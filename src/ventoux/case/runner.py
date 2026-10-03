@@ -136,8 +136,8 @@ def answer_task(
         set_by[field_name] = person
 
 
-# TRACER: a minimal structured condition (`=`, `>`, `field`, literals), replaced by the
-# expression language in layer 2 (design question 11). Plain code: never `eval`.
+# TRACER: a minimal structured condition, replaced by the expression language in layer 2.
+# It knows `=`, `>`, `field` and literals (design question 11). Plain code: never `eval`.
 def evaluate(expr: Any, values: dict[str, Any]) -> Any:
     """The value of `expr` against the case file."""
     if isinstance(expr, dict) and "field" in expr:
