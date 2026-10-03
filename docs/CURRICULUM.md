@@ -1,7 +1,8 @@
 # Ventoux — building it layer by layer
 
-Status: draft, 2026-10-03. Order: layer 0, the tracer bullet, layer 1, the spike, layers 2–15. Each layer is one pull request. Don't start a layer until the previous
-one is merged and you can explain it in your own words.
+Status: draft, 2026-10-03. Order: layer 0, the tracer bullet, layer 1, the spike, layers 2–15.
+Each layer is one pull request. Don't start a layer until the previous one is merged and you can
+explain it in your own words.
 
 References point to the `chartering` prototype, which is written in TypeScript; Ventoux is built in
 Python (decision D4). Read them to understand an idea; don't copy whole
