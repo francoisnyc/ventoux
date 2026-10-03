@@ -30,7 +30,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 23 | D18: fresh facts | closed |
 | 24 | D17: failures | closed |
 | 25 | D19: identities | closed |
-| 26 | Layer 0: core inside a workflow | closed |
+| 26 | Layer 0: core inside a workflow | open |
 | 27 | Tracer: running the quickstart | closed |
 
 ---
@@ -457,7 +457,18 @@ and record the key points. A question is closed once you can explain the answer 
   restart the whole case and re-run steps that already had side effects, with no history of which
   decisions were made. Activities are for the side effects; the decisions live in the workflow,
   which is why they must be deterministic.
-- Status: closed.
+- Retrieval (tutor review, after the tracer bullet): answered "core needs to be deterministic"
+  again; the durability half was missing a second time. In one line: it runs in a workflow to
+  survive days of waiting; it must be deterministic because that is how a workflow survives.
+  The review added a second part: importing `temporalio` breaks *portability* (core would only run
+  inside a workflow: no `run_case`, no simulate, no fast tests), while calling an LLM breaks
+  *determinism* (a different answer on replay means a different path, and a side effect outside
+  the registry).
+- Follow-up: where does the step advisor's LLM call happen, and what does replay do with its
+  answer? Answer: in an activity, and replay uses the recorded answer. Right: Temporal stores the
+  activity's result in history and replay reads it instead of asking the model again. That answer
+  is still `untrusted:llm`: it may only name a step, and the engine re-checks admission.
+- Status: open, kept in the warm-up rotation until the durability half comes without prompting.
 
 ## 27. Tracer: running the quickstart
 
