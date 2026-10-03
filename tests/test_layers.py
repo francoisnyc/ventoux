@@ -15,6 +15,7 @@ SRC = Path(__file__).parent.parent / "src"
 LLM_SDKS = {"anthropic", "openai"}
 FORBIDDEN = {
     "core": {"temporalio"} | LLM_SDKS,
+    "case": {"temporalio"} | LLM_SDKS,
 }
 
 
@@ -54,6 +55,10 @@ def test_from_imports_count_too() -> None:
 
 def test_core_may_not_import_an_llm_sdk_or_its_submodules() -> None:
     assert forbidden_imports("core", "import openai.types\n") == ["openai.types"]
+
+
+def test_case_may_not_import_temporal() -> None:
+    assert forbidden_imports("case", "import temporalio\n") == ["temporalio"]
 
 
 @pytest.mark.parametrize("layer", sorted(FORBIDDEN))
