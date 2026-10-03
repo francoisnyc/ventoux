@@ -14,7 +14,7 @@ def fake_refund(inputs: dict[str, Any]) -> dict[str, Any]:
     return {"refund_id": f"refund-{inputs['order_id']}"}
 
 
-# TRACER: a hard-coded fake activity; the registry and its development activities come in layer 1.
+# TRACER: a hard-coded fake activity; the catalog and its development activities come in layer 1.
 FAKE_ACTIVITIES: dict[str, Activity] = {"payments.refund@1": fake_refund}
 
 

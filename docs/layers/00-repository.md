@@ -18,7 +18,7 @@ uv.lock                 committed, so CI installs exactly what we tested
 .python-version         3.12
 src/ventoux/
   __init__.py
-  core/__init__.py      schema, expressions, registry, provenance, interpreter (pure)
+  core/__init__.py      schema, expressions, catalog, provenance, interpreter (pure)
   case/__init__.py      case runtime, rules, validation, migration (pure; may import core)
   temporal/__init__.py  workflows, activities, worker, client (may import core and case)
   authoring/__init__.py AI drafting and the step advisor (may import core and case)

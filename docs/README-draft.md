@@ -296,7 +296,7 @@ produces the definitions, and existing Temporal workflows as steps of a case.
   expires, and can be used once. Verification uses public keys only and replays deterministically.
   See [Trust model](#trust-model).
 - **Draft, never send.** This is the default for anything that talks to people. The built-in email
-  capability creates a draft for a person to review, and the registry has no send activity.
+  capability creates a draft for a person to review, and the catalog has no send activity.
 - **Durable execution.** The same interpreter runs as a Temporal workflow, with `continueAsNew` for
   long cases and a read-only history query for following a run.
 - **An audit trail of decisions, not just actions.** Every proposal records who made it (a person or

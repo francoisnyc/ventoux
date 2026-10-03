@@ -54,7 +54,7 @@ def run(
             break  # the step waits, and nothing after it starts
         else:
             inputs = {key: evaluate(expr, values) for key, expr in step["inputs"].items()}
-            # TRACER: activities are looked up by name; the registry (layer 1) checks contracts.
+            # TRACER: activities are looked up by name; the catalog (layer 1) checks contracts.
             activities[step["activity"]](inputs)
         result.steps_reached.append(name)
     # A case closes when nothing is left to do (D10): here, when no step is waiting.
