@@ -39,3 +39,13 @@ def test_large_refund_waits_for_a_team_lead() -> None:
     assert run.waiting_for == ["approval of pay by support-lead"]
     assert not run.reached("pay")
     assert not run.closed
+
+
+def test_rejected_review_closes_without_paying() -> None:
+    run = run_case(
+        REFUND,
+        file={"order_id": "ord-3", "amount": 250},
+        answers=[("review", "reject", "ana")],
+    )
+    assert run.closed
+    assert not run.reached("pay")
