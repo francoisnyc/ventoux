@@ -150,7 +150,20 @@ and record the key points. A question is closed once you can explain the answer 
   `risk-v2` must publish a manifest serving `risk.score@1` with the same hash, and an activity
   nobody picks up fails loudly on its schedule-to-start timeout. Keep the question open until you
   can explain "what vs where" without notes.
-- Status: open.
+- Retrieval (layer 1 warm-up), the same follow-up plus a twist: (c) the same week, they also raise
+  the scorer's start-to-close timeout from 10 s to 30 s. Answer: a) the registry gets the new
+  queue; b) no new contract version, no release; c) no change. Discussion: b is right, and it's the
+  "what vs where" half, now recalled without notes. a needs one word changed: the queue isn't in
+  the registry (which holds contracts: *what* is promised) but in production's **deployment
+  binding** (*where* it runs), so the registry and the contract hash don't move. c is the trap:
+  the retry policy and timeouts are part of the contract (D17), because cases depend on them (how
+  long a step may run before it needs attention) and may only tighten them, which needs a fixed
+  baseline. Any contract change needs a new number (D5), so it is `risk.score@2`, published side
+  by side with `@1`; CI's contract hash would fail a change made under `@1`. Packages adopt `@2`
+  by referencing it, which creates a release; cases on `@1` keep the 10 s timeout. Rule of thumb:
+  it's in the contract if a case could notice it or tighten it; where it runs is not.
+- Status: open; "what vs where" is solid now, the contents of a contract (D17) still need a
+  retrieval. Layer 1 builds exactly that.
 
 ## 10. Versions
 
