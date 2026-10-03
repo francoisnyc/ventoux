@@ -6,10 +6,16 @@ time, and in a plain test. See docs/layers/00-repository.md.
 
 import ast
 
-# What each pure layer may not import.
+# What each pure layer may not import (a package and everything under it).
+LLM_SDKS = {"anthropic", "openai"}
 FORBIDDEN = {
-    "core": {"temporalio"},
+    "core": {"temporalio"} | LLM_SDKS,
 }
+
+
+def is_under(module: str, package: str) -> bool:
+    """`temporalio.workflow` is under `temporalio`; `temporalio_helpers` is not."""
+    return module == package or module.startswith(package + ".")
 
 
 def imported_modules(source: str) -> list[str]:
@@ -26,7 +32,11 @@ def imported_modules(source: str) -> list[str]:
 
 def forbidden_imports(layer: str, source: str) -> list[str]:
     """Return the modules imported by `source` that `layer` may not import."""
-    return [name for name in imported_modules(source) if name in FORBIDDEN[layer]]
+    return [
+        name
+        for name in imported_modules(source)
+        if any(is_under(name, package) for package in FORBIDDEN[layer])
+    ]
 
 
 def test_core_may_not_import_temporal() -> None:
@@ -35,3 +45,7 @@ def test_core_may_not_import_temporal() -> None:
 
 def test_from_imports_count_too() -> None:
     assert forbidden_imports("core", "from temporalio import workflow\n") == ["temporalio"]
+
+
+def test_core_may_not_import_an_llm_sdk_or_its_submodules() -> None:
+    assert forbidden_imports("core", "import openai.types\n") == ["openai.types"]
