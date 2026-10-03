@@ -85,16 +85,18 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 
 - **Learn:** what Serverless Workflow 1.0 (the CNCF standard, run on Temporal by Zigflow) offers, and
   what it would cost to adopt it for plans instead of our own format. And how CEL (Common
-  Expression Language) compares with our JSONata subset for expressions.
+  Expression Language) and structured JSON expressions (an expression tree stored as JSON, written
+  by people through the builder) compare with our JSONata subset (design question 11).
 - **Do:** express the `claim-pay` plan and the small claim case from the prototype in Serverless
   Workflow 1.0. For each, list what fits, what is missing (provenance, sink policies, approvals on
   every path, case semantics), and what we would have to forbid (scripts, shell, containers,
-  non-deterministic expressions). Write the conditions, inputs and updates of the claim case in both
-  the JSONata subset and CEL; compare readability, typing, provenance analysis, and Python
+  non-deterministic expressions). Write the conditions, inputs and updates of the claim case in the
+  JSONata subset, CEL and structured JSON; compare readability for people, ease of parsing,
+  typing, provenance analysis, model output constrained by a JSON Schema, exact diffs, and Python
   support (`jsonata-python`; `cel-python` or Google's `cel-expr-python`).
 - **Output:** a short note in `docs/layers/spike-dsl.md` with a recommendation: adopt it for
   plans (keeping our case layer), offer import/export later, or keep our own format. No product
-  code. For expressions: keep the JSONata subset, or switch to CEL.
+  code. For expressions: keep the JSONata subset, or switch to CEL or structured JSON.
 - **Reference:** the Serverless Workflow specification and its Python SDK; Zigflow; the CEL
   specification and its implementations.
 - **Check yourself:** which of our guarantees could not be expressed as a restriction of the
