@@ -4,6 +4,8 @@ A definition only names an activity (`payments.refund@1`); its contract, written
 team, says what that name promises. See docs/guides/activities.md.
 """
 
+import hashlib
+import json
 import re
 from typing import Any, Literal, Self
 
@@ -131,17 +133,24 @@ class Catalog:
         self._contracts: dict[str, ActivityContract] = {}
 
     def register(self, contract: ActivityContract) -> None:
-        # A name stands for one content for good (D5): a changed promise needs a new version.
+        # A name stands for one promise for good (D5): a changed promise needs a new version.
         registered = self._contracts.get(contract.reference)
-        if registered == contract:
-            return  # the same promise again (a worker restarting, say): nothing changes
-        if registered is not None:
-            latest = max(c.version for c in self._contracts.values() if c.name == contract.name)
+        if registered is not None and contract_hash(registered) != contract_hash(contract):
             raise ContractConflict(
                 f"{contract.reference} is already registered with different content: "
-                f"register it as {contract.name}@{latest + 1}."
+                f"register it as {self.next_reference(contract.name)}."
             )
+        # New, the same promise again (a worker restarting), or new wording, which applies at once.
         self._contracts[contract.reference] = contract
+
+    def next_reference(self, name: str) -> str:
+        """The reference a changed contract should take: one past the latest version."""
+        versions = [c.version for c in self._contracts.values() if c.name == name]
+        return f"{name}@{max(versions, default=0) + 1}"
+
+    def contracts(self) -> list[ActivityContract]:
+        """Every registered contract, by reference."""
+        return sorted(self._contracts.values(), key=lambda c: c.reference)
 
     def get(self, reference: str) -> ActivityContract:
         if not REFERENCE.fullmatch(reference):
@@ -159,3 +168,30 @@ class Catalog:
         registered = ", ".join(c.reference for c in same_name)
         hint = f" Registered: {registered}." if registered else ""
         raise NotInCatalog(f"{reference} is not in the catalog.{hint}")
+
+
+def contract_hash(contract: ActivityContract) -> str:
+    """SHA-256 of what the contract promises: everything but `display`, schemas as JSON Schema."""
+    promise = contract.model_dump(mode="json", exclude={"display", "input", "output"})
+    promise["input"] = contract.input.model_json_schema()
+    promise["output"] = contract.output.model_json_schema()
+    # Canonical JSON: the same promise always gives the same bytes, so the same hash.
+    canonical = json.dumps(promise, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def check_hashes(catalog: Catalog, recorded: dict[str, str]) -> list[str]:
+    """What CI reports: contracts changed without a new version (D5), and unrecorded ones."""
+    problems: list[str] = []
+    for contract in catalog.contracts():
+        digest = contract_hash(contract)
+        if contract.reference not in recorded:
+            problems.append(
+                f'{contract.reference} is not recorded yet: add "{contract.reference}": "{digest}".'
+            )
+        elif digest != recorded[contract.reference]:
+            problems.append(
+                f"{contract.reference} changed without a new version: "
+                f"register it as {catalog.next_reference(contract.name)}."
+            )
+    return problems

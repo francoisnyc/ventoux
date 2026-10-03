@@ -16,6 +16,8 @@ from ventoux.core.catalog import (
     NotInCatalog,
     RetryPolicy,
     Timeouts,
+    check_hashes,
+    contract_hash,
 )
 
 
@@ -147,3 +149,50 @@ def test_every_outcome_has_a_title_and_every_title_an_outcome(
     display = Display(title="Look up an order", description="Reads an order.", outcomes=titles)
     with pytest.raises(ValidationError, match="outcomes and their display titles must match"):
         lookup_contract(outcomes=outcomes, display=display)
+
+
+def catalog_of(*contracts: ActivityContract) -> Catalog:
+    catalog = Catalog()
+    for contract in contracts:
+        catalog.register(contract)
+    return catalog
+
+
+def test_a_contract_changed_without_a_new_version_is_reported() -> None:
+    recorded = {"orders.lookup@1": contract_hash(lookup_contract())}
+    # The same reference, edited in place: a longer timeout.
+    edited = lookup_contract(timeouts=Timeouts(start_to_close=30, schedule_to_start=60))
+    assert check_hashes(catalog_of(edited), recorded) == [
+        "orders.lookup@1 changed without a new version: register it as orders.lookup@2."
+    ]
+
+
+def test_a_contract_with_no_recorded_hash_is_reported_with_the_line_to_add() -> None:
+    contract = lookup_contract()
+    assert check_hashes(catalog_of(contract), {}) == [
+        f'orders.lookup@1 is not recorded yet: add "orders.lookup@1": "{contract_hash(contract)}".'
+    ]
+
+
+def test_a_wording_change_is_not_a_new_promise() -> None:
+    reworded = lookup_contract(
+        display=Display(title="Look up an order", description="Reads the status of an order.")
+    )
+    assert contract_hash(reworded) == contract_hash(lookup_contract())
+
+
+def test_registering_a_reworded_contract_is_not_a_conflict() -> None:
+    catalog = catalog_of(lookup_contract())
+    reworded = lookup_contract(
+        display=Display(title="Look up an order", description="Reads the status of an order.")
+    )
+    catalog.register(reworded)  # the same promise, worded differently
+    assert contract_hash(catalog.get("orders.lookup@1")) == contract_hash(reworded)
+
+
+def test_the_same_schema_written_twice_is_the_same_promise() -> None:
+    class LookupInput(BaseModel):  # a second class, written separately, with the same schema
+        order_id: str
+
+    catalog = catalog_of(lookup_contract())
+    catalog.register(lookup_contract(input=LookupInput))  # no conflict

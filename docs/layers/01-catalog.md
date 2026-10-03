@@ -65,6 +65,14 @@ add). A test runs it on the development catalog against `contracts.lock.json` at
 root, so CI needs no new step. Recorded contracts no longer in the catalog (retirement) are layer
 12's.
 
+`register` compares hashes too: the same promise in other words, or in a separately written but
+identical schema class, is not a conflict, and new wording replaces the old at once (D5). Found in
+slice 6: Pydantic's JSON Schema carries each model's class name and docstring (as `title` and
+`description`), so renaming an input class or editing its docstring changes the hash and needs a
+new version. We keep it that way: the JSON Schema is what Java workers and other readers see, so
+it is part of the promise. A Pydantic upgrade that changes the generated schema would too; the
+lockfile pins Pydantic, and the hash check would report it.
+
 ## Files
 
 - `src/ventoux/core/catalog.py`: the contract, the catalog, the hash and the check.
