@@ -88,3 +88,13 @@ def test_approving_needs_the_approval_role() -> None:
                 ("pay", "approve", "ana"),
             ],
         )
+
+
+def test_answering_a_task_needs_its_role() -> None:
+    # Eve has no role on refunds, so she can't review one.
+    with pytest.raises(AnswerRefused, match="support"):
+        run_case(
+            REFUND,
+            file={"order_id": "ord-7", "amount": 40},
+            answers=[("review", "approve", "eve", {"approved_amount": 40})],
+        )

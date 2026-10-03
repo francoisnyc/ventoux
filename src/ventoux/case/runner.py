@@ -45,7 +45,7 @@ def run(
     for name in definition["sequence"]:
         step = definition["steps"][name]
         if step["kind"] == "task":
-            answer_task(name, step, answer_for(name, answers), values, set_by)
+            answer_task(name, step, answer_for(name, answers), values, set_by, roles_of)
         elif not holds(step.get("when"), values):
             continue  # not needed: its rule says it doesn't run
         elif needs_approval(step, values) and not approved(name, step, answers, set_by, roles_of):
@@ -75,15 +75,21 @@ def approved(
     if answer is None:
         return False
     _, outcome, person, *_ = answer
-    roles = step["approval"]["roles"]
-    if not roles_of.get(person, set()) & set(roles):
-        raise AnswerRefused(f"{person} cannot approve {name}: needs {' or '.join(roles)}")
+    require_role(person, step["approval"]["roles"], f"approve {name}", roles_of)
     # "Someone else" is computed, never listed (D11): whoever set a value the step uses, in its
     # inputs or its condition, may not approve it.
     used = fields_read([*step["inputs"].values(), step.get("when")])
     if person in {set_by[f] for f in used if f in set_by}:
         raise AnswerRefused(f"{person} set a value {name} uses, so cannot approve it")
     return bool(outcome == "approve")
+
+
+def require_role(
+    person: str, roles: list[str], action: str, roles_of: Mapping[str, set[str]]
+) -> None:
+    """Refuse `person` unless they have one of `roles` (the engine re-checks every answer)."""
+    if not roles_of.get(person, set()) & set(roles):
+        raise AnswerRefused(f"{person} cannot {action}: needs {' or '.join(roles)}")
 
 
 def fields_read(exprs: list[Any]) -> set[str]:
@@ -114,9 +120,11 @@ def answer_task(
     answer: tuple[Any, ...],
     values: dict[str, Any],
     set_by: dict[str, str],
+    roles_of: Mapping[str, set[str]],
 ) -> None:
     """Record a person's answer to a task, after checking it is one the task accepts."""
     _, outcome, person, *form = answer
+    require_role(person, step["roles"], f"answer {name}", roles_of)
     # A task's outcomes are a closed list (D9): anything else is refused, never guessed.
     if outcome not in step["outcomes"]:
         raise AnswerRefused(f"{name} has no outcome {outcome!r}")
