@@ -30,6 +30,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 23 | D18: fresh facts | closed |
 | 24 | D17: failures | closed |
 | 25 | D19: identities | closed |
+| 26 | Layer 0: core inside a workflow | open |
 
 ---
 
@@ -426,3 +427,20 @@ and record the key points. A question is closed once you can explain the answer 
   access must stay small, restricted and audited. They also need binding to the case, step, input
   digest and an expiry, or an old valid signature could be replayed. Recorded in D19.
 - Status: closed.
+
+## 26. Layer 0: core inside a workflow
+
+> Why must `core` run inside a Temporal workflow?
+
+- Your answer: because replay must make the same decisions every time.
+- Discussion: true, but that is why `core` must be deterministic *once* it runs in a workflow, not
+  why it runs there. It runs there because the interpreter (and later the case runtime) makes the
+  decisions (which step next, is an approval needed, can the case close) and those span days and
+  wait on people. Only workflow code waits durably: Temporal records each decision in history, and
+  timers and signals (a person's answer) wake it up; a crash or deploy loses nothing. Temporal
+  resumes by replaying the code against that history, hence your point: same decisions every time,
+  so no clock, randomness or I/O in `core`, and no Temporal imports. Bonus: pure code also runs in
+  memory, in a plain test, so what is tested is what runs.
+- Follow-up: why not run the interpreter inside an activity instead, where the clock and I/O are
+  allowed and determinism stops mattering? What would we lose?
+- Status: open.
