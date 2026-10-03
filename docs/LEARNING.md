@@ -30,7 +30,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 23 | D18: fresh facts | closed |
 | 24 | D17: failures | closed |
 | 25 | D19: identities | closed |
-| 26 | Layer 0: core inside a workflow | open |
+| 26 | Layer 0: core inside a workflow | closed |
 
 ---
 
@@ -443,4 +443,10 @@ and record the key points. A question is closed once you can explain the answer 
   memory, in a plain test, so what is tested is what runs.
 - Follow-up: why not run the interpreter inside an activity instead, where the clock and I/O are
   allowed and determinism stops mattering? What would we lose?
-- Status: open.
+  Answer: the interpreter needs durability. Right. An activity is one attempt: it runs to the end
+  or fails and is retried from the start. It can't wait days for a person's answer (signals and
+  durable timers belong to workflows), and its progress isn't recorded, so a crash midway would
+  restart the whole case and re-run steps that already had side effects, with no history of which
+  decisions were made. Activities are for the side effects; the decisions live in the workflow,
+  which is why they must be deterministic.
+- Status: closed.
