@@ -61,8 +61,10 @@ code, never `eval`.
 
 - **A task** takes the next scripted answer for it. The answer is refused if its outcome isn't
   declared or the person lacks one of the task's roles. Its form may set only the fields the
-  outcome declares, and each field remembers who set it. With no answer left, the case waits
-  ("review by support").
+  outcome declares, and each field remembers who set it. With no answer left, the tracer
+  crashes (`StopIteration`) rather than reporting that the case waits ("review by support"); what
+  a case waiting for a task reports is design question 14, for layer 8. (Corrected after review:
+  this note first said the case waits.)
 - **An activity** runs only if its `when` holds; otherwise it is not needed. If its approval's
   `when` holds, it needs an approval answer from someone with the approval's roles who is not
   excluded: the people who set the fields it uses, and who answered the steps its `when` reads.

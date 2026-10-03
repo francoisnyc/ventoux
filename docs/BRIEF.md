@@ -549,6 +549,11 @@ inside a Temporal workflow alike.
   retry policy or freshness, untrusted data can add an approval, a view can hide more than the
   source system; none of them can loosen.
 - Nothing is skipped automatically: a failed step waits for a person (D17).
+- **Fail closed.** Anything the engine can't evaluate or doesn't recognise (an unknown operator, a
+  missing field, an undeclared answer) is an error that stops the step, never a permissive default
+  such as "false" or "no approval needed". The validator rejects it first; the runtime refuses it
+  again (found in the tracer review: an unknown operator in an approval's condition let a refund be
+  paid without approval).
 - Every feature ships with tests, including at least one negative test (a definition that must be
   rejected).
 
@@ -602,7 +607,11 @@ New questions found while building go here, numbered from 10.
 13. **How is an approval answered?** (found in the tracer bullet) The quickstart never answers an
     approval in a test, so its shape is undefined. The tracer answers it by naming the step:
     `("pay", "approve", "sam")`. To decide in layer 7, with D11 (an approval is a task with
-    *approve* and *reject*).
+    *approve* and *reject*). The tracer review found that approval answers aren't checked like task
+    answers: a misspelled outcome (`"aprove"`) is quietly treated as "not approved" instead of
+    refused, and a *rejected* approval leaves the case waiting for approval forever instead of
+    letting the step not run (and the case close, or a rule react). Layer 7 must check approval
+    answers exactly like task answers and define what a rejection does.
 14. **What running the quickstart taught us.** (found in the tracer bullet)
     - *Fixed:* the large-refund test asserted only `waiting_for`, not that nothing was paid and
       the case stayed open, which is what matters most. The quickstart now asserts all three.

@@ -74,8 +74,11 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 - **Learn:** capabilities as versioned contracts; risk classes; why definitions only reference them.
 - **Build:** an activity contract (name, version, input and output schemas, risk, effect, retry
   policy and timeouts, idempotency, declared failure outcomes; decision D17) and a registry with
-  lookup by `name@version`. Two or three mock activities.
-- **Negative test:** an unknown name or version is not found; a reused `name@version` with different
+  lookup by `name@version`. Two or three mock activities. First, close a loophole in layer 0's
+  boundary test found in review: relative imports (`from ..temporal import worker`) aren't checked,
+  so ban them with ruff's `TID252` rule, and every import names its layer.
+- **Negative test:** a relative import in `src/` fails `ruff check`; an unknown name or version is
+  not found; a reused `name@version` with different
   content is refused; a contract whose hash changed without a new version fails the CI check; a
   side-effecting contract without idempotency is refused.
 - **Reference:** `src/core/registry.ts`, `src/activities/catalog.ts`; `docs/design.md` §8.
@@ -108,7 +111,8 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 - **Build:** the plan schema (activity, wait and final states; transitions); expressions limited
   to the subset in decision D3.
 - **Negative test:** `$now()`, a user-defined function or `$map` is rejected; a malformed plan is
-  rejected.
+  rejected; evaluating an operator or function the evaluator doesn't know raises an error, never
+  returns false (fail closed).
 - **Reference:** `src/core/schema.ts`, `src/core/expr.ts`; `docs/design.md` §2.
 - **Check yourself:** what would break on Temporal replay if `$now()` were allowed?
 
@@ -140,7 +144,9 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
   I/O directly; the run history.
 - **Build:** the interpreter loop, mock activities, scripted signals, history events, and the runtime
   sink check before each activity.
-- **Negative test:** with the static check skipped, the runtime check still blocks the injection.
+- **Negative test:** with the static check skipped, the runtime check still blocks the injection,
+  and an approval condition the interpreter can't evaluate stops the step instead of skipping the
+  approval (fail closed).
 - **Reference:** `src/core/interpreter.ts`, `src/mocks/index.ts`; `docs/design.md` §4.
 - **Check yourself:** why check sink policies twice?
 

@@ -48,6 +48,9 @@ deliberately in Python, smaller and clearer.
 - Policies can be made stricter downstream, never looser (a case tightening a contract, untrusted
   data adding an approval, a view hiding more than its source).
 - Nothing is skipped automatically: a failed step waits for a person.
+- Fail closed: anything the engine can't evaluate or doesn't recognise is an error, never a
+  permissive default ("false", "not needed", "no approval"). Every evaluator has a negative test
+  for an input it doesn't know.
 
 ## Conventions
 
