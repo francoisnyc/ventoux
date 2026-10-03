@@ -560,6 +560,15 @@ multi-tenancy, code inside definitions (scripts, listeners), and the deferred fe
 
 New questions found while building go here, numbered from 10.
 
+10. **"Sink policy" or "input policy"?** (found in layer 0) "Sink" is taint-analysis jargon that
+    few developers or analysts know, and the brief already uses both names (six ideas and concepts
+    table: "input policies"; D5, D6, D12: "sink policy"). Proposal: say **input policy** in all
+    user-facing text and validator errors, mentioning "sink" at most once for readers who know the
+    security literature; analysts see only plain language ("never sends email to an address chosen
+    by the AI"). The policy kinds stay a short list fixed by the engine (`no_untrusted`,
+    `only_from`), written by the platform team on each contract input. To decide in layer 4,
+    including the error code (`SINK_POLICY` or `INPUT_POLICY`).
+
 ## Prior art
 
 Agentic Chartering (plans as checked data, which it calls Charters, and the trust model), CaMeL
