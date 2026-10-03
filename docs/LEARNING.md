@@ -32,6 +32,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 25 | D19: identities | closed |
 | 26 | Layer 0: core inside a workflow | open |
 | 27 | Tracer: running the quickstart | closed |
+| 28 | Card: catalog, contract, binding | open |
 
 ---
 
@@ -501,3 +502,22 @@ and record the key points. A question is closed once you can explain the answer 
   pass while under-testing (the large-refund test), and a case waiting on a task had no defined
   report (design question 14).
 - Status: closed.
+
+## 28. Card: catalog, contract, binding
+
+> Three words, three questions. Without looking: what question does each answer, give an example,
+> and say what happens when it changes.
+
+| Word | Question it answers | Example | Changes when… |
+|---|---|---|---|
+| **Catalog** | What can a definition call? | `payments.refund@1`, `risk.score@1` | a contract is added or retired |
+| **Contract** | What does one entry promise? | schemas, risk, effect, retries, timeouts, idempotency, outcomes | never: a change is a new `@N` |
+| **Binding** | Where does it run, here? | production: queue `risk-v2` | operations move it; no version, no release |
+
+- In one line: the catalog lists contracts; each environment binds them.
+- The test: if changing it would change the contract hash, it's the contract. Another way to put
+  it: it's in the contract if a case could notice it or tighten it.
+- The analogy: an OpenAPI document (the catalog) keeps its operations (contracts) apart from its
+  `servers` per environment (bindings).
+- Why "catalog" and not "registry": design question 15.
+- Status: open (a card: kept in the warm-up rotation until all three come without the table).
