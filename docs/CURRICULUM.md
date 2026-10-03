@@ -14,11 +14,17 @@ files. Every layer should end up smaller and clearer than its prototype.
    persona) to describe the layer as if it already worked. If it is hard to explain, revisit the
    design before building.
 3. **Decide:** you agree on a short design note (a few paragraphs in `docs/layers/NN-name.md`).
-4. **Build:** the smallest slice that works.
-5. **Test:** tests, including at least one negative test (input that must be rejected). Where the
+4. **Test first:** turn the design note into tests before writing the code, starting with the
+   negative test (input that must be rejected), and watch them fail for the right reason. Where the
    docs show an example, a test runs it, so the docs can't drift from the code.
+5. **Build:** the smallest slice that makes the tests pass, then tidy it with the tests still green
+   (test-driven development: red, green, refactor).
 6. **Walk through:** the assistant walks you through the code; you ask questions until it's clear.
 7. **Check yourself:** answer the layer's questions below. If you can't, don't move on.
+
+This loop is a small version of QRSPI (question, research, design, structure, plan, implement): the
+brief and this curriculum already answer the questions and the design, so each layer starts at the
+design note. Full QRSPI is kept for later work that cuts across several layers.
 
 ---
 
