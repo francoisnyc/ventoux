@@ -30,6 +30,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 23 | D18: fresh facts | closed |
 | 24 | D17: failures | closed |
 | 25 | D19: identities | closed |
+| 26 | Layer 0: core inside a workflow | closed |
 
 ---
 
@@ -124,8 +125,31 @@ and record the key points. A question is closed once you can explain the answer 
 > a draft letter. The engine is in Python. What does each activity declare in the registry, and does
 > the Java developer ever need to read Python code?
 
-- Your answer:
-- Discussion:
+- Your answer (layer 0 warm-up): a contract with schemas, risk and a task queue; no.
+- Discussion: schemas and risk are right, and "no" is right. Two corrections. First, the task queue
+  is not in the contract: the contract says *what* is promised, and a deployment binding per
+  environment says *where* it runs (D5). Moving the scorer to another queue is an operations change
+  and needs no new contract version. Second, the contract holds more than schemas and risk:
+  `name@version`, the effect, sink policies on inputs, the provenance of each output, the retry
+  policy and timeouts, idempotency, and declared failure outcomes (D17). The two activities differ
+  on several of these. The risk score is `effect: compute`, so it needs no idempotency key, and the
+  platform team declares its output as trusted. The draft letter has a side effect (it creates a
+  draft), so it declares an idempotency key. It is low risk because it only drafts and never sends.
+  On "no": the Java worker and the Python engine meet only through the contract (published as JSON
+  Schema) and a Temporal task queue. The Java developer reads the contract and the JSON definition,
+  never the engine. One gap to keep in mind: activation needs every worker to publish a manifest
+  (D5), so a Java worker needs a small Ventoux library or an equivalent.
+- Follow-up: the platform team moves the risk scorer from the `risk` task queue to `risk-v2` in
+  production, without changing its code. What changes in the registry, and does it create a new
+  contract version or a release?
+  Answer: not sure. Discussion: only the production deployment binding changes (activity name and
+  task queue). The contract is untouched, so its hash is unchanged: no new version, nothing for
+  packages to adopt, and no release, because a release records which contracts a package needs,
+  not where they run. What protects the move is activation and its runtime backstops: workers on
+  `risk-v2` must publish a manifest serving `risk.score@1` with the same hash, and an activity
+  nobody picks up fails loudly on its schedule-to-start timeout. Keep the question open until you
+  can explain "what vs where" without notes.
+- Status: open.
 
 ## 10. Versions
 
@@ -402,4 +426,27 @@ and record the key points. A question is closed once you can explain the answer 
   deploy rights, ship different worker code. Signatures protect approvals, not the platform: admin
   access must stay small, restricted and audited. They also need binding to the case, step, input
   digest and an expiry, or an old valid signature could be replayed. Recorded in D19.
+- Status: closed.
+
+## 26. Layer 0: core inside a workflow
+
+> Why must `core` run inside a Temporal workflow?
+
+- Your answer: because replay must make the same decisions every time.
+- Discussion: true, but that is why `core` must be deterministic *once* it runs in a workflow, not
+  why it runs there. It runs there because the interpreter (and later the case runtime) makes the
+  decisions (which step next, is an approval needed, can the case close) and those span days and
+  wait on people. Only workflow code waits durably: Temporal records each decision in history, and
+  timers and signals (a person's answer) wake it up; a crash or deploy loses nothing. Temporal
+  resumes by replaying the code against that history, hence your point: same decisions every time,
+  so no clock, randomness or I/O in `core`, and no Temporal imports. Bonus: pure code also runs in
+  memory, in a plain test, so what is tested is what runs.
+- Follow-up: why not run the interpreter inside an activity instead, where the clock and I/O are
+  allowed and determinism stops mattering? What would we lose?
+  Answer: the interpreter needs durability. Right. An activity is one attempt: it runs to the end
+  or fails and is retried from the start. It can't wait days for a person's answer (signals and
+  durable timers belong to workflows), and its progress isn't recorded, so a crash midway would
+  restart the whole case and re-run steps that already had side effects, with no history of which
+  decisions were made. Activities are for the side effects; the decisions live in the workflow,
+  which is why they must be deterministic.
 - Status: closed.
