@@ -582,6 +582,34 @@ New questions found while building go here, numbered from 10.
     by the AI"). The policy kinds stay a short list fixed by the engine (`no_untrusted`,
     `only_from`), written by the platform team on each contract input. To decide in layer 4,
     including the error code (`SINK_POLICY` or `INPUT_POLICY`).
+11. **Positioning for always-on agents.** (found after layer 0) Agents that run for weeks, react to
+    events and act for people read untrusted content all the time, hold real credentials and act
+    unwatched. Ventoux answers each risk with what it already has: provenance, registered
+    capabilities, approvals, drafts by default, durable history, rules changeable for open cases.
+    The idea: not a cage around the agent (a sandbox limits what it can *touch*) but **the only
+    door out** (Ventoux limits what its output can *cause*); the two complement each other.
+    Proposal: keep "case management for Temporal" as the main door, and add "the control plane for
+    agents that act" as a second story built from the same concepts, proven by layers 4, 8 and 15
+    and the AgentDojo benchmark. Open points:
+    - **Credential lockdown.** Ventoux protects only what goes through it: the agent must hold no
+      credentials of its own, the same lockdown argument as D19.
+    - **Short cases or one long case.** One case per item of work (an email, a ticket), or one
+      case with `stays_open=True` (D10: listening is not waiting)?
+    - **Less freedom than agent frameworks.** In v1.0 a model chooses among registered steps and
+      plans; ad hoc plans are deferred (D13).
+    - **Audience.** Agent security brings security teams and agent builders, and other
+      competitors (agent gateways, guardrails, MCP proxies).
+    - **Temporal's own positioning.** Temporal is reportedly framing itself as a controlled
+      sandbox for agents: every side effect of a workflow is a command in its history, so guards
+      can inspect commands before they run (worker interceptors). That is the same chokepoint
+      Ventoux's runtime check uses (layer 5), and it validates the category. What a command guard
+      can't see is *why*: the arguments, but not where they came from (provenance), so it ends up
+      allow-listing types or judging content. It checks only at runtime, never the definition
+      before it runs (layer 3), and code inside an activity is opaque to it. Ventoux would add the
+      policy meaning on top of Temporal's chokepoint: provenance, approvals by eligible people,
+      plans as data checked in advance. To verify with Temporal what they ship (a guard or
+      interceptor API Ventoux should build on rather than duplicate), and the risk that Temporal
+      builds policy features itself.
 
 ## Prior art
 
