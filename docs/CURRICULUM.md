@@ -14,11 +14,13 @@ files. Every layer should end up smaller and clearer than its prototype.
    persona) to describe the layer as if it already worked. If it is hard to explain, revisit the
    design before building.
 3. **Decide:** you agree on a short design note (a few paragraphs in `docs/layers/NN-name.md`).
-4. **Test first:** turn the design note into tests before writing the code, starting with the
-   negative test (input that must be rejected), and watch them fail for the right reason. Where the
-   docs show an example, a test runs it, so the docs can't drift from the code.
-5. **Build:** the smallest slice that makes the tests pass, then tidy it with the tests still green
-   (test-driven development: red, green, refactor).
+4. **Agree the seams:** name the public interfaces the tests will use (for example "the registry's
+   lookup" or "`validate()` returns issues"), never internals, so the tests survive refactoring.
+5. **Build test-first, one slice at a time:** one failing test (start with the negative one) →
+   the least code that passes it → the next test. Watch each fail for the right reason. Don't write
+   all the tests up front: each test should respond to what the last one taught. Tidy up once the
+   slice is green. Where the docs show an example, a test runs it, so the docs can't drift from the
+   code.
 6. **Walk through:** the assistant walks you through the code; you ask questions until it's clear.
 7. **Check yourself:** answer the layer's questions below. If you can't, don't move on.
 

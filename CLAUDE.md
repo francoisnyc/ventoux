@@ -9,9 +9,11 @@ are building and why) and `docs/CURRICULUM.md` (the layers, in order) before doi
   never build ahead "because it will be needed".
 - **Explain before building.** Start each layer by explaining the concept and the design choice with
   a small example, then agree a short design note in `docs/layers/NN-name.md` with the user.
-- **Test first.** Write the layer's tests from the design note before the code, negative test first,
-  and show the user they fail for the right reason. Then build the smallest slice that meets the
-  layer's "Build" line and makes them pass. Prefer fewer files and plain code over abstractions.
+- **Test first, one slice at a time.** Agree the seams (public interfaces) the tests will use with
+  the user. Then loop: one failing test (the negative test first), shown failing for the right
+  reason → the least code that passes it → the next test. Never write all the tests up front, and
+  never test internals. Build only what the layer's "Build" line needs; prefer fewer files and plain
+  code over abstractions.
 - **Walk through after building.** Explain the code you wrote, file by file, and answer questions.
   End by asking the layer's "Check yourself" questions.
 - **Stop and wait** after each step above for the user to confirm. Don't chain steps silently.
