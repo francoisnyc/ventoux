@@ -1,0 +1,34 @@
+[project]
+name = "ventoux"
+version = "0.0.0"
+description = "Case management and human-in-the-loop workflows for Temporal."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.13.5",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.9"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 100
+# Python files only: code blocks in the docs are examples, kept as written.
+extend-exclude = ["*.md"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
