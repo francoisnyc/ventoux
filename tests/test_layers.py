@@ -12,17 +12,26 @@ FORBIDDEN = {
 }
 
 
+def imported_modules(source: str) -> list[str]:
+    """The modules `source` imports, by `import X` or `from X import ...`."""
+    # Parse, never run: the source is read as data.
+    modules: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            modules += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.append(node.module)
+    return modules
+
+
 def forbidden_imports(layer: str, source: str) -> list[str]:
     """Return the modules imported by `source` that `layer` may not import."""
-    # Parse, never run: the source is read as data.
-    imported = [
-        alias.name
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    ]
-    return [name for name in imported if name in FORBIDDEN[layer]]
+    return [name for name in imported_modules(source) if name in FORBIDDEN[layer]]
 
 
 def test_core_may_not_import_temporal() -> None:
     assert forbidden_imports("core", "import temporalio\n") == ["temporalio"]
+
+
+def test_from_imports_count_too() -> None:
+    assert forbidden_imports("core", "from temporalio import workflow\n") == ["temporalio"]
