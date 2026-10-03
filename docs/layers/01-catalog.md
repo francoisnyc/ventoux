@@ -1,6 +1,6 @@
 # Layer 1: activities and the catalog
 
-Status: draft, 2026-10-03.
+Status: agreed, 2026-10-03.
 
 ## What this layer is for
 
