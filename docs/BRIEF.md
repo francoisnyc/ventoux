@@ -603,6 +603,21 @@ New questions found while building go here, numbered from 10.
     approval in a test, so its shape is undefined. The tracer answers it by naming the step:
     `("pay", "approve", "sam")`. To decide in layer 7, with D11 (an approval is a task with
     *approve* and *reject*).
+14. **What running the quickstart taught us.** (found in the tracer bullet)
+    - *Fixed:* the large-refund test asserted only `waiting_for`, not that nothing was paid and
+      the case stayed open, which is what matters most. The quickstart now asserts all three.
+    - *Open:* a case waiting for a *task* has no defined report. The quickstart only shows waiting
+      for an approval, and the tracer crashes when no one has answered the review. Proposal:
+      `waiting_for` lists open tasks too (`"review by support"`). To decide in layer 8, with
+      pending work (D10).
+    - *Open:* the quickstart's story (Ana reviews, Sam approves) never shows the D11 exclusion,
+      because Ana isn't a team lead anyway. Only a reviewer who is also a team lead shows it
+      (learning question 18). Proposal: the quickstart's "When Ventoux says no" adds Sam
+      reviewing and then trying to approve, refused with the reason.
+    - *Open:* reading a field nobody set fails at runtime (a rejected review leaves
+      `approved_amount` unset, and the tracer only avoids reading it because `pay` doesn't run).
+      D9 already asks the validator to warn about conditions on answers that may not exist; to
+      check in layer 3 that this covers inputs too.
 
 ## Prior art
 
