@@ -30,8 +30,9 @@ yourself. Ventoux adds them to the Temporal you already operate.
 
 ## A case in one file
 
-The Case below is a trimmed version of [`examples/cases/insurance-claim`](examples/cases/insurance-claim),
-and it validates as written. Each *fragment* is a unit of work (a *plan*, described under
+The Case below is a trimmed version of the prototype's
+[`examples/cases/insurance-claim`](https://github.com/francoisnyc/chartering/tree/main/examples/cases/insurance-claim), and it validates as
+written. Each *fragment* is a unit of work (a *plan*, described under
 [How it works](#how-it-works)) together with the rules for when it may run. No flowchart fixes the
 order.
 
@@ -341,7 +342,8 @@ npm run charter -- validate examples/injection-attempt.json   # rejected: SINK_P
 Runs use deterministic mocks over the fixture world in `examples/fixtures/world.json`. The Temporal
 tests and the inbox demo download a Temporal dev server on first use.
 
-See [`docs/design.md`](docs/design.md) for the full architecture and the security review.
+See the prototype's [`docs/design.md`](https://github.com/francoisnyc/chartering/blob/main/docs/design.md) for the full architecture and
+the security review.
 
 ## Status of the prototype
 
