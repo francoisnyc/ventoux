@@ -5,6 +5,11 @@ time, and in a plain test. See docs/layers/00-repository.md.
 """
 
 import ast
+from pathlib import Path
+
+import pytest
+
+SRC = Path(__file__).parent.parent / "src"
 
 # What each pure layer may not import (a package and everything under it).
 LLM_SDKS = {"anthropic", "openai"}
@@ -49,3 +54,19 @@ def test_from_imports_count_too() -> None:
 
 def test_core_may_not_import_an_llm_sdk_or_its_submodules() -> None:
     assert forbidden_imports("core", "import openai.types\n") == ["openai.types"]
+
+
+@pytest.mark.parametrize("layer", sorted(FORBIDDEN))
+def test_pure_layers_import_nothing_forbidden(layer: str) -> None:
+    files = sorted((SRC / "ventoux" / layer).rglob("*.py"))
+    # An empty or missing layer must fail, or this test could pass by checking nothing.
+    assert files, f"no source found for ventoux.{layer}"
+    violations = [
+        f"{path.relative_to(SRC)} imports {name}"
+        for path in files
+        for name in forbidden_imports(layer, path.read_text())
+    ]
+    assert violations == [], (
+        f"ventoux.{layer} must run inside a Temporal workflow and in a plain test, so it may "
+        f"not import {sorted(FORBIDDEN[layer])}. See docs/layers/00-repository.md."
+    )
