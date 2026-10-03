@@ -28,3 +28,12 @@ def test_small_refund_needs_no_team_lead() -> None:
     )
     assert run.closed
     assert run.reached("pay")
+
+
+def test_large_refund_waits_for_a_team_lead() -> None:
+    run = run_case(
+        REFUND,
+        file={"order_id": "ord-2", "amount": 250},
+        answers=[("review", "approve", "ana", {"approved_amount": 250})],
+    )
+    assert run.waiting_for == ["approval of pay by support-lead"]

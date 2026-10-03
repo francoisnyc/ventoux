@@ -19,6 +19,7 @@ class Run:
 
     closed: bool = False
     steps_reached: list[str] = field(default_factory=list[str])
+    waiting_for: list[str] = field(default_factory=list[str])
 
     def reached(self, step: str) -> bool:
         return step in self.steps_reached
@@ -44,13 +45,24 @@ def run(
             answer_task(name, step, answer_for(name, answers), values)
         elif not holds(step.get("when"), values):
             continue  # not needed: its rule says it doesn't run
+        elif needs_approval(step, values):
+            # TRACER: approvals are never answered yet; approvals and roles come in layer 7.
+            roles = " or ".join(step["approval"]["roles"])
+            result.waiting_for.append(f"approval of {name} by {roles}")
+            break  # the step waits, and nothing after it starts
         else:
             inputs = {key: evaluate(expr, values) for key, expr in step["inputs"].items()}
             # TRACER: activities are looked up by name; the registry (layer 1) checks contracts.
             activities[step["activity"]](inputs)
         result.steps_reached.append(name)
-    result.closed = True
+    # A case closes when nothing is left to do (D10): here, when no step is waiting.
+    result.closed = not result.waiting_for
     return result
+
+
+def needs_approval(step: dict[str, Any], values: dict[str, Any]) -> bool:
+    """Whether the step has an approval whose condition holds now."""
+    return "approval" in step and holds(step["approval"]["when"], values)
 
 
 def answer_for(step_name: str, answers: list[tuple[Any, ...]]) -> tuple[Any, ...]:
