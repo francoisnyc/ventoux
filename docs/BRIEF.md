@@ -582,6 +582,42 @@ New questions found while building go here, numbered from 10.
     by the AI"). The policy kinds stay a short list fixed by the engine (`no_untrusted`,
     `only_from`), written by the platform team on each contract input. To decide in layer 4,
     including the error code (`SINK_POLICY` or `INPUT_POLICY`).
+11. **Expressions: JSONata strings, CEL, or structured JSON?** (found before the tracer bullet)
+    D3 stores conditions as JSONata strings. Few people read the stored form: developers read the
+    builder (`approved > 100`), analysts and approvers read plain language. Programs read it all the
+    time: the validator, provenance analysis (which fields does this condition read?), the diff, and
+    a model drafting definitions. Strings read well raw but every tool must parse them, and "reject
+    anything outside the subset" needs a parser for a large language. Structured JSON
+    (`{">": [{"field": "approved_amount"}, 100]}`) is clumsy raw but needs no parser, is validated
+    by Pydantic, makes the fields read explicit, diffs exactly, and lets a model's output be
+    constrained by a JSON Schema. A middle path: people write readable syntax, the stored JSON is
+    structured. To decide in the spike before layer 2, on the claim-case examples, judged on
+    readability for people, parsing, typing, provenance analysis, schema-constrained model output,
+    exact diffs, determinism and Python support. The tracer bullet uses a minimal structured form,
+    marked `# TRACER: layer 2`, which commits to neither.
+12. **Who has which role in `run_case`?** (found in the tracer bullet) The quickstart's tests name
+    people (`"ana"`) but never say where their roles come from. The tracer uses a fixed directory
+    (`ana`: support; `sam`: support, support-lead). To decide in layer 7: roles passed to
+    `run_case`, a test directory, or roles carried with each answer.
+13. **How is an approval answered?** (found in the tracer bullet) The quickstart never answers an
+    approval in a test, so its shape is undefined. The tracer answers it by naming the step:
+    `("pay", "approve", "sam")`. To decide in layer 7, with D11 (an approval is a task with
+    *approve* and *reject*).
+14. **What running the quickstart taught us.** (found in the tracer bullet)
+    - *Fixed:* the large-refund test asserted only `waiting_for`, not that nothing was paid and
+      the case stayed open, which is what matters most. The quickstart now asserts all three.
+    - *Open:* a case waiting for a *task* has no defined report. The quickstart only shows waiting
+      for an approval, and the tracer crashes when no one has answered the review. Proposal:
+      `waiting_for` lists open tasks too (`"review by support"`). To decide in layer 8, with
+      pending work (D10).
+    - *Open:* the quickstart's story (Ana reviews, Sam approves) never shows the D11 exclusion,
+      because Ana isn't a team lead anyway. Only a reviewer who is also a team lead shows it
+      (learning question 18). Proposal: the quickstart's "When Ventoux says no" adds Sam
+      reviewing and then trying to approve, refused with the reason.
+    - *Open:* reading a field nobody set fails at runtime (a rejected review leaves
+      `approved_amount` unset, and the tracer only avoids reading it because `pay` doesn't run).
+      D9 already asks the validator to warn about conditions on answers that may not exist; to
+      check in layer 3 that this covers inputs too.
 
 ## Prior art
 
