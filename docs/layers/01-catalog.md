@@ -91,7 +91,8 @@ root, so CI needs no new step. Recorded contracts no longer in the catalog (reti
    reference. Then register and get.
 4. Negative: a different contract under a reused reference is refused; the same one is a no-op.
 5. Negative: a `write` contract without an idempotency key; a key that isn't an input field; a
-   `queue` field.
+   `queue` field; a name or version that no reference could match (`Payments Refund`, version 0),
+   which could be registered but never looked up (found in slice 3).
 6. Negative: `check_hashes` reports a changed contract and an unrecorded one; a `display` change
    leaves the hash alone.
 7. The development activities and `contracts.lock.json`; the runner looks activities up in the

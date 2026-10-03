@@ -7,7 +7,10 @@ team, says what that name promises. See docs/guides/activities.md.
 import re
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+# A contract never changes once written (D5), down to its parts.
+FROZEN = ConfigDict(frozen=True)
 
 # `payments.refund@1`: a dotted lowercase name, then a whole-number version from 1.
 REFERENCE = re.compile(r"[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*@[1-9][0-9]*")
@@ -16,12 +19,16 @@ REFERENCE = re.compile(r"[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*@[1-9][0-9]*")
 class Timeouts(BaseModel):
     """In seconds. `schedule_to_start` makes an activity no worker picks up fail loudly."""
 
+    model_config = FROZEN
+
     start_to_close: int
     schedule_to_start: int
 
 
 class RetryPolicy(BaseModel):
     """How Temporal retries the activity; intervals in seconds."""
+
+    model_config = FROZEN
 
     maximum_attempts: int
     initial_interval: int
@@ -31,6 +38,8 @@ class RetryPolicy(BaseModel):
 class Display(BaseModel):
     """What people read: presentation, so outside the contract's hash."""
 
+    model_config = FROZEN
+
     title: str
     description: str
     outcomes: dict[str, str] = {}
@@ -38,6 +47,8 @@ class Display(BaseModel):
 
 class ActivityContract(BaseModel):
     """What one activity promises (D17). Where it runs is a deployment binding, not this."""
+
+    model_config = FROZEN
 
     name: str
     version: int
@@ -48,7 +59,7 @@ class ActivityContract(BaseModel):
     timeouts: Timeouts
     retry: RetryPolicy
     idempotency_key: str | None
-    outcomes: list[str]
+    outcomes: tuple[str, ...]
     display: Display
 
     @property
@@ -60,6 +71,10 @@ class NotInCatalog(LookupError):
     """A reference the catalog doesn't hold."""
 
 
+class ContractConflict(ValueError):
+    """A second, different contract under a reference already in the catalog."""
+
+
 class Catalog:
     """Contracts by reference. Contracts only, never implementations: `core` runs no I/O."""
 
@@ -67,6 +82,16 @@ class Catalog:
         self._contracts: dict[str, ActivityContract] = {}
 
     def register(self, contract: ActivityContract) -> None:
+        # A name stands for one content for good (D5): a changed promise needs a new version.
+        registered = self._contracts.get(contract.reference)
+        if registered == contract:
+            return  # the same promise again (a worker restarting, say): nothing changes
+        if registered is not None:
+            latest = max(c.version for c in self._contracts.values() if c.name == contract.name)
+            raise ContractConflict(
+                f"{contract.reference} is already registered with different content: "
+                f"register it as {contract.name}@{latest + 1}."
+            )
         self._contracts[contract.reference] = contract
 
     def get(self, reference: str) -> ActivityContract:

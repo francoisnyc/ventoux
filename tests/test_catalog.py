@@ -6,11 +6,12 @@ See docs/layers/01-catalog.md and docs/guides/activities.md.
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ventoux.core.catalog import (
     ActivityContract,
     Catalog,
+    ContractConflict,
     Display,
     NotInCatalog,
     RetryPolicy,
@@ -73,3 +74,33 @@ def test_an_unknown_version_names_the_registered_ones() -> None:
         match="orders.lookup@3 is not in the catalog. Registered: orders.lookup@1, orders.lookup@2",
     ):
         catalog.get("orders.lookup@3")
+
+
+def test_a_reused_reference_with_different_content_is_refused() -> None:
+    catalog = Catalog()
+    catalog.register(lookup_contract())
+    # Same name and version, longer timeout: a changed promise under the same name.
+    changed = lookup_contract(timeouts=Timeouts(start_to_close=30, schedule_to_start=60))
+    with pytest.raises(
+        ContractConflict,
+        match="orders.lookup@1 is already registered with different content: "
+        "register it as orders.lookup@2",
+    ):
+        catalog.register(changed)
+
+
+def test_registering_the_same_contract_again_changes_nothing() -> None:
+    catalog = Catalog()
+    catalog.register(lookup_contract())
+    catalog.register(lookup_contract())  # built again, equal content: a no-op
+    assert catalog.get("orders.lookup@1") == lookup_contract()
+
+
+def test_a_registered_contract_cannot_be_changed_in_place() -> None:
+    catalog = Catalog()
+    contract = lookup_contract()
+    catalog.register(contract)
+    with pytest.raises(ValidationError, match="frozen"):
+        contract.timeouts.start_to_close = 30
+    with pytest.raises(ValidationError, match="frozen"):
+        contract.version = 2
