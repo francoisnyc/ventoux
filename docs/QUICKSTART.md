@@ -132,6 +132,8 @@ def test_large_refund_waits_for_a_team_lead():
     run = run_case(refund, file={"order_id": "ord-2", "amount": 250},
                    answers=[("review", "approve", "ana", {"approved_amount": 250})])
     assert run.waiting_for == ["approval of pay by support-lead"]
+    assert not run.reached("pay")
+    assert not run.closed
 
 
 def test_rejected_review_closes_without_paying():
