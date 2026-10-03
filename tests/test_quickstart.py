@@ -49,3 +49,16 @@ def test_rejected_review_closes_without_paying() -> None:
     )
     assert run.closed
     assert not run.reached("pay")
+
+
+def test_the_reviewer_cannot_approve_the_payment() -> None:
+    # Sam is a team lead, but he reviewed: his answer set the amount paid (D11).
+    with pytest.raises(AnswerRefused, match="sam"):
+        run_case(
+            REFUND,
+            file={"order_id": "ord-4", "amount": 250},
+            answers=[
+                ("review", "approve", "sam", {"approved_amount": 250}),
+                ("pay", "approve", "sam"),
+            ],
+        )

@@ -37,16 +37,17 @@ def run(
 ) -> Run:
     """Run the case `definition` from `file`, playing the scripted `answers` in order."""
     values = dict(file)  # the case file, plus each task's latest outcome as "<step>.outcome"
+    # TRACER: who set each value, a crude stand-in for provenance tags (layer 4).
+    set_by: dict[str, str] = {}
     result = Run()
     # TRACER: `sequence` is walked in order; the case runtime (layer 8) admits steps by rules.
     for name in definition["sequence"]:
         step = definition["steps"][name]
         if step["kind"] == "task":
-            answer_task(name, step, answer_for(name, answers), values)
+            answer_task(name, step, answer_for(name, answers), values, set_by)
         elif not holds(step.get("when"), values):
             continue  # not needed: its rule says it doesn't run
-        elif needs_approval(step, values):
-            # TRACER: approvals are never answered yet; approvals and roles come in layer 7.
+        elif needs_approval(step, values) and not approved(name, step, answers, set_by):
             roles = " or ".join(step["approval"]["roles"])
             result.waiting_for.append(f"approval of {name} by {roles}")
             break  # the step waits, and nothing after it starts
@@ -60,6 +61,35 @@ def run(
     return result
 
 
+# TRACER: approvals and roles, replaced in layer 7 (design question 13 for the answer's shape).
+def approved(
+    name: str, step: dict[str, Any], answers: list[tuple[Any, ...]], set_by: dict[str, str]
+) -> bool:
+    """Whether the step's approval has been given by someone allowed to give it."""
+    answer = next((a for a in answers if a[0] == name), None)
+    if answer is None:
+        return False
+    _, outcome, person, *_ = answer
+    # "Someone else" is computed, never listed (D11): whoever set a value the step uses, in its
+    # inputs or its condition, may not approve it.
+    used = fields_read([*step["inputs"].values(), step.get("when")])
+    if person in {set_by[f] for f in used if f in set_by}:
+        raise AnswerRefused(f"{person} set a value {name} uses, so cannot approve it")
+    return bool(outcome == "approve")
+
+
+def fields_read(exprs: list[Any]) -> set[str]:
+    """The case-file fields the expressions read."""
+    found: set[str] = set()
+    for expr in exprs:
+        if isinstance(expr, dict) and "field" in expr:
+            found.add(expr["field"])
+        elif isinstance(expr, dict):
+            for operands in expr.values():
+                found |= fields_read(operands)
+    return found
+
+
 def needs_approval(step: dict[str, Any], values: dict[str, Any]) -> bool:
     """Whether the step has an approval whose condition holds now."""
     return "approval" in step and holds(step["approval"]["when"], values)
@@ -71,17 +101,23 @@ def answer_for(step_name: str, answers: list[tuple[Any, ...]]) -> tuple[Any, ...
 
 
 def answer_task(
-    name: str, step: dict[str, Any], answer: tuple[Any, ...], values: dict[str, Any]
+    name: str,
+    step: dict[str, Any],
+    answer: tuple[Any, ...],
+    values: dict[str, Any],
+    set_by: dict[str, str],
 ) -> None:
     """Record a person's answer to a task, after checking it is one the task accepts."""
-    _, outcome, _person, *form = answer
+    _, outcome, person, *form = answer
     # A task's outcomes are a closed list (D9): anything else is refused, never guessed.
     if outcome not in step["outcomes"]:
         raise AnswerRefused(f"{name} has no outcome {outcome!r}")
     values[f"{name}.outcome"] = outcome
+    set_by[f"{name}.outcome"] = person
     # An outcome sets only the case-file fields it declares (D9).
     for field_name in step["outcomes"][outcome].get("sets", []):
         values[field_name] = form[0][field_name]
+        set_by[field_name] = person
 
 
 # TRACER: a minimal structured condition (`=`, `>`, `field`, literals), replaced by the
