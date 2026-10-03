@@ -5,12 +5,13 @@ team, says what that name promises. See docs/guides/activities.md.
 """
 
 import re
-from typing import Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
-# A contract never changes once written (D5), down to its parts.
-FROZEN = ConfigDict(frozen=True)
+# A contract never changes once written (D5), down to its parts; and fail closed: a field it
+# doesn't know is refused, never silently dropped.
+FROZEN = ConfigDict(frozen=True, extra="forbid")
 
 # `payments.refund@1`: a dotted lowercase name, then a whole-number version from 1.
 REFERENCE = re.compile(r"[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*@[1-9][0-9]*")
@@ -61,6 +62,54 @@ class ActivityContract(BaseModel):
     idempotency_key: str | None
     outcomes: tuple[str, ...]
     display: Display
+
+    @model_validator(mode="before")
+    @classmethod
+    def no_unknown_fields(cls, data: Any) -> Any:
+        # Fail closed: a field the contract doesn't know is refused, never silently dropped.
+        unknown = sorted(set(data) - set(cls.model_fields)) if isinstance(data, dict) else []
+        if unknown:
+            raise ValueError(
+                f"a contract has no field {', '.join(map(repr, unknown))}. A contract says what "
+                "an activity promises; where it runs (task queue, namespace, worker) belongs in a "
+                "deployment binding."
+            )
+        return data
+
+    @model_validator(mode="after")
+    def can_be_named(self) -> Self:
+        # The same pattern `Catalog.get` reads, so whatever is registered can be looked up.
+        if not REFERENCE.fullmatch(self.reference):
+            raise ValueError(
+                f"{self.reference!r}: no reference could name it. A name is dotted lowercase "
+                "(payments.refund), and a version a whole number from 1."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def side_effects_are_idempotent(self) -> Self:
+        # D17: anything that changes the world sends a key, so a retry can't do it twice.
+        if self.effect in ("write", "notify") and self.idempotency_key is None:
+            raise ValueError(
+                f"{self.reference} has effect {self.effect!r}: a side-effecting activity must say "
+                "which input carries its idempotency key, or a retry could do it twice."
+            )
+        if self.idempotency_key is not None and self.idempotency_key not in self.input.model_fields:
+            raise ValueError(
+                f"{self.reference}: idempotency key {self.idempotency_key!r} is not a field of its "
+                f"input ({self.input.__name__}), so the engine would have nowhere to put the key."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def outcomes_have_titles(self) -> Self:
+        # People read outcomes by their titles (D1), and a title for no outcome is a typo.
+        if set(self.outcomes) != set(self.display.outcomes):
+            raise ValueError(
+                f"{self.reference}: outcomes and their display titles must match: outcomes "
+                f"{sorted(self.outcomes)}, titles for {sorted(self.display.outcomes)}."
+            )
+        return self
 
     @property
     def reference(self) -> str:

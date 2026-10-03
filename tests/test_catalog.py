@@ -104,3 +104,46 @@ def test_a_registered_contract_cannot_be_changed_in_place() -> None:
         contract.timeouts.start_to_close = 30
     with pytest.raises(ValidationError, match="frozen"):
         contract.version = 2
+
+
+def test_a_side_effecting_contract_without_an_idempotency_key_is_refused() -> None:
+    # Without a key, a retry after a timeout could do it twice (D17).
+    with pytest.raises(ValidationError, match="must say which input carries its idempotency key"):
+        lookup_contract(effect="write", idempotency_key=None)
+
+
+def test_an_idempotency_key_must_be_an_input_field() -> None:
+    with pytest.raises(ValidationError, match="'request_id' is not a field of its input"):
+        lookup_contract(effect="write", idempotency_key="request_id")
+
+
+def test_where_an_activity_runs_is_not_part_of_its_contract() -> None:
+    # What vs where: a task queue belongs in a deployment binding (D5).
+    with pytest.raises(ValidationError, match="'queue'.*belongs in a deployment binding"):
+        lookup_contract(queue="payments")
+
+
+def test_a_part_of_a_contract_refuses_fields_it_does_not_know() -> None:
+    with pytest.raises(ValidationError, match="heartbeat"):
+        Timeouts.model_validate({"start_to_close": 10, "schedule_to_start": 60, "heartbeat": 5})
+
+
+@pytest.mark.parametrize(
+    "changes", [{"name": "Payments Refund"}, {"name": "payments."}, {"version": 0}]
+)
+def test_a_contract_no_reference_could_name_is_refused(changes: dict[str, Any]) -> None:
+    # It could be registered, but never looked up.
+    with pytest.raises(ValidationError, match="no reference could name it"):
+        lookup_contract(**changes)
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "titles"),
+    [(["not_found"], {}), ([], {"not_found": "No such order"})],
+)
+def test_every_outcome_has_a_title_and_every_title_an_outcome(
+    outcomes: list[str], titles: dict[str, str]
+) -> None:
+    display = Display(title="Look up an order", description="Reads an order.", outcomes=titles)
+    with pytest.raises(ValidationError, match="outcomes and their display titles must match"):
+        lookup_contract(outcomes=outcomes, display=display)

@@ -91,12 +91,14 @@ Every refusal says what was wrong and what to do instead.
 
 | You wrote | Ventoux says |
 |---|---|
-| `effect="write"` with no `idempotency_key` | A side-effecting activity must say which input carries its idempotency key, or a retry could do it twice. |
-| `idempotency_key="request_id"`, not an input field | The idempotency key must be a field of the input schema. |
-| `queue="payments"` in a contract | Where an activity runs belongs in a deployment binding, not the contract. |
+| `effect="write"` with no `idempotency_key` | `payments.refund@1` has effect `'write'`: a side-effecting activity must say which input carries its idempotency key, or a retry could do it twice. |
+| `idempotency_key="request_id"`, not an input field | `payments.refund@1`: idempotency key `'request_id'` is not a field of its input (`RefundInput`), so the engine would have nowhere to put the key. |
+| `queue="payments"` in a contract | A contract has no field `'queue'`. A contract says what an activity promises; where it runs (task queue, namespace, worker) belongs in a deployment binding. |
+| `name="Payments Refund"`, or `version=0` | `'Payments Refund@1'`: no reference could name it. A name is dotted lowercase (`payments.refund`), and a version a whole number from 1. |
+| `outcomes=["declined"]` with no title for it | `payments.refund@1`: outcomes and their display titles must match. |
 | A second, different `payments.refund@1` | `payments.refund@1` is already registered with different content: register it as `payments.refund@2`. |
 | `catalog.get("payments.refund@3")` | `payments.refund@3` is not in the catalog. Registered: `payments.refund@1`. |
-| `catalog.get("payments.refund@1.0")` | A reference is `name@N`, with a whole-number version. |
+| `catalog.get("payments.refund@1.0")` | `'payments.refund@1.0'` is not a reference: a reference is name@N, such as `payments.refund@1`, with a whole-number version. |
 
 ## Changing a contract
 
