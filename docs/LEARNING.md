@@ -13,7 +13,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 6 | Why not an existing DSL | closed |
 | 7 | D3: expressions | open |
 | 8 | Engine language | open |
-| 9 | D4: Python engine | open |
+| 9 | D4: Python engine | closed |
 | 10 | Versions (pending D5) | closed |
 | 11 | Behaviour vs wording | open |
 | 12 | Releases | closed |
@@ -150,7 +150,11 @@ and record the key points. A question is closed once you can explain the answer 
   `risk-v2` must publish a manifest serving `risk.score@1` with the same hash, and an activity
   nobody picks up fails loudly on its schedule-to-start timeout. Keep the question open until you
   can explain "what vs where" without notes.
-- Status: open.
+  Answer from memory (layer 1 warm-up): only the deployment binding changes; no new version or
+  release. Right on every point: the contract (what) is untouched, so its hash and version stay;
+  a release records which contracts a package needs, not where they run; the binding (where) is an
+  operations change, protected by activation's check of manifests and live pollers.
+- Status: closed.
 
 ## 10. Versions
 
