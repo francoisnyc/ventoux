@@ -2,9 +2,23 @@
 
 **Case management and human-in-the-loop workflows for Temporal.**
 
-Ventoux adds cases, approvals and human tasks to the [Temporal](https://temporal.io) you already
-run. Definitions are data: reviewed in pull requests, checked before they run, changeable for open
+Ventoux adds cases, approvals and human tasks to your existing [Temporal](https://temporal.io)
+server. Definitions are data: reviewed in pull requests, checked before they run, changeable for open
 cases, and safe for an AI to draft. Agents propose plans, Ventoux checks them, people approve.
+
+## Where it runs: on your Temporal server
+
+Ventoux is not a separate platform installed next to Temporal. It runs on the Temporal server your
+team already operates, self-hosted or Temporal Cloud:
+
+- **Cases are Temporal workflows** in your namespace: their history is Temporal history, with no
+  new engine and no new database.
+- **The Ventoux engine is a Python library** inside a worker you deploy like any other.
+- **Your activities and workflows stay where they are** (Python or Java workers); cases call them.
+- **Operations are Temporal's:** the same UI, metrics, alerting and access control.
+- **What Ventoux adds:** one small API service with a reference inbox (the only way into the engine),
+  resolvers to show records from your systems, and a key provider (such as Vault or a cloud KMS)
+  for sensitive fields.
 
 ## Status
 

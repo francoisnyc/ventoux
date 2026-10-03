@@ -5,12 +5,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
 ![Status: v0.1 alpha](https://img.shields.io/badge/status-v0.1%20alpha-orange)
 
-Ventoux adds cases, approvals and human tasks to the [Temporal](https://temporal.io) you already run.
+Ventoux adds cases, approvals and human tasks to your existing [Temporal](https://temporal.io) server.
 Definitions are data: reviewed in pull requests, checked before they run, changeable for open cases,
-and safe for an AI to draft. There is no studio and no new runtime to operate.
+and safe for an AI to draft. Cases run as Temporal workflows on your server: there is no studio, no new
+engine and no new database to operate.
 
 Camunda and Flowable bring their own platform. Plain Temporal makes you build cases and human tasks
-yourself. Ventoux adds them to the Temporal you already operate.
+yourself. Ventoux adds them to your existing Temporal server.
 
 - **Cases without flowcharts.** A case is a case file, milestones and rules for what may happen next.
   People, systems or an AI propose the next step; the engine admits or refuses it.

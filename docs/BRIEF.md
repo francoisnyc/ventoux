@@ -6,7 +6,7 @@ version of what we are building and why. The longer reference is `docs/design.md
 
 ## In one sentence
 
-Ventoux adds case management and human-in-the-loop workflows to the Temporal you already run, with
+Ventoux adds case management and human-in-the-loop workflows to your existing Temporal server, with
 definitions that are data: reviewed in pull requests, checked before they run, changeable for open
 cases, and safe for an AI to draft.
 
@@ -28,6 +28,20 @@ cases, and safe for an AI to draft.
   analysts and business owners who work with those developers.
 - **Not for:** teams that want analysts to draw and edit processes in a visual tool, or a ready-made
   UI product. Camunda, Flowable or Pega fit those better.
+
+## Where it runs
+
+On the Temporal server the team already operates (self-hosted or Temporal Cloud), not as a second
+platform beside it, unlike Camunda or Flowable, which bring their own engine, database and studio:
+
+- **Cases are Temporal workflows** in your namespace: their history is Temporal history, with no
+  new engine and no new database.
+- **The Ventoux engine is a Python library** inside a worker you deploy like any other.
+- **Your activities and workflows stay where they are** (Python or Java workers); cases call them.
+- **Operations are Temporal's:** the same UI, metrics, alerting and access control.
+- **What Ventoux adds:** one small API service with a reference inbox (the only way into the engine),
+  resolvers to show records from your systems, and a key provider (such as Vault or a cloud KMS)
+  for sensitive fields.
 
 ## Design principles
 
