@@ -18,6 +18,10 @@ def fake_refund(inputs: dict[str, Any]) -> dict[str, Any]:
 FAKE_ACTIVITIES: dict[str, Activity] = {"payments.refund@1": fake_refund}
 
 
+# TRACER: a fixed directory of people and roles; roles come with layer 7 (design question 12).
+PEOPLE: dict[str, set[str]] = {"ana": {"support"}, "sam": {"support", "support-lead"}}
+
+
 def load_definition(path: Path) -> dict[str, Any]:
     """Read a case definition from its JSON file (I/O, so here and not in `case`)."""
     definition: dict[str, Any] = json.loads(path.read_text())
@@ -30,4 +34,4 @@ def run_case(
     answers: list[tuple[Any, ...]],
 ) -> Run:
     """Open a case with `file`, play the scripted `answers`, and report where it ended."""
-    return run(definition, file, answers, FAKE_ACTIVITIES)
+    return run(definition, file, answers, FAKE_ACTIVITIES, PEOPLE)

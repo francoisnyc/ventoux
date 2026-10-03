@@ -34,6 +34,7 @@ def run(
     file: dict[str, Any],
     answers: list[tuple[Any, ...]],
     activities: Mapping[str, Activity],
+    roles_of: Mapping[str, set[str]],
 ) -> Run:
     """Run the case `definition` from `file`, playing the scripted `answers` in order."""
     values = dict(file)  # the case file, plus each task's latest outcome as "<step>.outcome"
@@ -47,7 +48,7 @@ def run(
             answer_task(name, step, answer_for(name, answers), values, set_by)
         elif not holds(step.get("when"), values):
             continue  # not needed: its rule says it doesn't run
-        elif needs_approval(step, values) and not approved(name, step, answers, set_by):
+        elif needs_approval(step, values) and not approved(name, step, answers, set_by, roles_of):
             roles = " or ".join(step["approval"]["roles"])
             result.waiting_for.append(f"approval of {name} by {roles}")
             break  # the step waits, and nothing after it starts
@@ -63,13 +64,20 @@ def run(
 
 # TRACER: approvals and roles, replaced in layer 7 (design question 13 for the answer's shape).
 def approved(
-    name: str, step: dict[str, Any], answers: list[tuple[Any, ...]], set_by: dict[str, str]
+    name: str,
+    step: dict[str, Any],
+    answers: list[tuple[Any, ...]],
+    set_by: dict[str, str],
+    roles_of: Mapping[str, set[str]],
 ) -> bool:
     """Whether the step's approval has been given by someone allowed to give it."""
     answer = next((a for a in answers if a[0] == name), None)
     if answer is None:
         return False
     _, outcome, person, *_ = answer
+    roles = step["approval"]["roles"]
+    if not roles_of.get(person, set()) & set(roles):
+        raise AnswerRefused(f"{person} cannot approve {name}: needs {' or '.join(roles)}")
     # "Someone else" is computed, never listed (D11): whoever set a value the step uses, in its
     # inputs or its condition, may not approve it.
     used = fields_read([*step["inputs"].values(), step.get("when")])

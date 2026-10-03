@@ -62,3 +62,29 @@ def test_the_reviewer_cannot_approve_the_payment() -> None:
                 ("pay", "approve", "sam"),
             ],
         )
+
+
+def test_a_team_lead_who_did_not_review_approves_and_the_refund_is_paid() -> None:
+    run = run_case(
+        REFUND,
+        file={"order_id": "ord-5", "amount": 250},
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 250}),
+            ("pay", "approve", "sam"),
+        ],
+    )
+    assert run.reached("pay")
+    assert run.closed
+
+
+def test_approving_needs_the_approval_role() -> None:
+    # Ana didn't review this one, but she isn't a team lead.
+    with pytest.raises(AnswerRefused, match="support-lead"):
+        run_case(
+            REFUND,
+            file={"order_id": "ord-6", "amount": 250},
+            answers=[
+                ("review", "approve", "sam", {"approved_amount": 250}),
+                ("pay", "approve", "ana"),
+            ],
+        )
