@@ -220,8 +220,15 @@ and record the key points. A question is closed once you can explain the answer 
 > In the quickstart, the reviewer approves a 250 refund. Which person can approve the payment, and
 > who can't? What does the case wait for at that moment, and what would a test assert?
 
-- Your answer:
-- Discussion:
+- Your answer (tracer warm-up): people with the approval role other than the reviewer.
+- Discussion: right for the first part, made precise by D11: anyone with `support-lead` (Sam)
+  except Ana, whose answer set `approved_amount`, the value `pay` sends, and whose *approve* is
+  what lets `pay` run; the person who opened the case is excluded too. The other two parts were
+  missing. The case waits for one piece of pending work, the approval of `pay` by a
+  `support-lead`: `pay` has not run, and the case stays open (D10). The test asserts exactly that:
+  `run.waiting_for == ["approval of pay by support-lead"]`, and also that `pay` was not reached and
+  the case is not closed. The tracer bullet runs this test.
+- Status: open.
 
 ## 15. Case data
 
