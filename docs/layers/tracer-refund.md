@@ -1,6 +1,6 @@
 # Tracer bullet: the quickstart's refund case, end to end
 
-Status: draft, for agreement.
+Status: agreed, 2026-10-03.
 
 ## What this is for
 

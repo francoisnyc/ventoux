@@ -1,0 +1,20 @@
+"""The quickstart's refund case, run end to end: the tracer bullet's acceptance tests.
+
+They go only through the seams the quickstart shows (`run_case` and what a run reports), so they
+stay green while later layers replace everything behind them. See docs/layers/tracer-refund.md.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from ventoux.testing import AnswerRefused, load_definition, run_case
+
+REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
+
+
+def test_an_undeclared_outcome_is_refused() -> None:
+    with pytest.raises(AnswerRefused, match="aprove"):
+        run_case(
+            REFUND, file={"order_id": "ord-1", "amount": 40}, answers=[("review", "aprove", "ana")]
+        )

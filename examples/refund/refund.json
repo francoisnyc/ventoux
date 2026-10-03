@@ -1,0 +1,33 @@
+{
+  "case": "refund",
+  "title": "Customer refund",
+  "fields": {
+    "order_id": {"type": "reference", "system": "orders", "title": "Order"},
+    "amount": {"type": "number", "title": "Amount requested"},
+    "approved_amount": {"type": "number", "title": "Amount approved"}
+  },
+  "steps": {
+    "review": {
+      "kind": "task",
+      "title": "Review the refund request",
+      "roles": ["support"],
+      "outcomes": {
+        "approve": {"title": "Approve the refund", "sets": ["approved_amount"]},
+        "reject": {"title": "Reject the refund"}
+      }
+    },
+    "pay": {
+      "kind": "activity",
+      "title": "Refund the customer",
+      "activity": "payments.refund@1",
+      "inputs": {"order_id": {"field": "order_id"}, "amount": {"field": "approved_amount"}},
+      "when": {"=": [{"field": "review.outcome"}, "approve"]},
+      "approval": {
+        "when": {">": [{"field": "approved_amount"}, 100]},
+        "roles": ["support-lead"],
+        "reason": "Refunds over 100 need a team lead"
+      }
+    }
+  },
+  "sequence": ["review", "pay"]
+}
