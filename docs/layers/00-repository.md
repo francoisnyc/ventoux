@@ -1,6 +1,6 @@
 # Layer 0: repository and conventions
 
-Status: draft, for agreement.
+Status: agreed, 2026-10-03.
 
 ## What this layer is for
 
