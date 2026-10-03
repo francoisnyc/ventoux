@@ -18,3 +18,13 @@ def test_an_undeclared_outcome_is_refused() -> None:
         run_case(
             REFUND, file={"order_id": "ord-1", "amount": 40}, answers=[("review", "aprove", "ana")]
         )
+
+
+def test_small_refund_needs_no_team_lead() -> None:
+    run = run_case(
+        REFUND,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+    )
+    assert run.closed
+    assert run.reached("pay")

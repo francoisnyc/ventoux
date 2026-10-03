@@ -4,9 +4,18 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ventoux.case.runner import AnswerRefused, run
+from ventoux.case.runner import Activity, AnswerRefused, Run, run
 
 __all__ = ["AnswerRefused", "load_definition", "run_case"]
+
+
+def fake_refund(inputs: dict[str, Any]) -> dict[str, Any]:
+    """`payments.refund@1` against a fake payment system: nothing is paid."""
+    return {"refund_id": f"refund-{inputs['order_id']}"}
+
+
+# TRACER: a hard-coded fake activity; the registry and its development activities come in layer 1.
+FAKE_ACTIVITIES: dict[str, Activity] = {"payments.refund@1": fake_refund}
 
 
 def load_definition(path: Path) -> dict[str, Any]:
@@ -19,6 +28,6 @@ def run_case(
     definition: dict[str, Any],
     file: dict[str, Any],
     answers: list[tuple[Any, ...]],
-) -> None:
+) -> Run:
     """Open a case with `file`, play the scripted `answers`, and report where it ended."""
-    run(definition, file, answers)
+    return run(definition, file, answers, FAKE_ACTIVITIES)
