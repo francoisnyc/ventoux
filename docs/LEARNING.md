@@ -141,6 +141,13 @@ and record the key points. A question is closed once you can explain the answer 
 - Follow-up: the platform team moves the risk scorer from the `risk` task queue to `risk-v2` in
   production, without changing its code. What changes in the registry, and does it create a new
   contract version or a release?
+  Answer: not sure. Discussion: only the production deployment binding changes (activity name and
+  task queue). The contract is untouched, so its hash is unchanged: no new version, nothing for
+  packages to adopt, and no release, because a release records which contracts a package needs,
+  not where they run. What protects the move is activation and its runtime backstops: workers on
+  `risk-v2` must publish a manifest serving `risk.score@1` with the same hash, and an activity
+  nobody picks up fails loudly on its schedule-to-start timeout. Keep the question open until you
+  can explain "what vs where" without notes.
 - Status: open.
 
 ## 10. Versions
