@@ -124,8 +124,24 @@ and record the key points. A question is closed once you can explain the answer 
 > a draft letter. The engine is in Python. What does each activity declare in the registry, and does
 > the Java developer ever need to read Python code?
 
-- Your answer:
-- Discussion:
+- Your answer (layer 0 warm-up): a contract with schemas, risk and a task queue; no.
+- Discussion: schemas and risk are right, and "no" is right. Two corrections. First, the task queue
+  is not in the contract: the contract says *what* is promised, and a deployment binding per
+  environment says *where* it runs (D5). Moving the scorer to another queue is an operations change
+  and needs no new contract version. Second, the contract holds more than schemas and risk:
+  `name@version`, the effect, sink policies on inputs, the provenance of each output, the retry
+  policy and timeouts, idempotency, and declared failure outcomes (D17). The two activities differ
+  on several of these. The risk score is `effect: compute`, so it needs no idempotency key, and the
+  platform team declares its output as trusted. The draft letter has a side effect (it creates a
+  draft), so it declares an idempotency key. It is low risk because it only drafts and never sends.
+  On "no": the Java worker and the Python engine meet only through the contract (published as JSON
+  Schema) and a Temporal task queue. The Java developer reads the contract and the JSON definition,
+  never the engine. One gap to keep in mind: activation needs every worker to publish a manifest
+  (D5), so a Java worker needs a small Ventoux library or an equivalent.
+- Follow-up: the platform team moves the risk scorer from the `risk` task queue to `risk-v2` in
+  production, without changing its code. What changes in the registry, and does it create a new
+  contract version or a release?
+- Status: open.
 
 ## 10. Versions
 
