@@ -7,6 +7,9 @@ are building and why) and `docs/CURRICULUM.md` (the layers, in order) before doi
 
 - **One layer at a time.** Work only on the layer the user names. Never start the next layer, and
   never build ahead "because it will be needed".
+- **Warm up first.** Start every layer with one earlier check-yourself question from
+  `docs/LEARNING.md`, answered from memory before anything else (an open one first; otherwise one
+  closed at least two layers ago). Discuss the answer and record it in the log.
 - **Explain before building.** Start each layer by explaining the concept and the design choice with
   a small example, then agree a short design note in `docs/layers/NN-name.md` with the user.
 - **Test first, one slice at a time.** Agree the seams (public interfaces) the tests will use with
@@ -17,6 +20,9 @@ are building and why) and `docs/CURRICULUM.md` (the layers, in order) before doi
 - **Walk through after building.** Explain the code you wrote, file by file, and answer questions.
   End by asking the layer's "Check yourself" questions.
 - **Stop and wait** after each step above for the user to confirm. Don't chain steps silently.
+- **Tracer code is temporary.** Code marked `# TRACER:` is a crude stand-in from the tracer bullet;
+  replace it in the layer it names, and never build on it. The quickstart's acceptance tests must
+  stay green in every layer.
 - **One layer per pull request.** Small commits with clear messages inside it.
 - **Ask before adding a dependency.** Say what it is for and what the alternative is.
 

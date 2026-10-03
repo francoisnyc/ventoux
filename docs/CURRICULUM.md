@@ -1,6 +1,6 @@
 # Ventoux — building it layer by layer
 
-Status: draft, 2026-10-03. Each layer is one pull request. Don't start a layer until the previous
+Status: draft, 2026-10-03. Order: layer 0, the tracer bullet, layer 1, the spike, layers 2–15. Each layer is one pull request. Don't start a layer until the previous
 one is merged and you can explain it in your own words.
 
 References point to the `chartering` prototype, which is written in TypeScript; Ventoux is built in
@@ -9,6 +9,9 @@ files. Every layer should end up smaller and clearer than its prototype.
 
 ## How each layer runs
 
+0. **Warm-up:** one earlier check-yourself question from `docs/LEARNING.md`, answered from memory
+   (an open question first; otherwise one closed at least two layers ago). Recalling it later is
+   what makes it stick; record the answer in the log.
 1. **Explain:** the assistant explains the concept and the design choice, with a small example.
 2. **Document first:** update the user-facing docs (the quickstart, or the guide for this layer's
    persona) to describe the layer as if it already worked. If it is hard to explain, revisit the
@@ -38,6 +41,32 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
   this curriculum and the quickstart draft in the repo.
 - **Done when:** CI is green on an empty test suite and the layout matches the brief's layers.
 - **Check yourself:** why must `core` run inside a Temporal workflow?
+
+## Tracer bullet (after layer 0): the quickstart's refund case, end to end
+
+- **Learn:** a tracer bullet is a thin path through the whole system, built first and deepened
+  later. Seeing a case run from opening to closing shows what every later layer is for, and tests
+  the quickstart's design against real code in the first week rather than at layer 8.
+- **Build:** the refund case from `docs/QUICKSTART.md`, running in memory, crudely: its definition
+  as a JSON file (`examples/refund/refund.json`, the shape `ventoux check` would produce, written by
+  hand since the builder comes at layer 14); a fake `payments.refund@1`; scripted answers; a small
+  loop that opens the case, runs `review`, checks `pay`'s condition and approval, runs it, and
+  closes when nothing is left to do; and `ventoux.testing.run_case` with the shape the quickstart
+  shows. Every crude part carries a `# TRACER:` comment naming the layer that replaces it
+  (registry: 1, expressions: 2, validation: 3, provenance: 4, interpreter: 5, Temporal: 6,
+  approvals and roles: 7, case runtime: 8).
+- **Tests:** the quickstart's three tests (small refund, large refund waiting for a team lead,
+  rejected review), run against the JSON definition. They stay for good as acceptance tests: every
+  later layer must keep them green, and at layer 14 they switch to the Python definition exactly as
+  the quickstart shows.
+- **Negative test:** an answer with an outcome the task doesn't declare is refused; a refund over 100
+  is not paid until someone other than the reviewer approves.
+- **Done when:** the three tests pass, every `# TRACER:` comment names its layer, and anything the
+  quickstart got wrong or left unsaid is recorded as a new design question in `docs/BRIEF.md`
+  (numbered from 10).
+- **Reference:** `docs/QUICKSTART.md`; the prototype's `scripts/migration-demo.ts` shows a case run
+  end to end.
+- **Check yourself:** what did running the quickstart teach you that reading it didn't?
 
 ## 1. Activities and the registry
 
