@@ -13,9 +13,11 @@ SRC = Path(__file__).parent.parent / "src"
 
 # What each pure layer may not import (a package and everything under it).
 LLM_SDKS = {"anthropic", "openai"}
+ADAPTERS = {"ventoux.temporal", "ventoux.authoring", "ventoux.tooling"}
+CASE_FORBIDDEN = {"temporalio"} | LLM_SDKS | ADAPTERS
 FORBIDDEN = {
-    "core": {"temporalio"} | LLM_SDKS,
-    "case": {"temporalio"} | LLM_SDKS,
+    "core": CASE_FORBIDDEN | {"ventoux.case"},
+    "case": CASE_FORBIDDEN,
 }
 
 
@@ -61,6 +63,23 @@ def test_case_may_not_import_temporal() -> None:
     assert forbidden_imports("case", "import temporalio\n") == ["temporalio"]
 
 
+# Imports point downward: a pure layer may not reach up into the layers built on it.
+@pytest.mark.parametrize(
+    ("layer", "higher"),
+    [
+        ("core", "ventoux.case"),
+        ("core", "ventoux.temporal"),
+        ("core", "ventoux.authoring"),
+        ("core", "ventoux.tooling"),
+        ("case", "ventoux.temporal"),
+        ("case", "ventoux.authoring"),
+        ("case", "ventoux.tooling"),
+    ],
+)
+def test_pure_layers_may_not_import_higher_layers(layer: str, higher: str) -> None:
+    assert forbidden_imports(layer, f"from {higher} import x\n") == [higher]
+
+
 @pytest.mark.parametrize("layer", sorted(FORBIDDEN))
 def test_pure_layers_import_nothing_forbidden(layer: str) -> None:
     files = sorted((SRC / "ventoux" / layer).rglob("*.py"))
@@ -75,3 +94,8 @@ def test_pure_layers_import_nothing_forbidden(layer: str) -> None:
         f"ventoux.{layer} must run inside a Temporal workflow and in a plain test, so it may "
         f"not import {sorted(FORBIDDEN[layer])}. See docs/layers/00-repository.md."
     )
+
+
+def test_importing_downward_is_allowed() -> None:
+    assert forbidden_imports("case", "from ventoux.core import x\n") == []
+    assert forbidden_imports("core", "from ventoux.core import x\n") == []
