@@ -31,6 +31,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 24 | D17: failures | closed |
 | 25 | D19: identities | closed |
 | 26 | Layer 0: core inside a workflow | closed |
+| 27 | Tracer: running the quickstart | closed |
 
 ---
 
@@ -456,4 +457,19 @@ and record the key points. A question is closed once you can explain the answer 
   restart the whole case and re-run steps that already had side effects, with no history of which
   decisions were made. Activities are for the side effects; the decisions live in the workflow,
   which is why they must be deterministic.
+- Status: closed.
+
+## 27. Tracer: running the quickstart
+
+> What did running the quickstart teach you that reading it didn't?
+
+- Your answer: that the approval exclusion depends on who set the values.
+- Discussion: right, and it's the key lesson. Read, the rule sounds like one about a person ("the
+  team lead can't be the reviewer"); run, it is one about values: whoever set a value the step uses,
+  or the answer that lets it run, can't approve it. The quickstart's own story (Ana reviews, Sam
+  approves) never exercises it, since Ana isn't a team lead; only Sam reviewing then approving
+  shows it. It needs a record of who set each value (`set_by` in the tracer, provenance in layer 4),
+  so approvals (layer 7) depend on provenance, not only on roles. Smaller lessons: an example can
+  pass while under-testing (the large-refund test), and a case waiting on a task had no defined
+  report (design question 14).
 - Status: closed.
