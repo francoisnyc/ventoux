@@ -639,6 +639,14 @@ New questions found while building go here, numbered from 10.
     **environment registry** keeps its name: it does record where things run (worker manifests).
     Past entries in the learning log keep the old word.
 
+16. **Should a hash failure say what changed?** (found in layer 1's walk-through) Today CI says
+    "`payments.refund@1` changed without a new version", and the cause can be invisible: renaming
+    the input class or editing its docstring changes the JSON Schema, so the hash. A message such
+    as "`retry.maximum_attempts`: 5 → 9" would teach the rule each time it fires. But
+    `contracts.lock.json` stores only hashes. Options: store each contract's canonical promise in
+    the lockfile (bigger, but pull requests show a readable diff), or leave it to the semantic diff
+    (layer 13). To decide by layer 12 (releases), which also reads the recorded contracts.
+
 ## Prior art
 
 Agentic Chartering (plans as checked data, which it calls Charters, and the trust model), CaMeL

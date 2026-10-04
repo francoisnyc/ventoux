@@ -21,6 +21,18 @@ The catalog lists contracts; each environment binds them. A contract has no fiel
 queue, a namespace or a worker: where an activity runs is a deployment binding, and moving it
 changes no contract.
 
+> **Coming from Temporal?** Three things work differently:
+>
+> - **Timeouts and retries live on the contract,** not where an activity is called. You set them
+>   once, for every case; a case may make them stricter, never looser.
+> - **Business failures are declared outcomes** (`declined`), not non-retryable errors. Cases read
+>   them like task answers; anything undeclared that fails after its retries needs attention.
+> - **Registering an activity on a worker is still how you deploy it.** That's *where* it runs (a
+>   deployment binding). The catalog is *what* it promises, and the two never mix.
+>
+> And one surprise: the contract's hash covers the JSON Schema of its input and output, which
+> includes each model's class name and docstring. Renaming `RefundInput` is a new version.
+
 ## Writing a contract
 
 ```python
