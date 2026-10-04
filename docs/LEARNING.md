@@ -634,5 +634,12 @@ and record the key points. A question is closed once you can explain the answer 
   time reaches an expression only as data history recorded: a timer firing, an event, a field.
 - Follow-up: a claim must escalate if nobody has assessed it within 5 days. Without `now`, how is
   that written, and where does the time come from?
-- Status: open, waiting for the follow-up.
+  Answer: asked for it. As a rule whose *when* is time passing, not an expression reading the
+  clock (D7, the `sla` pattern of layer 11): *when* 5 days after the case opened (a timer, declared
+  as data, `5d`), *if* `assessed` is not reached (a question about the case file), *then* start
+  `escalate`. The engine starts a durable Temporal timer when the case opens; the Temporal server
+  keeps the time, and history records `TimerFired`. On replay, Temporal reads that event at the
+  same point instead of waiting or reading a clock, so the condition sees the same case file and
+  decides the same way. Time enters as a recorded event, never as something an expression reads.
+- Status: open, kept in the warm-up rotation until the follow-up comes from memory.
 
