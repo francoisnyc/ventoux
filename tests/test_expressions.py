@@ -4,10 +4,18 @@ See docs/layers/02-plan-expressions.md and docs/guides/expressions.md.
 """
 
 from decimal import Decimal
+from typing import cast
 
 import pytest
 
-from ventoux.core.expressions import ExpressionInvalid, Var, parse_expression
+from ventoux.core.expressions import (
+    Expression,
+    ExpressionError,
+    ExpressionInvalid,
+    Var,
+    evaluate,
+    parse_expression,
+)
 
 NOT_AN_OPERATOR = (
     "`now` is not an operator. The operators are: var, ==, !=, >, >=, <, <=, and, or, !, +, -, *, "
@@ -65,4 +73,36 @@ def test_var_names_one_field_with_no_default(name: object) -> None:
     assert str(refused.value) == (
         'var takes the name of one field, like {"var": "approved_amount"}: '
         "no default, and never the whole case file"
+    )
+
+
+def test_a_field_with_no_value_is_an_error_not_false() -> None:
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(Var(var="approved_amount"), {"amount": Decimal(250)})
+    assert str(stopped.value) == "approved_amount has no value"
+
+
+def test_an_operator_the_evaluator_does_not_know_is_an_error_not_false() -> None:
+    # A raw dict that skipped the parser, like the tracer's `{"now": []}`, which read as false.
+    unknown = cast(Expression, {"now": []})
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(unknown, {})
+    assert str(stopped.value) == "can't evaluate {'now': []}: it isn't a parsed expression"
+
+
+def test_a_field_reads_its_value_and_a_literal_is_itself() -> None:
+    values = {"approved_amount": Decimal("250.00"), "review.outcome": "approve"}
+    assert evaluate(Var(var="approved_amount"), values) == Decimal("250.00")
+    assert evaluate(Var(var="review.outcome"), values) == "approve"
+    assert evaluate(Decimal(100), values) == Decimal(100)
+    assert evaluate("approve", values) == "approve"
+    assert evaluate(False, values) is False
+
+
+def test_a_value_an_expression_cannot_read_is_an_error() -> None:
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(Var(var="approved_amount"), {"approved_amount": 250.0})
+    assert str(stopped.value) == (
+        "approved_amount holds 250.0, a float, and an expression reads only decimals, "
+        "texts and booleans"
     )

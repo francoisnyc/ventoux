@@ -90,7 +90,9 @@ mapping from field name to value. It raises `ExpressionError` when:
 
 - a field is missing;
 - a value has the wrong runtime type (the evaluator checks the values, and doesn't rely on the
-  check having run);
+  check having run). It takes the values as `Mapping[str, object]`, because the case file is data
+  from outside, and refuses one it can't read at all, such as a binary float (found in slice 2,
+  by mypy);
 - it divides by zero;
 - it meets an object it has no case for, such as a raw dict.
 

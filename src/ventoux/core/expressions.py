@@ -1,5 +1,6 @@
 """Expressions: structured JSON with the operators of decision D3 (layer 2)."""
 
+from collections.abc import Mapping
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
@@ -44,6 +45,11 @@ class ExpressionInvalid(Exception):
     """An expression that can't be accepted: refused before anything runs."""
 
 
+class ExpressionError(Exception):
+    """An expression that can't be evaluated against these values: the step stops."""
+
+
+type Value = Decimal | str | bool
 type Expression = Decimal | str | bool | Var
 
 
@@ -88,3 +94,23 @@ def parse_expression(data: object) -> Expression:
                 parse_expression(argument)
     # Fail closed: whatever isn't recognised above is refused, never passed through.
     raise ExpressionInvalid(f"not an expression: {data!r}")
+
+
+def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
+    """The value of `expression` against the case file's `values`, or `ExpressionError`."""
+    if isinstance(expression, bool | str | Decimal):
+        return expression
+    if isinstance(expression, Var):
+        if expression.var not in values:
+            # Fail closed: a missing value is an error that stops the step, never `false` (D3).
+            raise ExpressionError(f"{expression.var} has no value")
+        value = values[expression.var]
+        # The case file is data from outside: check what it holds, never assume it.
+        if not isinstance(value, bool | str | Decimal):
+            raise ExpressionError(
+                f"{expression.var} holds {value!r}, a {type(value).__name__}, and an expression "
+                "reads only decimals, texts and booleans"
+            )
+        return value
+    # Fail closed: anything the evaluator has no case for is an error, never a default.
+    raise ExpressionError(f"can't evaluate {expression!r}: it isn't a parsed expression")
