@@ -40,7 +40,7 @@ deliberately in Python, smaller and clearer.
 
 - Definitions (plans and case definitions) are data. Never `eval`, `exec`, `compile`, `importlib` or
   `pickle` anything from them.
-- Expressions are structured JSON using only the operators listed in decision D3, evaluated as pure
+- Expressions are structured JSON using only the operators listed in decision D20, evaluated as pure
   functions of the case file. No operator reads the clock, randomness or I/O. Reject anything else
   at validation; at runtime a missing field, a wrong type or an unknown operator is an error. Adding
   an operator is a design decision recorded in the brief, never just a code change.
@@ -75,3 +75,9 @@ deliberately in Python, smaller and clearer.
   they are (no home-made wrappers around them) but get a short comment the first time a file uses
   them (`# Pydantic: runs after the fields are checked, on the whole object`). No cryptic regex
   without a readable explanation or a small named function.
+- Comments that cite a decision state the rule in plain words first; the reference only points to
+  the reason, written with its source: "(brief, D5)", "(learning question 7)". Cite where a rule is
+  enforced, not everywhere its topic appears.
+- Decisions in the brief are never renumbered or rewritten: a replaced decision keeps its text,
+  marked "superseded by D*n*", and the new one gets the next number. So a reference always means
+  what it meant when it was written.

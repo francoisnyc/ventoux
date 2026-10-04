@@ -108,13 +108,13 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 - **Check yourself:** which of our guarantees could not be expressed as a restriction of the
   standard, and why?
 - **Done:** `docs/layers/spike-dsl.md`. Plans keep our own format; expressions are structured JSON
-  with a fixed list of operators (D3).
+  with a fixed list of operators (D20).
 
 ## 2. Plan schema and expressions
 
-- **Learn:** a plan as a state machine of data; expressions as data (structured JSON, decision D3);
+- **Learn:** a plan as a state machine of data; expressions as data (structured JSON, decision D20);
   why some things can't even be written; why a missing value is an error, not `false`.
-- **Build:** the plan schema (activity, wait and final states; transitions); expressions with D3's
+- **Build:** the plan schema (activity, wait and final states; transitions); expressions with D20's
   operators: the Pydantic models, a type check against declared fields (outcomes as closed lists),
   a fail-closed evaluator and the one-line rendering. The tracer's minimal form (`=`, `field`)
   becomes `==` and `var`.
@@ -141,7 +141,8 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
   tutor session: `model_copy(update=...)` skips every check, so a copied contract with risk
   `"hihg"` and a `write` with no idempotency key was accepted into the catalog. `Catalog.register`
   must re-check every contract it receives (Pydantic's `revalidate_instances="always"`), with a
-  negative test: a copy that breaks a rule is refused at registration.
+  negative test: a copy that breaks a rule is refused at registration. Also a reference check: every
+  decision cited in `src/` ("brief, D5") exists in the brief and is not superseded.
 - **Learn:** what can be proven by reading a definition: references exist, states are reachable,
   high-risk activities are behind an approval on every path.
 - **Build:** a validator returning structured issues (`path`, `code`, `message`).

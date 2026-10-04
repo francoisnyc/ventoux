@@ -1,7 +1,7 @@
 # Ventoux — design brief
 
-Status: draft, 2026-10-04; all design questions decided (D1–D19). Read this first; it is the short
-version of what we are building and why. The longer reference is `docs/design.md` in the
+Status: draft, 2026-10-04; all design questions decided (D1–D20; D3 superseded by D20). Read this
+first; it is the short version of what we are building and why. The longer reference is `docs/design.md` in the
 `chartering` prototype.
 
 ## In one sentence
@@ -133,44 +133,23 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
 - Short sequences without people stay inside a plan. Anything that waits on people or runs for
   days is a case step, where it can change.
 
-### D3. Expressions are structured JSON with a fixed list of operators
+### D3. Expressions are a small JSONata subset (superseded by D20)
 
-- **Stored as structured JSON:** a literal, a field (`{"var": "approved_amount"}`), or one operator
-  with its arguments (`{">": [{"var": "approved_amount"}, 100]}`). No parser: Pydantic validates the
-  shape, the fields an expression reads are explicit (provenance, D12), it diffs exactly and hashes
-  canonically (D5), and the published JSON Schema constrains what a model can write (layer 15).
-- **Written** through the Python builder (`approved_amount > 100` with typed field objects) or, at
-  runtime, by a model under the JSON Schema. **Read** as a one-line rendering (`approved_amount >
-  100`) in diffs and reviews, and in plain language by analysts. No text syntax is parsed in v1.
-- **The operators:** `var` (a declared field) and literals; `==`, `!=`, `>`, `>=`, `<`, `<=`; `and`,
-  `or`, `!`; `+`, `-`, `*`, `/`; `if` (condition, then, else); `in` (membership in a list); `cat`
-  and `string`; `exists`; `count`; `sum` over a list field with a simple `where`, reading each
-  element with `item`.
-- **Names follow JsonLogic where ours are only stricter.** An operator takes JsonLogic's name when,
-  whenever ours returns a value, JsonLogic returns the same one: ours may only refuse more. Refused:
-  a default in `var`, `var` of the whole data, `if` chains, truthiness (conditions are `true` or
-  `false`), coercion in `==` and `cat`. Where the shape or meaning differs, the name is ours (`sum`,
-  `count`, `exists`, `string`, `item`), so nobody assumes JsonLogic's behaviour.
-- **Typed, and fail closed.** Checked before running against the declared field types, with one
-  `number` type and outcomes as closed lists, so a misspelled outcome (`"aprove"`) is rejected. At
-  runtime a missing field, a wrong type or an unknown operator is an error, never `false`; `and` and
-  `or` evaluate every operand, so an error is never hidden. Why: JSONata, the earlier choice, reads
-  a missing field as nothing, and the prototype's `holds()` turned that into `false`, so an approval
-  condition on a missing amount meant "no approval needed".
-- **Numbers are exact decimals, never binary floats.** JSON numbers are read as decimals, and both
-  evaluators use exact decimal arithmetic, so `0.1 + 0.2 == 0.3` holds and money agrees with the
-  contracts (`payments.refund@1` takes a `Decimal`). A division that doesn't terminate (`1 / 3`)
-  keeps 34 significant digits, rounding half to even (IEEE 754 decimal128), set explicitly in both
-  evaluators, never taken from a global default. Division by zero is an error. Rounding is not an
-  operator: a `compute` activity does it, with an explicit scale and mode.
-- **Deterministic by construction.** No operator reads the clock, randomness or I/O, and there are
-  no user-defined or higher-order functions, variable bindings or regular expressions. They can't be
-  written, so there is nothing to refuse.
-- **The list is fixed here.** Adding an operator is a design decision recorded in this brief, with
-  its reason, not a code change. Logic that doesn't fit becomes a registered activity with
-  `effect: compute`: real code, tested and reviewed. The TypeScript evaluator (for the inbox) passes
-  the same conformance suite as the Python one (D4), so the two can't drift.
-- Compared in the spike (`docs/layers/spike-dsl.md`) with the JSONata subset, CEL and JsonLogic.
+> **Superseded on 2026-10-04 by D20** (structured JSON), after the spike
+> (`docs/layers/spike-dsl.md`): JSONata reads a missing field as nothing, so an approval condition on a missing amount meant
+> "no approval needed". Kept as written, so references to D3 and the history stay true.
+
+
+- Allowed: field paths, literals, comparisons, `and`/`or`/`not`, arithmetic, conditionals, simple
+  array filters, and a short list of functions (`$exists`, `$count`, `$sum`, `$contains`,
+  `$string`, `$number`, …). The JSONata engine evaluates them; the validator rejects anything else.
+- Not allowed: user-defined functions, `$map`/`$reduce` and other higher-order functions, regular
+  expressions, variable bindings, and anything non-deterministic.
+- Logic that doesn't fit becomes a registered activity with `effect: compute`: real code, tested
+  and reviewed.
+- Typed builder expressions (`file.payout > 1000` written with typed field objects) compile to this
+  subset.
+- CEL (Common Expression Language) is compared on the same examples in the curriculum's spike.
 
 ### D4. The engine is written in Python
 
@@ -178,7 +157,7 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   live with the engine must be able to read, debug and extend it.
 - Stack: Python 3.12+, Pydantic for schemas, pytest, strict type checking (pyright or mypy strict),
   and the Temporal Python SDK (its workflow sandbox helps catch non-determinism). Expressions need
-  no library: their evaluator is a small part of `core` (D3).
+  no library: their evaluator is a small part of `core` (D20).
 - No lock-in to the engine language: the definition format is published as **JSON Schema**
   (generated from Pydantic), and a **conformance suite** (definitions, expected validation results
   and run histories) checks any implementation, including the TypeScript prototype.
@@ -499,6 +478,45 @@ be erased on request), has size limits, and a second copy of business records go
   and an expiry, so it can't be forged by someone with signal access, or replayed on another case,
   step or amount. Verifying it is a pure calculation, safe inside the workflow.
 
+### D20. Expressions are structured JSON with a fixed list of operators (supersedes D3)
+
+- **Stored as structured JSON:** a literal, a field (`{"var": "approved_amount"}`), or one operator
+  with its arguments (`{">": [{"var": "approved_amount"}, 100]}`). No parser: Pydantic validates the
+  shape, the fields an expression reads are explicit (provenance, D12), it diffs exactly and hashes
+  canonically (D5), and the published JSON Schema constrains what a model can write (layer 15).
+- **Written** through the Python builder (`approved_amount > 100` with typed field objects) or, at
+  runtime, by a model under the JSON Schema. **Read** as a one-line rendering (`approved_amount >
+  100`) in diffs and reviews, and in plain language by analysts. No text syntax is parsed in v1.
+- **The operators:** `var` (a declared field) and literals; `==`, `!=`, `>`, `>=`, `<`, `<=`; `and`,
+  `or`, `!`; `+`, `-`, `*`, `/`; `if` (condition, then, else); `in` (membership in a list); `cat`
+  and `string`; `exists`; `count`; `sum` over a list field with a simple `where`, reading each
+  element with `item`.
+- **Names follow JsonLogic where ours are only stricter.** An operator takes JsonLogic's name when,
+  whenever ours returns a value, JsonLogic returns the same one: ours may only refuse more. Refused:
+  a default in `var`, `var` of the whole data, `if` chains, truthiness (conditions are `true` or
+  `false`), coercion in `==` and `cat`. Where the shape or meaning differs, the name is ours (`sum`,
+  `count`, `exists`, `string`, `item`), so nobody assumes JsonLogic's behaviour.
+- **Typed, and fail closed.** Checked before running against the declared field types, with one
+  `number` type and outcomes as closed lists, so a misspelled outcome (`"aprove"`) is rejected. At
+  runtime a missing field, a wrong type or an unknown operator is an error, never `false`; `and` and
+  `or` evaluate every operand, so an error is never hidden. Why: JSONata, the earlier choice, reads
+  a missing field as nothing, and the prototype's `holds()` turned that into `false`, so an approval
+  condition on a missing amount meant "no approval needed".
+- **Numbers are exact decimals, never binary floats.** JSON numbers are read as decimals, and both
+  evaluators use exact decimal arithmetic, so `0.1 + 0.2 == 0.3` holds and money agrees with the
+  contracts (`payments.refund@1` takes a `Decimal`). A division that doesn't terminate (`1 / 3`)
+  keeps 34 significant digits, rounding half to even (IEEE 754 decimal128), set explicitly in both
+  evaluators, never taken from a global default. Division by zero is an error. Rounding is not an
+  operator: a `compute` activity does it, with an explicit scale and mode.
+- **Deterministic by construction.** No operator reads the clock, randomness or I/O, and there are
+  no user-defined or higher-order functions, variable bindings or regular expressions. They can't be
+  written, so there is nothing to refuse.
+- **The list is fixed here.** Adding an operator is a design decision recorded in this brief, with
+  its reason, not a code change. Logic that doesn't fit becomes a registered activity with
+  `effect: compute`: real code, tested and reviewed. The TypeScript evaluator (for the inbox) passes
+  the same conformance suite as the Python one (D4), so the two can't drift.
+- Compared in the spike (`docs/layers/spike-dsl.md`) with the JSONata subset, CEL and JsonLogic.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
@@ -566,7 +584,7 @@ inside a Temporal workflow alike.
 ## Non-negotiables
 
 - Definitions are data. Never `eval`, `exec`, `compile`, import or unpickle anything from them.
-- Expressions are pure and deterministic, limited to the operators listed in D3.
+- Expressions are pure and deterministic, limited to the operators listed in D20.
 - Every side effect goes through a registered activity.
 - The interpreter is deterministic, so it runs as a Temporal workflow and survives replay.
 - Every value carries provenance; sink policies are checked before an activity is scheduled.
@@ -593,7 +611,7 @@ deferred features listed above.
 ## Design questions (all decided)
 
 1. JSON or code first: D1.
-2. Expressions: D3, structured JSON, decided in the spike.
+2. Expressions: D3 (a JSONata subset), superseded by D20 (structured JSON) after the spike.
 3. Is a plan the right unit inside a case: no, kinds of step (Simplifications, D13).
 4. Existing Temporal workflows as steps: D6.
 5. Signed identities as the production default: D19, for high-risk approvals after v1.0.
@@ -627,7 +645,7 @@ New questions found while building go here, numbered from 10.
     readability for people, parsing, typing, provenance analysis, schema-constrained model output,
     exact diffs, determinism and Python support. The tracer bullet uses a minimal structured form,
     marked `# TRACER: layer 2`, which commits to neither. **Decided in the spike:** structured JSON
-    with a fixed list of operators (D3; `docs/layers/spike-dsl.md`).
+    with a fixed list of operators (D20, superseding D3; `docs/layers/spike-dsl.md`).
 12. **Who has which role in `run_case`?** (found in the tracer bullet) The quickstart's tests name
     people (`"ana"`) but never say where their roles come from. The tracer uses a fixed directory
     (`ana`: support; `sam`: support, support-lead). To decide in layer 7: roles passed to
