@@ -35,6 +35,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 28 | Card: catalog, contract, binding | open |
 | 29 | Layer 1: why `@1` and not `@1.0` | closed |
 | 30 | Spike: guarantees outside the standard | closed |
+| 31 | Pydantic: when checks run | closed |
 
 ---
 
@@ -603,4 +604,25 @@ and record the key points. A question is closed once you can explain the answer 
   only fixes add or change something: check before evaluating that every field read has a value
   (which needs a parser to know the fields), or an evaluator with different rules. Either way it
   is no longer the standard's jq, which is the point of the question.
+- Status: closed.
+
+## 31. Pydantic: when checks run
+
+> Predict, then run: (1) `payments_refund.risk = "low"`; (2)
+> `payments_refund.model_copy(update={"risk": "low"}).risk`; (3) building a contract with
+> `effect="write"` and `idempotency_key=None`: which rule fires, and in which mode?
+
+- Your answer: (1) an error; (2) `"low"`; (3) asked for the explanation.
+- Discussion: (1) right: `frozen=True` refuses the assignment ("Instance is frozen"), so D5 is
+  enforced by the object itself. (2) right, and the trap: `model_copy` makes a *new* object and
+  runs no checks at all. Trying it with `risk="hihg"` and no idempotency key produced a copy that
+  `Catalog.register` accepted: every rule skipped, failing open through a side door. Fix added to
+  layer 3: `register` re-checks what it receives. (3) In order: the `mode="before"` validator
+  (`no_unknown_fields`) sees the raw dict; then each field is checked alone against its type
+  (`None` is a valid `str | None`); then the `mode="after"` validators see the whole object, and
+  `side_effects_are_idempotent` finds `effect == "write"` with no key and raises `ValueError`,
+  which Pydantic wraps in a `ValidationError`. In one line: field checks see one value, "after"
+  rules see the whole object, and both run only when an object is built, never when it's copied.
+- Follow-up: the platform team wants a helper, `next_version(contract, **changes)`, that copies a
+  contract as `@N+1` with some changes. How should it build the new contract so every rule runs?
 - Status: closed.

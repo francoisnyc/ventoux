@@ -137,7 +137,11 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
   Pydantic idiom the first time it appears; the reference check readable (commented or a small
   function); every error message in the same shape (what's wrong, then what to do). No behaviour
   change: all tests stay green, and one new test checks that every rule in the design note is
-  registered on the contract, so a rule can never silently stop running.
+  registered on the contract, so a rule can never silently stop running. One fix found in the
+  tutor session: `model_copy(update=...)` skips every check, so a copied contract with risk
+  `"hihg"` and a `write` with no idempotency key was accepted into the catalog. `Catalog.register`
+  must re-check every contract it receives (Pydantic's `revalidate_instances="always"`), with a
+  negative test: a copy that breaks a rule is refused at registration.
 - **Learn:** what can be proven by reading a definition: references exist, states are reachable,
   high-risk activities are behind an approval on every path.
 - **Build:** a validator returning structured issues (`path`, `code`, `message`).
