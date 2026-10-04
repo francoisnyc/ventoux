@@ -212,9 +212,9 @@ There are two levels, and both are plain JSON. Nothing in a plan or a Case is ev
 imported.
 
 **1. Plans: one task as a state machine.** Each state either calls a *registered activity*,
-waits for a signal, or ends. Expressions are [JSONata](https://jsonata.org) with an allowlist of
-functions, and non-deterministic ones (`$now`, `$random`, `$uuid`, and so on) are rejected, so a run
-replays exactly on Temporal.
+waits for a signal, or ends. Expressions are structured JSON with a short, fixed list of operators
+(`{">": [{"var": "amount"}, 1000]}`). None of them reads the clock or randomness, so a run replays
+exactly on Temporal, and a missing value is an error, never a quiet `false`.
 
 ```json
 {
@@ -276,9 +276,9 @@ produces the definitions, and existing Temporal workflows as steps of a case.
 ## What the engine enforces
 
 - **Static validation.** It checks the schema, that every referenced activity exists at the declared
-  version, that the JSONata functions used are on the allowlist, that every state is reachable, and
-  that the Case has no structural deadlock. Deadlocks that depend on guard values can't be decided
-  statically, so they are detected at runtime.
+  version, that every expression type-checks against the declared fields, that every state is
+  reachable, and that the Case has no structural deadlock. Deadlocks that depend on guard values
+  can't be decided statically, so they are detected at runtime.
 - **Provenance tracking.** Every value carries the sources it was derived from. Sink policies are
   checked before an activity is scheduled, not after it runs.
 - **Events are provenance sources too.** Each event a Case accepts declares its source and whether it

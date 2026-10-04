@@ -1,6 +1,6 @@
 # Ventoux — building it layer by layer
 
-Status: draft, 2026-10-03. Order: layer 0, the tracer bullet, layer 1, the spike, layers 2–15.
+Status: draft, 2026-10-04. Order: layer 0, the tracer bullet, layer 1, the spike, layers 2–15.
 Each layer is one pull request. Don't start a layer until the previous one is merged and you can
 explain it in your own words.
 
@@ -104,17 +104,26 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
   specification and its implementations.
 - **Check yourself:** which of our guarantees could not be expressed as a restriction of the
   standard, and why?
+- **Done:** `docs/layers/spike-dsl.md`. Plans keep our own format; expressions are structured JSON
+  with a fixed list of operators (D3).
 
 ## 2. Plan schema and expressions
 
-- **Learn:** a plan as a state machine of data; JSONata; why some functions are forbidden.
-- **Build:** the plan schema (activity, wait and final states; transitions); expressions limited
-  to the subset in decision D3.
-- **Negative test:** `$now()`, a user-defined function or `$map` is rejected; a malformed plan is
-  rejected; evaluating an operator or function the evaluator doesn't know raises an error, never
-  returns false (fail closed).
-- **Reference:** `src/core/schema.ts`, `src/core/expr.ts`; `docs/design.md` §2.
-- **Check yourself:** what would break on Temporal replay if `$now()` were allowed?
+- **Learn:** a plan as a state machine of data; expressions as data (structured JSON, decision D3);
+  why some things can't even be written; why a missing value is an error, not `false`.
+- **Build:** the plan schema (activity, wait and final states; transitions); expressions with D3's
+  operators: the Pydantic models, a type check against declared fields (outcomes as closed lists),
+  a fail-closed evaluator and the one-line rendering. The tracer's minimal form (`=`, `field`)
+  becomes `==` and `var`.
+- **Negative test:** an unknown operator (`now`, `map`) is rejected with one clear message; a
+  misspelled outcome and a text compared with a number are rejected; a malformed plan is rejected;
+  evaluating with a missing field, or an operator the evaluator doesn't know, raises an error,
+  never returns false (fail closed).
+- **Reference:** `src/core/schema.ts`; `docs/design.md` §2; `docs/layers/spike-dsl.md` and its
+  `structured.py` sketch. The prototype's `src/core/expr.ts` shows the JSONata version, and why it
+  failed open.
+- **Check yourself:** why can't `now` be written at all, and what would break on Temporal replay if
+  it could?
 
 ## 3. Static validation
 
