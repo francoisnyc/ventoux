@@ -3,6 +3,9 @@
 See docs/layers/01-catalog.md and docs/guides/activities.md.
 """
 
+import copy
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -19,6 +22,9 @@ from ventoux.core.catalog import (
     check_hashes,
     contract_hash,
 )
+from ventoux.testing import CATALOG, load_definition, payments_refund, run_case
+
+ROOT = Path(__file__).parent.parent
 
 
 class LookupInput(BaseModel):
@@ -196,3 +202,29 @@ def test_the_same_schema_written_twice_is_the_same_promise() -> None:
 
     catalog = catalog_of(lookup_contract())
     catalog.register(lookup_contract(input=LookupInput))  # no conflict
+
+
+def test_a_definition_naming_an_activity_not_in_the_catalog_stops_the_case() -> None:
+    refund = copy.deepcopy(load_definition(ROOT / "examples" / "refund" / "refund.json"))
+    refund["steps"]["pay"]["activity"] = "payments.refund@2"
+    with pytest.raises(NotInCatalog, match="Registered: payments.refund@1"):
+        run_case(
+            refund,
+            file={"order_id": "ord-1", "amount": 40},
+            answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        )
+
+
+def test_every_development_contract_matches_its_recorded_hash() -> None:
+    # The CI check (D5): a contract edited without a new version fails here.
+    recorded = json.loads((ROOT / "contracts.lock.json").read_text())
+    assert check_hashes(CATALOG, recorded) == []
+
+
+def test_the_guides_example_is_the_development_refund_contract() -> None:
+    guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
+    example = guide.split("```python\n")[1].split("```")[0]
+    # Our own documentation, run so it can't drift from the code; never a definition (data).
+    namespace: dict[str, Any] = {}
+    exec(example, namespace)  # noqa: S102 -- our guide, agreed in docs/layers/01-catalog.md
+    assert contract_hash(namespace["payments_refund"]) == contract_hash(payments_refund)

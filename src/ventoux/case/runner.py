@@ -10,6 +10,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from ventoux.core.catalog import Catalog
+
 Activity = Callable[[dict[str, Any]], dict[str, Any]]
 
 
@@ -33,7 +35,8 @@ def run(
     definition: dict[str, Any],
     file: dict[str, Any],
     answers: list[tuple[Any, ...]],
-    activities: Mapping[str, Activity],
+    catalog: Catalog,
+    implementations: Mapping[str, Activity],
     roles_of: Mapping[str, set[str]],
 ) -> Run:
     """Run the case `definition` from `file`, playing the scripted `answers` in order."""
@@ -54,8 +57,11 @@ def run(
             break  # the step waits, and nothing after it starts
         else:
             inputs = {key: evaluate(expr, values) for key, expr in step["inputs"].items()}
-            # TRACER: activities are looked up by name; the catalog (layer 1) checks contracts.
-            activities[step["activity"]](inputs)
+            # Fail closed: an activity the catalog doesn't hold stops the case (NotInCatalog).
+            contract = catalog.get(step["activity"])
+            # TRACER: inputs aren't checked against the contract's schema (the interpreter, layer 5).
+            # TRACER: no idempotency key is built per step run (the Temporal adapter, layer 6).
+            implementations[contract.reference](inputs)
         result.steps_reached.append(name)
     # A case closes when nothing is left to do (D10): here, when no step is waiting.
     result.closed = not result.waiting_for
