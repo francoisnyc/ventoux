@@ -11,7 +11,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 4 | Simplifications: one rule type | closed |
 | 5 | D2: structured to case | open |
 | 6 | Why not an existing DSL | closed |
-| 7 | D3: expressions | open |
+| 7 | D3: expressions | closed |
 | 8 | Engine language | open |
 | 9 | D4: Python engine | open |
 | 10 | Versions (pending D5) | closed |
@@ -34,6 +34,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 27 | Tracer: running the quickstart | closed |
 | 28 | Card: catalog, contract, binding | open |
 | 29 | Layer 1: why `@1` and not `@1.0` | closed |
+| 30 | Spike: guarantees outside the standard | closed |
 
 ---
 
@@ -110,8 +111,28 @@ and record the key points. A question is closed once you can explain the answer 
 > 10,000". Where does the logic for "total of high-risk items" live, and why is that better for the
 > reviewer than one long expression?
 
-- Your answer:
-- Discussion:
+- Your answer (spike warm-up): it goes in the contract?
+- Discussion: close, one level off. The contract is the *promise* (inputs: the line items; output:
+  `high_risk_total`; `effect: compute`; the output's provenance), but the *logic* lives in the
+  activity's code behind it: a registered activity with `effect: compute` (D3), ordinary Python or
+  Java, unit-tested and reviewed like any code. The case runs it as a step that writes
+  `high_risk_total` to the case file, and the approval reads one short condition,
+  `high_risk_total > 10000`. Better for the reviewer because: the condition says what it guards in
+  one line (and renders as one plain sentence); "what counts as high risk" is a business definition
+  with its own tests and its own owner, changed without touching every rule that uses it; the total
+  is a named fact with provenance and a time obtained, so the approval sheet can show it (D11, D18)
+  and an approval guards that value; and the expression language stays small enough to check,
+  which is the spike's whole question (design question 11).
+- Follow-up: `$sum(items[risk = 'high'].amount) > 10000` fits D3's subset (a simple filter and
+  `$sum`). When would you still move it into a compute activity?
+  Answer: when the rules need to change without editing every rule. Right: once "high-risk
+  total" is used by more than one rule (an approval, an escalation, a report), it is a business
+  definition, and it belongs in one place with one owner. Other signs: it needs its own tests
+  (missing `risk`, currencies, rounding); "high risk" stops being a field comparison (a category
+  table, a threshold per product); or the value should appear as a fact on the approval sheet, with
+  provenance and the time obtained. And the reverse: used once, short, and reading as a sentence,
+  the inline expression is fine and more visible, since the rules sheet shows it directly.
+- Status: closed.
 
 ## 8. Engine language
 
@@ -548,4 +569,38 @@ and record the key points. A question is closed once you can explain the answer 
   watch: "unchanged" must be true in meaning, not only in the hash. If the fix changes what callers
   rely on (rounding down becomes rounding to the nearest cent), the promise changed and a person
   decides it's `@2`. The hash tells you that something changed, never that a change is harmless.
+- Status: closed.
+
+## 30. Spike: guarantees outside the standard
+
+> Which of our guarantees could not be expressed as a restriction of the standard, and why?
+
+- Your answer: no eval?
+- Discussion: the opposite case, and a useful one: "no eval" is the guarantee you *can* get by
+  restriction. Forbid `run` (script, shell, container), `call` to URLs, custom functions,
+  catalogs, extensions and `loose` mode, and nothing from a definition is executed. Fragile
+  (every door must be found: a custom function is itself a task, an extension adds `before` and
+  `after` tasks), which is why question 6 prefers safe by construction, but possible. A
+  restriction can only *remove*. The guarantees it can't give are those that need something the
+  standard doesn't have:
+  - **provenance and input policies:** values carry no record of where they came from, so no
+    amount of forbidding adds one; it is new information (D12);
+  - **an approval on every path, by someone else:** there is no approval, role or answer, only
+    an event anyone may send, so "someone other than whoever set the amount" can't be said (D11);
+  - **references to contracts only:** a `call` name binds to nothing the standard can check;
+  - **case semantics:** no position, closing when nothing is left to do (D10): a flow can't be
+    restricted into a case;
+  - **fail closed:** jq reads a missing field as `null` and `null > 1000` as `false`. That is
+    the language's meaning, not a feature to forbid; changing it changes the semantics.
+  In one line: restriction removes capabilities; our guarantees mostly *add* information
+  (sources, who answered) or *change* meaning (errors instead of false).
+- Follow-up: why can't you make jq fail closed by forbidding parts of it?
+  Answer: because missing fields return null by design. Right: it lives in the meaning of the
+  most basic operation, `.payout`, not in a feature you could remove. Forbidding works on syntax;
+  every field access can yield `null`, and `null > 1000` is `false` (jq orders `null` below every
+  number), so you would have to forbid field access, which is the whole language. jq can't even
+  tell a missing field from one set to `null` (`{}` and `{"payout": null}` both give `null`). The
+  only fixes add or change something: check before evaluating that every field read has a value
+  (which needs a parser to know the fields), or an evaluator with different rules. Either way it
+  is no longer the standard's jq, which is the point of the question.
 - Status: closed.

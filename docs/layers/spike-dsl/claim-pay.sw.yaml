@@ -1,0 +1,76 @@
+# The prototype's claim-pay plan (chartering: examples/cases/insurance-claim/charters/claim-pay.json)
+# written in Serverless Workflow 1.0.3. Valid against the official schema: see check_sw.py.
+# Comments marked GAP name what the standard cannot say; FORBID what we would have to forbid.
+document:
+  dsl: '1.0.3'
+  namespace: claims
+  name: claim-pay
+  version: '1.0.0'            # must be semver (schema pattern); our plans are numbered by release (D5)
+  summary: Pay the assessed amount to the payout account on file for the policy, after an approval.
+input:
+  schema:
+    format: json
+    document:
+      type: object
+      required: [claimId, policyId, amount]
+      properties:
+        claimId: {type: string}
+        policyId: {type: string}
+        amount: {type: number}
+use:
+  retries:
+    threeTimes:
+      delay: {seconds: 1}
+      backoff: {exponential: {}}
+      limit: {attempt: {count: 3}}
+do:
+  - getPolicy:
+      try:
+        - fetch:
+            # `call` accepts any string that isn't a built-in protocol, so a catalog reference fits.
+            # GAP: nothing in the standard says this name must resolve to a registered contract,
+            # rather than to a custom function, which is itself a task that may `run` a script.
+            call: policies.get@1
+            with:
+              policyId: ${ $input.policyId }   # jq, the default expression language
+            export:
+              as: '${ $context + { policy: . } }'
+      catch:
+        retry: threeTimes
+        do:
+          - giveUp:
+              raise:
+                error: {type: https://ventoux.dev/errors/failed, status: 500}
+  - requestApproval:
+      call: notify.user@1
+      with:
+        text: ${ "Approve payout of \($input.amount) for claim \($input.claimId)?" }
+  - awaitApproval:
+      # GAP: no human task. An approval is an event we listen for; who may send it, and that it
+      # must be someone other than the proposer, is outside the format (D11).
+      listen:
+        to:
+          any:
+            - with: {type: claims.approved}
+            - with: {type: claims.rejected}
+      timeout:
+        after: {hours: 48}
+  - decide:
+      switch:
+        - approved:
+            when: ${ .[0].type == "claims.approved" }
+            then: pay
+        - otherwise:
+            then: rejected
+  - pay:
+      # GAP: nothing guarantees that every path to this call passes an approval (layer 3's
+      # APPROVAL_REQUIRED), or that `destination` comes from a trusted source (input policies, D12).
+      call: claims.pay@1
+      with:
+        claimId: ${ $input.claimId }
+        amount: ${ $input.amount }
+        destination: ${ $context.policy.payoutAccount }
+      then: end
+  - rejected:
+      raise:
+        error: {type: https://ventoux.dev/errors/rejected, status: 403}

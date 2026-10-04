@@ -1,0 +1,152 @@
+# 1. The claim case, evaluated on a sample case file
+
+pay: when
+  jsonata    assess.outcome = "approve" and payout > 0        -> True
+  celpy      assess.outcome == "approve" && payout > 0.0      -> BoolType(True)
+  cel-expr   assess.outcome == "approve" && payout > 0.0      -> True
+  structured assess.outcome = "approve" and payout > 0        -> True
+
+pay: approval when
+  jsonata    payout > 1000                                    -> True
+  celpy      payout > 1000.0                                  -> BoolType(True)
+  cel-expr   payout > 1000.0                                  -> True
+  structured payout > 1000                                    -> True
+
+deny: when
+  jsonata    assess.outcome = "deny"                          -> False
+  celpy      assess.outcome == "deny"                         -> BoolType(False)
+  cel-expr   assess.outcome == "deny"                         -> False
+  structured assess.outcome = "deny"                          -> False
+
+rule documents_arrived: if
+  jsonata    event.count > 0                                  -> True
+  celpy      event.count > 0                                  -> BoolType(True)
+  cel-expr   event.count > 0                                  -> True
+  structured event.count > 0                                  -> True
+
+pay: input amount
+  jsonata    payout                                           -> 1500.0
+  celpy      payout                                           -> DoubleType(1500.0)
+  cel-expr   payout                                           -> 1500.0
+  structured payout                                           -> 1500.0
+
+deny: input subject
+  jsonata    "Claim " & claim_id & ": decision"               -> 'Claim CLM-7: decision'
+  celpy      "Claim " + claim_id + ": decision"               -> 'Claim CLM-7: decision'
+  cel-expr   "Claim " + claim_id + ": decision"               -> 'Claim CLM-7: decision'
+  structured "Claim " & claim_id & ": decision"               -> 'Claim CLM-7: decision'
+
+intake: update estimated_damage
+  jsonata    result.facts.estimated_damage                    -> 2000.0
+  celpy      result.facts.estimated_damage                    -> DoubleType(2000.0)
+  cel-expr   result.facts.estimated_damage                    -> 2000.0
+  structured result.facts.estimated_damage                    -> 2000.0
+
+rule customer_wrote: update
+  jsonata    event.text                                       -> 'Here are the photos'
+  celpy      event.text                                       -> StringType('Here are the photos')
+  cel-expr   event.text                                       -> 'Here are the photos'
+  structured event.text                                       -> 'Here are the photos'
+
+learning question 7 (not in the case)
+  jsonata    $sum(items[risk = "high"].amount) > 10000        -> True
+  celpy      (no standard CEL form)
+  cel-expr   (no standard CEL form)
+  structured sum(items[risk = "high"].amount) > 10000         -> True
+
+# 2. `payout` has no value yet (fail closed?)
+
+pay: approval when
+  jsonata    payout > 1000                                    -> undefined (None)
+  celpy      payout > 1000.0                                  -> ERROR CELEvalError: ("undeclared reference to 'payout' (in activation 'Activation(annotations=None, package=No
+  cel-expr   payout > 1000.0                                  -> ERROR RuntimeError: error value returned (truthy if read with .value()): UNKNOWN: No value with name "payout" 
+  structured payout > 1000                                    -> ERROR EvalError: `payout` has no value
+
+approval when, as a conditional
+  jsonata    payout > 1000 ? "approval needed" : "no approval" -> 'no approval'
+  celpy      payout > 1000.0 ? "approval needed" : "no approval" -> ERROR CELEvalError: ("found no matching overload for _?_:_ applied to '(<class 'celpy.evaluation.CELEvalError'
+  cel-expr   payout > 1000.0 ? "approval needed" : "no approval" -> ERROR RuntimeError: error value returned (truthy if read with .value()): UNKNOWN: No value with name "payout" 
+  structured payout > 1000 ? "approval needed" : "no approval" -> ERROR EvalError: `payout` has no value
+
+approval when, with an `or`
+  jsonata    payout > 1000 or estimated_damage > 5000         -> False
+  celpy      payout > 1000.0 || estimated_damage > 5000.0     -> ERROR CELEvalError: ("undeclared reference to 'payout' (in activation 'Activation(annotations=None, package=No
+  cel-expr   payout > 1000.0 || estimated_damage > 5000.0     -> ERROR RuntimeError: error value returned (truthy if read with .value()): UNKNOWN: No value with name "payout" 
+  structured payout > 1000 or estimated_damage > 5000         -> ERROR EvalError: `payout` has no value
+
+an input built from the missing value
+  jsonata    "Pay " & $string(payout) & " on " & claim_id     -> 'Pay  on CLM-7'
+  celpy      "Pay " + string(payout) + " on " + claim_id      -> ERROR CELEvalError: ("undeclared reference to 'payout' (in activation 'Activation(annotations=None, package=No
+  cel-expr   "Pay " + string(payout) + " on " + claim_id      -> ERROR RuntimeError: error value returned (truthy if read with .value()): UNKNOWN: No value with name "payout" 
+  structured "Pay " & string(payout) & " on " & claim_id      -> ERROR EvalError: `payout` has no value
+
+# 3. Rejected before anything runs?
+
+non-deterministic
+  jsonata (our AST walk)    $now()                                     -> REJECTED: function `$now` is not allowed
+  celpy (parse only)        now()                                      -> accepted
+  cel-expr (type checker)   now()                                      -> ERROR RuntimeError: INVALID_ARGUMENT: ERROR: <input>:1:4: undeclared reference to 'now' (in container '')
+  structured (Pydantic+type){"now": []}                                -> REJECTED: 38 union errors
+
+higher-order
+  jsonata (our AST walk)    $map(items, function($i) { $i.amount })    -> REJECTED: function `$map` is not allowed
+  celpy (parse only)        items.map(i, i.amount)                     -> accepted
+  cel-expr (type checker)   items.map(i, i.amount)                     -> 'accepted'
+  cel-expr, macros excluded items.map(i, i.amount)                     -> ERROR RuntimeError: INVALID_ARGUMENT: ERROR: <input>:1:11: undeclared reference to 'i' (in container '')
+  structured (Pydantic+type){"map": [{"field": "items"}, {"item": "amo -> REJECTED: 38 union errors
+
+variable binding
+  jsonata (our AST walk)    ($limit := 1000; payout > $limit)          -> REJECTED: `block` is outside the subset
+  celpy (parse only)        cel.bind(limit, 1000.0, payout > limit)    -> accepted
+  cel-expr (type checker)   cel.bind(limit, 1000.0, payout > limit)    -> ERROR RuntimeError: INVALID_ARGUMENT: ERROR: <input>:1:10: undeclared reference to 'limit' (in container '')
+  structured (Pydantic+type){"let": ["limit", 1000]}                   -> REJECTED: 38 union errors
+
+misspelled outcome
+  jsonata (our AST walk)    assess.outcome = "aprove"                  -> accepted
+  celpy (parse only)        assess.outcome == "aprove"                 -> accepted
+  cel-expr (type checker)   assess.outcome == "aprove"                 -> 'accepted'
+  structured (Pydantic+type){"=": [{"field": "assess.outcome"}, "aprov -> REJECTED: 'aprove' is not one of the outcomes ['approve', 'deny']
+
+text compared with a number
+  jsonata (our AST walk)    payout > "1000"                            -> accepted
+  celpy (parse only)        payout > "1000"                            -> accepted
+  cel-expr (type checker)   payout > "1000"                            -> ERROR RuntimeError: INVALID_ARGUMENT: ERROR: <input>:1:8: found no matching overload for '_>_' applied to '(do
+  structured (Pydantic+type){">": [{"field": "payout"}, "1000"]}       -> REJECTED: comparisons need two numbers
+
+misspelled field
+  jsonata (our AST walk)    payot > 1000                               -> REJECTED: `payot` is not a declared field
+  celpy (parse only)        payot > 1000.0                             -> accepted
+  cel-expr (type checker)   payot > 1000.0                             -> ERROR RuntimeError: INVALID_ARGUMENT: ERROR: <input>:1:1: undeclared reference to 'payot' (in container '')
+  structured (Pydantic+type){">": [{"field": "payot"}, 1000]}          -> REJECTED: `payot` is not a declared field
+
+int literal on a number field
+  jsonata (our AST walk)    payout > 1000                              -> accepted
+  celpy (parse only)        payout > 1000                              -> accepted
+  cel-expr (type checker)   payout > 1000                              -> ERROR RuntimeError: INVALID_ARGUMENT: ERROR: <input>:1:8: found no matching overload for '_>_' applied to '(do
+  structured (Pydantic+type){">": [{"field": "payout"}, 1000]}         -> accepted
+
+# 4. Which fields does it read? (provenance analysis, layer 4)
+  pay: when                              jsonata ['assess.outcome', 'payout']  celpy ['assess.outcome', 'payout']  structured ['assess.outcome', 'payout']
+  pay: approval when                     jsonata ['payout']  celpy ['payout']  structured ['payout']
+  deny: when                             jsonata ['assess.outcome']  celpy ['assess.outcome']  structured ['assess.outcome']
+  rule documents_arrived: if             jsonata ['event.count']  celpy ['event.count']  structured ['event.count']
+  pay: input amount                      jsonata ['payout']  celpy ['payout']  structured ['payout']
+  deny: input subject                    jsonata ['claim_id']  celpy ['claim_id']  structured ['claim_id']
+  intake: update estimated_damage        jsonata ['result.facts.estimated_damage']  celpy ['result.facts.estimated_damage']  structured ['result.facts.estimated_damage']
+  rule customer_wrote: update            jsonata ['event.text']  celpy ['event.text']  structured ['event.text']
+  learning question 7 (not in the case)  jsonata ['items']  celpy -  structured ['items']
+  cel-expr-python: no public API for the syntax tree or the references it resolved
+
+# 5. Exact diffs and the release digest (D5): the same condition, written three ways
+  string 'payout > 1000'      digest 05b5375de5f1
+  string 'payout>1000'        digest 0fd510b360e9
+  string '(payout > 1000)'    digest 295d5ccc58ba
+  structured {">":[{"field":"payout"},1000]} digest d4b65e4b5c99
+  structured {">":[{"field":"payout"},1000]} digest d4b65e4b5c99
+
+# 6. A JSON Schema for model output (layer 15)
+  jsonata / cel: the schema can only say {'type': 'string'}
+  structured: 18 definitions, 17078 bytes, recursive via $ref
+  {">": [{"field": "payout"}, 1000]}                         -> valid
+  {"now": []}                                                -> invalid
+  {">": [{"field": "payout"}, 1000], "or": [1, 2]}           -> invalid
