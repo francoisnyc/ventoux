@@ -1,7 +1,8 @@
 # Spike: existing standards for plans and expressions
 
-Status: draft for review, 2026-10-04. Research, not product code: nothing in `src/` changes, and the
-brief is not edited until the recommendations are agreed.
+Status: agreed, 2026-10-04 (tutor review on PR #4: both recommendations accepted, with the
+JsonLogic comparison and the operator-list rule added). Research, not product code: nothing in
+`src/` changes, and the brief changes in the PR that follows, not this one.
 
 ## The questions
 
@@ -37,6 +38,8 @@ is committed next to it (`*.out.txt`).
 | [CEL language definition](https://github.com/google/cel-spec/blob/40a3c90/doc/langdef.md) | `master` at 40a3c90 (2026-09-16) |
 | [cel-python](https://github.com/cloud-custodian/cel-python) (`celpy`, pure Python) | 0.5.0 (2026-01-31) |
 | [cel-expr-python](https://github.com/cel-expr/cel-python) (Google's wrapper of the C++ implementation) | 0.1.3 (2026-06-25); first release 2026-02-13 |
+| [JsonLogic](https://jsonlogic.com/operations.html) docs (operations, truthiness) and the reference [json-logic-js](https://github.com/jwadhams/json-logic-js) | json-logic-js 2.0.5 (2024-07-09) |
+| Python JsonLogic: [json-logic](https://github.com/nadirizr/json-logic-py), [panzi-json-logic](https://github.com/panzi/panzi-json-logic), [python-jsonlogic](https://pypi.org/project/python-jsonlogic/) | 0.6.3 (2017), 1.0.1 (2021), 0.2.0 (2026-08-30) |
 | Prototype: `chartering/src/core/expr.ts` | 197d519 |
 
 Experiments ran on Python 3.12 with pydantic 2.13.5, jsonschema 4.26.0 and pyyaml 6.0.3, in a
@@ -247,6 +250,25 @@ library: the sketch's parser is Pydantic, its evaluator about 100 lines (`struct
 other side of that: we own the language, so we must keep it small, and the inbox (TypeScript, D4)
 needs a port of the evaluator, checked by the conformance suite.
 
+### Prior art: JsonLogic
+
+The structured form, like the tracer's, is close to [JsonLogic](https://jsonlogic.com/):
+`{">": [{"var": "payout"}, 1000]}`. We don't adopt it, for the same gate that ruled out JSONata.
+In the reference implementation a missing `var` is `null` and `null > 1000` is `false`, so the
+approval condition answers "no approval" when the payout is unknown; `"1500" > 1000` is `true`;
+`==` is "equality, with type coercion" (`1 == "1"` is `true`); and `var` takes a default "for
+values that might be missing", which makes failing open a feature (`jsonlogic_check.out.txt`).
+Its truthiness is its own (`[]` is false, `"0"` true; [truthy.html](https://jsonlogic.com/truthy.html)),
+and there are no static types or closed lists of outcomes in the format. Implementations differ,
+which the documentation's lack of a formal specification allows: panzi-json-logic follows the
+JavaScript reference case for case, and says other Python ports "don't emulate all the
+JavaScript operator behaviors quite right"; json-logic 0.6.3, the oldest port, doesn't run on
+Python 3 at all (`tests.keys()[0]`); python-jsonlogic 0.2.0 fails closed and type-checks against
+a JSON Schema, but does so by changing the language (a `var` is a JSON Pointer, `1 == "1"` is
+`false`), and its checker still accepts the misspelled outcome. Adopting JsonLogic would mean
+choosing one dialect and documenting how it differs from the others, which is owning a language
+again, with readers expecting another's behaviour.
+
 ### Recommendation B: store expressions as structured JSON
 
 Switch D3's stored form from JSONata strings to **structured JSON**, the middle path of design
@@ -256,13 +278,31 @@ question 11: people write readable code, the stored JSON is structured.
   parsed in v1.
 - **Read as** a one-line rendering in diffs and reviews, and plain language for analysts.
 - **The operators** are D3's list, kept short: field paths, literals, comparisons, `and`/`or`/`not`,
-  `+ - * /`, `if`, `concat` and `string`, `exists`, `count`, `sum` with a simple `where`. Anything
-  else is a compute activity (learning question 7).
+  `+ - * /`, `if`, membership, `concat` and `string`, `exists`, `count`, `sum` with a simple
+  `where`. Anything else is a compute activity (learning question 7).
+- **Names: JsonLogic's where we are only stricter.** An operator takes JsonLogic's name when,
+  whenever ours returns a value, JsonLogic returns the same one: ours may only refuse more (a
+  missing field, a wrong type), never answer differently. That gives `var`, `==`, `!=`, `>`,
+  `>=`, `<`, `<=`, `and`, `or`, `!`, `if`, `in`, `+`, `-`, `*`, `/` and `cat`, with JsonLogic's
+  looser forms refused: no default in `var`, no `var` of the whole data, no `if` chains, no
+  truthiness (conditions must be `true` or `false`), no coercion in `==` or `cat`. Where the shape
+  or meaning differs, the name is ours, so nobody assumes JsonLogic's behaviour: `sum`, `count`,
+  `exists` (JsonLogic's `missing` returns a list), `string`, and `item` inside `sum` (JsonLogic
+  rebinds `var`'s scope instead). The sketch in `structured.py` predates this rule and still says
+  `field`, `=` and `concat`.
 - **Checked** against the case's declared field types, outcomes as closed lists; evaluated by a
   small evaluator that treats a missing field, a wrong type or an unknown operator as an error,
   and evaluates every operand of `and`/`or`.
 - **Taken from CEL:** strict types checked before running, and errors instead of defaults. **Not
   taken:** its separate `int` and `double`, and error absorption by `&&` and `||`.
+
+**The operator list is fixed** (to carry into D3):
+- the list is written in D3, and adding an operator is a design decision recorded in the brief,
+  with its reason, not a code change;
+- logic that doesn't fit becomes a `compute` activity: real code, tested and reviewed
+  (learning question 7);
+- the TypeScript evaluator for the inbox passes the same conformance suite as the Python one
+  (D4), so the two can't drift.
 
 Why not keep JSONata: it fails open by design, has no types, includes non-deterministic functions,
 and the subset check depends on an undocumented AST. Why not CEL: the best fit on the gates, but
@@ -270,12 +310,13 @@ in Python its checker is young and exposes no tree (so provenance needs a second
 catch a misspelled outcome, its numeric types leak to authors, and a model's output is still a
 string to check after the fact.
 
-**If agreed, what changes** (in the PR that follows the review, not this one): D3 and design
-question 11 in the brief, the D4 stack (no `jsonata-python`), the expressions line of `CLAUDE.md`'s
+**What changes next** (agreed; in the PR that follows, not this one): D3 and design
+question 11 in the brief, naming the prototype's `holds()` failing open on a missing field as the
+reason, the D4 stack (no `jsonata-python`), the expressions line of `CLAUDE.md`'s
 non-negotiables, and layer 2 in the curriculum ("JSONata" becomes the structured form; the
 negative test `$now()` becomes "an unknown operator is rejected with a clear message"). The
 tracer's minimal form (`=`, `>`, `field`) is already structured, so layer 2 grows it rather than
-replacing it.
+replacing it, renaming `=` to `==` and `field` to `var` under the naming rule.
 
 ## Check yourself
 
