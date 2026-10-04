@@ -109,6 +109,16 @@ one exception, deliberately: it evaluates only the branch its condition chooses,
 checks both branches). A JSON `null` in the case file is no value, for `var` and `exists` alike. A
 condition returns `True`, returns `False`, or raises: there is no `holds`.
 
+**`count` and `sum`** (slice 7). The list field holds records (mappings); anything else is an
+error naming what it holds. Every element is looked at, with no early exit, and `where` must be a
+boolean for each. `sum`'s `value` is read only for the elements `where` chose, as `if` reads only
+its branch, and adds through the same decimal128 context as `+`. `item` reads the current element
+with the same checks as `var`, and an error names it: `item.risk has no value (element 2 of
+items)`. Where `item` may appear is checked once after parsing: the recursive `parse` accepts it
+anywhere, and `parse_expression` walks the tree and refuses an `item` outside `count` and `sum`.
+Threading an "inside" flag through every recursive call would have touched each line of the
+parser; the walk is six lines, and later checks (types, provenance) walk the same tree.
+
 **The renderer** (choice 9). One line, with parentheses only where precedence needs them:
 
 - precedence from loosest to tightest: `or`, `and`, `not`, comparisons and `in`, `+ -`, `* /`;
