@@ -157,6 +157,12 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   `or` evaluate every operand, so an error is never hidden. Why: JSONata, the earlier choice, reads
   a missing field as nothing, and the prototype's `holds()` turned that into `false`, so an approval
   condition on a missing amount meant "no approval needed".
+- **Numbers are exact decimals, never binary floats.** JSON numbers are read as decimals, and both
+  evaluators use exact decimal arithmetic, so `0.1 + 0.2 == 0.3` holds and money agrees with the
+  contracts (`payments.refund@1` takes a `Decimal`). A division that doesn't terminate (`1 / 3`)
+  keeps 34 significant digits, rounding half to even (IEEE 754 decimal128), set explicitly in both
+  evaluators, never taken from a global default. Division by zero is an error. Rounding is not an
+  operator: a `compute` activity does it, with an explicit scale and mode.
 - **Deterministic by construction.** No operator reads the clock, randomness or I/O, and there are
   no user-defined or higher-order functions, variable bindings or regular expressions. They can't be
   written, so there is nothing to refuse.

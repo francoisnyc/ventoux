@@ -214,7 +214,9 @@ imported.
 **1. Plans: one task as a state machine.** Each state either calls a *registered activity*,
 waits for a signal, or ends. Expressions are structured JSON with a short, fixed list of operators
 (`{">": [{"var": "amount"}, 1000]}`). None of them reads the clock or randomness, so a run replays
-exactly on Temporal, and a missing value is an error, never a quiet `false`.
+exactly on Temporal, and a missing value is an error, never a quiet `false`. The example below is
+still in the prototype's shape, with string paths (`"params.policyId"`); it will be rewritten in
+the structured form when plans are built (layer 2).
 
 ```json
 {

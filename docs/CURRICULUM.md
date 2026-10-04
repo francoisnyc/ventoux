@@ -118,7 +118,8 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 - **Negative test:** an unknown operator (`now`, `map`) is rejected with one clear message; a
   misspelled outcome and a text compared with a number are rejected; a malformed plan is rejected;
   evaluating with a missing field, or an operator the evaluator doesn't know, raises an error,
-  never returns false (fail closed).
+  never returns false (fail closed); `{"/": [x, 0]}` raises an error; and, as a positive check on
+  exact decimals, `{"==": [{"+": [0.1, 0.2]}, 0.3]}` is `true`.
 - **Reference:** `src/core/schema.ts`; `docs/design.md` §2; `docs/layers/spike-dsl.md` and its
   `structured.py` sketch. The prototype's `src/core/expr.ts` shows the JSONata version, and why it
   failed open.
