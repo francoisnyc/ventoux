@@ -176,6 +176,15 @@ message per problem and its path, dispatching on each state's key as the prototy
   `{"when": expression, "target": state}`. At runtime (layer 5) the first `when` that holds wins,
   and none holding is an error.
 
+What slice 10 settled. Names have one shape each, and a message showing it: a plan
+`refund-pay`, a state `await_approval`, an event `approve`, a duration `48h`, and an activity
+reference in the catalog's own pattern (`REFERENCE`), so a plan can only name what the catalog could
+register. A bare state name in `on` is shorthand for one transition with no condition, and is
+stored as that list. Expressions go through `parse_expression`, so a plan reports the same
+messages (`states.pay.inputs.amount: `now` is not an operator…`). Field types are told apart by
+their `type`. `PlanInvalid` lists every problem, one line each, with its path in the plan;
+Pydantic's own markers (the kind it picked, `[key]`) are left out of the path.
+
 An activity's events are `done` and the outcomes its contract declares. There is no `error`
 event, unlike the prototype: an undeclared failure after the retries needs a person (D17), and is
 never a transition the plan takes on its own.
