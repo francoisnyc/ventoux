@@ -1,6 +1,6 @@
 # Layer 2: plan schema and expressions
 
-Status: draft, 2026-10-04 (the ten design choices agreed in the session; this note awaits review).
+Status: built, 2026-10-04 (the ten design choices agreed in the session; slices 1–11 done); awaiting the tutor review on its pull request.
 
 ## What this layer is for
 
