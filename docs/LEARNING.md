@@ -30,7 +30,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 23 | D18: fresh facts | closed |
 | 24 | D17: failures | closed |
 | 25 | D19: identities | closed |
-| 26 | Layer 0: core inside a workflow | open |
+| 26 | Layer 0: core inside a workflow | closed |
 | 27 | Tracer: running the quickstart | closed |
 | 28 | Card: catalog, contract, binding | open |
 | 29 | Layer 1: why `@1` and not `@1.0` | closed |
@@ -508,7 +508,16 @@ and record the key points. A question is closed once you can explain the answer 
   answer? Answer: in an activity, and replay uses the recorded answer. Right: Temporal stores the
   activity's result in history and replay reads it instead of asking the model again. That answer
   is still `untrusted:llm`: it may only name a step, and the engine re-checks admission.
-- Status: open, kept in the warm-up rotation until the durability half comes without prompting.
+- Retrieval (layer 2 warm-up): "core must be inside a workflow for durability." Right, and the
+  durability half came first and without prompting this time, which is what kept the question
+  open. Unpacked: the decisions (which step next, is an approval needed, can the case close) span
+  days and wait on people; only workflow code waits durably, with each decision recorded in
+  history and timers and signals waking it up, so a crash or a deploy loses nothing. The other
+  half follows from it: Temporal resumes a workflow by replaying its code against that history,
+  so `core` must make the same decisions every time (no clock, randomness or I/O). Layer 2 is
+  where that rule first shapes a language: an expression that read the clock would decide
+  differently on replay.
+- Status: closed.
 
 ## 27. Tracer: running the quickstart
 
