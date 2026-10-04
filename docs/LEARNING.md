@@ -34,6 +34,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 27 | Tracer: running the quickstart | closed |
 | 28 | Card: catalog, contract, binding | open |
 | 29 | Layer 1: why `@1` and not `@1.0` | closed |
+| 30 | Spike: guarantees outside the standard | open |
 
 ---
 
@@ -569,3 +570,10 @@ and record the key points. A question is closed once you can explain the answer 
   rely on (rounding down becomes rounding to the nearest cent), the promise changed and a person
   decides it's `@2`. The hash tells you that something changed, never that a change is harmless.
 - Status: closed.
+
+## 30. Spike: guarantees outside the standard
+
+> Which of our guarantees could not be expressed as a restriction of the standard, and why?
+
+- Your answer:
+- Discussion:
