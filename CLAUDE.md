@@ -17,6 +17,10 @@ are building and why) and `docs/CURRICULUM.md` (the layers, in order) before doi
   reason → the least code that passes it → the next test. Never write all the tests up front, and
   never test internals. Build only what the layer's "Build" line needs; prefer fewer files and plain
   code over abstractions.
+- **Check the note's promises before opening the pull request.** End the design note with a
+  "Promises" table: each claim the note makes about behaviour (an error, a refusal, a bound, a
+  default), and the test that would fail if it weren't true. A promise with no test gets one, or
+  leaves the note. Twice the note promised what the code didn't do and every test still passed.
 - **Walk through after building.** Explain the code you wrote, file by file, and answer questions.
   End by asking the layer's "Check yourself" questions.
 - **Stop and wait** after each step above for the user to confirm. Don't chain steps silently.

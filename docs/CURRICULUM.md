@@ -25,8 +25,11 @@ files. Every layer should end up smaller and clearer than its prototype.
    all the tests up front: each test should respond to what the last one taught. Tidy up once the
    slice is green. Where the docs show an example, a test runs it, so the docs can't drift from the
    code.
-6. **Walk through:** the assistant walks you through the code; you ask questions until it's clear.
-7. **Check yourself:** answer the layer's questions below. If you can't, don't move on.
+6. **Check the promises:** the design note ends with a "Promises" table: each claim about behaviour
+   and the test that proves it. A claim without a test gets one, or leaves the note. The reviewer
+   checks the table against the code (twice a note promised what the code didn't do).
+7. **Walk through:** the assistant walks you through the code; you ask questions until it's clear.
+8. **Check yourself:** answer the layer's questions below. If you can't, don't move on.
 
 This loop is a small version of QRSPI (question, research, design, structure, plan, implement): the
 brief and this curriculum already answer the questions and the design, so each layer starts at the
