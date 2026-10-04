@@ -575,5 +575,24 @@ and record the key points. A question is closed once you can explain the answer 
 
 > Which of our guarantees could not be expressed as a restriction of the standard, and why?
 
-- Your answer:
-- Discussion:
+- Your answer: no eval?
+- Discussion: the opposite case, and a useful one: "no eval" is the guarantee you *can* get by
+  restriction. Forbid `run` (script, shell, container), `call` to URLs, custom functions,
+  catalogs, extensions and `loose` mode, and nothing from a definition is executed. Fragile
+  (every door must be found: a custom function is itself a task, an extension adds `before` and
+  `after` tasks), which is why question 6 prefers safe by construction, but possible. A
+  restriction can only *remove*. The guarantees it can't give are those that need something the
+  standard doesn't have:
+  - **provenance and input policies:** values carry no record of where they came from, so no
+    amount of forbidding adds one; it is new information (D12);
+  - **an approval on every path, by someone else:** there is no approval, role or answer, only
+    an event anyone may send, so "someone other than whoever set the amount" can't be said (D11);
+  - **references to contracts only:** a `call` name binds to nothing the standard can check;
+  - **case semantics:** no position, closing when nothing is left to do (D10): a flow can't be
+    restricted into a case;
+  - **fail closed:** jq reads a missing field as `null` and `null > 1000` as `false`. That is
+    the language's meaning, not a feature to forbid; changing it changes the semantics.
+  In one line: restriction removes capabilities; our guarantees mostly *add* information
+  (sources, who answered) or *change* meaning (errors instead of false).
+- Follow-up: why can't you make jq fail closed by forbidding parts of it?
+- Status: open.
