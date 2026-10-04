@@ -69,7 +69,6 @@ deliberately in Python, smaller and clearer.
 - Run the tests, the type checker and ruff before declaring a step done.
 - Write for a reader learning the system: short functions, names from the brief's glossary, a comment
   where a design rule is enforced.
-
 - Readable for a Python developer who doesn't know Pydantic or Temporal yet: one idea per file;
   a one-line comment on each field saying what it means; each rule reads like its line in the
   design note, its error message saying what is wrong, then what to do. Framework idioms stay as
