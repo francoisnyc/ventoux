@@ -92,6 +92,15 @@ exist at a given state of a plan or step of a case is not this layer's question:
 validator builds the mapping and collects issues as `(path, code, message)`. Layer 2 raises the
 first error.
 
+What the check decides (slice 8): an ordering and arithmetic need numbers; equality needs the same
+type on both sides, model equality doing the work (a reference only to the same system, an outcome
+only to the same list), except that a text literal compared with an outcome must be one of its
+names, in `==`, `!=` and `in` alike. `if` needs a boolean condition and two branches of one type,
+both checked though only one runs. `cat` takes texts, an outcome counting as one; `string` takes a
+number, a boolean or a reference; `in` never takes a reference. A list field appears only as
+`count`'s or `sum`'s `over`, and `item` reads that list's declared element fields: the check passes
+the list down as the evaluator passes the element.
+
 **The evaluator** (fail closed). `evaluate(expression, values)` takes a parsed expression and a
 mapping from field name to value. It raises `ExpressionError` when:
 

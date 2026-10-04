@@ -13,6 +13,7 @@ import pytest
 from ventoux.core.expressions import (
     Add,
     And,
+    BooleanType,
     Cat,
     Count,
     Div,
@@ -21,17 +22,24 @@ from ventoux.core.expressions import (
     Expression,
     ExpressionError,
     ExpressionInvalid,
+    FieldType,
     Gt,
     If,
     In,
     Item,
+    ListType,
     Mul,
     Not,
+    NumberType,
     Or,
+    OutcomeType,
+    ReferenceType,
     String,
+    StringType,
     Sub,
     Sum,
     Var,
+    check,
     evaluate,
     parse_expression,
 )
@@ -607,3 +615,200 @@ def test_a_list_is_not_an_expression() -> None:
     with pytest.raises(ExpressionInvalid) as refused:
         parse_expression(["approve", "escalate"])
     assert str(refused.value) == "not an expression: ['approve', 'escalate']"
+
+
+# The refund case's fields, as the type check sees them (slice 8).
+REFUND: dict[str, FieldType] = {
+    "amount": NumberType(),
+    "approved_amount": NumberType(),
+    "urgent": BooleanType(),
+    "note": StringType(),
+    "order_id": ReferenceType(system="orders"),
+    "review.outcome": OutcomeType(outcomes=("approve", "reject")),
+    "items": ListType(fields={"risk": StringType(), "amount": NumberType()}),
+}
+
+
+def test_a_misspelled_outcome_is_rejected_before_anything_runs() -> None:
+    misspelled = parse_expression({"==": [{"var": "review.outcome"}, "aprove"]})
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(misspelled, REFUND)
+    assert str(refused.value) == (
+        '==[1]: review.outcome has no outcome "aprove"; its outcomes are approve, reject'
+    )
+
+
+def test_an_undeclared_field_is_rejected() -> None:
+    misspelled = parse_expression({">": [{"var": "aproved_amount"}, 100]})
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(misspelled, REFUND)
+    assert str(refused.value) == ">[0]: aproved_amount is not a declared field"
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (
+            {">": [{"var": "approved_amount"}, "100"]},
+            ">[1]: `>` compares numbers, and this is a string",
+        ),
+        (
+            {"==": [{"var": "approved_amount"}, "100"]},
+            "==[1]: `==` compares values of the same type, and this is a string, not a number",
+        ),
+        (
+            {"!=": [{"var": "urgent"}, {"var": "note"}]},
+            "!=[1]: `!=` compares values of the same type, and this is a string, not a boolean",
+        ),
+    ],
+)
+def test_a_text_compared_with_a_number_is_rejected(data: object, message: str) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(parse_expression(data), REFUND)
+    assert str(refused.value) == message
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (
+            {"if": [{"var": "urgent"}, {"var": "approved_amount"}, "none"]},
+            "if[2]: `if`'s branches give the same type, and this is a string, not a number",
+        ),
+        ({"if": [{"var": "amount"}, 1, 2]}, "if[0]: `if` takes a boolean, and this is a number"),
+    ],
+)
+def test_an_if_is_checked_on_both_branches(data: object, message: str) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(parse_expression(data), REFUND)
+    assert str(refused.value) == message
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (
+            {"and": [{"var": "amount"}, True]},
+            "and[0]: `and` combines booleans, and this is a number",
+        ),
+        ({"or": [True, {"var": "note"}]}, "or[1]: `or` combines booleans, and this is a string"),
+        ({"!": [{"var": "note"}]}, "![0]: `!` takes a boolean, and this is a string"),
+        (
+            {"+": [{"var": "amount"}, {"var": "note"}]},
+            "+[1]: `+` adds numbers, and this is a string",
+        ),
+        ({"/": [{"var": "urgent"}, 2]}, "/[0]: `/` divides numbers, and this is a boolean"),
+        (
+            {"cat": ["Refund of ", {"var": "amount"}]},
+            "cat[1]: `cat` joins texts, and this is a number; write string(…) to turn it into text",
+        ),
+        (
+            {"string": [{"var": "review.outcome"}]},
+            "string[0]: `string` takes a number, a boolean or a reference, and this is an outcome",
+        ),
+    ],
+)
+def test_logic_arithmetic_and_text_are_checked(data: object, message: str) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(parse_expression(data), REFUND)
+    assert str(refused.value) == message
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (
+            {"in": [{"var": "review.outcome"}, ["approve", "rejct"]]},
+            'in[1][1]: review.outcome has no outcome "rejct"; its outcomes are approve, reject',
+        ),
+        (
+            {"in": [{"var": "amount"}, ["a", "b"]]},
+            "in[1]: `in` looks for a number in a list of strings",
+        ),
+        (
+            {"in": [{"var": "order_id"}, ["ORD-7"]]},
+            (
+                "in[0]: `in` looks for a number, a string, a boolean or an outcome, "
+                "and this is a reference to orders"
+            ),
+        ),
+        ({"exists": "aproved_amount"}, "aproved_amount is not a declared field"),
+        ({"==": [{"var": "items"}, 1]}, "==[0]: items is a list; read it with count or sum"),
+    ],
+)
+def test_in_exists_and_lists_are_checked(data: object, message: str) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(parse_expression(data), REFUND)
+    assert str(refused.value) == message
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (
+            {"count": {"over": {"var": "amount"}}},
+            "count.over: amount is a number, and count reads a list",
+        ),
+        ({"count": {"over": {"var": "itms"}}}, "count.over: itms is not a declared field"),
+        (
+            {"count": {"over": {"var": "items"}, "where": {"==": [{"item": "risks"}, "high"]}}},
+            "count.where.==[0]: item.risks is not a field of the elements of items",
+        ),
+        (
+            {"count": {"over": {"var": "items"}, "where": {"item": "risk"}}},
+            "count.where: `where` takes a boolean, and this is a string",
+        ),
+        (
+            {"sum": {"over": {"var": "items"}, "value": {"item": "risk"}}},
+            "sum.value: `sum` adds numbers, and this is a string",
+        ),
+    ],
+)
+def test_count_sum_and_item_are_checked(data: object, message: str) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(parse_expression(data), REFUND)
+    assert str(refused.value) == message
+
+
+HIGH_TOTAL = {"sum": {"over": {"var": "items"}, "where": HIGH, "value": {"item": "amount"}}}
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"==": [{"var": "review.outcome"}, "approve"]}, BooleanType()),
+        (
+            {
+                "and": [
+                    {"==": [{"var": "review.outcome"}, "approve"]},
+                    {">": [{"var": "approved_amount"}, 100]},
+                ]
+            },
+            BooleanType(),
+        ),
+        ({"in": [{"var": "review.outcome"}, ["approve", "reject"]]}, BooleanType()),
+        ({"if": [{"exists": "approved_amount"}, {"var": "approved_amount"}, 0]}, NumberType()),
+        ({"cat": ["Refund of ", {"string": [{"var": "approved_amount"}]}]}, StringType()),
+        ({"cat": ["Review: ", {"var": "review.outcome"}]}, StringType()),
+        ({"==": [{"var": "order_id"}, {"var": "order_id"}]}, BooleanType()),
+        (
+            {"if": [{"var": "urgent"}, {"var": "order_id"}, {"var": "order_id"}]},
+            ReferenceType(system="orders"),
+        ),
+        ({"count": {"over": {"var": "items"}, "where": HIGH}}, NumberType()),
+        ({">": [HIGH_TOTAL, 10000]}, BooleanType()),
+    ],
+)
+def test_check_gives_the_type(data: object, expected: FieldType) -> None:
+    assert check(parse_expression(data), REFUND) == expected
+
+
+def test_a_reference_compares_only_with_the_same_system() -> None:
+    fields: dict[str, FieldType] = {**REFUND, "policy_id": ReferenceType(system="policies")}
+    mixed = parse_expression({"==": [{"var": "order_id"}, {"var": "policy_id"}]})
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(mixed, fields)
+    assert str(refused.value) == (
+        "==[1]: `==` compares values of the same type, "
+        "and this is a reference to policies, not a reference to orders"
+    )

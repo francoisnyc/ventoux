@@ -48,7 +48,7 @@ change.
 | `-`, `/` | two numbers | number |
 | `if` | a boolean, then two values of the same type | that type |
 | `in` | a value, and a list of literal values of its type | boolean |
-| `cat` | one or more texts | text |
+| `cat` | one or more texts (an outcome counts as one) | text |
 | `string` | one number, boolean or reference | text |
 | `exists` | a declared field's name | boolean: whether it has a value |
 | `count` | `over` a list field, optional `where` | number |
@@ -73,8 +73,8 @@ those types before the definition is accepted:
 | `string` | `"Refund of "` | text |
 | `boolean` | `true` | |
 | outcome | `review.outcome` | a closed list of names (`approve`, `reject`) |
-| `reference` | `order_id` (system `orders`) | only `==`, `!=`, `in` and `string` |
-| list | `items` | its elements have declared fields, read with `item` |
+| `reference` | `order_id` (system `orders`) | only `==` and `!=` with a reference to the same system, and `string` |
+| list | `items` | read only by `count` and `sum`; its elements have declared fields, read with `item` |
 
 **Numbers are exact decimals.** `0.1 + 0.2 == 0.3` is `true`, so money adds up the way people
 expect. A division that doesn't come out exactly (`1 / 3`) keeps 34 significant digits, rounding
