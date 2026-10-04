@@ -1,6 +1,7 @@
 """Expressions: structured JSON with the operators of decision D3 (layer 2)."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow
 from typing import ClassVar
 
@@ -70,6 +71,9 @@ type Expression = (
     | Cat
     | String
     | Exists
+    | Item
+    | Count
+    | Sum
 )
 
 
@@ -220,6 +224,41 @@ class Exists(Node):
     exists: str
 
 
+class Item(Node):
+    """`{"item": "amount"}`: a field of the current element, inside `count` and `sum`."""
+
+    item: str
+
+
+class CountOver(Node):
+    """What `count` reads: a list field, and which of its elements to count."""
+
+    over: Var
+    where: Expression | None = None
+
+
+class SumOver(Node):
+    """What `sum` reads: a list field, which of its elements, and the number each one adds."""
+
+    over: Var
+    where: Expression | None = None
+    value: Expression
+
+
+class Count(Node):
+    """`{"count": {"over": list, "where": condition}}`: how many elements match."""
+
+    operator: ClassVar[str] = "count"
+    args: CountOver = Field(alias="count")
+
+
+class Sum(Node):
+    """`{"sum": {"over": list, "where": condition, "value": number}}`: their total."""
+
+    operator: ClassVar[str] = "sum"
+    args: SumOver = Field(alias="sum")
+
+
 COMPARISONS: dict[str, type[Eq] | type[Ne] | type[Gt] | type[Ge] | type[Lt] | type[Le]] = {
     kind.operator: kind for kind in (Eq, Ne, Gt, Ge, Lt, Le)
 }
@@ -235,6 +274,29 @@ class ExpressionError(Exception):
 
 def parse_expression(data: object) -> Expression:
     """The expression stored as `data`, or `ExpressionInvalid` saying what is wrong with it."""
+    expression = parse(data)
+    if item_outside(expression):
+        raise ExpressionInvalid(
+            "item reads a field of the current element, so it is only allowed inside count and sum"
+        )
+    return expression
+
+
+def item_outside(node: object) -> bool:
+    """Whether `node` reads `item` anywhere but inside a `count` or `sum`."""
+    if isinstance(node, Item):
+        return True
+    if isinstance(node, Count | Sum):
+        return False  # `over` is a field; `where` and `value` may read the current element
+    if isinstance(node, BaseModel):
+        return any(item_outside(child) for child in node.__dict__.values())
+    if isinstance(node, tuple):
+        return any(item_outside(child) for child in node)
+    return False
+
+
+def parse(data: object) -> Expression:
+    """`data` parsed recursively; `parse_expression` then checks where `item` is used."""
     # `bool` first: in Python `True` is also an `int`, and it must never become the number 1.
     if isinstance(data, bool | str):
         return data
@@ -272,6 +334,16 @@ def parse_expression(data: object) -> Expression:
                     "no default, and never the whole case file"
                 )
             return Var(var=arguments)
+        if operator == "count":
+            shape = aggregate_shape("count", arguments)
+            return Count.model_validate({"count": parsed_fields(shape)})
+        if operator == "sum":
+            shape = aggregate_shape("sum", arguments)
+            return Sum.model_validate({"sum": parsed_fields(shape)})
+        if operator == "item":
+            if not isinstance(arguments, str) or not arguments:
+                raise ExpressionInvalid('item takes the name of one field, like {"item": "amount"}')
+            return Item(item=arguments)
         if operator in COMPARISONS:
             parsed = parsed_arguments(operator, arguments, 2)
             return COMPARISONS[operator].model_validate({operator: parsed})
@@ -303,9 +375,6 @@ def parse_expression(data: object) -> Expression:
                     'exists takes the name of one field, like {"exists": "approved_amount"}'
                 )
             return Exists(exists=arguments)
-        if isinstance(arguments, list):
-            for argument in arguments:
-                parse_expression(argument)
     # Fail closed: whatever isn't recognised above is refused, never passed through.
     raise ExpressionInvalid(f"not an expression: {data!r}")
 
@@ -317,12 +386,35 @@ def parsed_arguments(
     if isinstance(arguments, list) and (
         len(arguments) == count or (or_more and len(arguments) > count)
     ):
-        return [parse_expression(argument) for argument in arguments]
+        return [parse(argument) for argument in arguments]
     plural = "argument" if count == 1 and not or_more else "arguments"
     more = " or more" if or_more else ""
     # `!` alone gets an example: JsonLogic also accepts `{"!": x}`, which we refuse (D3).
     example = ', like {"!": [x]}' if operator == "!" else ""
     raise ExpressionInvalid(f"`{operator}` takes a list of {count}{more} {plural}{example}")
+
+
+def aggregate_shape(operator: str, arguments: object) -> dict[str, object]:
+    """`count`'s or `sum`'s object, if its keys and its `over` are right, else `ExpressionInvalid`."""
+    needed = {"over", "value"} if operator == "sum" else {"over"}
+    allowed = needed | {"where"}
+    if (
+        isinstance(arguments, dict)
+        and needed <= arguments.keys() <= allowed
+        and isinstance(arguments["over"], dict)
+        and arguments["over"].keys() == {"var"}
+    ):
+        return arguments
+    value = ', "value": …' if operator == "sum" else ""
+    raise ExpressionInvalid(
+        f'`{operator}` takes {{"over": {{"var": "items"}}, "where": …{value}}}, '
+        'with "where" optional'
+    )
+
+
+def parsed_fields(shape: dict[str, object]) -> dict[str, Expression]:
+    """Each of `count`'s or `sum`'s fields (`over`, `where`, `value`) parsed."""
+    return {name: parse(field) for name, field in shape.items()}
 
 
 IN_LIST = '`in` takes a value and a list of values, like {"in": [x, ["approve", "escalate"]]}'
@@ -342,7 +434,7 @@ def in_list(arguments: object) -> tuple[Expression, tuple[Value, ...]]:
         raise ExpressionInvalid("`in` needs at least one value in its list")
     literals: list[Value] = []
     for option in options:
-        literal = parse_expression(option)
+        literal = parse(option)
         if not isinstance(literal, bool | str | Decimal):
             raise ExpressionInvalid(IN_LIST + "; the list holds literal values")
         literals.append(literal)
@@ -351,41 +443,51 @@ def in_list(arguments: object) -> tuple[Expression, tuple[Value, ...]]:
         raise ExpressionInvalid(
             f"`in`'s list holds values of one type, and this one mixes {' and '.join(kinds)}"
         )
-    return parse_expression(value), tuple(literals)
+    return parse(value), tuple(literals)
 
 
-def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
-    """The value of `expression` against the case file's `values`, or `ExpressionError`."""
+@dataclass(frozen=True)
+class Element:
+    """The record of a list field that `count` or `sum` is looking at, for `item` to read."""
+
+    fields: Mapping[str, object]
+    label: str  # "element 2 of items", for messages
+
+
+def evaluate(
+    expression: Expression, values: Mapping[str, object], element: Element | None = None
+) -> Value:
+    """The value of `expression` against the case file's `values`, or `ExpressionError`.
+
+    `element` is the record `count` or `sum` is looking at, for `item` to read; it is passed down
+    unchanged, and is `None` everywhere else.
+    """
     if isinstance(expression, bool | str | Decimal):
         return expression
     if isinstance(expression, Var):
-        if values.get(expression.var) is None:
-            # Fail closed: a missing value is an error that stops the step, never `false` (D3).
-            raise ExpressionError(f"{expression.var} has no value")
-        value = values[expression.var]
-        # The case file is data from outside: check what it holds, never assume it.
-        if not isinstance(value, bool | str | Decimal):
-            raise ExpressionError(
-                f"{expression.var} holds {value!r}, a {type(value).__name__}, and an expression "
-                "reads only decimals, texts and booleans"
-            )
-        if isinstance(value, Decimal) and not value.is_finite():
-            raise ExpressionError(
-                f"{expression.var} holds {value}, which is not a number an expression can use"
-            )
-        return value
+        return readable(expression.var, values.get(expression.var))
+    if isinstance(expression, Item):
+        if element is None:
+            # Fail closed, though `parse_expression` refuses `item` outside `count` and `sum`.
+            raise ExpressionError("item is only readable inside count and sum")
+        field = f"item.{expression.item}"
+        return readable(field, element.fields.get(expression.item), f" ({element.label})")
     if isinstance(expression, Comparison):
-        left, right = (evaluate(argument, values) for argument in expression.args)
+        left, right = (evaluate(argument, values, element) for argument in expression.args)
         return compare(expression.operator, left, right)
     if isinstance(expression, And | Or):
         # Every part is evaluated before combining, so an error is never hidden behind a part
         # that already decided the answer (D3). Python's `all` and `any` would stop early.
-        parts = [boolean(expression.operator, evaluate(a, values)) for a in expression.args]
+        parts = [
+            boolean(expression.operator, evaluate(a, values, element)) for a in expression.args
+        ]
         return all(parts) if isinstance(expression, And) else any(parts)
     if isinstance(expression, Not):
-        return not boolean("!", evaluate(expression.args[0], values))
+        return not boolean("!", evaluate(expression.args[0], values, element))
     if isinstance(expression, Add | Sub | Mul | Div):
-        numbers = [number(expression.operator, evaluate(a, values)) for a in expression.args]
+        numbers = [
+            number(expression.operator, evaluate(a, values, element)) for a in expression.args
+        ]
         result = numbers[0]
         for n in numbers[1:]:
             result = calculate(expression.operator, result, n)
@@ -394,7 +496,7 @@ def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
         # The one way to ask about a missing value, said out loud in the definition.
         return values.get(expression.exists) is not None
     if isinstance(expression, In):
-        found, options = evaluate(expression.args[0], values), expression.args[1]
+        found, options = evaluate(expression.args[0], values, element), expression.args[1]
         # Same rule as `==`: no coercion, and in Python `True in [1]` would be true.
         if kind(found) != kind(options[0]):
             raise ExpressionError(
@@ -402,18 +504,73 @@ def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
             )
         return found in options
     if isinstance(expression, Cat):
-        return "".join(text(evaluate(argument, values)) for argument in expression.args)
+        return "".join(text(evaluate(argument, values, element)) for argument in expression.args)
     if isinstance(expression, String):
-        value = evaluate(expression.args[0], values)
+        value = evaluate(expression.args[0], values, element)
         if isinstance(value, bool):
             return "true" if value else "false"
         # A number keeps its own digits: `250.00` stays `250.00`. Formatting is a compute activity.
         return str(value)
     if isinstance(expression, If):
         condition, then, otherwise = expression.args
-        return evaluate(then if boolean("if", evaluate(condition, values)) else otherwise, values)
+        return evaluate(
+            then if boolean("if", evaluate(condition, values, element)) else otherwise,
+            values,
+            element,
+        )
+    if isinstance(expression, Count):
+        return Decimal(len(matching(expression.operator, expression.args, values)))
+    if isinstance(expression, Sum):
+        total = Decimal(0)
+        # `value` is read only for the elements `where` chose, as `if` reads only its branch.
+        for here in matching(expression.operator, expression.args, values):
+            amount = number("sum", evaluate(expression.args.value, values, here))
+            total = calculate("+", total, amount)
+        return total
     # Fail closed: anything the evaluator has no case for is an error, never a default.
     raise ExpressionError(f"can't evaluate {expression!r}: it isn't a parsed expression")
+
+
+def matching(
+    operator: str, args: CountOver | SumOver, values: Mapping[str, object]
+) -> list[Element]:
+    """The elements of `args.over` that `args.where` chooses (all of them, with no `where`)."""
+    over, where = args.over.var, args.where
+    chosen = []
+    # Every element is looked at: no early exit, so an error in any of them stops the step.
+    for position, fields in enumerate(records(operator, over, values), start=1):
+        here = Element(fields, f"element {position} of {over}")
+        if where is None or boolean("where", evaluate(where, values, here)):
+            chosen.append(here)
+    return chosen
+
+
+def readable(name: str, value: object, where: str = "") -> Value:
+    """`value` of the field `name`, if an expression can read it, else `ExpressionError`."""
+    if value is None:
+        # Fail closed: a missing value is an error that stops the step, never `false` (D3).
+        raise ExpressionError(f"{name} has no value{where}")
+    # The case file is data from outside: check what it holds, never assume it.
+    if not isinstance(value, bool | str | Decimal):
+        raise ExpressionError(
+            f"{name} holds {value!r}, a {type(value).__name__}, and an expression "
+            f"reads only decimals, texts and booleans{where}"
+        )
+    if isinstance(value, Decimal) and not value.is_finite():
+        raise ExpressionError(
+            f"{name} holds {value}, which is not a number an expression can use{where}"
+        )
+    return value
+
+
+def records(operator: str, name: str, values: Mapping[str, object]) -> list[Mapping[str, object]]:
+    """The list field `name` that `count` or `sum` reads: a list of records, each a mapping."""
+    held = values.get(name)
+    if held is None:
+        raise ExpressionError(f"{name} has no value")
+    if not isinstance(held, list) or not all(isinstance(element, Mapping) for element in held):
+        raise ExpressionError(f"{name} holds {held!r}, and {operator} reads a list of records")
+    return held
 
 
 def calculate(operator: str, a: Decimal, b: Decimal) -> Decimal:
@@ -464,7 +621,7 @@ def compare(operator: str, left: Value, right: Value) -> bool:
 def boolean(operator: str, value: Value) -> bool:
     """`value` as a boolean for `operator`; nothing is truthy (D3)."""
     if not isinstance(value, bool):
-        verb = "takes a boolean" if operator in ("!", "if") else "combines booleans"
+        verb = "takes a boolean" if operator in ("!", "if", "where") else "combines booleans"
         raise ExpressionError(
             f"`{operator}` {verb}, and it was given a {kind(value)}: {shown(value)}"
         )
@@ -484,9 +641,13 @@ def text(value: Value) -> str:
 def number(operator: str, value: Value) -> Decimal:
     """`value` as a number for `operator`; no coercion from a text or a boolean (D3)."""
     if not isinstance(value, Decimal):
-        verb = {"+": "adds", "-": "subtracts", "*": "multiplies", "/": "divides"}.get(
-            operator, "compares"
-        )
+        verb = {
+            "+": "adds",
+            "sum": "adds",
+            "-": "subtracts",
+            "*": "multiplies",
+            "/": "divides",
+        }.get(operator, "compares")
         raise ExpressionError(
             f"`{operator}` {verb} numbers, and it was given a {kind(value)}: {shown(value)}"
         )

@@ -14,7 +14,9 @@ from ventoux.core.expressions import (
     Add,
     And,
     Cat,
+    Count,
     Div,
+    Eq,
     Exists,
     Expression,
     ExpressionError,
@@ -22,11 +24,13 @@ from ventoux.core.expressions import (
     Gt,
     If,
     In,
+    Item,
     Mul,
     Not,
     Or,
     String,
     Sub,
+    Sum,
     Var,
     evaluate,
     parse_expression,
@@ -463,3 +467,143 @@ def test_string_writes_a_value_as_text() -> None:
     assert evaluate(letter, values) == "Refund of 250.00 for ORD-7"
     assert evaluate(parse_expression({"string": [{"var": "urgent"}]}), values) == "true"
     assert evaluate(parse_expression({"string": [{"var": "order_id"}]}), values) == "ORD-7"
+
+
+ITEM_OUTSIDE = (
+    "item reads a field of the current element, so it is only allowed inside count and sum"
+)
+
+
+@pytest.mark.parametrize("data", [{"item": "amount"}, {">": [{"item": "amount"}, 100]}])
+def test_item_is_refused_outside_count_and_sum(data: object) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression(data)
+    assert str(refused.value) == ITEM_OUTSIDE
+
+
+COUNT_SHAPE = '`count` takes {"over": {"var": "items"}, "where": …}, with "where" optional'
+SUM_SHAPE = '`sum` takes {"over": {"var": "items"}, "where": …, "value": …}, with "where" optional'
+HIGH = {"==": [{"item": "risk"}, "high"]}
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ({"count": [{"var": "items"}]}, COUNT_SHAPE),
+        ({"count": {"over": "items"}}, COUNT_SHAPE),
+        ({"count": {"over": {"var": "items"}, "value": {"item": "amount"}}}, COUNT_SHAPE),
+        ({"count": {"over": {"var": "items"}, "map": []}}, COUNT_SHAPE),
+        ({"sum": {"over": {"var": "items"}, "where": HIGH}}, SUM_SHAPE),
+        ({"sum": {"over": {"cat": ["a"]}, "value": {"item": "amount"}}}, SUM_SHAPE),
+    ],
+)
+def test_count_and_sum_take_their_shape(data: object, message: str) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression(data)
+    assert str(refused.value) == message
+
+
+def test_count_and_sum_parse_with_item_inside() -> None:
+    items = Var(var="items")
+    high = Eq.model_validate({"==": [Item(item="risk"), "high"]})
+    assert parse_expression({"count": {"over": {"var": "items"}, "where": HIGH}}) == (
+        Count.model_validate({"count": {"over": items, "where": high}})
+    )
+    assert parse_expression({"count": {"over": {"var": "items"}}}) == (
+        Count.model_validate({"count": {"over": items}})
+    )
+    total = {"sum": {"over": {"var": "items"}, "where": HIGH, "value": {"item": "amount"}}}
+    assert parse_expression(total) == Sum.model_validate(
+        {"sum": {"over": items, "where": high, "value": Item(item="amount")}}
+    )
+
+
+@pytest.mark.parametrize("name", ["", ["amount", 0]])
+def test_item_names_one_field(name: object) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression(
+            {"count": {"over": {"var": "items"}, "where": {"==": [{"item": name}, 1]}}}
+        )
+    assert str(refused.value) == 'item takes the name of one field, like {"item": "amount"}'
+
+
+@pytest.mark.parametrize(
+    ("held", "message"),
+    [
+        (None, "items has no value"),
+        (Decimal(3), "items holds Decimal('3'), and count reads a list of records"),
+        ("items", "items holds 'items', and count reads a list of records"),
+        ([Decimal(3)], "items holds [Decimal('3')], and count reads a list of records"),
+    ],
+)
+def test_count_reads_a_list_of_records(held: object, message: str) -> None:
+    high_risk = parse_expression({"count": {"over": {"var": "items"}, "where": HIGH}})
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(high_risk, {"items": held})
+    assert str(stopped.value) == message
+
+
+def test_an_element_missing_a_field_is_an_error() -> None:
+    items = [{"risk": "high", "amount": Decimal(10)}, {"amount": Decimal(20)}]
+    high_risk = parse_expression({"count": {"over": {"var": "items"}, "where": HIGH}})
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(high_risk, {"items": items})
+    assert str(stopped.value) == "item.risk has no value (element 2 of items)"
+
+
+def test_sum_adds_numbers_only() -> None:
+    items = [{"risk": "high", "amount": "10"}]
+    total = parse_expression({"sum": {"over": {"var": "items"}, "value": {"item": "amount"}}})
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(total, {"items": items})
+    assert str(stopped.value) == "`sum` adds numbers, and it was given a string: '10'"
+
+
+def test_where_is_a_condition() -> None:
+    items = [{"risk": "high", "amount": Decimal(10)}]
+    truthy = parse_expression({"count": {"over": {"var": "items"}, "where": {"item": "risk"}}})
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(truthy, {"items": items})
+    assert str(stopped.value) == "`where` takes a boolean, and it was given a string: 'high'"
+
+
+ITEMS = [
+    {"risk": "high", "amount": Decimal("6000.50")},
+    {"risk": "low", "amount": Decimal(900)},
+    {"risk": "high", "amount": Decimal("4000.25")},
+]
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"count": {"over": {"var": "items"}}}, Decimal(3)),
+        ({"count": {"over": {"var": "items"}, "where": HIGH}}, Decimal(2)),
+        ({"sum": {"over": {"var": "items"}, "value": {"item": "amount"}}}, Decimal("10900.75")),
+        (
+            {"sum": {"over": {"var": "items"}, "where": HIGH, "value": {"item": "amount"}}},
+            Decimal("10000.75"),
+        ),
+        # Learning question 7: are the high-risk items worth more than 10,000 in total?
+        (
+            {
+                ">": [
+                    {"sum": {"over": {"var": "items"}, "where": HIGH, "value": {"item": "amount"}}},
+                    10000,
+                ]
+            },
+            True,
+        ),
+        ({"count": {"over": {"var": "none"}}}, Decimal(0)),
+        ({"sum": {"over": {"var": "none"}, "value": {"item": "amount"}}}, Decimal(0)),
+    ],
+)
+def test_count_and_sum(data: object, expected: object) -> None:
+    assert evaluate(parse_expression(data), {"items": ITEMS, "none": []}) == expected
+
+
+def test_a_list_is_not_an_expression() -> None:
+    # A list literal is allowed only as `in`'s second argument.
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression(["approve", "escalate"])
+    assert str(refused.value) == "not an expression: ['approve', 'escalate']"
