@@ -131,6 +131,13 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 
 ## 3. Static validation
 
+- **First:** the readability refactor of layer 1's `core/catalog.py` (agreed in the tutor session):
+  split it into `contract.py` (a contract and what it refuses), `catalog.py` (lookup) and
+  `contract_hash.py` (the hash and the CI check); a one-line comment per field; a comment on each
+  Pydantic idiom the first time it appears; the reference check readable (commented or a small
+  function); every error message in the same shape (what's wrong, then what to do). No behaviour
+  change: all tests stay green, and one new test checks that every rule in the design note is
+  registered on the contract, so a rule can never silently stop running.
 - **Learn:** what can be proven by reading a definition: references exist, states are reachable,
   high-risk activities are behind an approval on every path.
 - **Build:** a validator returning structured issues (`path`, `code`, `message`).
