@@ -645,7 +645,10 @@ New questions found while building go here, numbered from 10.
     as "`retry.maximum_attempts`: 5 → 9" would teach the rule each time it fires. But
     `contracts.lock.json` stores only hashes. Options: store each contract's canonical promise in
     the lockfile (bigger, but pull requests show a readable diff), or leave it to the semantic diff
-    (layer 13). To decide by layer 12 (releases), which also reads the recorded contracts.
+    (layer 13). To decide by layer 12 (releases), which also reads the recorded contracts. Found in
+    the layer 1 review: changing *how* the hash is computed (sorting outcomes, a Pydantic upgrade
+    changing the generated JSON Schema) changes existing hashes with no change of promise, so the
+    hash method itself needs a version recorded with each hash.
 
 ## Prior art
 

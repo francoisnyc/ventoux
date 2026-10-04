@@ -540,4 +540,12 @@ and record the key points. A question is closed once you can explain the answer 
   breaking still matters, but only for how much work packages need to adopt `@2`.
 - Follow-up: the payments team fixes a rounding bug inside the refund adapter's code; the contract
   is unchanged. New version? New release? What tells the running cases?
+  Answer (tutor review): no new version, no release, just deploy the worker. Right on all three.
+  Nothing needs to tell the running cases: they only know `payments.refund@1`, and the next call
+  is picked up by whichever worker serves it (an attempt already running finishes on the old code;
+  a retry may land on the new). It's safe because Temporal never replays activities, only their
+  recorded results; changing *workflow* code is what needs worker versioning (D5). The judgment to
+  watch: "unchanged" must be true in meaning, not only in the hash. If the fix changes what callers
+  rely on (rounding down becomes rounding to the nearest cent), the promise changed and a person
+  decides it's `@2`. The hash tells you that something changed, never that a change is harmless.
 - Status: closed.
