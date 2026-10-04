@@ -110,8 +110,21 @@ and record the key points. A question is closed once you can explain the answer 
 > 10,000". Where does the logic for "total of high-risk items" live, and why is that better for the
 > reviewer than one long expression?
 
-- Your answer:
-- Discussion:
+- Your answer (spike warm-up): it goes in the contract?
+- Discussion: close, one level off. The contract is the *promise* (inputs: the line items; output:
+  `high_risk_total`; `effect: compute`; the output's provenance), but the *logic* lives in the
+  activity's code behind it: a registered activity with `effect: compute` (D3), ordinary Python or
+  Java, unit-tested and reviewed like any code. The case runs it as a step that writes
+  `high_risk_total` to the case file, and the approval reads one short condition,
+  `high_risk_total > 10000`. Better for the reviewer because: the condition says what it guards in
+  one line (and renders as one plain sentence); "what counts as high risk" is a business definition
+  with its own tests and its own owner, changed without touching every rule that uses it; the total
+  is a named fact with provenance and a time obtained, so the approval sheet can show it (D11, D18)
+  and an approval guards that value; and the expression language stays small enough to check,
+  which is the spike's whole question (design question 11).
+- Follow-up: `$sum(items[risk = 'high'].amount) > 10000` fits D3's subset (a simple filter and
+  `$sum`). When would you still move it into a compute activity?
+- Status: open.
 
 ## 8. Engine language
 
