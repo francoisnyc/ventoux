@@ -773,6 +773,12 @@ def evaluate(
         numbers = [
             number(expression.operator, evaluate(a, values, element)) for a in expression.args
         ]
+        if isinstance(expression, Div) and numbers[1] == 0:
+            # Both: the fields say where to look, the values what happened.
+            raise ExpressionError(
+                f"division by zero in {render(expression)} "
+                f"({shown(numbers[0])} / {shown(numbers[1])})"
+            )
         result = numbers[0]
         for n in numbers[1:]:
             result = calculate(expression.operator, result, n)

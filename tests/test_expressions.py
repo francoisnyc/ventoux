@@ -297,7 +297,8 @@ def test_division_by_zero_is_an_error() -> None:
     per_item = parse_expression({"/": [{"var": "amount"}, {"var": "items"}]})
     with pytest.raises(ExpressionError) as stopped:
         evaluate(per_item, {"amount": Decimal(250), "items": Decimal(0)})
-    assert str(stopped.value) == "division by zero: 250 / 0"
+    # The fields tell a developer where to look; the values tell an operator what happened.
+    assert str(stopped.value) == "division by zero in amount / items (250 / 0)"
 
 
 @pytest.mark.parametrize(

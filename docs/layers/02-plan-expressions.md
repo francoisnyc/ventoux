@@ -70,8 +70,9 @@ Arithmetic uses one module-level context, passed explicitly (`CONTEXT.add(a, b)`
 to even, exponents within ±6144, and overflow trapped and turned into an `ExpressionError` (found
 in slice 5: Python's default range returned `1E+12000`). A number must be finite, in a literal
 and in the case file: `Infinity > 100` is true, so an infinite amount would pass a threshold.
-Division by zero names the values (`division by zero: 250 / 0`), since naming the fields needs the
-renderer (slice 9). `string` of a number is the
+Division by zero names the fields and the values (`division by zero in amount / items (250 / 0)`):
+the fields tell a developer where to look, the values an operator what happened (decided after
+slice 9, once the renderer existed). `string` of a number is the
 `Decimal`'s own text (`250`, `250.00`, `0.3`); it is never reformatted.
 
 **Field types** (choice 3), the shape case and plan definitions already use:
