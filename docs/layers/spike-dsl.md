@@ -318,6 +318,25 @@ negative test `$now()` becomes "an unknown operator is rejected with a clear mes
 tracer's minimal form (`=`, `>`, `field`) is already structured, so layer 2 grows it rather than
 replacing it, renaming `=` to `==` and `field` to `var` under the naming rule.
 
+## Addendum (tutor session, 2026-10-04): FEEL and Python rule languages
+
+Not compared above, checked afterwards against the same gates.
+- **FEEL** (DMN; Camunda 8 through `feel-scala`): "FEEL doesn't define any error handling. Instead,
+  it follows one simple rule: if something goes wrong, return `null`", including a missing
+  variable and a comparison of different types
+  ([Camunda docs](https://docs.camunda.io/docs/components/modeler/feel/language-guide/feel-error-handling/));
+  an `if` whose condition is `null` takes the `else` branch, so it fails open like JSONata and jq.
+  It has `now()` and `today()`, and is a large language (loops, contexts, user-defined
+  functions). Its strength is readability for business readers, so D20 takes its *look* for the
+  one-line rendering, not its engine.
+- **In Python:** [pySFeel](https://pypi.org/project/pySFeel/) implements S-FEEL for pyDMNrules
+  ("not intended to be a syntactically perfect implementation"; numbers are floats);
+  [rule-engine](https://pypi.org/project/rule-engine/) is an optionally typed rule language whose
+  undefined symbols raise `SymbolResolutionError` (fails closed), but it is a text syntax to parse,
+  with regular expressions. Neither changes recommendation B: no text syntax is parsed in v1. If
+  analysts ever type expressions, a FEEL-like syntax compiled to D20's JSON would be the place to
+  start, and these are references for it.
+
 ## Check yourself
 
 > Which of our guarantees could not be expressed as a restriction of the standard, and why?

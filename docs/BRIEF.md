@@ -517,6 +517,11 @@ be erased on request), has size limits, and a second copy of business records go
   `effect: compute`: real code, tested and reviewed. The TypeScript evaluator (for the inbox) passes
   the same conformance suite as the Python one (D4), so the two can't drift.
 - Compared in the spike (`docs/layers/spike-dsl.md`) with the JSONata subset, CEL and JsonLogic.
+- *Added 2026-10-04 (tutor session):* the one-line rendering uses **FEEL-style** syntax, the
+  expression language of DMN and Camunda 8, because business readers and Camunda users know it:
+  `review.outcome = "approve" and approved_amount > 100`, with `=` and `!=`, `and`, `or`,
+  `not(...)`. Display only: the text is never parsed back, so none of FEEL's runtime behaviour
+  (a failure returns `null`, `now()`) comes with it.
 
 ### Simplifications adopted
 
