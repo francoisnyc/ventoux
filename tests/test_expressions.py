@@ -3,19 +3,25 @@
 See docs/layers/02-plan-expressions.md and docs/guides/expressions.md.
 """
 
+import decimal
+import json
 from decimal import Decimal
 from typing import cast
 
 import pytest
 
 from ventoux.core.expressions import (
+    Add,
     And,
+    Div,
     Expression,
     ExpressionError,
     ExpressionInvalid,
     Gt,
+    Mul,
     Not,
     Or,
+    Sub,
     Var,
     evaluate,
     parse_expression,
@@ -234,3 +240,100 @@ def test_nothing_is_truthy(data: object, message: str) -> None:
 )
 def test_and_or_not(data: object, expected: bool) -> None:
     assert evaluate(parse_expression(data), {"review.outcome": "approve"}) is expected
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ({"+": [1]}, "`+` takes a list of 2 or more arguments"),
+        ({"*": 2}, "`*` takes a list of 2 or more arguments"),
+        ({"-": [5]}, "`-` takes a list of 2 arguments"),
+        ({"/": [1, 2, 3]}, "`/` takes a list of 2 arguments"),
+    ],
+)
+def test_arithmetic_takes_its_number_of_arguments(data: object, message: str) -> None:
+    # JsonLogic reads `{"-": [5]}` as -5; ours refuses it (D3: only stricter). Write 0 - 5.
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression(data)
+    assert str(refused.value) == message
+
+
+def test_arithmetic_parses_with_its_arguments_parsed() -> None:
+    amount = Var(var="amount")
+    assert parse_expression({"+": [{"var": "amount"}, 1, 2]}) == Add.model_validate(
+        {"+": [amount, Decimal(1), Decimal(2)]}
+    )
+    assert parse_expression({"-": [{"var": "amount"}, 1]}) == Sub.model_validate(
+        {"-": [amount, Decimal(1)]}
+    )
+    assert parse_expression({"*": [{"var": "amount"}, 2]}) == Mul.model_validate(
+        {"*": [amount, Decimal(2)]}
+    )
+    assert parse_expression({"/": [{"var": "amount"}, 2]}) == Div.model_validate(
+        {"/": [amount, Decimal(2)]}
+    )
+
+
+def test_division_by_zero_is_an_error() -> None:
+    per_item = parse_expression({"/": [{"var": "amount"}, {"var": "items"}]})
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(per_item, {"amount": Decimal(250), "items": Decimal(0)})
+    assert str(stopped.value) == "division by zero: 250 / 0"
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ({"+": [1, "2"]}, "`+` adds numbers, and it was given a string: '2'"),
+        ({"-": [True, 1]}, "`-` subtracts numbers, and it was given a boolean: true"),
+        ({"*": [2, "3"]}, "`*` multiplies numbers, and it was given a string: '3'"),
+        ({"/": ["6", 2]}, "`/` divides numbers, and it was given a string: '6'"),
+    ],
+)
+def test_arithmetic_never_coerces(data: object, message: str) -> None:
+    # JsonLogic reads `{"+": [1, "2"]}` as 3; ours refuses a text (D3).
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(parse_expression(data), {})
+    assert str(stopped.value) == message
+
+
+def test_numbers_are_exact_decimals() -> None:
+    # As a definition is read: JSON numbers become decimals, never binary floats.
+    data = json.loads('{"==": [{"+": [0.1, 0.2]}, 0.3]}', parse_float=Decimal)
+    assert evaluate(parse_expression(data), {}) is True
+
+
+def test_a_division_keeps_34_significant_digits_whatever_the_global_context() -> None:
+    third = parse_expression({"/": [1, 3]})
+    expected = Decimal("0." + "3" * 34)
+    assert evaluate(third, {}) == expected
+    # The process-wide context is someone else's setting; it never decides a result (D3).
+    with decimal.localcontext(prec=5, rounding=decimal.ROUND_DOWN):
+        assert evaluate(third, {}) == expected
+
+
+def test_arithmetic_rounds_half_to_even() -> None:
+    # 35 significant digits ending in 5: decimal128 keeps 34, rounding to the even neighbour.
+    ends_in_5 = Decimal("1" + "0" * 33 + "5")
+    assert evaluate(parse_expression({"+": [ends_in_5, 0]}), {}) == Decimal("1" + "0" * 34)
+    ends_in_15 = Decimal("1" + "0" * 32 + "15")
+    assert evaluate(parse_expression({"+": [ends_in_15, 0]}), {}) == Decimal("1" + "0" * 32 + "20")
+
+
+@pytest.mark.parametrize("special", [Decimal("Infinity"), Decimal("-Infinity"), Decimal("NaN")])
+def test_a_number_is_finite(special: Decimal) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression(special)
+    assert str(refused.value) == f"{special} is not a number an expression can use"
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(Var(var="amount"), {"amount": special})
+    assert (
+        str(stopped.value) == f"amount holds {special}, which is not a number an expression can use"
+    )
+
+
+def test_a_result_too_large_for_decimal128_is_an_error() -> None:
+    huge = parse_expression({"*": [Decimal("1E+6000"), Decimal("1E+6000")]})
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(huge, {})
+    assert str(stopped.value) == "`*` gives a number too large for an expression (decimal128)"

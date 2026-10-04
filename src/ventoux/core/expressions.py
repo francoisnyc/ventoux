@@ -1,7 +1,7 @@
 """Expressions: structured JSON with the operators of decision D3 (layer 2)."""
 
 from collections.abc import Mapping
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow
 from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -33,10 +33,39 @@ OPERATORS = (
     "item",
 )
 
+# Arithmetic as IEEE 754 decimal128 (D3): 34 significant digits, rounding half to even, exponents
+# within ±6144, and an error rather than a special value when something goes wrong. Passed to every
+# operation explicitly, so the process-wide `decimal.getcontext()` never decides a result.
+CONTEXT = Context(
+    prec=34,
+    rounding=ROUND_HALF_EVEN,
+    Emax=6144,
+    Emin=-6143,
+    traps=[InvalidOperation, DivisionByZero, Overflow],
+)
+
 # What an expression gives, and what it is: a literal, a field, or one operator with its arguments.
 # Recursive, so the models below can hold expressions; a `type` alias is resolved when first used.
 type Value = Decimal | str | bool
-type Expression = Decimal | str | bool | Var | Eq | Ne | Gt | Ge | Lt | Le | And | Or | Not
+type Expression = (
+    Decimal
+    | str
+    | bool
+    | Var
+    | Eq
+    | Ne
+    | Gt
+    | Ge
+    | Lt
+    | Le
+    | And
+    | Or
+    | Not
+    | Add
+    | Sub
+    | Mul
+    | Div
+)
 
 
 class Node(BaseModel):
@@ -124,6 +153,34 @@ class Not(Node):
     args: tuple[Expression] = Field(alias="!")
 
 
+class Add(Node):
+    """`{"+": [a, b, …]}`: the sum of the arguments."""
+
+    operator: ClassVar[str] = "+"
+    args: tuple[Expression, ...] = Field(alias="+", min_length=2)
+
+
+class Sub(Node):
+    """`{"-": [a, b]}`: a minus b."""
+
+    operator: ClassVar[str] = "-"
+    args: tuple[Expression, Expression] = Field(alias="-")
+
+
+class Mul(Node):
+    """`{"*": [a, b, …]}`: the product of the arguments."""
+
+    operator: ClassVar[str] = "*"
+    args: tuple[Expression, ...] = Field(alias="*", min_length=2)
+
+
+class Div(Node):
+    """`{"/": [a, b]}`: a divided by b."""
+
+    operator: ClassVar[str] = "/"
+    args: tuple[Expression, Expression] = Field(alias="/")
+
+
 COMPARISONS: dict[str, type[Eq] | type[Ne] | type[Gt] | type[Ge] | type[Lt] | type[Le]] = {
     kind.operator: kind for kind in (Eq, Ne, Gt, Ge, Lt, Le)
 }
@@ -143,6 +200,9 @@ def parse_expression(data: object) -> Expression:
     if isinstance(data, bool | str):
         return data
     if isinstance(data, int | Decimal):
+        # Fail closed: `Infinity > 100` is true, so an infinite amount would pass any threshold.
+        if not Decimal(data).is_finite():
+            raise ExpressionInvalid(f"{data} is not a number an expression can use")
         return Decimal(data)
     if isinstance(data, float):
         # Refused, not converted: the reader already turned 0.1 into a binary approximation (D3).
@@ -182,6 +242,14 @@ def parse_expression(data: object) -> Expression:
             return Or.model_validate({"or": parsed_arguments("or", arguments, 2, or_more=True)})
         if operator == "!":
             return Not.model_validate({"!": parsed_arguments("!", arguments, 1)})
+        if operator == "+":
+            return Add.model_validate({"+": parsed_arguments("+", arguments, 2, or_more=True)})
+        if operator == "-":
+            return Sub.model_validate({"-": parsed_arguments("-", arguments, 2)})
+        if operator == "*":
+            return Mul.model_validate({"*": parsed_arguments("*", arguments, 2, or_more=True)})
+        if operator == "/":
+            return Div.model_validate({"/": parsed_arguments("/", arguments, 2)})
         if isinstance(arguments, list):
             for argument in arguments:
                 parse_expression(argument)
@@ -219,6 +287,10 @@ def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
                 f"{expression.var} holds {value!r}, a {type(value).__name__}, and an expression "
                 "reads only decimals, texts and booleans"
             )
+        if isinstance(value, Decimal) and not value.is_finite():
+            raise ExpressionError(
+                f"{expression.var} holds {value}, which is not a number an expression can use"
+            )
         return value
     if isinstance(expression, Comparison):
         left, right = (evaluate(argument, values) for argument in expression.args)
@@ -230,8 +302,35 @@ def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
         return all(parts) if isinstance(expression, And) else any(parts)
     if isinstance(expression, Not):
         return not boolean("!", evaluate(expression.args[0], values))
+    if isinstance(expression, Add | Sub | Mul | Div):
+        numbers = [number(expression.operator, evaluate(a, values)) for a in expression.args]
+        result = numbers[0]
+        for n in numbers[1:]:
+            result = calculate(expression.operator, result, n)
+        return result
     # Fail closed: anything the evaluator has no case for is an error, never a default.
     raise ExpressionError(f"can't evaluate {expression!r}: it isn't a parsed expression")
+
+
+def calculate(operator: str, a: Decimal, b: Decimal) -> Decimal:
+    """`a` and `b` combined by one of the four arithmetic operators, in decimal128."""
+    if operator == "/" and b == 0:
+        raise ExpressionError(f"division by zero: {shown(a)} / {shown(b)}")
+    try:
+        if operator == "+":
+            return CONTEXT.add(a, b)
+        if operator == "-":
+            return CONTEXT.subtract(a, b)
+        if operator == "*":
+            return CONTEXT.multiply(a, b)
+        if operator == "/":
+            return CONTEXT.divide(a, b)
+    except Overflow:
+        raise ExpressionError(
+            f"`{operator}` gives a number too large for an expression (decimal128)"
+        ) from None
+    # Fail closed, though the parser builds only the four above.
+    raise ExpressionError(f"`{operator}` is not arithmetic")
 
 
 def compare(operator: str, left: Value, right: Value) -> bool:
@@ -271,8 +370,11 @@ def boolean(operator: str, value: Value) -> bool:
 def number(operator: str, value: Value) -> Decimal:
     """`value` as a number for `operator`; no coercion from a text or a boolean (D3)."""
     if not isinstance(value, Decimal):
+        verb = {"+": "adds", "-": "subtracts", "*": "multiplies", "/": "divides"}.get(
+            operator, "compares"
+        )
         raise ExpressionError(
-            f"`{operator}` compares numbers, and it was given a {kind(value)}: {shown(value)}"
+            f"`{operator}` {verb} numbers, and it was given a {kind(value)}: {shown(value)}"
         )
     return value
 

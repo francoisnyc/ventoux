@@ -77,8 +77,10 @@ those types before the definition is accepted:
 | list | `items` | its elements have declared fields, read with `item` |
 
 **Numbers are exact decimals.** `0.1 + 0.2 == 0.3` is `true`, so money adds up the way people
-expect. A division that doesn't come out exactly (`1 / 3`) keeps 34 significant digits. Expressions
-don't round: rounding is a compute activity, with the scale and rounding mode written out.
+expect. A division that doesn't come out exactly (`1 / 3`) keeps 34 significant digits, rounding
+half to even (IEEE 754 decimal128). Expressions don't round otherwise: rounding is a compute
+activity, with the scale and rounding mode written out. A number must be finite: infinity and NaN
+are refused, since an infinite amount would pass any threshold.
 
 ## What is refused, and what it says
 
@@ -103,7 +105,8 @@ When the case runs, a value the check couldn't see is an error that stops the st
 | Situation | Error |
 |---|---|
 | `approved_amount` has no value yet | `approved_amount has no value` |
-| `{"/": [{"var": "amount"}, 0]}` | `division by zero in amount / 0` |
+| `{"/": [{"var": "amount"}, 0]}`, with an amount of 250 | `division by zero: 250 / 0` |
+| a result beyond what decimal128 can hold | `` `*` gives a number too large for an expression (decimal128) `` |
 | a field holds a value of the wrong type | `approved_amount should be a number, and it holds a string` |
 
 **Why an error and not `false`.** Suppose an approval's condition is `approved_amount > 100` and

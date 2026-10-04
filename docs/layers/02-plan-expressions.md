@@ -63,8 +63,13 @@ named operator's model, so a bad argument gets one error from that model too.
   already lost precision. It says so, and doesn't convert.
 - a `bool` where a number is expected, since Python's `True` is an `int`.
 
-Arithmetic uses one module-level `Context(prec=34, rounding=ROUND_HALF_EVEN)`, passed explicitly
-(`CONTEXT.add(a, b)`, `CONTEXT.divide(a, b)`), never `getcontext()`. `string` of a number is the
+Arithmetic uses one module-level context, passed explicitly (`CONTEXT.add(a, b)`,
+`CONTEXT.divide(a, b)`), never `getcontext()`. It is decimal128 in full: 34 digits, rounding half
+to even, exponents within ±6144, and overflow trapped and turned into an `ExpressionError` (found
+in slice 5: Python's default range returned `1E+12000`). A number must be finite, in a literal
+and in the case file: `Infinity > 100` is true, so an infinite amount would pass a threshold.
+Division by zero names the values (`division by zero: 250 / 0`), since naming the fields needs the
+renderer (slice 9). `string` of a number is the
 `Decimal`'s own text (`250`, `250.00`, `0.3`); it is never reformatted.
 
 **Field types** (choice 3), the shape case and plan definitions already use:
