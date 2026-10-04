@@ -11,7 +11,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 4 | Simplifications: one rule type | closed |
 | 5 | D2: structured to case | open |
 | 6 | Why not an existing DSL | closed |
-| 7 | D3: expressions | open |
+| 7 | D3: expressions | closed |
 | 8 | Engine language | open |
 | 9 | D4: Python engine | open |
 | 10 | Versions (pending D5) | closed |
@@ -124,7 +124,14 @@ and record the key points. A question is closed once you can explain the answer 
   which is the spike's whole question (design question 11).
 - Follow-up: `$sum(items[risk = 'high'].amount) > 10000` fits D3's subset (a simple filter and
   `$sum`). When would you still move it into a compute activity?
-- Status: open.
+  Answer: when the rules need to change without editing every rule. Right: once "high-risk
+  total" is used by more than one rule (an approval, an escalation, a report), it is a business
+  definition, and it belongs in one place with one owner. Other signs: it needs its own tests
+  (missing `risk`, currencies, rounding); "high risk" stops being a field comparison (a category
+  table, a threshold per product); or the value should appear as a fact on the approval sheet, with
+  provenance and the time obtained. And the reverse: used once, short, and reading as a sentence,
+  the inline expression is fine and more visible, since the rules sheet shows it directly.
+- Status: closed.
 
 ## 8. Engine language
 
