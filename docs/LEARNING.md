@@ -35,6 +35,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 28 | Card: catalog, contract, binding | open |
 | 29 | Layer 1: why `@1` and not `@1.0` | closed |
 | 30 | Spike: guarantees outside the standard | closed |
+| 31 | Layer 2: why `now` can't be written | open |
 
 ---
 
@@ -613,3 +614,25 @@ and record the key points. A question is closed once you can explain the answer 
   (which needs a parser to know the fields), or an evaluator with different rules. Either way it
   is no longer the standard's jq, which is the point of the question.
 - Status: closed.
+
+## 31. Layer 2: why `now` can't be written
+
+> Why can't `now` be written at all, and what would break on Temporal replay if it could?
+
+- Your answer: because time breaks determinism.
+- Discussion: right at the core, and the short version of two answers. *Can't be written*, not
+  *refused*: `now` has no model and isn't in `OPERATORS`, so the published JSON Schema has no
+  shape for it and neither a person nor a model can express it. The prototype's JSONata had
+  `$now()` in the language and refused it from an allowlist, where any gap lets it through; ours
+  is safe by construction (question 6). *What breaks*: on Monday `now > deadline` is false and the
+  workflow waits, which history records; on Thursday a worker restarts and Temporal replays the
+  code against that history, the condition is now true, the code asks to schedule `escalate`,
+  history says otherwise, and the case stops on a non-determinism error until someone fixes the
+  code (or, if the commands happened to line up, the run quietly diverges from what happened).
+  One sharpening: reading the *wall clock* breaks determinism, not time itself. Temporal has
+  replay-safe time (`workflow.now()` comes from history), but `core` may not import Temporal, so
+  time reaches an expression only as data history recorded: a timer firing, an event, a field.
+- Follow-up: a claim must escalate if nobody has assessed it within 5 days. Without `now`, how is
+  that written, and where does the time come from?
+- Status: open, waiting for the follow-up.
+
