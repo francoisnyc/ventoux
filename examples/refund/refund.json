@@ -20,10 +20,10 @@
       "kind": "activity",
       "title": "Refund the customer",
       "activity": "payments.refund@1",
-      "inputs": {"order_id": {"field": "order_id"}, "amount": {"field": "approved_amount"}},
-      "when": {"=": [{"field": "review.outcome"}, "approve"]},
+      "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+      "when": {"==": [{"var": "review.outcome"}, "approve"]},
       "approval": {
-        "when": {">": [{"field": "approved_amount"}, 100]},
+        "when": {">": [{"var": "approved_amount"}, 100]},
         "roles": ["support-lead"],
         "reason": "Refunds over 100 need a team lead"
       }
