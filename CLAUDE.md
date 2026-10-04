@@ -36,9 +36,10 @@ deliberately in Python, smaller and clearer.
 
 - Definitions (plans and case definitions) are data. Never `eval`, `exec`, `compile`, `importlib` or
   `pickle` anything from them.
-- Expressions use the JSONata subset in decision D3, evaluated as pure functions of context. Reject
-  anything outside it, including non-deterministic functions (`$now`, `$millis`, `$random`, `$uuid`),
-  at validation.
+- Expressions are structured JSON using only the operators listed in decision D3, evaluated as pure
+  functions of the case file. No operator reads the clock, randomness or I/O. Reject anything else
+  at validation; at runtime a missing field, a wrong type or an unknown operator is an error. Adding
+  an operator is a design decision recorded in the brief, never just a code change.
 - Every side effect goes through a registered activity. Definitions reference capabilities; they
   never define them.
 - The interpreter is deterministic so it can run as a Temporal workflow and survive replay: no clock,
