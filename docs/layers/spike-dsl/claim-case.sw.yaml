@@ -1,0 +1,102 @@
+# The prototype's small claim case (chartering: examples/cases/insurance-claim/case.json, release 1),
+# in the shape Ventoux intends (steps, task outcomes, one when/if/then rule), forced into
+# Serverless Workflow 1.0.3. Valid against the official schema (check_sw.py), but most of the case
+# lives in comments: GAP is what the standard cannot say, FORBID what we would have to forbid.
+#
+# The standard is a flow: a position in a list of tasks, with `then` jumps. A case has no position
+# (brief, idea 4): steps become available when rules allow, and the case closes when nothing is
+# left to do. The closest translation is a fork of long-running branches, which loses that.
+document:
+  dsl: '1.0.3'
+  namespace: claims
+  name: insurance-claim
+  version: '1.0.0'
+input:
+  schema:
+    format: json
+    document:
+      type: object
+      required: [claimId, policyId, policyholder, threadId]
+      properties:
+        claimId: {type: string}
+        policyId: {type: string}          # GAP: a reference to the `policies` system (D16)
+        policyholder: {type: string}
+        threadId: {type: string}
+do:
+  - claim:
+      fork:
+        compete: false
+        branches:
+          - main:
+              do:
+                - intake:
+                    run:
+                      workflow: {namespace: claims, name: claim-intake, version: '1.0.0'}
+                    export:
+                      # GAP: no provenance. These facts were extracted by an LLM (untrusted:llm);
+                      # nothing here can carry that, so nothing can stop them reaching a payment.
+                      as: '${ $context + { incident_date: .facts.incidentDate, estimated_damage: .facts.estimatedDamage } }'
+                - waitForDocuments:
+                    # GAP: `request_documents` is repeatable and available at any time before the
+                    # assessment; a flow can only offer it at fixed points.
+                    listen:
+                      to:
+                        one:
+                          with: {type: claims.documents_received}
+                - assess:
+                    # GAP: a human task. Outcomes (approve / deny), the form that sets `payout`,
+                    # the roles that may answer (adjuster): none exist in the standard (D9).
+                    listen:
+                      to:
+                        any:
+                          - with: {type: claims.assess.approve}
+                          - with: {type: claims.assess.deny}
+                    export:
+                      as: '${ $context + { outcome: .[0].type, payout: (.[0].data.payout // 0) } }'
+                - decide:
+                    switch:
+                      - pay:
+                          when: ${ $context.outcome == "claims.assess.approve" and $context.payout > 0 }
+                          then: pay
+                      - deny:
+                          when: ${ $context.outcome == "claims.assess.deny" }
+                          then: deny
+                - pay:
+                    # GAP: the approval when payout > 1000, by someone who didn't set the payout
+                    # (D11), and tied to the values it saw. Only expressible as more listen tasks.
+                    run:
+                      workflow: {namespace: claims, name: claim-pay, version: '1.0.0'}
+                      # the input mapping lives in `input.from`, a jq expression
+                    input:
+                      from: '${ { claimId: $workflow.input.claimId, policyId: $workflow.input.policyId, amount: $context.payout } }'
+                    then: end
+                - deny:
+                    run:
+                      workflow: {namespace: claims, name: claim-denial-letter, version: '1.0.0'}
+          - assessmentSla:
+              do:
+                # GAP: "5 days from intake, unless assessed". A fork branch can't see whether the
+                # other branch reached `assessed`, and won't stop when it does: the case would
+                # stay open 5 days for nothing (D7's `sla` pattern, D10's pending work).
+                - wait5Days:
+                    wait: {days: 5}
+                - escalate:
+                    run:
+                      workflow: {namespace: claims, name: claim-escalate, version: '1.0.0'}
+          - customerMessages:
+              do:
+                # GAP: a rule that listens without keeping the case open (D10: listening is not
+                # waiting). Here the branch never ends, so the case never closes.
+                - keepLatest:
+                    listen:
+                      to:
+                        any:
+                          - with: {type: claims.customer_message}
+                    foreach:
+                      item: message
+                      do:
+                        - store:
+                            set:
+                              last_customer_message: ${ $message.text }
+# GAP, case-wide: milestones; closing when nothing is left to do, or by a declared reason (D10);
+# change requests and migration of open cases (D5); roles and who may see what (D16).

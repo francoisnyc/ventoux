@@ -1,0 +1,8 @@
+claim-case.sw.yaml: valid
+claim-pay.sw.yaml: valid
+unsafe (script, shell, any URL, clock): valid
+zigflow quickstart: 3 error(s)
+  at document: Unevaluated properties are not allowed ('taskQueue', 'workflowType' were unexpected)
+  at document: 'namespace' is a required property
+  at document: 'name' is a required property
+{"schema": "https://raw.githubusercontent.com/serverlessworkflow/specification/v1.0.3/schema/workflow.yaml"}
