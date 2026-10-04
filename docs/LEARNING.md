@@ -34,7 +34,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 27 | Tracer: running the quickstart | closed |
 | 28 | Card: catalog, contract, binding | open |
 | 29 | Layer 1: why `@1` and not `@1.0` | closed |
-| 30 | Spike: guarantees outside the standard | open |
+| 30 | Spike: guarantees outside the standard | closed |
 
 ---
 
@@ -595,4 +595,12 @@ and record the key points. A question is closed once you can explain the answer 
   In one line: restriction removes capabilities; our guarantees mostly *add* information
   (sources, who answered) or *change* meaning (errors instead of false).
 - Follow-up: why can't you make jq fail closed by forbidding parts of it?
-- Status: open.
+  Answer: because missing fields return null by design. Right: it lives in the meaning of the
+  most basic operation, `.payout`, not in a feature you could remove. Forbidding works on syntax;
+  every field access can yield `null`, and `null > 1000` is `false` (jq orders `null` below every
+  number), so you would have to forbid field access, which is the whole language. jq can't even
+  tell a missing field from one set to `null` (`{}` and `{"payout": null}` both give `null`). The
+  only fixes add or change something: check before evaluating that every field read has a value
+  (which needs a parser to know the fields), or an evaluator with different rules. Either way it
+  is no longer the standard's jq, which is the point of the question.
+- Status: closed.
