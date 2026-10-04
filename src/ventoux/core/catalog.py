@@ -9,7 +9,7 @@ import json
 import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # A contract never changes once written (D5), down to its parts; and fail closed: a field it
 # doesn't know is refused, never silently dropped.
@@ -24,8 +24,8 @@ class Timeouts(BaseModel):
 
     model_config = FROZEN
 
-    start_to_close: int
-    schedule_to_start: int
+    start_to_close: int = Field(gt=0)
+    schedule_to_start: int = Field(gt=0)
 
 
 class RetryPolicy(BaseModel):
@@ -33,9 +33,9 @@ class RetryPolicy(BaseModel):
 
     model_config = FROZEN
 
-    maximum_attempts: int
-    initial_interval: int
-    backoff_coefficient: float
+    maximum_attempts: int = Field(gt=0)  # 0 would mean "retry forever" to Temporal
+    initial_interval: int = Field(gt=0)
+    backoff_coefficient: float = Field(ge=1)  # below 1, each retry would come sooner
 
 
 class Display(BaseModel):
@@ -175,6 +175,9 @@ def contract_hash(contract: ActivityContract) -> str:
     promise = contract.model_dump(mode="json", exclude={"display", "input", "output"})
     promise["input"] = contract.input.model_json_schema()
     promise["output"] = contract.output.model_json_schema()
+    promise["outcomes"] = sorted(
+        contract.outcomes
+    )  # a set of answers: their order promises nothing
     # Canonical JSON: the same promise always gives the same bytes, so the same hash.
     canonical = json.dumps(promise, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()

@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from ventoux import testing
 from ventoux.core.catalog import (
     ActivityContract,
     Catalog,
@@ -228,3 +229,43 @@ def test_the_guides_example_is_the_development_refund_contract() -> None:
     namespace: dict[str, Any] = {}
     exec(example, namespace)  # noqa: S102 -- our guide, agreed in docs/layers/01-catalog.md
     assert contract_hash(namespace["payments_refund"]) == contract_hash(payments_refund)
+
+
+@pytest.mark.parametrize(
+    ("part", "values"),
+    [
+        (Timeouts, {"start_to_close": 0, "schedule_to_start": 60}),
+        (Timeouts, {"start_to_close": 10, "schedule_to_start": -5}),
+        # In Temporal, maximum_attempts=0 means retry forever.
+        (RetryPolicy, {"maximum_attempts": 0, "initial_interval": 1, "backoff_coefficient": 2}),
+        (RetryPolicy, {"maximum_attempts": 3, "initial_interval": 0, "backoff_coefficient": 2}),
+        # Below 1, each retry comes sooner than the last, hammering a failing system.
+        (RetryPolicy, {"maximum_attempts": 3, "initial_interval": 1, "backoff_coefficient": 0.5}),
+    ],
+)
+def test_impossible_timeouts_and_retries_are_refused(
+    part: type[Timeouts] | type[RetryPolicy], values: dict[str, Any]
+) -> None:
+    with pytest.raises(ValidationError, match="greater than"):
+        part.model_validate(values)
+
+
+def test_the_order_of_outcomes_is_not_part_of_the_promise() -> None:
+    titles = {"not_found": "No such order", "archived": "The order is archived"}
+    display = Display(title="Look up an order", description="Reads an order.", outcomes=titles)
+    one_way = lookup_contract(outcomes=["not_found", "archived"], display=display)
+    other_way = lookup_contract(outcomes=["archived", "not_found"], display=display)
+    assert contract_hash(one_way) == contract_hash(other_way)
+
+
+def test_a_contract_with_no_implementation_stops_the_case_by_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delitem(testing.FAKES, "payments.refund@1")
+    refund = load_definition(ROOT / "examples" / "refund" / "refund.json")
+    with pytest.raises(LookupError, match="no implementation of payments.refund@1"):
+        run_case(
+            refund,
+            file={"order_id": "ord-1", "amount": 40},
+            answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        )

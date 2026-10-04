@@ -87,19 +87,20 @@ What each part is for:
   and `compute` change nothing, so retrying them is harmless.
 - **`timeouts` and `retry`**, in seconds. You set them because you know the system's limits; a case
   may make them stricter, never looser. `schedule_to_start` makes an activity no worker picks up
-  fail loudly instead of waiting forever.
+  fail loudly instead of waiting forever. Every timeout, interval and attempt count must be greater
+  than 0 (to Temporal, `maximum_attempts=0` means "retry forever"), and the backoff at least 1.
 - **`idempotency_key`**: the input field that carries the key the engine builds from the case, the
   step and the step's run (never Temporal's attempt number). Your adapter sends it to the system,
   and returns the original result when the system answers "duplicate request".
 - **`outcomes`**: business failures (declined, account closed), which cases read like task
-  outcomes: `pay.outcome == "declined"`. Anything else that goes wrong is a failure that needs
-  attention.
+  outcomes: `pay.outcome == "declined"`. Their order doesn't matter. Anything else that goes wrong
+  is a failure that needs attention.
 - **`display`**: titles and descriptions for people. They are presentation: fixing a typo in them
   is not a new contract.
 
 ## What the catalog refuses
 
-Every refusal says what was wrong and what to do instead.
+Every refusal says what was wrong; the catalog's own refusals also say what to do instead.
 
 | You wrote | Ventoux says |
 |---|---|
@@ -108,6 +109,7 @@ Every refusal says what was wrong and what to do instead.
 | `queue="payments"` in a contract | A contract has no field `'queue'`. A contract says what an activity promises; where it runs (task queue, namespace, worker) belongs in a deployment binding. |
 | `name="Payments Refund"`, or `version=0` | `'Payments Refund@1'`: no reference could name it. A name is dotted lowercase (`payments.refund`), and a version a whole number from 1. |
 | `outcomes=["declined"]` with no title for it | `payments.refund@1`: outcomes and their display titles must match. |
+| `RetryPolicy(maximum_attempts=0, …)` | `maximum_attempts`: Input should be greater than 0. |
 | A second, different `payments.refund@1` | `payments.refund@1` is already registered with different content: register it as `payments.refund@2`. |
 | `catalog.get("payments.refund@3")` | `payments.refund@3` is not in the catalog. Registered: `payments.refund@1`. |
 | `catalog.get("payments.refund@1.0")` | `'payments.refund@1.0'` is not a reference: a reference is name@N, such as `payments.refund@1`, with a whole-number version. |

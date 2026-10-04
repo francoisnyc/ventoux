@@ -61,6 +61,8 @@ def run(
             contract = catalog.get(step["activity"])
             # TRACER: inputs aren't checked against the contract's schema (the interpreter, layer 5).
             # TRACER: no idempotency key is built per step run (the Temporal adapter, layer 6).
+            if contract.reference not in implementations:
+                raise LookupError(f"no implementation of {contract.reference} is available")
             implementations[contract.reference](inputs)
         result.steps_reached.append(name)
     # A case closes when nothing is left to do (D10): here, when no step is waiting.
