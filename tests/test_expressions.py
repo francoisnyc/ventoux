@@ -9,10 +9,13 @@ from typing import cast
 import pytest
 
 from ventoux.core.expressions import (
+    And,
     Expression,
     ExpressionError,
     ExpressionInvalid,
     Gt,
+    Not,
+    Or,
     Var,
     evaluate,
     parse_expression,
@@ -159,3 +162,75 @@ def test_equality_never_coerces(left: object, right: object, message: str) -> No
     with pytest.raises(ExpressionError) as stopped:
         evaluate(parse_expression({"==": [left, right]}), {})
     assert str(stopped.value) == message
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ({"and": [True]}, "`and` takes a list of 2 or more arguments"),
+        ({"or": True}, "`or` takes a list of 2 or more arguments"),
+        ({"!": True}, '`!` takes a list of 1 argument, like {"!": [x]}'),
+        ({"!": [True, False]}, '`!` takes a list of 1 argument, like {"!": [x]}'),
+    ],
+)
+def test_logic_operators_take_their_number_of_arguments(data: object, message: str) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression(data)
+    assert str(refused.value) == message
+
+
+def test_logic_operators_parse_with_their_arguments_parsed() -> None:
+    approved = {"==": [{"var": "review.outcome"}, "approve"]}
+    parsed_approved = parse_expression(approved)
+    urgent = Var(var="urgent")
+    assert parse_expression({"and": [approved, {"var": "urgent"}]}) == And.model_validate(
+        {"and": [parsed_approved, urgent]}
+    )
+    assert parse_expression({"or": [approved, {"var": "urgent"}, True]}) == Or.model_validate(
+        {"or": [parsed_approved, urgent, True]}
+    )
+    assert parse_expression({"!": [{"var": "urgent"}]}) == Not.model_validate({"!": [urgent]})
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"and": [False, {">": [{"var": "approved_amount"}, 100]}]},
+        {"or": [True, {">": [{"var": "approved_amount"}, 100]}]},
+    ],
+)
+def test_and_or_evaluate_every_part_so_an_error_is_never_hidden(data: object) -> None:
+    # The first part already decides the answer; the missing amount must still stop the step.
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(parse_expression(data), {})
+    assert str(stopped.value) == "approved_amount has no value"
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ({"and": [True, 1]}, "`and` combines booleans, and it was given a number: 1"),
+        ({"or": [False, "yes"]}, "`or` combines booleans, and it was given a string: 'yes'"),
+        ({"!": [0]}, "`!` takes a boolean, and it was given a number: 0"),
+    ],
+)
+def test_nothing_is_truthy(data: object, message: str) -> None:
+    # JsonLogic reads 1 and "yes" as true and 0 as false; a condition here is true or false (D3).
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(parse_expression(data), {})
+    assert str(stopped.value) == message
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"and": [True, True]}, True),
+        ({"and": [True, True, False]}, False),
+        ({"or": [False, False, True]}, True),
+        ({"or": [False, False]}, False),
+        ({"!": [False]}, True),
+        ({"!": [{"and": [True, {"==": [{"var": "review.outcome"}, "approve"]}]}]}, False),
+    ],
+)
+def test_and_or_not(data: object, expected: bool) -> None:
+    assert evaluate(parse_expression(data), {"review.outcome": "approve"}) is expected

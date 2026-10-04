@@ -36,7 +36,7 @@ OPERATORS = (
 # What an expression gives, and what it is: a literal, a field, or one operator with its arguments.
 # Recursive, so the models below can hold expressions; a `type` alias is resolved when first used.
 type Value = Decimal | str | bool
-type Expression = Decimal | str | bool | Var | Eq | Ne | Gt | Ge | Lt | Le
+type Expression = Decimal | str | bool | Var | Eq | Ne | Gt | Ge | Lt | Le | And | Or | Not
 
 
 class Node(BaseModel):
@@ -100,6 +100,30 @@ class Le(Comparison):
     args: tuple[Expression, Expression] = Field(alias="<=")
 
 
+class And(Node):
+    """`{"and": [a, b, …]}`: every argument is true."""
+
+    operator: ClassVar[str] = "and"
+
+    args: tuple[Expression, ...] = Field(alias="and", min_length=2)
+
+
+class Or(Node):
+    """`{"or": [a, b, …]}`: at least one argument is true."""
+
+    operator: ClassVar[str] = "or"
+
+    args: tuple[Expression, ...] = Field(alias="or", min_length=2)
+
+
+class Not(Node):
+    """`{"!": [a]}`: a is false."""
+
+    operator: ClassVar[str] = "!"
+
+    args: tuple[Expression] = Field(alias="!")
+
+
 COMPARISONS: dict[str, type[Eq] | type[Ne] | type[Gt] | type[Ge] | type[Lt] | type[Le]] = {
     kind.operator: kind for kind in (Eq, Ne, Gt, Ge, Lt, Le)
 }
@@ -149,16 +173,35 @@ def parse_expression(data: object) -> Expression:
                     "no default, and never the whole case file"
                 )
             return Var(var=arguments)
-        if operator in COMPARISONS and not (isinstance(arguments, list) and len(arguments) == 2):
-            raise ExpressionInvalid(f"`{operator}` takes a list of 2 arguments")
         if operator in COMPARISONS:
-            parsed = [parse_expression(argument) for argument in arguments]
+            parsed = parsed_arguments(operator, arguments, 2)
             return COMPARISONS[operator].model_validate({operator: parsed})
+        if operator == "and":
+            return And.model_validate({"and": parsed_arguments("and", arguments, 2, or_more=True)})
+        if operator == "or":
+            return Or.model_validate({"or": parsed_arguments("or", arguments, 2, or_more=True)})
+        if operator == "!":
+            return Not.model_validate({"!": parsed_arguments("!", arguments, 1)})
         if isinstance(arguments, list):
             for argument in arguments:
                 parse_expression(argument)
     # Fail closed: whatever isn't recognised above is refused, never passed through.
     raise ExpressionInvalid(f"not an expression: {data!r}")
+
+
+def parsed_arguments(
+    operator: str, arguments: object, count: int, *, or_more: bool = False
+) -> list[Expression]:
+    """`arguments` parsed, if they are a list of `count` (or more), else `ExpressionInvalid`."""
+    if isinstance(arguments, list) and (
+        len(arguments) == count or (or_more and len(arguments) > count)
+    ):
+        return [parse_expression(argument) for argument in arguments]
+    plural = "argument" if count == 1 else "arguments"
+    more = " or more" if or_more else ""
+    # `!` alone gets an example: JsonLogic also accepts `{"!": x}`, which we refuse (D3).
+    example = ', like {"!": [x]}' if operator == "!" else ""
+    raise ExpressionInvalid(f"`{operator}` takes a list of {count}{more} {plural}{example}")
 
 
 def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
@@ -180,6 +223,13 @@ def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
     if isinstance(expression, Comparison):
         left, right = (evaluate(argument, values) for argument in expression.args)
         return compare(expression.operator, left, right)
+    if isinstance(expression, And | Or):
+        # Every part is evaluated before combining, so an error is never hidden behind a part
+        # that already decided the answer (D3). Python's `all` and `any` would stop early.
+        parts = [boolean(expression.operator, evaluate(a, values)) for a in expression.args]
+        return all(parts) if isinstance(expression, And) else any(parts)
+    if isinstance(expression, Not):
+        return not boolean("!", evaluate(expression.args[0], values))
     # Fail closed: anything the evaluator has no case for is an error, never a default.
     raise ExpressionError(f"can't evaluate {expression!r}: it isn't a parsed expression")
 
@@ -208,11 +258,21 @@ def compare(operator: str, left: Value, right: Value) -> bool:
     raise ExpressionError(f"`{operator}` is not a comparison")
 
 
+def boolean(operator: str, value: Value) -> bool:
+    """`value` as a boolean for `operator`; nothing is truthy (D3)."""
+    if not isinstance(value, bool):
+        verb = "takes a boolean" if operator == "!" else "combines booleans"
+        raise ExpressionError(
+            f"`{operator}` {verb}, and it was given a {kind(value)}: {shown(value)}"
+        )
+    return value
+
+
 def number(operator: str, value: Value) -> Decimal:
     """`value` as a number for `operator`; no coercion from a text or a boolean (D3)."""
     if not isinstance(value, Decimal):
         raise ExpressionError(
-            f"`{operator}` compares numbers, and it was given a {kind(value)}: {value!r}"
+            f"`{operator}` compares numbers, and it was given a {kind(value)}: {shown(value)}"
         )
     return value
 
@@ -225,3 +285,12 @@ def kind(value: Value) -> str:
     if isinstance(value, str):
         return "string"
     return "number"
+
+
+def shown(value: Value) -> str:
+    """`value` as a message shows it: `250`, `'250'`, `true`."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return repr(value)
+    return str(value)
