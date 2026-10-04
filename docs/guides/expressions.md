@@ -47,7 +47,7 @@ change.
 | `+`, `*` | two or more numbers | number |
 | `-`, `/` | two numbers | number |
 | `if` | a boolean, then two values of the same type | that type |
-| `in` | a value, and a list of values of its type | boolean |
+| `in` | a value, and a list of literal values of its type | boolean |
 | `cat` | one or more texts | text |
 | `string` | one number, boolean or reference | text |
 | `exists` | a declared field's name | boolean: whether it has a value |
@@ -114,7 +114,9 @@ the amount is missing. Reading the condition as `false` would mean "no approval 
 refund would be paid without one. In Ventoux an expression the engine can't evaluate always stops
 the step, and a person looks at it. `and` and `or` also evaluate every part, so an error is never
 hidden behind a part that already decided the answer. To handle a missing value on purpose, say
-so: `exists(approved_amount)`.
+so: `if exists(approved_amount) then approved_amount else 0`. That works because `if` evaluates
+only the branch its condition chooses: the condition is what says which branch means something.
+A field holding JSON's `null` has no value, for `exists` and for `var` alike.
 
 ## In a plan
 

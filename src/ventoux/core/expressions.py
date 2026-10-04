@@ -65,6 +65,11 @@ type Expression = (
     | Sub
     | Mul
     | Div
+    | If
+    | In
+    | Cat
+    | String
+    | Exists
 )
 
 
@@ -181,6 +186,40 @@ class Div(Node):
     args: tuple[Expression, Expression] = Field(alias="/")
 
 
+class If(Node):
+    """`{"if": [condition, then, else]}`."""
+
+    operator: ClassVar[str] = "if"
+    args: tuple[Expression, Expression, Expression] = Field(alias="if")
+
+
+class In(Node):
+    """`{"in": [a, [x, y, …]]}`: a is one of the listed values."""
+
+    operator: ClassVar[str] = "in"
+    args: tuple[Expression, tuple[Value, ...]] = Field(alias="in")
+
+
+class Cat(Node):
+    """`{"cat": [a, b, …]}`: the texts joined."""
+
+    operator: ClassVar[str] = "cat"
+    args: tuple[Expression, ...] = Field(alias="cat", min_length=1)
+
+
+class String(Node):
+    """`{"string": [a]}`: a number, boolean or reference as text."""
+
+    operator: ClassVar[str] = "string"
+    args: tuple[Expression] = Field(alias="string")
+
+
+class Exists(Node):
+    """`{"exists": "approved_amount"}`: whether the field has a value."""
+
+    exists: str
+
+
 COMPARISONS: dict[str, type[Eq] | type[Ne] | type[Gt] | type[Ge] | type[Lt] | type[Le]] = {
     kind.operator: kind for kind in (Eq, Ne, Gt, Ge, Lt, Le)
 }
@@ -250,6 +289,20 @@ def parse_expression(data: object) -> Expression:
             return Mul.model_validate({"*": parsed_arguments("*", arguments, 2, or_more=True)})
         if operator == "/":
             return Div.model_validate({"/": parsed_arguments("/", arguments, 2)})
+        if operator == "if":
+            return If.model_validate({"if": parsed_arguments("if", arguments, 3)})
+        if operator == "in":
+            return In.model_validate({"in": in_list(arguments)})
+        if operator == "cat":
+            return Cat.model_validate({"cat": parsed_arguments("cat", arguments, 1, or_more=True)})
+        if operator == "string":
+            return String.model_validate({"string": parsed_arguments("string", arguments, 1)})
+        if operator == "exists":
+            if not isinstance(arguments, str) or not arguments:
+                raise ExpressionInvalid(
+                    'exists takes the name of one field, like {"exists": "approved_amount"}'
+                )
+            return Exists(exists=arguments)
         if isinstance(arguments, list):
             for argument in arguments:
                 parse_expression(argument)
@@ -265,11 +318,40 @@ def parsed_arguments(
         len(arguments) == count or (or_more and len(arguments) > count)
     ):
         return [parse_expression(argument) for argument in arguments]
-    plural = "argument" if count == 1 else "arguments"
+    plural = "argument" if count == 1 and not or_more else "arguments"
     more = " or more" if or_more else ""
     # `!` alone gets an example: JsonLogic also accepts `{"!": x}`, which we refuse (D3).
     example = ', like {"!": [x]}' if operator == "!" else ""
     raise ExpressionInvalid(f"`{operator}` takes a list of {count}{more} {plural}{example}")
+
+
+IN_LIST = '`in` takes a value and a list of values, like {"in": [x, ["approve", "escalate"]]}'
+
+
+def in_list(arguments: object) -> tuple[Expression, tuple[Value, ...]]:
+    """`in`'s value and its list of literals, or `ExpressionInvalid`."""
+    if not isinstance(arguments, list) or len(arguments) != 2:
+        raise ExpressionInvalid(IN_LIST)
+    value, options = arguments
+    if isinstance(options, str):
+        # JsonLogic's `in` also finds "app" in "approve"; a condition never searches a text.
+        raise ExpressionInvalid(IN_LIST + "; it never searches a text")
+    if not isinstance(options, list):
+        raise ExpressionInvalid(IN_LIST)
+    if not options:
+        raise ExpressionInvalid("`in` needs at least one value in its list")
+    literals: list[Value] = []
+    for option in options:
+        literal = parse_expression(option)
+        if not isinstance(literal, bool | str | Decimal):
+            raise ExpressionInvalid(IN_LIST + "; the list holds literal values")
+        literals.append(literal)
+    kinds = list(dict.fromkeys(kind(literal) for literal in literals))  # in the list's order
+    if len(kinds) > 1:
+        raise ExpressionInvalid(
+            f"`in`'s list holds values of one type, and this one mixes {' and '.join(kinds)}"
+        )
+    return parse_expression(value), tuple(literals)
 
 
 def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
@@ -277,7 +359,7 @@ def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
     if isinstance(expression, bool | str | Decimal):
         return expression
     if isinstance(expression, Var):
-        if expression.var not in values:
+        if values.get(expression.var) is None:
             # Fail closed: a missing value is an error that stops the step, never `false` (D3).
             raise ExpressionError(f"{expression.var} has no value")
         value = values[expression.var]
@@ -308,6 +390,28 @@ def evaluate(expression: Expression, values: Mapping[str, object]) -> Value:
         for n in numbers[1:]:
             result = calculate(expression.operator, result, n)
         return result
+    if isinstance(expression, Exists):
+        # The one way to ask about a missing value, said out loud in the definition.
+        return values.get(expression.exists) is not None
+    if isinstance(expression, In):
+        found, options = evaluate(expression.args[0], values), expression.args[1]
+        # Same rule as `==`: no coercion, and in Python `True in [1]` would be true.
+        if kind(found) != kind(options[0]):
+            raise ExpressionError(
+                f"`in` looks for a {kind(found)} in a list of {kind(options[0])}s"
+            )
+        return found in options
+    if isinstance(expression, Cat):
+        return "".join(text(evaluate(argument, values)) for argument in expression.args)
+    if isinstance(expression, String):
+        value = evaluate(expression.args[0], values)
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        # A number keeps its own digits: `250.00` stays `250.00`. Formatting is a compute activity.
+        return str(value)
+    if isinstance(expression, If):
+        condition, then, otherwise = expression.args
+        return evaluate(then if boolean("if", evaluate(condition, values)) else otherwise, values)
     # Fail closed: anything the evaluator has no case for is an error, never a default.
     raise ExpressionError(f"can't evaluate {expression!r}: it isn't a parsed expression")
 
@@ -360,9 +464,19 @@ def compare(operator: str, left: Value, right: Value) -> bool:
 def boolean(operator: str, value: Value) -> bool:
     """`value` as a boolean for `operator`; nothing is truthy (D3)."""
     if not isinstance(value, bool):
-        verb = "takes a boolean" if operator == "!" else "combines booleans"
+        verb = "takes a boolean" if operator in ("!", "if") else "combines booleans"
         raise ExpressionError(
             f"`{operator}` {verb}, and it was given a {kind(value)}: {shown(value)}"
+        )
+    return value
+
+
+def text(value: Value) -> str:
+    """`value` as a text for `cat`; a number or a boolean is turned into text only by `string`."""
+    if not isinstance(value, str):
+        raise ExpressionError(
+            f"`cat` joins texts, and it was given a {kind(value)}: {shown(value)}; "
+            "write string(…) to turn it into text"
         )
     return value
 

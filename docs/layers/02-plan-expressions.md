@@ -49,7 +49,9 @@ reading in brackets:
 - `in` on a string (substring);
 - `null` as a literal.
 
-A list literal is allowed only as the second argument of `in`.
+A list literal is allowed only as the second argument of `in`, and holds at least one literal
+value, all of one type (decided in slice 6: list fields hold records for `count` and `sum`, so
+`in` never reads one).
 
 **One clear parse error** (choice 2). The sketch's union of operator models gave 38 errors for
 `{"now": []}`. A validator runs first, before any union matching. It checks that the value is a
@@ -101,8 +103,11 @@ mapping from field name to value. It raises `ExpressionError` when:
 - it divides by zero;
 - it meets an object it has no case for, such as a raw dict.
 
-`and` and `or` evaluate every operand before combining, so an error is never hidden. A condition
-returns `True`, returns `False`, or raises: there is no `holds`.
+`and` and `or` evaluate every operand before combining, so an error is never hidden. `if` is the
+one exception, deliberately: it evaluates only the branch its condition chooses, or
+`if exists(x) then x else 0` could never guard a missing value (slice 6; the type check still
+checks both branches). A JSON `null` in the case file is no value, for `var` and `exists` alike. A
+condition returns `True`, returns `False`, or raises: there is no `holds`.
 
 **The renderer** (choice 9). One line, with parentheses only where precedence needs them:
 

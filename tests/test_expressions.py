@@ -13,14 +13,19 @@ import pytest
 from ventoux.core.expressions import (
     Add,
     And,
+    Cat,
     Div,
+    Exists,
     Expression,
     ExpressionError,
     ExpressionInvalid,
     Gt,
+    If,
+    In,
     Mul,
     Not,
     Or,
+    String,
     Sub,
     Var,
     evaluate,
@@ -337,3 +342,124 @@ def test_a_result_too_large_for_decimal128_is_an_error() -> None:
     with pytest.raises(ExpressionError) as stopped:
         evaluate(huge, {})
     assert str(stopped.value) == "`*` gives a number too large for an expression (decimal128)"
+
+
+IN_LIST = '`in` takes a value and a list of values, like {"in": [x, ["approve", "escalate"]]}'
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        # JsonLogic chains `if` (`[c1, a, c2, b, else]`); ours takes exactly three (D3).
+        ({"if": [True, 1, False, 2, 3]}, "`if` takes a list of 3 arguments"),
+        ({"if": [True, 1]}, "`if` takes a list of 3 arguments"),
+        # JsonLogic's `in` also searches a text ("app" in "approve"); ours never does.
+        ({"in": ["app", "approve"]}, IN_LIST + "; it never searches a text"),
+        ({"in": ["approve"]}, IN_LIST),
+        ({"in": ["approve", []]}, "`in` needs at least one value in its list"),
+        (
+            {"in": [1, ["a", 1]]},
+            "`in`'s list holds values of one type, and this one mixes string and number",
+        ),
+        ({"in": ["a", [{"var": "x"}]]}, IN_LIST + "; the list holds literal values"),
+        ({"cat": []}, "`cat` takes a list of 1 or more arguments"),
+        ({"string": 5}, "`string` takes a list of 1 argument"),
+        (
+            {"exists": ["approved_amount"]},
+            'exists takes the name of one field, like {"exists": "approved_amount"}',
+        ),
+        ({"exists": ""}, 'exists takes the name of one field, like {"exists": "approved_amount"}'),
+    ],
+)
+def test_if_in_cat_string_exists_take_their_shape(data: object, message: str) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression(data)
+    assert str(refused.value) == message
+
+
+def test_if_in_cat_string_exists_parse() -> None:
+    outcome = Var(var="review.outcome")
+    approved = {"==": [{"var": "review.outcome"}, "approve"]}
+    assert parse_expression({"if": [approved, {"var": "approved_amount"}, 0]}) == If.model_validate(
+        {"if": [parse_expression(approved), Var(var="approved_amount"), Decimal(0)]}
+    )
+    assert parse_expression({"in": [{"var": "review.outcome"}, ["approve", "escalate"]]}) == (
+        In.model_validate({"in": [outcome, ["approve", "escalate"]]})
+    )
+    assert parse_expression({"cat": ["Refund of ", {"string": [{"var": "amount"}]}]}) == (
+        Cat.model_validate(
+            {"cat": ["Refund of ", String.model_validate({"string": [Var(var="amount")]})]}
+        )
+    )
+    assert parse_expression({"exists": "approved_amount"}) == Exists(exists="approved_amount")
+
+
+def test_an_if_condition_is_a_boolean() -> None:
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(parse_expression({"if": [1, "yes", "no"]}), {})
+    assert str(stopped.value) == "`if` takes a boolean, and it was given a number: 1"
+
+
+def test_exists_says_whether_a_field_has_a_value() -> None:
+    values = {"approved_amount": Decimal(250), "reason": None}
+    assert evaluate(parse_expression({"exists": "approved_amount"}), values) is True
+    assert evaluate(parse_expression({"exists": "amount"}), values) is False
+    # A JSON null is no value either, for `exists` and for `var`.
+    assert evaluate(parse_expression({"exists": "reason"}), values) is False
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(parse_expression({"var": "reason"}), values)
+    assert str(stopped.value) == "reason has no value"
+
+
+def test_if_evaluates_only_the_branch_its_condition_chooses() -> None:
+    # Unlike `and` and `or`: the condition says which branch means something, so a guard on a
+    # missing value works. The type check (slice 8) still checks both branches before anything runs.
+    guarded = parse_expression(
+        {"if": [{"exists": "approved_amount"}, {"var": "approved_amount"}, 0]}
+    )
+    assert evaluate(guarded, {}) == Decimal(0)
+    assert evaluate(guarded, {"approved_amount": Decimal(250)}) == Decimal(250)
+
+
+def test_in_looks_for_a_value_of_the_list_type() -> None:
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(
+            parse_expression({"in": [{"var": "review.outcome"}, ["approve", "escalate"]]}),
+            {"review.outcome": Decimal(1)},
+        )
+    assert str(stopped.value) == "`in` looks for a number in a list of strings"
+
+
+def test_in() -> None:
+    escalated = parse_expression({"in": [{"var": "review.outcome"}, ["approve", "escalate"]]})
+    assert evaluate(escalated, {"review.outcome": "escalate"}) is True
+    assert evaluate(escalated, {"review.outcome": "reject"}) is False
+    assert evaluate(parse_expression({"in": [Decimal("2.0"), [1, 2]]}), {}) is True
+
+
+def test_cat_joins_texts_only() -> None:
+    # JsonLogic's `cat` turns 250 into "250"; ours asks for it to be said with `string`.
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(
+            parse_expression({"cat": ["Refund of ", {"var": "amount"}]}), {"amount": Decimal(250)}
+        )
+    assert str(stopped.value) == (
+        "`cat` joins texts, and it was given a number: 250; write string(…) to turn it into text"
+    )
+
+
+def test_string_writes_a_value_as_text() -> None:
+    values = {"approved_amount": Decimal("250.00"), "urgent": True, "order_id": "ORD-7"}
+    letter = parse_expression(
+        {
+            "cat": [
+                "Refund of ",
+                {"string": [{"var": "approved_amount"}]},
+                " for ",
+                {"var": "order_id"},
+            ]
+        }
+    )
+    assert evaluate(letter, values) == "Refund of 250.00 for ORD-7"
+    assert evaluate(parse_expression({"string": [{"var": "urgent"}]}), values) == "true"
+    assert evaluate(parse_expression({"string": [{"var": "order_id"}]}), values) == "ORD-7"
