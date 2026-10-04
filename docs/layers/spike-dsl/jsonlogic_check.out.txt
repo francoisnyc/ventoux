@@ -1,0 +1,40 @@
+json-logic-js 2.0.5
+  missing var, approval when       -> false
+  missing var, as a conditional    -> "no approval"
+  misspelled outcome               -> false
+  text compared with a number      -> true
+  loose equality 1 == "1"          -> true
+  empty list as a condition        -> "falsy"
+  text "0" as a condition          -> "truthy"
+  unknown operator                 -> ERROR Unrecognized operation now
+  present var                      -> true
+json-logic 0.6.3
+  missing var, approval when       -> ERROR TypeError: 'dict_keys' object is not subscriptable
+  missing var, as a conditional    -> ERROR TypeError: 'dict_keys' object is not subscriptable
+  misspelled outcome               -> ERROR TypeError: 'dict_keys' object is not subscriptable
+  text compared with a number      -> ERROR TypeError: 'dict_keys' object is not subscriptable
+  loose equality 1 == "1"          -> ERROR TypeError: 'dict_keys' object is not subscriptable
+  empty list as a condition        -> ERROR TypeError: 'dict_keys' object is not subscriptable
+  text "0" as a condition          -> ERROR TypeError: 'dict_keys' object is not subscriptable
+  unknown operator                 -> ERROR TypeError: 'dict_keys' object is not subscriptable
+  present var                      -> ERROR TypeError: 'dict_keys' object is not subscriptable
+panzi-json-logic 1.0.1
+  missing var, approval when       -> false
+  missing var, as a conditional    -> "no approval"
+  misspelled outcome               -> false
+  text compared with a number      -> true
+  loose equality 1 == "1"          -> true
+  empty list as a condition        -> "falsy"
+  text "0" as a condition          -> "truthy"
+  unknown operator                 -> ERROR ReferenceError: Unrecognized operation: 'now'
+  present var                      -> true
+python-jsonlogic 0.2.0
+  missing var, approval when       -> ERROR Unresolvable: ParsedReference(reference='/payout', segments=['payout'])
+  missing var, as a conditional    -> ERROR Unresolvable: ParsedReference(reference='/payout', segments=['payout'])
+  misspelled outcome               -> false
+  text compared with a number      -> ERROR TypeError: '>' not supported between instances of 'int' and 'str'
+  loose equality 1 == "1"          -> false
+  empty list as a condition        -> "falsy"
+  text "0" as a condition          -> "truthy"
+  unknown operator                 -> ERROR UnknownOperator: now
+  present var                      -> true

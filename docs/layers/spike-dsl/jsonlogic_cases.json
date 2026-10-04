@@ -1,0 +1,11 @@
+[
+  {"name": "missing var, approval when", "rule": {">": [{"var": "payout"}, 1000]}, "data": {}},
+  {"name": "missing var, as a conditional", "rule": {"if": [{">": [{"var": "payout"}, 1000]}, "approval needed", "no approval"]}, "data": {}},
+  {"name": "misspelled outcome", "rule": {"==": [{"var": "assess.outcome"}, "aprove"]}, "data": {"assess": {"outcome": "approve"}}},
+  {"name": "text compared with a number", "rule": {">": [{"var": "payout"}, "1000"]}, "data": {"payout": 1500}},
+  {"name": "loose equality 1 == \"1\"", "rule": {"==": [1, "1"]}, "data": {}},
+  {"name": "empty list as a condition", "rule": {"if": [[], "truthy", "falsy"]}, "data": {}},
+  {"name": "text \"0\" as a condition", "rule": {"if": ["0", "truthy", "falsy"]}, "data": {}},
+  {"name": "unknown operator", "rule": {"now": []}, "data": {}},
+  {"name": "present var", "rule": {">": [{"var": "payout"}, 1000]}, "data": {"payout": 1500}}
+]
