@@ -16,7 +16,7 @@ uv add ventoux
 uv run ventoux init
 ```
 
-`ventoux init` creates a `cases/` folder and a development registry with example activities, such as
+`ventoux init` creates a `cases/` folder and a development catalog with example activities, such as
 `payments.refund@1`, which runs against a fake payment system.
 
 ## 2. Describe the case
@@ -198,7 +198,8 @@ Open a pull request: the same summary appears there, for your reviewers and your
 ## Next
 
 - **Deploy on Temporal:** run Ventoux on your own Temporal, release and activate a case.
-- **Add your own activity:** register a system call with its contract (for the platform team).
+- **Add your own activity:** register a system call with its contract (for the platform team; the
+  guide "Activities").
 - **Use an existing Temporal workflow as a step.**
 - **Change cases that are already open:** migration.
 - **When things fail:** retries, declined payments and the "needs attention" queue.
@@ -226,7 +227,7 @@ Writing the page surfaced decisions the brief doesn't make yet:
 5. **Untrusted fields need a short way to say so.** `source="untrusted:customer"` on a field is the
    first place a developer meets provenance. Decided in D12: three origins (system, person,
    untrusted), registered labels, and fields can be declared untrusted, never trusted.
-6. **`ventoux init` must ship a working registry**, or step 2 fails. That's the platform team's job in
+6. **`ventoux init` must ship a working catalog**, or step 2 fails. That's the platform team's job in
    production, but the quickstart needs it out of the box.
 7. **Plans never appeared.** A first case needs tasks and activities only. This supports
    presenting plans as an advanced concept (multi-step plans, AI drafting), not a day-one one

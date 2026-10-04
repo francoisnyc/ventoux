@@ -69,7 +69,7 @@ code, never `eval`.
   `when` holds, it needs an approval answer from someone with the approval's roles who is not
   excluded: the people who set the fields it uses, and who answered the steps its `when` reads.
   With no approval answer, the case waits ("approval of pay by support-lead"). Then it calls the
-  activity through a fake registry.
+  activity through a fake catalog.
 - **The case closes** when nothing is left to do: no step waiting.
 
 People and roles are a fixed directory: `ana` (support), `sam` (support, support-lead) (design
@@ -97,7 +97,7 @@ question 13).
 2. The quickstart's three tests, kept for good as acceptance tests: small refund paid, large refund
    waiting for a team lead, rejected review closes without paying.
 3. Negative: Ana can't approve the payment of a refund she reviewed; Sam can, and it is paid.
-4. Every `# TRACER:` comment names its layer (registry 1, expressions 2, validation 3,
+4. Every `# TRACER:` comment names its layer (catalog 1, expressions 2, validation 3,
    provenance 4, interpreter 5, Temporal 6, approvals and roles 7, case runtime 8).
 
 ## Done when

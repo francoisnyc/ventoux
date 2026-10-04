@@ -32,6 +32,8 @@ and record the key points. A question is closed once you can explain the answer 
 | 25 | D19: identities | closed |
 | 26 | Layer 0: core inside a workflow | open |
 | 27 | Tracer: running the quickstart | closed |
+| 28 | Card: catalog, contract, binding | open |
+| 29 | Layer 1: why `@1` and not `@1.0` | closed |
 
 ---
 
@@ -150,7 +152,24 @@ and record the key points. A question is closed once you can explain the answer 
   `risk-v2` must publish a manifest serving `risk.score@1` with the same hash, and an activity
   nobody picks up fails loudly on its schedule-to-start timeout. Keep the question open until you
   can explain "what vs where" without notes.
-- Status: open.
+  Answer from memory (an earlier layer 1 warm-up, in another session): only the deployment
+  binding changes; no new version or release. Right on every point: the contract (what) is untouched, so its hash and version stay;
+  a release records which contracts a package needs, not where they run; the binding (where) is an
+  operations change, protected by activation's check of manifests and live pollers.
+- Retrieval (layer 1 warm-up, this session), the same follow-up plus a twist: (c) the same week,
+  they also raise the scorer's start-to-close timeout from 10 s to 30 s. Answer: a) the registry gets the new
+  queue; b) no new contract version, no release; c) no change. Discussion: b is right, and it's the
+  "what vs where" half, now recalled without notes. a needs one word changed: the queue isn't in
+  the registry (which holds contracts: *what* is promised) but in production's **deployment
+  binding** (*where* it runs), so the registry and the contract hash don't move. c is the trap:
+  the retry policy and timeouts are part of the contract (D17), because cases depend on them (how
+  long a step may run before it needs attention) and may only tighten them, which needs a fixed
+  baseline. Any contract change needs a new number (D5), so it is `risk.score@2`, published side
+  by side with `@1`; CI's contract hash would fail a change made under `@1`. Packages adopt `@2`
+  by referencing it, which creates a release; cases on `@1` keep the 10 s timeout. Rule of thumb:
+  it's in the contract if a case could notice it or tighten it; where it runs is not.
+- Status: reopened; "what vs where" is solid now, the contents of a contract (D17) still need a
+  retrieval. Layer 1 builds exactly that.
 
 ## 10. Versions
 
@@ -483,4 +502,42 @@ and record the key points. A question is closed once you can explain the answer 
   so approvals (layer 7) depend on provenance, not only on roles. Smaller lessons: an example can
   pass while under-testing (the large-refund test), and a case waiting on a task had no defined
   report (design question 14).
+- Status: closed.
+
+## 28. Card: catalog, contract, binding
+
+> Three words, three questions. Without looking: what question does each answer, give an example,
+> and say what happens when it changes.
+
+| Word | Question it answers | Example | Changes when… |
+|---|---|---|---|
+| **Catalog** | What can a definition call? | `payments.refund@1`, `risk.score@1` | a contract is added or retired |
+| **Contract** | What does one entry promise? | schemas, risk, effect, retries, timeouts, idempotency, outcomes | never: a change is a new `@N` |
+| **Binding** | Where does it run, here? | production: queue `risk-v2` | operations move it; no version, no release |
+
+- In one line: the catalog lists contracts; each environment binds them.
+- The test: if changing it would change the contract hash, it's the contract. Another way to put
+  it: it's in the contract if a case could notice it or tighten it.
+- The analogy: an OpenAPI document (the catalog) keeps its operations (contracts) apart from its
+  `servers` per environment (bindings).
+- Why "catalog" and not "registry": design question 15.
+- Status: open (a card: kept in the warm-up rotation until all three come without the table).
+
+## 29. Layer 1: why `@1` and not `@1.0`
+
+> Why `@1` and not `@1.0`?
+
+- Your answer: because any change is a new contract, so there are no minor versions.
+- Discussion: right, that's the core. Two sharpenings. First, *any change to the contract*, not
+  to the code: a bug fix inside the refund adapter, with the same schemas, risk, retries and
+  outcomes, needs no new number (D5, implementation changes). Second, why a minor version would
+  hurt, not just be unneeded: semantic versioning lets "compatible" changes ship under the same
+  name and lets consumers float (`^1.0` picks up `1.1`), so one reference would mean different
+  promises over time. Ventoux needs a reference to mean one thing for good: an approval, a
+  release record and an audit ("which contract did this case use?") must have one answer, and the
+  hash can tell that a contract *changed* but never that the change is *compatible*, which is a
+  judgment. So a whole number, exact, with no ranges and nothing to resolve. Whether a change is
+  breaking still matters, but only for how much work packages need to adopt `@2`.
+- Follow-up: the payments team fixes a rounding bug inside the refund adapter's code; the contract
+  is unchanged. New version? New release? What tells the running cases?
 - Status: closed.

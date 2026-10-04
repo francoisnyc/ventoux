@@ -52,7 +52,7 @@ layers, under `src/ventoux/`:
 
 | Package | What it holds | May import |
 |---|---|---|
-| `core` | schema, expressions, registry, provenance, interpreter | nothing else in Ventoux |
+| `core` | schema, expressions, catalog, provenance, interpreter | nothing else in Ventoux |
 | `case` | case runtime, rules, validation, migration | `core` |
 | `temporal` | workflows, activities, worker, client | `core`, `case` |
 | `authoring` | AI drafting and the step advisor | `core`, `case` |

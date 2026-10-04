@@ -70,7 +70,7 @@ Every decision is checked against these five.
 - locally and in staging, releasing and activating are automatic; in production they are
   deliberate;
 - one folder is one package;
-- the registry ships with example activities and sensible policies;
+- the catalog ships with example activities and sensible policies;
 - identity is the trusted-caller model, with the engine reachable only through the Ventoux API (D19);
 - provenance and sink policies are set by the platform team on each activity; developers meet
   them only through validator errors, and every error says what was wrong, why, and what to do
@@ -83,7 +83,7 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
 1. **Definitions are data.** Plans and case definitions are JSON. Nothing in them is ever executed
    as code: no `eval`, no imports. Because they are data, they can be validated, rendered for people,
    compared between versions, migrated, and written by an AI.
-2. **Capabilities live in a registry.** Definitions *reference* activities (`claims.pay@1`); they
+2. **Capabilities live in a catalog.** Definitions *reference* activities (`claims.pay@1`); they
    never define them. Activities are ordinary code, registered with a contract: input and output
    schemas, a risk class, and policies on their inputs.
 3. **Every value carries its provenance.** Values are tagged with where they came from (a system, a
@@ -209,7 +209,7 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
 
 - A fourth kind of step, `workflow`, runs an existing Temporal workflow (in any SDK language) as a
   child workflow of the case.
-- It is described by a **workflow contract** in the registry: name and version, input and output
+- It is described by a **workflow contract** in the catalog: name and version, input and output
   schemas, risk class and effect, sink policies on inputs, the provenance of each output, and
   whether it can be cancelled. Its deployment binding gives the workflow type and task queue.
 - The engine checks admission, approvals, risk and sink policies before starting it, and tags its
@@ -428,7 +428,7 @@ be erased on request), has size limits, and a second copy of business records go
   so an `sla` still escalates during a long outage.
 - **Side effects are idempotent.** Every activity whose effect is not read-only declares how: it
   sends a key built from the case, the step and the step's run (never Temporal's attempt number).
-  The registry refuses a side-effecting contract without one. An adapter that receives "duplicate
+  The catalog refuses a side-effecting contract without one. An adapter that receives "duplicate
   request" returns the original result (the existing payment's ID), so the case records the real
   payment.
 - **Business failures are outcomes.** Declined, account closed: the contract declares them as
@@ -493,7 +493,7 @@ be erased on request), has size limits, and a second copy of business records go
 | Term | Meaning |
 |---|---|
 | Activity | A registered capability with a versioned contract (`name@version`), implemented as code |
-| Registry | What a deployment allows: activity and workflow contracts, resolvers, roles and source labels |
+| Catalog | What a deployment allows, never where it runs: activity and workflow contracts, resolvers, roles and source labels |
 | Plan | A step made of several calls and waits, written as data: a state machine whose states call activities, wait for answers, or end ("Charter" in Agentic Chartering and the prototype) |
 | Case definition | Long-running work: a typed case file, milestones, steps and rules |
 | Step | A unit of work in a case (an activity, a human task, a plan or a workflow) and when it may run |
@@ -531,7 +531,7 @@ authoring    AI drafting of plans · AI step advisor for cases             (uses
 temporal     plan and case workflows · activities · worker · client ·
              payload codec and key provider                              (uses Temporal)
 case         case runtime · rules · validation · migration · worklists (pure)
-core         schema · expressions · registry · provenance · validation · interpreter (pure)
+core         schema · expressions · catalog · provenance · validation · interpreter (pure)
 ```
 
 `core` and `case` stay free of Temporal and LLM dependencies, so they run in memory, in tests and
@@ -627,6 +627,25 @@ New questions found while building go here, numbered from 10.
       `approved_amount` unset, and the tracer only avoids reading it because `pay` doesn't run).
       D9 already asks the validator to warn about conditions on answers that may not exist; to
       check in layer 3 that this covers inputs too.
+15. **"Registry" or "catalog"?** (found in the layer 1 warm-up) Decided: **catalog**. To most
+    developers a registry says *where* things run (a service registry, Temporal registering
+    activities on a worker), and in the warm-up the queue was put "in the registry". A catalog
+    lists what can be ordered and what each item promises, never which warehouse ships it. Each
+    word answers one question: the **catalog** says what a definition can call; a **contract**
+    says what one entry promises (and never changes: a change is a new `@N`); a **deployment
+    binding** says where it runs in one environment. In short: the catalog lists contracts; each
+    environment binds them. The test: if changing it would change the contract hash, it's the
+    contract. "Binding" is kept (an environment *binds* a contract to a queue). The D5
+    **environment registry** keeps its name: it does record where things run (worker manifests).
+    Past entries in the learning log keep the old word.
+
+16. **Should a hash failure say what changed?** (found in layer 1's walk-through) Today CI says
+    "`payments.refund@1` changed without a new version", and the cause can be invisible: renaming
+    the input class or editing its docstring changes the JSON Schema, so the hash. A message such
+    as "`retry.maximum_attempts`: 5 → 9" would teach the rule each time it fires. But
+    `contracts.lock.json` stores only hashes. Options: store each contract's canonical promise in
+    the lockfile (bigger, but pull requests show a readable diff), or leave it to the semantic diff
+    (layer 13). To decide by layer 12 (releases), which also reads the recorded contracts.
 
 ## Prior art
 

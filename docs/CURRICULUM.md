@@ -18,7 +18,7 @@ files. Every layer should end up smaller and clearer than its prototype.
    persona) to describe the layer as if it already worked. If it is hard to explain, revisit the
    design before building.
 3. **Decide:** you agree on a short design note (a few paragraphs in `docs/layers/NN-name.md`).
-4. **Agree the seams:** name the public interfaces the tests will use (for example "the registry's
+4. **Agree the seams:** name the public interfaces the tests will use (for example "the catalog's
    lookup" or "`validate()` returns issues"), never internals, so the tests survive refactoring.
 5. **Build test-first, one slice at a time:** one failing test (start with the negative one) →
    the least code that passes it → the next test. Watch each fail for the right reason. Don't write
@@ -54,7 +54,7 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
   loop that opens the case, runs `review`, checks `pay`'s condition and approval, runs it, and
   closes when nothing is left to do; and `ventoux.testing.run_case` with the shape the quickstart
   shows. Every crude part carries a `# TRACER:` comment naming the layer that replaces it
-  (registry: 1, expressions: 2, validation: 3, provenance: 4, interpreter: 5, Temporal: 6,
+  (catalog: 1, expressions: 2, validation: 3, provenance: 4, interpreter: 5, Temporal: 6,
   approvals and roles: 7, case runtime: 8).
 - **Tests:** the quickstart's three tests (small refund, large refund waiting for a team lead,
   rejected review), run against the JSON definition. They stay for good as acceptance tests: every
@@ -69,11 +69,11 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
   end to end.
 - **Check yourself:** what did running the quickstart teach you that reading it didn't?
 
-## 1. Activities and the registry
+## 1. Activities and the catalog
 
 - **Learn:** capabilities as versioned contracts; risk classes; why definitions only reference them.
 - **Build:** an activity contract (name, version, input and output schemas, risk, effect, retry
-  policy and timeouts, idempotency, declared failure outcomes; decision D17) and a registry with
+  policy and timeouts, idempotency, declared failure outcomes; decision D17) and a catalog with
   lookup by `name@version`. Two or three mock activities. First, close a loophole in layer 0's
   boundary test found in review: relative imports (`from ..temporal import worker`) aren't checked,
   so ban them with ruff's `TID252` rule, and every import names its layer.
@@ -153,7 +153,7 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 ## 6. Temporal adapter
 
 - **Learn:** workflows vs activities; signals and queries; replay; `continueAsNew`.
-- **Build:** a plan workflow running the same interpreter, activities wired to the registry with
+- **Build:** a plan workflow running the same interpreter, activities wired to the catalog with
   the retry policy and timeouts from their contracts and an idempotency key per step run (decision
   D17), a worker and a client, tests against Temporal's test server.
 - **Negative test:** a run whose history is replayed with changed code fails replay; a retried

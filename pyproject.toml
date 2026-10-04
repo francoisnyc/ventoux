@@ -25,6 +25,13 @@ line-length = 100
 # Python files only: code blocks in the docs are examples, kept as written.
 extend-exclude = ["*.md"]
 
+[tool.ruff.lint]
+# TID252: relative imports. Every import names its layer, so the boundary test can check it.
+extend-select = ["TID252"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
 [tool.mypy]
 strict = true
 files = ["src", "tests"]
