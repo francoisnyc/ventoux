@@ -33,6 +33,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 26 | Layer 0: core inside a workflow | open |
 | 27 | Tracer: running the quickstart | closed |
 | 28 | Card: catalog, contract, binding | open |
+| 29 | Layer 1: why `@1` and not `@1.0` | closed |
 
 ---
 
@@ -521,3 +522,22 @@ and record the key points. A question is closed once you can explain the answer 
   `servers` per environment (bindings).
 - Why "catalog" and not "registry": design question 15.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
+
+## 29. Layer 1: why `@1` and not `@1.0`
+
+> Why `@1` and not `@1.0`?
+
+- Your answer: because any change is a new contract, so there are no minor versions.
+- Discussion: right, that's the core. Two sharpenings. First, *any change to the contract*, not
+  to the code: a bug fix inside the refund adapter, with the same schemas, risk, retries and
+  outcomes, needs no new number (D5, implementation changes). Second, why a minor version would
+  hurt, not just be unneeded: semantic versioning lets "compatible" changes ship under the same
+  name and lets consumers float (`^1.0` picks up `1.1`), so one reference would mean different
+  promises over time. Ventoux needs a reference to mean one thing for good: an approval, a
+  release record and an audit ("which contract did this case use?") must have one answer, and the
+  hash can tell that a contract *changed* but never that the change is *compatible*, which is a
+  judgment. So a whole number, exact, with no ranges and nothing to resolve. Whether a change is
+  breaking still matters, but only for how much work packages need to adopt `@2`.
+- Follow-up: the payments team fixes a rounding bug inside the refund adapter's code; the contract
+  is unchanged. New version? New release? What tells the running cases?
+- Status: closed.
