@@ -6,6 +6,7 @@ See docs/layers/02-plan-expressions.md and docs/guides/expressions.md.
 import decimal
 import json
 from decimal import Decimal
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -42,6 +43,7 @@ from ventoux.core.expressions import (
     check,
     evaluate,
     parse_expression,
+    render,
 )
 
 NOT_AN_OPERATOR = (
@@ -812,3 +814,119 @@ def test_a_reference_compares_only_with_the_same_system() -> None:
         "==[1]: `==` compares values of the same type, "
         "and this is a reference to policies, not a reference to orders"
     )
+
+
+def test_render_refuses_what_it_does_not_know() -> None:
+    unknown = cast(Expression, {"now": []})
+    with pytest.raises(ExpressionInvalid) as refused:
+        render(unknown)
+    assert str(refused.value) == "can't render {'now': []}: it isn't a parsed expression"
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"var": "approved_amount"}, "approved_amount"),
+        ({"var": "review.outcome"}, "review.outcome"),
+        (Decimal("250.00"), "250.00"),
+        (True, "true"),
+        ("approve", '"approve"'),
+        ('say "yes" or no', '"say \\"yes\\" or no"'),
+        ({"exists": "approved_amount"}, "exists(approved_amount)"),
+    ],
+)
+def test_render_literals_and_fields(data: object, expected: str) -> None:
+    assert render(parse_expression(data)) == expected
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({">": [{"var": "approved_amount"}, 100]}, "approved_amount > 100"),
+        ({"!=": [{"var": "review.outcome"}, "reject"]}, 'review.outcome != "reject"'),
+        ({"and": [{"var": "urgent"}, {"var": "vip"}, True]}, "urgent and vip and true"),
+        ({"or": [{"var": "urgent"}, {"var": "vip"}]}, "urgent or vip"),
+        ({"!": [{"var": "urgent"}]}, "not urgent"),
+        ({"+": [{"var": "amount"}, 1, 2]}, "amount + 1 + 2"),
+        ({"/": [{"var": "amount"}, 3]}, "amount / 3"),
+        ({"if": [{"var": "urgent"}, 1, 0]}, "if urgent then 1 else 0"),
+        (
+            {"in": [{"var": "review.outcome"}, ["approve", "escalate"]]},
+            'review.outcome in ["approve", "escalate"]',
+        ),
+        (
+            {"cat": ["Refund of ", {"string": [{"var": "amount"}]}]},
+            'cat("Refund of ", string(amount))',
+        ),
+        ({"count": {"over": {"var": "items"}}}, "count(items)"),
+        (
+            {"count": {"over": {"var": "items"}, "where": HIGH}},
+            'count(items where item.risk == "high")',
+        ),
+        (
+            {"sum": {"over": {"var": "items"}, "value": {"item": "amount"}}},
+            "sum(item.amount over items)",
+        ),
+        (HIGH_TOTAL, 'sum(item.amount over items where item.risk == "high")'),
+    ],
+)
+def test_render_each_operator(data: object, expected: str) -> None:
+    assert render(parse_expression(data)) == expected
+
+
+A, B = {"var": "a"}, {"var": "b"}
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"and": [{"or": [A, B]}, {">": [{"var": "amount"}, 0]}]}, "(a or b) and amount > 0"),
+        ({"or": [{"and": [A, B]}, True]}, "(a and b) or true"),
+        ({"!": [{"and": [A, B]}]}, "not (a and b)"),
+        ({"-": [{"var": "amount"}, {"-": [{"var": "fee"}, 1]}]}, "amount - (fee - 1)"),
+        ({"-": [{"-": [{"var": "amount"}, {"var": "fee"}]}, 1]}, "(amount - fee) - 1"),
+        ({"*": [{"+": [{"var": "amount"}, 1]}, 2]}, "(amount + 1) * 2"),
+        ({"+": [{"var": "amount"}, {"*": [1, 2]}]}, "amount + 1 * 2"),
+        ({"==": [{"==": [A, B]}, True]}, "(a == b) == true"),
+        ({">": [{"if": [A, 1, 0]}, 0]}, "(if a then 1 else 0) > 0"),
+        ({"if": [A, {"if": [B, 1, 2]}, 3]}, "if a then (if b then 1 else 2) else 3"),
+        ({"and": [{"in": [A, ["x"]]}, {"!": [B]}]}, 'a in ["x"] and not b'),
+    ],
+)
+def test_render_brackets_only_what_needs_it(data: object, expected: str) -> None:
+    assert render(parse_expression(data)) == expected
+
+
+GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "expressions.md"
+
+
+def guide_table(header: str) -> list[tuple[str, str]]:
+    """The rows of the guide's table under `header`, as (first cell, second cell), code unquoted."""
+    lines = GUIDE.read_text().splitlines()
+    start = lines.index(header) + 2  # the header, then the |---| line
+    rows = []
+    for line in lines[start:]:
+        if not line.startswith("|"):
+            break
+        first, second = (cell.strip() for cell in line.strip("|").split(" | "))
+        rows.append((unquote(first), unquote(second)))
+    # An emptied table would run no tests and pass silently: fail closed here too.
+    assert rows, f"the guide's table {header} has no rows"
+    return rows
+
+
+def unquote(cell: str) -> str:
+    """A table cell's code without its backticks: `x` or `` x `` (when x holds a backtick)."""
+    return cell[3:-3] if cell.startswith("`` ") else cell[1:-1]
+
+
+@pytest.mark.parametrize(("stored", "reads_as"), guide_table("| Stored | Reads as |"))
+def test_the_guide_reads_as_the_renderer_renders(stored: str, reads_as: str) -> None:
+    assert render(parse_expression(json.loads(stored, parse_float=Decimal))) == reads_as
+
+
+@pytest.mark.parametrize(("wrote", "message"), guide_table("| You wrote | Refused with |"))
+def test_the_guide_refuses_as_the_check_refuses(wrote: str, message: str) -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(parse_expression(json.loads(wrote, parse_float=Decimal)), REFUND)
+    assert str(refused.value) == message

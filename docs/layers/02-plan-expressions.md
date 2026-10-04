@@ -130,7 +130,11 @@ parser; the walk is six lines, and later checks (types, provenance) walk the sam
 
 **The renderer** (choice 9). One line, with parentheses only where precedence needs them:
 
-- precedence from loosest to tightest: `or`, `and`, `not`, comparisons and `in`, `+ -`, `* /`;
+- precedence from loosest to tightest: `if`, `or`, `and`, `not`, comparisons and `in`, `+ -`,
+  `* /`; a child that binds no tighter than its parent is bracketed, so the line shows exactly
+  what is stored (`(amount - fee) - 1` is not `amount - (fee - 1)`), and an `and` inside an `or`
+  is always bracketed, though precedence wouldn't need it: `a and b or c` is easy to misread
+  (slice 9);
 - functions render as calls: `cat(…)`, `string(…)`, `exists(…)`, `count(…)`, `sum(…)`;
 - `if` renders as `if … then … else …`;
 - texts render in double quotes, with JSON escapes.
