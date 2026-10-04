@@ -1,8 +1,8 @@
 # Ventoux — design brief
 
 Status: draft, 2026-10-04; all design questions decided (D1–D20; D3 superseded by D20). Read this
-first; it is the short version of what we are building and why. The longer reference is `docs/design.md` in the
-`chartering` prototype.
+first; it is the short version of what we are building and why. The longer reference is
+`docs/design.md` in the `chartering` prototype.
 
 ## In one sentence
 
@@ -136,8 +136,9 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
 ### D3. Expressions are a small JSONata subset (superseded by D20)
 
 > **Superseded on 2026-10-04 by D20** (structured JSON), after the spike
-> (`docs/layers/spike-dsl.md`): JSONata reads a missing field as nothing, so an approval condition on a missing amount meant
-> "no approval needed". Kept as written, so references to D3 and the history stay true.
+> (`docs/layers/spike-dsl.md`): JSONata reads a missing field as nothing, so an approval condition
+> on a missing amount meant "no approval needed". Kept as written, so references to D3 and the
+> history stay true.
 
 
 - Allowed: field paths, literals, comparisons, `and`/`or`/`not`, arithmetic, conditionals, simple
