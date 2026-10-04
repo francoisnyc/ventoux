@@ -1,6 +1,6 @@
 # Ventoux — design brief
 
-Status: draft, 2026-10-03; all design questions decided (D1–D19). Read this first; it is the short
+Status: draft, 2026-10-04; all design questions decided (D1–D19). Read this first; it is the short
 version of what we are building and why. The longer reference is `docs/design.md` in the
 `chartering` prototype.
 
@@ -133,26 +133,52 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
 - Short sequences without people stay inside a plan. Anything that waits on people or runs for
   days is a case step, where it can change.
 
-### D3. Expressions are a small JSONata subset
+### D3. Expressions are structured JSON with a fixed list of operators
 
-- Allowed: field paths, literals, comparisons, `and`/`or`/`not`, arithmetic, conditionals, simple
-  array filters, and a short list of functions (`$exists`, `$count`, `$sum`, `$contains`,
-  `$string`, `$number`, …). The JSONata engine evaluates them; the validator rejects anything else.
-- Not allowed: user-defined functions, `$map`/`$reduce` and other higher-order functions, regular
-  expressions, variable bindings, and anything non-deterministic.
-- Logic that doesn't fit becomes a registered activity with `effect: compute`: real code, tested
-  and reviewed.
-- Typed builder expressions (`file.payout > 1000` written with typed field objects) compile to this
-  subset.
-- CEL (Common Expression Language) is compared on the same examples in the curriculum's spike.
+- **Stored as structured JSON:** a literal, a field (`{"var": "approved_amount"}`), or one operator
+  with its arguments (`{">": [{"var": "approved_amount"}, 100]}`). No parser: Pydantic validates the
+  shape, the fields an expression reads are explicit (provenance, D12), it diffs exactly and hashes
+  canonically (D5), and the published JSON Schema constrains what a model can write (layer 15).
+- **Written** through the Python builder (`approved_amount > 100` with typed field objects) or, at
+  runtime, by a model under the JSON Schema. **Read** as a one-line rendering (`approved_amount >
+  100`) in diffs and reviews, and in plain language by analysts. No text syntax is parsed in v1.
+- **The operators:** `var` (a declared field) and literals; `==`, `!=`, `>`, `>=`, `<`, `<=`; `and`,
+  `or`, `!`; `+`, `-`, `*`, `/`; `if` (condition, then, else); `in` (membership in a list); `cat`
+  and `string`; `exists`; `count`; `sum` over a list field with a simple `where`, reading each
+  element with `item`.
+- **Names follow JsonLogic where ours are only stricter.** An operator takes JsonLogic's name when,
+  whenever ours returns a value, JsonLogic returns the same one: ours may only refuse more. Refused:
+  a default in `var`, `var` of the whole data, `if` chains, truthiness (conditions are `true` or
+  `false`), coercion in `==` and `cat`. Where the shape or meaning differs, the name is ours (`sum`,
+  `count`, `exists`, `string`, `item`), so nobody assumes JsonLogic's behaviour.
+- **Typed, and fail closed.** Checked before running against the declared field types, with one
+  `number` type and outcomes as closed lists, so a misspelled outcome (`"aprove"`) is rejected. At
+  runtime a missing field, a wrong type or an unknown operator is an error, never `false`; `and` and
+  `or` evaluate every operand, so an error is never hidden. Why: JSONata, the earlier choice, reads
+  a missing field as nothing, and the prototype's `holds()` turned that into `false`, so an approval
+  condition on a missing amount meant "no approval needed".
+- **Numbers are exact decimals, never binary floats.** JSON numbers are read as decimals, and both
+  evaluators use exact decimal arithmetic, so `0.1 + 0.2 == 0.3` holds and money agrees with the
+  contracts (`payments.refund@1` takes a `Decimal`). A division that doesn't terminate (`1 / 3`)
+  keeps 34 significant digits, rounding half to even (IEEE 754 decimal128), set explicitly in both
+  evaluators, never taken from a global default. Division by zero is an error. Rounding is not an
+  operator: a `compute` activity does it, with an explicit scale and mode.
+- **Deterministic by construction.** No operator reads the clock, randomness or I/O, and there are
+  no user-defined or higher-order functions, variable bindings or regular expressions. They can't be
+  written, so there is nothing to refuse.
+- **The list is fixed here.** Adding an operator is a design decision recorded in this brief, with
+  its reason, not a code change. Logic that doesn't fit becomes a registered activity with
+  `effect: compute`: real code, tested and reviewed. The TypeScript evaluator (for the inbox) passes
+  the same conformance suite as the Python one (D4), so the two can't drift.
+- Compared in the spike (`docs/layers/spike-dsl.md`) with the JSONata subset, CEL and JsonLogic.
 
 ### D4. The engine is written in Python
 
 - Why: the team that will use and maintain Ventoux works mostly in Python (and Java). The people who
   live with the engine must be able to read, debug and extend it.
 - Stack: Python 3.12+, Pydantic for schemas, pytest, strict type checking (pyright or mypy strict),
-  the Temporal Python SDK (its workflow sandbox helps catch non-determinism), and `jsonata-python`, a
-  native port of the JSONata reference implementation.
+  and the Temporal Python SDK (its workflow sandbox helps catch non-determinism). Expressions need
+  no library: their evaluator is a small part of `core` (D3).
 - No lock-in to the engine language: the definition format is published as **JSON Schema**
   (generated from Pydantic), and a **conformance suite** (definitions, expected validation results
   and run histories) checks any implementation, including the TypeScript prototype.
@@ -540,7 +566,7 @@ inside a Temporal workflow alike.
 ## Non-negotiables
 
 - Definitions are data. Never `eval`, `exec`, `compile`, import or unpickle anything from them.
-- Expressions are pure and deterministic, limited to the subset in D3.
+- Expressions are pure and deterministic, limited to the operators listed in D3.
 - Every side effect goes through a registered activity.
 - The interpreter is deterministic, so it runs as a Temporal workflow and survives replay.
 - Every value carries provenance; sink policies are checked before an activity is scheduled.
@@ -560,13 +586,14 @@ inside a Temporal workflow alike.
 ## Out of scope for v1.0
 
 A visual editor, a polished production UI (v1.0 ships the API and a reference inbox, which draws
-task forms from field types; there is no form designer), broker connectors, BPMN or CMMN import,
-multi-tenancy, code inside definitions (scripts, listeners), and the deferred features listed above.
+task forms from field types; there is no form designer), broker connectors, BPMN, CMMN or
+Serverless Workflow import, multi-tenancy, code inside definitions (scripts, listeners), and the
+deferred features listed above.
 
 ## Design questions (all decided)
 
 1. JSON or code first: D1.
-2. Expressions: D3, with CEL compared in the spike.
+2. Expressions: D3, structured JSON, decided in the spike.
 3. Is a plan the right unit inside a case: no, kinds of step (Simplifications, D13).
 4. Existing Temporal workflows as steps: D6.
 5. Signed identities as the production default: D19, for high-risk approvals after v1.0.
@@ -599,7 +626,8 @@ New questions found while building go here, numbered from 10.
     structured. To decide in the spike before layer 2, on the claim-case examples, judged on
     readability for people, parsing, typing, provenance analysis, schema-constrained model output,
     exact diffs, determinism and Python support. The tracer bullet uses a minimal structured form,
-    marked `# TRACER: layer 2`, which commits to neither.
+    marked `# TRACER: layer 2`, which commits to neither. **Decided in the spike:** structured JSON
+    with a fixed list of operators (D3; `docs/layers/spike-dsl.md`).
 12. **Who has which role in `run_case`?** (found in the tracer bullet) The quickstart's tests name
     people (`"ana"`) but never say where their roles come from. The tracer uses a fixed directory
     (`ana`: support; `sam`: support, support-lead). To decide in layer 7: roles passed to
@@ -654,5 +682,7 @@ New questions found while building go here, numbered from 10.
 
 Agentic Chartering (plans as checked data, which it calls Charters, and the trust model), CaMeL
 (provenance), CMMN and Flowable (case concepts), Temporal (durable execution), AWS CDK and Pulumi
-(code that produces checked artifacts), `jsonata-python` (expressions). The `chartering` prototype
-is a TypeScript reference. See "Related work" in the README draft.
+(code that produces checked artifacts), JsonLogic (operator names for expressions) and CEL (strict
+types, errors instead of defaults). Serverless Workflow 1.0 was compared in the spike and not
+adopted: our guarantees fall outside it (`docs/layers/spike-dsl.md`). The `chartering` prototype is
+a TypeScript reference. See "Related work" in the README draft.
