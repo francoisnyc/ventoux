@@ -131,7 +131,10 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 
 ## 3. Static validation
 
-- **First:** the readability refactor of layer 1's `core/catalog.py` (agreed in the tutor session):
+- **First:** the readability refactor of layer 2's `core/expressions.py` (1,043 lines, five jobs):
+  split it into a package, one module per job (the models and parsing, the type check, evaluation,
+  rendering), as a pure move: no behaviour change, tests unchanged and green. Then the same for
+  layer 1's `core/catalog.py` (agreed in the tutor session):
   split it into `contract.py` (a contract and what it refuses), `catalog.py` (lookup) and
   `contract_hash.py` (the hash and the CI check); a one-line comment per field; a comment on each
   Pydantic idiom the first time it appears; the reference check readable (commented or a small
