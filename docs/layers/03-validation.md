@@ -25,14 +25,16 @@ It opens with a refactor, so the two files it builds on are easy to read first.
 
 ### `core/expressions.py` becomes a package
 
-The arrows run one way: every module below imports `model`, and none imports another.
+The arrows run one way: every module below imports `model`; besides that, only `evaluate`
+imports `render`, to name the fields in a division-by-zero message (`amount / items`). Nothing
+imports `parse`, `check` or `evaluate` except `__init__`.
 
 | Module | Holds |
 |---|---|
-| `expressions/model.py` | what an expression is: `OPERATORS`, the decimal128 `CONTEXT` and `fits_decimal128`, `Value` and `Expression`, one model per operator, the field types, `ExpressionInvalid` and `ExpressionError` |
+| `expressions/model.py` | what an expression is: `OPERATORS`, the decimal128 `CONTEXT` and `fits_decimal128`, `Value` and `Expression`, one model per operator, the field types, `ExpressionInvalid` and `ExpressionError`, and `kind` (a value's type name, which parse, check and evaluate all use) |
 | `expressions/parse.py` | JSON to an expression: `parse_expression`, the depth limit, the `item` walk, `in`'s list |
 | `expressions/check.py` | `check`: an expression's type against the declared fields |
-| `expressions/evaluate.py` | `evaluate`: an expression's value against the case file, failing closed |
+| `expressions/evaluate.py` | `evaluate`: an expression's value against the case file, failing closed; `Element`, the list record `item` reads |
 | `expressions/render.py` | `render`: one line in FEEL style, such as `review.outcome = "approve" and amount > 100` |
 | `expressions/__init__.py` | re-exports the public names, listed in `__all__` |
 
