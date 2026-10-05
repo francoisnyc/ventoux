@@ -237,6 +237,13 @@ Decided while building (slices 6 to 9):
   activity behind it is also `APPROVAL_REQUIRED` (fail closed).
 - The guide's table was checked by breaking it: a changed word, and an unknown code, each fail.
 
+**The tracer's "validator comes in layer 3".** `testing.load_definition` said nothing is checked
+before the case runs, "the validator comes in layer 3". But the quickstart's `refund.json` is a
+case definition, and this layer validates plans: a case definition has no schema to check against
+until layer 8, and case validation is layer 10. The tracer was written before the curriculum split
+plan validation from case validation, so its comment now names layer 8 (agreed in the session),
+rather than this layer building ahead.
+
 Not in this layer: whether an input's type matches the contract's (the contract's schema would
 need mapping to field types; layer 5 checks inputs when the step runs); a transition listed after
 one with no `when`, which can never be taken (not on the agreed list); provenance and sink
