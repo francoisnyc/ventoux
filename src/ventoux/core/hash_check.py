@@ -5,7 +5,7 @@ from ventoux.core.contract_hash import contract_hash
 
 
 def check_hashes(catalog: Catalog, recorded: dict[str, str]) -> list[str]:
-    """What CI reports: contracts changed without a new version (D5), and unrecorded ones."""
+    """What CI reports: contracts changed without a new version (brief, D5), and unrecorded ones."""
     problems: list[str] = []
     for contract in catalog.contracts():
         digest = contract_hash(contract)

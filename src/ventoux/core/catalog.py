@@ -1,6 +1,6 @@
 """The catalog: the activities a definition can call, each looked up by its reference."""
 
-from ventoux.core.contract import REFERENCE, ActivityContract
+from ventoux.core.contract import ActivityContract, is_reference
 from ventoux.core.contract_hash import contract_hash
 
 
@@ -16,10 +16,11 @@ class Catalog:
     """Contracts by reference. Contracts only, never implementations: `core` runs no I/O."""
 
     def __init__(self) -> None:
-        self._contracts: dict[str, ActivityContract] = {}
+        self._contracts: dict[str, ActivityContract] = {}  # by reference, `payments.refund@1`
 
     def register(self, contract: ActivityContract) -> None:
-        # A name stands for one promise for good (D5): a changed promise needs a new version.
+        # A reference stands for one promise for good: a changed promise needs a new version
+        # (brief, D5).
         registered = self._contracts.get(contract.reference)
         if registered is not None and contract_hash(registered) != contract_hash(contract):
             raise ContractConflict(
@@ -39,7 +40,7 @@ class Catalog:
         return sorted(self._contracts.values(), key=lambda c: c.reference)
 
     def get(self, reference: str) -> ActivityContract:
-        if not REFERENCE.fullmatch(reference):
+        if not is_reference(reference):
             raise NotInCatalog(
                 f"{reference!r} is not a reference: a reference is name@N, such as "
                 "payments.refund@1, with a whole-number version."
