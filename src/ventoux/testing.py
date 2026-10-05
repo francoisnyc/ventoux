@@ -8,7 +8,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from ventoux.case.runner import Activity, AnswerRefused, Run, run
-from ventoux.core.catalog import ActivityContract, Catalog, Display, RetryPolicy, Timeouts
+from ventoux.core.catalog import Catalog
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 
 __all__ = ["AnswerRefused", "load_definition", "run_case"]
 

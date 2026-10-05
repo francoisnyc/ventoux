@@ -20,7 +20,7 @@ from pydantic import (
     ValidationError,
 )
 
-from ventoux.core.catalog import REFERENCE
+from ventoux.core.contract import REFERENCE
 from ventoux.core.expressions import (
     BooleanType,
     Expression,
