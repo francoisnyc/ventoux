@@ -21,6 +21,9 @@ from ventoux.core.expressions.check import a_type
 from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
+# An approval is a wait offering exactly these two outcomes; `approve` is reserved for it
+# (brief, D11).
+APPROVE, REJECT = "approve", "reject"
 
 
 @dataclass(frozen=True)
@@ -61,7 +64,7 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
                     issues += expression_issues(
                         f"{path}.when", transition.when, plan.fields, condition=True
                     )
-    return issues + graph_issues(plan)
+    return issues + graph_issues(plan, catalog)
 
 
 def activity_issues(path: str, state: ActivityState, catalog: Catalog) -> list[Issue]:
@@ -89,6 +92,16 @@ def wait_issues(path: str, name: str, state: WaitState) -> list[Issue]:
                 "RESERVED_OUTCOME",
                 f"{TIMEOUT} is the event of a wait's timeout, not an outcome: "
                 "name the outcome differently",
+            )
+        )
+    if APPROVE in state.wait.outcomes and not is_approval(state):
+        issues.append(
+            Issue(
+                f"{path}.wait.outcomes",
+                "APPROVAL_OUTCOMES",
+                f"a wait offering {APPROVE} is an approval, and offers exactly {APPROVE} and "
+                f"{REJECT}; this one offers {', '.join(state.wait.outcomes)}: use another word "
+                f"than {APPROVE}",
             )
         )
     # A wait gives one of its outcomes, or `timeout` when it declares one.
@@ -232,8 +245,9 @@ def reach(starts: set[str], through: list[Arrow], backwards: bool = False) -> se
     return seen
 
 
-def graph_issues(plan: Plan) -> list[Issue]:
-    """What reading the plan as a graph proves: every state reachable, and the plan able to end."""
+def graph_issues(plan: Plan, catalog: Catalog) -> list[Issue]:
+    """What reading the plan as a graph proves: every state reachable, the plan able to end, and
+    every high-risk activity behind an approval."""
     if plan.initial not in plan.states:
         return []  # already an issue; with no start, reachability would only repeat it
     issues: list[Issue] = []
@@ -260,7 +274,67 @@ def graph_issues(plan: Plan) -> list[Issue]:
                     f"the plan can never end from {name}: add a path to a final state",
                 )
             )
+    return issues + approval_issues(plan, catalog, every)
+
+
+def is_approval(state: object) -> bool:
+    """Whether `state` is an approval: a wait offering exactly `approve` and `reject` (brief, D11).
+    A wait offering `approve` with anything else is an issue, and approves nothing (fail closed)."""
+    return isinstance(state, WaitState) and sorted(state.wait.outcomes) == [APPROVE, REJECT]
+
+
+def is_high_risk(state: object, catalog: Catalog) -> bool:
+    """Whether `state` calls a high-risk activity. One the catalog doesn't hold is already an issue
+    (UNKNOWN_ACTIVITY), so it adds no approval issue of its own."""
+    if not isinstance(state, ActivityState):
+        return False
+    try:
+        return catalog.get(state.activity).risk == "high"
+    except NotInCatalog:
+        return False
+
+
+def approval_issues(plan: Plan, catalog: Catalog, every: list[Arrow]) -> list[Issue]:
+    """Every high-risk activity behind an approval, on every path from `initial`."""
+    # Follow every arrow except an approval's `approve`: what is reached this way runs unapproved.
+    unapproved = [
+        a for a in every if not (a.event == APPROVE and is_approval(plan.states[a.source]))
+    ]
+    reached = reach({plan.initial}, unapproved)
+    issues: list[Issue] = []
+    for name, state in plan.states.items():
+        if name in reached and isinstance(state, ActivityState) and is_high_risk(state, catalog):
+            path = " → ".join(shortest_path(plan.initial, name, unapproved))
+            issues.append(
+                Issue(
+                    f"states.{name}",
+                    "APPROVAL_REQUIRED",
+                    f"{state.activity} is high risk, and {path} reaches it without an approval: "
+                    f"route every path to {name} through an approval",
+                )
+            )
     return issues
+
+
+def shortest_path(start: str, goal: str, through: list[Arrow]) -> list[str]:
+    """The fewest states from `start` to `goal` along `through`, both included; `goal` must be
+    reachable. Searched breadth first: nearer states before farther ones."""
+    came_from: dict[str, str] = {}
+    waiting = [start]
+    seen = {start}
+    while waiting:
+        here = waiting.pop(0)
+        if here == goal:
+            break
+        for arrow in through:
+            if arrow.source == here and arrow.target not in seen:
+                seen.add(arrow.target)
+                came_from[arrow.target] = here
+                waiting.append(arrow.target)
+    path = [goal]
+    while path[-1] != start:
+        path.append(came_from[path[-1]])
+    return path[::-1]
 
 
 def each_transition(path: str, transitions: tuple[Transition, ...]) -> list[tuple[str, Transition]]:

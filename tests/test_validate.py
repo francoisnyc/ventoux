@@ -299,3 +299,40 @@ def test_from_every_state_the_plan_can_end() -> None:
             "the plan can never end from retry_payment: add a path to a final state",
         )
     ]
+
+
+def guide_fork() -> dict[str, Any]:
+    """The guide's plan with its second JSON block, the fork that skips the approval."""
+    block = GUIDE.read_text().split("```json\n")[2].split("```")[0]
+    fork: dict[str, Any] = json.loads("{" + block + "}", parse_float=Decimal)
+    return changed(**fork)
+
+
+def test_an_approval_offers_exactly_approve_and_reject() -> None:
+    plan = approval_with({"outcomes": ["approve", "edit"]}, {"approve": "pay", "edit": "failed"})
+    assert with_code(plan, "APPROVAL_OUTCOMES") == [
+        Issue(
+            "states.approve_refund.wait.outcomes",
+            "APPROVAL_OUTCOMES",
+            "a wait offering approve is an approval, and offers exactly approve and reject; "
+            "this one offers approve, edit: use another word than approve",
+        )
+    ]
+    # Fail closed: a wait that isn't a proper approval approves nothing.
+    assert [issue.code for issue in issues(plan)] == ["APPROVAL_OUTCOMES", "APPROVAL_REQUIRED"]
+
+
+def test_a_high_risk_activity_is_never_reached_without_an_approval() -> None:
+    assert issues(guide_fork()) == [
+        Issue(
+            "states.pay",
+            "APPROVAL_REQUIRED",
+            "payments.refund@1 is high risk, and check_order → pay reaches it without an "
+            "approval: route every path to pay through an approval",
+        )
+    ]
+
+
+def test_a_low_risk_activity_needs_no_approval() -> None:
+    # orders.lookup@1 is low risk: check_order runs first, before any approval, and that's fine.
+    assert with_code(guide_plan(), "APPROVAL_REQUIRED") == []
