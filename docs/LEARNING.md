@@ -562,6 +562,13 @@ and record the key points. A question is closed once you can explain the answer 
   queue, not a case. The examples and the "changes when…" column didn't come back: a catalog
   changes when a contract is added or retired; a contract never changes (a change is a new `@N`);
   a binding changes when operations move it, with no new version and no release.
+  Check: `payments.refund@1` (a) moves to queue `payments-v2`, (b) its start-to-close timeout goes
+  from 30 s to 60 s. Answer: both only update the binding. (a) right. (b) is the same trap as
+  question 9's twist: timeouts and retries are in the contract (D17), because a case can notice
+  them (how long a step may run before it needs attention) and may only tighten them, which needs
+  a fixed baseline. So (b) is `payments.refund@2`, CI's hash check would refuse it under `@1`, and
+  packages adopt `@2` through a release. Rule: what the activity promises is the contract; where
+  it runs is the binding.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
 
 ## 29. Layer 1: why `@1` and not `@1.0`
