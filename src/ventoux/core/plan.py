@@ -102,7 +102,7 @@ class Shape(BaseModel):
 
 
 class Display(Shape):
-    """What people read: presentation, outside the plan's behaviour (D5)."""
+    """What people read: presentation, outside the plan's behaviour (brief, D5)."""
 
     title: str = Field(min_length=1)
     description: str = ""
@@ -127,7 +127,7 @@ class ActivityState(Shape):
 
 
 class Wait(Shape):
-    """A closed list of answers (D9), and how long to wait for one."""
+    """A closed list of answers, and how long to wait for one (brief, D9)."""
 
     outcomes: Annotated[tuple[EventName, ...], AfterValidator(some_outcomes)]
     timeout: Duration | None = None

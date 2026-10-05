@@ -163,7 +163,7 @@ def decides(condition: Any, values: dict[str, Any]) -> bool:
 
 
 # TRACER: answers are read by their declared types in layer 7, the case file in layer 8. Here a
-# whole number becomes the exact decimal expressions read (D3), and anything else passes as is.
+# whole number becomes the exact decimal expressions read, and anything else passes as is.
 def case_value(value: Any) -> Any:
     """`value` as the case file holds it: a whole number as a `Decimal`."""
     return Decimal(value) if isinstance(value, int) and not isinstance(value, bool) else value

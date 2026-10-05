@@ -34,7 +34,7 @@ The one-line form is for reading only. Nothing parses it back: what is stored is
 
 ## The operators
 
-The list is fixed (decision D3 in the brief). Adding an operator is a design decision, not a code
+The list is fixed (decision D20 in the brief). Adding an operator is a design decision, not a code
 change.
 
 | Operator | Takes | Gives |

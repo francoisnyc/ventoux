@@ -1,4 +1,4 @@
-"""Expressions: structured JSON with the operators of decision D3 (layer 2)."""
+"""Expressions: structured JSON with a fixed list of operators (layer 2; brief, D20)."""
 
 import json
 from collections.abc import Mapping
@@ -8,8 +8,8 @@ from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# The fixed list (D3). Adding an operator is a design decision recorded in the brief, never just a
-# code change.
+# The fixed list of operators. Adding one is a design decision recorded in the brief, never just a
+# code change (brief, D20).
 OPERATORS = (
     "var",
     "==",
@@ -35,9 +35,10 @@ OPERATORS = (
     "item",
 )
 
-# Arithmetic as IEEE 754 decimal128 (D3): 34 significant digits, rounding half to even, exponents
+# Arithmetic as IEEE 754 decimal128: 34 significant digits, rounding half to even, exponents
 # within ±6144, and an error rather than a special value when something goes wrong. Passed to every
-# operation explicitly, so the process-wide `decimal.getcontext()` never decides a result.
+# operation explicitly, so the process-wide `decimal.getcontext()` never decides a result
+# (brief, D20).
 CONTEXT = Context(
     prec=34,
     rounding=ROUND_HALF_EVEN,
@@ -271,7 +272,7 @@ type FieldType = NumberType | StringType | BooleanType | OutcomeType | Reference
 
 
 class NumberType(Node):
-    """A number: one type, exact decimal (D3)."""
+    """A number: one type, exact decimal (brief, D20)."""
 
     type: Literal["number"] = "number"
 
@@ -289,14 +290,14 @@ class BooleanType(Node):
 
 
 class OutcomeType(Node):
-    """A task's answer: a closed list of names (D9)."""
+    """A task's answer: a closed list of names (brief, D9)."""
 
     type: Literal["outcome"] = "outcome"
     outcomes: tuple[str, ...] = Field(min_length=1)
 
 
 class ReferenceType(Node):
-    """The ID of a record kept in another system, typed by that system's name (D16)."""
+    """The ID of a record kept in another system, typed by that system's name (brief, D16)."""
 
     type: Literal["reference"] = "reference"
     system: str
@@ -351,7 +352,7 @@ def parse(data: object) -> Expression:
             raise ExpressionInvalid(f"{data} is not a number an expression can use")
         return Decimal(data)
     if isinstance(data, float):
-        # Refused, not converted: the reader already turned 0.1 into a binary approximation (D3).
+        # Refused, not converted: the reader already turned 0.1 into a binary approximation.
         raise ExpressionInvalid(
             f"{data} is a binary float, and numbers must be exact decimals: read the JSON with "
             "json.loads(text, parse_float=Decimal)"
@@ -372,7 +373,8 @@ def parse(data: object) -> Expression:
                 "Logic that doesn't fit is a compute activity."
             )
         if operator == "var":
-            # Stricter than JsonLogic (D3): no default to fall back on, and no reading everything.
+            # No default to fall back on, and no reading everything: stricter than JsonLogic
+            # (brief, D20).
             if not isinstance(arguments, str) or not arguments:
                 raise ExpressionInvalid(
                     'var takes the name of one field, like {"var": "approved_amount"}: '
@@ -434,7 +436,7 @@ def parsed_arguments(
         return [parse(argument) for argument in arguments]
     plural = "argument" if count == 1 and not or_more else "arguments"
     more = " or more" if or_more else ""
-    # `!` alone gets an example: JsonLogic also accepts `{"!": x}`, which we refuse (D3).
+    # `!` alone gets an example: JsonLogic also accepts `{"!": x}`, which we refuse.
     example = ', like {"!": [x]}' if operator == "!" else ""
     raise ExpressionInvalid(f"`{operator}` takes a list of {count}{more} {plural}{example}")
 
@@ -546,7 +548,7 @@ def type_of(
             )
         for position, literal in enumerate(expression.args[1]):
             if isinstance(found, OutcomeType) and isinstance(literal, str):
-                # Outcomes are closed lists (D9), in a list as in `==`.
+                # Outcomes are closed lists, in a list as in `==` (brief, D9).
                 if literal not in found.outcomes:
                     raise refused(
                         inside(path, f"in[1][{position}]"),
@@ -576,7 +578,8 @@ def type_of(
         for argument, step, other, other_argument in zip(
             expression.args, steps, reversed(types), reversed(expression.args), strict=True
         ):
-            # Outcomes are closed lists (D9), so a misspelled one is caught here, not at runtime.
+            # Outcomes are closed lists, so a misspelled one is caught here, not at runtime
+            # (brief, D9).
             if isinstance(other, OutcomeType) and isinstance(argument, str):
                 if argument not in other.outcomes:
                     raise refused(
@@ -585,7 +588,7 @@ def type_of(
                         f"its outcomes are {', '.join(other.outcomes)}",
                     )
                 return BooleanType()
-        # Otherwise the same type on both sides: a reference only to the same system (D16).
+        # Otherwise the same type on both sides: a reference only to the same system (brief, D16).
         if types[0] != types[1]:
             raise refused(
                 steps[1],
@@ -762,7 +765,7 @@ def evaluate(
         return compare(expression.operator, left, right)
     if isinstance(expression, And | Or):
         # Every part is evaluated before combining, so an error is never hidden behind a part
-        # that already decided the answer (D3). Python's `all` and `any` would stop early.
+        # that already decided the answer (brief, D20). Python's `all` and `any` would stop early.
         parts = [
             boolean(expression.operator, evaluate(a, values, element)) for a in expression.args
         ]
@@ -839,7 +842,7 @@ def matching(
 def readable(name: str, value: object, where: str = "") -> Value:
     """`value` of the field `name`, if an expression can read it, else `ExpressionError`."""
     if value is None:
-        # Fail closed: a missing value is an error that stops the step, never `false` (D3).
+        # Fail closed: a missing value is an error that stops the step, never `false` (brief, D20).
         raise ExpressionError(f"{name} has no value{where}")
     # The case file is data from outside: check what it holds, never assume it.
     if not isinstance(value, bool | str | Decimal):
@@ -888,7 +891,7 @@ def calculate(operator: str, a: Decimal, b: Decimal) -> Decimal:
 def compare(operator: str, left: Value, right: Value) -> bool:
     """`left` and `right` compared by one of the six comparison operators."""
     if operator in ("==", "!="):
-        # No coercion (D3): in Python `True == 1`, so the types are compared first.
+        # No coercion: in Python `True == 1`, so the types are compared first (brief, D20).
         if kind(left) != kind(right):
             raise ExpressionError(
                 f"`{operator}` compares values of the same type, "
@@ -910,7 +913,7 @@ def compare(operator: str, left: Value, right: Value) -> bool:
 
 
 def boolean(operator: str, value: Value) -> bool:
-    """`value` as a boolean for `operator`; nothing is truthy (D3)."""
+    """`value` as a boolean for `operator`; nothing is truthy (brief, D20)."""
     if not isinstance(value, bool):
         verb = "takes a boolean" if operator in ("!", "if", "where") else "combines booleans"
         raise ExpressionError(
@@ -930,7 +933,7 @@ def text(value: Value) -> str:
 
 
 def number(operator: str, value: Value) -> Decimal:
-    """`value` as a number for `operator`; no coercion from a text or a boolean (D3)."""
+    """`value` as a number for `operator`; no coercion from a text or a boolean (brief, D20)."""
     if not isinstance(value, Decimal):
         verb = {
             "+": "adds",

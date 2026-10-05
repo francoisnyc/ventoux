@@ -129,7 +129,7 @@ PEOPLE: dict[str, set[str]] = {"ana": {"support"}, "sam": {"support", "support-l
 def load_definition(path: Path) -> dict[str, Any]:
     """Read a case definition from its JSON file (I/O, so here and not in `case`)."""
     # TRACER: nothing is checked before the case runs; the validator comes in layer 3.
-    # Numbers as exact decimals, never binary floats (D3).
+    # Numbers as exact decimals, never binary floats (brief, D20).
     definition: dict[str, Any] = json.loads(path.read_text(), parse_float=Decimal)
     return definition
 

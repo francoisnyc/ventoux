@@ -1,4 +1,4 @@
-"""Expressions: structured JSON with D3's operators, checked and evaluated fail closed (layer 2).
+"""Expressions: structured JSON with a fixed list of operators, checked and evaluated fail closed.
 
 See docs/layers/02-plan-expressions.md and docs/guides/expressions.md.
 """
@@ -139,7 +139,7 @@ def test_a_value_an_expression_cannot_read_is_an_error() -> None:
 
 @pytest.mark.parametrize("arguments", [[1], [1, 2, 3], 1])
 def test_a_comparison_takes_two_arguments(arguments: object) -> None:
-    # JsonLogic reads `{"<": [1, x, 3]}` as "between"; ours refuses it (D3: only stricter).
+    # JsonLogic reads `{"<": [1, x, 3]}` as "between"; ours refuses it: ours is only stricter.
     with pytest.raises(ExpressionInvalid) as refused:
         parse_expression({"<": arguments})
     assert str(refused.value) == "`<` takes a list of 2 arguments"
@@ -240,7 +240,7 @@ def test_and_or_evaluate_every_part_so_an_error_is_never_hidden(data: object) ->
     ],
 )
 def test_nothing_is_truthy(data: object, message: str) -> None:
-    # JsonLogic reads 1 and "yes" as true and 0 as false; a condition here is true or false (D3).
+    # JsonLogic reads 1 and "yes" as true and 0 as false; a condition here is true or false.
     with pytest.raises(ExpressionError) as stopped:
         evaluate(parse_expression(data), {})
     assert str(stopped.value) == message
@@ -271,7 +271,7 @@ def test_and_or_not(data: object, expected: bool) -> None:
     ],
 )
 def test_arithmetic_takes_its_number_of_arguments(data: object, message: str) -> None:
-    # JsonLogic reads `{"-": [5]}` as -5; ours refuses it (D3: only stricter). Write 0 - 5.
+    # JsonLogic reads `{"-": [5]}` as -5; ours refuses it. Write 0 - 5.
     with pytest.raises(ExpressionInvalid) as refused:
         parse_expression(data)
     assert str(refused.value) == message
@@ -311,7 +311,7 @@ def test_division_by_zero_is_an_error() -> None:
     ],
 )
 def test_arithmetic_never_coerces(data: object, message: str) -> None:
-    # JsonLogic reads `{"+": [1, "2"]}` as 3; ours refuses a text (D3).
+    # JsonLogic reads `{"+": [1, "2"]}` as 3; ours refuses a text.
     with pytest.raises(ExpressionError) as stopped:
         evaluate(parse_expression(data), {})
     assert str(stopped.value) == message
@@ -327,7 +327,7 @@ def test_a_division_keeps_34_significant_digits_whatever_the_global_context() ->
     third = parse_expression({"/": [1, 3]})
     expected = Decimal("0." + "3" * 34)
     assert evaluate(third, {}) == expected
-    # The process-wide context is someone else's setting; it never decides a result (D3).
+    # The process-wide context is someone else's setting; it never decides a result.
     with decimal.localcontext(prec=5, rounding=decimal.ROUND_DOWN):
         assert evaluate(third, {}) == expected
 
@@ -365,7 +365,7 @@ IN_LIST = '`in` takes a value and a list of values, like {"in": [x, ["approve", 
 @pytest.mark.parametrize(
     ("data", "message"),
     [
-        # JsonLogic chains `if` (`[c1, a, c2, b, else]`); ours takes exactly three (D3).
+        # JsonLogic chains `if` (`[c1, a, c2, b, else]`); ours takes exactly three.
         ({"if": [True, 1, False, 2, 3]}, "`if` takes a list of 3 arguments"),
         ({"if": [True, 1]}, "`if` takes a list of 3 arguments"),
         # JsonLogic's `in` also searches a text ("app" in "approve"); ours never does.

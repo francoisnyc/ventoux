@@ -6,7 +6,7 @@ Status: built, 2026-10-04 (the ten design choices agreed in the session; slices 
 
 Two kinds of data the engine reads and never executes. A **plan** is a state machine written as
 data, so later layers can prove things about it by reading it (layer 3). An **expression** is a
-JSON tree using only D3's operators: it is parsed, checked against declared field types,
+JSON tree using only D20's operators: it is parsed, checked against declared field types,
 evaluated as a pure function of the values, and rendered on one line for people. User-facing
 description: `docs/guides/expressions.md`.
 
