@@ -233,8 +233,11 @@ policies (layer 4); roles (layer 7).
 
 ### Files
 
-- `src/ventoux/core/validate.py`: `Issue`, `validate`, and the graph search. If it grows past one
-  idea, the graph search moves to `core/graph.py`.
+- `src/ventoux/core/validate.py`: `Issue`, `validate`, the checks of each state against its
+  contract, and the approval rules.
+- `src/ventoux/core/graph.py`: the plan as a graph (`Arrow`, `arrows`) and the searches along it
+  (`reach`, `shortest_path`). Moved out of `validate.py` after slice 8, when it held two ideas, as a
+  pure move with no test changed.
 - `tests/test_validate.py`; the plans guide's example and table run in it.
 
 ### Seams the tests use

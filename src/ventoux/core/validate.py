@@ -18,6 +18,7 @@ from ventoux.core.expressions import (
     check,
 )
 from ventoux.core.expressions.check import a_type
+from ventoux.core.graph import Arrow, arrows, reach, shortest_path
 from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
@@ -207,44 +208,6 @@ def expression_issues(
     return []
 
 
-@dataclass(frozen=True)
-class Arrow:
-    """One transition seen as an arrow of the graph: from a state, on an event, to a state."""
-
-    source: str  # the state it leaves
-    event: str  # what happened there: `done`, an outcome, `timeout`
-    target: str  # the state it enters
-
-
-def arrows(plan: Plan) -> list[Arrow]:
-    """Every transition whose target is a state (an unknown target is already an issue)."""
-    found = []
-    for name, state in plan.states.items():
-        if isinstance(state, FinalState):
-            continue
-        for event, transitions in state.on.items():
-            # A condition is a fork the validator can't see through: every branch may run.
-            found += [Arrow(name, event, t.target) for t in transitions if t.target in plan.states]
-    return found
-
-
-def reach(starts: set[str], through: list[Arrow], backwards: bool = False) -> set[str]:
-    """Every state reachable from `starts` along `through`, `starts` included; `backwards` follows
-    each arrow from its target to its source, so it finds the states that can reach `starts`."""
-    seen = set(starts)
-    waiting = list(starts)
-    while waiting:
-        here = waiting.pop()
-        for arrow in through:
-            source, target = (
-                (arrow.target, arrow.source) if backwards else (arrow.source, arrow.target)
-            )
-            if source == here and target not in seen:
-                seen.add(target)
-                waiting.append(target)
-    return seen
-
-
 def graph_issues(plan: Plan, catalog: Catalog) -> list[Issue]:
     """What reading the plan as a graph proves: every state reachable, the plan able to end, and
     every high-risk activity behind an approval."""
@@ -334,27 +297,6 @@ def approval_issues(plan: Plan, catalog: Catalog, every: list[Arrow]) -> list[Is
                 )
             )
     return issues
-
-
-def shortest_path(start: str, goal: str, through: list[Arrow]) -> list[str]:
-    """The fewest states from `start` to `goal` along `through`, both included; `goal` must be
-    reachable. Searched breadth first: nearer states before farther ones."""
-    came_from: dict[str, str] = {}
-    waiting = [start]
-    seen = {start}
-    while waiting:
-        here = waiting.pop(0)
-        if here == goal:
-            break
-        for arrow in through:
-            if arrow.source == here and arrow.target not in seen:
-                seen.add(arrow.target)
-                came_from[arrow.target] = here
-                waiting.append(arrow.target)
-    path = [goal]
-    while path[-1] != start:
-        path.append(came_from[path[-1]])
-    return path[::-1]
 
 
 def each_transition(path: str, transitions: tuple[Transition, ...]) -> list[tuple[str, Transition]]:
