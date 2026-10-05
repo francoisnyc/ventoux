@@ -1,7 +1,7 @@
 # Layer 3: static validation
 
 Status: part 1 (the refactor and the catalog fixes) agreed and built, 2026-10-05, slices 1–7;
-part 2 (the validator) to be written and agreed next.
+part 2 (the validator) drafted, 2026-10-05, for agreement.
 
 ## What this layer is for
 
@@ -144,8 +144,120 @@ lives in the test file, as layer 0's boundary check does: it reads files, so it 
 
 ## Part 2: the validator
 
-To be written and agreed after part 1. One question to settle first: how a plan expresses an
-approval. Layer 2's plans have none, and D11 puts an approval on the step, with roles.
+`parse_plan` (layer 2) checks a plan's shape; `validate` checks its meaning, by reading the plan
+as a graph: the states are its nodes, the transitions in each `on` its arrows. User-facing
+description: `docs/guides/plans.md`, written first.
+
+Drawn on: the prototype's `src/core/validate.ts` (issues as `{path, code, message}`, reachability
+forward from the start and backward from the finals, an approval as a wait's approve transition,
+"approval required" and "approval reused" as reachability over the arrows that aren't approvals).
+Ours drops its `ERROR` event (an undeclared failure needs a person, D17), its `resultAs` and
+`assign` (layer 2 left them out), and its default-transition rules (none holding is an error at
+run time, layer 5); it adds the engine's idempotency key and the reserved `approve` and `timeout`.
+
+### Decided in the session
+
+1. **An approval is a wait plus an outcome**, as in the prototype: no new kind of state. The
+   outcome `approve` is reserved: a wait offering it is an approval, and must offer exactly
+   `approve` and `reject` (brief, D11). Only an approval's `approve` transitions count as
+   approving. The trade-off, accepted: the validator infers an approval from a name, so a wait
+   meant for something else that offers `approve` would approve what follows it; the exact pair
+   and the reserved word (the guide says to use `accept` or `confirm`) narrow that.
+2. **Plans are strict:** every path to a high-risk activity passes an approval. A condition is a
+   fork the validator can't see through, so a plan can't skip the approval for small amounts; a
+   case step's `approval.when` (brief, D11) is layer 8's question. Plans are what an AI may draft
+   (brief, D13 and D14), and there the approval stops a model's mistake.
+3. **Roles wait for layer 7**, which adds them to the approval wait, with the check "no approval
+   without roles on a high-risk step" (brief, D11).
+4. **The seam is `validate(plan, catalog) -> list[Issue]`** on a parsed `Plan`. Shape problems
+   stay `PlanInvalid`; meaning problems are issues. One list for both is the AI loop's need
+   (layer 15).
+5. **A wait's timeout is the event `timeout`**, handled exactly when the wait declares a
+   `timeout`; no outcome may be named `timeout`.
+6. **Document first:** `docs/guides/plans.md`, its first section being what `ventoux check`
+   proves.
+
+### The issue
+
+`Issue(path, code, message)`, a frozen dataclass. `path` is where in the plan, in layer 2's style
+(`states.pay.inputs.amount`, `states.check_order.on.done[1]`, `initial`). `code` is one of the
+codes below. `message` says what is wrong, then what to do. The issues come in the plan's order:
+states as written, then the graph checks.
+
+### The checks
+
+What each state is checked for:
+
+- **Every target is a state** (`UNKNOWN_TARGET`), and `initial` too.
+- **An activity state:**
+  - its activity is in the catalog (`UNKNOWN_ACTIVITY`, with `Catalog.get`'s message, which names
+    the versions that exist);
+  - its inputs are the contract's input fields (`UNKNOWN_INPUT`), every required field is given
+    (`MISSING_INPUT`), and the idempotency key field is never given: the engine fills it
+    (`ENGINE_INPUT`), so it isn't required either;
+  - its `on` handles exactly `done` and each outcome the contract declares (`UNKNOWN_EVENT`,
+    `MISSING_EVENT`): an unhandled `declined` would leave the plan with nowhere to go.
+- **A wait state:**
+  - its `on` handles exactly its outcomes, plus `timeout` if it declares one (`UNKNOWN_EVENT`,
+    `MISSING_EVENT`);
+  - no outcome is named `timeout` (`RESERVED_OUTCOME`);
+  - a wait offering `approve` offers exactly `approve` and `reject` (`APPROVAL_OUTCOMES`).
+- **Every expression** goes through layer 2's `check` against the plan's `fields`
+  (`EXPRESSION_INVALID`, with the check's message and its path inside the expression): each
+  input, and each transition's `when`, which must give a boolean. A plan can't bind new values,
+  so the fields are the same at every state.
+
+Then the graph, built from the transitions whose target is a state:
+
+- **Reachable** (`UNREACHABLE_STATE`): every state can be reached from `initial`.
+- **Can end** (`NO_PATH_TO_FINAL`): from every state, some final state can be reached (searched
+  backwards from the finals).
+- **Approval required** (`APPROVAL_REQUIRED`): follow every arrow from `initial` except an
+  approval's `approve`; a high-risk activity reached that way can run unapproved. The message
+  names the shortest such path (`check_order → pay`).
+- **Approval reused** (`APPROVAL_REUSED`): from each high-risk activity, follow every arrow except
+  an approval's `approve`; another high-risk activity reached that way, or the same one in a loop,
+  would run on the same approval (brief, D11: one approval unlocks one run).
+
+An activity the catalog doesn't hold has no risk to read. It is already an issue
+(`UNKNOWN_ACTIVITY`), so the plan is refused, and the approval checks don't add a second one
+for it.
+
+**Fail closed:** `validate` given anything but a parsed `Plan` raises `TypeError`, never returns
+an empty list as if the plan were fine.
+
+Not in this layer: whether an input's type matches the contract's (the contract's schema would
+need mapping to field types; layer 5 checks inputs when the step runs); a transition listed after
+one with no `when`, which can never be taken (not on the agreed list); provenance and sink
+policies (layer 4); roles (layer 7).
+
+### Files
+
+- `src/ventoux/core/validate.py`: `Issue`, `validate`, and the graph search. If it grows past one
+  idea, the graph search moves to `core/graph.py`.
+- `tests/test_validate.py`; the plans guide's example and table run in it.
+
+### Seams the tests use
+
+- `parse_plan(data)` (layer 2), then `validate(plan, catalog) -> list[Issue]`.
+- `testing.CATALOG`, the development catalog: `orders.lookup@1` (low), `payments.refund@1`
+  (high), `letters.draft@1` (low).
+- The guide: its example plan has no issues; each table row's message is what `validate` says.
+
+### Slices, in order
+
+1. Negative: `validate` of something that isn't a parsed plan raises. Negative: an unknown
+   `initial` and an unknown target. Then the guide's example plan has no issues.
+2. Negative: an activity not in the catalog.
+3. Negative: an unknown input, a missing one, the idempotency key set by the plan.
+4. Negative: an activity's unknown event and unhandled outcome; a wait's; `timeout` without a
+   declared timeout, and a declared timeout not handled; an outcome named `timeout`.
+5. Negative: an undeclared field in an input; a `when` that gives a number.
+6. Negative: an unreachable state; a state from which the plan can't end.
+7. Negative: `approve` offered with `edit`. Negative: the guide's fork, `APPROVAL_REQUIRED`
+   naming `check_order → pay`. Then the guide's example passes.
+8. Negative: two high-risk activities after one approval; a loop back to the same one.
+9. A plan with several problems lists them all; the guide's table runs as a test.
 
 ## Promises
 
@@ -164,3 +276,20 @@ Each claim part 1 makes about behaviour, and the test that fails if it isn't tru
 | A bare, superseded or unknown decision is refused with what to write instead | R `test_a_bare_decision_is_refused`, `test_a_superseded_decision_is_refused`, `test_a_decision_the_brief_does_not_have_is_refused`, `test_a_decision_cited_with_its_source_is_accepted` |
 | `get` returns the very contract registered | C `test_a_registered_contract_is_found_by_its_reference` |
 | `core` imports no Temporal or LLM code, in the new modules too | `tests/test_layers.py`, unchanged |
+
+Part 2's promises; `V` is `tests/test_validate.py`, and each test is named when its slice is built.
+
+| Promise | Test |
+|---|---|
+| `validate` refuses anything but a parsed plan, never returning "no issues" for it | V slice 1 |
+| `initial` and every target name a state | V slice 1 |
+| Every activity is in the catalog, with the catalog's message | V slice 2 |
+| Inputs are the contract's fields, the required ones given, the idempotency key never | V slice 3 |
+| An activity handles exactly `done` and its declared outcomes; a wait exactly its outcomes and `timeout` if declared; no outcome is named `timeout` | V slice 4 |
+| Every input and condition passes the expression check; a condition gives a boolean | V slice 5 |
+| Every state is reachable, and from every state the plan can end | V slice 6 |
+| A wait offering `approve` offers exactly `approve` and `reject` | V slice 7 |
+| No high-risk activity is reachable without passing an approval's `approve`, and the message names a path | V slice 7 |
+| One approval unlocks one high-risk run: no second one, and no loop back, without a new approval | V slice 8 |
+| Every problem is listed, not only the first | V slice 9 |
+| The plans guide says what the code does: its example has no issues, its table's messages are `validate`'s | V slices 1, 7 and 9 |
