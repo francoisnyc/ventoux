@@ -135,3 +135,103 @@ def test_the_idempotency_key_is_filled_by_the_engine_never_by_a_plan() -> None:
             "idempotency_key is filled by the engine, never by a plan: remove it",
         )
     ]
+
+
+def with_code(plan: dict[str, Any], code: str) -> list[Issue]:
+    """Only the issues of one kind: for a plan that breaks other rules too."""
+    return [issue for issue in issues(plan) if issue.code == code]
+
+
+def pay_on(on: dict[str, Any]) -> dict[str, Any]:
+    return changed(pay={**guide_plan()["states"]["pay"], "on": on})
+
+
+def approval_with(wait: dict[str, Any], on: dict[str, Any]) -> dict[str, Any]:
+    return changed(approve_refund={"wait": wait, "on": on})
+
+
+APPROVE_OR_REJECT = {"outcomes": ["approve", "reject"]}
+
+
+def test_an_activity_never_gives_an_event_its_contract_does_not_declare() -> None:
+    plan = pay_on({"done": "paid", "declined": "failed", "cancelled": "failed"})
+    assert issues(plan) == [
+        Issue(
+            "states.pay.on.cancelled",
+            "UNKNOWN_EVENT",
+            "payments.refund@1 never gives cancelled: its events are done, declined",
+        )
+    ]
+
+
+def test_every_outcome_an_activity_declares_is_handled() -> None:
+    # Unhandled, a declined refund would leave the plan with nowhere to go (brief, D17).
+    plan = pay_on({"done": "paid"})
+    assert issues(plan) == [
+        Issue(
+            "states.pay.on",
+            "MISSING_EVENT",
+            "declined is not handled: say where the plan goes on declined",
+        )
+    ]
+
+
+def test_a_wait_never_gives_an_outcome_it_does_not_offer() -> None:
+    on = {"approve": "pay", "reject": "failed", "escalate": "failed"}
+    plan = approval_with(APPROVE_OR_REJECT, on)
+    assert issues(plan) == [
+        Issue(
+            "states.approve_refund.on.escalate",
+            "UNKNOWN_EVENT",
+            "the wait approve_refund never gives escalate: its events are approve, reject",
+        )
+    ]
+
+
+def test_every_outcome_a_wait_offers_is_handled() -> None:
+    plan = approval_with(APPROVE_OR_REJECT, {"approve": "pay"})
+    assert issues(plan) == [
+        Issue(
+            "states.approve_refund.on",
+            "MISSING_EVENT",
+            "reject is not handled: say where the plan goes on reject",
+        )
+    ]
+
+
+def test_a_wait_without_a_timeout_never_times_out() -> None:
+    plan = approval_with(
+        APPROVE_OR_REJECT, {"approve": "pay", "reject": "failed", "timeout": "failed"}
+    )
+    assert issues(plan) == [
+        Issue(
+            "states.approve_refund.on.timeout",
+            "UNKNOWN_EVENT",
+            "the wait approve_refund never gives timeout: its events are approve, reject; "
+            "declare wait.timeout to wait for timeout",
+        )
+    ]
+
+
+def test_a_wait_with_a_timeout_handles_it() -> None:
+    wait = APPROVE_OR_REJECT | {"timeout": "48h"}
+    plan = approval_with(wait, {"approve": "pay", "reject": "failed"})
+    assert issues(plan) == [
+        Issue(
+            "states.approve_refund.on",
+            "MISSING_EVENT",
+            "timeout is not handled: say where the plan goes on timeout",
+        )
+    ]
+
+
+def test_no_outcome_is_named_timeout() -> None:
+    wait = {"outcomes": ["accept", "decline", "timeout"]}
+    plan = approval_with(wait, {"accept": "pay", "decline": "failed", "timeout": "failed"})
+    assert with_code(plan, "RESERVED_OUTCOME") == [
+        Issue(
+            "states.approve_refund.wait.outcomes",
+            "RESERVED_OUTCOME",
+            "timeout is the event of a wait's timeout, not an outcome: name the outcome differently",
+        )
+    ]

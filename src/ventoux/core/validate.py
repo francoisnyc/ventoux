@@ -5,11 +5,14 @@ arrows are the transitions in each state's `on`. It lists every problem at once.
 docs/guides/plans.md.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
-from ventoux.core.plan import ActivityState, FinalState, Plan, Transition
+from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
+
+TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,8 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
             continue  # a final state has no `on`: nowhere to go
         if isinstance(state, ActivityState):
             issues += activity_issues(f"states.{name}", state, catalog)
+        else:
+            issues += wait_issues(f"states.{name}", name, state)
         for event, transitions in state.on.items():
             for path, transition in each_transition(f"states.{name}.on.{event}", transitions):
                 if transition.target not in plan.states:
@@ -50,7 +55,66 @@ def activity_issues(path: str, state: ActivityState, catalog: Catalog) -> list[I
     except NotInCatalog as missing:
         # The catalog's own message, which names the versions it does hold.
         return [Issue(f"{path}.activity", "UNKNOWN_ACTIVITY", str(missing))]
-    return input_issues(path, state, contract)
+    # An activity gives `done`, or one of the business failures its contract declares (brief, D17).
+    # Anything else that goes wrong needs a person, never a transition the plan takes on its own.
+    events = ("done", *contract.outcomes)
+    return input_issues(path, state, contract) + event_issues(
+        path, state.on, events, gives=f"{contract.reference} never gives"
+    )
+
+
+def wait_issues(path: str, name: str, state: WaitState) -> list[Issue]:
+    """What is wrong with a wait state: its outcomes, and the events its `on` handles."""
+    issues: list[Issue] = []
+    if TIMEOUT in state.wait.outcomes:
+        issues.append(
+            Issue(
+                f"{path}.wait.outcomes",
+                "RESERVED_OUTCOME",
+                f"{TIMEOUT} is the event of a wait's timeout, not an outcome: "
+                "name the outcome differently",
+            )
+        )
+    # A wait gives one of its outcomes, or `timeout` when it declares one.
+    timed = (
+        (TIMEOUT,) if state.wait.timeout is not None and TIMEOUT not in state.wait.outcomes else ()
+    )
+    events = (*state.wait.outcomes, *timed)
+    hint = "" if timed else f"; declare wait.timeout to wait for {TIMEOUT}"
+    return issues + event_issues(
+        path, state.on, events, gives=f"the wait {name} never gives", timeout_hint=hint
+    )
+
+
+def event_issues(
+    path: str,
+    on: Mapping[str, object],
+    events: tuple[str, ...],
+    gives: str,
+    timeout_hint: str = "",
+) -> list[Issue]:
+    """`on` against the events a state can give: each handled, and nothing else."""
+    issues: list[Issue] = []
+    for event in on:
+        if event not in events:
+            hint = timeout_hint if event == TIMEOUT else ""
+            issues.append(
+                Issue(
+                    f"{path}.on.{event}",
+                    "UNKNOWN_EVENT",
+                    f"{gives} {event}: its events are {', '.join(events)}{hint}",
+                )
+            )
+    for event in events:
+        if event not in on:
+            issues.append(
+                Issue(
+                    f"{path}.on",
+                    "MISSING_EVENT",
+                    f"{event} is not handled: say where the plan goes on {event}",
+                )
+            )
+    return issues
 
 
 def input_issues(path: str, state: ActivityState, contract: ActivityContract) -> list[Issue]:
