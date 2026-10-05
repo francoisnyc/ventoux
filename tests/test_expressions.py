@@ -847,7 +847,7 @@ def test_render_literals_and_fields(data: object, expected: str) -> None:
         ({"!=": [{"var": "review.outcome"}, "reject"]}, 'review.outcome != "reject"'),
         ({"and": [{"var": "urgent"}, {"var": "vip"}, True]}, "urgent and vip and true"),
         ({"or": [{"var": "urgent"}, {"var": "vip"}]}, "urgent or vip"),
-        ({"!": [{"var": "urgent"}]}, "not urgent"),
+        ({"!": [{"var": "urgent"}]}, "not(urgent)"),
         ({"+": [{"var": "amount"}, 1, 2]}, "amount + 1 + 2"),
         ({"/": [{"var": "amount"}, 3]}, "amount / 3"),
         ({"if": [{"var": "urgent"}, 1, 0]}, "if urgent then 1 else 0"),
@@ -862,13 +862,13 @@ def test_render_literals_and_fields(data: object, expected: str) -> None:
         ({"count": {"over": {"var": "items"}}}, "count(items)"),
         (
             {"count": {"over": {"var": "items"}, "where": HIGH}},
-            'count(items where item.risk == "high")',
+            'count(items where item.risk = "high")',
         ),
         (
             {"sum": {"over": {"var": "items"}, "value": {"item": "amount"}}},
             "sum(item.amount over items)",
         ),
-        (HIGH_TOTAL, 'sum(item.amount over items where item.risk == "high")'),
+        (HIGH_TOTAL, 'sum(item.amount over items where item.risk = "high")'),
     ],
 )
 def test_render_each_operator(data: object, expected: str) -> None:
@@ -883,15 +883,15 @@ A, B = {"var": "a"}, {"var": "b"}
     [
         ({"and": [{"or": [A, B]}, {">": [{"var": "amount"}, 0]}]}, "(a or b) and amount > 0"),
         ({"or": [{"and": [A, B]}, True]}, "(a and b) or true"),
-        ({"!": [{"and": [A, B]}]}, "not (a and b)"),
+        ({"!": [{"and": [A, B]}]}, "not(a and b)"),
         ({"-": [{"var": "amount"}, {"-": [{"var": "fee"}, 1]}]}, "amount - (fee - 1)"),
         ({"-": [{"-": [{"var": "amount"}, {"var": "fee"}]}, 1]}, "(amount - fee) - 1"),
         ({"*": [{"+": [{"var": "amount"}, 1]}, 2]}, "(amount + 1) * 2"),
         ({"+": [{"var": "amount"}, {"*": [1, 2]}]}, "amount + 1 * 2"),
-        ({"==": [{"==": [A, B]}, True]}, "(a == b) == true"),
+        ({"==": [{"==": [A, B]}, True]}, "(a = b) = true"),
         ({">": [{"if": [A, 1, 0]}, 0]}, "(if a then 1 else 0) > 0"),
         ({"if": [A, {"if": [B, 1, 2]}, 3]}, "if a then (if b then 1 else 2) else 3"),
-        ({"and": [{"in": [A, ["x"]]}, {"!": [B]}]}, 'a in ["x"] and not b'),
+        ({"and": [{"in": [A, ["x"]]}, {"!": [B]}]}, 'a in ["x"] and not(b)'),
     ],
 )
 def test_render_brackets_only_what_needs_it(data: object, expected: str) -> None:

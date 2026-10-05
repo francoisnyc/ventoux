@@ -15,20 +15,21 @@ That gives you real code, with tests and a review.
 
 An expression is stored as JSON. It is either a literal (a number, a text or `true`/`false`), a
 field (`{"var": "approved_amount"}`), or one operator with its arguments. Reviewers and diffs
-show it on one line:
+show it on one line, in the style of FEEL, the expression language of DMN and Camunda 8: `==` reads
+as `=`, and `!` as `not(...)`.
 
 | Stored | Reads as |
 |---|---|
 | `{">": [{"var": "approved_amount"}, 100]}` | `approved_amount > 100` |
-| `{"==": [{"var": "review.outcome"}, "approve"]}` | `review.outcome == "approve"` |
-| `{"and": [{"==": [{"var": "review.outcome"}, "approve"]}, {">": [{"var": "approved_amount"}, 100]}]}` | `review.outcome == "approve" and approved_amount > 100` |
+| `{"==": [{"var": "review.outcome"}, "approve"]}` | `review.outcome = "approve"` |
+| `{"and": [{"==": [{"var": "review.outcome"}, "approve"]}, {">": [{"var": "approved_amount"}, 100]}]}` | `review.outcome = "approve" and approved_amount > 100` |
 | `{"and": [{"or": [{"var": "urgent"}, {"var": "vip"}]}, {">": [{"var": "amount"}, 0]}]}` | `(urgent or vip) and amount > 0` |
-| `{"!": [{"exists": "approved_amount"}]}` | `not exists(approved_amount)` |
+| `{"!": [{"exists": "approved_amount"}]}` | `not(exists(approved_amount))` |
 | `{"in": [{"var": "review.outcome"}, ["approve", "escalate"]]}` | `review.outcome in ["approve", "escalate"]` |
-| `{"if": [{"==": [{"var": "review.outcome"}, "approve"]}, {"var": "approved_amount"}, 0]}` | `if review.outcome == "approve" then approved_amount else 0` |
+| `{"if": [{"==": [{"var": "review.outcome"}, "approve"]}, {"var": "approved_amount"}, 0]}` | `if review.outcome = "approve" then approved_amount else 0` |
 | `{"cat": ["Refund of ", {"string": [{"var": "approved_amount"}]}]}` | `cat("Refund of ", string(approved_amount))` |
-| `{"count": {"over": {"var": "items"}, "where": {"==": [{"item": "risk"}, "high"]}}}` | `count(items where item.risk == "high")` |
-| `{"sum": {"over": {"var": "items"}, "where": {"==": [{"item": "risk"}, "high"]}, "value": {"item": "amount"}}}` | `sum(item.amount over items where item.risk == "high")` |
+| `{"count": {"over": {"var": "items"}, "where": {"==": [{"item": "risk"}, "high"]}}}` | `count(items where item.risk = "high")` |
+| `{"sum": {"over": {"var": "items"}, "where": {"==": [{"item": "risk"}, "high"]}, "value": {"item": "amount"}}}` | `sum(item.amount over items where item.risk = "high")` |
 
 The one-line form is for reading only. Nothing parses it back: what is stored is the JSON.
 

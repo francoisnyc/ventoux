@@ -968,9 +968,11 @@ def shown(value: Value) -> str:
 
 
 def render(expression: Expression) -> str:
-    """`expression` on one line, for diffs and reviews: `approved_amount > 100`.
+    """`expression` on one line, for diffs and reviews: `review.outcome = "approve"`.
 
-    For reading only: nothing ever parses it back. What is stored is the JSON.
+    FEEL-style, the expression language of DMN and Camunda 8, which business readers know: `=` for
+    `==`, and `not(...)` (brief, D20). For reading only: nothing ever parses it back, so none of
+    FEEL's behaviour comes with it. What is stored is the JSON.
     """
     if isinstance(expression, bool):
         return "true" if expression else "false"
@@ -987,9 +989,11 @@ def render(expression: Expression) -> str:
         return f"item.{expression.item}"
     if isinstance(expression, Comparison | And | Or | Add | Sub | Mul | Div):
         level = precedence(expression)
-        return f" {expression.operator} ".join(operand(a, level) for a in expression.args)
+        symbol = "=" if expression.operator == "==" else expression.operator
+        return f" {symbol} ".join(operand(a, level) for a in expression.args)
     if isinstance(expression, Not):
-        return f"not {operand(expression.args[0], precedence(expression))}"
+        # A call, as in FEEL: `not(a and b)` needs no other brackets to read unambiguously.
+        return f"not({render(expression.args[0])})"
     if isinstance(expression, If):
         condition, then, otherwise = (operand(a, precedence(expression)) for a in expression.args)
         return f"if {condition} then {then} else {otherwise}"
@@ -1007,7 +1011,7 @@ def render(expression: Expression) -> str:
 
 
 def chosen(args: CountOver | SumOver) -> str:
-    """The elements `count` or `sum` reads: `items` or `items where item.risk == "high"`."""
+    """The elements `count` or `sum` reads: `items` or `items where item.risk = "high"`."""
     where = f" where {render(args.where)}" if args.where is not None else ""
     return f"{args.over.var}{where}"
 
@@ -1035,8 +1039,6 @@ def precedence(expression: Expression) -> int:
         return OR_LEVEL
     if isinstance(expression, And):
         return 2
-    if isinstance(expression, Not):
-        return 3
     if isinstance(expression, Comparison | In):
         return 4
     if isinstance(expression, Add | Sub):

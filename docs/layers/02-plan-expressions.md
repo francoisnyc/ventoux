@@ -129,14 +129,17 @@ anywhere, and `parse_expression` walks the tree and refuses an `item` outside `c
 Threading an "inside" flag through every recursive call would have touched each line of the
 parser; the walk is six lines, and later checks (types, provenance) walk the same tree.
 
-**The renderer** (choice 9). One line, with parentheses only where precedence needs them:
+**The renderer** (choice 9). One line in FEEL style, the expression language of DMN and Camunda 8
+(brief, D20, added after slice 11 in the tutor review): `==` reads as `=`, and `!` as `not(...)`.
+Parentheses only where precedence needs them:
 
-- precedence from loosest to tightest: `if`, `or`, `and`, `not`, comparisons and `in`, `+ -`,
+- precedence from loosest to tightest: `if`, `or`, `and`, comparisons and `in`, `+ -`,
   `* /`; a child that binds no tighter than its parent is bracketed, so the line shows exactly
   what is stored (`(amount - fee) - 1` is not `amount - (fee - 1)`), and an `and` inside an `or`
   is always bracketed, though precedence wouldn't need it: `a and b or c` is easy to misread
   (slice 9);
-- functions render as calls: `cat(…)`, `string(…)`, `exists(…)`, `count(…)`, `sum(…)`;
+- functions render as calls: `not(…)`, `cat(…)`, `string(…)`, `exists(…)`, `count(…)`, `sum(…)`;
+  `not(a and b)` needs no other brackets;
 - `if` renders as `if … then … else …`;
 - texts render in double quotes, with JSON escapes.
 
