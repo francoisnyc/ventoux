@@ -553,6 +553,15 @@ and record the key points. A question is closed once you can explain the answer 
 - The analogy: an OpenAPI document (the catalog) keeps its operations (contracts) apart from its
   `servers` per environment (bindings).
 - Why "catalog" and not "registry": design question 15.
+- Retrieval (layer 3 warm-up): "catalog = list of activities; contract = I/O for activities;
+  binding = Temporal config binding a case to queues." The questions half came back. Catalog: right,
+  and more exactly it lists *contracts*, never implementations (`core` runs no I/O). Contract:
+  I/O is the start; it also holds risk, effect, retries and timeouts, idempotency and outcomes
+  (D17), and the test for membership is "could a case notice it or tighten it?". Binding: right
+  that it's per-environment Temporal config, but it binds an *activity* (`risk.score@1`) to a task
+  queue, not a case. The examples and the "changes when…" column didn't come back: a catalog
+  changes when a contract is added or retired; a contract never changes (a change is a new `@N`);
+  a binding changes when operations move it, with no new version and no release.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
 
 ## 29. Layer 1: why `@1` and not `@1.0`
