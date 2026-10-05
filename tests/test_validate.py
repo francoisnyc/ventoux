@@ -336,3 +336,46 @@ def test_a_high_risk_activity_is_never_reached_without_an_approval() -> None:
 def test_a_low_risk_activity_needs_no_approval() -> None:
     # orders.lookup@1 is low risk: check_order runs first, before any approval, and that's fine.
     assert with_code(guide_plan(), "APPROVAL_REQUIRED") == []
+
+
+def test_one_approval_unlocks_one_high_risk_run() -> None:
+    pay = guide_plan()["states"]["pay"]
+    plan = changed(
+        pay={**pay, "on": {"done": "refund_fee", "declined": "failed"}},
+        refund_fee={**pay, "on": {"done": "paid", "declined": "failed"}},
+    )
+    assert issues(plan) == [
+        Issue(
+            "states.pay",
+            "APPROVAL_REUSED",
+            "one approval would unlock two high-risk runs: after pay, refund_fee can run without "
+            "a new approval: add an approval before refund_fee",
+        )
+    ]
+
+
+def retry_after_decline(retry_to: str) -> dict[str, Any]:
+    """The guide's plan where a declined refund waits for a person to retry, going to `retry_to`."""
+    pay = guide_plan()["states"]["pay"]
+    return changed(
+        pay={**pay, "on": {"done": "paid", "declined": "retry_payment"}},
+        retry_payment={
+            "wait": {"outcomes": ["retry", "give_up"]},
+            "on": {"retry": retry_to, "give_up": "failed"},
+        },
+    )
+
+
+def test_a_loop_back_to_a_high_risk_activity_needs_a_new_approval() -> None:
+    assert issues(retry_after_decline("pay")) == [
+        Issue(
+            "states.pay",
+            "APPROVAL_REUSED",
+            "one approval would unlock two high-risk runs: after pay, pay can run without "
+            "a new approval: add an approval before pay",
+        )
+    ]
+
+
+def test_a_loop_through_the_approval_is_approved_each_time() -> None:
+    assert issues(retry_after_decline("approve_refund")) == []

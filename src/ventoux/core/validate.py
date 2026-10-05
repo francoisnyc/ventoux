@@ -313,6 +313,26 @@ def approval_issues(plan: Plan, catalog: Catalog, every: list[Arrow]) -> list[Is
                     f"route every path to {name} through an approval",
                 )
             )
+    # One approval unlocks one run (brief, D11): after a high-risk activity, any high-risk activity
+    # reached without passing an approval, itself again in a loop included, would run on the
+    # approval already spent.
+    for name, state in plan.states.items():
+        if not is_high_risk(state, catalog):
+            continue
+        after = reach({a.target for a in unapproved if a.source == name}, unapproved)
+        again = [
+            n for n, other in plan.states.items() if n in after and is_high_risk(other, catalog)
+        ]
+        if again:
+            issues.append(
+                Issue(
+                    f"states.{name}",
+                    "APPROVAL_REUSED",
+                    f"one approval would unlock two high-risk runs: after {name}, "
+                    f"{', '.join(again)} can run without a new approval: add an approval before "
+                    f"{', '.join(again)}",
+                )
+            )
     return issues
 
 
