@@ -10,6 +10,14 @@ from dataclasses import dataclass
 
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
+from ventoux.core.expressions import (
+    BooleanType,
+    Expression,
+    ExpressionInvalid,
+    FieldType,
+    check,
+)
+from ventoux.core.expressions.check import a_type
 from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
@@ -37,6 +45,10 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
             continue  # a final state has no `on`: nowhere to go
         if isinstance(state, ActivityState):
             issues += activity_issues(f"states.{name}", state, catalog)
+            for field, expression in state.inputs.items():
+                issues += expression_issues(
+                    f"states.{name}.inputs.{field}", expression, plan.fields
+                )
         else:
             issues += wait_issues(f"states.{name}", name, state)
         for event, transitions in state.on.items():
@@ -44,6 +56,10 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
                 if transition.target not in plan.states:
                     issues.append(
                         Issue(path, "UNKNOWN_TARGET", not_a_state(transition.target, plan))
+                    )
+                if transition.when is not None:
+                    issues += expression_issues(
+                        f"{path}.when", transition.when, plan.fields, condition=True
                     )
     return issues
 
@@ -153,6 +169,29 @@ def input_issues(path: str, state: ActivityState, contract: ActivityContract) ->
                 )
             )
     return issues
+
+
+def expression_issues(
+    path: str, expression: Expression, fields: Mapping[str, FieldType], condition: bool = False
+) -> list[Issue]:
+    """An expression checked against the plan's fields (layer 2's `check`); a condition must give a
+    boolean. A plan binds no new values, so the fields are the same at every state."""
+    try:
+        found = check(expression, fields)
+    except ExpressionInvalid as refused:
+        # The check's own message, which starts with the path inside the expression (`>[1]`).
+        return [Issue(path, "EXPRESSION_INVALID", str(refused))]
+    if condition and not isinstance(found, BooleanType):
+        # Nothing is truthy: a condition gives true or false, never a number read as one.
+        return [
+            Issue(
+                path,
+                "EXPRESSION_INVALID",
+                f"a condition gives a boolean, and this gives {a_type(found)}: write a comparison, "
+                "such as amount > 100",
+            )
+        ]
+    return []
 
 
 def each_transition(path: str, transitions: tuple[Transition, ...]) -> list[tuple[str, Transition]]:

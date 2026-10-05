@@ -235,3 +235,40 @@ def test_no_outcome_is_named_timeout() -> None:
             "timeout is the event of a wait's timeout, not an outcome: name the outcome differently",
         )
     ]
+
+
+def lookup_forking_on(when: Any) -> dict[str, Any]:
+    """The guide's plan with check_order forking on `when`: approval if it holds, else pay."""
+    lookup = guide_plan()["states"]["check_order"]
+    fork = [{"when": when, "target": "approve_refund"}, {"target": "pay"}]
+    return changed(check_order={**lookup, "on": {"done": fork, "not_found": "failed"}})
+
+
+def test_an_input_reads_only_declared_fields() -> None:
+    plan = pay_with_inputs({"order_id": ORDER_ID, "amount": {"var": "amout"}})
+    assert issues(plan) == [
+        Issue("states.pay.inputs.amount", "EXPRESSION_INVALID", "amout is not a declared field")
+    ]
+
+
+def test_a_condition_gives_a_boolean() -> None:
+    plan = lookup_forking_on({"+": [{"var": "amount"}, 1]})
+    assert with_code(plan, "EXPRESSION_INVALID") == [
+        Issue(
+            "states.check_order.on.done[0].when",
+            "EXPRESSION_INVALID",
+            "a condition gives a boolean, and this gives a number: write a comparison, "
+            "such as amount > 100",
+        )
+    ]
+
+
+def test_a_condition_is_checked_inside_too() -> None:
+    plan = lookup_forking_on({">": [{"var": "amount"}, "100"]})
+    assert with_code(plan, "EXPRESSION_INVALID") == [
+        Issue(
+            "states.check_order.on.done[0].when",
+            "EXPRESSION_INVALID",
+            ">[1]: `>` compares numbers, and this is a string",
+        )
+    ]
