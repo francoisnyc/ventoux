@@ -71,7 +71,7 @@ def run(
                 raise LookupError(f"no implementation of {contract.reference} is available")
             implementations[contract.reference](inputs)
         result.steps_reached.append(name)
-    # A case closes when nothing is left to do (D10): here, when no step is waiting.
+    # A case closes when nothing is left to do (brief, D10): here, when no step is waiting.
     result.closed = not result.waiting_for
     return result
 
@@ -90,7 +90,7 @@ def approved(
         return False
     _, outcome, person, *_ = answer
     require_role(person, step["approval"]["roles"], f"approve {name}", roles_of)
-    # "Someone else" is computed, never listed (D11): whoever set a value the step uses, in its
+    # "Someone else" is computed, never listed (brief, D11): whoever set a value the step uses, in its
     # inputs or its condition, may not approve it.
     used = fields_read([*step["inputs"].values(), step.get("when")])
     if person in {set_by[f] for f in used if f in set_by}:
@@ -139,12 +139,12 @@ def answer_task(
     """Record a person's answer to a task, after checking it is one the task accepts."""
     _, outcome, person, *form = answer
     require_role(person, step["roles"], f"answer {name}", roles_of)
-    # A task's outcomes are a closed list (D9): anything else is refused, never guessed.
+    # A task's outcomes are a closed list (brief, D9): anything else is refused, never guessed.
     if outcome not in step["outcomes"]:
         raise AnswerRefused(f"{name} has no outcome {outcome!r}")
     values[f"{name}.outcome"] = outcome
     set_by[f"{name}.outcome"] = person
-    # An outcome sets only the case-file fields it declares (D9).
+    # An outcome sets only the case-file fields it declares (brief, D9).
     for field_name in step["outcomes"][outcome].get("sets", []):
         values[field_name] = case_value(form[0][field_name])
         set_by[field_name] = person

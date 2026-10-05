@@ -1,7 +1,7 @@
 # Layer 3: static validation
 
-Status: draft, 2026-10-05. Part 1 (the refactor and the catalog fixes) is up for agreement; part 2
-(the validator) is written after part 1 is merged into this branch and agreed separately.
+Status: part 1 (the refactor and the catalog fixes) agreed and built, 2026-10-05, slices 1–7;
+part 2 (the validator) to be written and agreed next.
 
 ## What this layer is for
 
@@ -117,7 +117,9 @@ cited (`D` and a number, as a whole word) must:
 
 A bare `D5` fails, so a citation can't slip past the check by its form. Today that means
 `catalog.py` (moved anyway) and four comments in `case/runner.py` (D9, D10, D11), rewritten
-there.
+there. Slice 7 found a fifth: the expressions package's docstring, `(layer 2; brief, D20)`,
+which names its source but not in the form; rewritten rather than loosening the check. The check
+lives in the test file, as layer 0's boundary check does: it reads files, so it isn't product code.
 
 ### Seams the tests use
 
@@ -148,7 +150,7 @@ approval. Layer 2's plans have none, and D11 puts an approval on the step, with 
 ## Promises
 
 Each claim part 1 makes about behaviour, and the test that fails if it isn't true. `C` is
-`tests/test_catalog.py`, `R` the new reference test (file to be named in slice 7).
+`tests/test_catalog.py`, `R` is `tests/test_decisions.py`.
 
 | Promise | Test |
 |---|---|
@@ -158,6 +160,7 @@ Each claim part 1 makes about behaviour, and the test that fails if it isn't tru
 | Every rule in the table refuses its example when a contract is built | C `test_every_rule_refuses_a_contract_that_breaks_it` |
 | `register` refuses a copy that breaks any rule in the table, nested parts included | C `test_every_rule_runs_again_when_a_copy_is_registered`, `test_a_copy_that_breaks_the_rules_is_refused_at_registration`, `test_a_copy_with_a_broken_part_is_refused_at_registration` |
 | Every catalog refusal says what is wrong, then what to do, word for word as the guide shows | C `test_the_guides_refusals_are_what_the_catalog_says` |
-| Every decision cited in `src/` is in the form `(brief, Dn`, exists, and isn't superseded | R (slice 7) |
+| Every decision cited in `src/` is in the form `(brief, Dn`, exists, and isn't superseded | R `test_every_decision_cited_in_src_is_in_the_brief_and_current` |
+| A bare, superseded or unknown decision is refused with what to write instead | R `test_a_bare_decision_is_refused`, `test_a_superseded_decision_is_refused`, `test_a_decision_the_brief_does_not_have_is_refused`, `test_a_decision_cited_with_its_source_is_accepted` |
 | `get` returns the very contract registered | C `test_a_registered_contract_is_found_by_its_reference` |
 | `core` imports no Temporal or LLM code, in the new modules too | `tests/test_layers.py`, unchanged |

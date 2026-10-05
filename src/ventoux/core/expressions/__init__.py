@@ -1,4 +1,4 @@
-"""Expressions: structured JSON with a fixed list of operators (layer 2; brief, D20).
+"""Expressions: structured JSON with a fixed list of operators (brief, D20), built in layer 2.
 
 One module per job: `model` (what an expression is), `parse`, `check`, `evaluate` and `render`.
 The names below are what the rest of Ventoux uses.
