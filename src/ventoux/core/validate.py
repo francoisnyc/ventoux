@@ -61,7 +61,7 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
                     issues += expression_issues(
                         f"{path}.when", transition.when, plan.fields, condition=True
                     )
-    return issues
+    return issues + graph_issues(plan)
 
 
 def activity_issues(path: str, state: ActivityState, catalog: Catalog) -> list[Issue]:
@@ -192,6 +192,75 @@ def expression_issues(
             )
         ]
     return []
+
+
+@dataclass(frozen=True)
+class Arrow:
+    """One transition seen as an arrow of the graph: from a state, on an event, to a state."""
+
+    source: str  # the state it leaves
+    event: str  # what happened there: `done`, an outcome, `timeout`
+    target: str  # the state it enters
+
+
+def arrows(plan: Plan) -> list[Arrow]:
+    """Every transition whose target is a state (an unknown target is already an issue)."""
+    found = []
+    for name, state in plan.states.items():
+        if isinstance(state, FinalState):
+            continue
+        for event, transitions in state.on.items():
+            # A condition is a fork the validator can't see through: every branch may run.
+            found += [Arrow(name, event, t.target) for t in transitions if t.target in plan.states]
+    return found
+
+
+def reach(starts: set[str], through: list[Arrow], backwards: bool = False) -> set[str]:
+    """Every state reachable from `starts` along `through`, `starts` included; `backwards` follows
+    each arrow from its target to its source, so it finds the states that can reach `starts`."""
+    seen = set(starts)
+    waiting = list(starts)
+    while waiting:
+        here = waiting.pop()
+        for arrow in through:
+            source, target = (
+                (arrow.target, arrow.source) if backwards else (arrow.source, arrow.target)
+            )
+            if source == here and target not in seen:
+                seen.add(target)
+                waiting.append(target)
+    return seen
+
+
+def graph_issues(plan: Plan) -> list[Issue]:
+    """What reading the plan as a graph proves: every state reachable, and the plan able to end."""
+    if plan.initial not in plan.states:
+        return []  # already an issue; with no start, reachability would only repeat it
+    issues: list[Issue] = []
+    every = arrows(plan)
+    reachable = reach({plan.initial}, every)
+    finals = {name for name, state in plan.states.items() if isinstance(state, FinalState)}
+    can_end = reach(finals, every, backwards=True)
+    for name in plan.states:
+        if name not in reachable:
+            issues.append(
+                Issue(
+                    f"states.{name}",
+                    "UNREACHABLE_STATE",
+                    f"no path from {plan.initial} reaches {name}: "
+                    "remove it, or add a transition to it",
+                )
+            )
+        elif name not in can_end:
+            # Only reachable states: an unreachable one is already an issue.
+            issues.append(
+                Issue(
+                    f"states.{name}",
+                    "NO_PATH_TO_FINAL",
+                    f"the plan can never end from {name}: add a path to a final state",
+                )
+            )
+    return issues
 
 
 def each_transition(path: str, transitions: tuple[Transition, ...]) -> list[tuple[str, Transition]]:

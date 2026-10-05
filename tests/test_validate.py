@@ -272,3 +272,30 @@ def test_a_condition_is_checked_inside_too() -> None:
             ">[1]: `>` compares numbers, and this is a string",
         )
     ]
+
+
+def test_every_state_is_reachable() -> None:
+    plan = changed(cancelled={"final": "failed"})
+    assert issues(plan) == [
+        Issue(
+            "states.cancelled",
+            "UNREACHABLE_STATE",
+            "no path from check_order reaches cancelled: remove it, or add a transition to it",
+        )
+    ]
+
+
+def test_from_every_state_the_plan_can_end() -> None:
+    # A declined refund waits for a retry that only ever leads back to itself: the plan is stuck.
+    pay = guide_plan()["states"]["pay"]
+    plan = changed(
+        pay={**pay, "on": {"done": "paid", "declined": "retry_payment"}},
+        retry_payment={"wait": {"outcomes": ["retry"]}, "on": {"retry": "retry_payment"}},
+    )
+    assert issues(plan) == [
+        Issue(
+            "states.retry_payment",
+            "NO_PATH_TO_FINAL",
+            "the plan can never end from retry_payment: add a path to a final state",
+        )
+    ]
