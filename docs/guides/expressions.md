@@ -81,7 +81,8 @@ those types before the definition is accepted:
 expect. A division that doesn't come out exactly (`1 / 3`) keeps 34 significant digits, rounding
 half to even (IEEE 754 decimal128). Expressions don't round otherwise: rounding is a compute
 activity, with the scale and rounding mode written out. A number must be finite: infinity and NaN
-are refused, since an infinite amount would pass any threshold.
+are refused, since an infinite amount would pass any threshold. It must also fit decimal128 (34
+digits, exponents within ±6144), so every evaluator holds the same number.
 
 ## What is refused, and what it says
 

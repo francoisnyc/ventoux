@@ -333,11 +333,14 @@ def test_a_division_keeps_34_significant_digits_whatever_the_global_context() ->
 
 
 def test_arithmetic_rounds_half_to_even() -> None:
-    # 35 significant digits ending in 5: decimal128 keeps 34, rounding to the even neighbour.
-    ends_in_5 = Decimal("1" + "0" * 33 + "5")
-    assert evaluate(parse_expression({"+": [ends_in_5, 0]}), {}) == Decimal("1" + "0" * 34)
-    ends_in_15 = Decimal("1" + "0" * 32 + "15")
-    assert evaluate(parse_expression({"+": [ends_in_15, 0]}), {}) == Decimal("1" + "0" * 32 + "20")
+    # A sum that needs 35 digits, from literals that fit: decimal128 keeps 34, rounding a final 5
+    # to the even neighbour. The numbers are written out: computing them here would use Python's
+    # own 28-digit context, the very thing this test guards against.
+    ends_in_0 = Decimal("1" + "0" * 33)
+    ends_in_1 = Decimal("1" + "0" * 32 + "1")
+    ends_in_2 = Decimal("1" + "0" * 32 + "2")
+    assert evaluate(parse_expression({"+": [ends_in_0, Decimal("0.5")]}), {}) == ends_in_0
+    assert evaluate(parse_expression({"+": [ends_in_1, Decimal("0.5")]}), {}) == ends_in_2
 
 
 @pytest.mark.parametrize("special", [Decimal("Infinity"), Decimal("-Infinity"), Decimal("NaN")])
@@ -931,3 +934,52 @@ def test_the_guide_refuses_as_the_check_refuses(wrote: str, message: str) -> Non
     with pytest.raises(ExpressionInvalid) as refused:
         check(parse_expression(json.loads(wrote, parse_float=Decimal)), REFUND)
     assert str(refused.value) == message
+
+
+def nested(levels: int) -> object:
+    """`not(not(…(true)…))`, `levels` objects deep."""
+    data: object = True
+    for _ in range(levels):
+        data = {"!": [data]}
+    return data
+
+
+TOO_DEEP = (
+    "an expression is nested at most 32 levels deep, and this one goes deeper; "
+    "logic this deep belongs in a compute activity"
+)
+
+
+@pytest.mark.parametrize("levels", [33, 3000])
+def test_an_expression_nested_too_deep_is_refused(levels: int) -> None:
+    # A model writing expressions could produce this; Python's RecursionError helps nobody.
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression(nested(levels))
+    assert str(refused.value) == TOO_DEEP
+
+
+def test_an_expression_32_levels_deep_parses() -> None:
+    assert evaluate(parse_expression(nested(32)), {}) is True
+
+
+OUTSIDE_DECIMAL128 = [Decimal("1E+999999"), Decimal("1E-7000"), Decimal("1" * 35)]
+
+
+@pytest.mark.parametrize("number", OUTSIDE_DECIMAL128)
+def test_a_literal_outside_decimal128_is_refused(number: Decimal) -> None:
+    # The TypeScript evaluator couldn't hold it exactly, so the two would disagree (brief, D20).
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression({">": [{"var": "amount"}, number]})
+    assert str(refused.value) == (
+        f"{number} doesn't fit a decimal128 number (34 digits, exponents within ±6144)"
+    )
+
+
+@pytest.mark.parametrize("number", OUTSIDE_DECIMAL128)
+def test_a_case_file_value_outside_decimal128_is_an_error(number: Decimal) -> None:
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(Var(var="amount"), {"amount": number})
+    assert str(stopped.value) == (
+        f"amount holds {number}, which doesn't fit a decimal128 number "
+        "(34 digits, exponents within ±6144)"
+    )

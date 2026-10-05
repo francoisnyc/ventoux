@@ -49,6 +49,10 @@ reading in brackets:
 - `in` on a string (substring);
 - `null` as a literal.
 
+An expression is nested at most 32 levels deep, counting each JSON object as a level; deeper is
+refused with a message naming the limit, measured before parsing and without recursion, so even
+thousands of levels give that refusal and not Python's `RecursionError` (tutor review, item 5).
+
 A list literal is allowed only as the second argument of `in`, and holds at least one literal
 value, all of one type (decided in slice 6: list fields hold records for `count` and `sum`, so
 `in` never reads one).
@@ -69,7 +73,10 @@ Arithmetic uses one module-level context, passed explicitly (`CONTEXT.add(a, b)`
 `CONTEXT.divide(a, b)`), never `getcontext()`. It is decimal128 in full: 34 digits, rounding half
 to even, exponents within ±6144, and overflow trapped and turned into an `ExpressionError` (found
 in slice 5: Python's default range returned `1E+12000`). A number must be finite, in a literal
-and in the case file: `Infinity > 100` is true, so an infinite amount would pass a threshold.
+and in the case file: `Infinity > 100` is true, so an infinite amount would pass a threshold. And
+it must fit decimal128 exactly, in a literal and in the case file: `1E+999999`, `1E-7000` and a
+35-digit number are refused, since the TypeScript evaluator couldn't hold them and the two would
+disagree (tutor review, item 6).
 Division by zero names the fields and the values (`division by zero in amount / items (250 / 0)`):
 the fields tell a developer where to look, the values an operator what happened (decided after
 slice 9, once the renderer existed). `string` of a number is the

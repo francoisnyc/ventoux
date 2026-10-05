@@ -47,6 +47,21 @@ CONTEXT = Context(
     traps=[InvalidOperation, DivisionByZero, Overflow],
 )
 
+DECIMAL128 = "a decimal128 number (34 digits, exponents within ±6144)"
+
+
+def fits_decimal128(number: Decimal) -> bool:
+    """Whether `number` is exactly a decimal128 number: putting it through `CONTEXT` changes nothing.
+
+    Both evaluators must hold the same numbers; the TypeScript one couldn't hold 1E+999999, or 35
+    digits, exactly, so the two would disagree (brief, D20).
+    """
+    try:
+        return CONTEXT.create_decimal(number) == number
+    except Overflow:
+        return False
+
+
 # What an expression gives, and what it is: a literal, a field, or one operator with its arguments.
 # Recursive, so the models below can hold expressions; a `type` alias is resolved when first used.
 type Value = Decimal | str | bool
@@ -320,12 +335,38 @@ class ExpressionError(Exception):
 
 def parse_expression(data: object) -> Expression:
     """The expression stored as `data`, or `ExpressionInvalid` saying what is wrong with it."""
+    if too_deep(data):
+        raise ExpressionInvalid(
+            f"an expression is nested at most {MAX_DEPTH} levels deep, and this one goes deeper; "
+            "logic this deep belongs in a compute activity"
+        )
     expression = parse(data)
     if item_outside(expression):
         raise ExpressionInvalid(
             "item reads a field of the current element, so it is only allowed inside count and sum"
         )
     return expression
+
+
+MAX_DEPTH = 32  # plenty for a condition people can read; a model could write far deeper
+
+
+def too_deep(data: object) -> bool:
+    """Whether `data` nests more than `MAX_DEPTH` objects, each object being one level.
+
+    Counted with a list of pending parts, not by recursion, so an input thousands of levels deep is
+    refused before it can exhaust Python's stack.
+    """
+    pending: list[tuple[object, int]] = [(data, 0)]
+    while pending:
+        part, depth = pending.pop()
+        if isinstance(part, dict):
+            if depth + 1 > MAX_DEPTH:
+                return True
+            pending.extend((child, depth + 1) for child in part.values())
+        elif isinstance(part, list):
+            pending.extend((child, depth) for child in part)
+    return False
 
 
 def item_outside(node: object) -> bool:
@@ -350,6 +391,8 @@ def parse(data: object) -> Expression:
         # Fail closed: `Infinity > 100` is true, so an infinite amount would pass any threshold.
         if not Decimal(data).is_finite():
             raise ExpressionInvalid(f"{data} is not a number an expression can use")
+        if not fits_decimal128(Decimal(data)):
+            raise ExpressionInvalid(f"{data} doesn't fit {DECIMAL128}")
         return Decimal(data)
     if isinstance(data, float):
         # Refused, not converted: the reader already turned 0.1 into a binary approximation.
@@ -854,6 +897,8 @@ def readable(name: str, value: object, where: str = "") -> Value:
         raise ExpressionError(
             f"{name} holds {value}, which is not a number an expression can use{where}"
         )
+    if isinstance(value, Decimal) and not fits_decimal128(value):
+        raise ExpressionError(f"{name} holds {value}, which doesn't fit {DECIMAL128}{where}")
     return value
 
 
