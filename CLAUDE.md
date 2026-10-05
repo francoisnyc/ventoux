@@ -17,6 +17,10 @@ are building and why) and `docs/CURRICULUM.md` (the layers, in order) before doi
   reason → the least code that passes it → the next test. Never write all the tests up front, and
   never test internals. Build only what the layer's "Build" line needs; prefer fewer files and plain
   code over abstractions.
+- **Check the note's promises before opening the pull request.** End the design note with a
+  "Promises" table: each claim the note makes about behaviour (an error, a refusal, a bound, a
+  default), and the test that would fail if it weren't true. A promise with no test gets one, or
+  leaves the note. Twice the note promised what the code didn't do and every test still passed.
 - **Walk through after building.** Explain the code you wrote, file by file, and answer questions.
   End by asking the layer's "Check yourself" questions.
 - **Stop and wait** after each step above for the user to confirm. Don't chain steps silently.
@@ -36,7 +40,7 @@ deliberately in Python, smaller and clearer.
 
 - Definitions (plans and case definitions) are data. Never `eval`, `exec`, `compile`, `importlib` or
   `pickle` anything from them.
-- Expressions are structured JSON using only the operators listed in decision D3, evaluated as pure
+- Expressions are structured JSON using only the operators listed in decision D20, evaluated as pure
   functions of the case file. No operator reads the clock, randomness or I/O. Reject anything else
   at validation; at runtime a missing field, a wrong type or an unknown operator is an error. Adding
   an operator is a design decision recorded in the brief, never just a code change.
@@ -65,3 +69,15 @@ deliberately in Python, smaller and clearer.
 - Run the tests, the type checker and ruff before declaring a step done.
 - Write for a reader learning the system: short functions, names from the brief's glossary, a comment
   where a design rule is enforced.
+- Readable for a Python developer who doesn't know Pydantic or Temporal yet: one idea per file;
+  a one-line comment on each field saying what it means; each rule reads like its line in the
+  design note, its error message saying what is wrong, then what to do. Framework idioms stay as
+  they are (no home-made wrappers around them) but get a short comment the first time a file uses
+  them (`# Pydantic: runs after the fields are checked, on the whole object`). No cryptic regex
+  without a readable explanation or a small named function.
+- Comments that cite a decision state the rule in plain words first; the reference only points to
+  the reason, written with its source: "(brief, D5)", "(learning question 7)". Cite where a rule is
+  enforced, not everywhere its topic appears.
+- Decisions in the brief are never renumbered or rewritten: a replaced decision keeps its text,
+  marked "superseded by D*n*", and the new one gets the next number. So a reference always means
+  what it meant when it was written.

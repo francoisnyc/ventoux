@@ -25,8 +25,11 @@ files. Every layer should end up smaller and clearer than its prototype.
    all the tests up front: each test should respond to what the last one taught. Tidy up once the
    slice is green. Where the docs show an example, a test runs it, so the docs can't drift from the
    code.
-6. **Walk through:** the assistant walks you through the code; you ask questions until it's clear.
-7. **Check yourself:** answer the layer's questions below. If you can't, don't move on.
+6. **Check the promises:** the design note ends with a "Promises" table: each claim about behaviour
+   and the test that proves it. A claim without a test gets one, or leaves the note. The reviewer
+   checks the table against the code (twice a note promised what the code didn't do).
+7. **Walk through:** the assistant walks you through the code; you ask questions until it's clear.
+8. **Check yourself:** answer the layer's questions below. If you can't, don't move on.
 
 This loop is a small version of QRSPI (question, research, design, structure, plan, implement): the
 brief and this curriculum already answer the questions and the design, so each layer starts at the
@@ -105,13 +108,13 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 - **Check yourself:** which of our guarantees could not be expressed as a restriction of the
   standard, and why?
 - **Done:** `docs/layers/spike-dsl.md`. Plans keep our own format; expressions are structured JSON
-  with a fixed list of operators (D3).
+  with a fixed list of operators (D20).
 
 ## 2. Plan schema and expressions
 
-- **Learn:** a plan as a state machine of data; expressions as data (structured JSON, decision D3);
+- **Learn:** a plan as a state machine of data; expressions as data (structured JSON, decision D20);
   why some things can't even be written; why a missing value is an error, not `false`.
-- **Build:** the plan schema (activity, wait and final states; transitions); expressions with D3's
+- **Build:** the plan schema (activity, wait and final states; transitions); expressions with D20's
   operators: the Pydantic models, a type check against declared fields (outcomes as closed lists),
   a fail-closed evaluator and the one-line rendering. The tracer's minimal form (`=`, `field`)
   becomes `==` and `var`.
@@ -128,6 +131,21 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 
 ## 3. Static validation
 
+- **First:** the readability refactor of layer 2's `core/expressions.py` (1,043 lines, five jobs):
+  split it into a package, one module per job (the models and parsing, the type check, evaluation,
+  rendering), as a pure move: no behaviour change, tests unchanged and green. Then the same for
+  layer 1's `core/catalog.py` (agreed in the tutor session):
+  split it into `contract.py` (a contract and what it refuses), `catalog.py` (lookup) and
+  `contract_hash.py` (the hash and the CI check); a one-line comment per field; a comment on each
+  Pydantic idiom the first time it appears; the reference check readable (commented or a small
+  function); every error message in the same shape (what's wrong, then what to do). No behaviour
+  change: all tests stay green, and one new test checks that every rule in the design note is
+  registered on the contract, so a rule can never silently stop running. One fix found in the
+  tutor session: `model_copy(update=...)` skips every check, so a copied contract with risk
+  `"hihg"` and a `write` with no idempotency key was accepted into the catalog. `Catalog.register`
+  must re-check every contract it receives (Pydantic's `revalidate_instances="always"`), with a
+  negative test: a copy that breaks a rule is refused at registration. Also a reference check: every
+  decision cited in `src/` ("brief, D5") exists in the brief and is not superseded.
 - **Learn:** what can be proven by reading a definition: references exist, states are reachable,
   high-risk activities are behind an approval on every path.
 - **Build:** a validator returning structured issues (`path`, `code`, `message`).
