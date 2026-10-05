@@ -262,3 +262,85 @@ def test_a_contract_with_no_implementation_stops_the_case_by_name(
             file={"order_id": "ord-1", "amount": 40},
             answers=[("review", "approve", "ana", {"approved_amount": 40})],
         )
+
+
+def refund(**changes: Any) -> ActivityContract:
+    """The guide's contract, `payments.refund@1`, with any field changed."""
+    fields = {name: getattr(payments_refund, name) for name in ActivityContract.model_fields}
+    return ActivityContract(**fields | changes)
+
+
+# Each "You wrote" cell of the guide's refusal table, and the code that does it.
+GUIDE_REFUSALS: dict[str, Any] = {
+    '`effect="write"` with no `idempotency_key`': lambda: refund(idempotency_key=None),
+    '`idempotency_key="request_id"`, not an input field': lambda: refund(
+        idempotency_key="request_id"
+    ),
+    '`queue="payments"` in a contract': lambda: refund(queue="payments"),
+    '`name="Payments Refund"`, or `version=0`': lambda: refund(name="Payments Refund"),
+    '`outcomes=["declined"]` with no title for it': lambda: refund(
+        display=Display(title="Refund a customer", description="Refunds an order.")
+    ),
+    "`RetryPolicy(maximum_attempts=0, …)`": lambda: RetryPolicy(
+        maximum_attempts=0, initial_interval=1, backoff_coefficient=2
+    ),
+    '`catalog.register(payments_refund.model_copy(update={"risk": "hihg"}))`': lambda: (
+        Catalog().register(payments_refund.model_copy(update={"risk": "hihg"}))
+    ),
+    "A second, different `payments.refund@1`": lambda: catalog_of(payments_refund).register(
+        refund(risk="medium")
+    ),
+    '`catalog.get("payments.refund@3")`': lambda: catalog_of(payments_refund).get(
+        "payments.refund@3"
+    ),
+    '`catalog.get("payments.refund@1.0")`': lambda: Catalog().get("payments.refund@1.0"),
+}
+
+
+def guide_refusal_rows() -> list[tuple[str, str]]:
+    """The rows of the guide's table "What the catalog refuses", as (you wrote, Ventoux says)."""
+    guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
+    table = guide.split("## What the catalog refuses")[1].split("\n## ")[0]
+    rows = [line for line in table.splitlines() if line.startswith("| ")][1:]  # after the header
+    return [(cells[1].strip(), cells[2].strip()) for cells in (row.split("|") for row in rows)]
+
+
+def messages(error: Exception) -> list[str]:
+    """What a refusal says, one message per problem: `field: message` for Pydantic's own."""
+    if not isinstance(error, ValidationError):
+        return [str(error)]
+    said = []
+    for problem in error.errors():
+        message = problem["msg"].removeprefix("Value error, ")
+        where = ".".join(str(part) for part in problem["loc"])
+        said.append(f"{where}: {message}" if where else message)
+    return said
+
+
+def as_compared(message: str) -> str:
+    """A message without the guide's code marks, its first letter's case or its final full stop."""
+    message = message.replace("`", "").removesuffix(".")
+    return message[:1].lower() + message[1:]
+
+
+@pytest.mark.parametrize(("wrote", "says"), guide_refusal_rows())
+def test_the_guides_refusals_are_what_the_catalog_says(wrote: str, says: str) -> None:
+    # Every refusal says what is wrong, then what to do; the guide shows each word of it.
+    assert wrote in GUIDE_REFUSALS, f"the guide's row {wrote!r} has no test"
+    with pytest.raises(Exception) as refused:  # each row raises its own kind of error
+        GUIDE_REFUSALS[wrote]()
+    assert as_compared(says) in [as_compared(message) for message in messages(refused.value)]
+
+
+def test_a_copy_that_breaks_the_rules_is_refused_at_registration() -> None:
+    # `model_copy` runs no checks (learning question 31), so `register` checks again.
+    broken = payments_refund.model_copy(update={"risk": "hihg", "idempotency_key": None})
+    with pytest.raises(ValidationError, match="risk"):
+        Catalog().register(broken)
+
+
+def test_a_copy_with_a_broken_part_is_refused_at_registration() -> None:
+    timeouts = payments_refund.timeouts.model_copy(update={"start_to_close": 0})
+    broken = payments_refund.model_copy(update={"timeouts": timeouts})
+    with pytest.raises(ValidationError, match="start_to_close"):
+        Catalog().register(broken)

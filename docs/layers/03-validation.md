@@ -83,8 +83,10 @@ idempotency key was accepted into the catalog. Two parts, both needed:
 
 - the shared config gets `revalidate_instances="always"`, so that validating a contract also
   re-checks the parts it holds (a copied `Timeouts` with a bad value);
-- `register` stores `ActivityContract.model_validate(contract)`, never the object it was given
-  unchecked. With the config alone, nothing would call validation at all.
+- `register` calls `ActivityContract.model_validate(contract)` before storing it. With the config
+  alone, nothing would call validation at all (slice 5 showed it: both tests still failed). It
+  stores the object it was given, now checked and frozen, so `get` still returns that same object
+  (an existing test caught the re-checked copy being stored instead).
 
 **2. Every rule is running.** Each rule a contract enforces, with an example it refuses:
 

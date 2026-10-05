@@ -13,7 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # know is refused, never silently dropped (fail closed).
 # Pydantic: `model_config` sets how a model behaves. `frozen=True` refuses any assignment after the
 # object is built; `extra="forbid"` refuses a field the model doesn't declare.
-FROZEN = ConfigDict(frozen=True, extra="forbid")
+# `revalidate_instances="always"` makes validating an object that is already built check it again,
+# its parts included: `model_copy(update=...)` builds a copy without any check, so `Catalog.register`
+# re-checks every contract it receives (learning question 31).
+FROZEN = ConfigDict(frozen=True, extra="forbid", revalidate_instances="always")
 
 # How a reference is written, `payments.refund@1`, read left to right:
 #   [a-z][a-z0-9_]*            a first word: a lowercase letter, then letters, digits or `_`
@@ -119,7 +122,8 @@ class ActivityContract(BaseModel):
         if self.idempotency_key is not None and self.idempotency_key not in self.input.model_fields:
             raise ValueError(
                 f"{self.reference}: idempotency key {self.idempotency_key!r} is not a field of its "
-                f"input ({self.input.__name__}), so the engine would have nowhere to put the key."
+                f"input ({self.input.__name__}), so the engine would have nowhere to put the key. "
+                f"Name one of its fields: {', '.join(sorted(self.input.model_fields))}."
             )
         return self
 
@@ -129,7 +133,8 @@ class ActivityContract(BaseModel):
         if set(self.outcomes) != set(self.display.outcomes):
             raise ValueError(
                 f"{self.reference}: outcomes and their display titles must match: outcomes "
-                f"{sorted(self.outcomes)}, titles for {sorted(self.display.outcomes)}."
+                f"{sorted(self.outcomes)}, titles for {sorted(self.display.outcomes)}. Give each "
+                "outcome exactly one title in display.outcomes."
             )
         return self
 

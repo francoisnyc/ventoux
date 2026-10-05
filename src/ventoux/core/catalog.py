@@ -19,6 +19,11 @@ class Catalog:
         self._contracts: dict[str, ActivityContract] = {}  # by reference, `payments.refund@1`
 
     def register(self, contract: ActivityContract) -> None:
+        # Every rule runs again on what is registered: a copy made with `model_copy` skipped them all
+        # (learning question 31). Fail closed: a contract that breaks a rule never enters the catalog.
+        # Pydantic: `model_validate` checks its input, raising `ValidationError` if a rule fails. The
+        # checked copy it returns isn't needed: the contract passed, and being frozen, can't change.
+        ActivityContract.model_validate(contract)
         # A reference stands for one promise for good: a changed promise needs a new version
         # (brief, D5).
         registered = self._contracts.get(contract.reference)
@@ -53,5 +58,9 @@ class Catalog:
             (c for c in self._contracts.values() if c.name == name), key=lambda c: c.version
         )
         registered = ", ".join(c.reference for c in same_name)
-        hint = f" Registered: {registered}." if registered else ""
+        hint = (
+            f" Registered: {registered}. Use a registered version, or register this one first."
+            if registered
+            else " Register its contract first, or check the name."
+        )
         raise NotInCatalog(f"{reference} is not in the catalog.{hint}")
