@@ -1,7 +1,7 @@
 # Layer 3: static validation
 
 Status: part 1 (the refactor and the catalog fixes) agreed and built, 2026-10-05, slices 1–7;
-part 2 (the validator) drafted, 2026-10-05, for agreement.
+part 2 (the validator) agreed and built, 2026-10-05, slices 1–9.
 
 ## What this layer is for
 
@@ -226,6 +226,17 @@ for it.
 **Fail closed:** `validate` given anything but a parsed `Plan` raises `TypeError`, never returns
 an empty list as if the plan were fine.
 
+Decided while building (slices 6 to 9):
+
+- If `initial` isn't a state, the graph checks don't run: with no start, every state would be
+  "unreachable", burying the one real problem.
+- An unreachable state gets only `UNREACHABLE_STATE`, not also `NO_PATH_TO_FINAL`: one cause, one
+  issue. A state whose every way out is broken gets `NO_PATH_TO_FINAL` as well as the broken
+  targets, since that is true and is what a reader of the plan needs to know.
+- A wait offering `approve` with other outcomes is `APPROVAL_OUTCOMES` and approves nothing, so the
+  activity behind it is also `APPROVAL_REQUIRED` (fail closed).
+- The guide's table was checked by breaking it: a changed word, and an unknown code, each fail.
+
 Not in this layer: whether an input's type matches the contract's (the contract's schema would
 need mapping to field types; layer 5 checks inputs when the step runs); a transition listed after
 one with no `when`, which can never be taken (not on the agreed list); provenance and sink
@@ -280,19 +291,19 @@ Each claim part 1 makes about behaviour, and the test that fails if it isn't tru
 | `get` returns the very contract registered | C `test_a_registered_contract_is_found_by_its_reference` |
 | `core` imports no Temporal or LLM code, in the new modules too | `tests/test_layers.py`, unchanged |
 
-Part 2's promises; `V` is `tests/test_validate.py`, and each test is named when its slice is built.
+Part 2's promises; `V` is `tests/test_validate.py`.
 
 | Promise | Test |
 |---|---|
-| `validate` refuses anything but a parsed plan, never returning "no issues" for it | V slice 1 |
-| `initial` and every target name a state | V slice 1 |
-| Every activity is in the catalog, with the catalog's message | V slice 2 |
-| Inputs are the contract's fields, the required ones given, the idempotency key never | V slice 3 |
-| An activity handles exactly `done` and its declared outcomes; a wait exactly its outcomes and `timeout` if declared; no outcome is named `timeout` | V slice 4 |
-| Every input and condition passes the expression check; a condition gives a boolean | V slice 5 |
-| Every state is reachable, and from every state the plan can end | V slice 6 |
-| A wait offering `approve` offers exactly `approve` and `reject` | V slice 7 |
-| No high-risk activity is reachable without passing an approval's `approve`, and the message names a path | V slice 7 |
-| One approval unlocks one high-risk run: no second one, and no loop back, without a new approval | V slice 8 |
-| Every problem is listed, not only the first | V slice 9 |
-| The plans guide says what the code does: its example has no issues, its table's messages are `validate`'s | V slices 1, 7 and 9 |
+| `validate` refuses anything but a parsed plan, never returning "no issues" for it | V `test_only_a_parsed_plan_is_validated` |
+| `initial` and every target name a state, a target in a list found by its position | V `test_initial_must_be_a_state`, `test_every_target_must_be_a_state`, `test_a_target_in_a_list_is_found_by_its_position` |
+| Every activity is in the catalog, with the catalog's message | V `test_every_activity_is_in_the_catalog` |
+| Inputs are the contract's fields, the required ones given, the idempotency key never | V `test_an_input_the_contract_does_not_take_is_refused`, `test_an_input_the_contract_needs_must_be_given`, `test_the_idempotency_key_is_filled_by_the_engine_never_by_a_plan` |
+| An activity handles exactly `done` and its declared outcomes; a wait exactly its outcomes and `timeout` if declared; no outcome is named `timeout` | V `test_an_activity_never_gives_an_event_its_contract_does_not_declare`, `test_every_outcome_an_activity_declares_is_handled`, `test_a_wait_never_gives_an_outcome_it_does_not_offer`, `test_every_outcome_a_wait_offers_is_handled`, `test_a_wait_without_a_timeout_never_times_out`, `test_a_wait_with_a_timeout_handles_it`, `test_no_outcome_is_named_timeout` |
+| Every input and condition passes the expression check, the path inside it kept; a condition gives a boolean | V `test_an_input_reads_only_declared_fields`, `test_a_condition_gives_a_boolean`, `test_a_condition_is_checked_inside_too` |
+| Every state is reachable, and from every state the plan can end | V `test_every_state_is_reachable`, `test_from_every_state_the_plan_can_end` |
+| A wait offering `approve` offers exactly `approve` and `reject`, and otherwise approves nothing | V `test_an_approval_offers_exactly_approve_and_reject` |
+| No high-risk activity is reachable without passing an approval's `approve`, and the message names the shortest path; a low-risk one needs none | V `test_a_high_risk_activity_is_never_reached_without_an_approval`, `test_a_low_risk_activity_needs_no_approval` |
+| One approval unlocks one high-risk run: no second one, and no loop back, without a new approval | V `test_one_approval_unlocks_one_high_risk_run`, `test_a_loop_back_to_a_high_risk_activity_needs_a_new_approval`, `test_a_loop_through_the_approval_is_approved_each_time` |
+| Every problem is listed, not only the first | V `test_every_problem_is_listed_not_only_the_first` |
+| The plans guide says what the code does: its example has no issues, its fork gives the message shown, its table lists every code with `validate`'s own message | V `test_the_guides_example_has_no_issues`, `test_a_high_risk_activity_is_never_reached_without_an_approval`, `test_the_guide_lists_every_issue_code`, `test_the_guides_messages_are_what_validate_says` |

@@ -379,3 +379,85 @@ def test_a_loop_back_to_a_high_risk_activity_needs_a_new_approval() -> None:
 
 def test_a_loop_through_the_approval_is_approved_each_time() -> None:
     assert issues(retry_after_decline("approve_refund")) == []
+
+
+def test_every_problem_is_listed_not_only_the_first() -> None:
+    lookup = guide_plan()["states"]["check_order"]
+    pay = guide_plan()["states"]["pay"]
+    plan = changed(
+        check_order={**lookup, "inputs": {"order_id": ORDER_ID, "amout": AMOUNT}},
+        pay={**pay, "on": {"done": "pai"}},
+        cancelled={"final": "failed"},
+    )
+    assert [(issue.path, issue.code) for issue in issues(plan)] == [
+        ("states.check_order.inputs.amout", "UNKNOWN_INPUT"),
+        ("states.pay.on", "MISSING_EVENT"),
+        ("states.pay.on.done", "UNKNOWN_TARGET"),
+        # With no valid way out, pay can never end, and nothing reaches paid any more.
+        ("states.pay", "NO_PATH_TO_FINAL"),
+        ("states.paid", "UNREACHABLE_STATE"),
+        ("states.cancelled", "UNREACHABLE_STATE"),
+    ]
+
+
+# Each code in the guide's table, and a plan that breaks that rule as the row's example does.
+GUIDE_EXAMPLES: dict[str, Any] = {
+    "UNKNOWN_TARGET": lambda: pay_on({"done": "pai", "declined": "failed"}),
+    "UNKNOWN_ACTIVITY": lambda: changed(
+        pay={**guide_plan()["states"]["pay"], "activity": "payments.refund@3"}
+    ),
+    "UNKNOWN_INPUT": lambda: pay_with_inputs(
+        {"order_id": ORDER_ID, "amount": AMOUNT, "amout": AMOUNT}
+    ),
+    "MISSING_INPUT": lambda: pay_with_inputs({"order_id": ORDER_ID}),
+    "ENGINE_INPUT": lambda: pay_with_inputs(
+        {"order_id": ORDER_ID, "amount": AMOUNT, "idempotency_key": ORDER_ID}
+    ),
+    "UNKNOWN_EVENT": lambda: pay_on({"done": "paid", "declined": "failed", "cancelled": "failed"}),
+    "MISSING_EVENT": lambda: pay_on({"done": "paid"}),
+    "RESERVED_OUTCOME": lambda: approval_with(
+        {"outcomes": ["accept", "decline", "timeout"]},
+        {"accept": "pay", "decline": "failed", "timeout": "failed"},
+    ),
+    "APPROVAL_OUTCOMES": lambda: approval_with(
+        {"outcomes": ["approve", "edit"]}, {"approve": "pay", "edit": "failed"}
+    ),
+    "EXPRESSION_INVALID": lambda: pay_with_inputs(
+        {"order_id": ORDER_ID, "amount": {"var": "amout"}}
+    ),
+    "UNREACHABLE_STATE": lambda: changed(refund_fee={"final": "failed"}),
+    "NO_PATH_TO_FINAL": lambda: changed(
+        pay={**guide_plan()["states"]["pay"], "on": {"done": "paid", "declined": "retry_payment"}},
+        retry_payment={"wait": {"outcomes": ["retry"]}, "on": {"retry": "retry_payment"}},
+    ),
+    "APPROVAL_REQUIRED": guide_fork,
+    "APPROVAL_REUSED": lambda: changed(
+        pay={**guide_plan()["states"]["pay"], "on": {"done": "refund_fee", "declined": "failed"}},
+        refund_fee={**guide_plan()["states"]["pay"], "on": {"done": "paid", "declined": "failed"}},
+    ),
+}
+
+
+def guide_table() -> list[tuple[str, str]]:
+    """The guide's table of issues, as (code, example message); "as above" is the block above it."""
+    guide = GUIDE.read_text()
+    above = guide.split("The check says:\n\n```\n")[1].split("```")[0]
+    above_message = " ".join(above.split()).split("APPROVAL_REQUIRED ")[1]
+    table = guide.split("| Code |")[1].split("\n\n")[0]
+    rows = [line.split("|") for line in table.splitlines() if line.startswith("| `")]
+    return [
+        (
+            code.strip().strip("`"),
+            above_message if says.strip() == "as above" else says.strip()[1:-1],
+        )
+        for _, code, _, says, _ in rows
+    ]
+
+
+def test_the_guide_lists_every_issue_code() -> None:
+    assert [code for code, _ in guide_table()] == list(GUIDE_EXAMPLES)
+
+
+@pytest.mark.parametrize(("code", "says"), guide_table())
+def test_the_guides_messages_are_what_validate_says(code: str, says: str) -> None:
+    assert says in [issue.message for issue in with_code(GUIDE_EXAMPLES[code](), code)]
