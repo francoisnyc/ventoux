@@ -5,6 +5,7 @@ stay green while later layers replace everything behind them. See docs/layers/tr
 """
 
 import copy
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -114,3 +115,10 @@ def test_an_approval_the_engine_cannot_evaluate_stops_the_case() -> None:
             file={"order_id": "ord-4", "amount": 250},
             answers=[("review", "approve", "ana", {"approved_amount": 250})],
         )
+
+
+def test_a_definition_is_read_with_exact_decimals(tmp_path: Path) -> None:
+    # A JSON number becomes a Decimal as it is read: as a float, 0.1 would already be inexact.
+    stored = tmp_path / "definition.json"
+    stored.write_text('{"threshold": 0.1}')
+    assert load_definition(stored)["threshold"] == Decimal("0.1")

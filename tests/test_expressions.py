@@ -983,3 +983,9 @@ def test_a_case_file_value_outside_decimal128_is_an_error(number: Decimal) -> No
         f"amount holds {number}, which doesn't fit a decimal128 number "
         "(34 digits, exponents within ±6144)"
     )
+
+
+def test_sum_reads_value_only_for_the_elements_where_chose() -> None:
+    # An element `where` leaves out may lack the value: like `if`, only the chosen ones are read.
+    items = [{"risk": "high", "amount": Decimal(10)}, {"risk": "low"}]
+    assert evaluate(parse_expression(HIGH_TOTAL), {"items": items}) == Decimal(10)

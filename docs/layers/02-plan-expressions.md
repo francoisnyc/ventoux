@@ -1,6 +1,7 @@
 # Layer 2: plan schema and expressions
 
-Status: built, 2026-10-04 (the ten design choices agreed in the session; slices 1–11 done); awaiting the tutor review on its pull request.
+Status: built, 2026-10-04 (the ten design choices agreed in the session; slices 1–11 done); tutor
+review items 1–6 done 2026-10-05.
 
 ## What this layer is for
 
@@ -63,11 +64,10 @@ literal or an object with one key, and that the key is an operator. If not, it r
 `ExpressionInvalid` with the one message the guide shows. After that, Pydantic validates only the
 named operator's model, so a bad argument gets one error from that model too.
 
-**Numbers** (choices 3 and 4). Every number is a `Decimal`. The parser refuses:
-
-- a Python `float`, which means the JSON was read without `parse_float=Decimal` and `0.1` has
-  already lost precision. It says so, and doesn't convert.
-- a `bool` where a number is expected, since Python's `True` is an `int`.
+**Numbers** (choices 3 and 4). Every number is a `Decimal`. The parser refuses a Python `float`,
+which means the JSON was read without `parse_float=Decimal` and `0.1` has already lost precision:
+it says so, and doesn't convert. It keeps `true` a boolean, never the number 1 (Python's `True` is
+an `int`), so the check and the evaluator refuse it wherever a number goes.
 
 Arithmetic uses one module-level context, passed explicitly (`CONTEXT.add(a, b)`,
 `CONTEXT.divide(a, b)`), never `getcontext()`. It is decimal128 in full: 34 digits, rounding half
@@ -183,8 +183,7 @@ message per problem and its path, dispatching on each state's key as the prototy
   closed list of outcomes (D9), not the prototype's untyped signals.
 - **A final state:** `final: "succeeded"` or `"failed"`.
 - **A transition:** an event name mapped to a state id, or to a list of
-  `{"when": expression, "target": state}`. At runtime (layer 5) the first `when` that holds wins,
-  and none holding is an error.
+  `{"when": expression, "target": state}`.
 
 What slice 10 settled. Names have one shape each, and a message showing it: a plan
 `refund-pay`, a state `await_approval`, an event `approve`, a duration `48h`, and an activity
@@ -195,11 +194,12 @@ messages (`states.pay.inputs.amount: `now` is not an operator…`). Field types 
 their `type`. `PlanInvalid` lists every problem, one line each, with its path in the plan;
 Pydantic's own markers (the kind it picked, `[key]`) are left out of the path.
 
-An activity's events are `done` and the outcomes its contract declares. There is no `error`
-event, unlike the prototype: an undeclared failure after the retries needs a person (D17), and is
-never a transition the plan takes on its own.
-
 Not in this layer:
+- an activity's events are `done` and the outcomes its contract declares, with no `error` event,
+  unlike the prototype: an undeclared failure after the retries needs a person (D17), never a
+  transition the plan takes on its own. Layer 2 reads any event name; layer 3 refuses an `on` key
+  that isn't `done` or a declared outcome;
+- at runtime the first `when` that holds wins, and none holding is an error: layer 5;
 - the prototype's `assign`, `resultAs` and per-state retry, since retries live in the contract
   (D17);
 - references (does `initial`, each target or each activity exist, do `on` keys match the
@@ -245,3 +245,40 @@ Not in this layer:
 
 The tests, mypy and ruff pass, the quickstart's tests are green, no `# TRACER: … layer 2` comment
 is left, and the guide matches the code.
+
+## Promises
+
+Each claim this note makes about behaviour, and the test that fails if it isn't true. `E` is
+`tests/test_expressions.py`, `P` is `tests/test_plan.py`, `Q` is `tests/test_quickstart.py`.
+
+| Promise | Test |
+|---|---|
+| An unknown operator (`now`, `map`) is refused with one message listing the operators, at any depth | E `test_an_unknown_operator_is_refused_with_one_message`, `test_an_unknown_operator_inside_another_is_refused` |
+| An object holds exactly one operator | E `test_an_object_holds_exactly_one_operator` |
+| `var` names one field: no default, never the whole case file | E `test_var_names_one_field_with_no_default` |
+| JsonLogic's looser shapes are refused: `if` chains, unary `-`, three-argument `<`, a bare `!`, `in` on a text | E `test_a_comparison_takes_two_arguments`, `test_logic_operators_take_their_number_of_arguments`, `test_arithmetic_takes_its_number_of_arguments`, `test_if_in_cat_string_exists_take_their_shape` |
+| `null` is not a literal; a list is an expression only as `in`'s list, non-empty, literal, of one type | E `test_null_is_not_a_value`, `test_a_list_is_not_an_expression`, `test_if_in_cat_string_exists_take_their_shape` |
+| An expression nests at most 32 levels; deeper (even 3,000) is refused, never a `RecursionError` | E `test_an_expression_nested_too_deep_is_refused`, `test_an_expression_32_levels_deep_parses` |
+| Numbers are decimals; a `float` is refused, not converted; `true` stays a boolean | E `test_a_field_and_literals_parse`, `test_a_float_is_refused_because_it_has_already_lost_precision` |
+| A number must be finite and fit decimal128, in a literal and in the case file | E `test_a_number_is_finite`, `test_a_literal_outside_decimal128_is_refused`, `test_a_case_file_value_outside_decimal128_is_an_error` |
+| `0.1 + 0.2 == 0.3`; 34 digits, half to even, whatever the global context | E `test_numbers_are_exact_decimals`, `test_a_division_keeps_34_significant_digits_whatever_the_global_context`, `test_arithmetic_rounds_half_to_even` |
+| Overflow and division by zero are errors; division by zero names the fields and the values | E `test_a_result_too_large_for_decimal128_is_an_error`, `test_division_by_zero_is_an_error` |
+| A missing field, `null`, or a value no expression can read is an error, never `false` | E `test_a_field_with_no_value_is_an_error_not_false`, `test_a_value_an_expression_cannot_read_is_an_error`, `test_exists_says_whether_a_field_has_a_value` |
+| The evaluator refuses what it doesn't know (a raw dict) | E `test_an_operator_the_evaluator_does_not_know_is_an_error_not_false` |
+| No coercion: ordering and arithmetic take numbers, `==` the same type, `cat` texts | E `test_comparing_a_text_with_a_number_is_an_error`, `test_equality_never_coerces`, `test_arithmetic_never_coerces`, `test_cat_joins_texts_only`, `test_in_looks_for_a_value_of_the_list_type` |
+| Nothing is truthy: `and`, `or`, `!`, `if` and `where` take booleans | E `test_nothing_is_truthy`, `test_an_if_condition_is_a_boolean`, `test_where_is_a_condition` |
+| `and` and `or` evaluate every part, so an error is never hidden | E `test_and_or_evaluate_every_part_so_an_error_is_never_hidden` |
+| `if` evaluates only its chosen branch; `sum` reads `value` only for chosen elements | E `test_if_evaluates_only_the_branch_its_condition_chooses`, `test_sum_reads_value_only_for_the_elements_where_chose` |
+| `string` keeps a number's own digits | E `test_string_writes_a_value_as_text` |
+| `count` and `sum` read a list of records; errors name the element; `item` only inside them | E `test_count_reads_a_list_of_records`, `test_an_element_missing_a_field_is_an_error`, `test_item_is_refused_outside_count_and_sum`, `test_count_sum_and_item_are_checked` |
+| The check names the path; a misspelled outcome, a text against a number, an undeclared field, mixed `if` branches are rejected before anything runs | E `test_a_misspelled_outcome_is_rejected_before_anything_runs`, `test_a_text_compared_with_a_number_is_rejected`, `test_an_undeclared_field_is_rejected`, `test_an_if_is_checked_on_both_branches` |
+| The check: a reference only against the same system; `in` never takes a reference; a list field only as `over`; an outcome counts as text for `cat` | E `test_a_reference_compares_only_with_the_same_system`, `test_in_exists_and_lists_are_checked`, `test_logic_arithmetic_and_text_are_checked`, `test_check_gives_the_type` |
+| The rendering is FEEL-style, bracketed exactly where the stored tree needs it, `and` inside `or` always | E `test_render_each_operator`, `test_render_brackets_only_what_needs_it`, `test_render_literals_and_fields` |
+| The renderer refuses what it doesn't know | E `test_render_refuses_what_it_does_not_know` |
+| The guide's tables say what the code does | E `test_the_guide_reads_as_the_renderer_renders`, `test_the_guide_refuses_as_the_check_refuses`; P `test_the_guides_plan_state_parses` |
+| A state is exactly one kind | P `test_a_state_is_exactly_one_kind` |
+| A malformed plan is refused with every problem listed, one line each with its path | P `test_a_malformed_plan_is_rejected`, `test_every_problem_is_listed` |
+| A plan's expressions report the same messages; a bare state name is one transition with no condition | P `test_a_malformed_plan_is_rejected`, `test_the_example_plan_parses`, `test_a_wait_state_with_conditional_transitions_parses` |
+| A definition is read with exact decimals | Q `test_a_definition_is_read_with_exact_decimals` |
+| An approval the engine can't evaluate (`{"now": []}`) stops the case instead of paying | Q `test_an_approval_the_engine_cannot_evaluate_stops_the_case` |
+| The quickstart's acceptance tests stay green | Q the first eight tests, `test_an_undeclared_outcome_is_refused` to `test_answering_a_task_needs_its_role` |
