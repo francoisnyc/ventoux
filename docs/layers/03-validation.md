@@ -105,6 +105,8 @@ idempotency key was accepted into the catalog. Two parts, both needed:
 One parametrized test runs this table twice for each row: building the contract, and registering
 a valid contract copied with the row's change. If a rule's decorator is lost, or `register`
 stops checking, its row fails. The test checks behaviour, not Pydantic's list of validators.
+Checked in slice 6 by breaking the code on purpose: without `outcomes_have_titles`'s decorator,
+exactly its two rows fail; without the check in `register`, exactly the 14 registered rows fail.
 
 **3. Decision references are real.** A test reads every `.py` file under `src/`. Every decision
 cited (`D` and a number, as a whole word) must:
@@ -153,8 +155,9 @@ Each claim part 1 makes about behaviour, and the test that fails if it isn't tru
 | The split changes no behaviour | every existing test, no body changed |
 | No contract's hash changes | C `test_every_development_contract_matches_its_recorded_hash` |
 | The guide's example runs as written, from `ventoux.core.contract` | C `test_the_guides_example_is_the_development_refund_contract` |
-| Every rule in the table refuses its example when a contract is built | C the rule table, built (slice 6) |
-| `register` refuses a copy that breaks any rule in the table, nested parts included | C the rule table, registered (slices 5 and 6) |
-| Every catalog refusal says what is wrong, then what to do | C the guide's refusal table run as a test (slice 4) |
+| Every rule in the table refuses its example when a contract is built | C `test_every_rule_refuses_a_contract_that_breaks_it` |
+| `register` refuses a copy that breaks any rule in the table, nested parts included | C `test_every_rule_runs_again_when_a_copy_is_registered`, `test_a_copy_that_breaks_the_rules_is_refused_at_registration`, `test_a_copy_with_a_broken_part_is_refused_at_registration` |
+| Every catalog refusal says what is wrong, then what to do, word for word as the guide shows | C `test_the_guides_refusals_are_what_the_catalog_says` |
 | Every decision cited in `src/` is in the form `(brief, Dn`, exists, and isn't superseded | R (slice 7) |
+| `get` returns the very contract registered | C `test_a_registered_contract_is_found_by_its_reference` |
 | `core` imports no Temporal or LLM code, in the new modules too | `tests/test_layers.py`, unchanged |

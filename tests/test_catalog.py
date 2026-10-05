@@ -344,3 +344,65 @@ def test_a_copy_with_a_broken_part_is_refused_at_registration() -> None:
     broken = payments_refund.model_copy(update={"timeouts": timeouts})
     with pytest.raises(ValidationError, match="start_to_close"):
         Catalog().register(broken)
+
+
+# Every rule a contract enforces (docs/layers/03-validation.md), each with a change that breaks it.
+# A change to a part (`timeouts`, `retry`) is written as that part's changed fields.
+CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
+    ("a field the contract doesn't know", {"queue": "payments"}, "deployment binding"),
+    ("a field a part doesn't know", {"timeouts": {"heartbeat": 5}}, "heartbeat"),
+    ("a name no reference could match", {"name": "Payments Refund"}, "no reference could name"),
+    ("a version no reference could match", {"version": 0}, "no reference could name"),
+    ("a side effect needs a key", {"idempotency_key": None}, "carries its idempotency key"),
+    ("the key is an input field", {"idempotency_key": "request_id"}, "not a field of its input"),
+    ("outcomes and titles match", {"outcomes": ("declined", "reversed")}, "titles must match"),
+    ("a timeout above 0", {"timeouts": {"start_to_close": 0}}, "greater than 0"),
+    ("a wait for a worker above 0", {"timeouts": {"schedule_to_start": 0}}, "greater than 0"),
+    ("attempts above 0", {"retry": {"maximum_attempts": 0}}, "greater than 0"),
+    ("an interval above 0", {"retry": {"initial_interval": 0}}, "greater than 0"),
+    ("a backoff of at least 1", {"retry": {"backoff_coefficient": 0.5}}, "greater than or equal"),
+    ("a risk from its list", {"risk": "hihg"}, "'low', 'medium' or 'high'"),
+    ("an effect from its list", {"effect": "delete"}, "'read', 'compute', 'write' or 'notify'"),
+]
+RULE_NAMES = [rule for rule, _, _ in CONTRACT_RULES]
+
+
+def built(changes: dict[str, Any]) -> ActivityContract:
+    """The guide's contract built with `changes`, each part built anew with its own."""
+    fields = {name: getattr(payments_refund, name) for name in ActivityContract.model_fields}
+    for name, change in changes.items():
+        part = fields.get(name)
+        if isinstance(part, BaseModel) and isinstance(change, dict):
+            fields[name] = type(part).model_validate(part.model_dump() | change)
+        else:
+            fields[name] = change
+    return ActivityContract.model_validate(fields)
+
+
+def copied(changes: dict[str, Any]) -> ActivityContract:
+    """The guide's contract copied with `changes`, which runs no check at all."""
+    update = {}
+    for name, change in changes.items():
+        part = getattr(payments_refund, name, None)
+        if isinstance(part, BaseModel) and isinstance(change, dict):
+            update[name] = part.model_copy(update=change)
+        else:
+            update[name] = change
+    return payments_refund.model_copy(update=update)
+
+
+@pytest.mark.parametrize(("rule", "changes", "says"), CONTRACT_RULES, ids=RULE_NAMES)
+def test_every_rule_refuses_a_contract_that_breaks_it(
+    rule: str, changes: dict[str, Any], says: str
+) -> None:
+    with pytest.raises(ValidationError, match=says):
+        built(changes)
+
+
+@pytest.mark.parametrize(("rule", "changes", "says"), CONTRACT_RULES, ids=RULE_NAMES)
+def test_every_rule_runs_again_when_a_copy_is_registered(
+    rule: str, changes: dict[str, Any], says: str
+) -> None:
+    broken = copied(changes)  # accepted: a copy is never checked
+    with pytest.raises(ValidationError, match=says):
+        Catalog().register(broken)
