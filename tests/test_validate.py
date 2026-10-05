@@ -91,3 +91,47 @@ def test_every_activity_is_in_the_catalog() -> None:
         "payments.refund@3 is not in the catalog. Registered: payments.refund@1. "
         "Use a registered version, or register this one first.",
     ) in issues(plan)
+
+
+def pay_with_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    return changed(pay={**guide_plan()["states"]["pay"], "inputs": inputs})
+
+
+ORDER_ID = {"var": "order_id"}
+AMOUNT = {"var": "amount"}
+
+
+def test_an_input_the_contract_does_not_take_is_refused() -> None:
+    plan = pay_with_inputs({"order_id": ORDER_ID, "amount": AMOUNT, "amout": AMOUNT})
+    assert issues(plan) == [
+        Issue(
+            "states.pay.inputs.amout",
+            "UNKNOWN_INPUT",
+            "payments.refund@1 has no input amout: its inputs are amount, order_id",
+        )
+    ]
+
+
+def test_an_input_the_contract_needs_must_be_given() -> None:
+    plan = pay_with_inputs({"order_id": ORDER_ID})
+    assert issues(plan) == [
+        Issue(
+            "states.pay.inputs",
+            "MISSING_INPUT",
+            "payments.refund@1 needs the input amount: add it to inputs",
+        )
+    ]
+
+
+def test_the_idempotency_key_is_filled_by_the_engine_never_by_a_plan() -> None:
+    # The engine builds the key from the case, the step and its run (brief, D17); a plan that set
+    # it could make two runs share one key, and the second refund would be skipped as a duplicate.
+    key = {"var": "order_id"}
+    plan = pay_with_inputs({"order_id": ORDER_ID, "amount": AMOUNT, "idempotency_key": key})
+    assert issues(plan) == [
+        Issue(
+            "states.pay.inputs.idempotency_key",
+            "ENGINE_INPUT",
+            "idempotency_key is filled by the engine, never by a plan: remove it",
+        )
+    ]

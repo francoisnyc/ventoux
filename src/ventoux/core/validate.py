@@ -8,6 +8,7 @@ docs/guides/plans.md.
 from dataclasses import dataclass
 
 from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.contract import ActivityContract
 from ventoux.core.plan import ActivityState, FinalState, Plan, Transition
 
 
@@ -45,11 +46,49 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
 def activity_issues(path: str, state: ActivityState, catalog: Catalog) -> list[Issue]:
     """What is wrong with an activity state, read against its contract in the catalog."""
     try:
-        catalog.get(state.activity)
+        contract = catalog.get(state.activity)
     except NotInCatalog as missing:
         # The catalog's own message, which names the versions it does hold.
         return [Issue(f"{path}.activity", "UNKNOWN_ACTIVITY", str(missing))]
-    return []
+    return input_issues(path, state, contract)
+
+
+def input_issues(path: str, state: ActivityState, contract: ActivityContract) -> list[Issue]:
+    """The state's inputs against the contract's input fields, the idempotency key aside."""
+    issues: list[Issue] = []
+    key = contract.idempotency_key
+    # The engine fills the key, from the case, the step and its run, so retries reuse it and two
+    # runs never share it (brief, D17). A plan may neither set it nor be asked for it.
+    fields = {name: field for name, field in contract.input.model_fields.items() if name != key}
+    for name in state.inputs:
+        if name == key:
+            issues.append(
+                Issue(
+                    f"{path}.inputs.{name}",
+                    "ENGINE_INPUT",
+                    f"{name} is filled by the engine, never by a plan: remove it",
+                )
+            )
+        elif name not in fields:
+            issues.append(
+                Issue(
+                    f"{path}.inputs.{name}",
+                    "UNKNOWN_INPUT",
+                    f"{contract.reference} has no input {name}: its inputs are "
+                    f"{', '.join(sorted(fields))}",
+                )
+            )
+    for name, field in fields.items():
+        # Pydantic: `is_required()` is true for a field declared with no default.
+        if field.is_required() and name not in state.inputs:
+            issues.append(
+                Issue(
+                    f"{path}.inputs",
+                    "MISSING_INPUT",
+                    f"{contract.reference} needs the input {name}: add it to inputs",
+                )
+            )
+    return issues
 
 
 def each_transition(path: str, transitions: tuple[Transition, ...]) -> list[tuple[str, Transition]]:
