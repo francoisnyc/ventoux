@@ -30,12 +30,13 @@ and record the key points. A question is closed once you can explain the answer 
 | 23 | D18: fresh facts | closed |
 | 24 | D17: failures | closed |
 | 25 | D19: identities | closed |
-| 26 | Layer 0: core inside a workflow | open |
+| 26 | Layer 0: core inside a workflow | closed |
 | 27 | Tracer: running the quickstart | closed |
 | 28 | Card: catalog, contract, binding | open |
 | 29 | Layer 1: why `@1` and not `@1.0` | closed |
 | 30 | Spike: guarantees outside the standard | closed |
 | 31 | Pydantic: when checks run | closed |
+| 32 | Layer 2: why `now` can't be written | open |
 
 ---
 
@@ -509,7 +510,16 @@ and record the key points. A question is closed once you can explain the answer 
   answer? Answer: in an activity, and replay uses the recorded answer. Right: Temporal stores the
   activity's result in history and replay reads it instead of asking the model again. That answer
   is still `untrusted:llm`: it may only name a step, and the engine re-checks admission.
-- Status: open, kept in the warm-up rotation until the durability half comes without prompting.
+- Retrieval (layer 2 warm-up): "core must be inside a workflow for durability." Right, and the
+  durability half came first and without prompting this time, which is what kept the question
+  open. Unpacked: the decisions (which step next, is an approval needed, can the case close) span
+  days and wait on people; only workflow code waits durably, with each decision recorded in
+  history and timers and signals waking it up, so a crash or a deploy loses nothing. The other
+  half follows from it: Temporal resumes a workflow by replaying its code against that history,
+  so `core` must make the same decisions every time (no clock, randomness or I/O). Layer 2 is
+  where that rule first shapes a language: an expression that read the clock would decide
+  differently on replay.
+- Status: closed.
 
 ## 27. Tracer: running the quickstart
 
@@ -626,3 +636,32 @@ and record the key points. A question is closed once you can explain the answer 
 - Follow-up: the platform team wants a helper, `next_version(contract, **changes)`, that copies a
   contract as `@N+1` with some changes. How should it build the new contract so every rule runs?
 - Status: closed.
+
+## 32. Layer 2: why `now` can't be written
+
+> Why can't `now` be written at all, and what would break on Temporal replay if it could?
+
+- Your answer: because time breaks determinism.
+- Discussion: right at the core, and the short version of two answers. *Can't be written*, not
+  *refused*: `now` has no model and isn't in `OPERATORS`, so the published JSON Schema has no
+  shape for it and neither a person nor a model can express it. The prototype's JSONata had
+  `$now()` in the language and refused it from an allowlist, where any gap lets it through; ours
+  is safe by construction (question 6). *What breaks*: on Monday `now > deadline` is false and the
+  workflow waits, which history records; on Thursday a worker restarts and Temporal replays the
+  code against that history, the condition is now true, the code asks to schedule `escalate`,
+  history says otherwise, and the case stops on a non-determinism error until someone fixes the
+  code (or, if the commands happened to line up, the run quietly diverges from what happened).
+  One sharpening: reading the *wall clock* breaks determinism, not time itself. Temporal has
+  replay-safe time (`workflow.now()` comes from history), but `core` may not import Temporal, so
+  time reaches an expression only as data history recorded: a timer firing, an event, a field.
+- Follow-up: a claim must escalate if nobody has assessed it within 5 days. Without `now`, how is
+  that written, and where does the time come from?
+  Answer: asked for it. As a rule whose *when* is time passing, not an expression reading the
+  clock (D7, the `sla` pattern of layer 11): *when* 5 days after the case opened (a timer, declared
+  as data, `5d`), *if* `assessed` is not reached (a question about the case file), *then* start
+  `escalate`. The engine starts a durable Temporal timer when the case opens; the Temporal server
+  keeps the time, and history records `TimerFired`. On replay, Temporal reads that event at the
+  same point instead of waiting or reading a clock, so the condition sees the same case file and
+  decides the same way. Time enters as a recorded event, never as something an expression reads.
+- Status: open, kept in the warm-up rotation until the follow-up comes from memory.
+

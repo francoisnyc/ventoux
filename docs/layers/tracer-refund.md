@@ -55,6 +55,9 @@ Conditions use a minimal structured form (`=`, `>`, `and`, `field`, literals), w
 neither JSONata nor structured JSON (design question 11). It is evaluated by a few lines of plain
 code, never `eval`.
 
+(Layer 2 replaced this form: `examples/refund/refund.json` now uses `==` and `var`, evaluated by
+`ventoux.core.expressions`; see `docs/layers/02-plan-expressions.md`.)
+
 ## How it runs
 
 `run_case` walks the `sequence` in order:

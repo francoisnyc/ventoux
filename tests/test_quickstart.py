@@ -4,10 +4,13 @@ They go only through the seams the quickstart shows (`run_case` and what a run r
 stay green while later layers replace everything behind them. See docs/layers/tracer-refund.md.
 """
 
+import copy
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from ventoux.core.expressions import ExpressionInvalid
 from ventoux.testing import AnswerRefused, load_definition, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
@@ -98,3 +101,24 @@ def test_answering_a_task_needs_its_role() -> None:
             file={"order_id": "ord-7", "amount": 40},
             answers=[("review", "approve", "eve", {"approved_amount": 40})],
         )
+
+
+def test_an_approval_the_engine_cannot_evaluate_stops_the_case() -> None:
+    # The tracer review's finding, kept as a regression test (brief: fail closed). The tracer's
+    # evaluator returned the unknown `{"now": []}` unchanged, `holds` read it as false, so the
+    # approval was "not needed" and a 250 refund was paid without a team lead.
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["pay"]["approval"]["when"] = {"now": []}
+    with pytest.raises(ExpressionInvalid, match="`now` is not an operator"):
+        run_case(
+            definition,
+            file={"order_id": "ord-4", "amount": 250},
+            answers=[("review", "approve", "ana", {"approved_amount": 250})],
+        )
+
+
+def test_a_definition_is_read_with_exact_decimals(tmp_path: Path) -> None:
+    # A JSON number becomes a Decimal as it is read: as a float, 0.1 would already be inexact.
+    stored = tmp_path / "definition.json"
+    stored.write_text('{"threshold": 0.1}')
+    assert load_definition(stored)["threshold"] == Decimal("0.1")

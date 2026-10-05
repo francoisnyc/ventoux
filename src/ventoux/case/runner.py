@@ -8,9 +8,11 @@ every side effect happens outside this module.
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from ventoux.core.catalog import Catalog
+from ventoux.core.expressions import ExpressionError, evaluate, parse_expression
 
 Activity = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -40,7 +42,8 @@ def run(
     roles_of: Mapping[str, set[str]],
 ) -> Run:
     """Run the case `definition` from `file`, playing the scripted `answers` in order."""
-    values = dict(file)  # the case file, plus each task's latest outcome as "<step>.outcome"
+    # The case file, plus each task's latest outcome as "<step>.outcome".
+    values = {name: case_value(value) for name, value in file.items()}
     # TRACER: who set each value, a crude stand-in for provenance tags (layer 4).
     set_by: dict[str, str] = {}
     result = Run()
@@ -49,14 +52,17 @@ def run(
         step = definition["steps"][name]
         if step["kind"] == "task":
             answer_task(name, step, answer_for(name, answers), values, set_by, roles_of)
-        elif not holds(step.get("when"), values):
+        elif not decides(step.get("when"), values):
             continue  # not needed: its rule says it doesn't run
         elif needs_approval(step, values) and not approved(name, step, answers, set_by, roles_of):
             roles = " or ".join(step["approval"]["roles"])
             result.waiting_for.append(f"approval of {name} by {roles}")
             break  # the step waits, and nothing after it starts
         else:
-            inputs = {key: evaluate(expr, values) for key, expr in step["inputs"].items()}
+            inputs = {
+                key: evaluate(parse_expression(expr), values)
+                for key, expr in step["inputs"].items()
+            }
             # Fail closed: an activity the catalog doesn't hold stops the case (NotInCatalog).
             contract = catalog.get(step["activity"])
             # TRACER: inputs aren't checked against the contract's schema (the interpreter, layer 5).
@@ -104,8 +110,8 @@ def fields_read(exprs: list[Any]) -> set[str]:
     """The case-file fields the expressions read."""
     found: set[str] = set()
     for expr in exprs:
-        if isinstance(expr, dict) and "field" in expr:
-            found.add(expr["field"])
+        if isinstance(expr, dict) and "var" in expr:
+            found.add(expr["var"])
         elif isinstance(expr, dict):
             for operands in expr.values():
                 found |= fields_read(operands)
@@ -114,7 +120,7 @@ def fields_read(exprs: list[Any]) -> set[str]:
 
 def needs_approval(step: dict[str, Any], values: dict[str, Any]) -> bool:
     """Whether the step has an approval whose condition holds now."""
-    return "approval" in step and holds(step["approval"]["when"], values)
+    return "approval" in step and decides(step["approval"]["when"], values)
 
 
 def answer_for(step_name: str, answers: list[tuple[Any, ...]]) -> tuple[Any, ...]:
@@ -140,25 +146,24 @@ def answer_task(
     set_by[f"{name}.outcome"] = person
     # An outcome sets only the case-file fields it declares (D9).
     for field_name in step["outcomes"][outcome].get("sets", []):
-        values[field_name] = form[0][field_name]
+        values[field_name] = case_value(form[0][field_name])
         set_by[field_name] = person
 
 
-# TRACER: a minimal structured condition, replaced by the expression language in layer 2.
-# It knows `=`, `>`, `field` and literals (design question 11). Plain code: never `eval`.
-def evaluate(expr: Any, values: dict[str, Any]) -> Any:
-    """The value of `expr` against the case file."""
-    if isinstance(expr, dict) and "field" in expr:
-        return values[expr["field"]]
-    if isinstance(expr, dict) and "=" in expr:
-        left, right = (evaluate(e, values) for e in expr["="])
-        return left == right
-    if isinstance(expr, dict) and ">" in expr:
-        left, right = (evaluate(e, values) for e in expr[">"])
-        return left > right
-    return expr
+def decides(condition: Any, values: dict[str, Any]) -> bool:
+    """A step's condition: `true` or `false`, or an error that stops the case. None: it runs."""
+    if condition is None:
+        return True
+    # Fail closed: the expression is parsed (an unknown operator is refused) and evaluated (a
+    # missing field is an error); anything but a boolean is an error too, never read as false.
+    decided = evaluate(parse_expression(condition), values)
+    if not isinstance(decided, bool):
+        raise ExpressionError(f"a condition gives true or false, and this one gives {decided!r}")
+    return decided
 
 
-def holds(condition: Any, values: dict[str, Any]) -> bool:
-    """Whether a step's condition holds; no condition always holds."""
-    return condition is None or evaluate(condition, values) is True
+# TRACER: answers are read by their declared types in layer 7, the case file in layer 8. Here a
+# whole number becomes the exact decimal expressions read, and anything else passes as is.
+def case_value(value: Any) -> Any:
+    """`value` as the case file holds it: a whole number as a `Decimal`."""
+    return Decimal(value) if isinstance(value, int) and not isinstance(value, bool) else value
