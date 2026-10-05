@@ -81,3 +81,13 @@ def test_a_target_in_a_list_is_found_by_its_position() -> None:
 
 def test_the_guides_example_has_no_issues() -> None:
     assert issues(guide_plan()) == []
+
+
+def test_every_activity_is_in_the_catalog() -> None:
+    plan = changed(pay={**guide_plan()["states"]["pay"], "activity": "payments.refund@3"})
+    assert Issue(
+        "states.pay.activity",
+        "UNKNOWN_ACTIVITY",
+        "payments.refund@3 is not in the catalog. Registered: payments.refund@1. "
+        "Use a registered version, or register this one first.",
+    ) in issues(plan)

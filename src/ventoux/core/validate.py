@@ -7,8 +7,8 @@ docs/guides/plans.md.
 
 from dataclasses import dataclass
 
-from ventoux.core.catalog import Catalog
-from ventoux.core.plan import FinalState, Plan, Transition
+from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.plan import ActivityState, FinalState, Plan, Transition
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,8 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
     for name, state in plan.states.items():
         if isinstance(state, FinalState):
             continue  # a final state has no `on`: nowhere to go
+        if isinstance(state, ActivityState):
+            issues += activity_issues(f"states.{name}", state, catalog)
         for event, transitions in state.on.items():
             for path, transition in each_transition(f"states.{name}.on.{event}", transitions):
                 if transition.target not in plan.states:
@@ -38,6 +40,16 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
                         Issue(path, "UNKNOWN_TARGET", not_a_state(transition.target, plan))
                     )
     return issues
+
+
+def activity_issues(path: str, state: ActivityState, catalog: Catalog) -> list[Issue]:
+    """What is wrong with an activity state, read against its contract in the catalog."""
+    try:
+        catalog.get(state.activity)
+    except NotInCatalog as missing:
+        # The catalog's own message, which names the versions it does hold.
+        return [Issue(f"{path}.activity", "UNKNOWN_ACTIVITY", str(missing))]
+    return []
 
 
 def each_transition(path: str, transitions: tuple[Transition, ...]) -> list[tuple[str, Transition]]:
