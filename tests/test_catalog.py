@@ -12,17 +12,10 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from ventoux import testing
-from ventoux.core.catalog import (
-    ActivityContract,
-    Catalog,
-    ContractConflict,
-    Display,
-    NotInCatalog,
-    RetryPolicy,
-    Timeouts,
-    check_hashes,
-    contract_hash,
-)
+from ventoux.core.catalog import Catalog, ContractConflict, NotInCatalog
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.contract_hash import contract_hash
+from ventoux.core.hash_check import check_hashes
 from ventoux.testing import CATALOG, load_definition, payments_refund, run_case
 
 ROOT = Path(__file__).parent.parent
