@@ -40,7 +40,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
-from ventoux.core.catalog import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 
 
 class RefundInput(BaseModel):
@@ -73,7 +73,8 @@ payments_refund = ActivityContract(
 ```
 
 Then register it: `catalog.register(payments_refund)`, and look it up by reference:
-`catalog.get("payments.refund@1")`.
+`catalog.get("payments.refund@1")`. The catalog checks every contract again when it is registered,
+so a contract made some other way, such as a copy with `model_copy(update=...)`, can't skip a rule.
 
 What each part is for:
 
@@ -100,18 +101,21 @@ What each part is for:
 
 ## What the catalog refuses
 
-Every refusal says what was wrong; the catalog's own refusals also say what to do instead.
+Every refusal says what is wrong; the catalog's own refusals then say what to do instead. Pydantic's
+messages for a single field (a number out of range, a value not in a list) are kept as Pydantic
+writes them.
 
 | You wrote | Ventoux says |
 |---|---|
 | `effect="write"` with no `idempotency_key` | `payments.refund@1` has effect `'write'`: a side-effecting activity must say which input carries its idempotency key, or a retry could do it twice. |
-| `idempotency_key="request_id"`, not an input field | `payments.refund@1`: idempotency key `'request_id'` is not a field of its input (`RefundInput`), so the engine would have nowhere to put the key. |
+| `idempotency_key="request_id"`, not an input field | `payments.refund@1`: idempotency key `'request_id'` is not a field of its input (`RefundInput`), so the engine would have nowhere to put the key. Name one of its fields: amount, idempotency_key, order_id. |
 | `queue="payments"` in a contract | A contract has no field `'queue'`. A contract says what an activity promises; where it runs (task queue, namespace, worker) belongs in a deployment binding. |
 | `name="Payments Refund"`, or `version=0` | `'Payments Refund@1'`: no reference could name it. A name is dotted lowercase (`payments.refund`), and a version a whole number from 1. |
-| `outcomes=["declined"]` with no title for it | `payments.refund@1`: outcomes and their display titles must match. |
+| `outcomes=["declined"]` with no title for it | `payments.refund@1`: outcomes and their display titles must match: outcomes ['declined'], titles for []. Give each outcome exactly one title in `display.outcomes`. |
 | `RetryPolicy(maximum_attempts=0, …)` | `maximum_attempts`: Input should be greater than 0. |
+| `catalog.register(payments_refund.model_copy(update={"risk": "hihg"}))` | `risk`: Input should be 'low', 'medium' or 'high'. |
 | A second, different `payments.refund@1` | `payments.refund@1` is already registered with different content: register it as `payments.refund@2`. |
-| `catalog.get("payments.refund@3")` | `payments.refund@3` is not in the catalog. Registered: `payments.refund@1`. |
+| `catalog.get("payments.refund@3")` | `payments.refund@3` is not in the catalog. Registered: `payments.refund@1`. Use a registered version, or register this one first. |
 | `catalog.get("payments.refund@1.0")` | `'payments.refund@1.0'` is not a reference: a reference is name@N, such as `payments.refund@1`, with a whole-number version. |
 
 ## Changing a contract

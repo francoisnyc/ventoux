@@ -37,6 +37,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 30 | Spike: guarantees outside the standard | closed |
 | 31 | Pydantic: when checks run | closed |
 | 32 | Layer 2: why `now` can't be written | open |
+| 33 | Layer 3: why plans can be checked and code can't | open |
 
 ---
 
@@ -553,6 +554,22 @@ and record the key points. A question is closed once you can explain the answer 
 - The analogy: an OpenAPI document (the catalog) keeps its operations (contracts) apart from its
   `servers` per environment (bindings).
 - Why "catalog" and not "registry": design question 15.
+- Retrieval (layer 3 warm-up): "catalog = list of activities; contract = I/O for activities;
+  binding = Temporal config binding a case to queues." The questions half came back. Catalog: right,
+  and more exactly it lists *contracts*, never implementations (`core` runs no I/O). Contract:
+  I/O is the start; it also holds risk, effect, retries and timeouts, idempotency and outcomes
+  (D17), and the test for membership is "could a case notice it or tighten it?". Binding: right
+  that it's per-environment Temporal config, but it binds an *activity* (`risk.score@1`) to a task
+  queue, not a case. The examples and the "changes when…" column didn't come back: a catalog
+  changes when a contract is added or retired; a contract never changes (a change is a new `@N`);
+  a binding changes when operations move it, with no new version and no release.
+  Check: `payments.refund@1` (a) moves to queue `payments-v2`, (b) its start-to-close timeout goes
+  from 30 s to 60 s. Answer: both only update the binding. (a) right. (b) is the same trap as
+  question 9's twist: timeouts and retries are in the contract (D17), because a case can notice
+  them (how long a step may run before it needs attention) and may only tighten them, which needs
+  a fixed baseline. So (b) is `payments.refund@2`, CI's hash check would refuse it under `@1`, and
+  packages adopt `@2` through a release. Rule: what the activity promises is the contract; where
+  it runs is the binding.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
 
 ## 29. Layer 1: why `@1` and not `@1.0`
@@ -665,3 +682,31 @@ and record the key points. A question is closed once you can explain the answer 
   decides the same way. Time enters as a recorded event, never as something an expression reads.
 - Status: open, kept in the warm-up rotation until the follow-up comes from memory.
 
+
+## 33. Layer 3: why plans can be checked and code can't
+
+> Why is this impossible to check on ordinary workflow code? ("This": what the validator proves
+> before anything runs, such as "every path to `pay` passes an approval".)
+
+- Your answer: it's a DAG? Or a decision tree to resolve, compared to a full AST?
+- Discussion: the core is right: a plan is a small graph of explicit moves, and a program is a
+  full syntax tree whose behaviour you would have to work out. Two sharpenings. First, a plan is
+  neither a DAG nor a tree: it is a directed graph that may have cycles (slice 8's retry loop
+  goes back to `pay`) and branches that merge again (`reject` and `timeout` both go to
+  `failed`). The search still ends because it keeps a `seen` set and a plan has finitely many
+  states. Second, the shape is only half of it. Two things make the plan checkable:
+  - **the moves are closed and explicit:** every way out of a state is an entry in its `on`, so
+    "every path" means "every arrow", a finite list. A condition is an opaque fork, and the
+    validator assumes either branch can run. That over-approximation is safe: it can refuse a
+    plan that would in fact be fine, never accept one that isn't (fail closed);
+  - **the meaning is declared, not inferred:** "high risk" is read from the contract, and "an
+    approval" is a wait offering `approve` and `reject`. In the Python workflow,
+    `await workflow.wait_condition(lambda: self.approved)` is just a lambda: which signal sets
+    `self.approved`, who may send it, and whether `refund` is risky are nowhere in the code.
+  In code, even with the full AST, paths go through loops, function calls, exceptions and
+  values computed at run time, and "can line B run without line A first?" is undecidable in
+  general (Rice's theorem): a tool can only guess or give up. Ventoux's rule, by contrast, is
+  three lines of graph search.
+- Follow-up: slice 8's plan loops back to `pay` after a declined refund. Why does `reach` still
+  finish on a graph with a cycle, and why does that loop make the plan unsafe, not just slow?
+- Status: open, until the follow-up comes from memory.

@@ -12,17 +12,10 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from ventoux import testing
-from ventoux.core.catalog import (
-    ActivityContract,
-    Catalog,
-    ContractConflict,
-    Display,
-    NotInCatalog,
-    RetryPolicy,
-    Timeouts,
-    check_hashes,
-    contract_hash,
-)
+from ventoux.core.catalog import Catalog, ContractConflict, NotInCatalog
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.contract_hash import contract_hash
+from ventoux.core.hash_check import check_hashes
 from ventoux.testing import CATALOG, load_definition, payments_refund, run_case
 
 ROOT = Path(__file__).parent.parent
@@ -269,3 +262,147 @@ def test_a_contract_with_no_implementation_stops_the_case_by_name(
             file={"order_id": "ord-1", "amount": 40},
             answers=[("review", "approve", "ana", {"approved_amount": 40})],
         )
+
+
+def refund(**changes: Any) -> ActivityContract:
+    """The guide's contract, `payments.refund@1`, with any field changed."""
+    fields = {name: getattr(payments_refund, name) for name in ActivityContract.model_fields}
+    return ActivityContract(**fields | changes)
+
+
+# Each "You wrote" cell of the guide's refusal table, and the code that does it.
+GUIDE_REFUSALS: dict[str, Any] = {
+    '`effect="write"` with no `idempotency_key`': lambda: refund(idempotency_key=None),
+    '`idempotency_key="request_id"`, not an input field': lambda: refund(
+        idempotency_key="request_id"
+    ),
+    '`queue="payments"` in a contract': lambda: refund(queue="payments"),
+    '`name="Payments Refund"`, or `version=0`': lambda: refund(name="Payments Refund"),
+    '`outcomes=["declined"]` with no title for it': lambda: refund(
+        display=Display(title="Refund a customer", description="Refunds an order.")
+    ),
+    "`RetryPolicy(maximum_attempts=0, …)`": lambda: RetryPolicy(
+        maximum_attempts=0, initial_interval=1, backoff_coefficient=2
+    ),
+    '`catalog.register(payments_refund.model_copy(update={"risk": "hihg"}))`': lambda: (
+        Catalog().register(payments_refund.model_copy(update={"risk": "hihg"}))
+    ),
+    "A second, different `payments.refund@1`": lambda: catalog_of(payments_refund).register(
+        refund(risk="medium")
+    ),
+    '`catalog.get("payments.refund@3")`': lambda: catalog_of(payments_refund).get(
+        "payments.refund@3"
+    ),
+    '`catalog.get("payments.refund@1.0")`': lambda: Catalog().get("payments.refund@1.0"),
+}
+
+
+def guide_refusal_rows() -> list[tuple[str, str]]:
+    """The rows of the guide's table "What the catalog refuses", as (you wrote, Ventoux says)."""
+    guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
+    table = guide.split("## What the catalog refuses")[1].split("\n## ")[0]
+    rows = [line for line in table.splitlines() if line.startswith("| ")][1:]  # after the header
+    return [(cells[1].strip(), cells[2].strip()) for cells in (row.split("|") for row in rows)]
+
+
+def messages(error: Exception) -> list[str]:
+    """What a refusal says, one message per problem: `field: message` for Pydantic's own."""
+    if not isinstance(error, ValidationError):
+        return [str(error)]
+    said = []
+    for problem in error.errors():
+        message = problem["msg"].removeprefix("Value error, ")
+        where = ".".join(str(part) for part in problem["loc"])
+        said.append(f"{where}: {message}" if where else message)
+    return said
+
+
+def as_compared(message: str) -> str:
+    """A message without the guide's code marks, its first letter's case or its final full stop."""
+    message = message.replace("`", "").removesuffix(".")
+    return message[:1].lower() + message[1:]
+
+
+@pytest.mark.parametrize(("wrote", "says"), guide_refusal_rows())
+def test_the_guides_refusals_are_what_the_catalog_says(wrote: str, says: str) -> None:
+    # Every refusal says what is wrong, then what to do; the guide shows each word of it.
+    assert wrote in GUIDE_REFUSALS, f"the guide's row {wrote!r} has no test"
+    with pytest.raises(Exception) as refused:  # each row raises its own kind of error
+        GUIDE_REFUSALS[wrote]()
+    assert as_compared(says) in [as_compared(message) for message in messages(refused.value)]
+
+
+def test_a_copy_that_breaks_the_rules_is_refused_at_registration() -> None:
+    # `model_copy` runs no checks (learning question 31), so `register` checks again.
+    broken = payments_refund.model_copy(update={"risk": "hihg", "idempotency_key": None})
+    with pytest.raises(ValidationError, match="risk"):
+        Catalog().register(broken)
+
+
+def test_a_copy_with_a_broken_part_is_refused_at_registration() -> None:
+    timeouts = payments_refund.timeouts.model_copy(update={"start_to_close": 0})
+    broken = payments_refund.model_copy(update={"timeouts": timeouts})
+    with pytest.raises(ValidationError, match="start_to_close"):
+        Catalog().register(broken)
+
+
+# Every rule a contract enforces (docs/layers/03-validation.md), each with a change that breaks it.
+# A change to a part (`timeouts`, `retry`) is written as that part's changed fields.
+CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
+    ("a field the contract doesn't know", {"queue": "payments"}, "deployment binding"),
+    ("a field a part doesn't know", {"timeouts": {"heartbeat": 5}}, "heartbeat"),
+    ("a name no reference could match", {"name": "Payments Refund"}, "no reference could name"),
+    ("a version no reference could match", {"version": 0}, "no reference could name"),
+    ("a side effect needs a key", {"idempotency_key": None}, "carries its idempotency key"),
+    ("the key is an input field", {"idempotency_key": "request_id"}, "not a field of its input"),
+    ("outcomes and titles match", {"outcomes": ("declined", "reversed")}, "titles must match"),
+    ("a timeout above 0", {"timeouts": {"start_to_close": 0}}, "greater than 0"),
+    ("a wait for a worker above 0", {"timeouts": {"schedule_to_start": 0}}, "greater than 0"),
+    ("attempts above 0", {"retry": {"maximum_attempts": 0}}, "greater than 0"),
+    ("an interval above 0", {"retry": {"initial_interval": 0}}, "greater than 0"),
+    ("a backoff of at least 1", {"retry": {"backoff_coefficient": 0.5}}, "greater than or equal"),
+    ("a risk from its list", {"risk": "hihg"}, "'low', 'medium' or 'high'"),
+    ("an effect from its list", {"effect": "delete"}, "'read', 'compute', 'write' or 'notify'"),
+]
+RULE_NAMES = [rule for rule, _, _ in CONTRACT_RULES]
+
+
+def built(changes: dict[str, Any]) -> ActivityContract:
+    """The guide's contract built with `changes`, each part built anew with its own."""
+    fields = {name: getattr(payments_refund, name) for name in ActivityContract.model_fields}
+    for name, change in changes.items():
+        part = fields.get(name)
+        if isinstance(part, BaseModel) and isinstance(change, dict):
+            fields[name] = type(part).model_validate(part.model_dump() | change)
+        else:
+            fields[name] = change
+    return ActivityContract.model_validate(fields)
+
+
+def copied(changes: dict[str, Any]) -> ActivityContract:
+    """The guide's contract copied with `changes`, which runs no check at all."""
+    update = {}
+    for name, change in changes.items():
+        part = getattr(payments_refund, name, None)
+        if isinstance(part, BaseModel) and isinstance(change, dict):
+            update[name] = part.model_copy(update=change)
+        else:
+            update[name] = change
+    return payments_refund.model_copy(update=update)
+
+
+@pytest.mark.parametrize(("rule", "changes", "says"), CONTRACT_RULES, ids=RULE_NAMES)
+def test_every_rule_refuses_a_contract_that_breaks_it(
+    rule: str, changes: dict[str, Any], says: str
+) -> None:
+    with pytest.raises(ValidationError, match=says):
+        built(changes)
+
+
+@pytest.mark.parametrize(("rule", "changes", "says"), CONTRACT_RULES, ids=RULE_NAMES)
+def test_every_rule_runs_again_when_a_copy_is_registered(
+    rule: str, changes: dict[str, Any], says: str
+) -> None:
+    broken = copied(changes)  # accepted: a copy is never checked
+    with pytest.raises(ValidationError, match=says):
+        Catalog().register(broken)
