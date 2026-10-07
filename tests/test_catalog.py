@@ -203,8 +203,8 @@ def test_the_same_schema_written_twice_is_the_same_promise() -> None:
 
 def test_a_definition_naming_an_activity_not_in_the_catalog_stops_the_case() -> None:
     refund = copy.deepcopy(load_definition(ROOT / "examples" / "refund" / "refund.json"))
-    refund["steps"]["pay"]["activity"] = "payments.refund@2"
-    with pytest.raises(NotInCatalog, match="Registered: payments.refund@1"):
+    refund["steps"]["pay"]["activity"] = "payments.refund@3"
+    with pytest.raises(NotInCatalog, match="Registered: payments.refund@2"):
         run_case(
             refund,
             file={"order_id": "ord-1", "amount": 40},
@@ -257,9 +257,9 @@ def test_the_order_of_outcomes_is_not_part_of_the_promise() -> None:
 def test_a_contract_with_no_implementation_stops_the_case_by_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delitem(testing.FAKES, "payments.refund@1")
+    monkeypatch.delitem(testing.FAKES, "payments.refund@2")
     refund = load_definition(ROOT / "examples" / "refund" / "refund.json")
-    with pytest.raises(LookupError, match="no implementation of payments.refund@1"):
+    with pytest.raises(LookupError, match="no implementation of payments.refund@2"):
         run_case(
             refund,
             file={"order_id": "ord-1", "amount": 40},

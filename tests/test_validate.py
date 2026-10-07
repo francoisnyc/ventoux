@@ -88,7 +88,7 @@ def test_every_activity_is_in_the_catalog() -> None:
     assert Issue(
         "states.pay.activity",
         "UNKNOWN_ACTIVITY",
-        "payments.refund@3 is not in the catalog. Registered: payments.refund@1. "
+        "payments.refund@3 is not in the catalog. Registered: payments.refund@2. "
         "Use a registered version, or register this one first.",
     ) in issues(plan)
 
@@ -107,7 +107,7 @@ def test_an_input_the_contract_does_not_take_is_refused() -> None:
         Issue(
             "states.pay.inputs.amout",
             "UNKNOWN_INPUT",
-            "payments.refund@1 has no input amout: its inputs are amount, order_id",
+            "payments.refund@2 has no input amout: its inputs are amount, order_id",
         )
     ]
 
@@ -118,7 +118,7 @@ def test_an_input_the_contract_needs_must_be_given() -> None:
         Issue(
             "states.pay.inputs",
             "MISSING_INPUT",
-            "payments.refund@1 needs the input amount: add it to inputs",
+            "payments.refund@2 needs the input amount: add it to inputs",
         )
     ]
 
@@ -159,7 +159,7 @@ def test_an_activity_never_gives_an_event_its_contract_does_not_declare() -> Non
         Issue(
             "states.pay.on.cancelled",
             "UNKNOWN_EVENT",
-            "payments.refund@1 never gives cancelled: its events are done, declined",
+            "payments.refund@2 never gives cancelled: its events are done, declined",
         )
     ]
 
@@ -327,7 +327,7 @@ def test_a_high_risk_activity_is_never_reached_without_an_approval() -> None:
         Issue(
             "states.pay",
             "APPROVAL_REQUIRED",
-            "payments.refund@1 is high risk, and check_order → pay reaches it without an "
+            "payments.refund@2 is high risk, and check_order → pay reaches it without an "
             "approval: route every path to pay through an approval",
         )
     ]
