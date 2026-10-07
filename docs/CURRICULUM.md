@@ -161,7 +161,8 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
   policies, the static check in the validator.
   The three origins and registered labels (decision D12).
 - **Negative test:** the injection plan, where an LLM chooses an email recipient, is rejected with
-  `SINK_POLICY`; a field declared `trusted:…` is rejected; an unregistered label is rejected.
+  `SINK_POLICY` (named `INPUT_POLICY` since brief D21); a field declared `trusted:…` is rejected;
+  an unregistered label is rejected.
 - **Reference:** `src/core/provenance.ts`, `examples/injection-attempt.json`,
   `examples/reply-to-sender.json`; `docs/design.md` §5.
 - **Check yourself:** how is this different from a guardrail that judges content?

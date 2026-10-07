@@ -1,6 +1,6 @@
 # Ventoux — design brief
 
-Status: draft, 2026-10-04; all design questions decided (D1–D20; D3 superseded by D20). Read this
+Status: draft, 2026-10-07; decisions D1–D21 (D3 superseded by D20). Read this
 first; it is the short version of what we are building and why. The longer reference is
 `docs/design.md` in the `chartering` prototype.
 
@@ -63,7 +63,7 @@ Every decision is checked against these five.
 | Persona | What they do | Concepts they meet |
 |---|---|---|
 | **Workflow developer** (most users) | Writes cases and tests them | case, case file, step, approval, rule; validator errors when something is unsafe |
-| **Platform team** (a few people) | Registers activities, workflows and resolvers, sets policies, runs releases and operations | contract (with retry policy and idempotency), deployment binding, risk, sink policy, source labels, resolver, key provider, release, activation, needs attention |
+| **Platform team** (a few people) | Registers activities, workflows and resolvers, sets policies, runs releases and operations | contract (with retry policy and idempotency), deployment binding, risk, input policy, source labels, resolver, key provider, release, activation, needs attention |
 | **Analyst / business owner** | Reads, proposes and approves changes | case map, rules sheet, plain-language diff |
 
 **Progressive disclosure.** Advanced concepts have defaults, so people meet them only when needed:
@@ -523,6 +523,28 @@ be erased on request), has size limits, and a second copy of business records go
   `not(...)`. Display only: the text is never parsed back, so none of FEEL's runtime behaviour
   (a failure returns `null`, `now()`) comes with it.
 
+### D21. Input policies: their name, their kinds, and where they are written
+
+*Decided 2026-10-07, in layer 4 (design question 10).*
+
+- **"Input policy" is the name** in every message, guide and error code (`INPUT_POLICY`). "Sink
+  policy", the taint-analysis term, is mentioned once in the activities guide for readers who know
+  the security literature. Earlier text (D5, D6, D12, the non-negotiables) keeps the word it was
+  written with; both mean the same rule.
+- **Written on the input field it guards,** in the activity's input model:
+  `amount: Annotated[Decimal, trusted_only()]`. A policy sits next to the field, so no field name
+  is spelled twice, and it is part of the input's JSON Schema, which the contract hash already
+  covers (D5): adding a policy is a new contract version.
+- **Two kinds, a closed list fixed by the engine:** `trusted_only()` (no `untrusted:` source; D12
+  called it `no_untrusted`) and `only_from("payments", …)` (every source is one of the systems
+  named). Every policy on an input applies. Adding a kind is a design decision recorded here, with
+  its reason, like an expression operator (D20): the static check, the runtime check, the
+  plain-language sentence, the semantic diff ("stricter or looser?") and the TypeScript evaluator
+  must all understand it. A kind the engine doesn't know is refused, never ignored.
+- **Read as one sentence,** the same in validator errors, approval sheets and diffs: "takes
+  `to_customer` only from a system or a person, never from untrusted data"; "takes `account` only
+  from payments". Developers never write a policy; they meet that sentence.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
@@ -563,7 +585,7 @@ be erased on request), has size limits, and a second copy of business records go
 | Milestone | A fact the case has reached (`assessed`, `paid`); recorded, never undone |
 | Admission | The engine's decision to allow a proposed step, re-checked when it runs |
 | Provenance tag | The sources a value was derived from |
-| Sink policy | A rule on an activity input: which sources may influence it |
+| Input policy | A rule on an activity input: which sources may influence it (a "sink policy" in the security literature; D21) |
 | Change request | A proposed change to a running case, applied only after someone else approves it |
 | Package | A case definition and the plans it uses, released together |
 | Release | An immutable, numbered version of a package, identified by its behaviour digest |
@@ -637,7 +659,9 @@ New questions found while building go here, numbered from 10.
     security literature; analysts see only plain language ("never sends email to an address chosen
     by the AI"). The policy kinds stay a short list fixed by the engine (`no_untrusted`,
     `only_from`), written by the platform team on each contract input. To decide in layer 4,
-    including the error code (`SINK_POLICY` or `INPUT_POLICY`).
+    including the error code (`SINK_POLICY` or `INPUT_POLICY`). **Decided in layer 4:** "input
+    policy" and `INPUT_POLICY`, written on the input field, kinds `trusted_only` and `only_from`
+    (D21).
 11. **Expressions: JSONata strings, CEL, or structured JSON?** (found before the tracer bullet)
     D3 stores conditions as JSONata strings. Few people read the stored form: developers read the
     builder (`approved > 100`), analysts and approvers read plain language. Programs read it all the
@@ -701,6 +725,18 @@ New questions found while building go here, numbered from 10.
     the layer 1 review: changing *how* the hash is computed (sorting outcomes, a Pydantic upgrade
     changing the generated JSON Schema) changes existing hashes with no change of promise, so the
     hash method itself needs a version recorded with each hash.
+17. **May an untrusted value steer a condition?** (found in layer 4) An input policy checks the
+    values an activity receives, not *whether* it runs. In a plan, a transition's `when` that reads
+    an untrusted field (`{"==": [{"var": "llm_says_refund"}, true]}`) decides which activity runs
+    next, though every input it gets is trusted. The prototype's "strict mode" adds the
+    condition's sources to the inputs of the state it enters, and no further (a state machine has
+    no point where the influence ends). For a high-risk activity, the approval already puts a
+    person between the condition and the step (D11); for a low-risk one, such as choosing which of
+    two trusted recipients gets a letter, nothing does. Options: add a condition's sources to the
+    entered state's inputs, as the prototype; refuse a condition reading untrusted data before
+    an activity with an input policy; or leave conditions to inform and let rules decide (D7's
+    teaching warning on "rules whose condition reads untrusted data"). To decide with
+    `UNTRUSTED_TRIGGER` (layer 11), or earlier if case validation (layer 10) needs it.
 
 ## Prior art
 
