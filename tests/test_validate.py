@@ -441,6 +441,7 @@ GUIDE_EXAMPLES: dict[str, Any] = {
         refund_fee={**guide_plan()["states"]["pay"], "on": {"done": "paid", "declined": "failed"}},
     ),
     "UNKNOWN_SOURCE": lambda: with_source("amount", "untrusted:lml"),
+    "INPUT_POLICY": lambda: guide_injection(),
 }
 
 
