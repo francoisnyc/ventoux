@@ -5,8 +5,10 @@ See docs/layers/01-catalog.md and docs/guides/activities.md.
 
 import copy
 import json
+from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -16,6 +18,7 @@ from ventoux.core.catalog import Catalog, ContractConflict, NotInCatalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.contract_hash import contract_hash
 from ventoux.core.hash_check import check_hashes
+from ventoux.core.policy import Policy, only_from, trusted_only
 from ventoux.testing import CATALOG, load_definition, payments_refund, run_case
 
 ROOT = Path(__file__).parent.parent
@@ -346,6 +349,23 @@ def test_a_copy_with_a_broken_part_is_refused_at_registration() -> None:
         Catalog().register(broken)
 
 
+@dataclass(frozen=True)
+class Unless(Policy):
+    """A kind of policy a contract writer invented: the engine doesn't know it."""
+
+    def refuses(self, sources: frozenset[str]) -> str | None:
+        return None
+
+    def describe(self) -> str:
+        return "unless it's urgent"
+
+
+class RefundWithUnless(BaseModel):
+    order_id: str
+    amount: Annotated[Decimal, Unless()]
+    idempotency_key: str
+
+
 # Every rule a contract enforces (docs/layers/03-validation.md), each with a change that breaks it.
 # A change to a part (`timeouts`, `retry`) is written as that part's changed fields.
 CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
@@ -363,6 +383,8 @@ CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
     ("a backoff of at least 1", {"retry": {"backoff_coefficient": 0.5}}, "greater than or equal"),
     ("a risk from its list", {"risk": "hihg"}, "'low', 'medium' or 'high'"),
     ("an effect from its list", {"effect": "delete"}, "'read', 'compute', 'write' or 'notify'"),
+    # Layer 4: the kinds of input policy are the engine's (brief, D21).
+    ("a policy kind the engine knows", {"input": RefundWithUnless}, "Ventoux doesn't know"),
 ]
 RULE_NAMES = [rule for rule, _, _ in CONTRACT_RULES]
 
@@ -406,3 +428,30 @@ def test_every_rule_runs_again_when_a_copy_is_registered(
     broken = copied(changes)  # accepted: a copy is never checked
     with pytest.raises(ValidationError, match=says):
         Catalog().register(broken)
+
+
+def test_a_policy_kind_the_engine_does_not_know_is_refused() -> None:
+    # Fail closed: a kind the engine doesn't know is refused, never ignored (brief, D21).
+    with pytest.raises(ValidationError, match="input amount has a policy Ventoux doesn't know"):
+        refund(input=RefundWithUnless)
+
+
+def refund_input(*policies: Policy) -> type[BaseModel]:
+    """A refund input, `RefundInput` as in the guide, with `policies` on its amount."""
+
+    amount_type: Any = Annotated[Decimal, *policies] if policies else Decimal
+
+    class RefundInput(BaseModel):
+        order_id: str
+        amount: amount_type
+        idempotency_key: str
+
+    return RefundInput
+
+
+def test_a_policy_changes_the_hash() -> None:
+    # A policy is part of what the contract promises, so adding one is a new version (brief, D21).
+    without = contract_hash(refund(input=refund_input()))
+    with_policy = contract_hash(refund(input=refund_input(trusted_only())))
+    other_policy = contract_hash(refund(input=refund_input(only_from("payments"))))
+    assert len({without, with_policy, other_policy}) == 3

@@ -5,12 +5,44 @@ docs/guides/activities.md.
 """
 
 from dataclasses import dataclass
+from typing import Any
+
+from pydantic import GetJsonSchemaHandler
+from pydantic_core import CoreSchema
 
 from ventoux.core.provenance import is_trusted, is_untrusted
 
 
 @dataclass(frozen=True)
-class TrustedOnly:
+class Policy:
+    """What every kind of input policy can do. The kinds are a closed list (`KINDS`, below)."""
+
+    def refuses(self, sources: frozenset[str]) -> str | None:
+        """Why a value with these sources can't go in, or None if it can."""
+        raise NotImplementedError
+
+    def describe(self) -> str:
+        """The policy as people read it, after the input's name."""
+        raise NotImplementedError
+
+    def promise(self) -> dict[str, Any]:
+        """The policy as data, in the input's JSON Schema: `{"kind": "trusted_only"}`."""
+        raise NotImplementedError
+
+    # Pydantic: on an object inside `Annotated[...]`, `__get_pydantic_json_schema__` is called when
+    # the model's JSON Schema is made, and may add to the field's schema.
+    def __get_pydantic_json_schema__(
+        self, core_schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> dict[str, Any]:
+        # The policy goes into the published schema, which the contract hash covers: adding or
+        # changing a policy changes the contract (brief, D21).
+        schema: dict[str, Any] = handler(core_schema)
+        schema.setdefault("x-input-policies", []).append(self.promise())
+        return schema
+
+
+@dataclass(frozen=True)
+class TrustedOnly(Policy):
     """Only from a system or a person, never from untrusted data."""
 
     def refuses(self, sources: frozenset[str]) -> str | None:
@@ -28,13 +60,16 @@ class TrustedOnly:
         """The policy as people read it, after the input's name."""
         return "only from a system or a person, never from untrusted data"
 
+    def promise(self) -> dict[str, Any]:
+        return {"kind": "trusted_only"}
+
 
 def trusted_only() -> TrustedOnly:
     return TrustedOnly()
 
 
 @dataclass(frozen=True)
-class OnlyFrom:
+class OnlyFrom(Policy):
     """Only from the systems named."""
 
     systems: tuple[str, ...]  # the system names a value must come from, such as "payments"
@@ -60,6 +95,15 @@ class OnlyFrom:
         """The policy as people read it, after the input's name."""
         return f"only from {' or '.join(self.systems)}"
 
+    def promise(self) -> dict[str, Any]:
+        return {"kind": "only_from", "systems": list(self.systems)}
+
 
 def only_from(*systems: str) -> OnlyFrom:
     return OnlyFrom(systems)
+
+
+# The kinds of policy, a closed list fixed by the engine. Adding one is a design decision recorded
+# in the brief, like an expression operator (brief, D21).
+KINDS: tuple[type[Policy], ...] = (TrustedOnly, OnlyFrom)
+KIND_NAMES = "trusted_only and only_from"
