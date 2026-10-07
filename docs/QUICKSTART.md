@@ -17,7 +17,7 @@ uv run ventoux init
 ```
 
 `ventoux init` creates a `cases/` folder and a development catalog with example activities, such as
-`payments.refund@1`, which runs against a fake payment system.
+`payments.refund@2`, which runs against a fake payment system.
 
 ## 2. Describe the case
 
@@ -47,7 +47,7 @@ review = refund.task(
 
 pay = refund.activity(
     "pay",
-    "payments.refund@1",
+    "payments.refund@2",
     title="Refund the customer",
     inputs={"order_id": order_id, "amount": approved},
     when=review.outcome == "approve",
@@ -68,7 +68,7 @@ What this says:
 - `review` is a **task** for someone with the `support` role, who answers with one of two
   **outcomes**: *approve*, entering the amount approved, or *reject*. The inbox draws the form from
   the outcome. A misspelled outcome (`"aprove"`) is caught by `ventoux check`.
-- `pay` calls the `payments.refund@1` activity with the order and the approved amount, the value a
+- `pay` calls the `payments.refund@2` activity with the order and the approved amount, the value a
   person confirmed.
 - `when=…` is a **rule**: `pay` only runs if the review was approved.
 - `approval=…`: when the amount actually paid is above 100, someone with the `support-lead` role must approve the payment, and it
@@ -87,7 +87,7 @@ uv run ventoux check
 ```text
 ✓ refund is valid (2 steps)
   review   task for support · outcomes: approve (sets approved_amount), reject
-  pay      runs payments.refund@1 · only after review = approve
+  pay      runs payments.refund@2 · only after review = approve
            · needs approval by support-lead when approved_amount > 100
   Case map: build/refund.md
 ```
@@ -162,12 +162,12 @@ inputs={"order_id": order_id, "amount": message_amount}
 
 ```text
 ✗ refund: pay.inputs.amount comes from customer_amount, which the customer typed (untrusted).
-  payments.refund@1 only accepts trusted amounts.
+  payments.refund@2 takes amount only from a system or a person, never from untrusted data.
   Use a value a person confirmed, for example `approved_amount`, set by the reviewer.
 ```
 
-You didn't write any security rule: the platform team set it once on `payments.refund@1`. Ventoux
-checks it for every case that uses the activity.
+You didn't write any security rule: the platform team set it once on `payments.refund@2`, as an
+input policy on `amount`. Ventoux checks it for every case that uses the activity.
 
 ## 7. Change it
 
@@ -175,7 +175,7 @@ Finance now wants the customer told when a refund is rejected. Add a step and a 
 
 ```python
 notify = refund.activity(
-    "notify_rejection", "letters.draft@1",
+    "notify_rejection", "letters.draft@2",
     title="Draft a rejection letter",
     inputs={"order_id": order_id},
     when=review.outcome == "reject",
@@ -188,7 +188,7 @@ uv run ventoux diff
 
 ```text
 refund: changes since the last release
-+ step "Draft a rejection letter" (letters.draft@1), runs when the review is rejected
++ step "Draft a rejection letter" (letters.draft@2), runs when the review is rejected
   No change to approvals or to where values come from.
   This change creates a new release.
 ```

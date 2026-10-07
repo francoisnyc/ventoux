@@ -53,14 +53,14 @@ A step that needs a customer's postal address gets the **reference** and fetches
 
 ```python
 deny = claim.activity(
-    "deny", "letters.draft@1",
+    "deny", "letters.draft@2",
     title="Draft the denial letter",
     inputs={"customer": customer, "claim": claim.id},
     when=decision == "denied",
 )
 ```
 
-`letters.draft@1` looks up the address in the CRM when it runs, so the letter always uses the
+`letters.draft@2` looks up the address in the CRM when it runs, so the letter always uses the
 current address, and the address never enters the case history. Activities that work this way take
 references as inputs; the platform team designs them so.
 
