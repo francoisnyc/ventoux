@@ -122,3 +122,22 @@ def test_a_definition_is_read_with_exact_decimals(tmp_path: Path) -> None:
     stored = tmp_path / "definition.json"
     stored.write_text('{"threshold": 0.1}')
     assert load_definition(stored)["threshold"] == Decimal("0.1")
+
+
+def test_whoever_decides_whether_the_step_runs_cannot_approve_it() -> None:
+    # Pay the amount the customer's system sent, but only once the review set an approved amount:
+    # Sam's answer decides whether the refund runs, so he can't approve it (brief, D11). Found in
+    # layer 4: the tracer's own walk missed a field read through `exists`.
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["pay"]["inputs"]["amount"] = {"var": "amount"}
+    refund["steps"]["pay"]["when"] = {"exists": "approved_amount"}
+    refund["steps"]["pay"]["approval"]["when"] = {">": [{"var": "amount"}, 100]}
+    with pytest.raises(AnswerRefused, match="sam set a value pay uses"):
+        run_case(
+            refund,
+            file={"order_id": "ord-8", "amount": 250},
+            answers=[
+                ("review", "approve", "sam", {"approved_amount": 250}),
+                ("pay", "approve", "sam"),
+            ],
+        )
