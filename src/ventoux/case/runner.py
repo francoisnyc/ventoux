@@ -13,6 +13,10 @@ from typing import Any
 
 from ventoux.core.catalog import Catalog
 from ventoux.core.expressions import ExpressionError, evaluate, parse_expression
+from ventoux.core.provenance import provenance
+
+# Where the case file's first values came from: the system that opened the case (brief, D12).
+OPENER = "system:opener"
 
 Activity = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -44,17 +48,17 @@ def run(
     """Run the case `definition` from `file`, playing the scripted `answers` in order."""
     # The case file, plus each task's latest outcome as "<step>.outcome".
     values = {name: case_value(value) for name, value in file.items()}
-    # TRACER: who set each value, a crude stand-in for provenance tags (layer 4).
-    set_by: dict[str, str] = {}
+    # Every value carries where it came from (brief, D12): the opening system, or who answered.
+    sources = {name: frozenset({OPENER}) for name in file}
     result = Run()
     # TRACER: `sequence` is walked in order; the case runtime (layer 8) admits steps by rules.
     for name in definition["sequence"]:
         step = definition["steps"][name]
         if step["kind"] == "task":
-            answer_task(name, step, answer_for(name, answers), values, set_by, roles_of)
+            answer_task(name, step, answer_for(name, answers), values, sources, roles_of)
         elif not decides(step.get("when"), values):
             continue  # not needed: its rule says it doesn't run
-        elif needs_approval(step, values) and not approved(name, step, answers, set_by, roles_of):
+        elif needs_approval(step, values) and not approved(name, step, answers, sources, roles_of):
             roles = " or ".join(step["approval"]["roles"])
             result.waiting_for.append(f"approval of {name} by {roles}")
             break  # the step waits, and nothing after it starts
@@ -81,7 +85,7 @@ def approved(
     name: str,
     step: dict[str, Any],
     answers: list[tuple[Any, ...]],
-    set_by: dict[str, str],
+    sources: dict[str, frozenset[str]],
     roles_of: Mapping[str, set[str]],
 ) -> bool:
     """Whether the step's approval has been given by someone allowed to give it."""
@@ -90,10 +94,11 @@ def approved(
         return False
     _, outcome, person, *_ = answer
     require_role(person, step["approval"]["roles"], f"approve {name}", roles_of)
-    # "Someone else" is computed, never listed (brief, D11): whoever set a value the step uses, in its
-    # inputs or its condition, may not approve it.
-    used = fields_read([*step["inputs"].values(), step.get("when")])
-    if person in {set_by[f] for f in used if f in set_by}:
+    # "Someone else" is computed, never listed (brief, D11): whoever's answer flows into the step,
+    # through its inputs or its condition, may not approve it.
+    used = [*step["inputs"].values(), *([step["when"]] if "when" in step else [])]
+    flowed_in = frozenset().union(*(provenance(parse_expression(e), sources) for e in used))
+    if f"person:{person}" in flowed_in:
         raise AnswerRefused(f"{person} set a value {name} uses, so cannot approve it")
     return bool(outcome == "approve")
 
@@ -104,18 +109,6 @@ def require_role(
     """Refuse `person` unless they have one of `roles` (the engine re-checks every answer)."""
     if not roles_of.get(person, set()) & set(roles):
         raise AnswerRefused(f"{person} cannot {action}: needs {' or '.join(roles)}")
-
-
-def fields_read(exprs: list[Any]) -> set[str]:
-    """The case-file fields the expressions read."""
-    found: set[str] = set()
-    for expr in exprs:
-        if isinstance(expr, dict) and "var" in expr:
-            found.add(expr["var"])
-        elif isinstance(expr, dict):
-            for operands in expr.values():
-                found |= fields_read(operands)
-    return found
 
 
 def needs_approval(step: dict[str, Any], values: dict[str, Any]) -> bool:
@@ -133,7 +126,7 @@ def answer_task(
     step: dict[str, Any],
     answer: tuple[Any, ...],
     values: dict[str, Any],
-    set_by: dict[str, str],
+    sources: dict[str, frozenset[str]],
     roles_of: Mapping[str, set[str]],
 ) -> None:
     """Record a person's answer to a task, after checking it is one the task accepts."""
@@ -143,11 +136,11 @@ def answer_task(
     if outcome not in step["outcomes"]:
         raise AnswerRefused(f"{name} has no outcome {outcome!r}")
     values[f"{name}.outcome"] = outcome
-    set_by[f"{name}.outcome"] = person
+    sources[f"{name}.outcome"] = frozenset({f"person:{person}"})
     # An outcome sets only the case-file fields it declares (brief, D9).
     for field_name in step["outcomes"][outcome].get("sets", []):
         values[field_name] = case_value(form[0][field_name])
-        set_by[field_name] = person
+        sources[field_name] = frozenset({f"person:{person}"})
 
 
 def decides(condition: Any, values: dict[str, Any]) -> bool:

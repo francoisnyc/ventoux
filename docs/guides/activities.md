@@ -1,10 +1,10 @@
 # Activities: adding a capability to the catalog
 
-> **For the platform team.** This guide describes layer 1 as if it already worked; the code that
-> makes it true is built test-first in that layer. Case developers rarely need it: they meet
+> **For the platform team.** This guide describes layers 1 and 4 as if they already worked; the
+> code that makes it true is built test-first in those layers. Case developers rarely need it: they meet
 > contracts only through the activities they call and the errors `ventoux check` gives them.
 
-**The rule of thumb:** a case definition can only *name* an activity (`payments.refund@1`). What
+**The rule of thumb:** a case definition can only *name* an activity (`payments.refund@2`). What
 that name promises is a **contract** you write and register in the **catalog**. Nothing in a
 definition, written by a person or drafted by an AI, can add a capability: it can only pick one
 from the list.
@@ -14,7 +14,7 @@ from the list.
 | Word | Question it answers | Example | Changes when… |
 |---|---|---|---|
 | **Catalog** | What can a definition call? | `payments.refund@1`, `risk.score@1` | a contract is added or retired |
-| **Contract** | What does one entry promise? | schemas, risk, effect, retries, timeouts, idempotency, outcomes | never: a change is a new `@N` |
+| **Contract** | What does one entry promise? | schemas, input policies, risk, effect, retries, timeouts, idempotency, outcomes | never: a change is a new `@N` |
 | **Binding** | Where does it run, here? | production: queue `payments` | operations move it; no version, no release |
 
 The catalog lists contracts; each environment binds them. A contract has no field for a task
@@ -37,15 +37,17 @@ changes no contract.
 
 ```python
 from decimal import Decimal
+from typing import Annotated
 
 from pydantic import BaseModel
 
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.policy import trusted_only
 
 
 class RefundInput(BaseModel):
-    order_id: str
-    amount: Decimal
+    order_id: Annotated[str, trusted_only()]  # never an order chosen by an AI or a customer
+    amount: Annotated[Decimal, trusted_only()]  # never an amount typed by a customer
     idempotency_key: str  # filled by the engine, never by a definition
 
 
@@ -55,7 +57,7 @@ class RefundOutput(BaseModel):
 
 payments_refund = ActivityContract(
     name="payments.refund",
-    version=1,
+    version=2,
     input=RefundInput,
     output=RefundOutput,
     risk="high",
@@ -73,7 +75,7 @@ payments_refund = ActivityContract(
 ```
 
 Then register it: `catalog.register(payments_refund)`, and look it up by reference:
-`catalog.get("payments.refund@1")`. The catalog checks every contract again when it is registered,
+`catalog.get("payments.refund@2")`. The catalog checks every contract again when it is registered,
 so a contract made some other way, such as a copy with `model_copy(update=...)`, can't skip a rule.
 
 What each part is for:
@@ -81,7 +83,7 @@ What each part is for:
 - **`name` and `version`.** Together they are the reference definitions use, `name@version`. The
   version is a whole number: there are no minor versions, because every change is a new contract.
 - **`input` and `output`.** Pydantic models. Their JSON Schema is what the catalog publishes and what
-  the contract's hash covers.
+  the contract's hash covers. An input field may carry an **input policy**: see below.
 - **`risk`** (`low`, `medium`, `high`): how bad a mistake would be. High-risk steps need an approval
   on every path.
 - **`effect`** (`read`, `compute`, `write`, `notify`): what the activity does to the world. `read`
@@ -99,6 +101,53 @@ What each part is for:
 - **`display`**: titles and descriptions for people. They are presentation: fixing a typo in them
   is not a new contract.
 
+## Input policies: where a value may come from
+
+Every value in a case carries the sources it came from (brief, D12): a **system** (the system that
+opened the case, or an activity whose contract says so), a **person** (who answered a task), or
+something **untrusted** (`untrusted:llm`, `untrusted:customer`, …). A value computed by an
+expression carries the sources of every field it reads, so wrapping an untrusted value in an
+expression doesn't clean it.
+
+An **input policy** says which sources one input accepts. (In the security literature, this is a
+*sink policy*: the input is where data "sinks" into an action.) You write it on the input's field,
+next to its type:
+
+```text
+to_customer: Annotated[str, trusted_only()]
+account: Annotated[str, only_from("payments")]
+```
+
+(`Annotated[str, …]` is plain Python typing: the type `str`, plus something attached to it for
+whoever reads the field. Here, Ventoux reads the policy.)
+
+| Kind | What people read | Use it for |
+|---|---|---|
+| `trusted_only()` | only from a system or a person, never from untrusted data | most inputs that decide something: a recipient, an amount, an order |
+| `only_from("payments", …)` | only from payments | the advanced form: the value must come from one of the systems named |
+
+`ventoux check` refuses a definition whose value for the input could come from a source the policy
+doesn't accept, with the policy's sentence in the message, and the engine checks again with the
+real values before the activity is scheduled. A content filter judges what a value says; a policy
+only asks where it came from, so no wording, however clever, gets an untrusted value past it.
+
+The kinds are a closed list fixed by the engine: adding one is a design decision recorded in the
+brief, like an expression operator (brief, D21). Every policy on an input applies. A policy is part
+of the contract's promise (the hash covers it, through the input's JSON Schema), so adding one is a
+new version.
+
+### Source labels
+
+The labels after `untrusted:` are registered by you, like roles, so a developer's typo is caught by
+`ventoux check`:
+
+```text
+catalog.register_label("llm")
+```
+
+A developer may declare a field untrusted with a registered label; nobody can declare a field
+trusted. Trust comes only from a contract you own, or a person's answer.
+
 ## What the catalog refuses
 
 Every refusal says what is wrong; the catalog's own refusals then say what to do instead. Pydantic's
@@ -107,15 +156,18 @@ writes them.
 
 | You wrote | Ventoux says |
 |---|---|
-| `effect="write"` with no `idempotency_key` | `payments.refund@1` has effect `'write'`: a side-effecting activity must say which input carries its idempotency key, or a retry could do it twice. |
-| `idempotency_key="request_id"`, not an input field | `payments.refund@1`: idempotency key `'request_id'` is not a field of its input (`RefundInput`), so the engine would have nowhere to put the key. Name one of its fields: amount, idempotency_key, order_id. |
+| `effect="write"` with no `idempotency_key` | `payments.refund@2` has effect `'write'`: a side-effecting activity must say which input carries its idempotency key, or a retry could do it twice. |
+| `idempotency_key="request_id"`, not an input field | `payments.refund@2`: idempotency key `'request_id'` is not a field of its input (`RefundInput`), so the engine would have nowhere to put the key. Name one of its fields: amount, idempotency_key, order_id. |
 | `queue="payments"` in a contract | A contract has no field `'queue'`. A contract says what an activity promises; where it runs (task queue, namespace, worker) belongs in a deployment binding. |
-| `name="Payments Refund"`, or `version=0` | `'Payments Refund@1'`: no reference could name it. A name is dotted lowercase (`payments.refund`), and a version a whole number from 1. |
-| `outcomes=["declined"]` with no title for it | `payments.refund@1`: outcomes and their display titles must match: outcomes ['declined'], titles for []. Give each outcome exactly one title in `display.outcomes`. |
+| `name="Payments Refund"`, or `version=0` | `'Payments Refund@2'`: no reference could name it. A name is dotted lowercase (`payments.refund`), and a version a whole number from 1. |
+| `outcomes=["declined"]` with no title for it | `payments.refund@2`: outcomes and their display titles must match: outcomes ['declined'], titles for []. Give each outcome exactly one title in `display.outcomes`. |
 | `RetryPolicy(maximum_attempts=0, …)` | `maximum_attempts`: Input should be greater than 0. |
 | `catalog.register(payments_refund.model_copy(update={"risk": "hihg"}))` | `risk`: Input should be 'low', 'medium' or 'high'. |
-| A second, different `payments.refund@1` | `payments.refund@1` is already registered with different content: register it as `payments.refund@2`. |
-| `catalog.get("payments.refund@3")` | `payments.refund@3` is not in the catalog. Registered: `payments.refund@1`. Use a registered version, or register this one first. |
+| `only_from()`, naming no system | `only_from` names at least one system: with none, no value could ever pass. |
+| A policy kind of your own, `class Unless(Policy)` on `amount` | `payments.refund@2`: input `amount` has a policy Ventoux doesn't know (`Unless`). The kinds are `trusted_only` and `only_from`; a new kind is added to the engine, never in a contract. |
+| `catalog.register_label("LLM")` | `'LLM'` is not a label: a label is lowercase, such as `llm` or `customer-portal`. |
+| A second, different `payments.refund@2` | `payments.refund@2` is already registered with different content: register it as `payments.refund@3`. |
+| `catalog.get("payments.refund@3")` | `payments.refund@3` is not in the catalog. Registered: `payments.refund@2`. Use a registered version, or register this one first. |
 | `catalog.get("payments.refund@1.0")` | `'payments.refund@1.0'` is not a reference: a reference is name@N, such as `payments.refund@1`, with a whole-number version. |
 
 ## Changing a contract
@@ -126,16 +178,20 @@ and packages that reference `@1` keep it until they adopt `@2`, which creates a 
 To catch an edit made in place, the catalog hashes each contract (everything except `display`) and
 `contracts.lock.json` records each hash. A test in CI compares them:
 
-- a recorded contract whose hash changed fails: "`payments.refund@1` changed without a new
-  version: register it as `@2`";
+- a recorded contract whose hash changed fails: "`payments.refund@2` changed without a new
+  version: register it as `@3`";
 - a contract that isn't recorded yet fails with the line to add.
 
 ## Development activities
 
-`ventoux.testing` ships three activities, with fake implementations that touch no real system:
+`ventoux.testing` ships three activities, with fake implementations that touch no real system, and
+the source labels `customer`, `document`, `email`, `llm` and `web`:
 
-| Activity | Effect | Risk | Notes |
-|---|---|---|---|
-| `payments.refund@1` | write | high | outcome `declined`; nothing is paid |
-| `orders.lookup@1` | read | low | no idempotency key needed |
-| `letters.draft@1` | write | low | only drafts, never sends |
+| Activity | Effect | Risk | Input policies | Notes |
+|---|---|---|---|---|
+| `payments.refund@2` | write | high | `order_id`, `amount`: trusted only | outcome `declined`; nothing is paid |
+| `orders.lookup@1` | read | low | none | no idempotency key needed |
+| `letters.draft@2` | write | low | `to_customer`: trusted only | only drafts, never sends |
+
+`payments.refund@1` and `letters.draft@1`, without policies, were retired when `@2` added them:
+a version without the policy, left in the catalog, would let a definition step around it.

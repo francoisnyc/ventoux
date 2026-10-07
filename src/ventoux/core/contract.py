@@ -9,6 +9,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ventoux.core.policy import KIND_NAMES, KINDS, Policy
+
 # A contract never changes once written, down to its parts (brief, D5); and a field it doesn't
 # know is refused, never silently dropped (fail closed).
 # Pydantic: `model_config` sets how a model behaves. `frozen=True` refuses any assignment after the
@@ -137,6 +139,27 @@ class ActivityContract(BaseModel):
                 "outcome exactly one title in display.outcomes."
             )
         return self
+
+    @model_validator(mode="after")
+    def policies_are_known(self) -> Self:
+        # Fail closed: a kind of policy the engine doesn't know is refused, never ignored, since
+        # nothing would check it (brief, D21).
+        for name, field in self.input.model_fields.items():
+            for policy in field.metadata:
+                if isinstance(policy, Policy) and type(policy) not in KINDS:
+                    raise ValueError(
+                        f"{self.reference}: input {name} has a policy Ventoux doesn't know "
+                        f"({type(policy).__name__}). The kinds are {KIND_NAMES}; a new kind is "
+                        "added to the engine, never in a contract."
+                    )
+        return self
+
+    def policies(self, field: str) -> list[Policy]:
+        """The input policies written on input `field`, each of which applies."""
+        if field not in self.input.model_fields:
+            return []  # not an input: validate reports it as UNKNOWN_INPUT
+        # Pydantic: `metadata` holds what `Annotated[...]` attached to the field.
+        return [m for m in self.input.model_fields[field].metadata if isinstance(m, Policy)]
 
     @property
     def reference(self) -> str:

@@ -1,5 +1,7 @@
 {
   "letters.draft@1": "2cc09f2b4e603ca10119325c9b0c8fb2e95d9dce9481fd2ec075cf4db5e2c4e1",
+  "letters.draft@2": "2aa90c93b6c422576e4fdfb85f6090f9a504059da9220afd879bfa776e21d5fe",
   "orders.lookup@1": "c3197cf072d1dbeab744abd17207c68004a4184c43bbf93cd954e7ceaf90c631",
-  "payments.refund@1": "6ef8dab663c116a022fe76fadc767422fab1fa2ee45ac28bd735009061e69f17"
+  "payments.refund@1": "6ef8dab663c116a022fe76fadc767422fab1fa2ee45ac28bd735009061e69f17",
+  "payments.refund@2": "b2f325e171c67b27ecf417b9b7456a2f7bcbb59eaa2281d5ba34c4f580340801"
 }

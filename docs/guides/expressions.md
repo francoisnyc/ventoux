@@ -128,7 +128,7 @@ expressions:
 
 ```json
 "pay": {
-  "activity": "payments.refund@1",
+  "activity": "payments.refund@2",
   "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "amount"}},
   "on": {"done": "paid"}
 }

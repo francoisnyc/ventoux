@@ -680,6 +680,17 @@ and record the key points. A question is closed once you can explain the answer 
   keeps the time, and history records `TimerFired`. On replay, Temporal reads that event at the
   same point instead of waiting or reading a clock, so the condition sees the same case file and
   decides the same way. Time enters as a recorded event, never as something an expression reads.
+- Retrieval (layer 4 warm-up): "it's implemented as a signal, not sure how it is written." Half
+  right: time does come in from outside the code, as a recorded event, which is the core. But it
+  is a **timer**, not a signal. A signal is sent by someone (a person's answer, an outside
+  system); a timer is set by the workflow itself and fired by the Temporal server, so no person or
+  system has to remember to send "5 days have passed". History records `TimerStarted` when the
+  case opens and `TimerFired` five days later. It is written as a rule (brief, D7): *when* 5 days
+  after the case opened, *if* `assessed` is not reached, *then* start `escalate`; the `sla`
+  pattern writes it for you (layer 11). On replay, Temporal reads `TimerFired` from history at the
+  same point, so the condition sees the same case file and decides the same way. The difference
+  matters for provenance too (layer 4): a signal carries content from a sender, whose trust must
+  be tagged; a timer carries none, so it can't be injected.
 - Status: open, kept in the warm-up rotation until the follow-up comes from memory.
 
 
