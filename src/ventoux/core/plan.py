@@ -18,6 +18,7 @@ from pydantic import (
     Field,
     Tag,
     ValidationError,
+    model_validator,
 )
 
 from ventoux.core.contract import REFERENCE
@@ -32,6 +33,7 @@ from ventoux.core.expressions import (
     StringType,
     parse_expression,
 )
+from ventoux.core.provenance import UNTRUSTED_ORIGIN, is_label
 
 KINDS = ("activity", "wait", "final")
 
@@ -74,6 +76,24 @@ def final_outcome(outcome: str) -> str:
     return outcome
 
 
+def declared_source(source: str) -> str:
+    """A field's declared source: `untrusted:` and a label, never trusted (brief, D12)."""
+    if source.startswith("trusted:"):
+        raise ValueError(
+            "a field can be declared untrusted, never trusted: trust comes from a contract the "
+            "platform team owns, or a person's answer"
+        )
+    # A developer declares only untrusted sources; a system or a person is never declared, it is
+    # what the engine records (brief, D12).
+    origin, _, label = source.partition(":")
+    if f"{origin}:" != UNTRUSTED_ORIGIN or not is_label(label):
+        raise ValueError(
+            'a source looks like "untrusted:customer": untrusted, and a lowercase label the '
+            "platform team registered"
+        )
+    return source
+
+
 def shorthand(transitions: object) -> object:
     """A bare state name in `on` is shorthand for one transition with no condition."""
     return [{"target": transitions}] if isinstance(transitions, str) else transitions
@@ -89,6 +109,7 @@ Duration = Annotated[
     str, matching(r"[1-9][0-9]*[smhd]", 'a duration looks like "30s", "5m", "48h" or "7d"')
 ]
 PlanExpression = Annotated[Expression, BeforeValidator(expression)]
+Source = Annotated[str, AfterValidator(declared_source)]
 DeclaredType = Annotated[
     NumberType | StringType | BooleanType | OutcomeType | ReferenceType | ListType,
     Field(discriminator="type"),
@@ -180,9 +201,41 @@ class Plan(Shape):
     plan: PlanName
     version: Annotated[int, AfterValidator(version)]
     display: Display
-    fields: dict[str, DeclaredType] = {}
+    fields: dict[str, DeclaredType] = {}  # each field's type, which expressions are checked against
+    # Each field's declared source, written on the field (`"source": "untrusted:llm"`) and kept
+    # here, beside its type: an untrusted `string` is still a `string` to the expression check.
+    sources: dict[str, Source] = {}
     initial: StateName
     states: dict[StateName, State]
+
+    # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
+    # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
+    @model_validator(mode="before")
+    @classmethod
+    def sources_beside_types(cls, data: Any) -> Any:
+        """Each field's `source` moved out of the field, into `sources`."""
+        if not isinstance(data, dict):
+            return data  # not a plan's shape: the field checks say what is wrong
+        # One place to write a source, on its field: a `sources` of the plan's own is refused.
+        if "sources" in data:
+            raise ValueError("sources: not a field here: write each source on its field")
+        fields = data.get("fields", {})
+        if not isinstance(fields, dict):
+            return data
+        types = {name: without_source(field) for name, field in fields.items()}
+        sources = {
+            name: field["source"]
+            for name, field in fields.items()
+            if isinstance(field, dict) and "source" in field
+        }
+        return {**data, "fields": types, "sources": sources}
+
+
+def without_source(field: object) -> object:
+    """A field's declaration without its `source`: its type alone."""
+    if isinstance(field, dict):
+        return {key: value for key, value in field.items() if key != "source"}
+    return field
 
 
 class PlanInvalid(Exception):
@@ -204,6 +257,9 @@ def problem(error: Any) -> str:
     """One of Pydantic's errors as a line for the plan's author: `states.pay.activity: …`."""
     # Pydantic's own markers (the tag of the kind it picked, `[key]` for a key) aren't in the plan.
     loc = [str(part) for part in error["loc"]]
+    # A source is written on its field, so its problem is shown there: `fields.amount.source`.
+    if loc[:1] == ["sources"]:
+        loc = ["fields", *loc[1:], "source"]
     path = ".".join(part for part in loc if not part.endswith(" state") and part != "[key]")
     if error["type"] == "missing":
         message = "required"
@@ -213,4 +269,4 @@ def problem(error: Any) -> str:
         message = f"a field's type is one of {FIELD_TYPES}, and this one is {error['ctx']['tag']}"
     else:
         message = str(error["msg"]).removeprefix("Value error, ")
-    return f"{path}: {message}"
+    return f"{path}: {message}" if path else message

@@ -3,6 +3,7 @@
 A source is a text, `origin:name`. See docs/layers/04-provenance.md.
 """
 
+import re
 from collections.abc import Mapping
 from decimal import Decimal
 
@@ -34,6 +35,16 @@ UNTRUSTED_ORIGIN = "untrusted:"
 # A plan field with no declared source: the case gives it, and the plan can't see its origin. Only
 # the static check uses it; the runtime check sees the real sources (docs/layers/04-provenance.md).
 CASE = "case"
+
+
+# How a label is written, `customer` or `customer-portal`: a lowercase letter, then lowercase
+# letters, digits or `-`.
+LABEL = re.compile(r"[a-z][a-z0-9-]*")
+
+
+def is_label(text: str) -> bool:
+    """Whether `text` is written as a label: `llm` and `customer-portal` are, `LLM` and `` aren't."""
+    return LABEL.fullmatch(text) is not None
 
 
 def is_trusted(source: str) -> bool:

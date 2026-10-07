@@ -186,3 +186,43 @@ def test_the_guides_plan_state_parses() -> None:
     snippet = guide.split("## In a plan")[1].split("```json\n")[1].split("```")[0]
     state = json.loads("{" + snippet + "}", parse_float=Decimal)["pay"]
     assert isinstance(parse_plan(changed(["states", "pay"], state)).states["pay"], ActivityState)
+
+
+def test_a_field_can_be_declared_untrusted_never_trusted() -> None:
+    # Trust comes only from a contract the platform team owns, or a person's answer (brief, D12).
+    plan = changed(["fields", "amount"], {"type": "number", "source": "trusted:portal"})
+    with pytest.raises(PlanInvalid) as refused:
+        parse_plan(plan)
+    assert str(refused.value) == (
+        "fields.amount.source: a field can be declared untrusted, never trusted: trust comes "
+        "from a contract the platform team owns, or a person's answer"
+    )
+
+
+@pytest.mark.parametrize(
+    "source", ["llm", "system:payments", "person:ana", "untrusted:", "untrusted:LLM"]
+)
+def test_a_source_has_an_origin_and_a_label(source: str) -> None:
+    # A developer declares only `untrusted:` and a label; a system or a person is never declared.
+    plan = changed(["fields", "amount"], {"type": "number", "source": source})
+    with pytest.raises(PlanInvalid) as refused:
+        parse_plan(plan)
+    assert str(refused.value) == (
+        'fields.amount.source: a source looks like "untrusted:customer": untrusted, '
+        "and a lowercase label the platform team registered"
+    )
+
+
+def test_an_untrusted_field_keeps_its_type_and_its_source() -> None:
+    plan = parse_plan(changed(["fields", "amount"], {"type": "number", "source": "untrusted:llm"}))
+    # The type alone, so an untrusted number is still a number to the expression check.
+    assert plan.fields["amount"] == NumberType()
+    assert plan.sources == {"amount": "untrusted:llm"}
+
+
+def test_a_source_is_written_on_its_field() -> None:
+    # One place to write it: a list of sources of the plan's own is refused (fail closed).
+    plan = changed(["sources"], {"amount": "untrusted:llm"})
+    with pytest.raises(PlanInvalid) as refused:
+        parse_plan(plan)
+    assert str(refused.value) == "sources: not a field here: write each source on its field"
