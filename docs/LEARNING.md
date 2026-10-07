@@ -720,4 +720,19 @@ and record the key points. A question is closed once you can explain the answer 
   three lines of graph search.
 - Follow-up: slice 8's plan loops back to `pay` after a declined refund. Why does `reach` still
   finish on a graph with a cycle, and why does that loop make the plan unsafe, not just slow?
+- Retrieval (layer 5 warm-up): "every path to pay is encoded in the model?"; the follow-up: "don't
+  know". The first half is the core: in a plan every move is an entry in some state's `on`, so the
+  paths are data the validator can list, where in code they are implicit in loops, calls,
+  exceptions and values computed at run time. The other half didn't come back: the *meaning* is
+  declared too ("high risk" is read from the contract; an approval is a wait offering exactly
+  `approve` and `reject`), while in code `wait_condition(lambda: self.approved)` says neither.
+  The follow-up, in two parts. *Why `reach` finishes:* it keeps a `seen` set and adds a state to
+  the work list only the first time it is seen, so each state is visited at most once; a plan has
+  finitely many states, so the search ends after at most that many steps, cycle or not. *Why the
+  loop is unsafe:* `pay` → `declined` → back to `pay` runs the high-risk refund a second time on
+  the approval already spent. An approval is for one run of one step (brief, D11), so the loop is
+  a second refund nobody approved. `validate` refuses it as `APPROVAL_REUSED`: after a high-risk
+  activity, follow every arrow except an approval's `approve`; reaching a high-risk activity
+  again, itself included, means a run without its own approval. The fix routes the loop through
+  an approval, so each pass is approved.
 - Status: open, until the follow-up comes from memory.
