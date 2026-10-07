@@ -435,6 +435,7 @@ GUIDE_EXAMPLES: dict[str, Any] = {
         pay={**guide_plan()["states"]["pay"], "on": {"done": "refund_fee", "declined": "failed"}},
         refund_fee={**guide_plan()["states"]["pay"], "on": {"done": "paid", "declined": "failed"}},
     ),
+    "UNKNOWN_SOURCE": lambda: with_source("amount", "untrusted:lml"),
 }
 
 
@@ -461,3 +462,26 @@ def test_the_guide_lists_every_issue_code() -> None:
 @pytest.mark.parametrize(("code", "says"), guide_table())
 def test_the_guides_messages_are_what_validate_says(code: str, says: str) -> None:
     assert says in [issue.message for issue in with_code(GUIDE_EXAMPLES[code](), code)]
+
+
+def with_source(field: str, source: str) -> dict[str, Any]:
+    """The guide's plan with `field` declared from `source`."""
+    plan = changed()
+    plan["fields"][field] = {**plan["fields"][field], "source": source}
+    return plan
+
+
+def test_a_source_label_must_be_registered() -> None:
+    # Labels are registered by the platform team, so a typo is caught (brief, D12).
+    assert with_code(with_source("amount", "untrusted:lml"), "UNKNOWN_SOURCE") == [
+        Issue(
+            "fields.amount.source",
+            "UNKNOWN_SOURCE",
+            "untrusted:lml has a label nobody registered: the labels are customer, document, "
+            "email, llm, web; use one of them, or ask the platform team to register it",
+        )
+    ]
+
+
+def test_a_registered_label_is_accepted() -> None:
+    assert with_code(with_source("amount", "untrusted:llm"), "UNKNOWN_SOURCE") == []

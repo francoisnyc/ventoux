@@ -294,6 +294,7 @@ GUIDE_REFUSALS: dict[str, Any] = {
     "A policy kind of your own, `class Unless(Policy)` on `amount`": lambda: refund(
         input=RefundWithUnless
     ),
+    '`catalog.register_label("LLM")`': lambda: Catalog().register_label("LLM"),
     "A second, different `payments.refund@2`": lambda: catalog_of(payments_refund).register(
         refund(risk="medium")
     ),

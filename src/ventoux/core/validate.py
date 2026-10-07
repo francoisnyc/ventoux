@@ -41,7 +41,7 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
     # Fail closed: anything but a parsed plan is refused, never read as a plan with no problems.
     if not isinstance(plan, Plan):
         raise TypeError(f"validate takes a parsed plan (see parse_plan), not {type(plan).__name__}")
-    issues: list[Issue] = []
+    issues: list[Issue] = source_issues(plan, catalog)
     if plan.initial not in plan.states:
         issues.append(Issue("initial", "UNKNOWN_TARGET", not_a_state(plan.initial, plan)))
     for name, state in plan.states.items():
@@ -66,6 +66,24 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
                         f"{path}.when", transition.when, plan.fields, condition=True
                     )
     return issues + graph_issues(plan, catalog)
+
+
+def source_issues(plan: Plan, catalog: Catalog) -> list[Issue]:
+    """Every declared source's label is one the platform team registered (brief, D12)."""
+    issues = []
+    for field, source in plan.sources.items():
+        label = source.removeprefix("untrusted:")  # parse_plan let only `untrusted:` through
+        if label not in catalog.labels:
+            issues.append(
+                Issue(
+                    f"fields.{field}.source",
+                    "UNKNOWN_SOURCE",
+                    f"{source} has a label nobody registered: the labels are "
+                    f"{', '.join(catalog.labels)}; use one of them, or ask the platform team to "
+                    "register it",
+                )
+            )
+    return issues
 
 
 def activity_issues(path: str, state: ActivityState, catalog: Catalog) -> list[Issue]:

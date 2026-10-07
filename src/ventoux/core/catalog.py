@@ -2,6 +2,7 @@
 
 from ventoux.core.contract import ActivityContract, is_reference
 from ventoux.core.contract_hash import contract_hash
+from ventoux.core.provenance import is_label
 
 
 class NotInCatalog(LookupError):
@@ -17,6 +18,21 @@ class Catalog:
 
     def __init__(self) -> None:
         self._contracts: dict[str, ActivityContract] = {}  # by reference, `payments.refund@1`
+        self._labels: set[str] = set()  # the labels a field may be declared untrusted with
+
+    def register_label(self, label: str) -> None:
+        """Let fields be declared `untrusted:<label>`. Registered by the platform team, like roles,
+        so a developer's typo is caught (brief, D12)."""
+        if not is_label(label):
+            raise ValueError(
+                f"{label!r} is not a label: a label is lowercase, such as llm or customer-portal."
+            )
+        self._labels.add(label)
+
+    @property
+    def labels(self) -> list[str]:
+        """The registered labels, in order."""
+        return sorted(self._labels)
 
     def register(self, contract: ActivityContract) -> None:
         # Every rule runs again on what is registered: a copy made with `model_copy` skipped them all

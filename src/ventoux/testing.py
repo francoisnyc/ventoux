@@ -107,6 +107,9 @@ letters_draft = ActivityContract(
 CATALOG = Catalog()
 for contract in (payments_refund, orders_lookup, letters_draft):
     CATALOG.register(contract)
+# The labels fields may be declared untrusted with: `untrusted:llm`.
+for label in ("customer", "document", "email", "llm", "web"):
+    CATALOG.register_label(label)
 
 
 # Fake implementations, against no real system: nothing is paid, read or sent.
