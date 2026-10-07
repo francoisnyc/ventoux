@@ -460,3 +460,10 @@ def test_a_policy_changes_the_hash() -> None:
     with_policy = contract_hash(refund(input=refund_input(trusted_only())))
     other_policy = contract_hash(refund(input=refund_input(only_from("payments"))))
     assert len({without, with_policy, other_policy}) == 3
+
+
+@pytest.mark.parametrize("retired", ["payments.refund@1", "letters.draft@1"])
+def test_a_version_without_the_policy_is_not_served(retired: str) -> None:
+    # Left beside @2, a @1 without the policy would let a definition step around it.
+    with pytest.raises(NotInCatalog, match=f"{retired} is not in the catalog"):
+        CATALOG.get(retired)

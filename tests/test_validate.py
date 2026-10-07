@@ -16,7 +16,7 @@ from ventoux import testing
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Display
 from ventoux.core.plan import parse_plan
-from ventoux.core.policy import only_from
+from ventoux.core.policy import only_from, trusted_only
 from ventoux.core.validate import Issue, validate
 from ventoux.testing import CATALOG
 
@@ -615,3 +615,25 @@ def test_an_input_already_refused_gets_no_input_policy_issue() -> None:
     # One cause, one issue: an expression the check refuses isn't also asked where it comes from.
     misspelt = {"cat": [{"var": "suggested_recipent"}, ""]}
     assert [issue.code for issue in issues(draft_to(misspelt))] == ["EXPRESSION_INVALID"]
+
+
+class StrictPayoutInput(BaseModel):
+    account: Annotated[str, trusted_only(), only_from("payments")]
+    idempotency_key: str
+
+
+def test_every_policy_on_an_input_applies() -> None:
+    # Policies only add up, never replace each other: each that refuses gives its own issue.
+    catalog = payout_catalog()
+    strict = catalog.get("payments.payout@1").model_copy(
+        update={"version": 2, "input": StrictPayoutInput}
+    )
+    catalog.register(strict)
+    plan = payout_of({"var": "account"})
+    plan["fields"]["account"]["source"] = "untrusted:customer"
+    plan["states"]["pay"]["activity"] = "payments.payout@2"
+    found = [i.message for i in validate(parse_plan(plan), catalog) if i.code == "INPUT_POLICY"]
+    assert [message.split(", and")[0] for message in found] == [
+        "payments.payout@2 takes account only from a system or a person, never from untrusted data",
+        "payments.payout@2 takes account only from payments",
+    ]
