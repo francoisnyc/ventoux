@@ -268,7 +268,7 @@ def test_a_contract_with_no_implementation_stops_the_case_by_name(
 
 
 def refund(**changes: Any) -> ActivityContract:
-    """The guide's contract, `payments.refund@1`, with any field changed."""
+    """The guide's contract, `payments.refund@2`, with any field changed."""
     fields = {name: getattr(payments_refund, name) for name in ActivityContract.model_fields}
     return ActivityContract(**fields | changes)
 
@@ -290,7 +290,11 @@ GUIDE_REFUSALS: dict[str, Any] = {
     '`catalog.register(payments_refund.model_copy(update={"risk": "hihg"}))`': lambda: (
         Catalog().register(payments_refund.model_copy(update={"risk": "hihg"}))
     ),
-    "A second, different `payments.refund@1`": lambda: catalog_of(payments_refund).register(
+    "`only_from()`, naming no system": lambda: only_from(),
+    "A policy kind of your own, `class Unless(Policy)` on `amount`": lambda: refund(
+        input=RefundWithUnless
+    ),
+    "A second, different `payments.refund@2`": lambda: catalog_of(payments_refund).register(
         refund(risk="medium")
     ),
     '`catalog.get("payments.refund@3")`': lambda: catalog_of(payments_refund).get(

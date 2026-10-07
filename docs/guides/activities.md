@@ -159,7 +159,7 @@ writes them.
 | `effect="write"` with no `idempotency_key` | `payments.refund@2` has effect `'write'`: a side-effecting activity must say which input carries its idempotency key, or a retry could do it twice. |
 | `idempotency_key="request_id"`, not an input field | `payments.refund@2`: idempotency key `'request_id'` is not a field of its input (`RefundInput`), so the engine would have nowhere to put the key. Name one of its fields: amount, idempotency_key, order_id. |
 | `queue="payments"` in a contract | A contract has no field `'queue'`. A contract says what an activity promises; where it runs (task queue, namespace, worker) belongs in a deployment binding. |
-| `name="Payments Refund"`, or `version=0` | `'Payments Refund@1'`: no reference could name it. A name is dotted lowercase (`payments.refund`), and a version a whole number from 1. |
+| `name="Payments Refund"`, or `version=0` | `'Payments Refund@2'`: no reference could name it. A name is dotted lowercase (`payments.refund`), and a version a whole number from 1. |
 | `outcomes=["declined"]` with no title for it | `payments.refund@2`: outcomes and their display titles must match: outcomes ['declined'], titles for []. Give each outcome exactly one title in `display.outcomes`. |
 | `RetryPolicy(maximum_attempts=0, …)` | `maximum_attempts`: Input should be greater than 0. |
 | `catalog.register(payments_refund.model_copy(update={"risk": "hihg"}))` | `risk`: Input should be 'low', 'medium' or 'high'. |

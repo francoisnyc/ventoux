@@ -19,7 +19,7 @@
     "pay": {
       "kind": "activity",
       "title": "Refund the customer",
-      "activity": "payments.refund@1",
+      "activity": "payments.refund@2",
       "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
       "when": {"==": [{"var": "review.outcome"}, "approve"]},
       "approval": {

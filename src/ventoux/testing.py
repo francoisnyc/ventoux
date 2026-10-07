@@ -3,20 +3,24 @@
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel
 
 from ventoux.case.runner import Activity, AnswerRefused, Run, run
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.policy import trusted_only
 
 __all__ = ["AnswerRefused", "load_definition", "run_case"]
 
 
+# The activities guide's contract, word for word: its test checks the two hash the same.
 class RefundInput(BaseModel):
-    order_id: str
-    amount: Decimal
+    # Python typing: `Annotated[type, …]` is the type, plus something attached to it for whoever
+    # reads the field. Here Ventoux reads the input policy (brief, D21).
+    order_id: Annotated[str, trusted_only()]  # never an order chosen by an AI or a customer
+    amount: Annotated[Decimal, trusted_only()]  # never an amount typed by a customer
     idempotency_key: str  # filled by the engine, never by a definition
 
 
@@ -24,9 +28,10 @@ class RefundOutput(BaseModel):
     refund_id: str
 
 
+# @2 added the input policies; @1, without them, is retired (docs/layers/04-provenance.md).
 payments_refund = ActivityContract(
     name="payments.refund",
-    version=1,
+    version=2,
     input=RefundInput,
     output=RefundOutput,
     risk="high",
@@ -71,7 +76,7 @@ orders_lookup = ActivityContract(
 
 
 class DraftInput(BaseModel):
-    to_customer: str
+    to_customer: Annotated[str, trusted_only()]  # never an address chosen by an AI
     template: str
     idempotency_key: str
 
@@ -80,9 +85,10 @@ class DraftOutput(BaseModel):
     draft_id: str
 
 
+# @2 added the input policy on `to_customer`; @1 is retired.
 letters_draft = ActivityContract(
     name="letters.draft",
-    version=1,
+    version=2,
     input=DraftInput,
     output=DraftOutput,
     risk="low",  # it only drafts: a person reviews and sends
@@ -117,9 +123,9 @@ def fake_draft(inputs: dict[str, Any]) -> dict[str, Any]:
 
 
 FAKES: dict[str, Activity] = {
-    "payments.refund@1": fake_refund,
+    "payments.refund@2": fake_refund,
     "orders.lookup@1": fake_lookup,
-    "letters.draft@1": fake_draft,
+    "letters.draft@2": fake_draft,
 }
 
 
