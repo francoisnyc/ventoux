@@ -154,6 +154,13 @@ class ActivityContract(BaseModel):
                     )
         return self
 
+    def policies(self, field: str) -> list[Policy]:
+        """The input policies written on input `field`, each of which applies."""
+        if field not in self.input.model_fields:
+            return []  # not an input: validate reports it as UNKNOWN_INPUT
+        # Pydantic: `metadata` holds what `Annotated[...]` attached to the field.
+        return [m for m in self.input.model_fields[field].metadata if isinstance(m, Policy)]
+
     @property
     def reference(self) -> str:
         """How definitions name this contract: `payments.refund@1`."""

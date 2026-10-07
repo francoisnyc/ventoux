@@ -20,6 +20,8 @@ from ventoux.core.expressions import (
 from ventoux.core.expressions.check import a_type
 from ventoux.core.graph import Arrow, arrows, reach, shortest_path
 from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
+from ventoux.core.policy import OnlyFrom, Policy
+from ventoux.core.provenance import CASE, fields_read, provenance
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
 # An approval is a wait offering exactly these two outcomes; `approve` is reserved for it
@@ -50,9 +52,11 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
         if isinstance(state, ActivityState):
             issues += activity_issues(f"states.{name}", state, catalog)
             for field, expression in state.inputs.items():
-                issues += expression_issues(
-                    f"states.{name}.inputs.{field}", expression, plan.fields
-                )
+                path = f"states.{name}.inputs.{field}"
+                problems = expression_issues(path, expression, plan.fields)
+                # One cause, one issue: an input whose expression is refused isn't asked where its
+                # value comes from.
+                issues += problems or policy_issues(path, field, expression, state, plan, catalog)
         else:
             issues += wait_issues(f"states.{name}", name, state)
         for event, transitions in state.on.items():
@@ -84,6 +88,62 @@ def source_issues(plan: Plan, catalog: Catalog) -> list[Issue]:
                 )
             )
     return issues
+
+
+def policy_issues(
+    path: str,
+    field: str,
+    expression: Expression,
+    state: ActivityState,
+    plan: Plan,
+    catalog: Catalog,
+) -> list[Issue]:
+    """The input's value against each input policy on it: where it may come from (brief, D21)."""
+    try:
+        contract = catalog.get(state.activity)
+    except NotInCatalog:
+        return []  # no contract, no policy to read: already UNKNOWN_ACTIVITY
+    # Each field's sources as the plan knows them: what it declared, or else the case's, which the
+    # runtime checks again with the real sources before the activity runs (layer 5).
+    sources = {name: frozenset({plan.sources.get(name, CASE)}) for name in plan.fields}
+    found = provenance(expression, sources)
+    issues = []
+    for policy in contract.policies(field):
+        if policy.refuses(found) is not None:
+            issues.append(
+                Issue(
+                    path,
+                    "INPUT_POLICY",
+                    f"{contract.reference} takes {field} {policy.describe()}, and this value "
+                    f"comes from {origins(expression, sources, policy)}: {what_to_do(policy)}",
+                )
+            )
+    return issues
+
+
+def origins(expression: Expression, sources: Mapping[str, frozenset[str]], policy: Policy) -> str:
+    """Where the refused value comes from: each field read whose own sources the policy refuses."""
+    refused = [
+        field
+        for field in dict.fromkeys(fields_read(expression))  # each field once, in order
+        if policy.refuses(sources[field]) is not None
+    ]
+    if not refused:
+        return "a value written in the plan"
+    return ", ".join(
+        f"{field}, which the case gives the plan"
+        if sources[field] == {CASE}
+        else f"{field} ({', '.join(sorted(sources[field]))})"
+        for field in refused
+    )
+
+
+def what_to_do(policy: Policy) -> str:
+    """What the plan's author can do about a refused input."""
+    if isinstance(policy, OnlyFrom):
+        # A plan only sees `case` for a field it is given: it can't tell which system it came from.
+        return "a plan can't show which system a value came from, so give this input in a case step"
+    return "use a value a system or a person gave"
 
 
 def activity_issues(path: str, state: ActivityState, catalog: Catalog) -> list[Issue]:

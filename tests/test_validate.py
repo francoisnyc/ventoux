@@ -7,11 +7,16 @@ import copy
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
+from pydantic import BaseModel
 
+from ventoux import testing
+from ventoux.core.catalog import Catalog
+from ventoux.core.contract import Display
 from ventoux.core.plan import parse_plan
+from ventoux.core.policy import only_from
 from ventoux.core.validate import Issue, validate
 from ventoux.testing import CATALOG
 
@@ -485,3 +490,127 @@ def test_a_source_label_must_be_registered() -> None:
 
 def test_a_registered_label_is_accepted() -> None:
     assert with_code(with_source("amount", "untrusted:llm"), "UNKNOWN_SOURCE") == []
+
+
+def guide_injection() -> dict[str, Any]:
+    """The guide's third JSON block: a model chooses who receives a letter."""
+    example = GUIDE.read_text().split("```json\n")[3].split("```")[0]
+    plan: dict[str, Any] = json.loads(example, parse_float=Decimal)
+    return plan
+
+
+DRAFT_REFUSED = Issue(
+    "states.draft.inputs.to_customer",
+    "INPUT_POLICY",
+    "letters.draft@2 takes to_customer only from a system or a person, never from untrusted "
+    "data, and this value comes from suggested_recipient (untrusted:llm): use a value a system "
+    "or a person gave",
+)
+
+
+def test_the_guides_injection_plan_is_refused() -> None:
+    # The email told the model to send the reply to an attacker; no wording gets past the policy.
+    assert issues(guide_injection()) == [DRAFT_REFUSED]
+
+
+def draft_to(recipient: object) -> dict[str, Any]:
+    """The guide's injection plan, with the letter sent to `recipient`."""
+    plan = guide_injection()
+    plan["states"]["draft"]["inputs"]["to_customer"] = recipient
+    return plan
+
+
+def test_an_expression_does_not_clean_an_untrusted_value() -> None:
+    wrapped = {"cat": [{"var": "suggested_recipient"}, ""]}
+    assert issues(draft_to(wrapped)) == [DRAFT_REFUSED]
+
+
+def test_a_misspelt_label_is_still_untrusted() -> None:
+    # The label only says which untrusted source: a typo never makes a value trusted.
+    plan = guide_injection()
+    plan["fields"]["suggested_recipient"]["source"] = "untrusted:lml"
+    found = issues(plan)
+    assert [issue.code for issue in found] == ["UNKNOWN_SOURCE", "INPUT_POLICY"]
+    assert "suggested_recipient (untrusted:lml)" in found[1].message
+
+
+class PayoutInput(BaseModel):
+    account: Annotated[str, only_from("payments")]  # never an account typed by anyone
+    idempotency_key: str
+
+
+class PayoutOutput(BaseModel):
+    payout_id: str
+
+
+def payout_catalog() -> Catalog:
+    """The development catalog, plus a payout whose account must come from the payments system."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(
+        testing.letters_draft.model_copy(
+            update={
+                "name": "payments.payout",
+                "version": 1,
+                "input": PayoutInput,
+                "output": PayoutOutput,
+                "display": Display(title="Pay out", description="Pays an account."),
+            }
+        )
+    )
+    return catalog
+
+
+def payout_of(account: object) -> dict[str, Any]:
+    """A plan paying out to `account`, given by the case as the field `account`."""
+    return {
+        "plan": "payout",
+        "version": 1,
+        "display": {"title": "Pay out"},
+        "fields": {"account": {"type": "string"}},
+        "initial": "pay",
+        "states": {
+            "pay": {
+                "activity": "payments.payout@1",
+                "inputs": {"account": account},
+                "on": {"done": "paid"},
+            },
+            "paid": {"final": "succeeded"},
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("account", "comes_from"),
+    [
+        ({"var": "account"}, "account, which the case gives the plan"),
+        ("acct-7", "a value written in the plan"),
+    ],
+)
+def test_only_from_is_never_met_inside_a_plan(account: object, comes_from: str) -> None:
+    # A plan can't tell which system a value it is given came from, so it can't show `only_from`.
+    found = validate(parse_plan(payout_of(account)), payout_catalog())
+    assert [issue for issue in found if issue.code == "INPUT_POLICY"] == [
+        Issue(
+            "states.pay.inputs.account",
+            "INPUT_POLICY",
+            f"payments.payout@1 takes account only from payments, and this value comes from "
+            f"{comes_from}: a plan can't show which system a value came from, so give this input "
+            "in a case step",
+        )
+    ]
+
+
+def test_the_guides_safe_variant_passes() -> None:
+    assert issues(draft_to({"var": "customer_email"})) == []
+
+
+def test_a_plan_field_is_the_cases_to_vouch_for() -> None:
+    # The guide's example pays `amount`, an unmarked field: trusted here, and checked again with
+    # the real sources before the activity runs (layer 5).
+    assert with_code(guide_plan(), "INPUT_POLICY") == []
+
+
+def test_an_input_already_refused_gets_no_input_policy_issue() -> None:
+    # One cause, one issue: an expression the check refuses isn't also asked where it comes from.
+    misspelt = {"cat": [{"var": "suggested_recipent"}, ""]}
+    assert [issue.code for issue in issues(draft_to(misspelt))] == ["EXPRESSION_INVALID"]
