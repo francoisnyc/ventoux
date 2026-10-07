@@ -209,7 +209,6 @@ class Plan(Shape):
     states: dict[StateName, State]
 
     # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
-    # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
     @model_validator(mode="before")
     @classmethod
     def sources_beside_types(cls, data: Any) -> Any:
