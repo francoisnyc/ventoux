@@ -1,6 +1,6 @@
 # Layer 4: provenance and input policies
 
-Status: design agreed in the session, 2026-10-07; not built yet.
+Status: design agreed in the session, 2026-10-07; built, slices 1–8.
 
 ## What this layer is for
 
@@ -91,8 +91,9 @@ class Policy:  # one class per kind, in a closed list
 | `only_from("payments")` | no source at all, or any source but `system:payments` | only from payments |
 
 `only_from()` naming no system is refused when it is written. The contract reads its input's
-policies from each field (`Annotated` metadata that is a `Policy`); a `Policy` subclass the engine
-doesn't know makes the contract invalid. Every policy on a field applies.
+policies from each field (`Annotated` metadata that is a `Policy`; `contract.policies(input)`); a
+`Policy` subclass the engine doesn't know makes the contract invalid. Every policy on a field
+applies.
 
 ## The checks
 
@@ -123,6 +124,38 @@ among the sources of the step's inputs and condition, through `provenance`. The 
 no input policy at runtime: that is the interpreter's (layer 5), and the runner is replaced at
 layer 8. The quickstart's three tests stay green, and its self-approval refusal with them.
 
+## Decided while building
+
+- **A policy writes itself into its field's JSON Schema** (`"x-input-policies": [{"kind":
+  "trusted_only"}]`), through Pydantic's `__get_pydantic_json_schema__` hook on `Annotated`
+  metadata. That is how the contract hash covers it with no change to how the hash is computed
+  (slice 3: before, adding a policy left the hash unchanged, equal to `payments.refund@1`'s).
+- **The kind check is `type(policy) in KINDS`**, not `isinstance`: a subclass of a known kind is
+  a kind of its own. The rule joins layer 3's rule table, so it runs on building and on
+  registering a copy.
+- **A plan keeps each field's source beside its type, not on it:** `plan.fields` holds the types,
+  `plan.sources` the declared sources. A source on the type would make an untrusted `string`
+  unequal to a `string`, and layer 2's `check` compares types with `==`. The author still writes
+  the source on the field; a before-validator moves it, and errors still point at
+  `fields.<name>.source`. A top-level `sources` written by the author is refused: one place to
+  write it.
+- **A declared source is `untrusted:` and a label, nothing else:** `system:payments` and
+  `person:ana` are refused as well as `trusted:portal`, since only the engine records a system or
+  a person (brief, D12). `is_label` (lowercase, digits, `-`) is shared by `parse_plan` and
+  `register_label`.
+- **Labels are checked twice, by two people:** `register_label` refuses a malformed label at once
+  (the platform team's code); `validate` gives `UNKNOWN_SOURCE` for an unregistered one (the
+  developer's plan, in the list of issues). A misspelt label is still untrusted for
+  `INPUT_POLICY`.
+- **The walk is written out operator by operator,** like `render`: a first, generic version
+  missed `exists`, `count` and `sum`, and each failed open (slice 2). An operator added to the
+  brief raises in it until someone says what it reads.
+- **"One cause, one issue" also keeps `validate` from crashing:** asked for the sources of an
+  expression that reads an undeclared field, `provenance` raises `NoSources` (slice 6).
+- **The tracer's walk had a hole:** it found a field only inside `{"var": …}`, so a reviewer whose
+  answer decided whether `pay` ran (through `exists`) could approve it. The runner now asks
+  `provenance` (slice 7), with a quickstart test for that case.
+
 ## Files
 
 - `src/ventoux/core/policy.py`: `Policy`, `TrustedOnly`, `OnlyFrom`, `trusted_only`, `only_from`.
@@ -135,7 +168,7 @@ layer 8. The quickstart's three tests stay green, and its self-approval refusal 
   contracts and the development labels.
 - `src/ventoux/case/runner.py`: sources instead of `set_by`.
 - Tests: `tests/test_policy.py`, `tests/test_provenance.py`, and new tests in `test_catalog.py`,
-  `test_plan.py`, `test_validate.py`.
+  `test_plan.py`, `test_validate.py` and `test_quickstart.py`.
 
 ## Seams the tests use
 
@@ -171,25 +204,33 @@ layer 8. The quickstart's three tests stay green, and its self-approval refusal 
 
 ## Promises
 
-Each claim this note makes about behaviour, and the test that fails if it isn't true. `P` is
-`tests/test_policy.py`, `Pr` `tests/test_provenance.py`, `C` `tests/test_catalog.py`, `L`
-`tests/test_plan.py`, `V` `tests/test_validate.py`, `Q` `tests/test_quickstart.py`. Test names are
-proposed; the table is checked against the code before the pull request.
+Each claim this note makes about behaviour, and the test that fails if it isn't true; checked
+against the code before the pull request. `P` is `tests/test_policy.py`, `Pr`
+`tests/test_provenance.py`, `C` `tests/test_catalog.py`, `L` `tests/test_plan.py`, `V`
+`tests/test_validate.py`, `Q` `tests/test_quickstart.py`.
 
 | Promise | Test |
 |---|---|
 | `trusted_only` refuses any untrusted source, and any source it doesn't recognise | P `test_trusted_only_refuses_untrusted_data`, `test_a_source_the_engine_does_not_know_is_refused` |
-| `only_from` refuses a value from no system, and one from another system; it names at least one system | P `test_only_from_refuses_a_value_from_no_system`, `test_only_from_refuses_another_system`, `test_only_from_names_a_system` |
+| `trusted_only` accepts a system, a person, the case and a literal | P `test_trusted_only_accepts_a_system_a_person_and_the_definition` |
+| `only_from` refuses a value from no system, from another system, from a person or the case; it names at least one system | P `test_only_from_refuses_a_value_from_no_system`, `test_only_from_refuses_another_system`, `test_only_from_refuses_a_person_and_the_case`, `test_only_from_names_a_system` |
 | Each policy reads as its sentence | P `test_each_policy_reads_as_one_sentence` |
 | An expression carries the sources of every field it reads, through every operator, `if`'s condition included; a literal adds none | Pr `test_a_literal_has_no_sources`, `test_every_field_read_is_a_source` |
-| A field with no known sources is an error, never "no sources" | Pr `test_a_field_without_sources_is_an_error` |
-| A policy kind the engine doesn't know makes the contract invalid | C `test_a_policy_kind_the_engine_does_not_know_is_refused` |
+| A field with no known sources, or something that isn't an expression, is an error, never "no sources" | Pr `test_a_field_without_sources_is_an_error`, `test_something_that_is_not_an_expression_is_an_error` |
+| A policy kind the engine doesn't know makes the contract invalid, built or registered as a copy | C `test_a_policy_kind_the_engine_does_not_know_is_refused`, `test_every_rule_refuses_a_contract_that_breaks_it`, `test_every_rule_runs_again_when_a_copy_is_registered` |
 | A policy is part of the hash; a contract without one keeps its hash | C `test_a_policy_changes_the_hash`, `test_every_development_contract_matches_its_recorded_hash` |
+| The development catalog doesn't serve the retired `@1` versions | C `test_a_version_without_the_policy_is_not_served` |
 | The activities guide's contract and refusals are what the code does | C `test_the_guides_example_is_the_development_refund_contract`, `test_the_guides_refusals_are_what_the_catalog_says` |
-| A field can be declared untrusted, never trusted; any other form is refused | L `test_a_field_can_be_declared_untrusted_never_trusted`, `test_a_source_has_an_origin_and_a_label` |
-| A label must be lowercase to be registered, and registered to be used | C `test_a_label_is_lowercase`; V `test_a_source_label_must_be_registered` |
-| An input never gets a value whose sources its policy refuses, however the expression wraps it | V `test_an_untrusted_value_never_reaches_a_trusted_only_input`, `test_an_expression_does_not_clean_an_untrusted_value` |
-| A plan field and a literal pass `trusted_only` and never pass `only_from` | V `test_a_plan_field_is_the_cases_to_vouch_for`, `test_only_from_is_never_met_inside_a_plan` |
+| A field can be declared untrusted, never trusted; any other form is refused; a source is written on its field only | L `test_a_field_can_be_declared_untrusted_never_trusted`, `test_a_source_has_an_origin_and_a_label`, `test_a_source_is_written_on_its_field` |
+| An untrusted field keeps its type for the expression check | L `test_an_untrusted_field_keeps_its_type_and_its_source` |
+| A label must be lowercase to be registered, and registered to be used | C `test_the_guides_refusals_are_what_the_catalog_says` (its `register_label("LLM")` row); V `test_a_source_label_must_be_registered`, `test_a_registered_label_is_accepted` |
+| An input never gets a value whose sources its policy refuses, however the expression wraps it, whatever the label | V `test_the_guides_injection_plan_is_refused`, `test_an_expression_does_not_clean_an_untrusted_value`, `test_a_misspelt_label_is_still_untrusted` |
+| Every policy on an input applies | V `test_every_policy_on_an_input_applies` |
+| A plan field passes `trusted_only`; a plan field and a literal never pass `only_from` | V `test_a_plan_field_is_the_cases_to_vouch_for`, `test_only_from_is_never_met_inside_a_plan` |
 | One cause, one issue: an input already refused gets no `INPUT_POLICY` | V `test_an_input_already_refused_gets_no_input_policy_issue` |
-| The plans guide says what the code does: the injection example, its safe variant, and the table | V `test_the_guides_injection_plan_is_refused`, `test_the_guides_messages_are_what_validate_says`, `test_the_guide_lists_every_issue_code` |
-| The tracer's approvals exclude whoever's answer the step uses, now through sources | Q the quickstart's tests, and the existing self-approval refusal test |
+| The plans guide says what the code does: the injection example, its safe variant, and the table | V `test_the_guides_injection_plan_is_refused`, `test_the_guides_safe_variant_passes`, `test_the_guide_lists_every_issue_code`, `test_the_guides_messages_are_what_validate_says` |
+| The tracer's approvals exclude whoever's answer the step uses, through any operator | Q `test_the_reviewer_cannot_approve_the_payment`, `test_whoever_decides_whether_the_step_runs_cannot_approve_it` |
+
+Not this layer's promise, though the plans guide states it: the engine checks a value's real
+sources again before an activity runs. That is the interpreter's (layer 5), whose curriculum
+negative test is exactly this.
