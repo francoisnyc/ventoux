@@ -19,9 +19,9 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.expressions.check import a_type
 from ventoux.core.graph import Arrow, arrows, reach, shortest_path
-from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
+from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState, set_by
 from ventoux.core.policy import OnlyFrom, Policy, refusal
-from ventoux.core.provenance import CASE, provenance
+from ventoux.core.provenance import CASE, answering, provenance
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
 # An approval is a wait offering exactly these two outcomes; `approve` is reserved for it
@@ -60,6 +60,7 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
         else:
             issues += wait_issues(f"states.{name}", name, state)
             issues += role_issues(f"states.{name}.wait.roles", state.wait.roles, catalog)
+            issues += sets_issues(f"states.{name}.wait.sets", name, state, plan)
         for event, transitions in state.on.items():
             for path, transition in each_transition(f"states.{name}.on.{event}", transitions):
                 if transition.target not in plan.states:
@@ -105,6 +106,32 @@ def role_issues(path: str, roles: tuple[str, ...], catalog: Catalog) -> list[Iss
     ]
 
 
+def sets_issues(path: str, name: str, state: WaitState, plan: Plan) -> list[Issue]:
+    """Each outcome a form is for is one the wait offers, and each field it sets is declared."""
+    issues: list[Issue] = []
+    for outcome, fields in state.wait.sets.items():
+        if outcome not in state.wait.outcomes:
+            issues.append(
+                Issue(
+                    f"{path}.{outcome}",
+                    "UNKNOWN_EVENT",
+                    f"the wait {name} never gives {outcome}: its outcomes are "
+                    f"{', '.join(state.wait.outcomes)}",
+                )
+            )
+        for field in fields:
+            if field not in plan.fields:
+                issues.append(
+                    Issue(
+                        f"{path}.{outcome}",
+                        "UNKNOWN_FIELD",
+                        f"{name}'s {outcome} sets {field}, which is not a field: the fields are "
+                        f"{', '.join(sorted(plan.fields))}",
+                    )
+                )
+    return issues
+
+
 def policy_issues(
     path: str,
     field: str,
@@ -120,7 +147,14 @@ def policy_issues(
         return []  # no contract, no policy to read: already UNKNOWN_ACTIVITY
     # Each field's sources as the plan knows them: what it declared, or else the case's, which the
     # runtime checks again with the real sources before the activity runs (core/before_activity.py).
-    sources = {name: frozenset({plan.sources.get(name, CASE)}) for name in plan.fields}
+    # A field a person sets comes from whoever answers that wait: trusted, from no system.
+    setters = set_by(plan)
+    sources = {
+        name: frozenset({answering(setters[name])})
+        if name in setters
+        else frozenset({plan.sources.get(name, CASE)})
+        for name in plan.fields
+    }
     found = provenance(expression, sources)
     issues = []
     for policy in contract.policies(field):

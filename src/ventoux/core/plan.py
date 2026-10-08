@@ -160,6 +160,8 @@ class Wait(Shape):
 
     outcomes: Annotated[tuple[EventName, ...], AfterValidator(some_outcomes)]
     roles: Annotated[tuple[RoleName, ...], AfterValidator(some_roles)]  # who may answer
+    # The plan fields each outcome's form sets, such as `{"accept": ["approved_amount"]}`.
+    sets: dict[EventName, tuple[str, ...]] = {}
     timeout: Duration | None = None
 
 
@@ -244,6 +246,17 @@ def without_source(field: object) -> object:
     if isinstance(field, dict):
         return {key: value for key, value in field.items() if key != "source"}
     return field
+
+
+def set_by(plan: Plan) -> dict[str, str]:
+    """Each field a person's form sets, and the first wait that sets it."""
+    found: dict[str, str] = {}
+    for name, state in plan.states.items():
+        if isinstance(state, WaitState):
+            for fields in state.wait.sets.values():
+                for field in fields:
+                    found.setdefault(field, name)
+    return found
 
 
 class PlanInvalid(Exception):

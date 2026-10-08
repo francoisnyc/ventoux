@@ -38,6 +38,12 @@ UNTRUSTED_ORIGIN = "untrusted:"
 CASE = "case"
 
 
+def answering(state: str) -> str:
+    """The static check's source for a field a person sets in the wait `state`: a person, trusted,
+    though nobody knows who until they answer. At runtime it is who answered, `person:ana`."""
+    return f"person:answering {state}"
+
+
 # How a label is written, `customer` or `customer-portal`: a lowercase letter, then lowercase
 # letters, digits or `-`.
 LABEL = re.compile(r"[a-z][a-z0-9-]*")

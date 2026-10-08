@@ -201,7 +201,8 @@ def run_plan(
     depend on nothing it did (docs/layers/05-interpreter.md).
     """
 
-    script = list(answers)  # each answer is (state, outcome, who), or (state, "timeout")
+    # Each answer is (state, outcome, who), (state, outcome, who, form), or (state, "timeout").
+    script = list(answers)
     roles = people or {}  # the test plays the API: it states each person's roles
 
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -216,7 +217,8 @@ def run_plan(
             if answer[0] == state:
                 script.remove(answer)
                 by = answer[2] if len(answer) > 2 else None
-                return Answer(answer[1], by, frozenset(roles.get(by, ())) if by else frozenset())
+                stated = frozenset(roles.get(by, ())) if by else frozenset[str]()
+                return Answer(answer[1], by, stated, answer[3] if len(answer) > 3 else None)
         return None
 
     # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it to the end.

@@ -87,11 +87,13 @@ class Answered:
     outcome: str  # one of the wait's outcomes, or `timeout`
     by: str | None  # who answered; None for a timeout, which no person gives
     role: str | None  # the role that let them answer (brief, D22); None for a timeout
+    setting: tuple[str, ...] = ()  # the fields their form set, if any
 
     def __str__(self) -> str:
         if self.by is None:
             return "the wait timed out"
-        return f"{self.by} answered {self.outcome} as {self.role}"
+        line = f"{self.by} answered {self.outcome} as {self.role}"
+        return f"{line}, setting {', '.join(self.setting)}" if self.setting else line
 
 
 @dataclass(frozen=True)

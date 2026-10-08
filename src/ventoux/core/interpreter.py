@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
+from ventoux.core.form import form_problem
 from ventoux.core.history import (
     Answered,
     Ended,
@@ -27,7 +28,7 @@ from ventoux.core.history import (
     Stopped,
     Waiting,
 )
-from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
+from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState, set_by
 from ventoux.core.provenance import CASE, Sourced, provenance
 from ventoux.core.roles import no_role, role_that_counts
 
@@ -52,6 +53,7 @@ class Answer:
     by: str | None  # who answered; None for a timeout
     # The roles the person has, as the trusted caller states them; never looked up (brief, D22).
     roles: frozenset[str] = frozenset()
+    form: Mapping[str, object] | None = None  # the values given with the outcome, if any
 
 
 # How the interpreter waits: the state, the entry it waits in (`approve_refund#1`: the state and how
@@ -109,7 +111,7 @@ async def interpret(
     refuse_to_start(plan, fields)
     run = PlanRun() if record is None else record
     run.history.append(Started(plan.plan, plan.version))
-    # A plan binds no new values, so its fields are the same in every state.
+    # The run's fields: what the case gave, then what people's forms set (brief, D9).
     values = {name: given.value for name, given in fields.items()}
     # Where each value really came from, plus what the plan declared: a mark adds distrust, never
     # removes it (non-negotiables: stricter downstream, never looser).
@@ -147,13 +149,19 @@ async def interpret(
                 run.history.append(Moved(gave.event, here))
             elif isinstance(state, WaitState):
                 taken = await take_answer(
-                    here, f"{here}#{entries[here]}", state, catalog, wait, run
+                    here, f"{here}#{entries[here]}", state, plan, catalog, wait, run
                 )
                 if taken is None:
                     run.status = "waiting"  # nothing more will come, for now
                     break
                 answer, role = taken
-                run.history.append(Answered(answer.outcome, answer.by, role))
+                setting = state.wait.sets.get(answer.outcome, ())
+                run.history.append(Answered(answer.outcome, answer.by, role, setting))
+                # A form's values land in the run's fields, tagged with who answered (brief, D9);
+                # the latest answer replaces an earlier pass's.
+                for name in setting:
+                    values[name] = (answer.form or {})[name]
+                    sources[name] = frozenset({f"person:{answer.by}"})
                 since_a_wait = 0  # someone answered: a loop through a wait isn't spinning
                 here = choose(here, state.on, answer.outcome, values)
                 run.history.append(Moved(answer.outcome, here))
@@ -215,7 +223,13 @@ async def run_activity(
 
 
 async def take_answer(
-    here: str, entry: str, state: WaitState, catalog: Catalog, wait: Wait, run: PlanRun
+    here: str,
+    entry: str,
+    state: WaitState,
+    plan: Plan,
+    catalog: Catalog,
+    wait: Wait,
+    run: PlanRun,
 ) -> tuple[Answer, str | None] | None:
     """The first answer the wait accepts, and the role that let its person answer; each one it
     doesn't accept is refused, and it waits on."""
@@ -225,8 +239,13 @@ async def take_answer(
         if reason is None and answer.by is not None:
             # Every answer is judged the same way: here, by who may give it (brief, D23).
             role = role_that_counts(state.wait.roles, answer.roles, catalog.roles)
+            sets = state.wait.sets.get(answer.outcome, ())
             if role is None:
                 reason = no_role(entry, state.wait.roles, answer.by, answer.roles, catalog.roles)
+            elif (
+                problem := form_problem(answer.outcome, sets, answer.form, plan.fields)
+            ) is not None:
+                reason = problem
             else:
                 return answer, role
         if reason is None:
@@ -284,16 +303,24 @@ def holds(when: Expression, event: str, values: Mapping[str, object]) -> bool:
 
 
 def refuse_to_start(plan: Plan, fields: Mapping[str, Sourced]) -> None:
-    """Refuse a run not given exactly the plan's fields, each saying where its value came from."""
-    declared = ", ".join(sorted(plan.fields))
+    """Refuse a run not given exactly the plan's fields a person doesn't set, each saying where
+    its value came from."""
+    setters = set_by(plan)
+    given_at_start = [name for name in plan.fields if name not in setters]
+    declared = ", ".join(sorted(given_at_start))
     problems = [
         f"{name} is missing: give every field the plan declares ({declared})"
-        for name in plan.fields
+        for name in given_at_start
         if name not in fields
     ]
     for name, given in fields.items():
         if name not in plan.fields:
             problems.append(f"{name} is not a field of {plan.plan}: its fields are {declared}")
+        # One source per field: a person's form sets it, so the case never gives it.
+        elif name in setters:
+            problems.append(
+                f"{name} is set by a person in {setters[name]}, never given at the start"
+            )
         # Fail closed: no sources would read as a value written in the plan, which policies trust.
         elif not given.sources:
             problems.append(
