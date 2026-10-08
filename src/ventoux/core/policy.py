@@ -4,13 +4,15 @@ A policy is written on the input field it guards, in the activity's input model.
 docs/guides/activities.md.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import GetJsonSchemaHandler
 from pydantic_core import CoreSchema
 
-from ventoux.core.provenance import is_trusted, is_untrusted
+from ventoux.core.expressions import Expression
+from ventoux.core.provenance import CASE, fields_read, is_trusted, is_untrusted
 
 
 @dataclass(frozen=True)
@@ -107,3 +109,35 @@ def only_from(*systems: str) -> OnlyFrom:
 # in the brief, like an expression operator (brief, D21).
 KINDS: tuple[type[Policy], ...] = (TrustedOnly, OnlyFrom)
 KIND_NAMES = "trusted_only and only_from"
+
+
+def origins(expression: Expression, sources: Mapping[str, frozenset[str]], policy: Policy) -> str:
+    """Where the refused value comes from: each field read whose own sources the policy refuses."""
+    refused = [
+        field
+        for field in dict.fromkeys(fields_read(expression))  # each field once, in order
+        if policy.refuses(sources[field]) is not None
+    ]
+    if not refused:
+        return "a value written in the plan"
+    return ", ".join(
+        f"{field}, which the case gives the plan"
+        if sources[field] == {CASE}
+        else f"{field} ({', '.join(sorted(sources[field]))})"
+        for field in refused
+    )
+
+
+def refusal(
+    reference: str,
+    field: str,
+    policy: Policy,
+    expression: Expression,
+    sources: Mapping[str, frozenset[str]],
+) -> str:
+    """The input policy's refusal as one sentence, the same in `validate` and before an activity
+    runs: `letters.draft@2 takes to_customer only from …, and this value comes from …`."""
+    return (
+        f"{reference} takes {field} {policy.describe()}, and this value comes from "
+        f"{origins(expression, sources, policy)}"
+    )

@@ -1,6 +1,6 @@
 # Layer 5: the deterministic interpreter, in memory
 
-Status: design agreed in the session, 2026-10-07; not built yet.
+Status: design agreed in the session, 2026-10-07; building (slices 1–3 done).
 
 ## What this layer is for
 
@@ -183,6 +183,23 @@ keeps naming layer 6. The quickstart's tests stay green.
    the refund is called. The quickstart's tests stay green.
 7. **The guide runs:** its run, its history and its two `stopped` messages.
 
+## Decided while building
+
+- **Every refusal is an internal `Stop`,** raised wherever the engine won't go on and recorded by
+  the loop as `Stopped`; `run.reason` keeps the reason without the closing sentence ("the step
+  needs attention, and nothing after it runs"), which every `Stopped` line ends with.
+- **One sentence for an input policy's refusal** (`refusal`, in `core/policy.py`): `validate` adds
+  what the author can do; the runtime adds nothing more, since `Stopped` says what happens next.
+  `origins` moved there from `validate.py` (slice 3), with no change to `validate`'s messages.
+- **The check before an activity runs in this order:** every input policy (on the expressions, so
+  a refused value is never even evaluated), then the inputs are evaluated (one that can't be is
+  refused, never defaulted), the key is filled, an input the contract doesn't declare is refused
+  (Pydantic would ignore it: found in slice 3, failing open), and the schema is checked.
+- **The engine's key replaces any value a plan gives it.** `validate` refuses a plan setting the
+  key (`ENGINE_INPUT`); at runtime the engine's value is what the activity gets.
+- **Until their slices, a transition with a condition and a wait state stop the step:** never
+  read as false, never spun on.
+
 ## Promises
 
 Each claim this note makes about behaviour, and the test that fails if it isn't true. `I` is
@@ -195,6 +212,7 @@ checked against the code before the pull request.
 | The runtime check uses the real sources: an injection the static check passes is stopped before the activity is called | I `test_with_the_static_check_skipped_the_runtime_check_still_blocks_the_injection` |
 | A field marked untrusted stays untrusted, whatever the case gives | I `test_a_mark_adds_distrust_never_removes_it` |
 | Inputs that don't fit the contract stop the step before it is called | I `test_an_input_that_does_not_fit_the_contract_stops_the_step` |
+| An input the contract doesn't take, or that can't be evaluated, stops the step | I `test_an_input_the_contract_does_not_take_stops_the_step`, `test_an_input_that_cannot_be_evaluated_stops_the_step` |
 | A condition that can't be evaluated, or isn't a boolean, stops the step; the next transition is never tried | I `test_a_condition_that_cannot_be_evaluated_stops_instead_of_skipping_the_approval`, `test_a_condition_must_give_a_boolean` |
 | An unhandled event, no transition holding, an unknown target or activity stop the step | I `test_what_the_plan_does_not_say_stops_the_step` |
 | An activity failing, an undeclared outcome, or an output that doesn't fit stops the step; a declared outcome moves on | I `test_an_activity_failure_stops_the_step`, `test_a_declared_outcome_moves_on` |

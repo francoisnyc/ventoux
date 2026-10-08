@@ -4,6 +4,7 @@ Tests go through `run_plan`, the in-memory driver, and read what a run reports. 
 docs/layers/05-interpreter.md and docs/guides/plans.md, "Running a plan".
 """
 
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -176,3 +177,125 @@ def test_what_the_plan_does_not_say_stops_the_step() -> None:
     )
     assert run.status == "stopped"
     assert run.reason == "on not_found, look says nowhere to go"
+
+
+def drafting(recipient: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The plans guide's injection example: a reply drafted to the recipient a model suggested.
+    Its `suggested_recipient` is unmarked unless `recipient` says otherwise."""
+    return {
+        "plan": "draft-reply",
+        "version": 1,
+        "display": {"title": "Draft a reply to a customer"},
+        "fields": {
+            "customer_email": {"type": "string"},
+            "suggested_recipient": recipient or {"type": "string"},
+        },
+        "initial": "draft",
+        "states": {
+            "draft": {
+                "activity": "letters.draft@2",
+                "inputs": {"to_customer": {"var": "suggested_recipient"}, "template": "reply"},
+                "on": {"done": "drafted"},
+            },
+            "drafted": {"final": "succeeded"},
+        },
+    }
+
+
+def recording(calls: list[dict[str, Any]]) -> Activity:
+    """A fake `letters.draft@2` that records every call it gets."""
+
+    def draft(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs)
+        return {"draft_id": "draft-1"}
+
+    return draft
+
+
+def test_with_the_static_check_skipped_the_runtime_check_still_blocks_the_injection() -> None:
+    # Unmarked, `suggested_recipient` passes `validate`: the case vouches for it. `run_plan` never
+    # calls `validate`; the value's real source is the model.
+    calls: list[dict[str, Any]] = []
+    run = run_plan(
+        drafting(),
+        fields={
+            "customer_email": sourced("ana@example.com", "system:crm"),
+            "suggested_recipient": sourced("attacker@evil.example", "untrusted:llm"),
+        },
+        answers=[],
+        activities={"letters.draft@2": recording(calls)},
+    )
+    assert calls == []  # never called
+    assert run.status == "stopped"
+    assert run.reason == (
+        "letters.draft@2 takes to_customer only from a system or a person, never from untrusted "
+        "data, and this value comes from suggested_recipient (untrusted:llm)"
+    )
+
+
+def test_a_mark_adds_distrust_never_removes_it() -> None:
+    marked = drafting(recipient={"type": "string", "source": "untrusted:llm"})
+    calls: list[dict[str, Any]] = []
+    run = run_plan(
+        marked,
+        fields={
+            "customer_email": sourced("ana@example.com", "system:crm"),
+            "suggested_recipient": sourced("attacker@evil.example", "system:crm"),
+        },
+        answers=[],
+        activities={"letters.draft@2": recording(calls)},
+    )
+    assert calls == []
+    assert run.reason is not None
+    assert run.reason.endswith("comes from suggested_recipient (system:crm, untrusted:llm)")
+
+
+def test_an_input_that_does_not_fit_the_contract_stops_the_step() -> None:
+    calls: list[dict[str, Any]] = []
+    run = run_plan(
+        looking_up(),
+        fields={"order_id": sourced(Decimal(1001), "system:orders")},  # a number, not a text
+        answers=[],
+        activities={"orders.lookup@1": recording(calls)},
+    )
+    assert calls == []
+    assert run.status == "stopped"
+    assert run.reason == (
+        "orders.lookup@1 doesn't take these inputs: order_id: Input should be a valid string"
+    )
+
+
+def test_trusted_values_pass_with_the_key_the_engine_fills() -> None:
+    calls: list[dict[str, Any]] = []
+    run = run_plan(
+        drafting(),
+        fields={
+            "customer_email": sourced("ana@example.com", "system:crm"),
+            "suggested_recipient": sourced("ana@example.com", "person:sam"),
+        },
+        answers=[],
+        activities={"letters.draft@2": recording(calls)},
+    )
+    assert run.status == "succeeded"
+    # The key is the state and how many times the run has entered it (brief, D17).
+    assert calls == [
+        {"to_customer": "ana@example.com", "template": "reply", "idempotency_key": "draft#1"}
+    ]
+
+
+def test_an_input_that_cannot_be_evaluated_stops_the_step() -> None:
+    dividing = looking_up(inputs={"order_id": {"string": [{"/": [1, 0]}]}})
+    run = run_plan(dividing, fields=ORDER, answers=[])
+    assert run.status == "stopped"
+    assert run.reason is not None
+    assert run.reason.startswith("order_id can't be evaluated: division by zero")
+
+
+def test_an_input_the_contract_does_not_take_stops_the_step() -> None:
+    calls: list[dict[str, Any]] = []
+    extra = looking_up(inputs={"order_id": {"var": "order_id"}, "note": "rush"})
+    run = run_plan(
+        extra, fields=ORDER, answers=[], activities={"orders.lookup@1": recording(calls)}
+    )
+    assert calls == []
+    assert run.reason == "orders.lookup@1 doesn't take these inputs: note: not an input it takes"

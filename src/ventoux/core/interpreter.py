@@ -4,14 +4,15 @@ Pure, like all of `ventoux.core`: no clock, no randomness, no I/O. See
 docs/layers/05-interpreter.md.
 """
 
+from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
-from ventoux.core.expressions import evaluate
 from ventoux.core.history import Ended, Entered, Event, Gave, Moved, Started, Stopped
 from ventoux.core.plan import ActivityState, FinalState, Plan, Transition
 from ventoux.core.provenance import CASE, Sourced
@@ -58,6 +59,13 @@ async def interpret(
     run = PlanRun(history=[Started(plan.plan, plan.version)])
     # A plan binds no new values, so its fields are the same in every state.
     values = {name: given.value for name, given in fields.items()}
+    # Where each value really came from, plus what the plan declared: a mark adds distrust, never
+    # removes it (non-negotiables: stricter downstream, never looser).
+    sources = {
+        name: given.sources | ({plan.sources[name]} if name in plan.sources else set())
+        for name, given in fields.items()
+    }
+    entries: Counter[str] = Counter()  # how many times the run has entered each state
     here = plan.initial
     try:
         while run.status is None:
@@ -65,12 +73,15 @@ async def interpret(
                 states = ", ".join(sorted(plan.states))
                 raise Stop(f"{here} is not a state of {plan.plan}: the states are {states}")
             run.history.append(Entered(here))
+            entries[here] += 1
             state = plan.states[here]
             if isinstance(state, FinalState):
                 run.history.append(Ended(state.final))
                 run.status = "succeeded" if state.final == "succeeded" else "failed"
             elif isinstance(state, ActivityState):
-                gave = await run_activity(state, values, catalog, call)
+                # The step's run: the state, and how many times the run has entered it.
+                key = f"{here}#{entries[here]}"
+                gave = await run_activity(state, values, sources, key, catalog, call)
                 run.history.append(gave)
                 here = choose(here, state.on, gave.event)
                 run.history.append(Moved(gave.event, here))
@@ -86,14 +97,22 @@ async def interpret(
 
 
 async def run_activity(
-    state: ActivityState, values: Mapping[str, object], catalog: Catalog, call: Call
+    state: ActivityState,
+    values: Mapping[str, object],
+    sources: Mapping[str, frozenset[str]],
+    key: str,
+    catalog: Catalog,
+    call: Call,
 ) -> Gave:
     """Call the state's activity with its inputs, and say what it gave."""
     try:
         contract = catalog.get(state.activity)
     except NotInCatalog as missing:
         raise Stop(str(missing)) from None
-    inputs = {name: evaluate(expression, values) for name, expression in state.inputs.items()}
+    try:
+        inputs = checked_inputs(contract, state.inputs, values, sources, key)
+    except InputRefused as refused:
+        raise Stop(str(refused)) from None
     try:
         output = await call(contract.reference, inputs)
     except Outcome as outcome:
@@ -116,13 +135,6 @@ async def run_activity(
             f"{contract.reference} gave an output its contract doesn't declare: {one_line(error)}"
         ) from None
     return Gave(contract.reference, "done", output)
-
-
-def one_line(error: ValidationError) -> str:
-    """Pydantic's errors as one line: `status: Field required; amount: …`."""
-    return "; ".join(
-        f"{'.'.join(str(part) for part in e['loc'])}: {e['msg']}" for e in error.errors()
-    )
 
 
 def choose(here: str, on: Mapping[str, tuple[Transition, ...]], event: str) -> str:
