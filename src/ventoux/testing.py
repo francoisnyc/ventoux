@@ -165,9 +165,11 @@ def run_plan(
     fields: Mapping[str, Sourced],
     answers: list[tuple[Any, ...]],
     activities: Mapping[str, Activity] = FAKES,
+    run: str = "memory",
 ) -> PlanRun:
     """Run the plan stored as `data` in memory, with `fields`, playing the scripted `answers`,
-    calling the fake `activities` by reference.
+    calling the fake `activities` by reference. `run` names the run in its idempotency keys
+    (`memory/pay#1`).
 
     The plan's shape is checked (`parse_plan`); `validate` is not called: the runtime checks
     depend on nothing it did (docs/layers/05-interpreter.md).
@@ -187,4 +189,4 @@ def run_plan(
         return None
 
     # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it to the end.
-    return asyncio.run(interpret(parse_plan(data), fields, CATALOG, call, wait))
+    return asyncio.run(interpret(parse_plan(data), fields, CATALOG, call, wait, run_name=run))

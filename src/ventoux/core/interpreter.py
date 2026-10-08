@@ -85,9 +85,19 @@ class PlanRun:
 
 
 async def interpret(
-    plan: Plan, fields: Mapping[str, Sourced], catalog: Catalog, call: Call, wait: Wait
+    plan: Plan,
+    fields: Mapping[str, Sourced],
+    catalog: Catalog,
+    call: Call,
+    wait: Wait,
+    *,
+    run_name: str,
 ) -> PlanRun:
-    """Run `plan` from its `initial` state, with the `fields` the case gives it."""
+    """Run `plan` from its `initial` state, with the `fields` the case gives it.
+
+    `run_name` names this run in every idempotency key: on Temporal, the workflow's ID and run ID.
+    It has no default: two runs sharing a name would share their keys (brief, D17).
+    """
     refuse_to_start(plan, fields)
     run = PlanRun(history=[Started(plan.plan, plan.version)])
     # A plan binds no new values, so its fields are the same in every state.
@@ -119,8 +129,9 @@ async def interpret(
                 run.history.append(Ended(state.final))
                 run.status = "succeeded" if state.final == "succeeded" else "failed"
             elif isinstance(state, ActivityState):
-                # The step's run: the state, and how many times the run has entered it.
-                key = f"{here}#{entries[here]}"
+                # The step's run: the run, the state, and how many times the run has entered it,
+                # so a retry reuses the key and another pass or another run never does (brief, D17).
+                key = f"{run_name}/{here}#{entries[here]}"
                 gave = await run_activity(state, values, sources, key, catalog, call, run)
                 run.history.append(gave)
                 here = choose(here, state.on, gave.event, values)

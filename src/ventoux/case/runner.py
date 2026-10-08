@@ -68,7 +68,9 @@ def run(
             contract = catalog.get(step["activity"])
             # The check before an activity, as in a plan: every input policy against the real
             # sources, then the contract's input schema; a refusal raises InputRefused.
-            # TRACER: the key is `<step>#1`, each step running once (Temporal adapter, layer 6).
+            # TRACER: the key `<step>#1` names no run (case runtime on Temporal, layer 8).
+            # Each step runs once here; a case gets a workflow ID and run ID for its keys when
+            # it runs as a workflow. Plans' keys name their run since layer 6.
             inputs = checked_inputs(
                 contract,
                 {key: parse_expression(expr) for key, expr in step["inputs"].items()},
