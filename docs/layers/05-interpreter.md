@@ -1,6 +1,6 @@
 # Layer 5: the deterministic interpreter, in memory
 
-Status: design agreed in the session, 2026-10-07; building (slices 1–5 done).
+Status: design agreed in the session, 2026-10-07; building (slices 1–6 done).
 
 ## What this layer is for
 
@@ -200,6 +200,10 @@ keeps naming layer 6. The quickstart's tests stay green.
 - **A wait refuses three more answers than the note first said,** in this order: a `timeout`
   sent by a person (a timeout comes from the wait's timer), a `timeout` from a wait that declares
   none, and an outcome that names no person. Each is recorded as `Refused`; the wait goes on.
+- **The runner's negative test uses an order number given as a number,** not a text amount:
+  `approved_amount` as a text is stopped earlier, by the approval's condition `approved_amount >
+  100`, so it never reaches the input check this test is about. The runner's key `TRACER` now
+  says `<step>#1` and keeps naming layer 6.
 - **The guide's run and history are tested in slice 7,** with the guide's other examples, once
   `Scheduled` exists; slice 5 tests the waits on the guide's plan.
 - **A condition's stop names it as written** (`render`, layer 2): `on done, amount > 100 can't be

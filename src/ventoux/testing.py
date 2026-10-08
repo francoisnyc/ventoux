@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel
 
 from ventoux.case.runner import Activity, AnswerRefused, Run, run
+from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.interpreter import Answer, PlanRun, interpret
@@ -17,7 +18,7 @@ from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
 
-__all__ = ["Activity", "AnswerRefused", "load_definition", "run_case", "run_plan"]
+__all__ = ["Activity", "AnswerRefused", "InputRefused", "load_definition", "run_case", "run_plan"]
 
 
 # The activities guide's contract, word for word: its test checks the two hash the same.

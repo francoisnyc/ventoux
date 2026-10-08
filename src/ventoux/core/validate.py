@@ -104,7 +104,7 @@ def policy_issues(
     except NotInCatalog:
         return []  # no contract, no policy to read: already UNKNOWN_ACTIVITY
     # Each field's sources as the plan knows them: what it declared, or else the case's, which the
-    # runtime checks again with the real sources before the activity runs (layer 5).
+    # runtime checks again with the real sources before the activity runs (core/before_activity.py).
     sources = {name: frozenset({plan.sources.get(name, CASE)}) for name in plan.fields}
     found = provenance(expression, sources)
     issues = []
