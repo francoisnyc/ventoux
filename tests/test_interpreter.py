@@ -4,14 +4,19 @@ Tests go through `run_plan`, the in-memory driver, and read what a run reports. 
 docs/layers/05-interpreter.md and docs/guides/plans.md, "Running a plan".
 """
 
+import copy
+import json
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from ventoux.core.interpreter import Outcome, PlanRun, RunRefused
 from ventoux.core.provenance import sourced
-from ventoux.testing import Activity, run_plan
+from ventoux.testing import FAKES, Activity, run_plan
+
+GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
 
 
 def ending_at_once() -> dict[str, Any]:
@@ -299,3 +304,82 @@ def test_an_input_the_contract_does_not_take_stops_the_step() -> None:
     )
     assert calls == []
     assert run.reason == "orders.lookup@1 doesn't take these inputs: note: not an input it takes"
+
+
+def guide_plan() -> dict[str, Any]:
+    """The plans guide's example plan, its first JSON block, as stored data."""
+    example = GUIDE.read_text().split("```json\n")[1].split("```")[0]
+    plan: dict[str, Any] = json.loads(example, parse_float=Decimal)
+    return plan
+
+
+def guide_fork() -> dict[str, Any]:
+    """The guide's plan with its second JSON block: `check_order` forks on `amount > 100`, to the
+    approval if it holds, else straight to `pay`. `validate` refuses it; the runtime never sees
+    whether it did."""
+    block = GUIDE.read_text().split("```json\n")[2].split("```")[0]
+    plan = copy.deepcopy(guide_plan())
+    plan["states"] |= json.loads("{" + block + "}", parse_float=Decimal)
+    return plan
+
+
+def test_a_condition_that_cannot_be_evaluated_stops_instead_of_skipping_the_approval() -> None:
+    refunds: list[dict[str, Any]] = []
+    run = run_plan(
+        guide_fork(),
+        fields={
+            "order_id": sourced("A-1001", "system:orders"),
+            "amount": sourced("250", "system:opener"),  # a text, so `amount > 100` can't be read
+        },
+        answers=[],
+        activities={**FAKES, "payments.refund@2": recording(refunds)},
+    )
+    assert refunds == []  # the next transition, straight to pay, is never tried
+    assert lines(run)[-1] == (
+        "stopped at check_order: on done, amount > 100 can't be evaluated: `>` compares numbers, "
+        "and it was given a string: '250': the step needs attention, and nothing after it runs"
+    )
+
+
+def test_a_condition_must_give_a_boolean() -> None:
+    # Nothing is truthy: a text is neither true nor false, so neither transition is taken.
+    text_as_condition = looking_up(
+        on={
+            "done": [{"when": {"var": "order_id"}, "target": "missing"}, {"target": "found"}],
+            "not_found": "missing",
+        }
+    )
+    run = run_plan(text_as_condition, fields=ORDER, answers=[])
+    assert run.status == "stopped"
+    assert run.reason == (
+        "on done, the condition order_id gives 'A-1001': a condition gives true or false"
+    )
+
+
+def order_is(order_id: str) -> dict[str, Any]:
+    return {"==": [{"var": "order_id"}, order_id]}
+
+
+def test_no_transition_holding_stops_the_step() -> None:
+    none_holds = looking_up(
+        on={"done": [{"when": order_is("B-2"), "target": "found"}], "not_found": "missing"}
+    )
+    run = run_plan(none_holds, fields=ORDER, answers=[])
+    assert run.status == "stopped"
+    assert run.reason == "on done, no transition holds"
+
+
+def test_transitions_are_tried_in_order() -> None:
+    both = looking_up(
+        on={
+            "done": [
+                {"when": order_is("B-2"), "target": "missing"},
+                {"when": order_is("A-1001"), "target": "found"},
+                {"target": "missing"},
+            ],
+            "not_found": "missing",
+        }
+    )
+    run = run_plan(both, fields=ORDER, answers=[])
+    assert run.status == "succeeded"
+    assert "moved on done to found" in lines(run)

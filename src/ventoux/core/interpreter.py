@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
 from ventoux.core.history import Ended, Entered, Event, Gave, Moved, Started, Stopped
 from ventoux.core.plan import ActivityState, FinalState, Plan, Transition
 from ventoux.core.provenance import CASE, Sourced
@@ -83,7 +84,7 @@ async def interpret(
                 key = f"{here}#{entries[here]}"
                 gave = await run_activity(state, values, sources, key, catalog, call)
                 run.history.append(gave)
-                here = choose(here, state.on, gave.event)
+                here = choose(here, state.on, gave.event, values)
                 run.history.append(Moved(gave.event, here))
             else:
                 # Fail closed until waits are taken (slice 5): never passed over, never spun on.
@@ -137,17 +138,36 @@ async def run_activity(
     return Gave(contract.reference, "done", output)
 
 
-def choose(here: str, on: Mapping[str, tuple[Transition, ...]], event: str) -> str:
+def choose(
+    here: str,
+    on: Mapping[str, tuple[Transition, ...]],
+    event: str,
+    values: Mapping[str, object],
+) -> str:
     """Where `on` says to go from `here` on `event`: the first transition that holds."""
     # Fail closed: an event the plan doesn't handle is never read as "stay" or "end".
     if event not in on:
         raise Stop(f"on {event}, {here} says nowhere to go")
     for transition in on[event]:
-        if transition.when is None:
+        if transition.when is None or holds(transition.when, event, values):
             return transition.target
-        # Fail closed until conditions are read (slice 4): never skipped as if false.
-        raise Stop(f"on {event}, the transition to {transition.target} has a condition")
     raise Stop(f"on {event}, no transition holds")
+
+
+def holds(when: Expression, event: str, values: Mapping[str, object]) -> bool:
+    """Whether the condition `when` is true. Fail closed: a condition that can't be evaluated
+    stops the step, and the next transition is never tried (it may skip an approval)."""
+    try:
+        decided = evaluate(when, values)
+    except ExpressionError as error:
+        raise Stop(f"on {event}, {render(when)} can't be evaluated: {error}") from None
+    # Nothing is truthy: anything but true or false stops the step, never read as false.
+    if not isinstance(decided, bool):
+        raise Stop(
+            f"on {event}, the condition {render(when)} gives {decided!r}: a condition gives true "
+            "or false"
+        )
+    return decided
 
 
 def refuse_to_start(plan: Plan, fields: Mapping[str, Sourced]) -> None:

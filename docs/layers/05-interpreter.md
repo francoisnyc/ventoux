@@ -1,6 +1,6 @@
 # Layer 5: the deterministic interpreter, in memory
 
-Status: design agreed in the session, 2026-10-07; building (slices 1–3 done).
+Status: design agreed in the session, 2026-10-07; building (slices 1–4 done).
 
 ## What this layer is for
 
@@ -197,8 +197,9 @@ keeps naming layer 6. The quickstart's tests stay green.
   (Pydantic would ignore it: found in slice 3, failing open), and the schema is checked.
 - **The engine's key replaces any value a plan gives it.** `validate` refuses a plan setting the
   key (`ENGINE_INPUT`); at runtime the engine's value is what the activity gets.
-- **Until their slices, a transition with a condition and a wait state stop the step:** never
-  read as false, never spun on.
+- **Until slice 5, a wait state stops the step:** never passed over, never spun on.
+- **A condition's stop names it as written** (`render`, layer 2): `on done, amount > 100 can't be
+  evaluated: …`, so the person looking at it sees the plan's own words.
 
 ## Promises
 
@@ -214,7 +215,8 @@ checked against the code before the pull request.
 | Inputs that don't fit the contract stop the step before it is called | I `test_an_input_that_does_not_fit_the_contract_stops_the_step` |
 | An input the contract doesn't take, or that can't be evaluated, stops the step | I `test_an_input_the_contract_does_not_take_stops_the_step`, `test_an_input_that_cannot_be_evaluated_stops_the_step` |
 | A condition that can't be evaluated, or isn't a boolean, stops the step; the next transition is never tried | I `test_a_condition_that_cannot_be_evaluated_stops_instead_of_skipping_the_approval`, `test_a_condition_must_give_a_boolean` |
-| An unhandled event, no transition holding, an unknown target or activity stop the step | I `test_what_the_plan_does_not_say_stops_the_step` |
+| An unhandled event, no transition holding, an unknown target or activity stop the step | I `test_what_the_plan_does_not_say_stops_the_step`, `test_no_transition_holding_stops_the_step`, `test_an_activity_the_catalog_does_not_hold_stops_the_step` |
+| Transitions are tried in order; the first that holds is taken | I `test_transitions_are_tried_in_order` |
 | An activity failing, an undeclared outcome, or an output that doesn't fit stops the step; a declared outcome moves on | I `test_an_activity_failure_stops_the_step`, `test_a_declared_outcome_moves_on` |
 | An answer the wait doesn't offer, or a `timeout` it doesn't declare, is refused and the wait goes on | I `test_an_answer_the_wait_does_not_offer_is_refused` |
 | A run with no answer left is `waiting`, not ended | I `test_a_run_without_its_answer_waits` |
