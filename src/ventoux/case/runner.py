@@ -6,15 +6,17 @@ every side effect happens outside this module.
 
 # TRACER: the whole runner is replaced by the case runtime in layer 8.
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from ventoux.core.approval import approver_role, risk_refusal, set_by_them
 from ventoux.core.before_activity import checked_inputs
 from ventoux.core.catalog import Catalog
 from ventoux.core.expressions import ExpressionError, evaluate, parse_expression
-from ventoux.core.provenance import provenance
+from ventoux.core.plan import APPROVE, REJECT
+from ventoux.core.roles import no_role, role_that_counts
 
 # Where the case file's first values came from: the system that opened the case (brief, D12).
 OPENER = "system:opener"
@@ -44,9 +46,11 @@ def run(
     answers: list[tuple[Any, ...]],
     catalog: Catalog,
     implementations: Mapping[str, Activity],
-    roles_of: Mapping[str, set[str]],
+    people: Mapping[str, Iterable[str]],
 ) -> Run:
-    """Run the case `definition` from `file`, playing the scripted `answers` in order."""
+    """Run the case `definition` from `file`, playing the scripted `answers` in order. `people`
+    gives each person their roles, as the trusted caller states them (brief, D22)."""
+    roles_of = {person: frozenset(roles) for person, roles in people.items()}
     # The case file, plus each task's latest outcome as "<step>.outcome".
     values = {name: case_value(value) for name, value in file.items()}
     # Every value carries where it came from (brief, D12): the opening system, or who answered.
@@ -56,10 +60,15 @@ def run(
     for name in definition["sequence"]:
         step = definition["steps"][name]
         if step["kind"] == "task":
-            answer_task(name, step, answer_for(name, answers), values, sources, roles_of)
+            answer_task(name, step, answer_for(name, answers), values, sources, roles_of, catalog)
         elif not decides(step.get("when"), values):
             continue  # not needed: its rule says it doesn't run
-        elif needs_approval(step, values) and not approved(name, step, answers, sources, roles_of):
+        elif (
+            needs_approval(step, values)
+            and (decision := approval(name, step, answers, sources, roles_of, catalog)) != "approve"
+        ):
+            if decision == "reject":
+                continue  # a rejection is an outcome: the step doesn't run (brief, D23)
             roles = " or ".join(step["approval"]["roles"])
             result.waiting_for.append(f"approval of {name} by {roles}")
             break  # the step waits, and nothing after it starts
@@ -87,35 +96,55 @@ def run(
     return result
 
 
-# TRACER: approvals and roles, replaced in layer 7 (design question 13 for the answer's shape).
-def approved(
+def approval(
     name: str,
     step: dict[str, Any],
     answers: list[tuple[Any, ...]],
     sources: dict[str, frozenset[str]],
-    roles_of: Mapping[str, set[str]],
-) -> bool:
-    """Whether the step's approval has been given by someone allowed to give it."""
+    roles_of: Mapping[str, frozenset[str]],
+    catalog: Catalog,
+) -> str | None:
+    """The step's approval: `approve` or `reject`, or None while nobody has answered. Checked like
+    a plan's approval, with the same rules from `core` (brief, D23)."""
     answer = next((a for a in answers if a[0] == name), None)
     if answer is None:
-        return False
+        return None
     _, outcome, person, *_ = answer
-    require_role(person, step["approval"]["roles"], f"approve {name}", roles_of)
+    # An approval's outcomes are a closed list: a misspelling is refused, never "not approved".
+    if outcome not in (APPROVE, REJECT):
+        raise AnswerRefused(
+            f"{name}'s approval offers {APPROVE} or {REJECT}, and the answer is {outcome!r}"
+        )
+    allowed = tuple(step["approval"]["roles"])
+    stated = roles_of.get(person, frozenset())
+    role = role_that_counts(allowed, stated, catalog.roles)
+    if role is None:
+        raise AnswerRefused(
+            no_role(f"the approval of {name}", allowed, person, stated, catalog.roles)
+        )
+    contract = catalog.get(step["activity"])
+    if approver_role(allowed, stated, contract, catalog) is None:
+        raise AnswerRefused(risk_refusal(role, catalog, contract))
     # "Someone else" is computed, never listed (brief, D11): whoever's answer flows into the step,
     # through its inputs or its condition, may not approve it.
     used = [*step["inputs"].values(), *([step["when"]] if "when" in step else [])]
-    flowed_in = frozenset().union(*(provenance(parse_expression(e), sources) for e in used))
-    if f"person:{person}" in flowed_in:
-        raise AnswerRefused(f"{person} set a value {name} uses, so cannot approve it")
-    return bool(outcome == "approve")
+    field = set_by_them(person, [parse_expression(e) for e in used], sources)
+    if field is not None:
+        raise AnswerRefused(f"{person} set {field}, which {name} uses, so cannot approve it")
+    return str(outcome)
 
 
 def require_role(
-    person: str, roles: list[str], action: str, roles_of: Mapping[str, set[str]]
+    person: str,
+    roles: list[str],
+    action: str,
+    roles_of: Mapping[str, frozenset[str]],
+    catalog: Catalog,
 ) -> None:
     """Refuse `person` unless they have one of `roles` (the engine re-checks every answer)."""
-    if not roles_of.get(person, set()) & set(roles):
-        raise AnswerRefused(f"{person} cannot {action}: needs {' or '.join(roles)}")
+    stated = roles_of.get(person, frozenset())
+    if role_that_counts(tuple(roles), stated, catalog.roles) is None:
+        raise AnswerRefused(no_role(action, tuple(roles), person, stated, catalog.roles))
 
 
 def needs_approval(step: dict[str, Any], values: dict[str, Any]) -> bool:
@@ -134,11 +163,12 @@ def answer_task(
     answer: tuple[Any, ...],
     values: dict[str, Any],
     sources: dict[str, frozenset[str]],
-    roles_of: Mapping[str, set[str]],
+    roles_of: Mapping[str, frozenset[str]],
+    catalog: Catalog,
 ) -> None:
     """Record a person's answer to a task, after checking it is one the task accepts."""
     _, outcome, person, *form = answer
-    require_role(person, step["roles"], f"answer {name}", roles_of)
+    require_role(person, step["roles"], name, roles_of, catalog)
     # A task's outcomes are a closed list (brief, D9): anything else is refused, never guessed.
     if outcome not in step["outcomes"]:
         raise AnswerRefused(f"{name} has no outcome {outcome!r}")
@@ -162,8 +192,9 @@ def decides(condition: Any, values: dict[str, Any]) -> bool:
     return decided
 
 
-# TRACER: answers are read by their declared types in layer 7, the case file in layer 8. Here a
-# whole number becomes the exact decimal expressions read, and anything else passes as is.
+# TRACER: a plan's forms are read by their declared types since layer 7; a case's, with the case
+# file, in layer 8. Here a whole number becomes the exact decimal expressions read, and anything
+# else passes as is.
 def case_value(value: Any) -> Any:
     """`value` as the case file holds it: a whole number as a `Decimal`."""
     return Decimal(value) if isinstance(value, int) and not isinstance(value, bool) else value

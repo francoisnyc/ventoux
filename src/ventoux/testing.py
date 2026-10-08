@@ -162,10 +162,6 @@ class DevelopmentPlans(PlanWorkflow):
         return await self.interpret(start)
 
 
-# TRACER: a fixed directory of people and roles; roles come with layer 7 (design question 12).
-PEOPLE: dict[str, set[str]] = {"ana": {"support"}, "sam": {"support", "support-lead"}}
-
-
 def load_definition(path: Path) -> dict[str, Any]:
     """Read a case definition from its JSON file (I/O, so here and not in `case`)."""
     # TRACER: a case definition is checked by nothing before it runs until layer 8 (its schema);
@@ -179,9 +175,12 @@ def run_case(
     definition: dict[str, Any],
     file: dict[str, Any],
     answers: list[tuple[Any, ...]],
+    people: Mapping[str, Iterable[str]],
 ) -> Run:
-    """Open a case with `file`, play the scripted `answers`, and report where it ended."""
-    return run(definition, file, answers, CATALOG, FAKES, PEOPLE)
+    """Open a case with `file`, play the scripted `answers`, and report where it ended. `people`
+    gives each person their roles, as the Ventoux API states them with every answer (brief, D22);
+    someone not listed has none."""
+    return run(definition, file, answers, CATALOG, FAKES, people)
 
 
 def run_plan(

@@ -209,6 +209,7 @@ def test_a_definition_naming_an_activity_not_in_the_catalog_stops_the_case() -> 
             refund,
             file={"order_id": "ord-1", "amount": 40},
             answers=[("review", "approve", "ana", {"approved_amount": 40})],
+            people={"ana": ["support"]},
         )
 
 
@@ -264,6 +265,7 @@ def test_a_contract_with_no_implementation_stops_the_case_by_name(
             refund,
             file={"order_id": "ord-1", "amount": 40},
             answers=[("review", "approve", "ana", {"approved_amount": 40})],
+            people={"ana": ["support"]},
         )
 
 
