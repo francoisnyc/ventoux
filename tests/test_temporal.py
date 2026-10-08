@@ -408,3 +408,25 @@ def test_a_history_replays_with_the_same_code() -> None:
     # The interpreter reads no clock, randomness or I/O, so it asks for the same things in the
     # same order: the recorded results, answer and timer are read back, nothing is called again.
     replay(finished_history(), DevelopmentPlans)
+
+
+def test_the_bound_on_a_loop_holds_on_temporal_and_replays() -> None:
+    # Layer 5's loop on activities alone. The bound is a count inside the interpreter, never a
+    # clock or the history's length, so replay counts the same states and stops at the same place.
+    looping = looking_up(on={"done": "look", "not_found": "missing"})
+
+    async def scenario(client: Client) -> tuple[RunReport, WorkflowHistory]:
+        run = await start_plan(
+            client, DevelopmentPlans, looping, ORDER, id="look-1", task_queue=QUEUE
+        )
+        return await run.result(), await run.fetch_history()
+
+    report, history = on_temporal(scenario)
+    assert report.status == "stopped"
+    assert report.reason == (
+        "entered 1,000 states without waiting for anyone: a plan that loops needs a wait or an end"
+    )
+    # Under Temporal's warning (about 10,000 events), far under its limit (51,200): no
+    # continue-as-new is needed for a plan (design question 18).
+    assert len(history.events) < 10_000
+    replay(history, DevelopmentPlans)
