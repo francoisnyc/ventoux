@@ -1,6 +1,6 @@
 """Plans: a state machine written as data, shape only (layer 2).
 
-A plan's states call an activity, wait for an answer, or end. Whether its references exist and its
+A plan's states call an activity, wait for an answer, ask for an approval, or end. Whether its references exist and its
 states are reachable is the validator's (layer 3); running it is the interpreter's (layer 5).
 Drawn on the prototype's `src/core/schema.ts`: each state is dispatched on its distinguishing key,
 so an error points at the right fields.
@@ -35,7 +35,10 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.provenance import UNTRUSTED_ORIGIN, is_label
 
-KINDS = ("activity", "wait", "final")
+KINDS = ("activity", "wait", "approval", "final")
+
+# An approval's outcomes: always these two, never written in a plan (brief, D23).
+APPROVE, REJECT = "approve", "reject"
 
 
 def matching(pattern: str, message: str) -> AfterValidator:
@@ -73,7 +76,7 @@ def some_outcomes(outcomes: tuple[str, ...]) -> tuple[str, ...]:
 def some_roles(roles: tuple[str, ...]) -> tuple[str, ...]:
     # No roles would mean anyone may answer: a permissive default (brief, D22).
     if not roles:
-        raise ValueError("a wait names at least one role that may answer it")
+        raise ValueError("a wait or an approval names at least one role that may answer it")
     return roles
 
 
@@ -172,6 +175,31 @@ class WaitState(Shape):
     on: dict[EventName, Transitions]
 
 
+class Approval(Shape):
+    """A person with one of `roles` approves or rejects running the activity state `of`: its own
+    act, never read from an outcome's name (brief, D23)."""
+
+    of: StateName  # the activity state it approves; its `approve` must lead there
+    roles: Annotated[tuple[RoleName, ...], AfterValidator(some_roles)]  # who may approve
+    timeout: Duration | None = None
+
+
+class ApprovalState(Shape):
+    """Ask for an approval, then move on by the answer: `approve`, `reject`, or `timeout`."""
+
+    approval: Approval
+    on: dict[EventName, Transitions]
+
+
+def asked(state: WaitState | ApprovalState) -> Wait:
+    """What a state that waits for a person asks: an approval asks `approve` or `reject`, by its
+    roles, and sets no field."""
+    if isinstance(state, WaitState):
+        return state.wait
+    approval = state.approval
+    return Wait(outcomes=(APPROVE, REJECT), roles=approval.roles, timeout=approval.timeout)
+
+
 class FinalState(Shape):
     """The plan has ended, and how."""
 
@@ -191,7 +219,7 @@ def one_kind(state: object) -> object:
     if isinstance(state, dict) and kind_of(state) is None:
         kinds = [kind for kind in KINDS if kind in state]
         raise ValueError(
-            "a state is one of activity, wait or final, "
+            "a state is one of activity, wait, approval or final, "
             f"and this one is {' and '.join(kinds) or 'none'}"
         )
     return state
@@ -200,6 +228,7 @@ def one_kind(state: object) -> object:
 type State = Annotated[
     Annotated[ActivityState, Tag("activity state")]
     | Annotated[WaitState, Tag("wait state")]
+    | Annotated[ApprovalState, Tag("approval state")]
     | Annotated[FinalState, Tag("final state")],
     Discriminator(kind_of),
     BeforeValidator(one_kind),

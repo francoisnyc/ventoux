@@ -95,7 +95,9 @@ def test_a_wait_without_roles_is_refused() -> None:
     del plan["states"]["confirm"]["wait"]["roles"]
     with pytest.raises(PlanInvalid, match="states.confirm.wait.roles: required"):
         parse_plan(plan)
-    with pytest.raises(PlanInvalid, match="states.confirm.wait.roles: a wait names at least one"):
+    with pytest.raises(
+        PlanInvalid, match="states.confirm.wait.roles: a wait or an approval names at least one"
+    ):
         parse_plan(asking(roles=[]))
 
 
@@ -290,3 +292,122 @@ def test_a_field_a_person_sets_is_trusted_but_from_no_system() -> None:
     issues = validate(parse_plan(paying), catalog)
     assert [(i.path, i.code) for i in issues] == [("states.write.inputs.amount", "INPUT_POLICY")]
     assert "comes from approved_amount (person:answering review)" in issues[0].message
+
+
+def approving(**approval: Any) -> dict[str, Any]:
+    """The guide's refund: a team lead approves `pay`, then the refund is paid."""
+    return {
+        "plan": "approving",
+        "version": 1,
+        "display": {"title": "Approve, then pay"},
+        "fields": {
+            "order_id": {"type": "reference", "system": "orders"},
+            "amount": {"type": "number"},
+        },
+        "initial": "approve_refund",
+        "states": {
+            "approve_refund": {
+                "approval": {"of": "pay", "roles": ["support-lead"], **approval},
+                "on": {"approve": "pay", "reject": "failed"},
+            },
+            "pay": {
+                "activity": "payments.refund@2",
+                "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "amount"}},
+                "on": {"done": "paid", "declined": "failed"},
+            },
+            "paid": {"final": "succeeded"},
+            "failed": {"final": "failed"},
+        },
+    }
+
+
+REFUND = {**ORDER, "amount": sourced(Decimal(250), "system:opener")}
+
+
+def issues_of(plan: dict[str, Any]) -> list[tuple[str, str, str]]:
+    return [(i.path, i.code, i.message) for i in validate(parse_plan(plan), CATALOG)]
+
+
+def test_an_approval_without_roles_is_refused() -> None:
+    plan = approving()
+    del plan["states"]["approve_refund"]["approval"]["roles"]
+    with pytest.raises(PlanInvalid, match="states.approve_refund.approval.roles: required"):
+        parse_plan(plan)
+
+
+def test_an_approval_approves_the_activity_its_approve_leads_to() -> None:
+    elsewhere = approving()
+    elsewhere["states"]["approve_refund"]["on"]["approve"] = "failed"
+    assert issues_of(elsewhere) == [
+        (
+            "states.approve_refund.on.approve",
+            "APPROVAL_TARGET",
+            "approve_refund approves pay, and its approve goes to failed: send approve to pay",
+        ),
+        (
+            "states.pay",
+            "UNREACHABLE_STATE",
+            "no path from approve_refund reaches pay: remove it, or add a transition to it",
+        ),
+        (
+            "states.paid",
+            "UNREACHABLE_STATE",
+            "no path from approve_refund reaches paid: remove it, or add a transition to it",
+        ),
+    ]
+    not_an_activity = approving(of="paid")
+    assert issues_of(not_an_activity)[0] == (
+        "states.approve_refund.approval.of",
+        "APPROVAL_TARGET",
+        (
+            "approve_refund approves paid, which is not an activity state: name the activity it "
+            "approves"
+        ),
+    )
+
+
+def test_a_wait_offering_approve_approves_nothing() -> None:
+    # An approval is declared, never read from an outcome's name (brief, D23).
+    plan = approving()
+    plan["states"]["approve_refund"] = {
+        "wait": {"outcomes": ["approve", "reject"], "roles": ["support-lead"]},
+        "on": {"approve": "pay", "reject": "failed"},
+    }
+    assert [(path, code) for path, code, _ in issues_of(plan)] == [
+        ("states.pay", "APPROVAL_REQUIRED")
+    ]
+
+
+def test_a_misspelled_approval_is_refused_never_read_as_not_approved() -> None:
+    run = run_plan(
+        approving(),
+        fields=REFUND,
+        answers=[("approve_refund", "aprove", "sam"), ("approve_refund", "approve", "sam")],
+        people=PEOPLE,
+    )
+    assert refusals(run) == ["refused sam's answer aprove: approve_refund offers approve or reject"]
+    assert run.status == "succeeded"
+
+
+def test_a_rejection_takes_reject_and_the_activity_does_not_run() -> None:
+    refunds: list[dict[str, Any]] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        refunds.append(inputs)
+        return {"refund_id": "r-1"}
+
+    run = run_plan(
+        approving(),
+        fields=REFUND,
+        answers=[("approve_refund", "reject", "sam")],
+        activities={**FAKES, "payments.refund@2": refund},
+        people=PEOPLE,
+    )
+    assert lines(run)[1:5] == [
+        "entered approve_refund",
+        "waiting at approve_refund#1 for approve or reject of pay by support-lead",
+        "sam answered reject as support-lead",
+        "moved on reject to failed",
+    ]
+    assert refunds == []
+    assert run.status == "failed"

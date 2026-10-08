@@ -110,7 +110,7 @@ Every problem it finds:
 | `APPROVAL_TARGET` | an approval's `approve` leads somewhere other than its `of`, or `of` isn't an activity state | `approve_refund approves pay, and its approve goes to refund_fee: send approve to pay` |
 | `UNKNOWN_ROLE` | a wait or an approval names a role nobody registered | `support-laed is a role nobody registered: the roles are support, support-lead; use one of them, or ask the platform team to register it` |
 | `APPROVAL_ROLE` | an approval names a role that may not approve its activity's risk | `support may approve no risk, and payments.refund@2 is high risk: name a role that may approve high risk` |
-| `UNKNOWN_FIELD` | a wait's outcome sets a field the plan doesn't declare | `review's accept sets approved_amout, which is not a field: the fields are amount, approved_amount, order_id` |
+| `UNKNOWN_FIELD` | a wait's outcome sets a field the plan doesn't declare | `review's accept sets approved_amout, which is not a field: the fields are approved_amount, order_id` |
 | `EXPRESSION_INVALID` | an input or a condition fails the expression check | `amout is not a declared field` |
 | `UNREACHABLE_STATE` | no path from `initial` reaches the state | `no path from check_order reaches refund_fee: remove it, or add a transition to it` |
 | `NO_PATH_TO_FINAL` | the plan can never end from the state | `the plan can never end from retry_payment: add a path to a final state` |

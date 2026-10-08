@@ -391,6 +391,8 @@ GUIDE_FIELDS = {
     "order_id": sourced("A-1001", "system:orders"),
     "amount": sourced(Decimal(250), "system:opener"),
 }
+# The guide's people: Ana is in support, Sam is a team lead too (brief, D22).
+PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
 
 
 def test_an_answer_the_wait_does_not_offer_is_refused() -> None:
@@ -398,6 +400,7 @@ def test_an_answer_the_wait_does_not_offer_is_refused() -> None:
         guide_plan(),
         fields=GUIDE_FIELDS,
         answers=[("approve_refund", "edit", "ana"), ("approve_refund", "approve", "sam")],
+        people=PEOPLE,
     )
     assert "refused ana's answer edit: approve_refund offers approve or reject" in lines(run)
     assert run.status == "succeeded"  # the wait went on, and took sam's answer
@@ -406,7 +409,7 @@ def test_an_answer_the_wait_does_not_offer_is_refused() -> None:
 def test_a_wait_takes_only_answers_it_can_be_given() -> None:
     no_timeout = copy.deepcopy(guide_plan())
     no_timeout["states"]["approve_refund"] = {
-        "wait": {"outcomes": ["approve", "reject"]},
+        "approval": {"of": "pay", "roles": ["support-lead"]},
         "on": {"approve": "pay", "reject": "failed"},
     }
     run = run_plan(
@@ -453,7 +456,7 @@ def test_a_run_without_its_answer_waits() -> None:
     run = run_plan(asking(), fields=ORDER, answers=[])
     assert run.status == "waiting"  # not ended: the answer may still come
     # The line names the entry, as an answer and a refusal do (layer 6's tutor review).
-    assert lines(run)[-1] == "waiting at confirm#1 for accept or decline, at most 48h"
+    assert lines(run)[-1] == "waiting at confirm#1 for accept or decline by support, at most 48h"
 
 
 def test_a_declared_timeout_moves_on() -> None:
@@ -484,6 +487,7 @@ def test_the_key_is_the_state_and_its_run() -> None:
         fields=GUIDE_FIELDS,
         answers=[("approve_refund", "approve", "sam"), ("approve_refund", "approve", "lee")],
         activities={**FAKES, "payments.refund@2": declines_once},
+        people={**PEOPLE, "lee": ["support-lead"]},
     )
     assert run.status == "succeeded"
     # A retry would reuse a key; a second run of the step never does (brief, D17).
@@ -506,6 +510,7 @@ def test_two_runs_never_share_a_key() -> None:
             answers=[("approve_refund", "approve", "sam")],
             activities={**FAKES, "payments.refund@2": refund},
             run=name,
+            people=PEOPLE,
         )
     assert keys == ["refund-1/pay#1", "refund-2/pay#1"]
 
@@ -514,7 +519,8 @@ def test_a_run_is_the_same_every_time() -> None:
     # No clock, no randomness, no I/O: what Temporal's replay needs (layer 6).
     answers = [("approve_refund", "edit", "ana"), ("approve_refund", "approve", "sam")]
     first, second = (
-        run_plan(guide_plan(), fields=GUIDE_FIELDS, answers=list(answers)) for _ in range(2)
+        run_plan(guide_plan(), fields=GUIDE_FIELDS, answers=list(answers), people=PEOPLE)
+        for _ in range(2)
     )
     assert first.history == second.history
 
@@ -534,7 +540,10 @@ def test_the_guides_run() -> None:
 
 def test_the_guides_history() -> None:
     run = run_plan(
-        guide_plan(), fields=GUIDE_FIELDS, answers=[("approve_refund", "approve", "sam")]
+        guide_plan(),
+        fields=GUIDE_FIELDS,
+        answers=[("approve_refund", "approve", "sam")],
+        people=PEOPLE,
     )
     assert lines(run) == guide_block("says what happened, one event per line").splitlines()
 

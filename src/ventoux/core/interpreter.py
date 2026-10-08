@@ -28,7 +28,17 @@ from ventoux.core.history import (
     Stopped,
     Waiting,
 )
-from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState, set_by
+from ventoux.core.plan import (
+    ActivityState,
+    ApprovalState,
+    FinalState,
+    Plan,
+    Transition,
+    WaitState,
+    asked,
+    set_by,
+)
+from ventoux.core.plan import Wait as Question
 from ventoux.core.provenance import CASE, Sourced, provenance
 from ventoux.core.roles import no_role, role_that_counts
 
@@ -147,7 +157,7 @@ async def interpret(
                 run.history.append(gave)
                 here = choose(here, state.on, gave.event, values)
                 run.history.append(Moved(gave.event, here))
-            elif isinstance(state, WaitState):
+            elif isinstance(state, WaitState | ApprovalState):
                 taken = await take_answer(
                     here, f"{here}#{entries[here]}", state, plan, catalog, wait, run
                 )
@@ -155,7 +165,7 @@ async def interpret(
                     run.status = "waiting"  # nothing more will come, for now
                     break
                 answer, role = taken
-                setting = state.wait.sets.get(answer.outcome, ())
+                setting = asked(state).sets.get(answer.outcome, ())
                 run.history.append(Answered(answer.outcome, answer.by, role, setting))
                 # A form's values land in the run's fields, tagged with who answered (brief, D9);
                 # the latest answer replaces an earlier pass's.
@@ -225,23 +235,25 @@ async def run_activity(
 async def take_answer(
     here: str,
     entry: str,
-    state: WaitState,
+    state: WaitState | ApprovalState,
     plan: Plan,
     catalog: Catalog,
     wait: Wait,
     run: PlanRun,
 ) -> tuple[Answer, str | None] | None:
-    """The first answer the wait accepts, and the role that let its person answer; each one it
-    doesn't accept is refused, and it waits on."""
-    run.history.append(Waiting(entry, state.wait.outcomes, state.wait.timeout))
-    while (answer := await wait(here, entry, state.wait.outcomes, state.wait.timeout)) is not None:
-        reason = why_not(here, entry, state, answer)
+    """The first answer the state accepts, and the role that let its person answer; each one it
+    doesn't accept is refused, and it waits on. A wait and an approval are asked the same way."""
+    question = asked(state)
+    of = state.approval.of if isinstance(state, ApprovalState) else None
+    run.history.append(Waiting(entry, question.outcomes, question.roles, question.timeout, of))
+    while (answer := await wait(here, entry, question.outcomes, question.timeout)) is not None:
+        reason = why_not(here, question, answer)
         if reason is None and answer.by is not None:
-            # Every answer is judged the same way: here, by who may give it (brief, D23).
-            role = role_that_counts(state.wait.roles, answer.roles, catalog.roles)
-            sets = state.wait.sets.get(answer.outcome, ())
+            # Every answer is judged the same way, wait or approval (brief, D23).
+            role = role_that_counts(question.roles, answer.roles, catalog.roles)
+            sets = question.sets.get(answer.outcome, ())
             if role is None:
-                reason = no_role(entry, state.wait.roles, answer.by, answer.roles, catalog.roles)
+                reason = no_role(entry, question.roles, answer.by, answer.roles, catalog.roles)
             elif (
                 problem := form_problem(answer.outcome, sets, answer.form, plan.fields)
             ) is not None:
@@ -254,17 +266,17 @@ async def take_answer(
     return None
 
 
-def why_not(here: str, entry: str, state: WaitState, answer: Answer) -> str | None:
-    """Why the wait won't take `answer`, or None if it will. Its outcomes are a closed list
+def why_not(here: str, question: Question, answer: Answer) -> str | None:
+    """Why the state won't take `answer`, or None if it will. Its outcomes are a closed list
     (brief, D9), and its timeout comes from its timer, never from a person."""
     if answer.outcome == TIMEOUT:
         if answer.by is not None:
             return "a timeout comes from the wait's timer, never from a person"
-        if state.wait.timeout is None:
+        if question.timeout is None:
             return f"{here} has no timeout"
         return None
-    if answer.outcome not in state.wait.outcomes:
-        return f"{here} offers {' or '.join(state.wait.outcomes)}"
+    if answer.outcome not in question.outcomes:
+        return f"{here} offers {' or '.join(question.outcomes)}"
     if answer.by is None:
         return "an answer comes from a person, and this one names nobody"
     return None

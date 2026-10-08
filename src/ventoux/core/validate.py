@@ -19,14 +19,21 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.expressions.check import a_type
 from ventoux.core.graph import Arrow, arrows, reach, shortest_path
-from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState, set_by
+from ventoux.core.plan import (
+    APPROVE,
+    REJECT,
+    ActivityState,
+    ApprovalState,
+    FinalState,
+    Plan,
+    Transition,
+    WaitState,
+    set_by,
+)
 from ventoux.core.policy import OnlyFrom, Policy, refusal
 from ventoux.core.provenance import CASE, answering, provenance
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
-# An approval is a wait offering exactly these two outcomes; `approve` is reserved for it
-# (brief, D11).
-APPROVE, REJECT = "approve", "reject"
 
 
 @dataclass(frozen=True)
@@ -57,10 +64,13 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
                 # One cause, one issue: an input whose expression is refused isn't asked where its
                 # value comes from.
                 issues += problems or policy_issues(path, field, expression, state, plan, catalog)
-        else:
+        elif isinstance(state, WaitState):
             issues += wait_issues(f"states.{name}", name, state)
             issues += role_issues(f"states.{name}.wait.roles", state.wait.roles, catalog)
             issues += sets_issues(f"states.{name}.wait.sets", name, state, plan)
+        else:
+            issues += approval_state_issues(f"states.{name}", name, state, plan)
+            issues += role_issues(f"states.{name}.approval.roles", state.approval.roles, catalog)
         for event, transitions in state.on.items():
             for path, transition in each_transition(f"states.{name}.on.{event}", transitions):
                 if transition.target not in plan.states:
@@ -205,16 +215,6 @@ def wait_issues(path: str, name: str, state: WaitState) -> list[Issue]:
                 "name the outcome differently",
             )
         )
-    if APPROVE in state.wait.outcomes and not is_approval(state):
-        issues.append(
-            Issue(
-                f"{path}.wait.outcomes",
-                "APPROVAL_OUTCOMES",
-                f"a wait offering {APPROVE} is an approval, and offers exactly {APPROVE} and "
-                f"{REJECT}; this one offers {', '.join(state.wait.outcomes)}: use another word "
-                f"than {APPROVE}",
-            )
-        )
     # A wait gives one of its outcomes, or `timeout` when it declares one.
     timed = (
         (TIMEOUT,) if state.wait.timeout is not None and TIMEOUT not in state.wait.outcomes else ()
@@ -223,6 +223,43 @@ def wait_issues(path: str, name: str, state: WaitState) -> list[Issue]:
     hint = "" if timed else f"; declare wait.timeout to wait for {TIMEOUT}"
     return issues + event_issues(
         path, state.on, events, gives=f"the wait {name} never gives", timeout_hint=hint
+    )
+
+
+def approval_state_issues(path: str, name: str, state: ApprovalState, plan: Plan) -> list[Issue]:
+    """What is wrong with an approval: what it approves, and the events its `on` handles."""
+    issues: list[Issue] = []
+    of = state.approval.of
+    if not isinstance(plan.states.get(of), ActivityState):
+        issues.append(
+            Issue(
+                f"{path}.approval.of",
+                "APPROVAL_TARGET",
+                f"{name} approves {of}, which is not an activity state: name the activity it "
+                "approves",
+            )
+        )
+    else:
+        # The approval is for `of`: its `approve` leads there, and nowhere else (brief, D23).
+        for transition in state.on.get(APPROVE, ()):
+            if transition.target != of:
+                issues.append(
+                    Issue(
+                        f"{path}.on.{APPROVE}",
+                        "APPROVAL_TARGET",
+                        f"{name} approves {of}, and its {APPROVE} goes to {transition.target}: "
+                        f"send {APPROVE} to {of}",
+                    )
+                )
+    # An approval gives approve or reject, or `timeout` when it declares one.
+    timed = (TIMEOUT,) if state.approval.timeout is not None else ()
+    hint = "" if timed else f"; declare approval.timeout to wait for {TIMEOUT}"
+    return issues + event_issues(
+        path,
+        state.on,
+        (APPROVE, REJECT, *timed),
+        gives=f"the approval {name} never gives",
+        timeout_hint=hint,
     )
 
 
@@ -351,9 +388,9 @@ def graph_issues(plan: Plan, catalog: Catalog) -> list[Issue]:
 
 
 def is_approval(state: object) -> bool:
-    """Whether `state` is an approval: a wait offering exactly `approve` and `reject` (brief, D11).
-    A wait offering `approve` with anything else is an issue, and approves nothing (fail closed)."""
-    return isinstance(state, WaitState) and sorted(state.wait.outcomes) == [APPROVE, REJECT]
+    """Whether `state` is an approval: declared as one, never read from an outcome's name, so a
+    wait offering `approve` approves nothing (brief, D23)."""
+    return isinstance(state, ApprovalState)
 
 
 def is_high_risk(state: object, catalog: Catalog) -> bool:

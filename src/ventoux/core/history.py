@@ -73,10 +73,16 @@ class Waiting:
 
     entry: str  # the entry it waits in, such as `approve_refund#1`, which answers name
     outcomes: tuple[str, ...]  # the answers it accepts
+    roles: tuple[str, ...]  # who may give one (brief, D22)
     timeout: str | None  # how long it waits, such as `48h`; None: for as long as it takes
+    of: str | None = None  # for an approval, the activity state it approves
 
     def __str__(self) -> str:
-        line = f"waiting at {self.entry} for {' or '.join(self.outcomes)}"
+        approves = f" of {self.of}" if self.of else ""
+        line = (
+            f"waiting at {self.entry} for {' or '.join(self.outcomes)}{approves} by "
+            f"{' or '.join(self.roles)}"
+        )
         return f"{line}, at most {self.timeout}" if self.timeout else line
 
 

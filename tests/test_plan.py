@@ -61,11 +61,11 @@ def changed(path: list[str], value: object) -> dict[str, Any]:
     [
         (
             {"on": {"done": "paid"}},
-            "states.pay: a state is one of activity, wait or final, and this one is none",
+            "states.pay: a state is one of activity, wait, approval or final, and this one is none",
         ),
         (
             {"activity": "payments.refund@1", "final": "succeeded", "on": {"done": "paid"}},
-            "states.pay: a state is one of activity, wait or final, and this one is activity and final",
+            "states.pay: a state is one of activity, wait, approval or final, and this one is activity and final",
         ),
     ],
 )
