@@ -267,7 +267,10 @@ stops when:
   state's `on` doesn't handle, and for a list of transitions none of which holds;
 - **an activity fails** with anything but one of its declared outcomes, or gives an output its
   contract doesn't declare;
-- the plan names an activity the catalog doesn't hold, or a state it doesn't have.
+- the plan names an activity the catalog doesn't hold, or a state it doesn't have;
+- **it loops without waiting:** after 1,000 states entered with no wait taking an answer, the run
+  stops ("a plan that loops needs a wait or an end"). A loop through a wait, such as a retry each
+  pass approves, doesn't count against it.
 
 A run also refuses to start when a field is missing, isn't declared, or comes with no sources. An
 answer the wait doesn't offer (or `timeout` from a wait without one) is refused, and the wait goes

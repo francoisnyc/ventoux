@@ -133,7 +133,8 @@ keeps naming layer 6. The quickstart's tests stay green.
 ## Not in this layer
 
 - Who may answer or approve, and approvals lapsing when an input changes (layer 7).
-- Retries, real timers, a bound on loops, continue-as-new (layer 6).
+- Retries, real timers, continue-as-new (layer 6). Layer 6 keeps this layer's bound on loops
+  under Temporal's history limits.
 - Field values checked against their declared types at start (the case file is typed, layer 8; a
   wrong type is still caught, by the evaluator or by the input check).
 - An activity's output reaching the case file (layer 8).
@@ -210,10 +211,24 @@ keeps naming layer 6. The quickstart's tests stay green.
 - **A condition's stop names it as written** (`render`, layer 2): `on done, amount > 100 can't be
   evaluated: …`, so the person looking at it sees the plan's own words.
 
+## From the tutor review
+
+- **`core` and `case` may not read the clock, randomness or I/O,** checked statically:
+  `tests/test_layers.py` refuses importing `time`, `datetime`, `random`, `secrets`, `uuid`, `os`,
+  `io`, `pathlib`, `socket`, `subprocess`, `urllib` or `http`, and calling the builtin `open`.
+  `docs/layers/00-repository.md` left this to layer 5. Running a plan twice and comparing
+  histories (`test_a_run_is_the_same_every_time`) can't see a `datetime.now()` whose value never
+  reaches the history, or I/O on a path the tests don't take. `pathlib` and `io` were added to the
+  review's list: both do I/O.
+- **A run stops after 1,000 states entered without a wait taking an answer** (`stopped`: "a plan
+  that loops needs a wait or an end"). A plan looping on activities alone validates when it can
+  end another way, and ran forever in memory. A count, never a clock, so replay decides the same
+  way; an answer resets it, so a loop through a wait isn't bounded.
+
 ## Promises
 
 Each claim this note makes about behaviour, and the test that fails if it isn't true. `I` is
-`tests/test_interpreter.py`, `Q` `tests/test_quickstart.py`. Checked against the code before the
+`tests/test_interpreter.py`, `Q` `tests/test_quickstart.py`, `L` `tests/test_layers.py`. Checked against the code before the
 pull request: every test named exists, and every interpreter test is named. The negative tests
 that passed as soon as they were written (no transition holding, a run without its answer, a
 refused value never evaluated, the engine's key) were each seen failing with the code they cover
@@ -238,6 +253,8 @@ broken; the positive ones that passed at once were not.
 | A declared timeout moves on by its `timeout` transition | I `test_a_declared_timeout_moves_on` |
 | A run with no answer left is `waiting`, not ended | I `test_a_run_without_its_answer_waits` |
 | The key is the state and its entry count, and replaces any value a plan gives it | I `test_trusted_values_pass_with_the_key_the_engine_fills`, `test_the_key_is_the_state_and_its_run`, `test_the_engines_key_replaces_any_a_plan_gives` |
+| `core` and `case` read no clock, randomness or I/O: no such import, no call to `open` | L `test_pure_layers_may_not_read_the_clock_randomness_or_io`, `test_pure_layers_may_not_open_a_file`, `test_pure_layers_import_nothing_forbidden` |
+| A run that enters 1,000 states without a wait taking an answer stops; a loop through a wait doesn't | I `test_a_loop_that_never_waits_is_stopped`, `test_a_loop_through_a_wait_does_not_count_against_the_bound` |
 | The same plan, fields and answers give the same history | I `test_a_run_is_the_same_every_time` |
 | The guide's run, history and messages are what the code does | I `test_the_guides_run`, `test_the_guides_history`, `test_the_guides_stopped_messages` |
 | The tracer runner checks inputs before an activity; the quickstart stays green | Q `test_an_input_that_does_not_fit_is_refused_before_the_refund`, the quickstart's tests |

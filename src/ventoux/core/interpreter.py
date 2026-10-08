@@ -55,6 +55,10 @@ class Answer:
 # or None when none will come. In tests a script; on Temporal, a signal or a timer (layer 6).
 type Wait = Callable[[str, tuple[str, ...], str | None], Awaitable[Answer | None]]
 
+# How many states a run may enter without a wait taking an answer. A count, never a clock, so
+# replay decides the same way; past it, a plan looping on activities alone is stopped, not spun on.
+ENTRIES_WITHOUT_A_WAIT = 1000
+
 # The event of a wait's timeout, never one of its outcomes (layer 3's RESERVED_OUTCOME).
 TIMEOUT = "timeout"
 
@@ -95,14 +99,21 @@ async def interpret(
         for name, given in fields.items()
     }
     entries: Counter[str] = Counter()  # how many times the run has entered each state
+    since_a_wait = 0  # states entered since a wait last took an answer
     here = plan.initial
     try:
         while run.status is None:
             if here not in plan.states:
                 states = ", ".join(sorted(plan.states))
                 raise Stop(f"{here} is not a state of {plan.plan}: the states are {states}")
+            if since_a_wait >= ENTRIES_WITHOUT_A_WAIT:
+                raise Stop(
+                    f"entered {ENTRIES_WITHOUT_A_WAIT:,} states without waiting for anyone: a plan "
+                    "that loops needs a wait or an end"
+                )
             run.history.append(Entered(here))
             entries[here] += 1
+            since_a_wait += 1
             state = plan.states[here]
             if isinstance(state, FinalState):
                 run.history.append(Ended(state.final))
@@ -120,6 +131,7 @@ async def interpret(
                     run.status = "waiting"  # nothing more will come, for now
                     break
                 run.history.append(Answered(answer.outcome, answer.by))
+                since_a_wait = 0  # someone answered: a loop through a wait isn't spinning
                 here = choose(here, state.on, answer.outcome, values)
                 run.history.append(Moved(answer.outcome, here))
             else:

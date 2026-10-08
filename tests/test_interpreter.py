@@ -572,3 +572,25 @@ def test_a_state_of_a_kind_the_engine_does_not_know_stops_the_step() -> None:
     )
     assert run.status == "stopped"
     assert run.reason == "done is a kind of state this engine doesn't know: str"
+
+
+def test_a_loop_that_never_waits_is_stopped() -> None:
+    # From the tutor review: it validates (it can end through not_found), and looked up forever.
+    looping = looking_up(on={"done": "look", "not_found": "missing"})
+    run = run_plan(looping, fields=ORDER, answers=[])
+    assert run.status == "stopped"
+    assert run.reason == (
+        "entered 1,000 states without waiting for anyone: a plan that loops needs a wait or an end"
+    )
+
+
+def test_a_loop_through_a_wait_does_not_count_against_the_bound() -> None:
+    # Each pass looks the order up, then asks a person: 600 passes enter 1,200 states.
+    asking = looking_up(on={"done": "ask", "not_found": "missing"})
+    asking["states"]["ask"] = {
+        "wait": {"outcomes": ["again", "enough"]},
+        "on": {"again": "look", "enough": "found"},
+    }
+    run = run_plan(asking, fields=ORDER, answers=[("ask", "again", "sam")] * 600)
+    assert lines(run).count("entered look") == 601
+    assert run.status == "waiting"  # the script ran out; nothing was stopped
