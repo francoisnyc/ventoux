@@ -1,6 +1,7 @@
 # Layer 6: the Temporal adapter
 
-Status: draft, for agreement in the session, 2026-10-08.
+Status: design agreed in the session, 2026-10-08; built, slices 0–7; Promises checked against
+the tests, 2026-10-08.
 
 ## What this layer is for
 
@@ -168,23 +169,59 @@ refused when written: it may already have lost its exact value, so it never ente
 7. **The bound on Temporal.** Negative: the looping plan stops after 1,000 states, as in memory,
    and its history replays. (About 8 seconds; the slowest test.)
 
+## Decided while building
+
+- **A refusal to start fails the workflow at once** (a non-retryable error, `RunRefused`), and so
+  does a malformed plan. Any other exception in workflow code only fails the workflow task, which
+  Temporal retries until fixed code is deployed (brief, D17): seen in slice 3, where a refusal
+  left unconverted made the run hang until the test was killed. Found by its test: `parse_plan`
+  raises `PlanInvalid`, not Pydantic's error, so a malformed plan first hung too.
+- **A client or worker without the exact converter is refused** (`require_exact_numbers`). With
+  Pydantic's converter an amount crosses as the text `"250"`, and a contract's schema reads it
+  back as a number, so nothing would show it had changed hands.
+- **A whole `Decimal` crosses with an exponent** (`250E0`), found in slice 5: written as `250` it
+  came back an int, and the evaluator refuses an int, so the guide's plan stopped at its first
+  condition. An int stays an int, so a run decides on Temporal as it does in memory. The converter
+  also refuses a non-finite `Decimal`, a dict key that isn't a text (it would come back as one),
+  and any type it can't write exactly (a set).
+- **An activity failing past its retries stops the step with its own message** (`letters system
+  unavailable`), not Temporal's "Activity task failed".
+- **The tracer runner's key `TRACER` points to layer 8.** It named layer 6, but a case doesn't run
+  as a workflow until layer 8, so it has no workflow ID or run ID yet; a made-up name in memory
+  would be another crude stand-in. Plans' keys name their run from this layer.
+- **The guide's run on Temporal is tested in slice 5,** once waits existed, not slice 3.
+- **Replay checks the commands, not their inputs.** Temporal's Python SDK compares the kind and
+  order of what the code asks for (an activity, a timer); a changed input to the same activity
+  replays without complaint (checked by hand: a version sending another `order_id` replayed the
+  guide's history). The boundary test is what keeps inputs deterministic.
+
 ## Promises
 
-To be filled in against the tests before the pull request. Each claim above, and the test that
-fails if it isn't true:
+Each claim this note makes about behaviour, and the test that fails if it isn't true. `T` is
+`tests/test_temporal.py`, `I` `tests/test_interpreter.py`, `L` `tests/test_layers.py`. Every
+negative test was seen failing before its code, except the side doors' real-tree check (seen
+failing by planting `import asyncio`, `eval` and `__builtins__` in `core/graph.py`), the
+stray-answer test (seen failing with `first_for` ignoring the state), the replay test with
+changed code (it raises Temporal's `NondeterminismError` itself), and the person's `timeout`,
+which passes on the interpreter's existing check.
 
 | Promise | Test |
 |---|---|
-| `core` and `case` may not import `asyncio`, `importlib` or `builtins`, call `__import__`, `eval`, `exec` or `compile`, or name `__builtins__` | |
-| `re.compile` and other methods named like a builtin stay allowed | |
-| Two runs never share an idempotency key; the key names the run, the state and its entry | |
-| A retried activity reuses the same key; the key is never the attempt number | |
-| Numbers cross Temporal as exact decimals; a float is refused | |
-| On Temporal a run makes the same decisions and history as in memory, the runtime input check included | |
-| A run refuses to start on Temporal as in memory | |
-| An activity is retried with its contract's policy; a declared outcome is never retried | |
-| An implementation for a reference the catalog doesn't hold is refused | |
-| An answer a wait doesn't offer is refused, and the wait goes on; a waiting run reports `waiting` | |
-| A wait's timeout is a timer, and moves on by `timeout` | |
-| A history replays with the same code, and fails replay with code changed to ask for something else | |
-| The bound of 1,000 states holds on Temporal, as a count | |
+| `core` and `case` may not import `asyncio`, `importlib` or `builtins`, call `__import__`, `eval`, `exec` or `compile`, or use the name `__builtins__` | L `test_pure_layers_may_not_import_a_side_door`, `test_pure_layers_may_not_run_text_as_code`, `test_pure_layers_may_not_reach_the_builtins_by_name`, `test_pure_layers_import_nothing_forbidden` |
+| `re.compile` and other methods named like a builtin stay allowed | L `test_a_method_named_compile_is_not_the_builtin`, `test_a_method_named_open_is_not_the_builtin` |
+| Two runs never share an idempotency key; the key names the run, the state and its entry | I `test_two_runs_never_share_a_key`, `test_the_key_is_the_state_and_its_run`; T `test_a_retried_activity_reuses_the_same_key` (`<workflow ID>/<run ID>/draft#1`) |
+| A retried activity reuses the same key; the key is never the attempt number | T `test_a_retried_activity_reuses_the_same_key` |
+| Numbers cross Temporal as exact decimals; a whole Decimal stays a Decimal, an int an int | T `test_a_decimal_comes_back_exactly`, `test_a_whole_decimal_stays_a_decimal_and_an_int_an_int` |
+| A float, a non-finite Decimal, a key that isn't a text, and a type JSON can't hold exactly are refused | T `test_a_float_is_refused`, `test_what_json_cannot_hold_exactly_is_refused` |
+| A client or worker without the exact converter is refused | T `test_a_client_without_exact_numbers_is_refused` |
+| A run missing a field, or with a malformed plan, is refused to start, at once | T `test_a_run_missing_a_field_is_refused_to_start`, `test_a_malformed_plan_is_refused_to_start` |
+| On Temporal a run makes the same decisions and history as in memory, the runtime input check included | T `test_a_plan_runs_as_a_workflow`, `test_the_guides_run_gives_the_same_history_as_in_memory`, `test_the_runtime_check_blocks_the_injection_on_temporal` |
+| An implementation for a reference the catalog doesn't hold is refused | T `test_an_implementation_the_catalog_does_not_hold_is_refused` |
+| An activity is retried up to its contract's `maximum_attempts`, then stops the step with its own message | T `test_an_activity_failing_past_its_retries_stops_the_step` |
+| A declared outcome is never retried, and moves the plan on | T `test_a_declared_outcome_is_never_retried_and_moves_the_plan_on` |
+| A wait takes the first answer sent to its state, and only to its state; one it doesn't offer is refused and the wait goes on | T `test_an_answer_the_wait_does_not_offer_is_refused_and_the_wait_goes_on`, `test_an_answer_is_taken_only_by_the_wait_it_names` |
+| A waiting run reports `waiting` | T `test_a_run_without_its_answer_reports_waiting` |
+| A wait's timeout is a Temporal timer and moves on by `timeout`; a person sending `timeout` is refused | T `test_a_wait_times_out_on_a_temporal_timer`, `test_a_timeout_sent_by_a_person_is_refused` |
+| A history replays with the same code, and fails replay with code changed to ask for something else | T `test_a_history_replays_with_the_same_code`, `test_a_history_replayed_with_changed_code_fails` |
+| The bound of 1,000 states holds on Temporal, as a count, and its history (6,005 events) replays | T `test_the_bound_on_a_loop_holds_on_temporal_and_replays` |
+| Not ours to test: any other exception in workflow code is retried by Temporal until fixed (brief, D17) | seen once by hand in slice 3; Temporal's behaviour, not Ventoux's code |

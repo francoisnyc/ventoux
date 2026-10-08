@@ -84,6 +84,19 @@ def test_a_float_is_refused() -> None:
         round_trip({"amount": 0.1})
 
 
+@pytest.mark.parametrize(
+    ("value", "refusal"),
+    [
+        (Decimal("NaN"), "NaN is not a number JSON can hold"),
+        ({1: "one"}, "a key must be a text"),  # JSON keys are texts: 1 would come back as "1"
+        ({"sources": {"system:orders"}}, "set can't be written exactly as JSON"),
+    ],
+)
+def test_what_json_cannot_hold_exactly_is_refused(value: Any, refusal: str) -> None:
+    with pytest.raises(TypeError, match=refusal):
+        round_trip(value)
+
+
 def test_a_decimal_comes_back_exactly() -> None:
     back = round_trip({"amount": Decimal("0.1"), "count": 3})
     assert back == {"amount": Decimal("0.1"), "count": 3}
@@ -298,6 +311,18 @@ def test_an_answer_the_wait_does_not_offer_is_refused_and_the_wait_goes_on() -> 
     assert report.status == "succeeded"
     assert "refused ana's answer edit: approve_refund offers approve or reject" in report.history
     assert "sam answered approve" in report.history
+
+
+def test_an_answer_is_taken_only_by_the_wait_it_names() -> None:
+    # An answer sent to another state is never read as an answer to this wait.
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
+        )
+        await answer(run, "check_order", "approve", by="sam")  # not a wait
+        return await settled(run)
+
+    assert on_temporal(scenario).status == "waiting"
 
 
 def test_a_run_without_its_answer_reports_waiting() -> None:

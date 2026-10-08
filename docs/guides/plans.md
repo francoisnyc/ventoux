@@ -302,8 +302,20 @@ class RefundPlans(PlanWorkflow):
         return await self.interpret(start)
 ```
 
+Clients and workers connect with Ventoux's data converter, which keeps numbers exact; a client
+connected without it is refused:
+
+```python
+from temporalio.client import Client
+
+from ventoux.temporal.converter import DATA_CONVERTER
+
+client = await Client.connect("localhost:7233", data_converter=DATA_CONVERTER)
+```
+
 A worker serves that workflow and the code behind each contract, registered as Temporal
-activities named by their references (`payments.refund@2`):
+activities named by their references (`payments.refund@2`). Code for a reference the catalog
+doesn't hold is refused, so a typo can't leave the real activity unserved:
 
 ```python
 from ventoux.temporal.worker import plan_worker
@@ -336,7 +348,8 @@ What changes from memory, and what doesn't:
   to it, as the script does in memory; an answer it doesn't offer is refused, and the wait goes
   on.
 - **A wait's timeout is a Temporal timer.** `at most 48h` sets a timer the Temporal server fires,
-  recorded in the history; no clock is read.
+  recorded in the history; no clock is read. A person sending `timeout` is refused: only the
+  timer times a wait out.
 - **A run waiting for an answer just waits.** Ask it how it is going with `report(run)`: its
   status is `waiting` until an answer comes.
 - **Numbers stay exact.** Amounts cross Temporal as exact decimals, never binary floats (brief,

@@ -44,6 +44,9 @@ def exact_json(value: Any) -> str:
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(exact_json(item) for item in value) + "]"
     if isinstance(value, dict):
+        # JSON keys are texts: a key 1 would come back as "1", a different key.
+        if not all(isinstance(key, str) for key in value):
+            raise TypeError(f"{sorted(map(repr, value))}: a key must be a text to cross as JSON")
         return (
             "{"
             + ", ".join(f"{json.dumps(key)}: {exact_json(item)}" for key, item in value.items())
