@@ -51,9 +51,10 @@ class Answer:
     by: str | None  # who answered; None for a timeout
 
 
-# How the interpreter waits: the state, the outcomes it accepts and its timeout in, an answer back,
-# or None when none will come. In tests a script; on Temporal, a signal or a timer (layer 6).
-type Wait = Callable[[str, tuple[str, ...], str | None], Awaitable[Answer | None]]
+# How the interpreter waits: the state, the entry it waits in (`approve_refund#1`: the state and how
+# many times the run has entered it), the outcomes it accepts and its timeout in; an answer back, or
+# None when none will come. In tests a script; on Temporal, a signal or a timer (layer 6).
+type Wait = Callable[[str, str, tuple[str, ...], str | None], Awaitable[Answer | None]]
 
 # How many states a run may enter without a wait taking an answer. A count, never a clock, so
 # replay decides the same way; past it, a plan looping on activities alone is stopped, not spun on.
@@ -85,11 +86,26 @@ class PlanRun:
 
 
 async def interpret(
-    plan: Plan, fields: Mapping[str, Sourced], catalog: Catalog, call: Call, wait: Wait
+    plan: Plan,
+    fields: Mapping[str, Sourced],
+    catalog: Catalog,
+    call: Call,
+    wait: Wait,
+    *,
+    run_name: str,
+    record: PlanRun | None = None,
 ) -> PlanRun:
-    """Run `plan` from its `initial` state, with the `fields` the case gives it."""
+    """Run `plan` from its `initial` state, with the `fields` the case gives it.
+
+    `run_name` names this run in every idempotency key: on Temporal, the workflow's ID and run ID.
+    It has no default: two runs sharing a name would share their keys (brief, D17).
+
+    `record` is the run to write into, when the driver records events of its own in the same
+    history: on Temporal, an answer refused because its wait isn't open.
+    """
     refuse_to_start(plan, fields)
-    run = PlanRun(history=[Started(plan.plan, plan.version)])
+    run = PlanRun() if record is None else record
+    run.history.append(Started(plan.plan, plan.version))
     # A plan binds no new values, so its fields are the same in every state.
     values = {name: given.value for name, given in fields.items()}
     # Where each value really came from, plus what the plan declared: a mark adds distrust, never
@@ -119,14 +135,15 @@ async def interpret(
                 run.history.append(Ended(state.final))
                 run.status = "succeeded" if state.final == "succeeded" else "failed"
             elif isinstance(state, ActivityState):
-                # The step's run: the state, and how many times the run has entered it.
-                key = f"{here}#{entries[here]}"
+                # The step's run: the run, the state, and how many times the run has entered it,
+                # so a retry reuses the key and another pass or another run never does (brief, D17).
+                key = f"{run_name}/{here}#{entries[here]}"
                 gave = await run_activity(state, values, sources, key, catalog, call, run)
                 run.history.append(gave)
                 here = choose(here, state.on, gave.event, values)
                 run.history.append(Moved(gave.event, here))
             elif isinstance(state, WaitState):
-                answer = await take_answer(here, state, wait, run)
+                answer = await take_answer(here, f"{here}#{entries[here]}", state, wait, run)
                 if answer is None:
                     run.status = "waiting"  # nothing more will come, for now
                     break
@@ -191,10 +208,12 @@ async def run_activity(
     return Gave(contract.reference, "done", output)
 
 
-async def take_answer(here: str, state: WaitState, wait: Wait, run: PlanRun) -> Answer | None:
+async def take_answer(
+    here: str, entry: str, state: WaitState, wait: Wait, run: PlanRun
+) -> Answer | None:
     """The first answer the wait accepts; each one it doesn't is refused, and it waits on."""
     run.history.append(Waiting(state.wait.outcomes, state.wait.timeout))
-    while (answer := await wait(here, state.wait.outcomes, state.wait.timeout)) is not None:
+    while (answer := await wait(here, entry, state.wait.outcomes, state.wait.timeout)) is not None:
         reason = why_not(here, state, answer)
         if reason is None:
             return answer

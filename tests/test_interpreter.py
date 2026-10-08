@@ -284,9 +284,9 @@ def test_trusted_values_pass_with_the_key_the_engine_fills() -> None:
         activities={"letters.draft@2": recording(calls)},
     )
     assert run.status == "succeeded"
-    # The key is the state and how many times the run has entered it (brief, D17).
+    # The key is the run, the state and how many times the run has entered it (brief, D17).
     assert calls == [
-        {"to_customer": "ana@example.com", "template": "reply", "idempotency_key": "draft#1"}
+        {"to_customer": "ana@example.com", "template": "reply", "idempotency_key": "memory/draft#1"}
     ]
 
 
@@ -462,7 +462,27 @@ def test_the_key_is_the_state_and_its_run() -> None:
     )
     assert run.status == "succeeded"
     # A retry would reuse a key; a second run of the step never does (brief, D17).
-    assert keys == ["pay#1", "pay#2"]
+    assert keys == ["memory/pay#1", "memory/pay#2"]
+
+
+def test_two_runs_never_share_a_key() -> None:
+    # The same plan, run twice: a key naming only the state would be `pay#1` both times, and the
+    # payment system would hand the second run the first one's refund (brief, D17).
+    keys: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-1"}
+
+    for name in ("refund-1", "refund-2"):
+        run_plan(
+            guide_plan(),
+            fields=GUIDE_FIELDS,
+            answers=[("approve_refund", "approve", "sam")],
+            activities={**FAKES, "payments.refund@2": refund},
+            run=name,
+        )
+    assert keys == ["refund-1/pay#1", "refund-2/pay#1"]
 
 
 def test_a_run_is_the_same_every_time() -> None:
@@ -552,7 +572,7 @@ def test_the_engines_key_replaces_any_a_plan_gives() -> None:
         answers=[],
         activities={"letters.draft@2": recording(calls)},
     )
-    assert [call["idempotency_key"] for call in calls] == ["draft#1"]
+    assert [call["idempotency_key"] for call in calls] == ["memory/draft#1"]
 
 
 def test_a_state_of_a_kind_the_engine_does_not_know_stops_the_step() -> None:
@@ -564,11 +584,15 @@ def test_a_state_of_a_kind_the_engine_does_not_know_stops_the_step() -> None:
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError("nothing is called")
 
-    async def wait(state: str, outcomes: tuple[str, ...], timeout: str | None) -> Answer | None:
+    async def wait(
+        state: str, entry: str, outcomes: tuple[str, ...], timeout: str | None
+    ) -> Answer | None:
         raise AssertionError("nothing is waited for")
 
     run = asyncio.run(
-        interpret(odd, {"amount": sourced(250, "system:opener")}, CATALOG, call, wait)
+        interpret(
+            odd, {"amount": sourced(250, "system:opener")}, CATALOG, call, wait, run_name="memory"
+        )
     )
     assert run.status == "stopped"
     assert run.reason == "done is a kind of state this engine doesn't know: str"

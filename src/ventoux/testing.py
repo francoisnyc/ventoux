@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import BaseModel
+from temporalio import workflow
 
 from ventoux.case.runner import Activity, AnswerRefused, Run, run
 from ventoux.core.before_activity import InputRefused
@@ -17,8 +18,17 @@ from ventoux.core.interpreter import Answer, PlanRun, interpret
 from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
+from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 
-__all__ = ["Activity", "AnswerRefused", "InputRefused", "load_definition", "run_case", "run_plan"]
+__all__ = [
+    "Activity",
+    "AnswerRefused",
+    "DevelopmentPlans",
+    "InputRefused",
+    "load_definition",
+    "run_case",
+    "run_plan",
+]
 
 
 # The activities guide's contract, word for word: its test checks the two hash the same.
@@ -138,6 +148,17 @@ FAKES: dict[str, Activity] = {
 }
 
 
+# Temporal: a workflow class is registered with a worker under its name; this one runs plans
+# against the development catalog, in tests and the development worker.
+@workflow.defn(name="ventoux.plan")
+class DevelopmentPlans(PlanWorkflow):
+    catalog = CATALOG
+
+    @workflow.run
+    async def run(self, start: PlanStart) -> RunReport:
+        return await self.interpret(start)
+
+
 # TRACER: a fixed directory of people and roles; roles come with layer 7 (design question 12).
 PEOPLE: dict[str, set[str]] = {"ana": {"support"}, "sam": {"support", "support-lead"}}
 
@@ -165,9 +186,11 @@ def run_plan(
     fields: Mapping[str, Sourced],
     answers: list[tuple[Any, ...]],
     activities: Mapping[str, Activity] = FAKES,
+    run: str = "memory",
 ) -> PlanRun:
     """Run the plan stored as `data` in memory, with `fields`, playing the scripted `answers`,
-    calling the fake `activities` by reference.
+    calling the fake `activities` by reference. `run` names the run in its idempotency keys
+    (`memory/pay#1`).
 
     The plan's shape is checked (`parse_plan`); `validate` is not called: the runtime checks
     depend on nothing it did (docs/layers/05-interpreter.md).
@@ -178,8 +201,11 @@ def run_plan(
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
         return activities[reference](inputs)
 
-    async def wait(state: str, outcomes: tuple[str, ...], timeout: str | None) -> Answer | None:
-        """The next scripted answer to `state`, or None once the script has none left for it."""
+    async def wait(
+        state: str, entry: str, outcomes: tuple[str, ...], timeout: str | None
+    ) -> Answer | None:
+        """The next scripted answer to `state`, or None once the script has none left for it.
+        A script answers a state, whatever its entry: it runs in order, with no one clicking."""
         for answer in script:
             if answer[0] == state:
                 script.remove(answer)
@@ -187,4 +213,4 @@ def run_plan(
         return None
 
     # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it to the end.
-    return asyncio.run(interpret(parse_plan(data), fields, CATALOG, call, wait))
+    return asyncio.run(interpret(parse_plan(data), fields, CATALOG, call, wait, run_name=run))

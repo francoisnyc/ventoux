@@ -2,7 +2,7 @@
 
 > **For workflow developers.** Plans are an advanced concept (brief, D13): most cases need only
 > tasks and activities. This guide describes what `ventoux check` proves about a plan before it
-> runs (layers 3 and 4), and how a plan runs (layer 5, in memory; on Temporal from layer 6).
+> runs (layers 3 and 4), and how a plan runs (layer 5, in memory; layer 6, on Temporal).
 
 **The rule of thumb:** use a plan when several calls and waits belong together as one step *and*
 must be data, because an AI drafts it or because the approval sheet must say what it will never
@@ -276,9 +276,97 @@ A run also refuses to start when a field is missing, isn't declared, or comes wi
 answer the wait doesn't offer (or `timeout` from a wait without one) is refused, and the wait goes
 on.
 
-The engine fills each activity's idempotency key: the state and how many times the run has
-entered it (`pay#1`, then `pay#2` on a second pass), so a retry reuses the key and a second pass
-never does (brief, D17). On Temporal the key also names the run.
+The engine fills each activity's idempotency key: the run, the state and how many times the run
+has entered it. `run_plan` names its run `memory`, so the keys are `memory/pay#1`, then
+`memory/pay#2` on a second pass; on Temporal, the run is the workflow's ID and its run ID. A retry
+reuses the key, and a second pass or another run never does (brief, D17).
 
-Not yet: who may answer or approve (layer 7), retries and real timers (layer 6), and an
-activity's output reaching the case file (layer 8).
+## Running a plan on Temporal
+
+On Temporal, the same engine runs the plan as a workflow. A workflow only decides; activities
+act on the world. Your deployment names the catalog its plans may call, in a workflow of its own:
+
+```python
+from temporalio import workflow
+
+from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
+from refunds.catalog import CATALOG  # the contracts this deployment allows
+
+
+@workflow.defn(name="ventoux.plan")
+class RefundPlans(PlanWorkflow):
+    catalog = CATALOG
+
+    @workflow.run
+    async def run(self, start: PlanStart) -> RunReport:
+        return await self.interpret(start)
+```
+
+Clients and workers connect with Ventoux's data converter, which keeps numbers exact; a client
+connected without it is refused:
+
+```python
+from temporalio.client import Client
+
+from ventoux.temporal.converter import DATA_CONVERTER
+
+client = await Client.connect("localhost:7233", data_converter=DATA_CONVERTER)
+```
+
+A worker serves that workflow and the code behind each contract, registered as Temporal
+activities named by their references (`payments.refund@2`). Code for a reference the catalog
+doesn't hold is refused, so a typo can't leave the real activity unserved:
+
+```python
+from ventoux.temporal.worker import plan_worker
+
+worker = plan_worker(client, "refunds", RefundPlans, {"payments.refund@2": refund, ...})
+await worker.run()
+```
+
+The client starts a run with its fields, each with where it came from, answers its waits, and reads
+how it went:
+
+```python
+from ventoux.temporal.client import answer, report, start_plan
+
+run = await start_plan(
+    client, RefundPlans, refund_order, fields={...}, id="refund-A-1001", task_queue="refunds"
+)
+assert (await report(run)).waiting_at == "approve_refund#1"
+await answer(run, "approve_refund#1", "approve", by="sam")
+assert (await run.result()).status == "succeeded"
+```
+
+What changes from memory, and what doesn't:
+
+- **The decisions don't change.** The same checks run before every activity, and the same history
+  comes back (`report.history`, one line per event).
+- **Activities are retried as their contract says.** Its retry policy and timeouts are the ones
+  Temporal uses; a contract's declared outcome (`declined`) is never retried, it moves the plan on.
+  An activity still failing after its retries stops the step.
+- **Answers are signals, each naming the wait it answers:** its state and how many times the run
+  has entered it, `approve_refund#1`, as `report(run).waiting_at` shows it. An answer counts only
+  for the wait open when it comes. One for a wait that is closed or hasn't opened is refused, and
+  the history says so (`refused sam's answer approve: approve_refund#1 is closed`): a double click
+  can't approve a retry, and an early click can't approve what nobody has seen yet (brief, D11).
+  An answer the open wait doesn't offer is refused too, and the wait goes on. In memory, a script
+  answers by the state's name: it runs in order, with no one clicking.
+- **A wait's timeout is a Temporal timer.** `at most 48h` sets a timer the Temporal server fires,
+  recorded in the history; no clock is read. A person sending `timeout` is refused: only the
+  timer times a wait out.
+- **A run waiting for an answer just waits.** Ask it how it is going with `report(run)`: its
+  history so far, its status `waiting`, and `waiting_at`, the wait open for an answer.
+- **Numbers stay exact.** Amounts cross Temporal as exact decimals, never binary floats (brief,
+  D20); a float given to a run is refused.
+
+Temporal can stop a worker at any point and replay the run on another one: it runs the workflow
+again against its history, handing back each activity's recorded result instead of calling it
+again. The engine reads no clock, no randomness and no I/O, so it asks for the same things in the
+same order and the run carries on where it was. Code changed in a way that asks for something else
+fails the replay, and Temporal holds the run until the code is fixed, rather than letting it go
+another way.
+
+Not yet: who may answer or approve (layer 7), and an activity's output reaching the case file
+(layer 8). A run never continues as new: the bound on loops keeps a run's history far below
+Temporal's limits (design question 18).

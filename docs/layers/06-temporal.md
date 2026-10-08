@@ -1,0 +1,256 @@
+# Layer 6: the Temporal adapter
+
+Status: design agreed in the session, 2026-10-08; built, slices 0–7; Promises checked against
+the tests, 2026-10-08.
+
+## What this layer is for
+
+Layer 5 runs a plan in memory, asking for each activity and each answer through two functions it
+is given (`call` and `wait`). Layer 6 hands it Temporal's: the same `interpret` runs inside a
+Temporal **workflow**, activities run on a worker with the retry policy and timeouts their
+contracts declare, answers arrive as **signals**, and a wait's timeout is a Temporal **timer**.
+
+Temporal keeps a run alive across crashes by **replay**: a new worker runs the workflow code again
+against the run's history, handing back each recorded result instead of acting again. That only
+works if the code asks for the same things in the same order every time, which is why `core` reads
+no clock, randomness or I/O. So this layer first makes that ban hold.
+
+User-facing description, written first: `docs/guides/plans.md`, "Running a plan on Temporal".
+
+Drawn on: the prototype's `src/temporal/workflow.ts` (the interpreter inside a workflow; signals
+for answers), `activities.ts` (activities from the catalog), `worker.ts` and `client.ts`. Ours
+differs: retry policy and timeouts come from each contract, not one default; a declared outcome is
+never retried; the idempotency key names the run.
+
+## Decided in the session
+
+1. **First, close the side doors in the ban** (curriculum, layer 6 "First"). `tests/test_layers.py`
+   reads only `import X` and calls to forbidden builtins by name, so today `import asyncio` (its
+   event loop has a clock), `importlib.import_module("time")` and `__import__("random")` all pass.
+   Added:
+   - imports of `asyncio`, `importlib` and `builtins` are forbidden in `core` and `case`;
+   - calls to the builtins `__import__`, `eval`, `exec` and `compile` are forbidden, by name, as
+     `open` is: `re.compile(...)` is a method and stays allowed;
+   - the name `__builtins__` may not appear at all (`__builtins__["open"]` reaches any builtin).
+
+   Each with a negative test. This is a fence against mistakes in our own reviewed code, not an
+   attacker: definitions are data and never run (non-negotiables). Temporal's workflow sandbox
+   checks again at runtime, the same "check twice" idea as learning question 34.
+2. **The idempotency key names the run:** `<workflow ID>/<run ID>/<state>#<n>`, so two runs never
+   share one (brief, D17). The workflow ID alone isn't enough: it can be reused once a run closes,
+   and a reset keeps it. The run ID comes from `workflow.info()`, recorded, so replay gives the
+   same key; a reset gets a new one, so it re-runs a payment with a new key, which is why resets
+   must be restricted (brief, D19). `interpret` takes the run's name as a parameter (`core` reads
+   nothing from Temporal), with no default: a forgotten name would be the shared key D17 forbids.
+   `run_plan` names its run `memory`.
+3. **The bound of 1,000 states without a wait stays a count** inside `interpret`, unchanged. On
+   replay the same code counts the same states from the same history, so it stops at the same
+   place; it never reads `workflow.now()` or the history's length. Measured on the test server:
+   1,000 activities make 6,003 history events, under Temporal's warning (about 10,000) and far
+   under its limit (51,200).
+4. **No continue-as-new in this layer.** The curriculum's Build line doesn't name it, and the bound
+   keeps a run far below the limits. A loop through a wait is unbounded, but every pass needs a
+   person's answer. Deciding what a new run carries (fields, entry counts, history, answers sent
+   during the switch) belongs with the case's state, in layer 8: design question 18 in the brief.
+5. **The dependency:** the Temporal Python SDK, `temporalio` (agreed). Its test server runs here
+   (checked: it starts in under a second and skips a 48-hour timer at once). Tests keep using
+   `asyncio.run`, as layer 5's do; no `pytest-asyncio`.
+
+## How it works
+
+### The workflow
+
+`PlanWorkflow` holds the code; a deployment subclasses it to name its catalog. Temporal's Python
+SDK refuses a workflow class made inside a function, and wants `@workflow.run` on the class it
+registers, so the subclass is three lines (shown in the guide). The development one, for tests,
+sits next to the development catalog.
+
+Its input, `PlanStart`, is the plan as stored data and the fields, each value with its sources.
+Inside, it parses the plan (`parse_plan`, as `run_plan` does) and calls `interpret` with:
+
+- **`call`**: `workflow.execute_activity(reference, inputs, …)` with the contract's timeouts
+  (`start_to_close`, `schedule_to_start`) and retry policy (`maximum_attempts`,
+  `initial_interval`, `backoff_coefficient`). A declared outcome comes back as a non-retryable
+  error of type `Outcome` and is raised again as `Outcome(name)`, so the interpreter reads it as
+  in memory. Any other failure, after the retries, reaches the interpreter as an exception: the
+  step stops (brief, D17).
+- **`wait`**: answers arrive by the signal `answer(wait, outcome, by)`, each naming the entry it
+  answers (`approve_refund#1`; changed in the tutor review, below). An answer for the open entry is
+  kept, in the order it came; the wait takes the first, and waits with `workflow.wait_condition`,
+  with the wait's timeout (`48h`) as a timer when it has one, giving `Answer("timeout", None)` when
+  it fires. Any other answer is refused and recorded. The interpreter's checks on answers are
+  unchanged: who may answer is layer 7's.
+- **the run's name**: `<workflow ID>/<run ID>`, from `workflow.info()`.
+
+It returns a `RunReport`: the status, the reason and the history, one line per event (`str` of
+each). The query `report` gives the same while it runs, with the status `waiting` and
+`waiting_at`, the entry open for an answer, while it waits; in memory the script running out says
+that, on Temporal nothing does, since a wait just waits.
+
+`ventoux.core` is passed through the workflow sandbox (imported once, not per run): it is
+deterministic, and the boundary test is what holds it to that.
+
+### Activities
+
+`plan_activities(catalog, implementations)` turns each implementation into a Temporal activity
+named by its contract's reference (`payments.refund@2`), the name deployment bindings use (brief,
+D5). It refuses an implementation for a reference the catalog doesn't hold, so a typo can't
+register an activity no plan can call. Implementations keep layer 5's shape (inputs in, output
+out, `Outcome(name)` raised for a declared outcome). The key the engine filled reaches the
+implementation unchanged on every attempt; it is never the attempt number (brief, D17).
+
+### Exact numbers across Temporal
+
+Temporal's default converter can't write a `Decimal` at all, and Pydantic's writes it as the text
+`"0.1"`, which would come back a string and stop the guide's `amount > 100` as a text compared with
+a number. So `ventoux.temporal` has its own data converter: JSON whose numbers are written exactly
+and read back as `Decimal` (brief, D20), the same rule as `load_definition`. A binary `float` is
+refused when written: it may already have lost its exact value, so it never enters a run.
+
+### Worker and client
+
+- `plan_worker(client, task_queue, workflow, implementations)`: a worker for the workflow and its
+  activities, with the converter.
+- `start_plan(client, workflow, plan, fields, id, task_queue)`, `answer(run, wait, outcome, by)`,
+  `report(run)`: start a run, answer a wait, read how it is going.
+
+## Not in this layer
+
+- Continue-as-new (design question 18, layer 8).
+- Who may answer or approve, and answers sent by people with roles (layer 7, brief D19).
+- Cases as workflows, child workflows and `workflow` steps (layer 8).
+- The payload codec and key provider for sensitive fields (layer 9).
+- Replay tests over recorded production histories in CI (brief, D17): this layer proves replay
+  works and fails on changed code; collecting histories comes with releases (layer 12).
+
+## Files
+
+- `tests/test_layers.py`: the side doors.
+- `src/ventoux/core/interpreter.py`: `interpret` takes the run's name; the key names it.
+- `src/ventoux/testing.py`: `run_plan` names its run `memory`; the development workflow.
+- `src/ventoux/temporal/workflow.py`: `PlanWorkflow`, `PlanStart`, `RunReport`.
+- `src/ventoux/temporal/activities.py`: `plan_activities`.
+- `src/ventoux/temporal/converter.py`: the exact-number data converter.
+- `src/ventoux/temporal/worker.py`, `client.py`.
+- Tests: `tests/test_layers.py`, `tests/test_interpreter.py` (the key), `tests/test_temporal.py`.
+
+## Seams the tests use
+
+- `forbidden_imports(layer, source)`, `forbidden_calls(source)` and a new
+  `forbidden_names(source)` (the boundary test's own seams, as before).
+- `run_plan` (the key in memory).
+- `plan_worker`, `start_plan`, `answer`, `report` and the run's `result()`, against Temporal's
+  time-skipping test server; `RunReport.status`, `.reason`, `.history`.
+- Temporal's `Replayer`, on a history fetched from a finished run, for replay.
+- The guide's examples: its run on Temporal gives the same history as in memory.
+
+## Slices, in order
+
+0. **The side doors.** Negative, each: `import asyncio`, `import importlib`,
+   `from importlib import import_module`, `import builtins`, `__import__("random")`,
+   `eval("1")`, `exec("x = 1")`, `compile("1", "", "eval")`, `__builtins__["open"]` are reported.
+   Then `re.compile(...)` is not, and the real source tree reports nothing.
+1. **The key names the run.** Negative: two runs of the same plan never share a key (in memory,
+   two names). Then `memory/pay#1`, `memory/pay#2`; layer 5's key tests updated.
+2. **Exact numbers across Temporal.** Negative: a float is refused by the converter; then a
+   `Decimal("0.1")` written and read back is `Decimal("0.1")`, never text or a float.
+3. **A plan runs as a workflow.** Negative: a run with a field missing is refused to start, as in
+   memory; the injection plan stops before `letters.draft@2` is called. Then a final-state plan
+   ends `succeeded`, and the guide's plan with an answer gives the guide's history, line for line.
+4. **Activities from the catalog.** Negative: an implementation for a reference the catalog
+   doesn't hold is refused; a declared outcome (`declined`) is not retried and moves the plan on;
+   an activity failing past `maximum_attempts` stops the step. Then **a retried activity reuses
+   the same idempotency key** (the curriculum's negative test): it fails once, succeeds on the
+   second attempt, and both attempts saw `refund-1/<run ID>/pay#1`.
+5. **Waits.** Negative: an answer the wait doesn't offer is refused and the wait goes on; a run
+   with no answer reports `waiting`. Then the 48-hour timeout fires on the time-skipping server
+   and moves on by `timeout`.
+6. **Replay** (the curriculum's other negative test). Negative: a finished run's history,
+   replayed against workflow code changed to ask for something else first, fails with a
+   non-determinism error. Then the same history replayed with the real code passes.
+7. **The bound on Temporal.** Negative: the looping plan stops after 1,000 states, as in memory,
+   and its history replays. (About 8 seconds; the slowest test.)
+
+## Decided while building
+
+- **A refusal to start fails the workflow at once** (a non-retryable error, `RunRefused`), and so
+  does a malformed plan. Any other exception in workflow code only fails the workflow task, which
+  Temporal retries until fixed code is deployed (brief, D17): seen in slice 3, where a refusal
+  left unconverted made the run hang until the test was killed. Found by its test: `parse_plan`
+  raises `PlanInvalid`, not Pydantic's error, so a malformed plan first hung too.
+- **A client or worker without the exact converter is refused** (`require_exact_numbers`). With
+  Pydantic's converter an amount crosses as the text `"250"`, and a contract's schema reads it
+  back as a number, so nothing would show it had changed hands.
+- **A whole `Decimal` crosses with an exponent** (`250E0`), found in slice 5: written as `250` it
+  came back an int, and the evaluator refuses an int, so the guide's plan stopped at its first
+  condition. An int stays an int, so a run decides on Temporal as it does in memory. The converter
+  also refuses a non-finite `Decimal`, a dict key that isn't a text (it would come back as one),
+  and any type it can't write exactly (a set).
+- **An activity failing past its retries stops the step with its own message** (`letters system
+  unavailable`), not Temporal's "Activity task failed".
+- **The tracer runner's key `TRACER` points to layer 8.** It named layer 6, but a case doesn't run
+  as a workflow until layer 8, so it has no workflow ID or run ID yet; a made-up name in memory
+  would be another crude stand-in. Plans' keys name their run from this layer.
+- **The guide's run on Temporal is tested in slice 5,** once waits existed, not slice 3.
+- **Replay checks the commands, not their inputs.** Temporal's Python SDK compares the kind and
+  order of what the code asks for (an activity, a timer); a changed input to the same activity
+  replays without complaint (checked by hand: a version sending another `order_id` replayed the
+  guide's history). The boundary test is what keeps inputs deterministic.
+
+## From the tutor review
+
+- **A leftover answer approved a later wait.** Every signal was kept in one queue, and a wait took
+  the first one for its state, so the queue outlived the wait an answer was meant for. Sam's double
+  click on "approve" approved the retry after a declined refund, which was paid with nobody
+  deciding again; an answer sent while `check_order` ran approved the wait the moment it opened, so
+  a person could approve what they never saw. Both broke "one approval unlocks one run of one step"
+  (brief, D11). Both tests were written first and seen failing with the old behaviour (the retry
+  paid as `pay#2`; the early click taken as `sam answered approve`).
+- **The fix: an answer names the entry it answers,** `approve_refund#1`, the state and the same
+  entry count as the idempotency key; the interpreter passes it to `wait`, and `report` shows it as
+  `waiting_at`. An answer counts only for the entry open when it comes. Any other is refused and
+  recorded, never kept: `… is closed` for an entry that has been open, `… isn't open` for one that
+  hasn't. An entry closes when the run moves on (an activity is scheduled, another wait opens, the
+  timer fires, or the run ends), and answers left for it are refused then, so a double click is
+  recorded where the run moved on. An answer refused by the interpreter (an outcome the wait
+  doesn't offer) leaves the entry open: the next answer to it still counts.
+- **`interpret` takes an optional `record`,** the run to write into, so the workflow can record a
+  refusal that reaches it outside a wait in the same history. The in-memory script still answers
+  by state: it runs in order, with no one clicking.
+- **For layer 7:** an approval should be its own explicit act, not read from the outcome name
+  `approve`; with roles (design question 12), how an approval is answered and rejected (design
+  question 13), and its lapse when inputs change (brief, D11).
+
+## Promises
+
+Each claim this note makes about behaviour, and the test that fails if it isn't true. `T` is
+`tests/test_temporal.py`, `I` `tests/test_interpreter.py`, `L` `tests/test_layers.py`. Every
+negative test was seen failing before its code, except the side doors' real-tree check (seen
+failing by planting `import asyncio`, `eval` and `__builtins__` in `core/graph.py`), the
+stray-answer test (seen failing with `first_for` ignoring the state), the replay test with
+changed code (it raises Temporal's `NondeterminismError` itself), and the person's `timeout`,
+which passes on the interpreter's existing check.
+
+| Promise | Test |
+|---|---|
+| `core` and `case` may not import `asyncio`, `importlib` or `builtins`, call `__import__`, `eval`, `exec` or `compile`, or use the name `__builtins__` | L `test_pure_layers_may_not_import_a_side_door`, `test_pure_layers_may_not_run_text_as_code`, `test_pure_layers_may_not_reach_the_builtins_by_name`, `test_pure_layers_import_nothing_forbidden` |
+| `re.compile` and other methods named like a builtin stay allowed | L `test_a_method_named_compile_is_not_the_builtin`, `test_a_method_named_open_is_not_the_builtin` |
+| Two runs never share an idempotency key; the key names the run, the state and its entry | I `test_two_runs_never_share_a_key`, `test_the_key_is_the_state_and_its_run`; T `test_a_retried_activity_reuses_the_same_key` (`<workflow ID>/<run ID>/draft#1`) |
+| A retried activity reuses the same key; the key is never the attempt number | T `test_a_retried_activity_reuses_the_same_key` |
+| Numbers cross Temporal as exact decimals; a whole Decimal stays a Decimal, an int an int | T `test_a_decimal_comes_back_exactly`, `test_a_whole_decimal_stays_a_decimal_and_an_int_an_int` |
+| A float, a non-finite Decimal, a key that isn't a text, and a type JSON can't hold exactly are refused | T `test_a_float_is_refused`, `test_what_json_cannot_hold_exactly_is_refused` |
+| A client or worker without the exact converter is refused | T `test_a_client_without_exact_numbers_is_refused` |
+| A run missing a field, or with a malformed plan, is refused to start, at once | T `test_a_run_missing_a_field_is_refused_to_start`, `test_a_malformed_plan_is_refused_to_start` |
+| On Temporal a run makes the same decisions and history as in memory, the runtime input check included | T `test_a_plan_runs_as_a_workflow`, `test_the_guides_run_gives_the_same_history_as_in_memory`, `test_the_runtime_check_blocks_the_injection_on_temporal` |
+| An implementation for a reference the catalog doesn't hold is refused | T `test_an_implementation_the_catalog_does_not_hold_is_refused` |
+| An activity is retried up to its contract's `maximum_attempts`, then stops the step with its own message | T `test_an_activity_failing_past_its_retries_stops_the_step` |
+| A declared outcome is never retried, and moves the plan on | T `test_a_declared_outcome_is_never_retried_and_moves_the_plan_on` |
+| A wait takes the first answer sent to its open entry; one it doesn't offer is refused and the wait goes on | T `test_an_answer_the_wait_does_not_offer_is_refused_and_the_wait_goes_on` |
+| An answer for an entry that isn't open (another state's, or a later one) is refused and recorded | T `test_an_answer_is_taken_only_by_the_wait_it_names` |
+| A double click never approves a retry: the second answer is refused as closed and recorded, and the retry waits for a new decision (tutor review) | T `test_a_double_click_does_not_approve_the_retry` |
+| An answer sent before its wait opens is refused and recorded, and the wait still waits (tutor review) | T `test_an_answer_sent_before_the_wait_opens_is_refused` |
+| A waiting run reports `waiting`, and the entry open for an answer | T `test_a_run_without_its_answer_reports_waiting` |
+| A wait's timeout is a Temporal timer and moves on by `timeout`; a person sending `timeout` is refused | T `test_a_wait_times_out_on_a_temporal_timer`, `test_a_timeout_sent_by_a_person_is_refused` |
+| A history replays with the same code, and fails replay with code changed to ask for something else | T `test_a_history_replays_with_the_same_code`, `test_a_history_replayed_with_changed_code_fails` |
+| The bound of 1,000 states holds on Temporal, as a count, and its history (6,005 events) replays | T `test_the_bound_on_a_loop_holds_on_temporal_and_replays` |
+| Not ours to test: any other exception in workflow code is retried by Temporal until fixed (brief, D17) | seen once by hand in slice 3; Temporal's behaviour, not Ventoux's code |

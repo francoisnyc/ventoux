@@ -23,14 +23,18 @@ ADAPTERS = {"ventoux.temporal", "ventoux.authoring", "ventoux.tooling"}
 CLOCK = {"time", "datetime"}
 RANDOMNESS = {"random", "secrets", "uuid"}
 IO = {"os", "io", "pathlib", "socket", "subprocess", "urllib", "http"}
-NOT_REPLAYABLE = CLOCK | RANDOMNESS | IO
+# Side doors to all three: asyncio's event loop has a clock; importlib imports any module by its
+# name, and builtins reaches any builtin, `open` and `__import__` included (curriculum, layer 6).
+SIDE_DOORS = {"asyncio", "importlib", "builtins"}
+NOT_REPLAYABLE = CLOCK | RANDOMNESS | IO | SIDE_DOORS
 CASE_FORBIDDEN = {"temporalio"} | LLM_SDKS | ADAPTERS | NOT_REPLAYABLE
 FORBIDDEN = {
     "core": CASE_FORBIDDEN | {"ventoux.case"},
     "case": CASE_FORBIDDEN,
 }
-# Builtins a pure layer may not call: `open` reads and writes files with no import at all.
-FORBIDDEN_CALLS = {"open"}
+# Builtins a pure layer may not call: `open` reads and writes files with no import at all;
+# `__import__` imports any module by its name; `eval`, `exec` and `compile` run text as code.
+FORBIDDEN_CALLS = {"open", "__import__", "eval", "exec", "compile"}
 
 
 def is_under(module: str, package: str) -> bool:
@@ -60,6 +64,20 @@ def forbidden_calls(source: str) -> list[str]:
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id in FORBIDDEN_CALLS
+    ]
+
+
+# Names a pure layer may not use at all: `__builtins__` holds every builtin, so through it
+# `__builtins__["open"]` is `open`, which no list of forbidden calls would see.
+FORBIDDEN_NAMES = {"__builtins__"}
+
+
+def forbidden_names(source: str) -> list[str]:
+    """The forbidden names `source` uses, such as `__builtins__`."""
+    return [
+        node.id
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES
     ]
 
 
@@ -107,8 +125,46 @@ def test_pure_layers_may_not_read_the_clock_randomness_or_io(layer: str, module:
     assert forbidden_imports(layer, f"import {module}\n") == [module]
 
 
+# Side doors: modules that reach the clock, or any module by its name, without naming it.
+@pytest.mark.parametrize("layer", ["core", "case"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import asyncio\n",  # its event loop has a clock: asyncio.get_event_loop().time()
+        "import importlib\n",  # importlib.import_module("time") imports what the list forbids
+        "from importlib import import_module\n",
+        "import builtins\n",  # builtins.open and builtins.__import__ reach any builtin
+    ],
+)
+def test_pure_layers_may_not_import_a_side_door(layer: str, source: str) -> None:
+    assert forbidden_imports(layer, source) != []
+
+
 def test_pure_layers_may_not_open_a_file() -> None:
     assert forbidden_calls("with open('plan.json') as f:\n    f.read()\n") == ["open"]
+
+
+# Definitions are data: nothing in a pure layer runs code it is given as text (non-negotiables).
+@pytest.mark.parametrize(
+    ("source", "name"),
+    [
+        ("__import__('random').random()\n", "__import__"),  # imports by name, with no import
+        ("eval('1 + 1')\n", "eval"),
+        ("exec('x = 1')\n", "exec"),
+        ("compile('1', '<plan>', 'eval')\n", "compile"),
+    ],
+)
+def test_pure_layers_may_not_run_text_as_code(source: str, name: str) -> None:
+    assert forbidden_calls(source) == [name]
+
+
+def test_a_method_named_compile_is_not_the_builtin() -> None:
+    assert forbidden_calls("re.compile('[a-z]+')\n") == []
+
+
+def test_pure_layers_may_not_reach_the_builtins_by_name() -> None:
+    # `__builtins__` is there in every module, with no import: `__builtins__["open"]` is `open`.
+    assert forbidden_names("__builtins__['open']('plan.json')\n") == ["__builtins__"]
 
 
 def test_a_method_named_open_is_not_the_builtin() -> None:
@@ -141,21 +197,30 @@ def test_pure_layers_import_nothing_forbidden(layer: str) -> None:
     files = sorted((SRC / "ventoux" / layer).rglob("*.py"))
     # An empty or missing layer must fail, or this test could pass by checking nothing.
     assert files, f"no source found for ventoux.{layer}"
-    violations = [
-        f"{path.relative_to(SRC)} imports {name}"
-        for path in files
-        for name in forbidden_imports(layer, path.read_text())
-    ] + [
-        f"{path.relative_to(SRC)} calls {name}()"
-        for path in files
-        for name in forbidden_calls(path.read_text())
-    ]
+    violations = (
+        [
+            f"{path.relative_to(SRC)} imports {name}"
+            for path in files
+            for name in forbidden_imports(layer, path.read_text())
+        ]
+        + [
+            f"{path.relative_to(SRC)} calls {name}()"
+            for path in files
+            for name in forbidden_calls(path.read_text())
+        ]
+        + [
+            f"{path.relative_to(SRC)} uses {name}"
+            for path in files
+            for name in forbidden_names(path.read_text())
+        ]
+    )
     assert violations == [], (
         f"ventoux.{layer} must run inside a Temporal workflow and in a plain test, and Temporal's "
         "replay needs the same decisions every time: so it reads no clock, no randomness and no "
-        f"I/O, and may not import {sorted(FORBIDDEN[layer])} or call "
-        f"{sorted(FORBIDDEN_CALLS)}; and every import must name its layer (no relative imports). "
-        "See docs/layers/00-repository.md, 01-catalog.md and 05-interpreter.md."
+        f"I/O, and may not import {sorted(FORBIDDEN[layer])}, call {sorted(FORBIDDEN_CALLS)} or "
+        f"use {sorted(FORBIDDEN_NAMES)}; and every import must name its layer (no relative "
+        "imports). See docs/layers/00-repository.md, 01-catalog.md, 05-interpreter.md and "
+        "06-temporal.md."
     )
 
 

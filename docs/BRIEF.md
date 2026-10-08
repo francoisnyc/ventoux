@@ -1,6 +1,6 @@
 # Ventoux — design brief
 
-Status: draft, 2026-10-07; decisions D1–D21 (D3 superseded by D20). Read this
+Status: draft, 2026-10-08; decisions D1–D21 (D3 superseded by D20). Read this
 first; it is the short version of what we are building and why. The longer reference is
 `docs/design.md` in the `chartering` prototype.
 
@@ -737,6 +737,15 @@ New questions found while building go here, numbered from 10.
     an activity with an input policy; or leave conditions to inform and let rules decide (D7's
     teaching warning on "rules whose condition reads untrusted data"). To decide with
     `UNTRUSTED_TRIGGER` (layer 11), or earlier if case validation (layer 10) needs it.
+18. **When does a run continue as new, and what does it carry?** (found in layer 6) Temporal
+    warns at about 10,000 history events and ends a run at 51,200; continue-as-new ends a run and
+    starts a fresh one with its state carried over. A plan doesn't need it yet: the bound of 1,000
+    states without a wait keeps a loop on activities to about 6,000 events, and a loop through a
+    wait needs a person's answer on every pass. A case does: it lives for weeks, with rules,
+    timers and many tasks. What crosses over must be decided with the case's state in view: the
+    case file and its sources, the count of entries per state (a count that restarts would repeat
+    an idempotency key, which is why the key carries the run ID), the history so far, and answers
+    sent during the switch. To decide in layer 8.
 
 ## Prior art
 
