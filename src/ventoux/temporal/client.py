@@ -27,12 +27,13 @@ async def start_plan(
 
 
 async def answer(
-    run: WorkflowHandle[PlanWorkflow, RunReport], state: str, outcome: str, by: str
+    run: WorkflowHandle[PlanWorkflow, RunReport], wait: str, outcome: str, by: str
 ) -> None:
-    """Answer the wait at `state` with `outcome`, as the person `by`."""
-    await run.signal(PlanWorkflow.answer, Sent(state, outcome, by))
+    """Answer the wait `wait` (`approve_refund#1`, as `report` shows it) with `outcome`, as the
+    person `by`. An answer to a wait that isn't open is refused, and recorded."""
+    await run.signal(PlanWorkflow.answer, Sent(wait, outcome, by))
 
 
 async def report(run: WorkflowHandle[PlanWorkflow, RunReport]) -> RunReport:
-    """How the run is going: `waiting` while a wait has no answer."""
+    """How the run is going: its history so far, and `waiting_at` the wait open for an answer."""
     return await run.query(PlanWorkflow.report)

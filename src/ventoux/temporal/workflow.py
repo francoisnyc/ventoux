@@ -19,7 +19,15 @@ from temporalio.exceptions import ActivityError, ApplicationError, FailureError
 # boundary test holds it to that), so it is shared.
 with workflow.unsafe.imports_passed_through():
     from ventoux.core.catalog import Catalog
-    from ventoux.core.interpreter import TIMEOUT, Answer, Outcome, RunRefused, interpret
+    from ventoux.core.history import Refused
+    from ventoux.core.interpreter import (
+        TIMEOUT,
+        Answer,
+        Outcome,
+        PlanRun,
+        RunRefused,
+        interpret,
+    )
     from ventoux.core.plan import PlanInvalid, parse_plan
     from ventoux.core.provenance import sourced
     from ventoux.temporal.activities import OUTCOME
@@ -56,14 +64,15 @@ class RunReport:
 
     status: str | None  # succeeded, failed, waiting or stopped; None while it runs
     reason: str | None  # why it stopped, if it did
-    history: list[str]  # every event, one line each
+    history: list[str]  # every event so far, one line each
+    waiting_at: str | None = None  # the wait open for an answer, such as `approve_refund#1`
 
 
 @dataclass
 class Sent:
     """An answer, as a person sends it to a wait."""
 
-    state: str  # the wait it answers, by its state's name
+    wait: str  # the entry it answers, such as `approve_refund#1`: its state and entry count
     outcome: str  # one of the wait's outcomes, such as `approve`
     by: str  # who answered
 
@@ -88,23 +97,47 @@ class PlanWorkflow:
     catalog: ClassVar[Catalog]  # the contracts this deployment's plans may call
 
     def __init__(self) -> None:
-        self.sent: list[Sent] = []  # answers not yet taken, in the order they came
+        self.record = PlanRun()  # the run and its history, written by the interpreter and here
+        self.open: str | None = None  # the entry answers go to now, such as `approve_refund#1`
+        self.opened: set[str] = set()  # every entry that has been open
+        self.sent: list[Sent] = []  # answers to the open entry, not yet taken, in order
         self.waiting = False  # whether a wait is waiting for an answer now
-        self.ended: RunReport | None = None  # how the run ended, once it has
 
     # Temporal: a signal is a message into a running workflow, recorded in its history, so replay
     # delivers it again at the same point.
     @workflow.signal(name="answer")
     def answer(self, sent: Sent) -> None:
-        self.sent.append(sent)
+        # An answer counts only for the entry open when it comes: one approval unlocks one run of
+        # one step (brief, D11). Any other is refused, and recorded, never kept for a later wait:
+        # a double click would approve the retry, an early click a wait nobody has seen.
+        if sent.wait != self.open:
+            self.refuse(sent)
+        else:
+            self.sent.append(sent)
+
+    def refuse(self, sent: Sent) -> None:
+        """Record `sent` as refused: its entry is closed, or hasn't opened."""
+        state = "is closed" if sent.wait in self.opened else "isn't open"
+        self.record.history.append(Refused(sent.outcome, sent.by, f"{sent.wait} {state}"))
+
+    def close(self) -> None:
+        """Close the open entry: answers left for it are refused, and recorded."""
+        self.open = None
+        for sent in self.sent:
+            self.refuse(sent)
+        self.sent.clear()
 
     # Temporal: a query reads a workflow's state without changing it, and isn't recorded.
     @workflow.query(name="report")
     def report(self) -> RunReport:
-        """How the run is going: how it ended, or `waiting` while a wait has no answer."""
-        if self.ended is not None:
-            return self.ended
-        return RunReport("waiting" if self.waiting else None, None, [])
+        """How the run is going: its history so far, and the wait open for an answer, if any."""
+        status = self.record.status or ("waiting" if self.waiting else None)
+        return RunReport(
+            status,
+            self.record.reason,
+            [str(event) for event in self.record.history],
+            self.open if self.waiting else None,
+        )
 
     async def run(self, start: PlanStart) -> RunReport:
         return await self.interpret(start)
@@ -115,15 +148,21 @@ class PlanWorkflow:
             fields = {
                 name: sourced(given.value, *given.sources) for name, given in start.fields.items()
             }
-            run = await interpret(
-                plan, fields, self.catalog, self.call, self.wait, run_name=self.name()
+            await interpret(
+                plan,
+                fields,
+                self.catalog,
+                self.call,
+                self.wait,
+                run_name=self.name(),
+                record=self.record,
             )
         except (RunRefused, PlanInvalid) as refused:
             # A run that can't start fails at once, saying why. Any other exception fails only the
             # workflow task, which Temporal retries until fixed code is deployed (brief, D17).
             raise ApplicationError(str(refused), type="RunRefused", non_retryable=True) from None
-        self.ended = RunReport(run.status, run.reason, [str(event) for event in run.history])
-        return self.ended
+        self.close()  # an answer left for the last wait is refused, and recorded
+        return self.report()
 
     def name(self) -> str:
         """This run's name in its idempotency keys: the workflow's ID and run ID (brief, D17)."""
@@ -132,6 +171,7 @@ class PlanWorkflow:
 
     async def call(self, reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
         """Schedule the activity, retried and timed out as its contract says (brief, D17)."""
+        self.close()  # the run has moved on from its last wait
         contract = self.catalog.get(reference)
         # Temporal: the result is recorded in history; on replay it is read back, never called
         # again.
@@ -158,28 +198,26 @@ class PlanWorkflow:
         return output
 
     async def wait(
-        self, state: str, outcomes: tuple[str, ...], timeout: str | None
+        self, state: str, entry: str, outcomes: tuple[str, ...], timeout: str | None
     ) -> Answer | None:
-        """The first answer sent to `state`, as the in-memory script gives it. The interpreter
-        checks it (an outcome the wait doesn't offer is refused, and it waits again)."""
-        # Temporal: `wait_condition` blocks until the condition holds, checked after each signal.
+        """The first answer sent to the open `entry`. The interpreter checks it, and asks again
+        for the same entry if it refuses it (an outcome the wait doesn't offer)."""
+        if entry != self.open:
+            self.close()  # answers left for an earlier wait never count for this one
+            self.open = entry
+            self.opened.add(entry)
         self.waiting = True
         try:
-            # With a timeout, a durable Temporal timer: the server fires it and history records
-            # it, so replay reads it back and no clock is read.
+            # Temporal: `wait_condition` blocks until the condition holds, checked after each
+            # signal. With a timeout, it is a durable Temporal timer: the server fires it and
+            # history records it, so replay reads it back and no clock is read.
             await workflow.wait_condition(
-                lambda: self.first_for(state) is not None,
-                timeout=None if timeout is None else duration(timeout),
+                lambda: bool(self.sent), timeout=None if timeout is None else duration(timeout)
             )
         except TimeoutError:
+            self.close()
             return Answer(TIMEOUT, None)  # from the timer, never from a person
         finally:
             self.waiting = False
-        sent = self.first_for(state)
-        assert sent is not None  # the condition just held
-        self.sent.remove(sent)
+        sent = self.sent.pop(0)
         return Answer(sent.outcome, sent.by)
-
-    def first_for(self, state: str) -> Sent | None:
-        """The first answer sent to `state` and not yet taken, if any."""
-        return next((sent for sent in self.sent if sent.state == state), None)

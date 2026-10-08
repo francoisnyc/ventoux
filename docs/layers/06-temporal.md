@@ -74,19 +74,21 @@ Inside, it parses the plan (`parse_plan`, as `run_plan` does) and calls `interpr
   error of type `Outcome` and is raised again as `Outcome(name)`, so the interpreter reads it as
   in memory. Any other failure, after the retries, reaches the interpreter as an exception: the
   step stops (brief, D17).
-- **`wait`**: answers arrive by the signal `answer(state, outcome, by)` and are kept in the order
-  they came. A wait takes the first answer sent to its state, as the in-memory script does; it
-  waits with `workflow.wait_condition`, and with the wait's timeout (`48h`) as a timer when it has
-  one, giving `Answer("timeout", None)` when it fires. The interpreter's checks on answers are
+- **`wait`**: answers arrive by the signal `answer(wait, outcome, by)`, each naming the entry it
+  answers (`approve_refund#1`; changed in the tutor review, below). An answer for the open entry is
+  kept, in the order it came; the wait takes the first, and waits with `workflow.wait_condition`,
+  with the wait's timeout (`48h`) as a timer when it has one, giving `Answer("timeout", None)` when
+  it fires. Any other answer is refused and recorded. The interpreter's checks on answers are
   unchanged: who may answer is layer 7's.
 - **the run's name**: `<workflow ID>/<run ID>`, from `workflow.info()`.
 
 It returns a `RunReport`: the status, the reason and the history, one line per event (`str` of
-each). The query `report` gives the same while it runs, with the status `waiting` while it waits;
-in memory the script running out says that, on Temporal nothing does, since a wait just waits.
+each). The query `report` gives the same while it runs, with the status `waiting` and
+`waiting_at`, the entry open for an answer, while it waits; in memory the script running out says
+that, on Temporal nothing does, since a wait just waits.
 
-`ventoux.core` and Pydantic are passed through the workflow sandbox (imported once, not per run):
-they are deterministic, and the boundary test is what holds `core` to that.
+`ventoux.core` is passed through the workflow sandbox (imported once, not per run): it is
+deterministic, and the boundary test is what holds it to that.
 
 ### Activities
 
@@ -109,7 +111,7 @@ refused when written: it may already have lost its exact value, so it never ente
 
 - `plan_worker(client, task_queue, workflow, implementations)`: a worker for the workflow and its
   activities, with the converter.
-- `start_plan(client, workflow, plan, fields, id, task_queue)`, `answer(run, state, outcome, by)`,
+- `start_plan(client, workflow, plan, fields, id, task_queue)`, `answer(run, wait, outcome, by)`,
   `report(run)`: start a run, answer a wait, read how it is going.
 
 ## Not in this layer
@@ -195,6 +197,30 @@ refused when written: it may already have lost its exact value, so it never ente
   replays without complaint (checked by hand: a version sending another `order_id` replayed the
   guide's history). The boundary test is what keeps inputs deterministic.
 
+## From the tutor review
+
+- **A leftover answer approved a later wait.** Every signal was kept in one queue, and a wait took
+  the first one for its state, so the queue outlived the wait an answer was meant for. Sam's double
+  click on "approve" approved the retry after a declined refund, which was paid with nobody
+  deciding again; an answer sent while `check_order` ran approved the wait the moment it opened, so
+  a person could approve what they never saw. Both broke "one approval unlocks one run of one step"
+  (brief, D11). Both tests were written first and seen failing with the old behaviour (the retry
+  paid as `pay#2`; the early click taken as `sam answered approve`).
+- **The fix: an answer names the entry it answers,** `approve_refund#1`, the state and the same
+  entry count as the idempotency key; the interpreter passes it to `wait`, and `report` shows it as
+  `waiting_at`. An answer counts only for the entry open when it comes. Any other is refused and
+  recorded, never kept: `… is closed` for an entry that has been open, `… isn't open` for one that
+  hasn't. An entry closes when the run moves on (an activity is scheduled, another wait opens, the
+  timer fires, or the run ends), and answers left for it are refused then, so a double click is
+  recorded where the run moved on. An answer refused by the interpreter (an outcome the wait
+  doesn't offer) leaves the entry open: the next answer to it still counts.
+- **`interpret` takes an optional `record`,** the run to write into, so the workflow can record a
+  refusal that reaches it outside a wait in the same history. The in-memory script still answers
+  by state: it runs in order, with no one clicking.
+- **For layer 7:** an approval should be its own explicit act, not read from the outcome name
+  `approve`; with roles (design question 12), how an approval is answered and rejected (design
+  question 13), and its lapse when inputs change (brief, D11).
+
 ## Promises
 
 Each claim this note makes about behaviour, and the test that fails if it isn't true. `T` is
@@ -219,8 +245,11 @@ which passes on the interpreter's existing check.
 | An implementation for a reference the catalog doesn't hold is refused | T `test_an_implementation_the_catalog_does_not_hold_is_refused` |
 | An activity is retried up to its contract's `maximum_attempts`, then stops the step with its own message | T `test_an_activity_failing_past_its_retries_stops_the_step` |
 | A declared outcome is never retried, and moves the plan on | T `test_a_declared_outcome_is_never_retried_and_moves_the_plan_on` |
-| A wait takes the first answer sent to its state, and only to its state; one it doesn't offer is refused and the wait goes on | T `test_an_answer_the_wait_does_not_offer_is_refused_and_the_wait_goes_on`, `test_an_answer_is_taken_only_by_the_wait_it_names` |
-| A waiting run reports `waiting` | T `test_a_run_without_its_answer_reports_waiting` |
+| A wait takes the first answer sent to its open entry; one it doesn't offer is refused and the wait goes on | T `test_an_answer_the_wait_does_not_offer_is_refused_and_the_wait_goes_on` |
+| An answer for an entry that isn't open (another state's, or a later one) is refused and recorded | T `test_an_answer_is_taken_only_by_the_wait_it_names` |
+| A double click never approves a retry: the second answer is refused as closed and recorded, and the retry waits for a new decision (tutor review) | T `test_a_double_click_does_not_approve_the_retry` |
+| An answer sent before its wait opens is refused and recorded, and the wait still waits (tutor review) | T `test_an_answer_sent_before_the_wait_opens_is_refused` |
+| A waiting run reports `waiting`, and the entry open for an answer | T `test_a_run_without_its_answer_reports_waiting` |
 | A wait's timeout is a Temporal timer and moves on by `timeout`; a person sending `timeout` is refused | T `test_a_wait_times_out_on_a_temporal_timer`, `test_a_timeout_sent_by_a_person_is_refused` |
 | A history replays with the same code, and fails replay with code changed to ask for something else | T `test_a_history_replays_with_the_same_code`, `test_a_history_replayed_with_changed_code_fails` |
 | The bound of 1,000 states holds on Temporal, as a count, and its history (6,005 events) replays | T `test_the_bound_on_a_loop_holds_on_temporal_and_replays` |

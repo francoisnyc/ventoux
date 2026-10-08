@@ -333,7 +333,8 @@ from ventoux.temporal.client import answer, report, start_plan
 run = await start_plan(
     client, RefundPlans, refund_order, fields={...}, id="refund-A-1001", task_queue="refunds"
 )
-await answer(run, "approve_refund", "approve", by="sam")
+assert (await report(run)).waiting_at == "approve_refund#1"
+await answer(run, "approve_refund#1", "approve", by="sam")
 assert (await run.result()).status == "succeeded"
 ```
 
@@ -344,14 +345,18 @@ What changes from memory, and what doesn't:
 - **Activities are retried as their contract says.** Its retry policy and timeouts are the ones
   Temporal uses; a contract's declared outcome (`declined`) is never retried, it moves the plan on.
   An activity still failing after its retries stops the step.
-- **Answers are signals,** sent to a wait by its state's name. A wait takes the first answer sent
-  to it, as the script does in memory; an answer it doesn't offer is refused, and the wait goes
-  on.
+- **Answers are signals, each naming the wait it answers:** its state and how many times the run
+  has entered it, `approve_refund#1`, as `report(run).waiting_at` shows it. An answer counts only
+  for the wait open when it comes. One for a wait that is closed or hasn't opened is refused, and
+  the history says so (`refused sam's answer approve: approve_refund#1 is closed`): a double click
+  can't approve a retry, and an early click can't approve what nobody has seen yet (brief, D11).
+  An answer the open wait doesn't offer is refused too, and the wait goes on. In memory, a script
+  answers by the state's name: it runs in order, with no one clicking.
 - **A wait's timeout is a Temporal timer.** `at most 48h` sets a timer the Temporal server fires,
   recorded in the history; no clock is read. A person sending `timeout` is refused: only the
   timer times a wait out.
 - **A run waiting for an answer just waits.** Ask it how it is going with `report(run)`: its
-  status is `waiting` until an answer comes.
+  history so far, its status `waiting`, and `waiting_at`, the wait open for an answer.
 - **Numbers stay exact.** Amounts cross Temporal as exact decimals, never binary floats (brief,
   D20); a float given to a run is refused.
 

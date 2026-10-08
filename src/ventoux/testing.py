@@ -201,8 +201,11 @@ def run_plan(
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
         return activities[reference](inputs)
 
-    async def wait(state: str, outcomes: tuple[str, ...], timeout: str | None) -> Answer | None:
-        """The next scripted answer to `state`, or None once the script has none left for it."""
+    async def wait(
+        state: str, entry: str, outcomes: tuple[str, ...], timeout: str | None
+    ) -> Answer | None:
+        """The next scripted answer to `state`, or None once the script has none left for it.
+        A script answers a state, whatever its entry: it runs in order, with no one clicking."""
         for answer in script:
             if answer[0] == state:
                 script.remove(answer)

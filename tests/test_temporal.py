@@ -4,6 +4,7 @@ See docs/layers/06-temporal.md and docs/guides/plans.md, "Running a plan on Temp
 """
 
 import asyncio
+import threading
 from collections.abc import Awaitable, Callable, Mapping
 from decimal import Decimal
 from typing import Any
@@ -54,6 +55,29 @@ async def settled(run: WorkflowHandle[PlanWorkflow, RunReport]) -> RunReport:
             return now
         await asyncio.sleep(0.05)  # real time, for the worker to take its next workflow task
     raise AssertionError("the run never settled")
+
+
+async def reported(
+    run: WorkflowHandle[PlanWorkflow, RunReport], holds: Callable[[RunReport], bool]
+) -> RunReport:
+    """The run's report once `holds` is true of it: the worker takes signals and runs on in its
+    own time. Asked a bounded number of times, so a run that never gets there fails the test."""
+    for _ in range(100):
+        now = await report(run)
+        if holds(now):
+            return now
+        await asyncio.sleep(0.05)  # real time, for the worker to take its next workflow task
+    raise AssertionError(f"the run never got there: {await report(run)}")
+
+
+def refusals(report: RunReport) -> int:
+    """How many answers the run has refused so far."""
+    return sum(line.startswith("refused ") for line in report.history)
+
+
+async def waiting_at(run: WorkflowHandle[PlanWorkflow, RunReport], entry: str) -> RunReport:
+    """The run's report once its wait `entry` (`approve_refund#1`) is open for an answer."""
+    return await reported(run, lambda now: now.waiting_at == entry)
 
 
 def ending_at_once() -> dict[str, Any]:
@@ -303,8 +327,9 @@ def test_an_answer_the_wait_does_not_offer_is_refused_and_the_wait_goes_on() -> 
         run = await start_plan(
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
-        await answer(run, "approve_refund", "edit", by="ana")
-        await answer(run, "approve_refund", "approve", by="sam")
+        await waiting_at(run, "approve_refund#1")
+        await answer(run, "approve_refund#1", "edit", by="ana")
+        await answer(run, "approve_refund#1", "approve", by="sam")
         return await run.result()
 
     report = on_temporal(scenario)
@@ -314,15 +339,22 @@ def test_an_answer_the_wait_does_not_offer_is_refused_and_the_wait_goes_on() -> 
 
 
 def test_an_answer_is_taken_only_by_the_wait_it_names() -> None:
-    # An answer sent to another state is never read as an answer to this wait.
+    # An answer sent to another entry is never read as an answer to this wait: it is refused, and
+    # recorded.
     async def scenario(client: Client) -> RunReport:
         run = await start_plan(
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
-        await answer(run, "check_order", "approve", by="sam")  # not a wait
-        return await settled(run)
+        await waiting_at(run, "approve_refund#1")
+        await answer(run, "check_order#1", "approve", by="sam")  # not a wait
+        await answer(run, "approve_refund#2", "approve", by="sam")  # not open yet
+        return await reported(run, lambda now: refusals(now) == 2)
 
-    assert on_temporal(scenario).status == "waiting"
+    report = on_temporal(scenario)
+    assert report.status == "waiting"
+    assert report.waiting_at == "approve_refund#1"
+    assert "refused sam's answer approve: check_order#1 isn't open" in report.history
+    assert "refused sam's answer approve: approve_refund#2 isn't open" in report.history
 
 
 def test_a_run_without_its_answer_reports_waiting() -> None:
@@ -341,8 +373,9 @@ def test_a_timeout_sent_by_a_person_is_refused() -> None:
         run = await start_plan(
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
-        await answer(run, "approve_refund", "timeout", by="mallory")
-        await answer(run, "approve_refund", "approve", by="sam")
+        await waiting_at(run, "approve_refund#1")
+        await answer(run, "approve_refund#1", "timeout", by="mallory")
+        await answer(run, "approve_refund#1", "approve", by="sam")
         return await run.result()
 
     report = on_temporal(scenario)
@@ -380,7 +413,8 @@ def test_the_guides_run_gives_the_same_history_as_in_memory() -> None:
         run = await start_plan(
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
-        await answer(run, "approve_refund", "approve", by="sam")
+        await waiting_at(run, "approve_refund#1")
+        await answer(run, "approve_refund#1", "approve", by="sam")
         return await run.result(), run.result_run_id or ""
 
     report, run_id = on_temporal(scenario)
@@ -409,7 +443,8 @@ def finished_history() -> WorkflowHistory:
         run = await start_plan(
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
-        await answer(run, "approve_refund", "approve", by="sam")
+        await waiting_at(run, "approve_refund#1")
+        await answer(run, "approve_refund#1", "approve", by="sam")
         await run.result()
         return await run.fetch_history()
 
@@ -455,3 +490,77 @@ def test_the_bound_on_a_loop_holds_on_temporal_and_replays() -> None:
     # continue-as-new is needed for a plan (design question 18).
     assert len(history.events) < 10_000
     replay(history, DevelopmentPlans)
+
+
+def declines_once(keys: list[str]) -> Activity:
+    """A fake `payments.refund@2` that declines the first refund, and pays the next."""
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        if len(keys) == 1:
+            raise Outcome("declined")
+        return {"refund_id": "refund-1"}
+
+    return refund
+
+
+def retrying_after_a_decline() -> dict[str, Any]:
+    """The guide's plan, where a declined refund goes back to the approval for a new decision."""
+    plan = guide_plan()
+    plan["states"]["pay"]["on"]["declined"] = "approve_refund"
+    return plan
+
+
+def test_a_double_click_does_not_approve_the_retry() -> None:
+    # From the tutor review: Sam clicks "approve" twice. The second click was meant for the first
+    # approval; left queued, it approved the retry, which was paid with nobody deciding again
+    # (brief, D11: one approval unlocks one run of one step). Each answer names the entry it
+    # answers, and one for an entry that isn't open is refused, and recorded.
+    keys: list[str] = []
+
+    async def scenario(client: Client) -> tuple[RunReport, RunReport]:
+        run = await start_plan(
+            client,
+            DevelopmentPlans,
+            retrying_after_a_decline(),
+            GUIDE_FIELDS,
+            id="refund-1",
+            task_queue=QUEUE,
+        )
+        await waiting_at(run, "approve_refund#1")
+        await answer(run, "approve_refund#1", "approve", by="sam")
+        await answer(run, "approve_refund#1", "approve", by="sam")  # the double click
+        retry = await waiting_at(run, "approve_refund#2")  # the retry waits for a new decision
+        await answer(run, "approve_refund#2", "approve", by="lee")
+        return retry, await run.result()
+
+    retry, ended = on_temporal(
+        scenario, activities={**FAKES, "payments.refund@2": declines_once(keys)}
+    )
+    assert "refused sam's answer approve: approve_refund#1 is closed" in retry.history
+    assert retry.history.count("sam answered approve") == 1
+    assert ended.status == "succeeded"
+    assert len(keys) == 2  # the first refund, declined, and the retry lee approved
+
+
+def test_an_answer_sent_before_the_wait_opens_is_refused() -> None:
+    # From the tutor review: an answer queued while `check_order` ran approved the wait the moment
+    # it opened, so a person could approve what they never saw.
+    looked_up = threading.Event()  # set by the test once its answer is sent
+
+    def slow_lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        looked_up.wait(timeout=10)
+        return {"status": "delivered"}
+
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
+        )
+        await answer(run, "approve_refund#1", "approve", by="sam")  # check_order still runs
+        looked_up.set()
+        return await waiting_at(run, "approve_refund#1")
+
+    report = on_temporal(scenario, activities={**FAKES, "orders.lookup@1": slow_lookup})
+    assert report.status == "waiting"  # still waiting for an answer given while it waits
+    assert "refused sam's answer approve: approve_refund#1 isn't open" in report.history
+    assert "sam answered approve" not in report.history

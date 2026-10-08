@@ -584,7 +584,9 @@ def test_a_state_of_a_kind_the_engine_does_not_know_stops_the_step() -> None:
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
         raise AssertionError("nothing is called")
 
-    async def wait(state: str, outcomes: tuple[str, ...], timeout: str | None) -> Answer | None:
+    async def wait(
+        state: str, entry: str, outcomes: tuple[str, ...], timeout: str | None
+    ) -> Answer | None:
         raise AssertionError("nothing is waited for")
 
     run = asyncio.run(
