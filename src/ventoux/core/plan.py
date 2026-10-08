@@ -70,6 +70,13 @@ def some_outcomes(outcomes: tuple[str, ...]) -> tuple[str, ...]:
     return outcomes
 
 
+def some_roles(roles: tuple[str, ...]) -> tuple[str, ...]:
+    # No roles would mean anyone may answer: a permissive default (brief, D22).
+    if not roles:
+        raise ValueError("a wait names at least one role that may answer it")
+    return roles
+
+
 def final_outcome(outcome: str) -> str:
     if outcome not in ("succeeded", "failed"):
         raise ValueError("a final state is succeeded or failed")
@@ -101,6 +108,7 @@ def shorthand(transitions: object) -> object:
 
 PlanName = Annotated[str, matching(r"[a-z][a-z0-9-]*", 'a plan name looks like "refund-pay"')]
 StateName = Annotated[str, matching(r"[a-z][a-z0-9_]*", 'a state name looks like "await_approval"')]
+RoleName = Annotated[str, matching(r"[a-z][a-z0-9-]*", 'a role looks like "support-lead"')]
 EventName = Annotated[str, matching(r"[a-z][a-z0-9_]*", 'an event name looks like "approve"')]
 ActivityReference = Annotated[
     str, matching(REFERENCE.pattern, 'an activity reference looks like "payments.refund@1"')
@@ -148,9 +156,10 @@ class ActivityState(Shape):
 
 
 class Wait(Shape):
-    """A closed list of answers, and how long to wait for one (brief, D9)."""
+    """A closed list of answers, who may give one, and how long to wait (brief, D9)."""
 
     outcomes: Annotated[tuple[EventName, ...], AfterValidator(some_outcomes)]
+    roles: Annotated[tuple[RoleName, ...], AfterValidator(some_roles)]  # who may answer
     timeout: Duration | None = None
 
 

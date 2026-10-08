@@ -29,6 +29,7 @@ from ventoux.core.history import (
 )
 from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
 from ventoux.core.provenance import CASE, Sourced, provenance
+from ventoux.core.roles import no_role, role_that_counts
 
 # How a run ends (docs/guides/plans.md, "Running a plan").
 Status = Literal["succeeded", "failed", "waiting", "stopped"]
@@ -49,6 +50,8 @@ class Answer:
 
     outcome: str  # what was answered, such as `approve`, or `timeout`
     by: str | None  # who answered; None for a timeout
+    # The roles the person has, as the trusted caller states them; never looked up (brief, D22).
+    roles: frozenset[str] = frozenset()
 
 
 # How the interpreter waits: the state, the entry it waits in (`approve_refund#1`: the state and how
@@ -143,11 +146,14 @@ async def interpret(
                 here = choose(here, state.on, gave.event, values)
                 run.history.append(Moved(gave.event, here))
             elif isinstance(state, WaitState):
-                answer = await take_answer(here, f"{here}#{entries[here]}", state, wait, run)
-                if answer is None:
+                taken = await take_answer(
+                    here, f"{here}#{entries[here]}", state, catalog, wait, run
+                )
+                if taken is None:
                     run.status = "waiting"  # nothing more will come, for now
                     break
-                run.history.append(Answered(answer.outcome, answer.by))
+                answer, role = taken
+                run.history.append(Answered(answer.outcome, answer.by, role))
                 since_a_wait = 0  # someone answered: a loop through a wait isn't spinning
                 here = choose(here, state.on, answer.outcome, values)
                 run.history.append(Moved(answer.outcome, here))
@@ -209,19 +215,27 @@ async def run_activity(
 
 
 async def take_answer(
-    here: str, entry: str, state: WaitState, wait: Wait, run: PlanRun
-) -> Answer | None:
-    """The first answer the wait accepts; each one it doesn't is refused, and it waits on."""
+    here: str, entry: str, state: WaitState, catalog: Catalog, wait: Wait, run: PlanRun
+) -> tuple[Answer, str | None] | None:
+    """The first answer the wait accepts, and the role that let its person answer; each one it
+    doesn't accept is refused, and it waits on."""
     run.history.append(Waiting(entry, state.wait.outcomes, state.wait.timeout))
     while (answer := await wait(here, entry, state.wait.outcomes, state.wait.timeout)) is not None:
-        reason = why_not(here, state, answer)
+        reason = why_not(here, entry, state, answer)
+        if reason is None and answer.by is not None:
+            # Every answer is judged the same way: here, by who may give it (brief, D23).
+            role = role_that_counts(state.wait.roles, answer.roles, catalog.roles)
+            if role is None:
+                reason = no_role(entry, state.wait.roles, answer.by, answer.roles, catalog.roles)
+            else:
+                return answer, role
         if reason is None:
-            return answer
+            return answer, None  # the timeout, which no person gives
         run.history.append(Refused(answer.outcome, answer.by, reason))
     return None
 
 
-def why_not(here: str, state: WaitState, answer: Answer) -> str | None:
+def why_not(here: str, entry: str, state: WaitState, answer: Answer) -> str | None:
     """Why the wait won't take `answer`, or None if it will. Its outcomes are a closed list
     (brief, D9), and its timeout comes from its timer, never from a person."""
     if answer.outcome == TIMEOUT:

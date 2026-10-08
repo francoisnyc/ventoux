@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
@@ -126,6 +126,9 @@ for contract in (payments_refund, orders_lookup, letters_draft):
 # The labels fields may be declared untrusted with: `untrusted:llm`.
 for label in ("customer", "document", "email", "llm", "web"):
     CATALOG.register_label(label)
+# The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
+CATALOG.register_role("support")
+CATALOG.register_role("support-lead", approves="high")
 
 
 # Fake implementations, against no real system: nothing is paid, read or sent.
@@ -187,16 +190,19 @@ def run_plan(
     answers: list[tuple[Any, ...]],
     activities: Mapping[str, Activity] = FAKES,
     run: str = "memory",
+    people: Mapping[str, Iterable[str]] | None = None,
 ) -> PlanRun:
     """Run the plan stored as `data` in memory, with `fields`, playing the scripted `answers`,
     calling the fake `activities` by reference. `run` names the run in its idempotency keys
-    (`memory/pay#1`).
+    (`memory/pay#1`). `people` gives each person their roles, as the Ventoux API states them with
+    every answer (brief, D22); someone not listed has none.
 
     The plan's shape is checked (`parse_plan`); `validate` is not called: the runtime checks
     depend on nothing it did (docs/layers/05-interpreter.md).
     """
 
     script = list(answers)  # each answer is (state, outcome, who), or (state, "timeout")
+    roles = people or {}  # the test plays the API: it states each person's roles
 
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
         return activities[reference](inputs)
@@ -209,7 +215,8 @@ def run_plan(
         for answer in script:
             if answer[0] == state:
                 script.remove(answer)
-                return Answer(answer[1], answer[2] if len(answer) > 2 else None)
+                by = answer[2] if len(answer) > 2 else None
+                return Answer(answer[1], by, frozenset(roles.get(by, ())) if by else frozenset())
         return None
 
     # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it to the end.

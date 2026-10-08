@@ -80,7 +80,10 @@ NOT_AN_OPERATOR = (
     "/, if, in, cat, string, exists, count, sum, item. Logic that doesn't fit is a compute "
     "activity."
 )
-WAIT = {"wait": {"outcomes": ["approve", "reject"], "timeout": "48h"}, "on": {"approve": "paid"}}
+WAIT = {
+    "wait": {"outcomes": ["accept", "reject"], "roles": ["support"], "timeout": "48h"},
+    "on": {"accept": "paid"},
+}
 
 
 @pytest.mark.parametrize(
@@ -116,12 +119,12 @@ WAIT = {"wait": {"outcomes": ["approve", "reject"], "timeout": "48h"}, "on": {"a
         ),
         (
             ["states", "pay"],
-            {**WAIT, "wait": {"outcomes": []}},
+            {**WAIT, "wait": {"outcomes": [], "roles": ["support"]}},
             "states.pay.wait.outcomes: a wait has at least one outcome",
         ),
         (
             ["states", "pay"],
-            {**WAIT, "wait": {"outcomes": ["approve"], "timeout": "2 days"}},
+            {**WAIT, "wait": {"outcomes": ["accept"], "roles": ["support"], "timeout": "2 days"}},
             'states.pay.wait.timeout: a duration looks like "30s", "5m", "48h" or "7d"',
         ),
         (
@@ -162,7 +165,7 @@ def test_the_example_plan_parses() -> None:
 
 def test_a_wait_state_with_conditional_transitions_parses() -> None:
     state = {
-        "wait": {"outcomes": ["approve", "reject"], "timeout": "48h"},
+        "wait": {"outcomes": ["approve", "reject"], "roles": ["support-lead"], "timeout": "48h"},
         "on": {
             "approve": [
                 {"when": {">": [{"var": "amount"}, 1000]}, "target": "failed"},

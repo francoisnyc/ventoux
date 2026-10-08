@@ -1,8 +1,10 @@
-"""Roles: who may answer a wait, and the highest risk each may approve (layer 7; brief, D22).
+"""Roles: who may answer a wait, and the highest risk each may approve (brief, D22).
 
 Roles are registered in the catalog by the platform team, like source labels. Who has which role
 is never looked up here: it comes with each answer, stated by the trusted caller (brief, D19).
 """
+
+from collections.abc import Mapping
 
 from ventoux.core.provenance import is_label
 
@@ -30,3 +32,25 @@ def may_approve(approves: str | None, risk: str) -> bool:
     if approves is None or risk not in RISKS:
         return False
     return RISKS.index(risk) <= RISKS.index(approves)
+
+
+def role_that_counts(
+    allowed: tuple[str, ...], stated: frozenset[str], registered: Mapping[str, str | None]
+) -> str | None:
+    """The role that lets a person answer: the first, in order, of the roles they have that the
+    wait allows and the catalog registered. None: no role of theirs counts."""
+    # Fail closed: a role the catalog doesn't know counts for nothing, whoever states it.
+    counting = sorted(role for role in stated if role in allowed and role in registered)
+    return counting[0] if counting else None
+
+
+def no_role(
+    entry: str,
+    allowed: tuple[str, ...],
+    by: str,
+    stated: frozenset[str],
+    registered: Mapping[str, str | None],
+) -> str:
+    """Why `by` may not answer `entry`: the roles it needs, and the ones they have."""
+    known = ", ".join(sorted(role for role in stated if role in registered)) or "no role"
+    return f"{entry} is answered by {' or '.join(allowed)}, and {by} has {known}"

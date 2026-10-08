@@ -435,7 +435,12 @@ def asking(**wait: Any) -> dict[str, Any]:
         "initial": "confirm",
         "states": {
             "confirm": {
-                "wait": {"outcomes": ["accept", "decline"], "timeout": "48h", **wait},
+                "wait": {
+                    "outcomes": ["accept", "decline"],
+                    "roles": ["support"],
+                    "timeout": "48h",
+                    **wait,
+                },
                 "on": {"accept": "accepted", "decline": "declined", "timeout": "declined"},
             },
             "accepted": {"final": "succeeded"},
@@ -632,9 +637,11 @@ def test_a_loop_through_a_wait_does_not_count_against_the_bound() -> None:
     # Each pass looks the order up, then asks a person: 600 passes enter 1,200 states.
     asking = looking_up(on={"done": "ask", "not_found": "missing"})
     asking["states"]["ask"] = {
-        "wait": {"outcomes": ["again", "enough"]},
+        "wait": {"outcomes": ["again", "enough"], "roles": ["support"]},
         "on": {"again": "look", "enough": "found"},
     }
-    run = run_plan(asking, fields=ORDER, answers=[("ask", "again", "sam")] * 600)
+    run = run_plan(
+        asking, fields=ORDER, answers=[("ask", "again", "sam")] * 600, people={"sam": ["support"]}
+    )
     assert lines(run).count("entered look") == 601
     assert run.status == "waiting"  # the script ran out; nothing was stopped

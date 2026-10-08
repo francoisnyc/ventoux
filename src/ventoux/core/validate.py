@@ -59,6 +59,7 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
                 issues += problems or policy_issues(path, field, expression, state, plan, catalog)
         else:
             issues += wait_issues(f"states.{name}", name, state)
+            issues += role_issues(f"states.{name}.wait.roles", state.wait.roles, catalog)
         for event, transitions in state.on.items():
             for path, transition in each_transition(f"states.{name}.on.{event}", transitions):
                 if transition.target not in plan.states:
@@ -88,6 +89,20 @@ def source_issues(plan: Plan, catalog: Catalog) -> list[Issue]:
                 )
             )
     return issues
+
+
+def role_issues(path: str, roles: tuple[str, ...], catalog: Catalog) -> list[Issue]:
+    """Every role a wait names is one the platform team registered (brief, D22)."""
+    return [
+        Issue(
+            path,
+            "UNKNOWN_ROLE",
+            f"{role} is a role nobody registered: the roles are {', '.join(catalog.roles)}; use "
+            "one of them, or ask the platform team to register it",
+        )
+        for role in roles
+        if role not in catalog.roles
+    ]
 
 
 def policy_issues(

@@ -86,9 +86,12 @@ class Answered:
 
     outcome: str  # one of the wait's outcomes, or `timeout`
     by: str | None  # who answered; None for a timeout, which no person gives
+    role: str | None  # the role that let them answer (brief, D22); None for a timeout
 
     def __str__(self) -> str:
-        return f"{self.by} answered {self.outcome}" if self.by else "the wait timed out"
+        if self.by is None:
+            return "the wait timed out"
+        return f"{self.by} answered {self.outcome} as {self.role}"
 
 
 @dataclass(frozen=True)
