@@ -1,7 +1,7 @@
 # Layer 7: people in the loop
 
-Status: design agreed in the session, 2026-10-08 (all five choices as recommended); draft for
-review before building.
+Status: design agreed in the session, 2026-10-08 (all five choices as recommended; the history
+shows only the role that counted; a field a wait sets is never given at the start).
 
 ## What this layer is for
 

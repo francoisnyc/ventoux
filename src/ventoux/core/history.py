@@ -71,11 +71,12 @@ class Gave:
 class Waiting:
     """The run waits for one of a closed list of answers (brief, D9)."""
 
+    entry: str  # the entry it waits in, such as `approve_refund#1`, which answers name
     outcomes: tuple[str, ...]  # the answers it accepts
     timeout: str | None  # how long it waits, such as `48h`; None: for as long as it takes
 
     def __str__(self) -> str:
-        line = f"waiting for {' or '.join(self.outcomes)}"
+        line = f"waiting at {self.entry} for {' or '.join(self.outcomes)}"
         return f"{line}, at most {self.timeout}" if self.timeout else line
 
 

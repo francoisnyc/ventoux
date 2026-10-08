@@ -212,7 +212,7 @@ async def take_answer(
     here: str, entry: str, state: WaitState, wait: Wait, run: PlanRun
 ) -> Answer | None:
     """The first answer the wait accepts; each one it doesn't is refused, and it waits on."""
-    run.history.append(Waiting(state.wait.outcomes, state.wait.timeout))
+    run.history.append(Waiting(entry, state.wait.outcomes, state.wait.timeout))
     while (answer := await wait(here, entry, state.wait.outcomes, state.wait.timeout)) is not None:
         reason = why_not(here, state, answer)
         if reason is None:

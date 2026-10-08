@@ -425,10 +425,30 @@ def test_a_wait_takes_only_answers_it_can_be_given() -> None:
     ]
 
 
+def asking(**wait: Any) -> dict[str, Any]:
+    """A plan that asks one question, `confirm`, then ends as the answer says."""
+    return {
+        "plan": "asking",
+        "version": 1,
+        "display": {"title": "Asks one question"},
+        "fields": {"order_id": {"type": "reference", "system": "orders"}},
+        "initial": "confirm",
+        "states": {
+            "confirm": {
+                "wait": {"outcomes": ["accept", "decline"], "timeout": "48h", **wait},
+                "on": {"accept": "accepted", "decline": "declined", "timeout": "declined"},
+            },
+            "accepted": {"final": "succeeded"},
+            "declined": {"final": "failed"},
+        },
+    }
+
+
 def test_a_run_without_its_answer_waits() -> None:
-    run = run_plan(guide_plan(), fields=GUIDE_FIELDS, answers=[])
+    run = run_plan(asking(), fields=ORDER, answers=[])
     assert run.status == "waiting"  # not ended: the answer may still come
-    assert lines(run)[-1] == "waiting for approve or reject, at most 48h"
+    # The line names the entry, as an answer and a refusal do (layer 6's tutor review).
+    assert lines(run)[-1] == "waiting at confirm#1 for accept or decline, at most 48h"
 
 
 def test_a_declared_timeout_moves_on() -> None:

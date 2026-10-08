@@ -365,7 +365,9 @@ def test_a_run_without_its_answer_reports_waiting() -> None:
         )
         return await settled(run)
 
-    assert on_temporal(scenario).status == "waiting"
+    report = on_temporal(scenario)
+    assert report.status == "waiting"
+    assert report.waiting_at == "approve_refund#1"  # the entry an answer must name
 
 
 def test_a_timeout_sent_by_a_person_is_refused() -> None:
