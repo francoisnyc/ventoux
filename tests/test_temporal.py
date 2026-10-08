@@ -9,8 +9,11 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from temporalio.client import Client, WorkflowFailureError, WorkflowHandle
+from temporalio import workflow
+from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
 from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import Replayer
+from temporalio.workflow import NondeterminismError
 from test_interpreter import GUIDE_FIELDS, ORDER, drafting, guide_plan, looking_up, recording
 
 from ventoux.core.catalog import NotInCatalog
@@ -19,8 +22,8 @@ from ventoux.core.provenance import sourced
 from ventoux.temporal.client import answer, report, start_plan
 from ventoux.temporal.converter import DATA_CONVERTER
 from ventoux.temporal.worker import plan_worker
-from ventoux.temporal.workflow import PlanWorkflow, RunReport
-from ventoux.testing import FAKES, Activity, DevelopmentPlans, fake_refund, run_plan
+from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
+from ventoux.testing import CATALOG, FAKES, Activity, DevelopmentPlans, fake_refund, run_plan
 
 QUEUE = "plans"
 
@@ -360,3 +363,48 @@ def test_the_guides_run_gives_the_same_history_as_in_memory() -> None:
     assert report.history == [
         str(event).replace("memory/", f"refund-1/{run_id}/") for event in in_memory.history
     ]
+
+
+# Temporal: replay runs a workflow's code again against a recorded history, as a new worker does
+# after a crash. This version was changed to ask for a timer before the plan starts.
+@workflow.defn(name="ventoux.plan")
+class ChangedPlans(PlanWorkflow):
+    catalog = CATALOG
+
+    @workflow.run
+    async def run(self, start: PlanStart) -> RunReport:
+        await workflow.sleep(1)  # a command the recorded history never saw
+        return await self.interpret(start)
+
+
+def finished_history() -> WorkflowHistory:
+    """The history of the guide's run, answered and finished."""
+
+    async def scenario(client: Client) -> WorkflowHistory:
+        run = await start_plan(
+            client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
+        )
+        await answer(run, "approve_refund", "approve", by="sam")
+        await run.result()
+        return await run.fetch_history()
+
+    return on_temporal(scenario)
+
+
+def replay(history: WorkflowHistory, workflow_class: type[PlanWorkflow]) -> None:
+    """Replay `history` against `workflow_class`, as a worker would after a restart."""
+    replayer = Replayer(workflows=[workflow_class], data_converter=DATA_CONVERTER)
+    asyncio.run(replayer.replay_workflow(history))
+
+
+def test_a_history_replayed_with_changed_code_fails() -> None:
+    # Temporal refuses rather than let the run go another way than it went: the run waits until
+    # the code is fixed (brief, D17).
+    with pytest.raises(NondeterminismError):
+        replay(finished_history(), ChangedPlans)
+
+
+def test_a_history_replays_with_the_same_code() -> None:
+    # The interpreter reads no clock, randomness or I/O, so it asks for the same things in the
+    # same order: the recorded results, answer and timer are read back, nothing is called again.
+    replay(finished_history(), DevelopmentPlans)
