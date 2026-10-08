@@ -7,19 +7,22 @@ the same things in the same order every time. The interpreter reads no clock, ra
 """
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, ClassVar
 
 from temporalio import workflow
-from temporalio.exceptions import ApplicationError
+from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError, ApplicationError, FailureError
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh for every run, to keep runs
 # apart; modules passed through are imported once and shared. `core` is deterministic (the
 # boundary test holds it to that), so it is shared.
 with workflow.unsafe.imports_passed_through():
     from ventoux.core.catalog import Catalog
-    from ventoux.core.interpreter import Answer, RunRefused, interpret
+    from ventoux.core.interpreter import Answer, Outcome, RunRefused, interpret
     from ventoux.core.plan import PlanInvalid, parse_plan
     from ventoux.core.provenance import sourced
+    from ventoux.temporal.activities import OUTCOME
 
 
 @dataclass
@@ -45,6 +48,10 @@ class RunReport:
     status: str | None  # succeeded, failed, waiting or stopped; None while it runs
     reason: str | None  # why it stopped, if it did
     history: list[str]  # every event, one line each
+
+
+class ActivityFailed(Exception):
+    """An activity that still failed after the retries its contract allows."""
 
 
 class PlanWorkflow:
@@ -86,7 +93,31 @@ class PlanWorkflow:
         return f"{info.workflow_id}/{info.run_id}"
 
     async def call(self, reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
-        raise NotImplementedError("activities come in the next slice")
+        """Schedule the activity, retried and timed out as its contract says (brief, D17)."""
+        contract = self.catalog.get(reference)
+        # Temporal: the result is recorded in history; on replay it is read back, never called
+        # again.
+        try:
+            output: dict[str, Any] = await workflow.execute_activity(
+                reference,
+                inputs,
+                start_to_close_timeout=timedelta(seconds=contract.timeouts.start_to_close),
+                schedule_to_start_timeout=timedelta(seconds=contract.timeouts.schedule_to_start),
+                retry_policy=RetryPolicy(
+                    maximum_attempts=contract.retry.maximum_attempts,
+                    initial_interval=timedelta(seconds=contract.retry.initial_interval),
+                    backoff_coefficient=contract.retry.backoff_coefficient,
+                ),
+                result_type=dict,
+            )
+        except ActivityError as error:
+            # Past its retries: the interpreter stops the step (brief, D17), and its reason says
+            # what the activity itself said, not "Activity task failed".
+            cause = error.cause
+            if isinstance(cause, ApplicationError) and cause.type == OUTCOME:
+                raise Outcome(cause.message) from None  # read as in memory: `declined`
+            raise ActivityFailed(cause.message if isinstance(cause, FailureError) else str(error))
+        return output
 
     async def wait(
         self, state: str, outcomes: tuple[str, ...], timeout: str | None

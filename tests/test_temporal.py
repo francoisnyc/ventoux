@@ -11,14 +11,16 @@ from typing import Any
 import pytest
 from temporalio.client import Client, WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
-from test_interpreter import drafting, recording
+from test_interpreter import ORDER, drafting, looking_up, recording
 
+from ventoux.core.catalog import NotInCatalog
+from ventoux.core.interpreter import Outcome
 from ventoux.core.provenance import sourced
 from ventoux.temporal.client import start_plan
 from ventoux.temporal.converter import DATA_CONVERTER
 from ventoux.temporal.worker import plan_worker
 from ventoux.temporal.workflow import RunReport
-from ventoux.testing import FAKES, Activity, DevelopmentPlans
+from ventoux.testing import FAKES, Activity, DevelopmentPlans, fake_refund
 
 QUEUE = "plans"
 
@@ -168,3 +170,92 @@ def test_the_runtime_check_blocks_the_injection_on_temporal() -> None:
     assert report.reason is not None
     assert report.reason.startswith("letters.draft@2 takes to_customer only from")
     assert calls == []  # never called
+
+
+def test_an_implementation_the_catalog_does_not_hold_is_refused() -> None:
+    # A typo would register an activity no plan can call, and leave the real one unserved.
+    async def go() -> None:
+        environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
+        async with environment:
+            with pytest.raises(NotInCatalog, match="payments.refnd@2"):
+                plan_worker(
+                    environment.client, QUEUE, DevelopmentPlans, {"payments.refnd@2": fake_refund}
+                )
+
+    asyncio.run(go())
+
+
+TRUSTED_REPLY = {
+    "customer_email": sourced("ana@example.com", "system:crm"),
+    "suggested_recipient": sourced("ana@example.com", "person:sam"),
+}
+
+
+def drafts_on_the_second_attempt(keys: list[str]) -> Activity:
+    """A fake `letters.draft@2` whose system is down on the first attempt."""
+
+    def draft(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        if len(keys) == 1:
+            raise ConnectionError("letters system unavailable")
+        return {"draft_id": "draft-1"}
+
+    return draft
+
+
+def test_a_retried_activity_reuses_the_same_key() -> None:
+    # A retry repeats the same step run, so the letters system sees the same key and can return
+    # the draft it already made; the key is never the attempt number (brief, D17).
+    keys: list[str] = []
+
+    async def scenario(client: Client) -> tuple[RunReport, str]:
+        run = await start_plan(
+            client, DevelopmentPlans, drafting(), TRUSTED_REPLY, id="reply-1", task_queue=QUEUE
+        )
+        return await run.result(), run.result_run_id or ""
+
+    report, run_id = on_temporal(
+        scenario, activities={"letters.draft@2": drafts_on_the_second_attempt(keys)}
+    )
+    assert report.status == "succeeded"
+    assert keys == [f"reply-1/{run_id}/draft#1"] * 2
+
+
+def test_an_activity_failing_past_its_retries_stops_the_step() -> None:
+    keys: list[str] = []
+
+    def always_down(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        raise ConnectionError("letters system unavailable")
+
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, drafting(), TRUSTED_REPLY, id="reply-1", task_queue=QUEUE
+        )
+        return await run.result()
+
+    report = on_temporal(scenario, activities={"letters.draft@2": always_down})
+    assert len(keys) == 5  # the contract's maximum_attempts, then a person looks (brief, D17)
+    assert report.status == "stopped"
+    assert report.reason == "letters.draft@2 failed: letters system unavailable"
+
+
+def test_a_declared_outcome_is_never_retried_and_moves_the_plan_on() -> None:
+    # "Not found" is an answer, not an outage: retrying it would ask the same question again
+    # (brief, D17).
+    calls: list[dict[str, Any]] = []
+
+    def not_found(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs)
+        raise Outcome("not_found")
+
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, looking_up(), ORDER, id="look-1", task_queue=QUEUE
+        )
+        return await run.result()
+
+    report = on_temporal(scenario, activities={"orders.lookup@1": not_found})
+    assert len(calls) == 1  # its contract allows 3 attempts; an outcome uses one
+    assert report.status == "failed"  # the plan's own way to fail: `not_found` goes to `missing`
+    assert "orders.lookup@1 gave not_found" in report.history
