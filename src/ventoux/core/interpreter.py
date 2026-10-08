@@ -122,6 +122,11 @@ async def interpret(
                 run.history.append(Answered(answer.outcome, answer.by))
                 here = choose(here, state.on, answer.outcome, values)
                 run.history.append(Moved(answer.outcome, here))
+            else:
+                # Fail closed: a kind of state this loop has no case for stops the step, never
+                # spun on or passed over. A new kind lands here until the loop says how it runs.
+                kind = type(state).__name__
+                raise Stop(f"{here} is a kind of state this engine doesn't know: {kind}")
     except Stop as stop:
         # Fail closed: the engine never guesses past what it can't do; a person decides
         # (brief, D17).

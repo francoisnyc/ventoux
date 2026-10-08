@@ -4,6 +4,7 @@ Tests go through `run_plan`, the in-memory driver, and read what a run reports. 
 docs/layers/05-interpreter.md and docs/guides/plans.md, "Running a plan".
 """
 
+import asyncio
 import copy
 import json
 from decimal import Decimal
@@ -12,9 +13,10 @@ from typing import Any
 
 import pytest
 
-from ventoux.core.interpreter import Outcome, PlanRun, RunRefused
+from ventoux.core.interpreter import Answer, Outcome, PlanRun, RunRefused, interpret
+from ventoux.core.plan import parse_plan
 from ventoux.core.provenance import sourced
-from ventoux.testing import FAKES, Activity, run_plan
+from ventoux.testing import CATALOG, FAKES, Activity, run_plan
 
 GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
 
@@ -551,3 +553,22 @@ def test_the_engines_key_replaces_any_a_plan_gives() -> None:
         activities={"letters.draft@2": recording(calls)},
     )
     assert [call["idempotency_key"] for call in calls] == ["draft#1"]
+
+
+def test_a_state_of_a_kind_the_engine_does_not_know_stops_the_step() -> None:
+    # A fourth kind of state can't be written (parse_plan refuses it); `model_copy` skips every
+    # check (learning question 31), so it is the side door this test comes through.
+    plan = parse_plan(ending_at_once())
+    odd = plan.model_copy(update={"states": {"done": "a fourth kind"}})
+
+    async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("nothing is called")
+
+    async def wait(state: str, outcomes: tuple[str, ...], timeout: str | None) -> Answer | None:
+        raise AssertionError("nothing is waited for")
+
+    run = asyncio.run(
+        interpret(odd, {"amount": sourced(250, "system:opener")}, CATALOG, call, wait)
+    )
+    assert run.status == "stopped"
+    assert run.reason == "done is a kind of state this engine doesn't know: str"

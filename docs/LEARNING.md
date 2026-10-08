@@ -38,6 +38,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 31 | Pydantic: when checks run | closed |
 | 32 | Layer 2: why `now` can't be written | open |
 | 33 | Layer 3: why plans can be checked and code can't | open |
+| 34 | Layer 5: why check input policies twice | open |
 
 ---
 
@@ -736,3 +737,32 @@ and record the key points. A question is closed once you can explain the answer 
   again, itself included, means a run without its own approval. The fix routes the loop through
   an approval, so each pass is approved.
 - Status: open, until the follow-up comes from memory.
+
+
+## 34. Layer 5: why check input policies twice
+
+> Why check sink policies twice? (`validate` before the plan runs, and again before each activity
+> is scheduled; "input policies" since brief, D21.)
+
+- Your answer: "validation happens before the run, that makes sense, and at run it checks the
+  real inputs?"
+- Discussion: right, and "the real inputs" is the key phrase. The two checks see different
+  things, and each catches what the other can't:
+  - **`validate` sees declarations, on every path.** It knows only what the plan says about its
+    fields: `untrusted:llm`, or nothing. An unmarked field is the case's to vouch for, so it
+    passes `trusted_only` (layer 4). What it gives: every path checked at once, before any case
+    runs, with a message telling the author what to change.
+  - **The runtime sees real sources, on the one path this run takes.** Each value arrives with
+    where it actually came from (`sourced(…, "untrusted:llm")`). The curriculum's test is the
+    gap between the two: `suggested_recipient` unmarked passes `validate`, and the model's value
+    is refused before `letters.draft@2` is called.
+  - **The runtime check depends on nothing the static one did.** A plan may reach the engine
+    without having been checked: an AI draft, an older release, a bug in `validate`, a copy made
+    with `model_copy`. The runtime check reads no flag saying "validated", so skipping
+    validation can never weaken it. Defence in depth, failing closed.
+  In one line: `validate` proves a plan *can't* misuse declared data on any path; the runtime
+  proves *this* value, on *this* path, really may go in.
+- Follow-up: if the runtime check catches everything with the real sources, why keep the static
+  one at all?
+- Status: open, until the follow-up comes from memory.
+
