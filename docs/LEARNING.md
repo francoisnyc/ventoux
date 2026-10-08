@@ -692,6 +692,18 @@ and record the key points. A question is closed once you can explain the answer 
   same point, so the condition sees the same case file and decides the same way. The difference
   matters for provenance too (layer 4): a signal carries content from a sender, whose trust must
   be tagged; a timer carries none, so it can't be injected.
+- Retrieval (layer 6 warm-up): "if 5 days passed since the signal was received for the claim,
+  then escalate." The shape came back this time: a rule reacting to time passing, from an anchor,
+  not an expression reading the clock. Anchoring on an event is right too (D7 anchors on the case
+  opening or a step's latest start; the claim arriving is that kind of event). Two parts didn't
+  come back. *The **if**:* as written, every claim escalates on day 5, even one assessed on day 2;
+  the rule needs *if `assessed` is not reached* (or the `sla` pattern, which cancels its timer
+  when the step completes). *Where the time comes from:* for the second warm-up in a row, the
+  answer names a signal and not the **timer**. The signal is only the anchor; the time comes from
+  a durable timer the workflow sets and the Temporal server fires, recorded as `TimerStarted` and
+  `TimerFired`. On replay, the code reads `TimerFired` from history at the same point instead of
+  waiting or reading a clock, so it decides the same way. Layer 6 builds exactly this, for a
+  wait's timeout (`at most 48h`).
 - Status: open, kept in the warm-up rotation until the follow-up comes from memory.
 
 
