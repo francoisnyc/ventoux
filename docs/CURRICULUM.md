@@ -198,6 +198,11 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 
 ## 7. People in the loop
 
+- **First:** two small fixes from the tutor review of layer 6. The history's waiting line names the
+  entry it waits in (`waiting at approve_refund#1 for approve or reject`), so a refusal naming an
+  entry reads clearly beside it, even when one wait leads straight into another. And
+  `test_a_run_without_its_answer_reports_waiting` also checks `waiting_at`, the half of its promise
+  it doesn't test today.
 - **Learn:** waits, signals from people, role checks, approvals by someone other than the proposer;
   task outcomes and their forms (decision D9).
 - **Build:** role-based access by risk, approval rules, signal senders with roles; outcomes as the
