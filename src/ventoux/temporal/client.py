@@ -7,7 +7,7 @@ from temporalio.client import Client, WorkflowHandle
 
 from ventoux.core.provenance import Sourced
 from ventoux.temporal.converter import require_exact_numbers
-from ventoux.temporal.workflow import Given, PlanStart, PlanWorkflow, RunReport
+from ventoux.temporal.workflow import Given, PlanStart, PlanWorkflow, RunReport, Sent
 
 
 async def start_plan(
@@ -24,3 +24,15 @@ async def start_plan(
         plan, {name: Given(given.value, sorted(given.sources)) for name, given in fields.items()}
     )
     return await client.start_workflow(workflow.run, start, id=id, task_queue=task_queue)
+
+
+async def answer(
+    run: WorkflowHandle[PlanWorkflow, RunReport], state: str, outcome: str, by: str
+) -> None:
+    """Answer the wait at `state` with `outcome`, as the person `by`."""
+    await run.signal(PlanWorkflow.answer, Sent(state, outcome, by))
+
+
+async def report(run: WorkflowHandle[PlanWorkflow, RunReport]) -> RunReport:
+    """How the run is going: `waiting` while a wait has no answer."""
+    return await run.query(PlanWorkflow.report)

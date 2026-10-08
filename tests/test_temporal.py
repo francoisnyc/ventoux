@@ -9,18 +9,18 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from temporalio.client import Client, WorkflowFailureError
+from temporalio.client import Client, WorkflowFailureError, WorkflowHandle
 from temporalio.testing import WorkflowEnvironment
-from test_interpreter import ORDER, drafting, looking_up, recording
+from test_interpreter import GUIDE_FIELDS, ORDER, drafting, guide_plan, looking_up, recording
 
 from ventoux.core.catalog import NotInCatalog
 from ventoux.core.interpreter import Outcome
 from ventoux.core.provenance import sourced
-from ventoux.temporal.client import start_plan
+from ventoux.temporal.client import answer, report, start_plan
 from ventoux.temporal.converter import DATA_CONVERTER
 from ventoux.temporal.worker import plan_worker
-from ventoux.temporal.workflow import RunReport
-from ventoux.testing import FAKES, Activity, DevelopmentPlans, fake_refund
+from ventoux.temporal.workflow import PlanWorkflow, RunReport
+from ventoux.testing import FAKES, Activity, DevelopmentPlans, fake_refund, run_plan
 
 QUEUE = "plans"
 
@@ -40,6 +40,17 @@ def on_temporal[T](
             return await scenario(environment.client)
 
     return asyncio.run(go())
+
+
+async def settled(run: WorkflowHandle[PlanWorkflow, RunReport]) -> RunReport:
+    """The run's report once it has settled (ended, or waiting): while it runs, its status is
+    None. Asked a bounded number of times, so a run that never settles fails the test."""
+    for _ in range(100):
+        now = await report(run)
+        if now.status is not None:
+            return now
+        await asyncio.sleep(0.05)  # real time, for the worker to take its next workflow task
+    raise AssertionError("the run never settled")
 
 
 def ending_at_once() -> dict[str, Any]:
@@ -74,6 +85,16 @@ def test_a_decimal_comes_back_exactly() -> None:
     back = round_trip({"amount": Decimal("0.1"), "count": 3})
     assert back == {"amount": Decimal("0.1"), "count": 3}
     assert isinstance(back["amount"], Decimal)  # never the text "0.1", never a float
+
+
+def test_a_whole_decimal_stays_a_decimal_and_an_int_an_int() -> None:
+    # Found in slice 5: `Decimal("250")` crossed as `250` and came back an int, which an expression
+    # refuses. Each comes back as what it was, so a run decides on Temporal as it does in memory.
+    back = round_trip({"amount": Decimal(250), "version": 1})
+    assert back == {"amount": Decimal(250), "version": 1}
+    assert isinstance(back["amount"], Decimal)
+    assert str(back["amount"]) == "250"  # the same digits, not 250.0
+    assert type(back["version"]) is int
 
 
 def test_a_run_missing_a_field_is_refused_to_start() -> None:
@@ -259,3 +280,83 @@ def test_a_declared_outcome_is_never_retried_and_moves_the_plan_on() -> None:
     assert len(calls) == 1  # its contract allows 3 attempts; an outcome uses one
     assert report.status == "failed"  # the plan's own way to fail: `not_found` goes to `missing`
     assert "orders.lookup@1 gave not_found" in report.history
+
+
+def test_an_answer_the_wait_does_not_offer_is_refused_and_the_wait_goes_on() -> None:
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
+        )
+        await answer(run, "approve_refund", "edit", by="ana")
+        await answer(run, "approve_refund", "approve", by="sam")
+        return await run.result()
+
+    report = on_temporal(scenario)
+    assert report.status == "succeeded"
+    assert "refused ana's answer edit: approve_refund offers approve or reject" in report.history
+    assert "sam answered approve" in report.history
+
+
+def test_a_run_without_its_answer_reports_waiting() -> None:
+    # On Temporal a wait just waits: nothing returns, so the run is asked how it is going.
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
+        )
+        return await settled(run)
+
+    assert on_temporal(scenario).status == "waiting"
+
+
+def test_a_timeout_sent_by_a_person_is_refused() -> None:
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
+        )
+        await answer(run, "approve_refund", "timeout", by="mallory")
+        await answer(run, "approve_refund", "approve", by="sam")
+        return await run.result()
+
+    report = on_temporal(scenario)
+    assert report.status == "succeeded"
+    assert (
+        "refused mallory's answer timeout: a timeout comes from the wait's timer, never from a "
+        "person" in report.history
+    )
+
+
+def test_a_wait_times_out_on_a_temporal_timer() -> None:
+    # No answer comes: the test server skips the 48 hours at once, and history records the timer.
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
+        )
+        return await asyncio.wait_for(run.result(), timeout=20)  # real seconds
+
+    report = on_temporal(scenario)
+    assert report.status == "failed"
+    assert report.history[-4:] == [
+        "the wait timed out",
+        "moved on timeout to failed",
+        "entered failed",
+        "ended failed",
+    ]
+
+
+def test_the_guides_run_gives_the_same_history_as_in_memory() -> None:
+    # The same plan, fields and answers make the same decisions in memory and on Temporal: only
+    # the idempotency keys differ, by the run's name.
+    in_memory = run_plan(guide_plan(), GUIDE_FIELDS, answers=[("approve_refund", "approve", "sam")])
+
+    async def scenario(client: Client) -> tuple[RunReport, str]:
+        run = await start_plan(
+            client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
+        )
+        await answer(run, "approve_refund", "approve", by="sam")
+        return await run.result(), run.result_run_id or ""
+
+    report, run_id = on_temporal(scenario)
+    assert report.status == in_memory.status == "succeeded"
+    assert report.history == [
+        str(event).replace("memory/", f"refund-1/{run_id}/") for event in in_memory.history
+    ]

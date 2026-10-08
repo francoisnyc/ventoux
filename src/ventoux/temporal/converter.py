@@ -36,7 +36,7 @@ def exact_json(value: Any) -> str:
     if isinstance(value, Decimal):
         if not value.is_finite():
             raise TypeError(f"{value} is not a number JSON can hold: give a finite Decimal")
-        return str(value)  # a JSON number, digit for digit: `0.1`, `1E+2`
+        return decimal_number(value)
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         # A dataclass, such as a run's start or report, is written as an object of its fields.
         fields = {field.name: getattr(value, field.name) for field in dataclasses.fields(value)}
@@ -50,6 +50,18 @@ def exact_json(value: Any) -> str:
             + "}"
         )
     raise TypeError(f"{type(value).__name__} can't be written exactly as JSON")
+
+
+def decimal_number(value: Decimal) -> str:
+    """`value` as a JSON number, digit for digit, that reads back as a `Decimal`: `0.1`, `1E+2`.
+
+    JSON reads `250` as an int, and an expression refuses an int (a number in `core` is a Decimal),
+    so a whole Decimal is written with an exponent, `250E0`, which reads back as `Decimal("250")`.
+    An int stays an int, so a run decides on Temporal exactly as it does in memory.
+    """
+    written = str(value)
+    is_whole = not any(mark in written for mark in ".Ee")
+    return written + "E0" if is_whole else written
 
 
 class ExactJSON(EncodingPayloadConverter):

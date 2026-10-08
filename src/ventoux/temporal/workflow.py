@@ -19,10 +19,19 @@ from temporalio.exceptions import ActivityError, ApplicationError, FailureError
 # boundary test holds it to that), so it is shared.
 with workflow.unsafe.imports_passed_through():
     from ventoux.core.catalog import Catalog
-    from ventoux.core.interpreter import Answer, Outcome, RunRefused, interpret
+    from ventoux.core.interpreter import TIMEOUT, Answer, Outcome, RunRefused, interpret
     from ventoux.core.plan import PlanInvalid, parse_plan
     from ventoux.core.provenance import sourced
     from ventoux.temporal.activities import OUTCOME
+
+
+# What each unit of a plan's duration (`48h`) is, as a Temporal timer reads it.
+UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
+
+
+def duration(text: str) -> timedelta:
+    """A plan's duration, such as `48h`, as a timedelta. `parse_plan` checked its shape."""
+    return timedelta(**{UNITS[text[-1]]: int(text[:-1])})
 
 
 @dataclass
@@ -50,6 +59,15 @@ class RunReport:
     history: list[str]  # every event, one line each
 
 
+@dataclass
+class Sent:
+    """An answer, as a person sends it to a wait."""
+
+    state: str  # the wait it answers, by its state's name
+    outcome: str  # one of the wait's outcomes, such as `approve`
+    by: str  # who answered
+
+
 class ActivityFailed(Exception):
     """An activity that still failed after the retries its contract allows."""
 
@@ -69,6 +87,25 @@ class PlanWorkflow:
 
     catalog: ClassVar[Catalog]  # the contracts this deployment's plans may call
 
+    def __init__(self) -> None:
+        self.sent: list[Sent] = []  # answers not yet taken, in the order they came
+        self.waiting = False  # whether a wait is waiting for an answer now
+        self.ended: RunReport | None = None  # how the run ended, once it has
+
+    # Temporal: a signal is a message into a running workflow, recorded in its history, so replay
+    # delivers it again at the same point.
+    @workflow.signal(name="answer")
+    def answer(self, sent: Sent) -> None:
+        self.sent.append(sent)
+
+    # Temporal: a query reads a workflow's state without changing it, and isn't recorded.
+    @workflow.query(name="report")
+    def report(self) -> RunReport:
+        """How the run is going: how it ended, or `waiting` while a wait has no answer."""
+        if self.ended is not None:
+            return self.ended
+        return RunReport("waiting" if self.waiting else None, None, [])
+
     async def run(self, start: PlanStart) -> RunReport:
         return await self.interpret(start)
 
@@ -85,7 +122,8 @@ class PlanWorkflow:
             # A run that can't start fails at once, saying why. Any other exception fails only the
             # workflow task, which Temporal retries until fixed code is deployed (brief, D17).
             raise ApplicationError(str(refused), type="RunRefused", non_retryable=True) from None
-        return RunReport(run.status, run.reason, [str(event) for event in run.history])
+        self.ended = RunReport(run.status, run.reason, [str(event) for event in run.history])
+        return self.ended
 
     def name(self) -> str:
         """This run's name in its idempotency keys: the workflow's ID and run ID (brief, D17)."""
@@ -122,4 +160,26 @@ class PlanWorkflow:
     async def wait(
         self, state: str, outcomes: tuple[str, ...], timeout: str | None
     ) -> Answer | None:
-        raise NotImplementedError("waits come in a later slice")
+        """The first answer sent to `state`, as the in-memory script gives it. The interpreter
+        checks it (an outcome the wait doesn't offer is refused, and it waits again)."""
+        # Temporal: `wait_condition` blocks until the condition holds, checked after each signal.
+        self.waiting = True
+        try:
+            # With a timeout, a durable Temporal timer: the server fires it and history records
+            # it, so replay reads it back and no clock is read.
+            await workflow.wait_condition(
+                lambda: self.first_for(state) is not None,
+                timeout=None if timeout is None else duration(timeout),
+            )
+        except TimeoutError:
+            return Answer(TIMEOUT, None)  # from the timer, never from a person
+        finally:
+            self.waiting = False
+        sent = self.first_for(state)
+        assert sent is not None  # the condition just held
+        self.sent.remove(sent)
+        return Answer(sent.outcome, sent.by)
+
+    def first_for(self, state: str) -> Sent | None:
+        """The first answer sent to `state` and not yet taken, if any."""
+        return next((sent for sent in self.sent if sent.state == state), None)
