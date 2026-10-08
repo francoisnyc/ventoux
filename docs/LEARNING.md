@@ -274,7 +274,11 @@ and record the key points. A question is closed once you can explain the answer 
   `support-lead`: `pay` has not run, and the case stays open (D10). The test asserts exactly that:
   `run.waiting_for == ["approval of pay by support-lead"]`, and also that `pay` was not reached and
   the case is not closed. The tracer bullet runs this test.
-- Status: open.
+- Retrieval (layer 7 warm-up): not recalled; asked to be reminded, and given the answer above in
+  brief (Sam may approve, Ana may not since her answer set `approved_amount`; the case waits for
+  the approval of `pay` by a `support-lead`; the test asserts `waiting_for`, not reached, not
+  closed). Layer 7 builds this exclusion, so it comes back in code.
+- Status: open, kept in the warm-up rotation until it comes from memory.
 
 ## 15. Case data
 
