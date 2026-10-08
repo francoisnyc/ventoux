@@ -11,6 +11,14 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from ventoux.core.approval import (
+    Unapprovable,
+    approved,
+    approver_role,
+    risk_refusal,
+    set_by_them,
+    used_by,
+)
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
@@ -159,7 +167,7 @@ async def interpret(
                 run.history.append(Moved(gave.event, here))
             elif isinstance(state, WaitState | ApprovalState):
                 taken = await take_answer(
-                    here, f"{here}#{entries[here]}", state, plan, catalog, wait, run
+                    here, f"{here}#{entries[here]}", state, plan, sources, catalog, wait, run
                 )
                 if taken is None:
                     run.status = "waiting"  # nothing more will come, for now
@@ -237,33 +245,76 @@ async def take_answer(
     entry: str,
     state: WaitState | ApprovalState,
     plan: Plan,
+    sources: Mapping[str, frozenset[str]],
     catalog: Catalog,
     wait: Wait,
     run: PlanRun,
 ) -> tuple[Answer, str | None] | None:
-    """The first answer the state accepts, and the role that let its person answer; each one it
-    doesn't accept is refused, and it waits on. A wait and an approval are asked the same way."""
+    """The first answer the state accepts, and the role that let its person answer (None for the
+    timeout); each one it doesn't accept is refused, and it waits on."""
     question = asked(state)
     of = state.approval.of if isinstance(state, ApprovalState) else None
     run.history.append(Waiting(entry, question.outcomes, question.roles, question.timeout, of))
     while (answer := await wait(here, entry, question.outcomes, question.timeout)) is not None:
-        reason = why_not(here, question, answer)
-        if reason is None and answer.by is not None:
-            # Every answer is judged the same way, wait or approval (brief, D23).
-            role = role_that_counts(question.roles, answer.roles, catalog.roles)
-            sets = question.sets.get(answer.outcome, ())
-            if role is None:
-                reason = no_role(entry, question.roles, answer.by, answer.roles, catalog.roles)
-            elif (
-                problem := form_problem(answer.outcome, sets, answer.form, plan.fields)
-            ) is not None:
-                reason = problem
-            else:
-                return answer, role
+        reason, role = judge(here, entry, state, plan, sources, catalog, answer)
         if reason is None:
-            return answer, None  # the timeout, which no person gives
+            return answer, role
         run.history.append(Refused(answer.outcome, answer.by, reason))
     return None
+
+
+def judge(
+    here: str,
+    entry: str,
+    state: WaitState | ApprovalState,
+    plan: Plan,
+    sources: Mapping[str, frozenset[str]],
+    catalog: Catalog,
+    answer: Answer,
+) -> tuple[str | None, str | None]:
+    """Why the state won't take `answer` (None if it will), and the role that let its person
+    answer. Every answer is judged the same way, in the same order, wait or approval; an approval
+    adds its own checks last (brief, D23)."""
+    question = asked(state)
+    reason = why_not(here, question, answer)
+    if reason is not None or answer.by is None:
+        return reason, None  # refused, or the timeout, which no person gives
+    role = role_that_counts(question.roles, answer.roles, catalog.roles)
+    if role is None:
+        return no_role(entry, question.roles, answer.by, answer.roles, catalog.roles), None
+    sets = question.sets.get(answer.outcome, ())
+    problem = form_problem(answer.outcome, sets, answer.form, plan.fields)
+    if problem is not None:
+        return problem, role
+    if isinstance(state, ApprovalState):
+        return judge_approval(state, plan, sources, catalog, answer.by, answer.roles, role)
+    return None, role
+
+
+def judge_approval(
+    state: ApprovalState,
+    plan: Plan,
+    sources: Mapping[str, frozenset[str]],
+    catalog: Catalog,
+    by: str,
+    stated: frozenset[str],
+    role: str,
+) -> tuple[str | None, str]:
+    """Why `by` may not give this approval, or None; and the role that counted, which for an
+    approval is one that may approve the activity's risk."""
+    try:
+        contract = approved(state, plan, catalog)
+    except Unapprovable as nothing:
+        # Fail closed: an approval of something the engine can't name approves nothing.
+        return f"{state.approval.of} can't be approved: {nothing}", role
+    approver = approver_role(state.approval.roles, stated, contract, catalog)
+    if approver is None:
+        return risk_refusal(role, catalog, contract), role
+    # Someone else: whoever's answer decides the run may not approve it (brief, D11).
+    field = set_by_them(by, used_by(state, plan), sources)
+    if field is not None:
+        return f"{by} set {field}, which {state.approval.of} uses, so cannot approve it", approver
+    return None, approver
 
 
 def why_not(here: str, question: Question, answer: Answer) -> str | None:

@@ -8,6 +8,7 @@ docs/guides/plans.md.
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from ventoux.core.approval import Unapprovable, approved, risk_refusal
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import (
@@ -32,6 +33,7 @@ from ventoux.core.plan import (
 )
 from ventoux.core.policy import OnlyFrom, Policy, refusal
 from ventoux.core.provenance import CASE, answering, provenance
+from ventoux.core.roles import may_approve
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
 
@@ -71,6 +73,7 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
         else:
             issues += approval_state_issues(f"states.{name}", name, state, plan)
             issues += role_issues(f"states.{name}.approval.roles", state.approval.roles, catalog)
+            issues += approval_role_issues(f"states.{name}.approval.roles", state, plan, catalog)
         for event, transitions in state.on.items():
             for path, transition in each_transition(f"states.{name}.on.{event}", transitions):
                 if transition.target not in plan.states:
@@ -113,6 +116,26 @@ def role_issues(path: str, roles: tuple[str, ...], catalog: Catalog) -> list[Iss
         )
         for role in roles
         if role not in catalog.roles
+    ]
+
+
+def approval_role_issues(
+    path: str, state: ApprovalState, plan: Plan, catalog: Catalog
+) -> list[Issue]:
+    """Every registered role an approval names may approve its activity's risk (brief, D22)."""
+    try:
+        contract = approved(state, plan, catalog)
+    except Unapprovable:
+        return []  # already APPROVAL_TARGET or UNKNOWN_ACTIVITY
+    return [
+        Issue(
+            path,
+            "APPROVAL_ROLE",
+            f"{risk_refusal(role, catalog, contract)}: name a role that may approve "
+            f"{contract.risk} risk",
+        )
+        for role in state.approval.roles
+        if role in catalog.roles and not may_approve(catalog.roles[role], contract.risk)
     ]
 
 

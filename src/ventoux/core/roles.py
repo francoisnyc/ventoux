@@ -54,3 +54,8 @@ def no_role(
     """Why `by` may not answer `entry`: the roles it needs, and the ones they have."""
     known = ", ".join(sorted(role for role in stated if role in registered)) or "no role"
     return f"{entry} is answered by {' or '.join(allowed)}, and {by} has {known}"
+
+
+def what_it_approves(approves: str | None) -> str:
+    """What a role may approve, as a message says it: `no risk`, `up to medium risk`."""
+    return "no risk" if approves is None else f"up to {approves} risk"

@@ -17,7 +17,7 @@ from ventoux.core.plan import PlanInvalid, parse_plan
 from ventoux.core.policy import only_from
 from ventoux.core.provenance import sourced
 from ventoux.core.validate import validate
-from ventoux.testing import CATALOG, FAKES, run_plan
+from ventoux.testing import CATALOG, FAKES, payments_refund, run_plan
 
 
 class RecordInput(BaseModel):
@@ -411,3 +411,114 @@ def test_a_rejection_takes_reject_and_the_activity_does_not_run() -> None:
     ]
     assert refunds == []
     assert run.status == "failed"
+
+
+def test_an_approval_role_that_may_not_approve_the_risk_is_an_issue() -> None:
+    assert issues_of(approving(roles=["support"])) == [
+        (
+            "states.approve_refund.approval.roles",
+            "APPROVAL_ROLE",
+            (
+                "support may approve no risk, and payments.refund@2 is high risk: name a role "
+                "that may approve high risk"
+            ),
+        )
+    ]
+    catalog = Catalog()
+    catalog.register(payments_refund)
+    catalog.register_role("support-lead", approves="medium")
+    found = validate(parse_plan(approving()), catalog)
+    assert [(i.code, i.message) for i in found] == [
+        (
+            "APPROVAL_ROLE",
+            (
+                "support-lead may approve up to medium risk, and payments.refund@2 is high risk: "
+                "name a role that may approve high risk"
+            ),
+        )
+    ]
+
+
+def test_an_approval_from_a_role_that_may_not_approve_the_risk_is_refused() -> None:
+    # Never validated: the runtime checks again, on nothing `validate` did.
+    run = run_plan(
+        approving(roles=["support", "support-lead"]),
+        fields=REFUND,
+        answers=[("approve_refund", "approve", "ana"), ("approve_refund", "approve", "sam")],
+        people=PEOPLE,
+    )
+    assert refusals(run) == [
+        (
+            "refused ana's answer approve: support may approve no risk, and payments.refund@2 is "
+            "high risk"
+        )
+    ]
+    assert "sam answered approve as support-lead" in lines(run)
+
+
+def reviewing_then_approving() -> dict[str, Any]:
+    """The guide's review-and-pay: support sets the amount, a team lead approves paying it."""
+    plan = reviewing()
+    plan["states"]["review"]["on"]["accept"] = "approve_refund"
+    plan["states"]["approve_refund"] = {
+        "approval": {"of": "pay", "roles": ["support-lead"]},
+        "on": {"approve": "pay", "reject": "failed"},
+    }
+    plan["states"]["pay"] = {
+        "activity": "payments.refund@2",
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+        "on": {"done": "written", "declined": "failed"},
+    }
+    del plan["states"]["write"]
+    return plan
+
+
+def test_a_person_whose_answer_flows_into_the_step_cannot_approve_it() -> None:
+    # Sam is a team lead, but Sam set the amount being paid (brief, D11).
+    run = run_plan(
+        reviewing_then_approving(),
+        fields=ORDER,
+        answers=[
+            ("review", "accept", "sam", {"approved_amount": Decimal(250)}),
+            ("approve_refund", "approve", "sam"),
+            ("approve_refund", "approve", "lee"),
+        ],
+        people={**PEOPLE, "lee": ["support-lead"]},
+    )
+    assert refusals(run) == [
+        (
+            "refused sam's answer approve: sam set approved_amount, which pay uses, so cannot "
+            "approve it"
+        )
+    ]
+    assert "lee answered approve as support-lead" in lines(run)
+    assert run.status == "succeeded"
+
+
+def test_a_person_whose_answer_decides_the_approval_cannot_give_it() -> None:
+    # Ana flagged the order as checked; the approval's `approve` runs pay only if it was. Ana is a
+    # team lead here, and still can't approve: her answer decides whether pay runs.
+    plan = approving()
+    plan["fields"]["checked"] = {"type": "boolean"}
+    plan["initial"] = "check"
+    plan["states"]["check"] = {
+        "wait": {"outcomes": ["done"], "roles": ["support"], "sets": {"done": ["checked"]}},
+        "on": {"done": "approve_refund"},
+    }
+    plan["states"]["approve_refund"]["on"]["approve"] = [
+        {"when": {"var": "checked"}, "target": "pay"}
+    ]
+    run = run_plan(
+        plan,
+        fields=REFUND,
+        answers=[
+            ("check", "done", "ana", {"checked": True}),
+            ("approve_refund", "approve", "ana"),
+            ("approve_refund", "approve", "sam"),
+        ],
+        people={**PEOPLE, "ana": ["support", "support-lead"]},
+    )
+    assert refusals(run) == [
+        "refused ana's answer approve: ana set checked, which pay uses, so cannot approve it"
+    ]
+    assert run.status == "succeeded"
