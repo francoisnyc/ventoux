@@ -17,7 +17,7 @@ from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
 
-__all__ = ["AnswerRefused", "load_definition", "run_case", "run_plan"]
+__all__ = ["Activity", "AnswerRefused", "load_definition", "run_case", "run_plan"]
 
 
 # The activities guide's contract, word for word: its test checks the two hash the same.
@@ -160,12 +160,20 @@ def run_case(
 
 
 def run_plan(
-    data: object, fields: Mapping[str, Sourced], answers: list[tuple[Any, ...]]
+    data: object,
+    fields: Mapping[str, Sourced],
+    answers: list[tuple[Any, ...]],
+    activities: Mapping[str, Activity] = FAKES,
 ) -> PlanRun:
-    """Run the plan stored as `data` in memory, with `fields`, playing the scripted `answers`.
+    """Run the plan stored as `data` in memory, with `fields`, playing the scripted `answers`,
+    calling the fake `activities` by reference.
 
     The plan's shape is checked (`parse_plan`); `validate` is not called: the runtime checks
     depend on nothing it did (docs/layers/05-interpreter.md).
     """
+
+    async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
+        return activities[reference](inputs)
+
     # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it to the end.
-    return asyncio.run(interpret(parse_plan(data), fields))
+    return asyncio.run(interpret(parse_plan(data), fields, CATALOG, call))
