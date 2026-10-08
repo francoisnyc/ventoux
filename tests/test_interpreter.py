@@ -470,3 +470,50 @@ def test_a_run_is_the_same_every_time() -> None:
         run_plan(guide_plan(), fields=GUIDE_FIELDS, answers=list(answers)) for _ in range(2)
     )
     assert first.history == second.history
+
+
+def guide_block(after: str) -> str:
+    """The guide's first fenced block after the text `after`, without its language tag."""
+    rest = GUIDE.read_text().split(after, 1)[1]
+    return rest.split("```", 1)[1].split("```", 1)[0].removeprefix("python").strip("\n")
+
+
+def test_the_guides_run() -> None:
+    # Our own documentation, run so it can't drift from the code; never a definition (data).
+    namespace: dict[str, Any] = {"refund_order": guide_plan()}
+    exec(guide_block("## Running a plan"), namespace)  # noqa: S102 -- our guide, as in layer 1
+    assert namespace["run"].status == "succeeded"
+
+
+def test_the_guides_history() -> None:
+    run = run_plan(
+        guide_plan(), fields=GUIDE_FIELDS, answers=[("approve_refund", "approve", "sam")]
+    )
+    assert lines(run) == guide_block("says what happened, one event per line").splitlines()
+
+
+def one_line(block: str) -> str:
+    """A message the guide wraps over several lines, as the one line the engine writes."""
+    return " ".join(line.strip() for line in block.splitlines() if line.strip())
+
+
+def test_the_guides_stopped_messages() -> None:
+    # The injection example with `suggested_recipient` left unmarked, given the model's value.
+    injection = json.loads(GUIDE.read_text().split("```json\n")[3].split("```")[0])
+    del injection["fields"]["suggested_recipient"]["source"]
+    run = run_plan(
+        injection,
+        fields={
+            "customer_email": sourced("ana@example.com", "system:crm"),
+            "suggested_recipient": sourced("attacker@evil.example", "untrusted:llm"),
+        },
+        answers=[],
+    )
+    assert lines(run)[-1] == one_line(guide_block("is ever called:"))
+
+    run = run_plan(
+        guide_fork(),
+        fields={**GUIDE_FIELDS, "amount": sourced("250", "system:opener")},
+        answers=[],
+    )
+    assert lines(run)[-1] == one_line(guide_block("to `pay`:"))

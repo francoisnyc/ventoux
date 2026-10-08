@@ -22,12 +22,13 @@ from ventoux.core.history import (
     Gave,
     Moved,
     Refused,
+    Scheduled,
     Started,
     Stopped,
     Waiting,
 )
 from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
-from ventoux.core.provenance import CASE, Sourced
+from ventoux.core.provenance import CASE, Sourced, provenance
 
 # How a run ends (docs/guides/plans.md, "Running a plan").
 Status = Literal["succeeded", "failed", "waiting", "stopped"]
@@ -109,7 +110,7 @@ async def interpret(
             elif isinstance(state, ActivityState):
                 # The step's run: the state, and how many times the run has entered it.
                 key = f"{here}#{entries[here]}"
-                gave = await run_activity(state, values, sources, key, catalog, call)
+                gave = await run_activity(state, values, sources, key, catalog, call, run)
                 run.history.append(gave)
                 here = choose(here, state.on, gave.event, values)
                 run.history.append(Moved(gave.event, here))
@@ -136,6 +137,7 @@ async def run_activity(
     key: str,
     catalog: Catalog,
     call: Call,
+    run: PlanRun,
 ) -> Gave:
     """Call the state's activity with its inputs, and say what it gave."""
     try:
@@ -146,6 +148,8 @@ async def run_activity(
         inputs = checked_inputs(contract, state.inputs, values, sources, key)
     except InputRefused as refused:
         raise Stop(str(refused)) from None
+    found = {name: provenance(expression, sources) for name, expression in state.inputs.items()}
+    run.history.append(Scheduled(contract.reference, inputs, found))
     try:
         output = await call(contract.reference, inputs)
     except Outcome as outcome:

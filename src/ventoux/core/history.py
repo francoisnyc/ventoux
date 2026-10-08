@@ -40,6 +40,22 @@ class Ended:
 
 
 @dataclass(frozen=True)
+class Scheduled:
+    """An activity was asked for, its inputs checked: what it was given, and from where."""
+
+    activity: str  # the activity's reference, such as `payments.refund@2`
+    inputs: dict[str, object]  # what it was given, the engine's key included
+    sources: dict[str, frozenset[str]]  # where each input written in the plan came from
+
+    def __str__(self) -> str:
+        origins = "; ".join(
+            f"{name} from {', '.join(sorted(found)) or 'the plan'}"
+            for name, found in self.sources.items()
+        )
+        return f"scheduled {self.activity} ({origins})"
+
+
+@dataclass(frozen=True)
 class Gave:
     """An activity answered: `done`, with its output, or one of its declared outcomes."""
 
@@ -112,4 +128,6 @@ class Stopped:
 # What happens after a stop, said in every one: nothing is skipped automatically (brief, D17).
 AFTER_A_STOP = "the step needs attention, and nothing after it runs"
 
-type Event = Started | Entered | Gave | Waiting | Answered | Refused | Moved | Ended | Stopped
+type Event = (
+    Started | Entered | Scheduled | Gave | Waiting | Answered | Refused | Moved | Ended | Stopped
+)
