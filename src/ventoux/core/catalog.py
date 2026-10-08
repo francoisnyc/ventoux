@@ -3,6 +3,7 @@
 from ventoux.core.contract import ActivityContract, is_reference
 from ventoux.core.contract_hash import contract_hash
 from ventoux.core.provenance import is_label
+from ventoux.core.roles import checked_role
 
 
 class NotInCatalog(LookupError):
@@ -19,6 +20,7 @@ class Catalog:
     def __init__(self) -> None:
         self._contracts: dict[str, ActivityContract] = {}  # by reference, `payments.refund@1`
         self._labels: set[str] = set()  # the labels a field may be declared untrusted with
+        self._roles: dict[str, str | None] = {}  # each role, and the highest risk it may approve
 
     def register_label(self, label: str) -> None:
         """Let fields be declared `untrusted:<label>`. Registered by the platform team, like roles,
@@ -33,6 +35,18 @@ class Catalog:
     def labels(self) -> list[str]:
         """The registered labels, in order."""
         return sorted(self._labels)
+
+    def register_role(self, name: str, approves: str | None = None) -> None:
+        """Let waits and approvals name the role `name`, which may approve activities up to the
+        risk `approves` (none by default). Registered by the platform team, like labels, so a
+        typo is caught (brief, D22)."""
+        checked_role(name, approves)
+        self._roles[name] = approves
+
+    @property
+    def roles(self) -> dict[str, str | None]:
+        """The registered roles, in order, each with the highest risk it may approve."""
+        return dict(sorted(self._roles.items()))
 
     def register(self, contract: ActivityContract) -> None:
         # Every rule runs again on what is registered: a copy made with `model_copy` skipped them all
