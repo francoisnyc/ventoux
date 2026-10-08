@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
-from ventoux.core.interpreter import PlanRun, RunRefused
+from ventoux.core.interpreter import Outcome, PlanRun, RunRefused
 from ventoux.core.plan import PlanInvalid, parse_plan
 from ventoux.core.policy import only_from
 from ventoux.core.provenance import sourced
@@ -522,3 +522,116 @@ def test_a_person_whose_answer_decides_the_approval_cannot_give_it() -> None:
         "refused ana's answer approve: ana set checked, which pay uses, so cannot approve it"
     ]
     assert run.status == "succeeded"
+
+
+def amending() -> dict[str, Any]:
+    """Review, approval, then a chance to amend the amount before paying. `validate` refuses it
+    (APPROVAL_TARGET: approve must lead straight to pay); the runtime checks on its own."""
+    plan = reviewing_then_approving()
+    plan["states"]["approve_refund"]["on"]["approve"] = "amend"
+    plan["states"]["amend"] = {
+        "wait": {
+            "outcomes": ["amend", "keep"],
+            "roles": ["support"],
+            "sets": {"amend": ["approved_amount"]},
+        },
+        "on": {"amend": "pay", "keep": "pay"},
+    }
+    return plan
+
+
+def recording_refunds(refunds: list[dict[str, Any]]) -> Any:
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        refunds.append(inputs)
+        return {"refund_id": "r-1"}
+
+    return refund
+
+
+@pytest.mark.parametrize("amended", [Decimal(300), Decimal(40)])
+def test_an_approval_lapses_when_an_input_changes_before_the_step_runs(amended: Decimal) -> None:
+    # Up or down, the approval saw other values: it is tied to the values it saw (brief, D11).
+    assert "APPROVAL_TARGET" in [code for _, code, _ in issues_of(amending())]
+    refunds: list[dict[str, Any]] = []
+    run = run_plan(
+        amending(),
+        fields=ORDER,
+        answers=[
+            ("review", "accept", "ana", {"approved_amount": Decimal(250)}),
+            ("approve_refund", "approve", "sam"),
+            ("amend", "amend", "ana", {"approved_amount": amended}),
+        ],
+        activities={**FAKES, "payments.refund@2": recording_refunds(refunds)},
+        people=PEOPLE,
+    )
+    assert refunds == []
+    assert run.status == "stopped"
+    assert (
+        run.reason == "the inputs of pay changed since sam approved them: a new approval is needed"
+    )
+
+
+def test_an_approval_holds_when_its_inputs_are_unchanged() -> None:
+    refunds: list[dict[str, Any]] = []
+    run = run_plan(
+        amending(),
+        fields=ORDER,
+        answers=[
+            ("review", "accept", "ana", {"approved_amount": Decimal(250)}),
+            ("approve_refund", "approve", "sam"),
+            ("amend", "keep", "ana"),
+        ],
+        activities={**FAKES, "payments.refund@2": recording_refunds(refunds)},
+        people=PEOPLE,
+    )
+    assert [r["amount"] for r in refunds] == [Decimal(250)]
+    assert run.status == "succeeded"
+
+
+def test_a_high_risk_activity_nobody_approved_stops_even_unvalidated() -> None:
+    plan = approving()
+    plan["initial"] = "pay"  # straight to the refund, past the approval
+    refunds: list[dict[str, Any]] = []
+    run = run_plan(
+        plan,
+        fields=REFUND,
+        answers=[],
+        activities={**FAKES, "payments.refund@2": recording_refunds(refunds)},
+        people=PEOPLE,
+    )
+    assert refunds == []
+    assert run.reason == "payments.refund@2 is high risk, and nobody approved this run of pay"
+
+
+def test_an_approval_is_spent_when_its_step_is_scheduled() -> None:
+    # Declined, the refund goes straight back to pay: `validate` refuses it (APPROVAL_REUSED), and
+    # at runtime the second pass has no approval of its own.
+    plan = approving()
+    plan["states"]["pay"]["on"]["declined"] = "pay"
+    calls: list[dict[str, Any]] = []
+
+    def declines(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs)
+        raise Outcome("declined")
+
+    run = run_plan(
+        plan,
+        fields=REFUND,
+        answers=[("approve_refund", "approve", "sam")],
+        activities={**FAKES, "payments.refund@2": declines},
+        people=PEOPLE,
+    )
+    assert len(calls) == 1
+    assert run.reason == "payments.refund@2 is high risk, and nobody approved this run of pay"
+
+
+def test_an_approval_of_inputs_that_cannot_be_read_yet_stops_the_step() -> None:
+    # Approving before anyone set the amount would approve a value nobody has seen.
+    plan = reviewing_then_approving()
+    plan["initial"] = "approve_refund"
+    run = run_plan(
+        plan, fields=ORDER, answers=[("approve_refund", "approve", "sam")], people=PEOPLE
+    )
+    assert run.status == "stopped"
+    assert run.reason is not None
+    assert run.reason.startswith("the inputs of pay can't be read: approved_amount")

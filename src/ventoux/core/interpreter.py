@@ -15,6 +15,7 @@ from ventoux.core.approval import (
     Unapprovable,
     approved,
     approver_role,
+    inputs_digest,
     risk_refusal,
     set_by_them,
     used_by,
@@ -37,6 +38,7 @@ from ventoux.core.history import (
     Waiting,
 )
 from ventoux.core.plan import (
+    APPROVE,
     ActivityState,
     ApprovalState,
     FinalState,
@@ -138,6 +140,8 @@ async def interpret(
         for name, given in fields.items()
     }
     entries: Counter[str] = Counter()  # how many times the run has entered each state
+    # Each activity state's open approval: who gave it, and the digest of the inputs they saw.
+    approvals: dict[str, Approved] = {}
     since_a_wait = 0  # states entered since a wait last took an answer
     here = plan.initial
     try:
@@ -158,6 +162,7 @@ async def interpret(
                 run.history.append(Ended(state.final))
                 run.status = "succeeded" if state.final == "succeeded" else "failed"
             elif isinstance(state, ActivityState):
+                check_approval(here, state, values, catalog, approvals)
                 # The step's run: the run, the state, and how many times the run has entered it,
                 # so a retry reuses the key and another pass or another run never does (brief, D17).
                 key = f"{run_name}/{here}#{entries[here]}"
@@ -175,6 +180,8 @@ async def interpret(
                 answer, role = taken
                 setting = asked(state).sets.get(answer.outcome, ())
                 run.history.append(Answered(answer.outcome, answer.by, role, setting))
+                if isinstance(state, ApprovalState) and answer.outcome == APPROVE:
+                    approvals[state.approval.of] = approval_of(state, plan, values, answer)
                 # A form's values land in the run's fields, tagged with who answered (brief, D9);
                 # the latest answer replaces an earlier pass's.
                 for name in setting:
@@ -261,6 +268,58 @@ async def take_answer(
             return answer, role
         run.history.append(Refused(answer.outcome, answer.by, reason))
     return None
+
+
+@dataclass(frozen=True)
+class Approved:
+    """An approval given and not yet spent: who gave it, and what they saw."""
+
+    by: str  # who approved
+    digest: str  # the digest of the inputs they saw (brief, D11)
+
+
+def approval_of(
+    state: ApprovalState, plan: Plan, values: Mapping[str, object], answer: Answer
+) -> Approved:
+    """The approval `answer` gives, tied to the inputs its activity would be given now."""
+    target = plan.states.get(state.approval.of)
+    if not isinstance(target, ActivityState):  # `judge` already refused it: never assumed
+        raise Stop(f"{state.approval.of} can't be approved: it is not an activity state")
+    try:
+        return Approved(str(answer.by), inputs_digest(target, values))
+    except ExpressionError as error:
+        # Fail closed: an approval of inputs that can't be read approves nothing.
+        raise Stop(f"the inputs of {state.approval.of} can't be read: {error}") from None
+
+
+def check_approval(
+    here: str,
+    state: ActivityState,
+    values: Mapping[str, object],
+    catalog: Catalog,
+    approvals: dict[str, Approved],
+) -> None:
+    """Spend the open approval of `here` if it saw these inputs; stop the step if it saw others,
+    or if a high-risk activity has none. One approval unlocks one run of one step (brief, D11)."""
+    approval = approvals.pop(here, None)  # spent, whatever happens next
+    if approval is not None:
+        try:
+            now = inputs_digest(state, values)
+        except ExpressionError:
+            return  # can't be read: the input check stops the step, saying why
+        if now != approval.digest:
+            raise Stop(
+                f"the inputs of {here} changed since {approval.by} approved them: a new approval "
+                "is needed"
+            )
+        return
+    try:
+        contract = catalog.get(state.activity)
+    except NotInCatalog:
+        return  # the activity check stops the step, saying why
+    # Checked again at runtime, on nothing `validate` did (learning question 34).
+    if contract.risk == "high":
+        raise Stop(f"{contract.reference} is high risk, and nobody approved this run of {here}")
 
 
 def judge(

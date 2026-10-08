@@ -2,14 +2,16 @@
 
 An approval is its own state (brief, D23). This module holds what only an approval checks, after
 the checks every answer passes: the role may approve the activity's risk, and the person is
-someone else.
+someone else; and the digest of the inputs it saw.
 """
 
+import hashlib
+import json
 from collections.abc import Mapping
 
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
-from ventoux.core.expressions import Expression
+from ventoux.core.expressions import Expression, evaluate
 from ventoux.core.plan import APPROVE, ActivityState, ApprovalState, Plan
 from ventoux.core.provenance import fields_read
 from ventoux.core.roles import may_approve, what_it_approves
@@ -73,3 +75,14 @@ def set_by_them(
             if f"person:{person}" in sources.get(field, frozenset()):
                 return field
     return None
+
+
+def inputs_digest(state: ActivityState, values: Mapping[str, object]) -> str:
+    """The digest of the values `state`'s activity would be given now: what an approval saw, so
+    a change, up or down, is noticed before the activity runs (brief, D11). Evaluating an input
+    that can't be read raises `ExpressionError`."""
+    seen = {name: evaluate(expression, values) for name, expression in state.inputs.items()}
+    # Canonical JSON: keys sorted, a number written as its exact text, marked apart from a text,
+    # so `250` and `"250"` never share a digest.
+    canonical = json.dumps(seen, sort_keys=True, default=lambda number: {"number": str(number)})
+    return hashlib.sha256(canonical.encode()).hexdigest()
