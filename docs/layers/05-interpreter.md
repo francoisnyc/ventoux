@@ -1,6 +1,7 @@
 # Layer 5: the deterministic interpreter, in memory
 
-Status: design agreed in the session, 2026-10-07; building (slices 1–6 done).
+Status: design agreed in the session, 2026-10-07; built, slices 1–7; Promises checked against
+the tests, 2026-10-08.
 
 ## What this layer is for
 
@@ -212,24 +213,28 @@ keeps naming layer 6. The quickstart's tests stay green.
 ## Promises
 
 Each claim this note makes about behaviour, and the test that fails if it isn't true. `I` is
-`tests/test_interpreter.py`, `Q` `tests/test_quickstart.py`. Test names are planned; the table is
-checked against the code before the pull request.
+`tests/test_interpreter.py`, `Q` `tests/test_quickstart.py`. Checked against the code before the
+pull request: every test named exists, every interpreter test is named, and the tests that passed
+as soon as they were written were each seen failing with the code they cover broken.
 
 | Promise | Test |
 |---|---|
-| A run refuses to start with a field missing, undeclared, with no sources, or from `case` | I `test_a_run_needs_every_field_with_its_sources`, `test_case_is_not_a_source_at_runtime` |
+| A run refuses to start with a field missing, undeclared, with no sources, or from `case` | I `test_a_run_needs_every_field_with_its_sources`, `test_a_run_needs_exactly_the_declared_fields`, `test_case_is_not_a_source_at_runtime` |
+| A run ends as its final state says | I `test_a_run_ends_as_its_final_state_says`, `test_a_declared_outcome_moves_on` |
 | The runtime check uses the real sources: an injection the static check passes is stopped before the activity is called | I `test_with_the_static_check_skipped_the_runtime_check_still_blocks_the_injection` |
 | A field marked untrusted stays untrusted, whatever the case gives | I `test_a_mark_adds_distrust_never_removes_it` |
+| A value its policy refuses is never evaluated: policies come first | I `test_a_value_its_policy_refuses_is_never_evaluated` |
+| Trusted values reach the activity, evaluated | I `test_trusted_values_pass_with_the_key_the_engine_fills`, `test_done_moves_on_with_the_evaluated_inputs` |
 | Inputs that don't fit the contract stop the step before it is called | I `test_an_input_that_does_not_fit_the_contract_stops_the_step` |
 | An input the contract doesn't take, or that can't be evaluated, stops the step | I `test_an_input_the_contract_does_not_take_stops_the_step`, `test_an_input_that_cannot_be_evaluated_stops_the_step` |
 | A condition that can't be evaluated, or isn't a boolean, stops the step; the next transition is never tried | I `test_a_condition_that_cannot_be_evaluated_stops_instead_of_skipping_the_approval`, `test_a_condition_must_give_a_boolean` |
 | An unhandled event, no transition holding, an unknown target or activity stop the step | I `test_what_the_plan_does_not_say_stops_the_step`, `test_no_transition_holding_stops_the_step`, `test_an_activity_the_catalog_does_not_hold_stops_the_step` |
 | Transitions are tried in order; the first that holds is taken | I `test_transitions_are_tried_in_order` |
-| An activity failing, an undeclared outcome, or an output that doesn't fit stops the step; a declared outcome moves on | I `test_an_activity_failure_stops_the_step`, `test_a_declared_outcome_moves_on` |
+| An activity failing, an undeclared outcome, or an output that doesn't fit stops the step; a declared outcome moves on | I `test_an_activity_failure_stops_the_step`, `test_an_outcome_the_contract_does_not_declare_stops_the_step`, `test_an_output_the_contract_does_not_declare_stops_the_step`, `test_a_declared_outcome_moves_on` |
 | An answer the wait doesn't offer, a `timeout` it doesn't declare or that a person sends, and an answer naming nobody are refused, and the wait goes on | I `test_an_answer_the_wait_does_not_offer_is_refused`, `test_a_wait_takes_only_answers_it_can_be_given` |
 | A declared timeout moves on by its `timeout` transition | I `test_a_declared_timeout_moves_on` |
 | A run with no answer left is `waiting`, not ended | I `test_a_run_without_its_answer_waits` |
-| The key is the state and its entry count | I `test_the_key_is_the_state_and_its_run` |
+| The key is the state and its entry count, and replaces any value a plan gives it | I `test_trusted_values_pass_with_the_key_the_engine_fills`, `test_the_key_is_the_state_and_its_run`, `test_the_engines_key_replaces_any_a_plan_gives` |
 | The same plan, fields and answers give the same history | I `test_a_run_is_the_same_every_time` |
 | The guide's run, history and messages are what the code does | I `test_the_guides_run`, `test_the_guides_history`, `test_the_guides_stopped_messages` |
 | The tracer runner checks inputs before an activity; the quickstart stays green | Q `test_an_input_that_does_not_fit_is_refused_before_the_refund`, the quickstart's tests |

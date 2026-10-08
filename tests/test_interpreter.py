@@ -517,3 +517,37 @@ def test_the_guides_stopped_messages() -> None:
         answers=[],
     )
     assert lines(run)[-1] == one_line(guide_block("to `pay`:"))
+
+
+def test_a_value_its_policy_refuses_is_never_evaluated() -> None:
+    # The policy is checked on where the value comes from; what it would be doesn't matter.
+    poisoned = drafting()
+    poisoned["states"]["draft"]["inputs"]["to_customer"] = {
+        "cat": [{"var": "suggested_recipient"}, {"string": [{"/": [1, 0]}]}]
+    }
+    run = run_plan(
+        poisoned,
+        fields={
+            "customer_email": sourced("ana@example.com", "system:crm"),
+            "suggested_recipient": sourced("attacker@evil.example", "untrusted:llm"),
+        },
+        answers=[],
+    )
+    assert run.reason is not None
+    assert run.reason.startswith("letters.draft@2 takes to_customer only from")
+
+
+def test_the_engines_key_replaces_any_a_plan_gives() -> None:
+    calls: list[dict[str, Any]] = []
+    keyed = drafting()
+    keyed["states"]["draft"]["inputs"]["idempotency_key"] = "mine"  # validate: ENGINE_INPUT
+    run_plan(
+        keyed,
+        fields={
+            "customer_email": sourced("ana@example.com", "system:crm"),
+            "suggested_recipient": sourced("ana@example.com", "person:sam"),
+        },
+        answers=[],
+        activities={"letters.draft@2": recording(calls)},
+    )
+    assert [call["idempotency_key"] for call in calls] == ["draft#1"]
