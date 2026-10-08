@@ -368,7 +368,7 @@ recorded, and the wait goes on:
 |---|---|
 | the outcome isn't one the wait offers | `refused sam's answer aprove: approve_refund offers approve or reject` |
 | the person has none of the wait's roles | `refused bob's answer approve: approve_refund#1 is answered by support-lead, and bob has support` |
-| the form doesn't fit what the outcome sets | `refused ana's answer accept: approved_amount is a number, and the answer gives the string '250'` |
+| the form doesn't fit what the outcome sets | `refused ana's answer accept: approved_amount is a number, and the answer gives '250'` |
 | for an approval: the person's answer flows into what it approves | `refused ana's answer approve: ana set approved_amount, which pay uses, so cannot approve it` |
 
 **Someone else, computed.** Nobody lists who may not approve: the engine reads it from where

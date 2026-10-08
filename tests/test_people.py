@@ -4,7 +4,9 @@ Tests go through the catalog, `parse_plan`, `validate` and `run_plan`, and read 
 See docs/layers/07-people.md and docs/guides/plans.md, "People in the loop".
 """
 
+import json
 from decimal import Decimal
+from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
@@ -635,3 +637,93 @@ def test_an_approval_of_inputs_that_cannot_be_read_yet_stops_the_step() -> None:
     assert run.status == "stopped"
     assert run.reason is not None
     assert run.reason.startswith("the inputs of pay can't be read: approved_amount")
+
+
+def test_an_approval_of_something_that_is_no_activity_approves_nothing() -> None:
+    # Never validated (APPROVAL_TARGET): the runtime refuses the answer, never guesses.
+    run = run_plan(
+        approving(of="paid"),
+        fields=REFUND,
+        answers=[("approve_refund", "approve", "sam")],
+        people=PEOPLE,
+    )
+    assert refusals(run) == [
+        "refused sam's answer approve: paid can't be approved: paid is not an activity state"
+    ]
+    assert run.status == "waiting"
+
+
+GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
+PEOPLE_SECTION = GUIDE.read_text().split("## People in the loop\n")[1].split("\n## ")[0]
+
+
+def guide_review_and_pay() -> dict[str, Any]:
+    """The guide's review then approval, its fourth JSON block."""
+    example = GUIDE.read_text().split("```json\n")[4].split("```")[0]
+    plan: dict[str, Any] = json.loads(example, parse_float=Decimal)
+    return plan
+
+
+def test_the_guides_people_example_runs_as_written() -> None:
+    # Our own documentation, run so it can't drift from the code; never a definition (data).
+    code = PEOPLE_SECTION.split("```python\n")[2].split("```")[0]
+    namespace: dict[str, Any] = {
+        "review_and_pay": guide_review_and_pay(),
+        "run_plan": run_plan,
+        "sourced": sourced,
+        "Decimal": Decimal,
+    }
+    exec(code, namespace)  # noqa: S102 -- our guide, as in layer 1
+    # The plain block under the example: its history, from Ana's answer on.
+    start = PEOPLE_SECTION.index("ana answered accept")
+    shown = PEOPLE_SECTION[start:].split("```")[0].splitlines()
+    history = lines(namespace["run"])
+    # The lines the guide shows appear in the run's history, in order; `...` skips some.
+    found = [history.index(line) for line in shown if line != "..."]
+    assert found == sorted(found)
+
+
+# Each "Refused when" row of the guide's table, and a run that is refused that way.
+GUIDE_REFUSALS: dict[str, Any] = {
+    "the outcome isn't one the wait offers": lambda: run_plan(
+        approving(), REFUND, [("approve_refund", "aprove", "sam")], people=PEOPLE
+    ),
+    "the person has none of the wait's roles": lambda: run_plan(
+        approving(),
+        REFUND,
+        [("approve_refund", "approve", "bob")],
+        people={"bob": ["support"]},
+    ),
+    "the form doesn't fit what the outcome sets": lambda: run_plan(
+        guide_review_and_pay(),
+        ORDER,
+        [("review", "accept", "ana", {"approved_amount": "250"})],
+        people=PEOPLE,
+    ),
+    "for an approval: the person's answer flows into what it approves": lambda: run_plan(
+        guide_review_and_pay(),
+        ORDER,
+        [
+            ("review", "accept", "ana", {"approved_amount": Decimal(250)}),
+            ("approve_refund", "approve", "ana"),
+        ],
+        people={"ana": ["support", "support-lead"]},
+    ),
+}
+
+
+def guide_refusal_rows() -> list[tuple[str, str]]:
+    """The rows of the guide's table "Refused when | Example", code unquoted."""
+    table = PEOPLE_SECTION.split("| Refused when | Example |")[1].split("\n\n")[0]
+    rows = [line.split("|") for line in table.splitlines()[2:] if line.startswith("| ")]
+    return [(when.strip(), example.strip().strip("`")) for _, when, example, _ in rows]
+
+
+@pytest.mark.parametrize(("when", "example"), guide_refusal_rows())
+def test_the_guides_refusals_are_what_the_engine_says(when: str, example: str) -> None:
+    assert when in GUIDE_REFUSALS, f"the guide's row {when!r} has no test"
+    assert example in refusals(GUIDE_REFUSALS[when]())
+
+
+def test_every_refusal_in_the_guide_is_tested() -> None:
+    assert [when for when, _ in guide_refusal_rows()] == list(GUIDE_REFUSALS)
