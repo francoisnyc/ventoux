@@ -1,9 +1,8 @@
 # Plans: several calls and waits as one step
 
 > **For workflow developers.** Plans are an advanced concept (brief, D13): most cases need only
-> tasks and activities. This guide describes layer 3 as if it already worked; the code that makes it
-> true is built test-first in that layer. It covers what `ventoux check` proves about a plan before
-> it runs. Running a plan comes at layer 5.
+> tasks and activities. This guide describes what `ventoux check` proves about a plan before it
+> runs (layers 3 and 4), and how a plan runs (layer 5, in memory; on Temporal from layer 6).
 
 **The rule of thumb:** use a plan when several calls and waits belong together as one step *and*
 must be data, because an AI drafts it or because the approval sheet must say what it will never
@@ -178,5 +177,108 @@ Three things to know:
   either.
 
 What the check doesn't prove yet: that an input's type matches the contract's (checked when the
-step runs, layer 5), who may approve (layer 7), and whether an untrusted value steers a condition
+step runs: see below), who may approve (layer 7), and whether an untrusted value steers a condition
 (design question 17).
+
+## Running a plan
+
+A plan runs inside a case step: the case gives it its fields, each value with where it came from.
+In tests, `run_plan` runs it in memory, with fake activities and scripted answers:
+
+```python
+from decimal import Decimal
+
+from ventoux.core.provenance import sourced
+from ventoux.testing import run_plan
+
+run = run_plan(
+    refund_order,  # the plan at the top of this guide, as stored data
+    fields={
+        "order_id": sourced("A-1001", "system:orders"),
+        "amount": sourced(Decimal("250"), "system:opener"),
+    },
+    answers=[("approve_refund", "approve", "sam")],
+)
+assert run.status == "succeeded"
+```
+
+`run.history` says what happened, one event per line:
+
+```
+started refund-order@1
+entered check_order
+scheduled orders.lookup@1 (order_id from system:orders)
+orders.lookup@1 gave done
+moved on done to approve_refund
+entered approve_refund
+waiting for approve or reject, at most 48h
+sam answered approve
+moved on approve to pay
+entered pay
+scheduled payments.refund@2 (order_id from system:orders; amount from system:opener)
+payments.refund@2 gave done
+moved on done to paid
+entered paid
+ended succeeded
+```
+
+The engine never reads the clock and calls nothing itself: it asks for each activity and each
+answer, and everything it decides follows from what it was given and what it was told. That is
+why, on Temporal, a run can be replayed from its history and make the same decisions.
+
+A run ends in one of four ways:
+
+| `run.status` | What happened |
+|---|---|
+| `succeeded` | it reached a final state `succeeded` |
+| `failed` | it reached a final state `failed`: the plan itself said how it fails |
+| `waiting` | it waits for an answer that hasn't come (in tests: the script ran out) |
+| `stopped` | something went wrong; the step needs attention, and nothing after it runs |
+
+**Nothing is skipped.** A plan stops, and waits for a person, rather than guess (brief, D17). It
+stops when:
+
+- **an input's value comes from somewhere its policy refuses.** `ventoux check` read where the
+  plan's fields come from; before each activity, the engine checks again with where each value
+  really came from. Take the injection example above with `suggested_recipient` left unmarked:
+  the check passes it, since the case vouches for an unmarked field. Run it with the model's
+  suggestion, `sourced("attacker@evil.example", "untrusted:llm")`, and the engine refuses before
+  `letters.draft@2` is ever called:
+
+  ```
+  stopped at draft: letters.draft@2 takes to_customer only from a system or a person, never from
+  untrusted data, and this value comes from suggested_recipient (untrusted:llm): the step needs
+  attention, and nothing after it runs
+  ```
+
+  A field marked untrusted in the plan stays untrusted, whatever the case says: a mark can add
+  distrust, never remove it.
+- **an input doesn't fit the contract,** such as a text where it takes a number;
+- **a condition can't be evaluated.** The fork shown in "What `ventoux check` proves", run with
+  `amount` given as the text `"250"`, stops at `check_order`, and never tries the next transition
+  to `pay`:
+
+  ```
+  stopped at check_order: on done, amount > 100 can't be evaluated: `>` compares numbers, and it
+  was given a string: '250': the step needs attention, and nothing after it runs
+  ```
+
+  The same holds for a condition that gives anything but `true` or `false`, for an event the
+  state's `on` doesn't handle, and for a list of transitions none of which holds;
+- **an activity fails** with anything but one of its declared outcomes, or gives an output its
+  contract doesn't declare;
+- the plan names an activity the catalog doesn't hold, or a state it doesn't have;
+- **it loops without waiting:** after 1,000 states entered with no wait taking an answer, the run
+  stops ("a plan that loops needs a wait or an end"). A loop through a wait, such as a retry each
+  pass approves, doesn't count against it.
+
+A run also refuses to start when a field is missing, isn't declared, or comes with no sources. An
+answer the wait doesn't offer (or `timeout` from a wait without one) is refused, and the wait goes
+on.
+
+The engine fills each activity's idempotency key: the state and how many times the run has
+entered it (`pay#1`, then `pay#2` on a second pass), so a retry reuses the key and a second pass
+never does (brief, D17). On Temporal the key also names the run.
+
+Not yet: who may answer or approve (layer 7), retries and real timers (layer 6), and an
+activity's output reaching the case file (layer 8).

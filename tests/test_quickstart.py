@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from ventoux.core.expressions import ExpressionInvalid
-from ventoux.testing import AnswerRefused, load_definition, run_case
+from ventoux.testing import AnswerRefused, InputRefused, load_definition, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 
@@ -140,4 +140,14 @@ def test_whoever_decides_whether_the_step_runs_cannot_approve_it() -> None:
                 ("review", "approve", "sam", {"approved_amount": 250}),
                 ("pay", "approve", "sam"),
             ],
+        )
+
+
+def test_an_input_that_does_not_fit_is_refused_before_the_refund() -> None:
+    # The same check as a plan's, before every activity (docs/layers/05-interpreter.md).
+    with pytest.raises(InputRefused, match="order_id: Input should be a valid string"):
+        run_case(
+            REFUND,
+            file={"order_id": 1001, "amount": 40},  # a number: payments.refund@2 takes a text
+            answers=[("review", "approve", "ana", {"approved_amount": 40})],
         )

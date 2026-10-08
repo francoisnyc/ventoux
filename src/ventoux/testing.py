@@ -1,6 +1,8 @@
 """Run cases in memory, in tests: no Temporal server, scripted answers, fake activities."""
 
+import asyncio
 import json
+from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
@@ -8,11 +10,15 @@ from typing import Annotated, Any
 from pydantic import BaseModel
 
 from ventoux.case.runner import Activity, AnswerRefused, Run, run
+from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.interpreter import Answer, PlanRun, interpret
+from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
+from ventoux.core.provenance import Sourced
 
-__all__ = ["AnswerRefused", "load_definition", "run_case"]
+__all__ = ["Activity", "AnswerRefused", "InputRefused", "load_definition", "run_case", "run_plan"]
 
 
 # The activities guide's contract, word for word: its test checks the two hash the same.
@@ -152,3 +158,33 @@ def run_case(
 ) -> Run:
     """Open a case with `file`, play the scripted `answers`, and report where it ended."""
     return run(definition, file, answers, CATALOG, FAKES, PEOPLE)
+
+
+def run_plan(
+    data: object,
+    fields: Mapping[str, Sourced],
+    answers: list[tuple[Any, ...]],
+    activities: Mapping[str, Activity] = FAKES,
+) -> PlanRun:
+    """Run the plan stored as `data` in memory, with `fields`, playing the scripted `answers`,
+    calling the fake `activities` by reference.
+
+    The plan's shape is checked (`parse_plan`); `validate` is not called: the runtime checks
+    depend on nothing it did (docs/layers/05-interpreter.md).
+    """
+
+    script = list(answers)  # each answer is (state, outcome, who), or (state, "timeout")
+
+    async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
+        return activities[reference](inputs)
+
+    async def wait(state: str, outcomes: tuple[str, ...], timeout: str | None) -> Answer | None:
+        """The next scripted answer to `state`, or None once the script has none left for it."""
+        for answer in script:
+            if answer[0] == state:
+                script.remove(answer)
+                return Answer(answer[1], answer[2] if len(answer) > 2 else None)
+        return None
+
+    # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it to the end.
+    return asyncio.run(interpret(parse_plan(data), fields, CATALOG, call, wait))

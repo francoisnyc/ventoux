@@ -1,0 +1,76 @@
+"""The check before an activity: what an activity is given, checked with the real sources of
+each value, before it is scheduled (layer 5).
+
+The static check (`validate`, layer 4) reads where a plan's fields are declared to come from; this
+one reads where each value really came from. Used by the interpreter and the tracer's case runner.
+See docs/layers/05-interpreter.md.
+"""
+
+from collections.abc import Mapping
+
+from pydantic import ValidationError
+
+from ventoux.core.contract import ActivityContract
+from ventoux.core.expressions import Expression, ExpressionError, evaluate
+from ventoux.core.policy import refusal
+from ventoux.core.provenance import provenance
+
+
+class InputRefused(Exception):
+    """An activity's inputs the engine won't give it: what is wrong."""
+
+
+def checked_inputs(
+    contract: ActivityContract,
+    inputs: Mapping[str, Expression],
+    values: Mapping[str, object],
+    sources: Mapping[str, frozenset[str]],
+    key: str,
+) -> dict[str, object]:
+    """The inputs `contract`'s activity gets, evaluated from `values`, with the idempotency `key`
+    if it takes one; or `InputRefused`.
+
+    `sources` are where each value really came from, never only what a definition declared.
+    """
+    # Every policy on every input, before anything else (brief, D21): the injection is refused
+    # on where the value came from, whatever it says.
+    for field, expression in inputs.items():
+        found = provenance(expression, sources)
+        for policy in contract.policies(field):
+            if policy.refuses(found) is not None:
+                raise InputRefused(refusal(contract.reference, field, policy, expression, sources))
+    given = {field: evaluated(field, expression, values) for field, expression in inputs.items()}
+    # The engine fills the key, never a definition: the same for a retry, new for each run of the
+    # step (brief, D17).
+    if contract.idempotency_key is not None:
+        given[contract.idempotency_key] = key
+    # Fail closed: Pydantic ignores a field the model doesn't declare; an activity never gets one.
+    unknown = sorted(set(given) - set(contract.input.model_fields))
+    if unknown:
+        raise InputRefused(
+            f"{contract.reference} doesn't take these inputs: "
+            + "; ".join(f"{name}: not an input it takes" for name in unknown)
+        )
+    try:
+        # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
+        contract.input.model_validate(given)
+    except ValidationError as error:
+        raise InputRefused(
+            f"{contract.reference} doesn't take these inputs: {one_line(error)}"
+        ) from None
+    return given
+
+
+def one_line(error: ValidationError) -> str:
+    """Pydantic's errors as one line: `status: Field required; amount: …`."""
+    return "; ".join(
+        f"{'.'.join(str(part) for part in e['loc'])}: {e['msg']}" for e in error.errors()
+    )
+
+
+def evaluated(field: str, expression: Expression, values: Mapping[str, object]) -> object:
+    """The input's value, or `InputRefused`: one that can't be evaluated never gets a default."""
+    try:
+        return evaluate(expression, values)
+    except ExpressionError as error:
+        raise InputRefused(f"{field} can't be evaluated: {error}") from None

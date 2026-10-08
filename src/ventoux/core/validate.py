@@ -20,8 +20,8 @@ from ventoux.core.expressions import (
 from ventoux.core.expressions.check import a_type
 from ventoux.core.graph import Arrow, arrows, reach, shortest_path
 from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
-from ventoux.core.policy import OnlyFrom, Policy
-from ventoux.core.provenance import CASE, fields_read, provenance
+from ventoux.core.policy import OnlyFrom, Policy, refusal
+from ventoux.core.provenance import CASE, provenance
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
 # An approval is a wait offering exactly these two outcomes; `approve` is reserved for it
@@ -104,7 +104,7 @@ def policy_issues(
     except NotInCatalog:
         return []  # no contract, no policy to read: already UNKNOWN_ACTIVITY
     # Each field's sources as the plan knows them: what it declared, or else the case's, which the
-    # runtime checks again with the real sources before the activity runs (layer 5).
+    # runtime checks again with the real sources before the activity runs (core/before_activity.py).
     sources = {name: frozenset({plan.sources.get(name, CASE)}) for name in plan.fields}
     found = provenance(expression, sources)
     issues = []
@@ -114,28 +114,11 @@ def policy_issues(
                 Issue(
                     path,
                     "INPUT_POLICY",
-                    f"{contract.reference} takes {field} {policy.describe()}, and this value "
-                    f"comes from {origins(expression, sources, policy)}: {what_to_do(policy)}",
+                    f"{refusal(contract.reference, field, policy, expression, sources)}: "
+                    f"{what_to_do(policy)}",
                 )
             )
     return issues
-
-
-def origins(expression: Expression, sources: Mapping[str, frozenset[str]], policy: Policy) -> str:
-    """Where the refused value comes from: each field read whose own sources the policy refuses."""
-    refused = [
-        field
-        for field in dict.fromkeys(fields_read(expression))  # each field once, in order
-        if policy.refuses(sources[field]) is not None
-    ]
-    if not refused:
-        return "a value written in the plan"
-    return ", ".join(
-        f"{field}, which the case gives the plan"
-        if sources[field] == {CASE}
-        else f"{field} ({', '.join(sorted(sources[field]))})"
-        for field in refused
-    )
 
 
 def what_to_do(policy: Policy) -> str:

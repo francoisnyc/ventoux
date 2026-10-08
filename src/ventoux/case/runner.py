@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from ventoux.core.before_activity import checked_inputs
 from ventoux.core.catalog import Catalog
 from ventoux.core.expressions import ExpressionError, evaluate, parse_expression
 from ventoux.core.provenance import provenance
@@ -63,14 +64,18 @@ def run(
             result.waiting_for.append(f"approval of {name} by {roles}")
             break  # the step waits, and nothing after it starts
         else:
-            inputs = {
-                key: evaluate(parse_expression(expr), values)
-                for key, expr in step["inputs"].items()
-            }
             # Fail closed: an activity the catalog doesn't hold stops the case (NotInCatalog).
             contract = catalog.get(step["activity"])
-            # TRACER: inputs aren't checked against the contract's schema (the interpreter, layer 5).
-            # TRACER: no idempotency key is built per step run (the Temporal adapter, layer 6).
+            # The check before an activity, as in a plan: every input policy against the real
+            # sources, then the contract's input schema; a refusal raises InputRefused.
+            # TRACER: the key is `<step>#1`, each step running once (Temporal adapter, layer 6).
+            inputs = checked_inputs(
+                contract,
+                {key: parse_expression(expr) for key, expr in step["inputs"].items()},
+                values,
+                sources,
+                f"{name}#1",
+            )
             if contract.reference not in implementations:
                 raise LookupError(f"no implementation of {contract.reference} is available")
             implementations[contract.reference](inputs)
