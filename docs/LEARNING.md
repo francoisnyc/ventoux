@@ -39,6 +39,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 32 | Layer 2: why `now` can't be written | open |
 | 33 | Layer 3: why plans can be checked and code can't | open |
 | 34 | Layer 5: why check input policies twice | open |
+| 35 | Layer 6: what lives in workflow history | open |
 
 ---
 
@@ -785,3 +786,34 @@ and record the key points. A question is closed once you can explain the answer 
   one at all?
 - Status: open, until the follow-up comes from memory.
 
+
+## 35. Layer 6: what lives in workflow history
+
+> What lives in workflow history, and why must the interpreter be deterministic? Concretely: Sam
+> approved the guide's refund, and the worker crashed just before `pay` finished. What does the
+> new worker read from history, what runs again, and is the refund paid twice?
+
+- Your answer: "history holds the activity results, signals and timers; replay reads them back."
+- Discussion: the core is right: what came from outside is recorded, and replay reads it back
+  instead of doing it again. Three parts didn't come back.
+  - **History also holds what the workflow asked for:** the run's input and every command
+    (`ActivityTaskScheduled`, `TimerStarted`), next to the results (`ActivityTaskCompleted`,
+    `WorkflowExecutionSignaled`, `TimerFired`). That is the *why* of determinism: replay runs the
+    code again from the start, and each command it issues must match the next recorded one, in
+    kind and order, or Temporal raises a non-determinism error and holds the run (slice 6's test).
+    A clock or a random number could change what the code asks for. Replay checks the commands,
+    not their inputs (checked in layer 6), so keeping the inputs deterministic is the boundary
+    test's job.
+  - **The scenario.** The new worker reads back the lookup's result, Sam's signal and the
+    `ActivityTaskScheduled` for `pay`; the workflow code runs again, each step matched against
+    history, nothing repeated. The `pay` *activity* is a different story: it never reported back,
+    so after its `start_to_close` (30s) Temporal **retries** it, and the first attempt may already
+    have moved money.
+  - **Paid twice? Not by replay, and not by the retry,** because of the idempotency key: both
+    attempts carry `refund-1/<run ID>/pay#1`, so the payment system returns the first refund
+    instead of paying again (brief, D17; slice 4's test).
+  In one line: replay re-decides from recorded facts; retries re-do side effects, and the key
+  makes them safe.
+- Follow-up: a person *resets* that run to before `pay` (brief, D19). Is the refund paid twice
+  now, and why does the key not save it?
+- Status: open, until the follow-up comes from memory.
