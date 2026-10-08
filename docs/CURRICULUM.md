@@ -181,6 +181,12 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 
 ## 6. Temporal adapter
 
+- **First:** close the side doors in layer 5's ban on the clock, randomness and I/O (found in the
+  tutor review of layer 5): `import asyncio` (its event loop has a clock),
+  `importlib.import_module("time")` and `__import__("random")` all pass the boundary test today.
+  Forbid `asyncio` and `importlib` in `core` and `case`, and the calls `__import__`, `eval`,
+  `exec` and `compile` (already non-negotiables in `CLAUDE.md`), each with a negative test. Replay
+  is what this layer depends on, so the ban must hold before the workflow runs the interpreter.
 - **Learn:** workflows vs activities; signals and queries; replay; `continueAsNew`.
 - **Build:** a plan workflow running the same interpreter, activities wired to the catalog with
   the retry policy and timeouts from their contracts and an idempotency key per step run (decision
