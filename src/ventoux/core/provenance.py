@@ -5,6 +5,7 @@ A source is a text, `origin:name`. See docs/layers/04-provenance.md.
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from decimal import Decimal
 
 from ventoux.core.expressions import (
@@ -55,6 +56,19 @@ def is_trusted(source: str) -> bool:
 def is_untrusted(source: str) -> bool:
     """Whether `source` was declared untrusted, such as `untrusted:llm`."""
     return source.startswith(UNTRUSTED_ORIGIN)
+
+
+@dataclass(frozen=True)
+class Sourced:
+    """A value, and where it came from: the sources it was derived from."""
+
+    value: object  # the value itself, as expressions read it
+    sources: frozenset[str]  # where it came from, such as `system:opener` or `untrusted:llm`
+
+
+def sourced(value: object, *sources: str) -> Sourced:
+    """`value`, with its sources: `sourced(Decimal("250"), "system:opener")`."""
+    return Sourced(value, frozenset(sources))
 
 
 class NoSources(LookupError):
