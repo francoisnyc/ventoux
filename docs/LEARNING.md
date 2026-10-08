@@ -762,6 +762,13 @@ and record the key points. A question is closed once you can explain the answer 
     validation can never weaken it. Defence in depth, failing closed.
   In one line: `validate` proves a plan *can't* misuse declared data on any path; the runtime
   proves *this* value, on *this* path, really may go in.
+- Asked: "is it because an activity can change at runtime?" No: a contract never changes (a
+  change is a new `@N`, layer 1), and its input policies are in its hash (layer 4); only its
+  binding can move, and a binding carries no policy. What differs between the two checks is the
+  *data*. The same `draft-reply` plan, `suggested_recipient` unmarked, passes `validate` once; in
+  case A the CRM set the field (`system:crm`) and the draft is made, in case B a model did
+  (`untrusted:llm`) and the step stops. Nothing in the plan tells A from B, only the values do,
+  and they don't exist when `validate` runs.
 - Follow-up: if the runtime check catches everything with the real sources, why keep the static
   one at all?
 - Status: open, until the follow-up comes from memory.
