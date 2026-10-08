@@ -17,11 +17,20 @@ SRC = ROOT / "src"
 # What each pure layer may not import (a package and everything under it).
 LLM_SDKS = {"anthropic", "openai"}
 ADAPTERS = {"ventoux.temporal", "ventoux.authoring", "ventoux.tooling"}
-CASE_FORBIDDEN = {"temporalio"} | LLM_SDKS | ADAPTERS
+# The clock, randomness and I/O: Temporal's replay needs the same decisions every time, so a pure
+# layer may read none of them (docs/layers/05-interpreter.md). Time and outside data reach it only
+# as what history recorded: an activity's result, an answer, a timer firing.
+CLOCK = {"time", "datetime"}
+RANDOMNESS = {"random", "secrets", "uuid"}
+IO = {"os", "io", "pathlib", "socket", "subprocess", "urllib", "http"}
+NOT_REPLAYABLE = CLOCK | RANDOMNESS | IO
+CASE_FORBIDDEN = {"temporalio"} | LLM_SDKS | ADAPTERS | NOT_REPLAYABLE
 FORBIDDEN = {
     "core": CASE_FORBIDDEN | {"ventoux.case"},
     "case": CASE_FORBIDDEN,
 }
+# Builtins a pure layer may not call: `open` reads and writes files with no import at all.
+FORBIDDEN_CALLS = {"open"}
 
 
 def is_under(module: str, package: str) -> bool:
@@ -40,6 +49,18 @@ def imported_modules(source: str) -> list[str]:
             # A relative import keeps its dots (`..temporal`, or `..` alone), so it can be reported.
             modules.append("." * node.level + (node.module or ""))
     return modules
+
+
+def forbidden_calls(source: str) -> list[str]:
+    """The forbidden builtins `source` calls by name, such as `open(...)`; `door.open()` is a
+    method, not the builtin."""
+    return [
+        node.func.id
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in FORBIDDEN_CALLS
+    ]
 
 
 def forbidden_imports(layer: str, source: str) -> list[str]:
@@ -61,6 +82,37 @@ def test_from_imports_count_too() -> None:
 
 def test_core_may_not_import_an_llm_sdk_or_its_submodules() -> None:
     assert forbidden_imports("core", "import openai.types\n") == ["openai.types"]
+
+
+# Replay needs the same decisions every time: no clock, no randomness, no I/O in a pure layer.
+@pytest.mark.parametrize("layer", ["core", "case"])
+@pytest.mark.parametrize(
+    "module",
+    [
+        "time",  # the clock
+        "datetime",
+        "random",  # randomness
+        "secrets",
+        "uuid",
+        "os",  # I/O
+        "io",
+        "pathlib",
+        "socket",
+        "subprocess",
+        "urllib.request",
+        "http.client",
+    ],
+)
+def test_pure_layers_may_not_read_the_clock_randomness_or_io(layer: str, module: str) -> None:
+    assert forbidden_imports(layer, f"import {module}\n") == [module]
+
+
+def test_pure_layers_may_not_open_a_file() -> None:
+    assert forbidden_calls("with open('plan.json') as f:\n    f.read()\n") == ["open"]
+
+
+def test_a_method_named_open_is_not_the_builtin() -> None:
+    assert forbidden_calls("door.open()\n") == []
 
 
 def test_case_may_not_import_temporal() -> None:
@@ -93,11 +145,17 @@ def test_pure_layers_import_nothing_forbidden(layer: str) -> None:
         f"{path.relative_to(SRC)} imports {name}"
         for path in files
         for name in forbidden_imports(layer, path.read_text())
+    ] + [
+        f"{path.relative_to(SRC)} calls {name}()"
+        for path in files
+        for name in forbidden_calls(path.read_text())
     ]
     assert violations == [], (
-        f"ventoux.{layer} must run inside a Temporal workflow and in a plain test, so it may "
-        f"not import {sorted(FORBIDDEN[layer])}, and every import must name its layer (no relative "
-        "imports). See docs/layers/00-repository.md and 01-catalog.md."
+        f"ventoux.{layer} must run inside a Temporal workflow and in a plain test, and Temporal's "
+        "replay needs the same decisions every time: so it reads no clock, no randomness and no "
+        f"I/O, and may not import {sorted(FORBIDDEN[layer])} or call "
+        f"{sorted(FORBIDDEN_CALLS)}; and every import must name its layer (no relative imports). "
+        "See docs/layers/00-repository.md, 01-catalog.md and 05-interpreter.md."
     )
 
 
