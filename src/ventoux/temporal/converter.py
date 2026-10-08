@@ -12,12 +12,14 @@ from decimal import Decimal
 from typing import Any
 
 from temporalio.api.common.v1 import Payload
+from temporalio.client import Client
 from temporalio.converter import (
     CompositePayloadConverter,
     DataConverter,
     DefaultPayloadConverter,
     EncodingPayloadConverter,
     JSONPlainPayloadConverter,
+    value_to_type,
 )
 
 
@@ -35,6 +37,12 @@ def exact_json(value: Any) -> str:
         if not value.is_finite():
             raise TypeError(f"{value} is not a number JSON can hold: give a finite Decimal")
         return str(value)  # a JSON number, digit for digit: `0.1`, `1E+2`
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        # A dataclass, such as a run's start or report, is written as an object of its fields.
+        fields = {field.name: getattr(value, field.name) for field in dataclasses.fields(value)}
+        return exact_json(fields)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(exact_json(item) for item in value) + "]"
     if isinstance(value, dict):
         return (
             "{"
@@ -58,7 +66,9 @@ class ExactJSON(EncodingPayloadConverter):
 
     def from_payload(self, payload: Payload, type_hint: type | None = None) -> Any:
         # Numbers with a fraction or an exponent come back as `Decimal`, never as `float`.
-        return json.loads(payload.data, parse_float=Decimal)
+        value = json.loads(payload.data, parse_float=Decimal)
+        # Temporal: `value_to_type` builds the type the receiver asked for (a dataclass, say).
+        return value if type_hint is None else value_to_type(type_hint, value)
 
 
 class ExactPayloadConverter(CompositePayloadConverter):
@@ -80,3 +90,14 @@ class ExactPayloadConverter(CompositePayloadConverter):
 DATA_CONVERTER = dataclasses.replace(
     DataConverter.default, payload_converter_class=ExactPayloadConverter
 )
+
+
+def require_exact_numbers(client: Client) -> None:
+    """Refuse a client that would write numbers some other way (brief, D20)."""
+    # Fail closed: with another converter an amount could cross as the text "250", and a
+    # contract's schema would read it back as a number: nothing would say it had changed hands.
+    if client.data_converter.payload_converter_class is not ExactPayloadConverter:
+        raise ValueError(
+            "this client doesn't keep exact numbers: connect it with "
+            "`data_converter=DATA_CONVERTER` from ventoux.temporal.converter"
+        )

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import BaseModel
+from temporalio import workflow
 
 from ventoux.case.runner import Activity, AnswerRefused, Run, run
 from ventoux.core.before_activity import InputRefused
@@ -17,8 +18,17 @@ from ventoux.core.interpreter import Answer, PlanRun, interpret
 from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
+from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 
-__all__ = ["Activity", "AnswerRefused", "InputRefused", "load_definition", "run_case", "run_plan"]
+__all__ = [
+    "Activity",
+    "AnswerRefused",
+    "DevelopmentPlans",
+    "InputRefused",
+    "load_definition",
+    "run_case",
+    "run_plan",
+]
 
 
 # The activities guide's contract, word for word: its test checks the two hash the same.
@@ -136,6 +146,17 @@ FAKES: dict[str, Activity] = {
     "orders.lookup@1": fake_lookup,
     "letters.draft@2": fake_draft,
 }
+
+
+# Temporal: a workflow class is registered with a worker under its name; this one runs plans
+# against the development catalog, in tests and the development worker.
+@workflow.defn(name="ventoux.plan")
+class DevelopmentPlans(PlanWorkflow):
+    catalog = CATALOG
+
+    @workflow.run
+    async def run(self, start: PlanStart) -> RunReport:
+        return await self.interpret(start)
 
 
 # TRACER: a fixed directory of people and roles; roles come with layer 7 (design question 12).
