@@ -52,6 +52,42 @@ class Gave:
 
 
 @dataclass(frozen=True)
+class Waiting:
+    """The run waits for one of a closed list of answers (brief, D9)."""
+
+    outcomes: tuple[str, ...]  # the answers it accepts
+    timeout: str | None  # how long it waits, such as `48h`; None: for as long as it takes
+
+    def __str__(self) -> str:
+        line = f"waiting for {' or '.join(self.outcomes)}"
+        return f"{line}, at most {self.timeout}" if self.timeout else line
+
+
+@dataclass(frozen=True)
+class Answered:
+    """The wait took an answer: a person's outcome, or its timeout."""
+
+    outcome: str  # one of the wait's outcomes, or `timeout`
+    by: str | None  # who answered; None for a timeout, which no person gives
+
+    def __str__(self) -> str:
+        return f"{self.by} answered {self.outcome}" if self.by else "the wait timed out"
+
+
+@dataclass(frozen=True)
+class Refused:
+    """The wait refused an answer, and goes on waiting."""
+
+    outcome: str  # the answer given
+    by: str | None  # who gave it, if anyone
+    reason: str  # why it was refused
+
+    def __str__(self) -> str:
+        whose = f"{self.by}'s answer" if self.by else "the answer"
+        return f"refused {whose} {self.outcome}: {self.reason}"
+
+
+@dataclass(frozen=True)
 class Moved:
     """The run took a transition."""
 
@@ -76,4 +112,4 @@ class Stopped:
 # What happens after a stop, said in every one: nothing is skipped automatically (brief, D17).
 AFTER_A_STOP = "the step needs attention, and nothing after it runs"
 
-type Event = Started | Entered | Gave | Moved | Ended | Stopped
+type Event = Started | Entered | Gave | Waiting | Answered | Refused | Moved | Ended | Stopped

@@ -14,8 +14,19 @@ from pydantic import ValidationError
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
-from ventoux.core.history import Ended, Entered, Event, Gave, Moved, Started, Stopped
-from ventoux.core.plan import ActivityState, FinalState, Plan, Transition
+from ventoux.core.history import (
+    Answered,
+    Ended,
+    Entered,
+    Event,
+    Gave,
+    Moved,
+    Refused,
+    Started,
+    Stopped,
+    Waiting,
+)
+from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
 from ventoux.core.provenance import CASE, Sourced
 
 # How a run ends (docs/guides/plans.md, "Running a plan").
@@ -29,6 +40,22 @@ class RunRefused(ValueError):
 # How the interpreter asks for an activity: its reference and inputs in, its output back. In tests a
 # fake; on Temporal, `workflow.execute_activity` (layer 6). The interpreter calls nothing itself.
 type Call = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+@dataclass(frozen=True)
+class Answer:
+    """An answer to a wait: one of its outcomes from a person, or its timeout."""
+
+    outcome: str  # what was answered, such as `approve`, or `timeout`
+    by: str | None  # who answered; None for a timeout
+
+
+# How the interpreter waits: the state, the outcomes it accepts and its timeout in, an answer back,
+# or None when none will come. In tests a script; on Temporal, a signal or a timer (layer 6).
+type Wait = Callable[[str, tuple[str, ...], str | None], Awaitable[Answer | None]]
+
+# The event of a wait's timeout, never one of its outcomes (layer 3's RESERVED_OUTCOME).
+TIMEOUT = "timeout"
 
 
 class Outcome(Exception):
@@ -53,7 +80,7 @@ class PlanRun:
 
 
 async def interpret(
-    plan: Plan, fields: Mapping[str, Sourced], catalog: Catalog, call: Call
+    plan: Plan, fields: Mapping[str, Sourced], catalog: Catalog, call: Call, wait: Wait
 ) -> PlanRun:
     """Run `plan` from its `initial` state, with the `fields` the case gives it."""
     refuse_to_start(plan, fields)
@@ -86,9 +113,14 @@ async def interpret(
                 run.history.append(gave)
                 here = choose(here, state.on, gave.event, values)
                 run.history.append(Moved(gave.event, here))
-            else:
-                # Fail closed until waits are taken (slice 5): never passed over, never spun on.
-                raise Stop(f"{here} waits for an answer, which this engine can't take yet")
+            elif isinstance(state, WaitState):
+                answer = await take_answer(here, state, wait, run)
+                if answer is None:
+                    run.status = "waiting"  # nothing more will come, for now
+                    break
+                run.history.append(Answered(answer.outcome, answer.by))
+                here = choose(here, state.on, answer.outcome, values)
+                run.history.append(Moved(answer.outcome, here))
     except Stop as stop:
         # Fail closed: the engine never guesses past what it can't do; a person decides
         # (brief, D17).
@@ -136,6 +168,33 @@ async def run_activity(
             f"{contract.reference} gave an output its contract doesn't declare: {one_line(error)}"
         ) from None
     return Gave(contract.reference, "done", output)
+
+
+async def take_answer(here: str, state: WaitState, wait: Wait, run: PlanRun) -> Answer | None:
+    """The first answer the wait accepts; each one it doesn't is refused, and it waits on."""
+    run.history.append(Waiting(state.wait.outcomes, state.wait.timeout))
+    while (answer := await wait(here, state.wait.outcomes, state.wait.timeout)) is not None:
+        reason = why_not(here, state, answer)
+        if reason is None:
+            return answer
+        run.history.append(Refused(answer.outcome, answer.by, reason))
+    return None
+
+
+def why_not(here: str, state: WaitState, answer: Answer) -> str | None:
+    """Why the wait won't take `answer`, or None if it will. Its outcomes are a closed list
+    (brief, D9), and its timeout comes from its timer, never from a person."""
+    if answer.outcome == TIMEOUT:
+        if answer.by is not None:
+            return "a timeout comes from the wait's timer, never from a person"
+        if state.wait.timeout is None:
+            return f"{here} has no timeout"
+        return None
+    if answer.outcome not in state.wait.outcomes:
+        return f"{here} offers {' or '.join(state.wait.outcomes)}"
+    if answer.by is None:
+        return "an answer comes from a person, and this one names nobody"
+    return None
 
 
 def choose(

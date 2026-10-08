@@ -383,3 +383,90 @@ def test_transitions_are_tried_in_order() -> None:
     run = run_plan(both, fields=ORDER, answers=[])
     assert run.status == "succeeded"
     assert "moved on done to found" in lines(run)
+
+
+GUIDE_FIELDS = {
+    "order_id": sourced("A-1001", "system:orders"),
+    "amount": sourced(Decimal(250), "system:opener"),
+}
+
+
+def test_an_answer_the_wait_does_not_offer_is_refused() -> None:
+    run = run_plan(
+        guide_plan(),
+        fields=GUIDE_FIELDS,
+        answers=[("approve_refund", "edit", "ana"), ("approve_refund", "approve", "sam")],
+    )
+    assert "refused ana's answer edit: approve_refund offers approve or reject" in lines(run)
+    assert run.status == "succeeded"  # the wait went on, and took sam's answer
+
+
+def test_a_wait_takes_only_answers_it_can_be_given() -> None:
+    no_timeout = copy.deepcopy(guide_plan())
+    no_timeout["states"]["approve_refund"] = {
+        "wait": {"outcomes": ["approve", "reject"]},
+        "on": {"approve": "pay", "reject": "failed"},
+    }
+    run = run_plan(
+        no_timeout,
+        fields=GUIDE_FIELDS,
+        answers=[
+            ("approve_refund", "timeout"),  # this wait has no timeout
+            ("approve_refund", "timeout", "ana"),  # and a person never sends one
+            ("approve_refund", "approve"),  # an outcome comes from a person
+        ],
+    )
+    assert [line for line in lines(run) if line.startswith("refused")] == [
+        "refused the answer timeout: approve_refund has no timeout",
+        "refused ana's answer timeout: a timeout comes from the wait's timer, never from a person",
+        "refused the answer approve: an answer comes from a person, and this one names nobody",
+    ]
+
+
+def test_a_run_without_its_answer_waits() -> None:
+    run = run_plan(guide_plan(), fields=GUIDE_FIELDS, answers=[])
+    assert run.status == "waiting"  # not ended: the answer may still come
+    assert lines(run)[-1] == "waiting for approve or reject, at most 48h"
+
+
+def test_a_declared_timeout_moves_on() -> None:
+    run = run_plan(guide_plan(), fields=GUIDE_FIELDS, answers=[("approve_refund", "timeout")])
+    assert run.status == "failed"
+    assert lines(run)[-4:] == [
+        "the wait timed out",
+        "moved on timeout to failed",
+        "entered failed",
+        "ended failed",
+    ]
+
+
+def test_the_key_is_the_state_and_its_run() -> None:
+    # Declined, the refund goes back through the approval, so each pass is approved.
+    again = copy.deepcopy(guide_plan())
+    again["states"]["pay"]["on"]["declined"] = "approve_refund"
+    keys: list[str] = []
+
+    def declines_once(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        if len(keys) == 1:
+            raise Outcome("declined")
+        return {"refund_id": "refund-1"}
+
+    run = run_plan(
+        again,
+        fields=GUIDE_FIELDS,
+        answers=[("approve_refund", "approve", "sam"), ("approve_refund", "approve", "lee")],
+        activities={**FAKES, "payments.refund@2": declines_once},
+    )
+    assert run.status == "succeeded"
+    # A retry would reuse a key; a second run of the step never does (brief, D17).
+    assert keys == ["pay#1", "pay#2"]
+
+
+def test_a_run_is_the_same_every_time() -> None:
+    # No clock, no randomness, no I/O: what Temporal's replay needs (layer 6).
+    answers = [("approve_refund", "edit", "ana"), ("approve_refund", "approve", "sam")]
+    first, second = (
+        run_plan(guide_plan(), fields=GUIDE_FIELDS, answers=list(answers)) for _ in range(2)
+    )
+    assert first.history == second.history
