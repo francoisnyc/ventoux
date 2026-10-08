@@ -214,8 +214,10 @@ keeps naming layer 6. The quickstart's tests stay green.
 
 Each claim this note makes about behaviour, and the test that fails if it isn't true. `I` is
 `tests/test_interpreter.py`, `Q` `tests/test_quickstart.py`. Checked against the code before the
-pull request: every test named exists, every interpreter test is named, and the tests that passed
-as soon as they were written were each seen failing with the code they cover broken.
+pull request: every test named exists, and every interpreter test is named. The negative tests
+that passed as soon as they were written (no transition holding, a run without its answer, a
+refused value never evaluated, the engine's key) were each seen failing with the code they cover
+broken; the positive ones that passed at once were not.
 
 | Promise | Test |
 |---|---|
