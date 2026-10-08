@@ -1,6 +1,6 @@
 # Ventoux — design brief
 
-Status: draft, 2026-10-08; decisions D1–D21 (D3 superseded by D20). Read this
+Status: draft, 2026-10-08; decisions D1–D23 (D3 superseded by D20). Read this
 first; it is the short version of what we are building and why. The longer reference is
 `docs/design.md` in the `chartering` prototype.
 
@@ -545,6 +545,42 @@ be erased on request), has size limits, and a second copy of business records go
   `to_customer` only from a system or a person, never from untrusted data"; "takes `account` only
   from payments". Developers never write a policy; they meet that sentence.
 
+### D22. Roles come with each answer, from the trusted caller
+
+*Decided 2026-10-08, in layer 7 (design question 12).*
+
+- **Who answered, and their roles, travel with the answer.** The Ventoux API, the only caller
+  allowed to send answers (D19), states the person signed in and the roles its identity provider
+  gives them. The engine never looks a person up: a lookup would be I/O inside the workflow, and a
+  replay after someone's roles changed would decide differently. History records the answer with
+  its roles, so replay and the audit both see what was true when the person answered.
+- **Roles are registered in the catalog,** by the platform team, like source labels (D12), each
+  with the highest risk it may approve (`register_role("support-lead", approves="high")`; none by
+  default). A definition naming an unregistered role is refused by `ventoux check`, and a role the
+  engine doesn't know counts for nothing at runtime (fail closed).
+- **Every wait and approval names its roles;** there is no "anyone may answer" default.
+- **In tests, the test plays the API:** `run_case(..., people={...})` and `run_plan(...,
+  people={...})` give each scripted answer the roles listed for its person.
+
+### D23. An approval is its own act, answered and checked like a task
+
+*Decided 2026-10-08, in layer 7 (design question 13).*
+
+- **An approval is declared, never inferred from an outcome's name.** In a plan it is its own kind
+  of state, `{"approval": {"of": "pay", "roles": [...]}}`, with the outcomes `approve` and
+  `reject`; `approve` must lead to the state it names. A wait offering an outcome called `approve`
+  approves nothing.
+- **Answered like a task answer** (D9), naming the entry it answers (`approve_refund#1`), and
+  checked the same way, in the same order: the entry is open, the outcome is one offered, the
+  person has one of its roles. An approval adds: the role may approve the activity's risk, and the
+  person is not excluded (D11). A misspelled outcome is refused, never read as "not approved".
+- **A rejection is an outcome:** the plan goes where `reject` says, and the approved step doesn't
+  run (in a case, the case can then close, or a rule react).
+- **A lapsed approval stops the step.** If the step's inputs no longer match the digest the
+  approval recorded (D11), the step stops and needs a new decision; it is never run, and never
+  sent back to an approval by the engine on its own.
+- **Several approvers (`count=2`) come with the `four_eyes` pattern** (layer 11).
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
@@ -679,7 +715,9 @@ New questions found while building go here, numbered from 10.
 12. **Who has which role in `run_case`?** (found in the tracer bullet) The quickstart's tests name
     people (`"ana"`) but never say where their roles come from. The tracer uses a fixed directory
     (`ana`: support; `sam`: support, support-lead). To decide in layer 7: roles passed to
-    `run_case`, a test directory, or roles carried with each answer.
+    `run_case`, a test directory, or roles carried with each answer. **Decided in layer 7:**
+    roles carried with each answer, stated by the trusted caller, and registered in the catalog
+    with the risk each may approve (D22).
 13. **How is an approval answered?** (found in the tracer bullet) The quickstart never answers an
     approval in a test, so its shape is undefined. The tracer answers it by naming the step:
     `("pay", "approve", "sam")`. To decide in layer 7, with D11 (an approval is a task with
@@ -687,7 +725,9 @@ New questions found while building go here, numbered from 10.
     answers: a misspelled outcome (`"aprove"`) is quietly treated as "not approved" instead of
     refused, and a *rejected* approval leaves the case waiting for approval forever instead of
     letting the step not run (and the case close, or a rule react). Layer 7 must check approval
-    answers exactly like task answers and define what a rejection does.
+    answers exactly like task answers and define what a rejection does. **Decided in layer 7:**
+    an approval is its own state, answered by entry and checked like a task answer; a rejection
+    is an outcome; a lapsed approval stops the step (D23).
 14. **What running the quickstart taught us.** (found in the tracer bullet)
     - *Fixed:* the large-refund test asserted only `waiting_for`, not that nothing was paid and
       the case stayed open, which is what matters most. The quickstart now asserts all three.
