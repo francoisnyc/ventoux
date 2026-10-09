@@ -20,16 +20,22 @@ from temporalio.exceptions import ActivityError, ApplicationError, FailureError
 # through are imported once and shared. `core` and `case` are deterministic (the boundary test
 # holds them to that), so they are shared.
 with workflow.unsafe.imports_passed_through():
+    from ventoux.case.admission import ProposalRefused, RetryRefused
+    from ventoux.case.answers import AnswerRefused
+    from ventoux.case.closing import CloseRefused
     from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.runtime import CaseRefused, decide
     from ventoux.case.state import (
         Answered,
         CaseState,
+        CloseAsked,
         Command,
         Completed,
         Event,
         Failed,
         Opened,
+        Proposed,
+        Retried,
         Schedule,
     )
     from ventoux.core.catalog import Catalog
@@ -72,6 +78,15 @@ class CaseAnswer:
     form: dict[str, Any] | None = None  # the values the outcome sets, if any
 
 
+@dataclass
+class CaseRequest:
+    """A person's request to a case: propose a step, retry a failed run, or close it."""
+
+    what: str  # the step proposed, the run retried (`pay#1`), or the close reason
+    by: str  # who asks, as the trusted caller states (brief, D19)
+    roles: list[str]  # their roles, stated with the request (brief, D22)
+
+
 class CaseWorkflow:
     """The code of a case workflow. A deployment subclasses it to name its catalog and plans, and
     registers the subclass (Temporal's SDK wants `@workflow.run` on the class it registers), as
@@ -90,6 +105,18 @@ class CaseWorkflow:
     def answer(self, sent: CaseAnswer) -> None:
         form = None if sent.form is None else dict(sent.form)
         self.inbox.append(Answered(sent.entry, sent.outcome, sent.by, frozenset(sent.roles), form))
+
+    @workflow.signal(name="propose")
+    def propose(self, sent: CaseRequest) -> None:
+        self.inbox.append(Proposed(sent.what, sent.by, frozenset(sent.roles)))
+
+    @workflow.signal(name="retry")
+    def retry(self, sent: CaseRequest) -> None:
+        self.inbox.append(Retried(sent.what, sent.by, frozenset(sent.roles)))
+
+    @workflow.signal(name="close")
+    def close(self, sent: CaseRequest) -> None:
+        self.inbox.append(CloseAsked(sent.what, sent.by, frozenset(sent.roles)))
 
     # Temporal: a query reads a workflow's state without changing it, and isn't recorded.
     @workflow.query(name="report")
@@ -124,7 +151,15 @@ class CaseWorkflow:
             raise ApplicationError(str(refused), type=kind, non_retryable=True) from None
         while self.state.phase != "closed":
             await workflow.wait_condition(lambda: bool(self.inbox))
-            self.decide(case, self.inbox.pop(0))
+            event = self.inbox.pop(0)
+            try:
+                names_its_entry(event, self.state)
+                self.decide(case, event)
+            except (AnswerRefused, ProposalRefused, RetryRefused, CloseRefused) as refused:
+                # In memory a refusal raises to the test; here nobody is there to catch it. It is
+                # recorded, and the case waits on as if it hadn't come: `decide` changed nothing
+                # (8b, slice 0). Never queued for later (layer 6).
+                self.state.history.append(f"refused {asked(event)}: {refused}")
         return self.report()
 
     def decide(self, case: Any, event: Event) -> None:
@@ -158,6 +193,32 @@ class CaseWorkflow:
             self.inbox.append(Failed(command.entry, f"{command.activity} failed: {said}"))
             return
         self.inbox.append(Completed(command.entry, output))
+
+
+def names_its_entry(event: Event, state: CaseState) -> None:
+    """On Temporal an answer names the entry it answers (`review#1`), never a step: after a
+    rework, an answer to `review` would answer `review#2`, which its sender never saw (layer 6).
+    The in-memory script may answer by step: it runs in order, with no one clicking."""
+    if isinstance(event, Answered) and "#" not in event.entry:
+        step = event.entry
+        open_now = [
+            entry for entry in state.waiting if entry.split("#")[0] in (step, f"{step}.approval")
+        ]
+        example = open_now[0] if open_now else f"{step}#1"
+        raise AnswerRefused(f"name the entry it answers, such as {example}")
+
+
+def asked(event: Event) -> str:
+    """What a person asked, as a refusal names it: `sam's answer approve to review#1`."""
+    if isinstance(event, Answered):
+        return f"{event.by}'s answer {event.outcome} to {event.entry}"
+    if isinstance(event, Proposed):
+        return f"{event.by}'s proposal of {event.step}"
+    if isinstance(event, Retried):
+        return f"{event.by}'s retry of {event.entry}"
+    if isinstance(event, CloseAsked):
+        return f"{event.by}'s close as {event.reason}"
+    return type(event).__name__  # only people's requests are refused; anything else is a bug
 
 
 async def start_case(
@@ -203,6 +264,28 @@ async def answer(
     the Ventoux API may send answers (brief, D19)."""
     sent = CaseAnswer(entry, outcome, by, sorted(roles), None if form is None else dict(form))
     await case.signal(CaseWorkflow.answer, sent)
+
+
+async def propose(
+    case: WorkflowHandle[CaseWorkflow, CaseReport], step: str, by: str, roles: list[str]
+) -> None:
+    """Propose starting `step`, as the person `by`, who has `roles`; admission decides."""
+    await case.signal(CaseWorkflow.propose, CaseRequest(step, by, sorted(roles)))
+
+
+async def retry(
+    case: WorkflowHandle[CaseWorkflow, CaseReport], entry: str, by: str, roles: list[str]
+) -> None:
+    """Retry the failed run `entry` (`pay#1`), as an operator: the same run, the same key
+    (brief, D26)."""
+    await case.signal(CaseWorkflow.retry, CaseRequest(entry, by, sorted(roles)))
+
+
+async def close(
+    case: WorkflowHandle[CaseWorkflow, CaseReport], reason: str, by: str, roles: list[str]
+) -> None:
+    """Close the case with the declared `reason`, as the person `by` (brief, D10)."""
+    await case.signal(CaseWorkflow.close, CaseRequest(reason, by, sorted(roles)))
 
 
 async def report(case: WorkflowHandle[CaseWorkflow, CaseReport]) -> CaseReport:

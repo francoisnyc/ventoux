@@ -472,7 +472,7 @@ retried again, a declared outcome while closing).
 ## 8c. Cases on Temporal
 
 Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); the six points
-decided while drafting confirmed the same day; slices 0–2 built.
+decided while drafting confirmed the same day; slices 0–3 built.
 
 User-facing description, written first: `docs/guides/cases.md`, "Plan steps" and "Running a case
 on Temporal". Decisions: brief D27 (design question 18) and D28.
@@ -653,6 +653,11 @@ Each starts with its negative test, seen failing for the right reason.
   the two drivers record the same line.
 - **The client addresses a case by its ID alone** (`case_handle`), from the first call on, not
   only after a switch: `start_case` returns such a handle.
+- **A request's signals share one shape,** `CaseRequest` (what, by, roles): a proposal names a
+  step, a retry a run, a close a reason (slice 3). An answer keeps its own, `CaseAnswer`.
+- **An answer naming a step is refused in the loop, not in the signal handler,** so its line
+  lands in the history in arrival order, like every other refusal; its example names the entry
+  open for that step, if any (`such as review#1`).
 - **The outcome of a plan step is tagged with the plan:** `settle.outcome` from
   `system:refund-order@1`, as an activity's is tagged with its contract (choice 5 in drafting).
 
@@ -667,7 +672,11 @@ stopped plan failing the step (the runner's `stopped` branch), inputs keeping th
 sources laundered to `system:opener`), and a plan ending done or failed (the check removed). The
 plan the deployment lacks first failed on the missing `plans=` seam. On Temporal: a refused
 opening was seen hanging until the test's bound with its conversion removed, and a second case
-opening under the same ID with Temporal's default reuse policy.
+opening under the same ID with Temporal's default reuse policy. A double click, before the
+refusals were recorded, left the case stuck (its workflow task failing) until the test's bound;
+an early click then passed as written, on slice 0's wording and the same recording; refused
+proposals, retries and closes passed as written too, and were seen stuck with only
+`AnswerRefused` recorded.
 
 | Promise | Test |
 |---|---|

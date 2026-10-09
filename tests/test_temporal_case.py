@@ -14,7 +14,16 @@ from temporalio.client import Client, WorkflowFailureError, WorkflowHandle
 from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
 from temporalio.testing import WorkflowEnvironment
 
-from ventoux.temporal.cases import CaseReport, CaseWorkflow, answer, report, start_case
+from ventoux.temporal.cases import (
+    CaseReport,
+    CaseWorkflow,
+    answer,
+    close,
+    propose,
+    report,
+    retry,
+    start_case,
+)
 from ventoux.temporal.converter import DATA_CONVERTER
 from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
@@ -141,3 +150,108 @@ def test_the_guides_case_gives_the_same_history_as_in_memory() -> None:
         in_memory.history
     )
     assert f"key refund-1/{run_id}/pay#1" in "\n".join(ended.history)
+
+
+# --- Slice 3: signals and refusals ---
+
+REVIEW_FORM = {"approved_amount": Decimal(250)}
+
+
+def test_a_double_click_is_refused_and_recorded() -> None:
+    # Ana's second click reaches review#1 after it closed. On Temporal nobody is there to catch
+    # a refusal: it is recorded, and the case waits on for what it waited for (layer 6).
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, DevelopmentCases, REFUND, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        return await reported(case, lambda now: "refused" in "\n".join(now.history))
+
+    now = on_temporal(scenario)
+    assert "refused ana's answer approve to review#1: review#1 is closed" in now.history
+    assert now.status == "open"
+    assert now.waiting_at == ["pay.approval#1"]
+
+
+def test_an_answer_before_its_entry_opens_is_refused() -> None:
+    # Sam approves the payment before anyone has reviewed the refund: he can't have seen the
+    # amount he approves. Refused and recorded; once the review sets it, the approval still waits.
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, DevelopmentCases, REFUND, LARGE, "refund-1", QUEUE)
+        await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        return await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+
+    now = on_temporal(scenario)
+    assert "refused sam's answer approve to pay.approval#1: pay.approval#1 isn't open" in (
+        now.history
+    )
+    assert "sam answered" not in "\n".join(now.history)
+
+
+def test_an_answer_names_its_entry() -> None:
+    # On Temporal an answer names the entry it answers, never a step: after a rework, a late
+    # click on "review" would answer review#2, which its sender never saw (layer 6).
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, DevelopmentCases, REFUND, LARGE, "refund-1", QUEUE)
+        await answer(case, "review", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        return await reported(case, lambda now: "refused" in "\n".join(now.history))
+
+    now = on_temporal(scenario)
+    assert (
+        "refused ana's answer approve to review: name the entry it answers, such as review#1"
+    ) in now.history
+    assert now.waiting_at == ["review#1"]
+
+
+# The cases guide's proposed step and close reason, beside the refund (docs/guides/cases.md).
+CHECK_ORDER = {
+    "kind": "activity",
+    "display": {"title": "Look the order up again"},
+    "activity": "orders.lookup@1",
+    "inputs": {"order_id": {"var": "order_id"}},
+    "automatic": False,
+    "proposed_by": ["support"],
+    "requires": ["review"],
+}
+DUPLICATE = {"display": {"title": "Duplicate request"}, "roles": ["support"]}
+WITH_REQUESTS = {
+    **REFUND,
+    "steps": {**REFUND["steps"], "check_order": CHECK_ORDER},
+    "close_reasons": {"duplicate": DUPLICATE},
+}
+
+
+def test_a_refused_request_is_recorded_and_the_case_waits_on() -> None:
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, DevelopmentCases, WITH_REQUESTS, LARGE, "refund-1", QUEUE)
+        await propose(case, "check_order", "eve", [])
+        await retry(case, "pay#1", "ana", PEOPLE["ana"])
+        await close(case, "duplicate", "eve", [])
+        return await reported(case, lambda now: "\n".join(now.history).count("refused") == 3)
+
+    now = on_temporal(scenario)
+    assert now.history[-3:] == [
+        (
+            "refused eve's proposal of check_order: check_order is proposed by support, and eve "
+            "has no role"
+        ),
+        "refused ana's retry of pay#1: pay#1 has not failed: nothing to retry",
+        "refused eve's close as duplicate: duplicate is closed by support, and eve has no role",
+    ]
+    assert now.status == "open"
+    assert now.waiting_at == ["review#1"]
+
+
+def test_a_proposal_and_a_close_by_reason_are_decided_as_in_memory() -> None:
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, DevelopmentCases, WITH_REQUESTS, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await propose(case, "check_order", "ana", PEOPLE["ana"])
+        await reported(case, lambda now: "check_order#1 done, giving status" in now.history)
+        await close(case, "duplicate", "ana", PEOPLE["ana"])
+        return await case.result()
+
+    ended = on_temporal(scenario)
+    assert "ana proposed check_order as support" in ended.history
+    assert ended.history[-1] == "closed: duplicate, by ana"
+    assert ended.status == "closed"
