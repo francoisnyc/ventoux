@@ -694,9 +694,9 @@ be erased on request), has size limits, and a second copy of business records go
 - **The case's exclusions cross into the plan:** the person who opened the case, and the person
   who proposed the step's run, approve nothing inside it (D25). Otherwise a plan step would be a
   way around them.
-- **The plan's own waits are answered on the child,** by its ID; the case reports the step as
-  running. Listing them in the case's `waiting_for` (D24) needs the child to tell its parent, and
-  comes later: until then the inbox reads them from the child.
+- **The plan's own waits are answered on the child,** by its ID; the case's history shows the step
+  started, and the case waits for it. Listing them in the case's `waiting_for` (D24) needs the
+  child to tell its parent, and comes later: until then the inbox reads them from the child.
 - **No approval of the whole plan yet.** A plan carries its own approvals, checked when it is
   read (layer 3); "Approve this plan" (D14), for plans an AI drafts, comes with authoring
   (layer 15).

@@ -68,6 +68,7 @@ def on_temporal[T](
     scenario: Callable[[Client], Awaitable[T]],
     activities: Mapping[str, Activity] = FAKES,
     cases: type[CaseWorkflow] = DevelopmentCases,
+    queue: str = QUEUE,
 ) -> T:
     """Run `scenario` against Temporal's time-skipping test server, with a worker serving the
     development cases, their plans and `activities`: nothing outside is reached."""
@@ -76,7 +77,7 @@ def on_temporal[T](
         environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
         async with (
             environment,
-            case_worker(environment.client, QUEUE, cases, DevelopmentPlans, activities),
+            case_worker(environment.client, queue, cases, DevelopmentPlans, activities),
         ):
             # Bounded: a case that hangs (a workflow task retried forever) fails the test.
             return await asyncio.wait_for(scenario(environment.client), timeout=20)
@@ -822,3 +823,52 @@ def test_a_case_history_replays() -> None:
         return await case.fetch_history()
 
     replay(on_temporal(with_child, cases=CasesWithPlans), CasesWithPlans)
+
+
+# --- Slice 8: the guide, as the engine does it ---
+
+CASES_GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+ON_TEMPORAL = CASES_GUIDE.split("## Running a case on Temporal\n")[1]
+
+
+def test_the_guides_refusals_on_temporal_are_what_the_engine_records() -> None:
+    # Every refusal line the guide shows, from one case: the review answered by step, then twice;
+    # a proposal by someone with no role; a retry of the failed payment by someone who doesn't
+    # operate; a close by someone the reason doesn't name. The case waits on through them all.
+    shown = [line.strip() for line in ON_TEMPORAL.splitlines() if line.startswith("  refused ")]
+    assert len(shown) == 5
+
+    def down(inputs: dict[str, Any]) -> dict[str, Any]:
+        raise ConnectionError("provider unreachable")
+
+    async def scenario(environment: WorkflowEnvironment) -> CaseReport:
+        client = environment.client
+        case = await start_case(client, DevelopmentCases, WITH_REQUESTS, SMALL, "refund-1", QUEUE)
+        await answer(case, "review", "approve", "ana", PEOPLE["ana"], SMALL_FORM)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], SMALL_FORM)
+        await answer(case, "review#1", "approve", "sam", PEOPLE["sam"], SMALL_FORM)
+        await propose(case, "check_order", "eve", [])
+        await past_the_retries(environment, case)
+        await retry(case, "pay#1", "ana", PEOPLE["ana"])
+        await close(case, "duplicate", "eve", [])
+        return await reported(case, lambda now: now.history[-1].startswith("refused eve's close"))
+
+    now = skipping(scenario, {**FAKES, "payments.refund@2": down})
+    for line in shown:
+        assert line in now.history
+    assert now.status == "open"
+    assert now.needs_attention == ["pay#1: payments.refund@2 failed: provider unreachable"]
+
+
+def test_the_guides_client_example_runs_as_written() -> None:
+    # Our own documentation, run so it can't drift from the code; never a definition (data).
+    # The guide's top-level `await`s run inside a coroutine, against the development workflow.
+    example = ON_TEMPORAL.split("```python\n")[3].split("```")[0]
+    body = "".join(f"    {line}\n" for line in example.splitlines())
+    namespace: dict[str, Any] = {"RefundCases": DevelopmentCases, "refund": REFUND}
+    exec(f"async def guide(client):\n{body}", namespace)  # noqa: S102 -- our guide, as in layer 7
+
+    async def scenario(client: Client) -> None:
+        await namespace["guide"](client)
+
+    on_temporal(scenario, queue="refunds")  # the guide's task queue

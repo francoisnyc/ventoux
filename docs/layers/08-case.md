@@ -472,7 +472,8 @@ retried again, a declared outcome while closing).
 ## 8c. Cases on Temporal
 
 Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); the six points
-decided while drafting confirmed the same day; slices 0–7 built.
+decided while drafting confirmed the same day; built, slices 0–8; Promises checked against the
+tests, 2026-10-09.
 
 User-facing description, written first: `docs/guides/cases.md`, "Plan steps" and "Running a case
 on Temporal". Decisions: brief D27 (design question 18) and D28.
@@ -525,9 +526,9 @@ the workflow ID alone.
    is `done`; a failed final state is the outcome `failed`; stopped fails the step. The case's
    opener and the step's proposer cross into the plan as people who approve nothing in it: an
    optional `excluded` parameter on `interpret` (a small `core` change). The plan's waits are
-   answered on the child; the case reports the step as running. In memory, `testing.py` runs the
-   plan with `asyncio.run` (8b, choice 1), answered from `plan_answers`; a plan left waiting
-   keeps the step running. No approval of a whole plan (D14) until layer 15.
+   answered on the child; the case's history shows the step started, and the case waits for
+   it. In memory, `testing.py` runs the plan with `asyncio.run` (8b, choice 1), answered from
+   `plan_answers`; a plan left waiting keeps the step running. No approval of a whole plan (D14) until layer 15.
 6. **Continue-as-new** (brief, D27): after `events_per_run` events decided in one run (a count on
    the workflow class, lowered in tests), or when Temporal suggests it, and only at a quiet point:
    the inbox empty, nothing running, every signal handler finished. The whole `CaseState` crosses,
@@ -684,6 +685,12 @@ Each starts with its negative test, seen failing for the right reason.
   at once lands before or after the switch is Temporal's timing, not ours: the test asserts that
   the approval counts once and the refund is paid once. A second part waits for the switch, so
   the open entry is answered by the same name after it, deterministically.
+- **Two of the guide's claims were corrected in slice 8, not built to:** a plan step is not
+  "reported as running" (`CaseReport` has no such list: the history shows it started, and the
+  case waits), corrected in the guide, D28 (new in this PR) and this note; and replay fails on
+  code "changed to ask for something else", not code that "decides differently" (layer 6:
+  replay compares commands, not their inputs).
+- **The guide's client example runs as written,** on the guide's own task queue, `refunds`.
 - **The outcome of a plan step is tagged with the plan:** `settle.outcome` from
   `system:refund-order@1`, as an activity's is tagged with its contract (choice 5 in drafting).
 
@@ -745,6 +752,11 @@ child plan) are the tests of our code.
 | An entry open before a switch is answered after it by the same name | TC `test_an_open_entry_survives_the_switch` |
 | A case switches only when nothing runs | TC `test_a_switch_waits_while_an_activity_runs` |
 | A case's history replays with the same code (refusals, a continued case's last run and a child plan included), and fails with changed code | TC `test_a_case_history_replays`, `test_a_case_history_replayed_with_changed_code_fails` |
-| The guide's examples are what the engine does | C `test_the_guides_examples_run_as_written`, `test_the_guides_plan_step_runs_as_written`; TC `test_the_guides_case_gives_the_same_history_as_in_memory` |
+| The guide's examples are what the engine does: in memory as written; on Temporal its client example as written, its history as in memory, and every refusal line it shows | C `test_the_guides_examples_run_as_written`, `test_the_guides_plan_step_runs_as_written`; TC `test_the_guides_client_example_runs_as_written`, `test_the_guides_case_gives_the_same_history_as_in_memory`, `test_the_guides_refusals_on_temporal_are_what_the_engine_records` |
 | An answer sent around a switch counts once, whichever run decides it | TC `test_an_open_entry_survives_the_switch` |
 | Not ours to test: a signal arriving while a switch is committed fails the switch, and the old run decides it first (Temporal's behaviour) | none of its own: the row above holds either way |
+
+Not promised in 8c, and why: the switch when Temporal suggests it (D27): the code reads
+`is_continue_as_new_suggested()`, but the test server can't be made to suggest a switch, which
+takes a history near Temporal's limits; only the count is tested. And a reset keeping a case's
+keys (D27): Temporal's documentation, and the test server can't reset a workflow.

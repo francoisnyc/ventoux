@@ -451,8 +451,8 @@ What changes from memory, and what doesn't:
   retries fails the step, and the case needs attention; every attempt, and an operator's retry,
   sends the same key.
 - **A plan step is a child workflow,** with the ID `<case ID>/<entry>`: `refund-A-1001/settle#1`.
-  Its waits are answered on the child, as the plans guide shows; the case reports the step as
-  running until the plan ends.
+  Its waits are answered on the child, as the plans guide shows; the case's history shows
+  the step started (`started settle#1: plan …`), and the case waits for it until the plan ends.
 
   ```python
   from ventoux.temporal import client as plans
@@ -471,5 +471,5 @@ What changes from memory, and what doesn't:
   `report` asked at the very moment of a switch can go unanswered, reaching the run that is
   ending: ask again, and it reaches the new one.
 - **Replay holds the case to its history.** A worker can stop at any point and another replays
-  the case from its history; code changed in a way that decides differently fails the replay,
+  the case from its history; code changed to ask for something else fails the replay,
   and Temporal holds the case until the code is fixed (brief, D17).
