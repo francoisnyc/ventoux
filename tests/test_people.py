@@ -727,3 +727,29 @@ def test_the_guides_refusals_are_what_the_engine_says(when: str, example: str) -
 
 def test_every_refusal_in_the_guide_is_tested() -> None:
     assert [when for when, _ in guide_refusal_rows()] == list(GUIDE_REFUSALS)
+
+
+def test_asking_again_withdraws_an_open_approval_so_a_rejection_is_never_outvoted() -> None:
+    # From the tutor review, in a plan `validate` refuses: Sam approves, the run goes round and
+    # asks again, and Lee rejects. Sam's approval from #1 must not pay the refund (brief, D23).
+    plan = approving()
+    plan["states"]["approve_refund"]["on"] = {"approve": "note", "reject": "pay"}
+    plan["states"]["note"] = {
+        "wait": {"outcomes": ["ok"], "roles": ["support"]},
+        "on": {"ok": "approve_refund"},
+    }
+    refunds: list[dict[str, Any]] = []
+    run = run_plan(
+        plan,
+        fields=REFUND,
+        answers=[
+            ("approve_refund", "approve", "sam"),
+            ("note", "ok", "ana"),
+            ("approve_refund", "reject", "lee"),
+        ],
+        activities={**FAKES, "payments.refund@2": recording_refunds(refunds)},
+        people={**PEOPLE, "lee": ["support-lead"]},
+    )
+    assert refunds == []
+    assert run.status == "stopped"
+    assert run.reason == "payments.refund@2 is high risk, and nobody approved this run of pay"

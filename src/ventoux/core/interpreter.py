@@ -171,6 +171,10 @@ async def interpret(
                 here = choose(here, state.on, gave.event, values)
                 run.history.append(Moved(gave.event, here))
             elif isinstance(state, WaitState | ApprovalState):
+                if isinstance(state, ApprovalState):
+                    # Asking again withdraws the last answer: an earlier approval never outvotes
+                    # the answer given now, such as a rejection (brief, D23; tutor review).
+                    approvals.pop(state.approval.of, None)
                 taken = await take_answer(
                     here, f"{here}#{entries[here]}", state, plan, sources, catalog, wait, run
                 )
