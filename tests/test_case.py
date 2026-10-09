@@ -555,7 +555,24 @@ def test_a_high_risk_step_with_no_approval_stops() -> None:
 
 # --- Slice 6: the guide, run as written ---
 
-GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+# The guide, without the sections whose code lands later in layer 8c: plan steps (slice 1), and
+# cases on Temporal, whose examples run on Temporal's test server (tests/test_temporal_case.py).
+NOT_RUN_HERE = ("## Plan steps\n", "## Running a case on Temporal\n")
+
+
+def without_sections(text: str, headings: tuple[str, ...]) -> str:
+    """`text` without each section that starts with one of `headings`, up to the next one."""
+    for heading in headings:
+        if heading in text:
+            before, after = text.split(heading, 1)
+            rest = after.split("\n## ", 1)
+            text = before + ("## " + rest[1] if len(rest) > 1 else "")
+    return text
+
+
+GUIDE = without_sections(
+    (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text(), NOT_RUN_HERE
+)
 
 
 def blocks(language: str) -> list[str]:

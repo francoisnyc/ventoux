@@ -643,6 +643,64 @@ be erased on request), has size limits, and a second copy of business records go
   or a person closes it with a declared reason. Nothing is skipped automatically (D17). *Added in
   the tutor review of layer 8b, before D26 was merged.*
 
+### D27. A case continues as new, keeping its keys (design question 18)
+
+*Decided 2026-10-09, in layer 8c.*
+
+- **A case is its workflow ID, and its keys survive every run of it.** An idempotency key is
+  `<workflow ID>/<first run ID>/<entry>`: the case's ID, the run ID Temporal gives the first run
+  of its chain (the same in every run after a continue-as-new), and the step run, `pay#1`. The
+  entry counts come from the case's step runs, which cross over, so a key never repeats and never
+  changes between runs. The first run ID keeps two cases apart even if an ID is reused once
+  Temporal has forgotten a closed case; while it remembers it, a second case with the same ID is
+  refused. A plan step's keys add its own: `<case key>/collect#1/pay#1`.
+- **A reset keeps the case's keys.** Temporal keeps the first run ID through a
+  reset (its documentation; not tested here), so a reset case sends the same keys again and the
+  payment system returns the first refund. This narrows D19's warning to plans, whose keys carry
+  their own run ID; resets stay restricted and audited (D19) for every other reason.
+- **When:** after a fixed count of events in one run, or when Temporal suggests it (its history is
+  getting large), whichever comes first; and only at a quiet point: no activity or plan step
+  running, no event waiting to be decided, no signal still being handled. An open task or approval
+  is only state, so it doesn't hold the switch back. A count, never a clock, so replay switches at
+  the same place.
+- **What crosses:** the whole state of the case: the case file and each value's sources, the
+  milestones, every step run (and so the entry counts), open, given and withdrawn approvals, who
+  proposed what, what waits on people, who opened the case, its phase, its flags and its history
+  lines, with the definition it runs. Nothing else: the new run decides from that state alone.
+- **Answers sent during the switch are never carried as a queue.** The switch happens only with
+  no event waiting, and Temporal refuses to complete it if a signal arrived meanwhile: the run
+  goes on, decides that signal, and switches later. So every answer is judged by the run whose
+  history records it, against the entry open when it arrived (layer 6). An entry open before the
+  switch is still open after it, under the same name.
+- **People address the case, not a run:** answers, proposals, retries, closes and reports go to
+  the workflow ID alone, which always reaches its latest run.
+
+### D28. A plan step runs as a child workflow of its case
+
+*Decided 2026-10-09, in layer 8c.*
+
+- **A case references a plan, never defines one:** `{"kind": "plan", "plan": "refund-order@1",
+  "inputs": {...}}`. The deployment supplies its plans, as it supplies its catalog; releases
+  package them later (D5, D13). A plan the deployment lacks fails the step (fail closed).
+- **Its inputs are expressions over the case file;** each becomes one of the plan's fields with
+  the sources of what it read (D12), so provenance crosses into the plan, and the plan's checks
+  see where each value really came from.
+- **On Temporal it is a child workflow,** `<case ID>/collect#1`, whose run is named by the case:
+  its keys are the case's key for that step run, then the plan's own (`…/collect#1/pay#1`). A
+  retry (D26) starts the child again under the same ID, with the same keys.
+- **How it ends:** a plan that succeeds makes the step `done`; one that ends in a failed final
+  state gives the outcome `failed`, which a step can react to, like a declared outcome; one that
+  stops makes the step fail, and the case needs attention (D17).
+- **The case's exclusions cross into the plan:** the person who opened the case, and the person
+  who proposed the step's run, approve nothing inside it (D25). Otherwise a plan step would be a
+  way around them.
+- **The plan's own waits are answered on the child,** by its ID; the case reports the step as
+  running. Listing them in the case's `waiting_for` (D24) needs the child to tell its parent, and
+  comes later: until then the inbox reads them from the child.
+- **No approval of the whole plan yet.** A plan carries its own approvals, checked when it is
+  read (layer 3); "Approve this plan" (D14), for plans an AI drafts, comes with authoring
+  (layer 15).
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
@@ -848,7 +906,7 @@ New questions found while building go here, numbered from 10.
     timers and many tasks. What crosses over must be decided with the case's state in view: the
     case file and its sources, the count of entries per state (a count that restarts would repeat
     an idempotency key, which is why the key carries the run ID), the history so far, and answers
-    sent during the switch. To decide in layer 8.
+    sent during the switch. To decide in layer 8. **Decided in layer 8c:** D27.
 
 ## Prior art
 

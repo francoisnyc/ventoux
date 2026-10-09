@@ -485,5 +485,5 @@ On Temporal, `answer` carries who answered and their roles, as the API states th
 when the outcome sets fields (`form={"approved_amount": Decimal("250")}`); the same checks run.
 
 Not yet: an activity's output reaching the case file, and a person's form landing in it rather
-than in the plan's fields (layer 8). A run never continues as new: the bound on loops keeps a run's history far below
-Temporal's limits (design question 18).
+than in the plan's fields (layer 8). A plan run never continues as new: the bound on loops keeps its history far below
+Temporal's limits. A case does, keeping its keys (brief, D27; the cases guide).

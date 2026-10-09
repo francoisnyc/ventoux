@@ -2,8 +2,8 @@
 
 > **For workflow developers.** A case is how Ventoux runs long work with people in it: one
 > customer's refund, one claim. This guide shows a case as stored (the JSON `ventoux check`
-> writes from your Python file) and how it runs in memory, in tests. Closing a case early and
-> failed steps come next, then cases on Temporal and existing workflows as steps.
+> writes from your Python file), how it runs in memory, in tests, and how it runs on Temporal.
+> Existing workflows as steps come next.
 
 ## A case, read aloud
 
@@ -269,6 +269,63 @@ flagged: pay#1 completed after the close was requested
 closed: duplicate, by ana
 ```
 
+## Plan steps
+
+A **plan step** runs a plan (see the plans guide) as one step of the case: several calls and
+waits that belong together, written as data (brief, D13). The case references the plan by name
+and version; your deployment supplies its plans, as it supplies its catalog, and a case never
+defines one (brief, D28). Here the refund's payment is the plans guide's `refund-order` plan,
+which looks the order up, asks a team lead, and pays:
+
+```json
+"settle": {
+  "kind": "plan",
+  "display": {"title": "Settle the refund"},
+  "plan": "refund-order@1",
+  "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+  "requires": ["review"],
+  "when": {"==": [{"var": "review.outcome"}, "approve"]}
+}
+```
+
+Its `inputs` give the plan its fields, read from the case file, each with where its value came
+from, so the plan's checks see the real sources: an amount a customer typed is still refused at
+`payments.refund@2`. The plan carries its own approvals, so a plan step has no `approval`. Who
+may not approve crosses into the plan too: the person who opened the case, and the person who
+proposed the step, approve nothing inside it (brief, D25).
+
+How the plan ends decides how the step ends:
+
+| The plan | The step |
+|---|---|
+| succeeds | is done, and reaches its milestones |
+| ends in a failed final state (`"final": "failed"`) | gives the outcome `failed`, which a step can react to (`settle.outcome`) |
+| stops (the engine can't go on) | fails, and the case needs attention |
+
+In a test, `plans` gives the plans by reference, and `plan_answers` answers each plan step's
+waits, in order, as a plan's script does (state, outcome, who):
+
+```python
+run = run_case(
+    refund_with_plan,
+    file={"order_id": "ord-1", "amount": 250},
+    answers=[("review", "approve", "ana", {"approved_amount": 250})],
+    plans={"refund-order@1": refund_order},
+    plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+    people=PEOPLE,
+)
+assert run.reached("settle")
+```
+
+```
+started settle#1: plan refund-order@1 (order_id from system:opener; amount from person:ana), run memory/settle#1
+settle#1 done
+closed: nothing left to do
+```
+
+The plan's activities are keyed by the step's run, then their own: `memory/settle#1/pay#1`. A
+plan whose waits the script doesn't answer keeps the step running, and the case open.
+
 ## Testing a case
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`
@@ -311,3 +368,106 @@ Anything the engine won't accept is refused, with the reason:
 | the close reason isn't declared | `refund has no close reason 'spam': its reasons are duplicate` |
 | the person closing has none of the reason's roles | `duplicate is closed by support, and eve has no role` |
 | the case is closing | `the case is closing: nothing waits for an answer` |
+
+## Running a case on Temporal
+
+On Temporal, the same engine runs the case as a workflow: one workflow per case, for as long as
+the case lives. Your deployment names its catalog and its plans in a workflow of its own:
+
+```python
+from temporalio import workflow
+
+from ventoux.temporal.cases import CaseStart, CaseWorkflow, CaseReport
+from refunds.catalog import CATALOG, PLANS  # the contracts and plans this deployment allows
+
+
+@workflow.defn(name="ventoux.case")
+class RefundCases(CaseWorkflow):
+    catalog = CATALOG
+    plans = PLANS
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+```
+
+A worker serves it, the plan workflow its plan steps run as (`RefundPlans`, from the plans
+guide), and the code behind each contract:
+
+```python
+from ventoux.temporal.worker import case_worker
+
+worker = case_worker(client, "refunds", RefundCases, RefundPlans, {"payments.refund@2": refund, ...})
+await worker.run()
+```
+
+The client opens a case with its first values, answers it, and reads how it is going. The case's
+ID is the case: `refund-A-1001` names it for as long as it lives, and opening a second case with
+the same ID is refused.
+
+```python
+from decimal import Decimal
+
+from ventoux.temporal.cases import answer, report, start_case
+
+case = await start_case(
+    client, RefundCases, refund, file={"order_id": "ord-1", "amount": Decimal("250")},
+    id="refund-A-1001", task_queue="refunds",
+)
+assert (await report(case)).waiting_at == ["review#1"]
+await answer(case, "review#1", "approve", by="ana", roles=["support"],
+             form={"approved_amount": Decimal("250")})
+await answer(case, "pay.approval#1", "approve", by="sam", roles=["support", "support-lead"])
+assert (await case.result()).status == "closed"
+```
+
+`propose(case, step, by, roles)`, `retry(case, entry, by, roles)` and `close(case, reason, by,
+roles)` do what a script's `propose`, `retry` and `close` do. `report` gives what `run_case`
+reports (`status`, `waiting_for`, `needs_attention`, `flags`, `history`), and `waiting_at`, the
+entries open for an answer, in the same order as `waiting_for`.
+
+What changes from memory, and what doesn't:
+
+- **The decisions don't change.** The same events give the same history, line for line, except
+  the keys, which name the case: `key refund-A-1001/<first run ID>/pay#1`.
+- **Answers, proposals, retries and closes are signals.** An answer names the entry it answers,
+  `review#1` or `pay.approval#1`, never a step: after a rework, an answer to "review" could
+  approve a review its sender never saw. An answer counts only for the entry open when it
+  arrives; a double click, or an answer sent before its entry opens, is refused.
+- **Anything refused is recorded, and the case waits on.** In memory a refusal raises from
+  `run_case`; on Temporal nobody is there to catch it, so the history says what was refused and
+  why, and the case goes on as if it hadn't come:
+
+  ```
+  refused sam's answer approve to review#1: review#1 is closed
+  refused ana's answer approve to review: name the entry it answers, such as review#1
+  refused eve's proposal of check_order: check_order is proposed by support, and eve has no role
+  refused ana's retry of pay#1: pay#1 is retried by an operating role (operations), and ana has support
+  refused eve's close as duplicate: duplicate is closed by support, and eve has no role
+  ```
+
+- **Activities are retried as their contract says.** Its retry policy and timeouts are the ones
+  Temporal uses; a declared outcome is never retried. An activity still failing after its
+  retries fails the step, and the case needs attention; every attempt, and an operator's retry,
+  sends the same key.
+- **A plan step is a child workflow,** with the ID `<case ID>/<entry>`: `refund-A-1001/settle#1`.
+  Its waits are answered on the child, as the plans guide shows; the case reports the step as
+  running until the plan ends.
+
+  ```python
+  from ventoux.temporal import client as plans
+
+  plan = client.get_workflow_handle("refund-A-1001/settle#1")
+  assert (await plans.report(plan)).waiting_at == "approve_refund#1"
+  await plans.answer(plan, "approve_refund#1", "approve", by="sam", roles=["support-lead"])
+  ```
+
+- **A long case continues as new.** Temporal keeps every event of a run, and a case lives for
+  weeks. After enough events, at a moment when nothing is running, the case starts a fresh run
+  carrying its whole state: case file, step runs, approvals, history (brief, D27). Nothing
+  changes for you: the case keeps its ID, its keys and its open entries (`review#1` is still
+  answered as `review#1`), and the client always reaches its latest run. An answer sent during
+  the switch is decided by one run or the other, never lost and never kept for later.
+- **Replay holds the case to its history.** A worker can stop at any point and another replays
+  the case from its history; code changed in a way that decides differently fails the replay,
+  and Temporal holds the case until the code is fixed (brief, D17).
