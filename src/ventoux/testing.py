@@ -10,12 +10,12 @@ from typing import Annotated, Any, NamedTuple
 from pydantic import BaseModel
 from temporalio import workflow
 
-from ventoux.case.admission import ProposalRefused, StepStopped
+from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import Activity, CaseRun, run_case_in_memory
 from ventoux.case.runtime import CaseRefused
-from ventoux.case.state import Answered, Event, Opened, Proposed
+from ventoux.case.state import Answered, Event, Opened, Proposed, Retried
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
@@ -33,9 +33,11 @@ __all__ = [
     "InputRefused",
     "Outcome",
     "ProposalRefused",
+    "RetryRefused",
     "StepStopped",
     "load_definition",
     "propose",
+    "retry",
     "run_case",
     "run_plan",
 ]
@@ -139,6 +141,8 @@ for label in ("customer", "document", "email", "llm", "web"):
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
 CATALOG.register_role("support")
 CATALOG.register_role("support-lead", approves="high")
+# Operations acts on a case's failed steps: retries them, or closes the case (brief, D26).
+CATALOG.register_role("operations", operates=True)
 
 
 # Fake implementations, against no real system: nothing is paid, read or sent.
@@ -199,6 +203,9 @@ def run_case(
         if isinstance(item, Proposal):
             events.append(Proposed(item.step, item.by, frozenset(people.get(item.by, ()))))
             continue
+        if isinstance(item, Retry):
+            events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ()))))
+            continue
         entry, outcome, who, *form = item
         # The test plays the API: it states who answered and their roles.
         roles = frozenset(people.get(who, ()))
@@ -211,6 +218,18 @@ class Proposal(NamedTuple):
 
     step: str
     by: str
+
+
+class Retry(NamedTuple):
+    """A scripted retry: `who` retries the failed step run `entry`."""
+
+    entry: str
+    by: str
+
+
+def retry(entry: str, who: str) -> Retry:
+    """A script's retry by an operator: `retry("pay#1", "omar")` (brief, D26)."""
+    return Retry(entry, who)
 
 
 def propose(step: str, who: str) -> Proposal:

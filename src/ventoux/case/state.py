@@ -10,14 +10,25 @@ from typing import Literal
 
 
 @dataclass
+class GivenApproval:
+    """An approval given and not yet spent: who gave it, and the digest of the inputs it saw."""
+
+    entry: str
+    by: str
+    digest: str  # of the step's inputs (brief, D11)
+
+
+@dataclass
 class StepRun:
     """One run of a step: `review#1`, open while a task waits, running while an activity runs."""
 
     entry: str  # the step and its run's number, such as `review#1`
     step: str
-    # rejected: its approval was refused; failed: it needs attention, with the reason (brief, D17).
-    status: Literal["open", "running", "done", "rejected", "failed"]
+    # rejected: its approval was refused; failed: it needs attention, with the reason (brief, D17);
+    # retrying: an operator retried it, and it runs again as the same run (brief, D26).
+    status: Literal["open", "running", "done", "rejected", "failed", "retrying"]
     reason: str = ""  # why it failed
+    approved: GivenApproval | None = None  # the approval spent on it, which a retry keeps
 
 
 @dataclass
@@ -27,15 +38,6 @@ class OpenApproval:
     entry: str  # the step, `approval`, and how many times it was asked: `pay.approval#1`
     step: str  # the step it guards
     seen: dict[str, object]  # the values its step read when it was asked, by field (brief, D25)
-
-
-@dataclass
-class GivenApproval:
-    """An approval given and not yet spent: who gave it, and the digest of the inputs it saw."""
-
-    entry: str
-    by: str
-    digest: str  # of the step's inputs (brief, D11)
 
 
 @dataclass
@@ -107,7 +109,16 @@ class Failed:
     reason: str
 
 
-type Event = Opened | Answered | Proposed | Completed | Failed
+@dataclass(frozen=True)
+class Retried:
+    """An operator retries a failed step run: the same run, with the same key (brief, D26)."""
+
+    entry: str
+    by: str  # who retried it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with the retry (brief, D22)
+
+
+type Event = Opened | Answered | Proposed | Completed | Failed | Retried
 
 
 @dataclass(frozen=True)

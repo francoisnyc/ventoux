@@ -9,11 +9,13 @@ See docs/layers/08-case.md.
 import copy
 from collections.abc import Mapping
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import ValidationError
 
 from ventoux.case.admission import (
     ProposalRefused,
+    RetryRefused,
     StepStopped,
     holds,
     latest_run,
@@ -34,6 +36,7 @@ from ventoux.case.state import (
     OpenApproval,
     Opened,
     Proposed,
+    Retried,
     Schedule,
     StepRun,
 )
@@ -77,6 +80,8 @@ def decide(
         propose(case, catalog, state, event, commands)
     elif isinstance(event, Failed):
         failed(state, event)
+    elif isinstance(event, Retried):
+        retry(case, catalog, state, event)
     else:
         complete(case, catalog, state, event)
     admit(case, catalog, state, commands)
@@ -316,10 +321,49 @@ def failed(state: CaseState, event: Failed) -> None:
 
 
 def fail(state: CaseState, name: str, reason: str) -> None:
-    """The step's next run fails before it is scheduled, with the reason (brief, D17)."""
-    entry = next_entry(state, name)
-    state.runs.append(StepRun(entry, name, "failed", reason))
-    state.history.append(f"{entry} failed: {reason}")
+    """The step's coming run fails before it is scheduled, with the reason (brief, D17)."""
+    run = coming_run(state, name, "failed")
+    run.reason = reason
+    state.history.append(f"{run.entry} failed: {reason}")
+
+
+def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retried) -> None:
+    """An operator retries a failed run: it runs again as the same run, with the same key, once
+    the step is checked again (brief, D26). Or `RetryRefused`."""
+    # Who retried is written one way, before anything is checked against it (brief, D22).
+    if (wrong := identifier_problem(event.by)) is not None:
+        raise RetryRefused(wrong)
+    if state.closed:
+        raise RetryRefused("the case is closed: nothing starts")
+    run = next((run for run in state.runs if run.entry == event.entry), None)
+    if run is None or run.status != "failed":
+        raise RetryRefused(f"{event.entry} has not failed: nothing to retry")
+    counted = sorted(role for role in event.roles if role in catalog.operators)
+    if not counted:
+        registered = sorted(role for role in event.roles if role in catalog.roles)
+        known = listed(registered) if registered else ""
+        raise RetryRefused(
+            f"{event.entry} is retried by an operating role "
+            f"({', '.join(catalog.operators) or 'none registered'}), and {event.by} has "
+            f"{known or 'no role'}"
+        )
+    step = case.steps[run.step]
+    # The step is checked again: what made it fail may still hold. Fail closed: nothing starts.
+    for requirement in requirements(case)[run.step]:
+        if not requirements_met((requirement,), state):
+            raise RetryRefused(
+                f"{event.entry} can't be retried: {run.step} requires {requirement}, which "
+                "hasn't completed"
+            )
+    if step.when is not None:
+        try:
+            decided = holds(step.when, state.values, f"{run.step}'s condition")
+        except StepStopped as unreadable:
+            raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
+        if not decided:
+            raise RetryRefused(f"{event.entry} can't be retried: {render(step.when)} is false now")
+    run.status, run.reason = "retrying", ""
+    state.history.append(f"{event.by} retried {event.entry} as {counted[0]}")
 
 
 def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
@@ -363,6 +407,9 @@ def free_to_start(state: CaseState, name: str, step: TaskStep | ActivityStep) ->
         return False  # waiting for its approval
     if name in state.given:
         return True  # approved, so it starts now
+    latest = latest_run(state, name)
+    if latest is not None and latest.status == "retrying":
+        return True  # an operator retried it
     # A step starts by itself at most once; again, or at all if not automatic, only if proposed.
     return step.automatic and latest_run(state, name) is None
 
@@ -376,8 +423,7 @@ def start(
 ) -> None:
     """Open a task's run; ask for an activity's approval, or schedule the activity."""
     if isinstance(step, TaskStep):
-        entry = next_entry(state, name)
-        state.runs.append(StepRun(entry, name, "open"))
+        entry = coming_run(state, name, "open").entry
         state.proposers.pop(name, None)  # a task has no approval: the proposed run has started
         state.waiting[entry] = f"{name} by {' or '.join(step.roles)}"
         state.history.append(
@@ -386,16 +432,24 @@ def start(
         )
         return
     given = state.given.pop(name, None)  # spent, whatever happens next
+    latest = latest_run(state, name)
+    if given is None and latest is not None and latest.status == "retrying":
+        given = latest.approved  # a retry keeps the approval spent on its run (brief, D26)
     if given is None and needs_approval(state, name, step):
         ask(state, name, step)
         return
     if given is not None:
         lapsed(state, name, step, given)
-    schedule(catalog, state, name, step, commands)
+    schedule(catalog, state, name, step, given, commands)
 
 
 def schedule(
-    catalog: Catalog, state: CaseState, name: str, step: ActivityStep, commands: list[Schedule]
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    step: ActivityStep,
+    approved: GivenApproval | None,
+    commands: list[Schedule],
 ) -> None:
     """Check the activity's inputs against the real sources (layer 5), then schedule it, with a
     key naming the case and the step run (brief, D17)."""
@@ -403,10 +457,12 @@ def schedule(
     # Checked again at runtime, on nothing case validation did (learning question 34).
     if contract.risk == "high" and step.approval is None:
         raise StepStopped(f"{contract.reference} is high risk, and {name} has no approval")
-    entry = next_entry(state, name)
+    latest = latest_run(state, name)
+    entry = latest.entry if latest is not None and latest.status == "retrying" else None
+    entry = entry or next_entry(state, name)
     key = f"{state.case}/{entry}"
     inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key)
-    state.runs.append(StepRun(entry, name, "running"))
+    coming_run(state, name, "running").approved = approved
     state.proposers.pop(name, None)  # the proposed run has started
     origins = "; ".join(
         f"{field} from {', '.join(sorted(provenance(expression, state.sources))) or 'the case'}"
@@ -417,6 +473,20 @@ def schedule(
     commands.append(Schedule(entry, contract.reference, inputs))
 
 
+def coming_run(
+    state: CaseState, name: str, status: Literal["open", "running", "failed"]
+) -> StepRun:
+    """The step's coming run, now `status`: the run an operator retried, which keeps its entry and
+    so its key (brief, D26), or else a new one."""
+    latest = latest_run(state, name)
+    if latest is not None and latest.status == "retrying":
+        latest.status = status
+        return latest
+    run = StepRun(next_entry(state, name), name, status)
+    state.runs.append(run)
+    return run
+
+
 def next_entry(state: CaseState, name: str) -> str:
     """The step's next run: `review#1`, then `review#2`."""
     return f"{name}#{sum(1 for run in state.runs if run.step == name) + 1}"
@@ -425,7 +495,7 @@ def next_entry(state: CaseState, name: str) -> str:
 def pending(state: CaseState) -> bool:
     """Whether anything is left to do: a task open, an activity running, a step failed, an
     approval asked or given and not yet spent (brief, D10, D17)."""
-    unfinished = any(run.status in ("open", "running", "failed") for run in state.runs)
+    unfinished = any(run.status in ("open", "running", "failed", "retrying") for run in state.runs)
     return unfinished or bool(state.approvals) or bool(state.given)
 
 

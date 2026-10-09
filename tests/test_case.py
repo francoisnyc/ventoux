@@ -21,8 +21,10 @@ from ventoux.testing import (
     CaseRefused,
     Outcome,
     ProposalRefused,
+    RetryRefused,
     load_definition,
     propose,
+    retry,
     run_case,
 )
 
@@ -907,3 +909,101 @@ def test_an_outcome_is_tagged_with_the_contract_that_declares_it() -> None:
         "scheduled letter#1: letters.draft@2 (to_customer from system:opener; template from "
         "system:payments.refund@2), key memory/letter#1"
     ) in run.history
+
+
+# --- Slice 3: an operator retries a failed step ---
+
+OPERATORS = {**PEOPLE, "omar": ["operations"]}
+
+
+def down_once() -> tuple[list[str], Any]:
+    """A fake refund that fails on its first call, and the keys it was called with."""
+    keys: list[str] = []
+
+    def refund_down_once(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        if len(keys) == 1:
+            raise ConnectionError("provider unreachable")
+        return {"refund_id": "refund-ord-1"}
+
+    return keys, refund_down_once
+
+
+def test_only_an_operating_role_retries() -> None:
+    _, refund_down = down_once()
+    with pytest.raises(
+        RetryRefused,
+        match=r"^pay#1 is retried by an operating role \(operations\), and ana has support$",
+    ):
+        run_case(
+            REFUND,
+            file=SMALL,
+            answers=[SMALL_REVIEW, retry("pay#1", "ana")],
+            people=OPERATORS,
+            activities={"payments.refund@2": refund_down},
+        )
+
+
+def test_only_a_failed_run_is_retried() -> None:
+    with pytest.raises(RetryRefused, match="^review#1 has not failed: nothing to retry$"):
+        run_case(
+            REFUND, file=LARGE, answers=[REVIEWED, retry("review#1", "omar")], people=OPERATORS
+        )
+
+
+def test_a_retry_is_the_same_run_with_the_same_key() -> None:
+    # The first attempt may have moved money: the same key lets the provider say so (brief, D26).
+    keys, refund_down = down_once()
+    run = run_case(
+        REFUND,
+        file=SMALL,
+        answers=[SMALL_REVIEW, retry("pay#1", "omar")],
+        people=OPERATORS,
+        activities={"payments.refund@2": refund_down},
+    )
+    assert keys == ["memory/pay#1", "memory/pay#1"]
+    assert "omar retried pay#1 as operations" in run.history
+    assert run.needs_attention == []
+    assert run.reached("pay")
+    assert run.closed
+
+
+def test_an_approval_spent_on_the_run_holds_for_its_retry() -> None:
+    keys, refund_down = down_once()
+    run = run_case(
+        REFUND,
+        file=LARGE,
+        answers=[REVIEWED, ("pay", "approve", "sam"), retry("pay#1", "omar")],
+        people=OPERATORS,
+        activities={"payments.refund@2": refund_down},
+    )
+    assert keys == ["memory/pay#1", "memory/pay#1"]
+    assert not any(line.startswith("asked pay.approval#2") for line in run.history)
+    assert run.closed
+
+
+def test_a_retry_checks_the_step_again() -> None:
+    # pay failed at the opening, its condition unreadable; once the review is answered, the
+    # retry reads it again, and the approval is asked for the same run.
+    definition = refund(sequence=[])
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[REVIEWED, retry("pay#1", "omar"), ("pay", "approve", "sam")],
+        people=OPERATORS,
+    )
+    assert run.reached("pay")
+    assert (
+        "scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from "
+        "person:ana), key memory/pay#1" in run.history
+    )
+    rejected = refund(sequence=[])
+    with pytest.raises(
+        RetryRefused, match='^pay#1 can\'t be retried: review.outcome = "approve" is false now$'
+    ):
+        run_case(
+            rejected,
+            file=LARGE,
+            answers=[("review", "reject", "ana"), retry("pay#1", "omar")],
+            people=OPERATORS,
+        )
