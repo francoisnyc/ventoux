@@ -177,14 +177,107 @@ assert run.waiting_for == ["review by support"]
 assert not run.closed
 ```
 
+## When a system says no
+
+A business failure is an answer, not an error (brief, D17). `payments.refund@2` declares the
+outcome `declined`; when the provider declines, `pay` is done with that outcome, and
+`pay.outcome` reads `"declined"`, tagged with the contract that declares it
+(`system:payments.refund@2`). A step can react to it:
+
+```json
+"call_customer": {
+  "kind": "task",
+  "display": {"title": "Call the customer about the declined refund"},
+  "roles": ["support"],
+  "requires": ["pay"],
+  "when": {"==": [{"var": "pay.outcome"}, "declined"]},
+  "outcomes": {"called": {"display": {"title": "Customer called"}}}
+}
+```
+
+```
+scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key memory/pay#1
+pay#1 gave declined
+started call_customer#1: waiting for called by support
+```
+
+A step's milestones are reached only when it is done with `done`: a declined refund doesn't reach
+`paid`. An outcome the contract doesn't declare is never read as one: it is a failure.
+
+## When something breaks
+
+Systems go down, and Temporal retries them with the contract's retry policy. When the retries run
+out, or an activity gives an outcome its contract doesn't declare, or a condition can't be read,
+the step run **fails** and the case **needs attention** (brief, D17). The failed step is pending
+work, so the case doesn't close, and nothing is skipped: other steps go on, and the failed one
+waits for an operator.
+
+```python
+calls = []
+
+def down_once(inputs):
+    calls.append(inputs["idempotency_key"])
+    if len(calls) == 1:
+        raise ConnectionError("provider unreachable")
+    return {"refund_id": "refund-ord-1"}
+
+failed = run_case(refund, file={"order_id": "ord-1", "amount": 40},
+                  answers=[("review", "approve", "ana", {"approved_amount": 40})],
+                  people=PEOPLE, activities={"payments.refund@2": down_once})
+assert failed.needs_attention == ["pay#1: payments.refund@2 failed: provider unreachable"]
+assert not failed.closed
+```
+
+An **operator** (a role the platform team registered as operating, such as `operations`) retries
+the failed run, or closes the case. A retry is the same step run, with the same idempotency key,
+so a payment that did go through before the failure is not made twice (brief, D26):
+
+```python
+calls.clear()
+retried = run_case(refund, file={"order_id": "ord-1", "amount": 40},
+                   answers=[("review", "approve", "ana", {"approved_amount": 40}),
+                            retry("pay#1", "omar")],
+                   people=PEOPLE, activities={"payments.refund@2": down_once})
+assert calls == ["memory/pay#1", "memory/pay#1"]
+assert retried.closed
+```
+
+## Closing a case
+
+A case closes by itself when nothing is left to do (brief, D10). Two definition keys change that:
+`"closes_when": ["paid"]` closes it as soon as the milestones are reached, and `"stays_open":
+true` keeps it open until a person closes it. A case whose steps all wait to be proposed needs
+`stays_open`: otherwise nothing is pending when it opens, and it closes at once.
+
+A person closes a case with a **close reason** the definition declares, with who may use it:
+
+```json
+{"close_reasons": {"duplicate": {"display": {"title": "Duplicate request"}, "roles": ["support"]}}}
+```
+
+Closing puts the case in **closing**: open tasks and approvals are cancelled, saying why; nothing
+new starts; activities already running finish, since a payment can't be safely cut off halfway.
+Then the case is **closed**. If something completed while closing, the case is **flagged**, so a
+person can decide whether to reverse it:
+
+```
+ana closed the case as duplicate, as support
+pay#1 done, giving refund_id
+flagged: pay#1 completed after the close was requested
+closed: duplicate, by ana
+```
+
 ## Testing a case
 
-`run_case` opens the case, plays the script in order, and reports where it ended: `closed`,
-`reached(step)`, `waiting_for` and `history`. A script holds answers, `(step, outcome, who)` or
-`(step, outcome, who, form)`, and proposals, `propose(step, who)`. An answer to a step answers
-its open entry; naming the entry (`"pay.approval#1"`) answers that one. `people` gives each person
-their roles, as the Ventoux API does (brief, D22); `opened_by` says who opened the case, when a
-person did.
+`run_case` opens the case, plays the script in order, and reports where it ended: `status`
+(`open`, `closing` or `closed`), `closed`, `reached(step)`, `waiting_for`, `needs_attention`,
+`flags` and `history`. A script holds answers, `(step, outcome, who)` or `(step, outcome, who,
+form)`, and the other things people do: `propose(step, who)`, `retry(entry, who)` and
+`close(reason, who)`. An answer to a step answers its open entry; naming the entry
+(`"pay.approval#1"`) answers that one. `people` gives each person their roles, as the Ventoux API
+does (brief, D22); `opened_by` says who opened the case, when a person did. `activities` replaces
+the fake activities; an activity raises `Outcome("declined")` for a declared outcome. `held=["pay"]`
+keeps `pay`'s runs running until the script says `finish("pay#1")`.
 
 ```python
 run = run_case(
@@ -211,3 +304,8 @@ Anything the engine won't accept is refused, with the reason:
 | a proposed step's requirements aren't met | `check_order requires review, which hasn't completed` |
 | nobody proposes a step that starts by itself | `pay starts by itself: nobody proposes it` |
 | the opening gives a field a person sets | `approved_amount is set by a person in review, never given at the opening` |
+| the person retrying has no operating role | `pay#1 is retried by an operating role (operations), and ana has support` |
+| the run hasn't failed | `pay#1 has not failed: nothing to retry` |
+| the close reason isn't declared | `refund has no close reason 'spam': its reasons are duplicate` |
+| the person closing has none of the reason's roles | `duplicate is closed by support, and eve has no role` |
+| the case is closing | `the case is closing: nothing waits for an answer` |
