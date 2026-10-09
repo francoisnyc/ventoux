@@ -15,7 +15,7 @@ import pytest
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Completed, Opened, StartPlan
-from ventoux.testing import CATALOG, load_definition, propose, run_case
+from ventoux.testing import CATALOG, close, load_definition, propose, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 
@@ -246,3 +246,27 @@ def test_a_plan_ends_done_or_failed_and_nothing_else() -> None:
     assert state.history[-1] == (
         "settle#1 failed: refund-order@1 ended with declined: a plan ends done or failed"
     )
+
+
+# --- Tutor review: closing a case stops its plan steps ---
+
+DUPLICATE = {"display": {"title": "Duplicate request"}, "roles": ["support"]}
+
+
+def test_closing_a_case_ends_its_waiting_plan_step() -> None:
+    # The plan waits for a team lead's approval when Ana closes the case as a duplicate. The
+    # plan's open wait is cancelled, the plan ends, its step run is cancelled because the case is
+    # closing, and the case closes: never "closing" forever, waiting on a decision nobody sees
+    # (brief, D10, D28).
+    run = run_case(
+        refund_with_plan() | {"close_reasons": {"duplicate": DUPLICATE}},
+        file=LARGE,
+        answers=[REVIEWED, close("duplicate", "ana")],
+        people=PEOPLE,
+        plans={"refund-order@1": refund_order()},
+    )
+    assert run.status == "closed"
+    assert run.history[-2:] == [
+        "settle#1 cancelled: the case is closing",
+        "closed: duplicate, by ana",
+    ]

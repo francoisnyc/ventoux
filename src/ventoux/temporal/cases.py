@@ -40,10 +40,12 @@ with workflow.unsafe.imports_passed_through():
         Event,
         Failed,
         Opened,
+        PlanCancelled,
         Proposed,
         Retried,
         Schedule,
         StartPlan,
+        StopPlan,
     )
     from ventoux.core.catalog import Catalog
     from ventoux.temporal.activities import OUTCOME
@@ -118,6 +120,9 @@ class CaseWorkflow:
         self.inbox: list[Event] = []  # events not yet decided, in the order they came
         self.decided = 0  # events this run has decided
         self.running = 0  # activities and child plans started and not yet back
+        # Each child plan running, by its step run, to stop it if the case closes (brief, D28).
+        self.children: dict[str, workflow.ChildWorkflowHandle[Any, RunReport]] = {}
+        self.stopping: set[str] = set()  # step runs whose plans the case has stopped
 
     # Temporal: a signal is a message into a running workflow, recorded in its history, so replay
     # delivers it again at the same point.
@@ -214,6 +219,9 @@ class CaseWorkflow:
     def carry(self, command: Command) -> None:
         """Start the command; what it gives comes back to the inbox when it arrives."""
         # asyncio: a task runs alongside the loop; Temporal's event loop runs it deterministically.
+        if isinstance(command, StopPlan):
+            asyncio.create_task(self.stop_plan(command))
+            return
         self.running += 1
         if isinstance(command, StartPlan):
             asyncio.create_task(self.until_back(self.run_plan(command)))
@@ -245,13 +253,17 @@ class CaseWorkflow:
             # Temporal: a child workflow is a workflow the case starts and waits for; its own
             # history holds its waits and activities. Its ID names the step run; a retry starts it
             # again under the same ID, with the same keys (brief, D26).
-            ran: RunReport = await workflow.execute_child_workflow(
+            child = await workflow.start_child_workflow(
                 self.plan_workflow,
                 start,
                 id=f"{workflow.info().workflow_id}/{command.entry}",
                 id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
                 result_type=RunReport,
             )
+            self.children[command.entry] = child
+            if command.entry in self.stopping:
+                await child.signal("stop")  # the case closed while the child was starting
+            ran: RunReport = await child
         except ChildWorkflowError as error:
             cause = error.cause
             said = cause.message if isinstance(cause, FailureError) else str(error)
@@ -259,12 +271,26 @@ class CaseWorkflow:
                 Failed(command.entry, f"{plan.plan}@{plan.version} can't start: {said}")
             )
             return
-        if ran.status == "succeeded":
+        finally:
+            self.children.pop(command.entry, None)
+        if ran.status == "cancelled":
+            self.inbox.append(PlanCancelled(command.entry))  # ended by the close
+        elif ran.status == "succeeded":
             self.inbox.append(Completed(command.entry, {}))
         elif ran.status == "failed":
             self.inbox.append(Completed(command.entry, {}, "failed"))  # a failed final state
         else:
             self.inbox.append(Failed(command.entry, f"{command.plan} stopped: {ran.reason}"))
+
+    async def stop_plan(self, command: StopPlan) -> None:
+        """Stop a child plan because the case is closing (brief, D28). A signal, not Temporal's
+        cancellation: cancellation would cut short the await on an activity running in the
+        plan, which must finish (brief, D10); the signal lets the plan's driver cancel its open
+        wait and start nothing new, and the plan ends `cancelled`."""
+        self.stopping.add(command.entry)
+        child = self.children.get(command.entry)
+        if child is not None:  # else it is starting: `run_plan` signals it once started
+            await child.signal("stop")
 
     async def run_activity(self, command: Schedule) -> None:
         """Run the activity, retried and timed out as its contract says (brief, D17), and put

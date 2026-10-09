@@ -697,6 +697,14 @@ be erased on request), has size limits, and a second copy of business records go
 - **The plan's own waits are answered on the child,** by its ID; the case's history shows the step
   started, and the case waits for it. Listing them in the case's `waiting_for` (D24) needs the
   child to tell its parent, and comes later: until then the inbox reads them from the child.
+- **Closing the case stops its plan steps.** A wait open inside a running plan is the case's
+  pending decision one level down, so when the case begins closing (D10), the plan stops taking
+  answers: its open waits are cancelled, nothing new starts in it, and an activity already
+  running inside it finishes, since it may already have acted. The plan then ends, its step run
+  is recorded as cancelled because the case is closing, and the case closes once it has ended.
+  On Temporal the case signals its child to stop; it doesn't cancel it, since cancellation
+  would cut short the wait on an activity that must finish. *Added in the tutor review of layer
+  8c, before D28 was merged.*
 - **No approval of the whole plan yet.** A plan carries its own approvals, checked when it is
   read (layer 3); "Approve this plan" (D14), for plans an AI drafts, comes with authoring
   (layer 15).

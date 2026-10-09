@@ -133,7 +133,17 @@ class CloseAsked:
     roles: frozenset[str]  # their roles, stated with the request (brief, D22)
 
 
-type Event = Opened | Answered | Proposed | Completed | Failed | Retried | CloseAsked
+@dataclass(frozen=True)
+class PlanCancelled:
+    """A plan step's plan ended early because the case is closing: its open waits were
+    cancelled, and nothing new started in it (brief, D28)."""
+
+    entry: str
+
+
+type Event = (
+    Opened | Answered | Proposed | Completed | Failed | Retried | CloseAsked | PlanCancelled
+)
 
 
 @dataclass(frozen=True)
@@ -159,4 +169,12 @@ class StartPlan:
     excluded: dict[str, str]
 
 
-type Command = Schedule | StartPlan
+@dataclass(frozen=True)
+class StopPlan:
+    """Stop a plan step's plan, because the case is closing: cancel its open waits, start
+    nothing new in it, and let an activity running inside it finish (brief, D10) (brief, D28)."""
+
+    entry: str  # the step run, such as `settle#1`
+
+
+type Command = Schedule | StartPlan | StopPlan

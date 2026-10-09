@@ -38,11 +38,13 @@ from ventoux.case.state import (
     GivenApproval,
     OpenApproval,
     Opened,
+    PlanCancelled,
     Proposed,
     Retried,
     Schedule,
     StartPlan,
     StepRun,
+    StopPlan,
 )
 from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
@@ -76,6 +78,7 @@ def decide(
     can't run fails, and the case needs attention (brief, D17)."""
     state = copy.deepcopy(state)  # the state passed in is never changed
     commands: list[Command] = []
+    was_open = state.phase == "open"
     if isinstance(event, Opened):
         open_case(case, state, event)
     elif isinstance(event, Answered):
@@ -86,6 +89,8 @@ def decide(
         propose(case, catalog, state, event, commands)
     elif isinstance(event, Failed):
         failed(state, event)
+    elif isinstance(event, PlanCancelled):
+        plan_cancelled(state, event)
     elif isinstance(event, Retried):
         retry(case, catalog, state, event)
     elif isinstance(event, CloseAsked):
@@ -96,6 +101,8 @@ def decide(
     else:
         complete(case, catalog, state, event)
     close_when_reached(case, state)
+    if was_open and state.phase == "closing":
+        stop_plans(case, state, commands)
     if state.phase == "open":
         admit(case, catalog, state, commands)  # nothing new starts once the case is closing
     settle(case, state)
@@ -359,6 +366,22 @@ def failed(state: CaseState, event: Failed) -> None:
     if state.phase == "closing":
         run.status = "cancelled"
         flag(state, f"{run.entry} failed after the close was requested: {event.reason}")
+
+
+def stop_plans(case: CaseDefinition, state: CaseState, commands: list[Command]) -> None:
+    """The case begins closing: stop each running plan step's plan. Its open waits are a
+    decision the close cancels, one level down; an activity running in it finishes, since it may
+    already have moved money (brief, D10) (brief, D28)."""
+    for run in state.runs:
+        if run.status == "running" and isinstance(case.steps[run.step], PlanStep):
+            commands.append(StopPlan(run.entry))
+
+
+def plan_cancelled(state: CaseState, event: PlanCancelled) -> None:
+    """A plan stopped by the close has ended: its step run is cancelled, and the case can close."""
+    run = next(run for run in state.runs if run.entry == event.entry)
+    run.status = "cancelled"
+    state.history.append(f"{run.entry} cancelled: the case is closing")
 
 
 def flag(state: CaseState, why: str) -> None:

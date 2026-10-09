@@ -68,7 +68,9 @@ class PlanStart:
 class RunReport:
     """How a run went: what `run_plan` reports in memory."""
 
-    status: str | None  # succeeded, failed, waiting or stopped; None while it runs
+    # succeeded, failed, waiting or stopped; cancelled when the case running it as a step closed
+    # (brief, D28); None while it runs.
+    status: str | None
     reason: str | None  # why it stopped, if it did
     history: list[str]  # every event so far, one line each
     waiting_at: str | None = None  # the wait open for an answer, such as `approve_refund#1`
@@ -89,6 +91,14 @@ class Sent:
 
 class ActivityFailed(Exception):
     """An activity that still failed after the retries its contract allows."""
+
+
+# Why a plan stopped by its case ends, and why it starts nothing new (brief, D28).
+CASE_CLOSING = "the case is closing"
+
+
+class CaseClosing(Exception):
+    """An activity the plan would start after its case began closing: never scheduled."""
 
 
 class PlanWorkflow:
@@ -112,6 +122,8 @@ class PlanWorkflow:
         self.opened: set[str] = set()  # every entry that has been open
         self.sent: list[Sent] = []  # answers to the open entry, not yet taken, in order
         self.waiting = False  # whether a wait is waiting for an answer now
+        self.stopping = False  # whether the case running this plan as a step is closing
+        self.cancelled = False  # whether the run ended because its case closed
 
     # Temporal: a signal is a message into a running workflow, recorded in its history, so replay
     # delivers it again at the same point.
@@ -120,10 +132,17 @@ class PlanWorkflow:
         # An answer counts only for the entry open when it comes: one approval unlocks one run of
         # one step (brief, D11). Any other is refused, and recorded, never kept for a later wait:
         # a double click would approve the retry, an early click a wait nobody has seen.
-        if sent.wait != self.open:
+        if self.stopping or sent.wait != self.open:
             self.refuse(sent)
         else:
             self.sent.append(sent)
+
+    @workflow.signal(name="stop")
+    def stop(self) -> None:
+        """The case running this plan as a step is closing (brief, D28): the open wait is
+        cancelled, answers are refused, and nothing new starts; an activity already running
+        finishes (brief, D10)."""
+        self.stopping = True
 
     def refuse(self, sent: Sent) -> None:
         """Record `sent` as refused: its entry is closed, or hasn't opened."""
@@ -141,6 +160,10 @@ class PlanWorkflow:
     @workflow.query(name="report")
     def report(self) -> RunReport:
         """How the run is going: its history so far, and the wait open for an answer, if any."""
+        if self.cancelled:
+            return RunReport(
+                "cancelled", CASE_CLOSING, [str(event) for event in self.record.history]
+            )
         status = self.record.status or ("waiting" if self.waiting else None)
         return RunReport(
             status,
@@ -173,6 +196,8 @@ class PlanWorkflow:
             # workflow task, which Temporal retries until fixed code is deployed (brief, D17).
             raise ApplicationError(str(refused), type="RunRefused", non_retryable=True) from None
         self.close()  # an answer left for the last wait is refused, and recorded
+        # Cut short by the close: neither a failure nor a wait anyone will answer.
+        self.cancelled = self.stopping and self.record.status in ("waiting", "stopped")
         return self.report()
 
     def name(self) -> str:
@@ -183,6 +208,8 @@ class PlanWorkflow:
     async def call(self, reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
         """Schedule the activity, retried and timed out as its contract says (brief, D17)."""
         self.close()  # the run has moved on from its last wait
+        if self.stopping:
+            raise CaseClosing(CASE_CLOSING)  # nothing new starts (brief, D10)
         contract = self.catalog.get(reference)
         # Temporal: the result is recorded in history; on replay it is read back, never called
         # again.
@@ -208,18 +235,25 @@ class PlanWorkflow:
             self.close()  # answers left for an earlier wait never count for this one
             self.open = entry
             self.opened.add(entry)
+        if self.stopping:
+            self.close()  # the case is closing: this wait is cancelled
+            return None
         self.waiting = True
         try:
             # Temporal: `wait_condition` blocks until the condition holds, checked after each
             # signal. With a timeout, it is a durable Temporal timer: the server fires it and
             # history records it, so replay reads it back and no clock is read.
             await workflow.wait_condition(
-                lambda: bool(self.sent), timeout=None if timeout is None else duration(timeout)
+                lambda: bool(self.sent) or self.stopping,
+                timeout=None if timeout is None else duration(timeout),
             )
         except TimeoutError:
             self.close()
             return Answer(TIMEOUT, None)  # from the timer, never from a person
         finally:
             self.waiting = False
+        if self.stopping:
+            self.close()  # the case closed while this waited: cancelled, answers left refused
+            return None
         sent = self.sent.pop(0)
         return Answer(sent.outcome, sent.by, frozenset(sent.roles), sent.form)

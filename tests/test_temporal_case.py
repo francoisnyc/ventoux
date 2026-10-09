@@ -425,7 +425,31 @@ def unapproved_refund_order() -> dict[str, Any]:
 
 # The plans the test deployment supplies: the guide's, one that stops, and one supplied under a
 # reference that isn't its own.
+# A lookup, then straight on to a letter, with no wait between: what starts after a close.
+LOOKUP_AND_DRAFT = {
+    "plan": "lookup-and-draft",
+    "version": 1,
+    "display": {"title": "Look the order up, then draft a letter"},
+    "fields": {"order_id": {"type": "reference", "system": "orders"}},
+    "initial": "check_order",
+    "states": {
+        "check_order": {
+            "activity": "orders.lookup@1",
+            "inputs": {"order_id": {"var": "order_id"}},
+            "on": {"done": "draft", "not_found": "failed"},
+        },
+        "draft": {
+            "activity": "letters.draft@2",
+            "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+            "on": {"done": "drafted"},
+        },
+        "drafted": {"final": "succeeded"},
+        "failed": {"final": "failed"},
+    },
+}
+
 TEST_PLANS = {
+    "lookup-and-draft@1": LOOKUP_AND_DRAFT,
     "refund-order@1": refund_order(),
     "refund-order@2": unapproved_refund_order(),
     "refund-order@3": refund_order(version=1),
@@ -872,3 +896,125 @@ def test_the_guides_client_example_runs_as_written() -> None:
         await namespace["guide"](client)
 
     on_temporal(scenario, queue="refunds")  # the guide's task queue
+
+
+# --- Tutor review: closing a case stops its plan steps ---
+
+
+def test_closing_a_case_stops_its_child_plan() -> None:
+    # The tutor's probe: the child refund-1/settle#1 waits for a team lead's approval when Ana
+    # closes the case as a duplicate. Lee's approval on the child, after the close, can't approve
+    # the refund: refused, or no longer given (the child has ended). Nothing is paid, and the case
+    # closes as a duplicate (brief, D10, D28).
+    paid: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paid.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-ord-1"}
+
+    definition = refund_with_plan() | {"close_reasons": {"duplicate": DUPLICATE}}
+
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, CasesWithPlans, definition, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+        await close(case, "duplicate", "ana", PEOPLE["ana"])
+        await reported(case, lambda now: now.status != "open")
+        try:
+            await plans.answer(plan, "approve_refund#1", "approve", "lee", PEOPLE["lee"])
+        except RPCError:
+            pass  # the child has ended: the answer can no longer be given
+        return await case.result()
+
+    ended = on_temporal(scenario, {**FAKES, "payments.refund@2": refund}, cases=CasesWithPlans)
+    assert paid == []
+    assert "settle#1 cancelled: the case is closing" in ended.history
+    assert ended.history[-1] == "closed: duplicate, by ana"
+    assert ended.flags == []
+
+
+def test_an_activity_running_in_a_stopped_plan_finishes() -> None:
+    # Ana closes the case while the plan's lookup runs. It finishes, once: it may already have
+    # acted (brief, D10). Then the plan goes on to its approval, which is cancelled at once:
+    # nothing is paid, its step run is cancelled, and the case closes.
+    release = threading.Event()
+    looked_up: list[str] = []
+    paid: list[str] = []
+
+    def lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        looked_up.append(inputs["order_id"])
+        release.wait(timeout=10)
+        return {"status": "delivered"}
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paid.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-ord-1"}
+
+    definition = refund_with_plan() | {"close_reasons": {"duplicate": DUPLICATE}}
+
+    async def scenario(client: Client) -> tuple[CaseReport, RunReport]:
+        case = await start_case(client, CasesWithPlans, definition, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        for _ in range(100):  # until the lookup runs inside the child
+            if looked_up:
+                break
+            await asyncio.sleep(0.05)
+        await close(case, "duplicate", "ana", PEOPLE["ana"])
+        await reported(case, lambda now: now.status != "open")
+        release.set()
+        child: PlanRun = client.get_workflow_handle("refund-1/settle#1", result_type=RunReport)
+        return await case.result(), await child.result()
+
+    activities = {**FAKES, "orders.lookup@1": lookup, "payments.refund@2": refund}
+    ended, plan = on_temporal(scenario, activities, cases=CasesWithPlans)
+    assert looked_up == ["ord-1"]  # finished, never cut off or run again
+    assert "orders.lookup@1 gave done" in plan.history
+    # Its approval was reached and cancelled at once: the plan ends there, no answer taken.
+    assert plan.history[-1].startswith("waiting at approve_refund#1")
+    assert "entered pay" not in plan.history
+    assert plan.status == "cancelled"
+    assert paid == []
+    assert "settle#1 cancelled: the case is closing" in ended.history
+    assert ended.history[-1] == "closed: duplicate, by ana"
+
+
+def test_a_stopped_plan_starts_nothing_new() -> None:
+    # Ana closes the case while the plan's lookup runs, and the plan's next state is a letter.
+    # The lookup finishes; the letter is never scheduled: nothing new starts while a case closes
+    # (brief, D10, D28).
+    release = threading.Event()
+    looked_up: list[str] = []
+    drafted: list[str] = []
+
+    def lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        looked_up.append(inputs["order_id"])
+        release.wait(timeout=10)
+        return {"status": "delivered"}
+
+    def draft(inputs: dict[str, Any]) -> dict[str, Any]:
+        drafted.append(inputs["idempotency_key"])
+        return {"draft_id": "draft-1"}
+
+    inputs = {"order_id": {"var": "order_id"}}
+    definition = refund_with_plan("lookup-and-draft@1", inputs=inputs) | {
+        "close_reasons": {"duplicate": DUPLICATE}
+    }
+
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, CasesWithPlans, definition, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        for _ in range(100):  # until the lookup runs inside the child
+            if looked_up:
+                break
+            await asyncio.sleep(0.05)
+        await close(case, "duplicate", "ana", PEOPLE["ana"])
+        await reported(case, lambda now: now.status != "open")
+        release.set()
+        return await case.result()
+
+    activities = {**FAKES, "orders.lookup@1": lookup, "letters.draft@2": draft}
+    ended = on_temporal(scenario, activities, cases=CasesWithPlans)
+    assert looked_up == ["ord-1"]
+    assert drafted == []
+    assert "settle#1 cancelled: the case is closing" in ended.history
+    assert ended.history[-1] == "closed: duplicate, by ana"

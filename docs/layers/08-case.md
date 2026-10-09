@@ -473,7 +473,7 @@ retried again, a declared outcome while closing).
 
 Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); the six points
 decided while drafting confirmed the same day; built, slices 0–8; Promises checked against the
-tests, 2026-10-09.
+tests, 2026-10-09; the tutor review's fix built test-first, the same day.
 
 User-facing description, written first: `docs/guides/cases.md`, "Plan steps" and "Running a case
 on Temporal". Decisions: brief D27 (design question 18) and D28.
@@ -694,6 +694,29 @@ Each starts with its negative test, seen failing for the right reason.
 - **The outcome of a plan step is tagged with the plan:** `settle.outcome` from
   `system:refund-order@1`, as an activity's is tagged with its contract (choice 5 in drafting).
 
+### From the tutor review
+
+- **Closing a case didn't stop a plan step waiting on a person.** The tutor's probe: the refund
+  paid through `refund-order@1`, the child `refund-1/settle#1` waiting at `approve_refund#1`,
+  Ana closes the case as a duplicate. The case went to closing with `waiting_for` empty; Lee then
+  approved on the child, the refund was paid, and the case closed flagged. The close existed to
+  prevent exactly that payment. In memory the case stayed closing forever. Both negative tests
+  were written first and seen failing that way (Lee's refund paid; `closing`, not `closed`).
+- **The fix, added to D28:** when a case begins closing, `decide` gives `StopPlan` for each
+  running plan step. On Temporal the case workflow signals the child `stop`; its open wait ends
+  with no answer, answers to it are refused, a new activity is refused before it is scheduled,
+  and an activity already running finishes. The plan ends `cancelled`, the case records
+  `PlanCancelled`, the step run is cancelled because the case is closing, and the case closes. In
+  memory a running plan step always waits on an answer, so the driver ends it at once.
+- **A signal, not Temporal's cancellation.** Cancelling the child interrupts every await in it,
+  including the one on a running activity, which D10 says must finish; and the interruption
+  would surface in `core` as an asyncio cancellation, which `core` can't import. The signal lets
+  the plan's driver act at its two seams, `wait` and `call`. `core` is unchanged: `cancelled` is
+  the plan workflow's report, not an interpreter status.
+- **The rule's other two promises got their own tests,** written after the code and seen failing
+  with it removed: an activity running in the stopped plan finishes, once; and nothing new starts
+  (with the refusal of a new activity removed, the letter was drafted after the close).
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that will fail if it isn't true.
@@ -751,6 +774,9 @@ child plan) are the tests of our code.
 | The state carried over keeps exact numbers and every value's sources | TC `test_a_carried_state_reads_back_as_it_was` |
 | An entry open before a switch is answered after it by the same name | TC `test_an_open_entry_survives_the_switch` |
 | A case switches only when nothing runs | TC `test_a_switch_waits_while_an_activity_runs` |
+| Closing a case ends a plan step waiting inside it: the case closes, never stays closing (tutor review) | P `test_closing_a_case_ends_its_waiting_plan_step` |
+| After a close, an answer on the child can't approve: nothing is paid, the step run is cancelled, and the case closes as the close said (tutor review) | TC `test_closing_a_case_stops_its_child_plan` |
+| An activity running in a plan stopped by the close finishes, once; then nothing new starts in it (tutor review) | TC `test_an_activity_running_in_a_stopped_plan_finishes`, `test_a_stopped_plan_starts_nothing_new` |
 | A case's history replays with the same code (refusals, a continued case's last run and a child plan included), and fails with changed code | TC `test_a_case_history_replays`, `test_a_case_history_replayed_with_changed_code_fails` |
 | The guide's examples are what the engine does: in memory as written; on Temporal its client example as written, its history as in memory, and every refusal line it shows | C `test_the_guides_examples_run_as_written`, `test_the_guides_plan_step_runs_as_written`; TC `test_the_guides_client_example_runs_as_written`, `test_the_guides_case_gives_the_same_history_as_in_memory`, `test_the_guides_refusals_on_temporal_are_what_the_engine_records` |
 | An answer sent around a switch counts once, whichever run decides it | TC `test_an_open_entry_survives_the_switch` |

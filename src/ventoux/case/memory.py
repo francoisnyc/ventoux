@@ -11,7 +11,16 @@ from typing import Any
 
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.runtime import decide
-from ventoux.case.state import CaseState, Completed, Event, Failed, Schedule, StartPlan
+from ventoux.case.state import (
+    CaseState,
+    Completed,
+    Event,
+    Failed,
+    PlanCancelled,
+    Schedule,
+    StartPlan,
+    StopPlan,
+)
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome
 
@@ -101,7 +110,11 @@ class Driver:
         while queue:
             state, commands = decide(self.case, self.catalog, state, queue.pop(0))
             for command in commands:
-                if isinstance(command, StartPlan):
+                if isinstance(command, StopPlan):
+                    # In memory a running plan step waits for an answer (its plan runs at once to
+                    # its end or its first unanswered wait): nothing runs in it, so it ends now.
+                    queue.append(PlanCancelled(command.entry))
+                elif isinstance(command, StartPlan):
                     if (ended := self.plans(command)) is not None:
                         queue.append(ended)  # else it waits for an answer: the step runs on
                 elif command.entry.split("#")[0] in self.holding:

@@ -326,6 +326,11 @@ closed: nothing left to do
 The plan's activities are keyed by the step's run, then their own: `memory/settle#1/pay#1`. A
 plan whose waits the script doesn't answer keeps the step running, and the case open.
 
+When the case begins closing, a running plan step stops taking answers: its open waits are
+cancelled, nothing new starts in it, and an activity already running inside it finishes. The
+plan then ends, the history says `settle#1 cancelled: the case is closing`, and the case closes.
+A team lead's approval that arrives after the close can't pay the refund (brief, D28).
+
 ## Testing a case
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`
@@ -453,6 +458,8 @@ What changes from memory, and what doesn't:
 - **A plan step is a child workflow,** with the ID `<case ID>/<entry>`: `refund-A-1001/settle#1`.
   Its waits are answered on the child, as the plans guide shows; the case's history shows
   the step started (`started settle#1: plan …`), and the case waits for it until the plan ends.
+  When the case begins closing, it signals the child to stop: an answer sent to the child after
+  that is refused, or can no longer be given once the child has ended.
 
   ```python
   from ventoux.temporal import client as plans
