@@ -260,6 +260,9 @@ def reworkable() -> dict[str, Any]:
 
 LARGE = {"order_id": "ord-1", "amount": 250}
 REVIEWED = ("review", "approve", "ana", {"approved_amount": 250})
+SMALL = {"order_id": "ord-1", "amount": 40}
+SMALL_REVIEW = ("review", "approve", "ana", {"approved_amount": 40})
+OPERATORS = {**PEOPLE, "omar": ["operations"]}
 
 
 @pytest.mark.parametrize(
@@ -598,7 +601,8 @@ def test_the_guides_examples_run_as_written() -> None:
         "propose": propose,
         "refund": guide_json(0),
         "refund_with_rework": guide_refund_with_rework(),
-        "PEOPLE": PEOPLE,
+        "retry": retry,
+        "PEOPLE": OPERATORS,
     }
     for code in blocks("python"):
         exec(code, namespace)  # noqa: S102 -- our guide, as in layer 7
@@ -617,9 +621,24 @@ def test_the_guides_histories_are_what_the_engine_records() -> None:
         answers=[*REWORKED, ("pay", "approve", "sam")],
         people=PEOPLE,
     )
-    shown = plain[1].splitlines()
-    first = reworked.history.index(shown[0])
-    assert reworked.history[first : first + len(shown)] == shown
+    declined = run_case(
+        guide_with(3),  # the guide's step reacting to a declined refund
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=PEOPLE,
+        activities={"payments.refund@2": gives("declined")},
+    )
+    closing = run_case(
+        guide_with_close_reasons(),
+        file=SMALL,
+        answers=[SMALL_REVIEW, close("duplicate", "ana"), finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+    )
+    for shown, run in ((plain[1], reworked), (plain[2], declined), (plain[3], closing)):
+        lines = shown.splitlines()
+        first = run.history.index(lines[0])
+        assert run.history[first : first + len(lines)] == lines
 
 
 def test_the_guides_proposed_step_runs() -> None:
@@ -631,11 +650,23 @@ def test_the_guides_proposed_step_runs() -> None:
     assert run.reached("check_order")
 
 
+def guide_with(index: int) -> dict[str, Any]:
+    """The guide's refund, with the step in its JSON block `index` added."""
+    definition = guide_json(0)
+    definition["steps"].update(guide_json(index))
+    return definition
+
+
+def guide_with_close_reasons() -> dict[str, Any]:
+    """The guide's refund, with the guide's close reason."""
+    return guide_json(0) | guide_json(4)
+
+
 def refusal(run: Any) -> str:
     """What the engine says when it refuses `run`."""
     try:
         run()
-    except (AnswerRefused, ProposalRefused, CaseRefused) as refused:
+    except (AnswerRefused, ProposalRefused, CaseRefused, RetryRefused, CloseRefused) as refused:
         return str(refused)
     raise AssertionError("nothing was refused")
 
@@ -678,6 +709,36 @@ GUIDE_REFUSALS: dict[str, Any] = {
     ),
     "the opening gives a field a person sets": lambda: run_case(
         guide_json(0), file={**LARGE, "approved_amount": 250}, answers=[], people=PEOPLE
+    ),
+    "the person retrying has no operating role": lambda: run_case(
+        guide_json(0),
+        file=SMALL,
+        answers=[SMALL_REVIEW, retry("pay#1", "ana")],
+        people=OPERATORS,
+        activities={"payments.refund@2": unreachable},
+    ),
+    "the run hasn't failed": lambda: run_case(
+        guide_json(0),
+        file=SMALL,
+        answers=[SMALL_REVIEW, retry("pay#1", "omar")],
+        people=OPERATORS,
+        held=["pay"],
+    ),
+    "the close reason isn't declared": lambda: run_case(
+        guide_with_close_reasons(), file=LARGE, answers=[close("spam", "ana")], people=PEOPLE
+    ),
+    "the person closing has none of the reason's roles": lambda: run_case(
+        guide_with_close_reasons(),
+        file=LARGE,
+        answers=[close("duplicate", "eve")],
+        people=PEOPLE,
+    ),
+    "the case is closing": lambda: run_case(
+        guide_with_close_reasons(),
+        file=SMALL,
+        answers=[SMALL_REVIEW, close("duplicate", "ana"), ("review", "approve", "ana")],
+        people=PEOPLE,
+        held=["pay"],
     ),
 }
 
@@ -782,10 +843,6 @@ def test_decide_never_changes_the_state_passed_in() -> None:
 
 def unreachable(inputs: dict[str, Any]) -> dict[str, Any]:
     raise ConnectionError("provider unreachable")
-
-
-SMALL = {"order_id": "ord-1", "amount": 40}
-SMALL_REVIEW = ("review", "approve", "ana", {"approved_amount": 40})
 
 
 def test_a_failed_step_needs_attention_and_keeps_the_case_open() -> None:
@@ -915,8 +972,6 @@ def test_an_outcome_is_tagged_with_the_contract_that_declares_it() -> None:
 
 
 # --- Slice 3: an operator retries a failed step ---
-
-OPERATORS = {**PEOPLE, "omar": ["operations"]}
 
 
 def down_once() -> tuple[list[str], Any]:
@@ -1175,4 +1230,36 @@ def test_closes_when_closes_the_case_once_its_milestones_are_reached() -> None:
         "cancelled survey#1: the case closes when paid is reached",
         "closed: paid reached",
     ]
+    assert run.closed
+
+
+def test_a_closing_case_is_not_closed_or_retried_again() -> None:
+    with pytest.raises(CloseRefused, match="^the case is closing: it can't be closed again$"):
+        run_case(
+            closable(),
+            file=SMALL,
+            answers=[*PAY_HELD, close("duplicate", "ana")],
+            people=PEOPLE,
+            held=["pay"],
+        )
+    with pytest.raises(RetryRefused, match="^the case is closing: nothing starts$"):
+        run_case(
+            closable(),
+            file=SMALL,
+            answers=[*PAY_HELD, retry("pay#1", "omar")],
+            people=OPERATORS,
+            held=["pay"],
+        )
+
+
+def test_a_declared_outcome_while_closing_flags_the_case() -> None:
+    run = run_case(
+        closable(),
+        file=SMALL,
+        answers=[*PAY_HELD, finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+        activities={"payments.refund@2": gives("declined")},
+    )
+    assert run.flags == ["pay#1 completed after the close was requested"]
     assert run.closed
