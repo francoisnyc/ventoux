@@ -13,12 +13,15 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.testing import load_definition, propose, run_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import Answered, CaseState, Completed, Opened, StartPlan
+from ventoux.testing import CATALOG, load_definition, propose, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "lee": ["support-lead"]}
 LARGE = {"order_id": "ord-1", "amount": 250}
+LARGE_EXACT = {"order_id": "ord-1", "amount": Decimal(250)}  # as the API passes it on
 REVIEWED = ("review", "approve", "ana", {"approved_amount": 250})
 
 PLANS_GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
@@ -134,3 +137,112 @@ def test_who_may_not_approve_crosses_into_the_plan() -> None:
     assert settled("lee")  # someone else approves it
     # The opener too (brief, D25): Lee opened the case, so Lee approves nothing in it.
     assert not settled("lee", opened_by="lee")
+
+
+def test_a_plan_supplied_under_another_reference_fails_the_step() -> None:
+    # Fail closed: the case references refund-order@1, and runs that plan or nothing.
+    other = refund_order() | {"version": 2}
+    run = run_case(
+        refund_with_plan(),
+        file=LARGE,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        plans={"refund-order@1": other},
+    )
+    assert run.needs_attention == [
+        "settle#1: refund-order@1 is supplied as refund-order@2: supply the plan it names"
+    ]
+
+
+def test_a_plan_steps_inputs_keep_their_sources() -> None:
+    # The amount a customer typed is marked untrusted in the case file; paid through the plan,
+    # it is still refused at payments.refund@2, which takes an amount only from a system or a
+    # person (brief, D12, D21): the plan's check sees the real source, not "the case".
+    definition = refund_with_plan(
+        inputs={"order_id": {"var": "order_id"}, "amount": {"var": "amount"}}
+    )
+    definition["fields"]["amount"]["source"] = "untrusted:customer"
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+    )
+    [attention] = run.needs_attention
+    assert attention.startswith("settle#1: refund-order@1 stopped: payments.refund@2 takes amount")
+    assert "untrusted:customer" in attention
+    assert (
+        "started settle#1: plan refund-order@1 (order_id from system:opener; amount from "
+        "system:opener, untrusted:customer), run memory/settle#1"
+    ) in run.history
+
+
+def test_a_plan_steps_keys_name_its_step_run() -> None:
+    keys: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-ord-1"}
+
+    run = run_case(
+        refund_with_plan(),
+        file=LARGE,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        activities={"payments.refund@2": refund},
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+    )
+    # The case's key for the step run, then the plan's own (brief, D28).
+    assert keys == ["memory/settle#1/pay#1"]
+    assert run.reached("settle")
+    assert run.history[-3:] == [
+        (
+            "started settle#1: plan refund-order@1 (order_id from system:opener; amount from "
+            "person:ana), run memory/settle#1"
+        ),
+        "settle#1 done",
+        "closed: nothing left to do",
+    ]
+
+
+def test_how_a_plan_ends_is_how_its_step_ends() -> None:
+    # Sam rejects the refund inside the plan: it ends in its failed final state. That is an
+    # outcome of the step, which a step can react to, never a failure needing attention.
+    rejected = run_case(
+        refund_with_plan(),
+        file=LARGE,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "reject", "sam")]},
+    )
+    assert "settle#1 gave failed" in rejected.history
+    assert rejected.needs_attention == []
+    assert rejected.closed
+    # Nobody answers the plan's wait: it waits, the step runs on, and the case stays open.
+    waiting = run_case(
+        refund_with_plan(),
+        file=LARGE,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        plans={"refund-order@1": refund_order()},
+    )
+    assert waiting.status == "open"
+    assert not waiting.reached("settle")
+
+
+def test_a_plan_ends_done_or_failed_and_nothing_else() -> None:
+    # Fail closed: a plan step can't "complete" with an outcome no plan gives; it fails instead.
+    case = parse_case(refund_with_plan())
+    state, _ = decide(case, CATALOG, CaseState("memory"), Opened(LARGE_EXACT, None))
+    form = {"approved_amount": Decimal(250)}
+    review = Answered("review#1", "approve", "ana", frozenset({"support"}), form)
+    state, commands = decide(case, CATALOG, state, review)
+    assert [type(command) for command in commands] == [StartPlan]
+    state, _ = decide(case, CATALOG, state, Completed("settle#1", {}, "declined"))
+    assert state.history[-1] == (
+        "settle#1 failed: refund-order@1 ended with declined: a plan ends done or failed"
+    )

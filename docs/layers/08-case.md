@@ -471,8 +471,8 @@ retried again, a declared outcome while closing).
 
 ## 8c. Cases on Temporal
 
-Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); design note drafted
-for review. Not built yet.
+Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); the six points
+decided while drafting confirmed the same day; slices 0–1 built.
 
 User-facing description, written first: `docs/guides/cases.md`, "Plan steps" and "Running a case
 on Temporal". Decisions: brief D27 (design question 18) and D28.
@@ -630,21 +630,45 @@ Each starts with its negative test, seen failing for the right reason.
    the same code, a continued case's last run included.
 8. **The guide and the promises.**
 
+### Decided while building
+
+- **Plan steps have their own test file,** `tests/test_plan_step.py` (`P` below):
+  `tests/test_case.py` is past 1,300 lines.
+- **A plan supplied under another reference fails the step** (slice 1, found while building the
+  runner): a deployment mapping `refund-order@1` to a plan that is really `refund-order@2` would
+  run something the case doesn't name. Fail closed: `refund-order@1 is supplied as
+  refund-order@2: supply the plan it names`. The same check comes to Temporal in slice 5.
+- **The test for exclusions inside a plan uses the proposer, not the opener.** Sam opening the
+  case and approving inside the plan was already refused by layer 7's provenance check: his
+  opening values feed the plan's `pay`. The proposer's values feed nothing, so only D25's rule
+  stops him; that test failed for the right reason (Sam's refund paid) before `excluded` existed.
+  A case of proposed steps needs `stays_open` (8a's carried catch), so the test declares it.
+- **`run_plan`'s scripted wait moved to `scripted` in `testing.py`,** shared by plan runs and plan
+  steps, rather than copied.
+- **The outcome of a plan step is tagged with the plan:** `settle.outcome` from
+  `system:refund-order@1`, as an activity's is tagged with its contract (choice 5 in drafting).
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that will fail if it isn't true.
 Drafted before building, with the tests named in advance; checked against the real tests before
-the pull request is opened. `C` is `tests/test_case.py`, `TC` `tests/test_temporal_case.py`.
+the pull request is opened. `C` is `tests/test_case.py`, `P` `tests/test_plan_step.py`, `TC`
+`tests/test_temporal_case.py`. Seen failing before their code: every negative test so far, except
+three that passed when written, the code already there, and were seen failing with it removed: a
+stopped plan failing the step (the runner's `stopped` branch), inputs keeping their sources (the
+sources laundered to `system:opener`), and a plan ending done or failed (the check removed). The
+plan the deployment lacks first failed on the missing `plans=` seam.
 
 | Promise | Test |
 |---|---|
 | An answer to an entry that has been open says it is closed; one that hasn't, that it isn't open | C `test_an_entry_is_closed_or_not_open` |
-| A plan step has no approval and names a plan, or is refused when read | C `test_a_plan_step_is_read_with_its_shape_checked` |
-| A plan the deployment lacks, or a plan that stops, fails the step: the case needs attention | C `test_a_plan_step_that_cannot_run_needs_attention` |
-| A plan's fields carry the sources of what they read from the case file | C `test_a_plan_steps_inputs_keep_their_sources` |
-| A plan that succeeds makes the step done; a failed final state is the outcome `failed` | C `test_how_a_plan_ends_is_how_its_step_ends` |
-| The case's opener and the step's proposer approve nothing inside a plan step | C `test_who_may_not_approve_crosses_into_the_plan`; TC `test_the_opener_cannot_approve_inside_a_child_plan` |
-| A plan step's keys are the step run's, then the plan's own | C `test_a_plan_steps_keys_name_its_step_run`; TC `test_a_child_plans_keys_name_the_case` |
+| A plan step has no approval and names a plan, or is refused when read | P `test_a_plan_step_is_read_with_its_shape_checked` |
+| A plan the deployment lacks, one supplied under another reference, or a plan that stops, fails the step: the case needs attention | P `test_a_plan_the_deployment_lacks_fails_the_step`, `test_a_plan_supplied_under_another_reference_fails_the_step`, `test_a_plan_that_stops_fails_the_step` |
+| A plan's fields carry the sources of what they read from the case file, and the plan's checks refuse by them | P `test_a_plan_steps_inputs_keep_their_sources` |
+| A plan that succeeds makes the step done; a failed final state is the outcome `failed`; a plan waiting keeps the step running | P `test_how_a_plan_ends_is_how_its_step_ends` |
+| A plan step ends done or failed, and nothing else | P `test_a_plan_ends_done_or_failed_and_nothing_else` |
+| The case's opener and the step's proposer approve nothing inside a plan step | P `test_who_may_not_approve_crosses_into_the_plan`; TC `test_the_opener_cannot_approve_inside_a_child_plan` |
+| A plan step's keys are the step run's, then the plan's own | P `test_a_plan_steps_keys_name_its_step_run`; TC `test_a_child_plans_keys_name_the_case` |
 | A refused opening fails the case workflow at once | TC `test_a_refused_opening_fails_at_once` |
 | A second case with the same ID is refused | TC `test_a_case_id_opens_one_case` |
 | On Temporal a case makes the same decisions and history as in memory, its keys naming the case and its first run | TC `test_the_guides_case_gives_the_same_history_as_in_memory` |
@@ -662,5 +686,5 @@ the pull request is opened. `C` is `tests/test_case.py`, `TC` `tests/test_tempor
 | An entry open before a switch is answered after it by the same name | TC `test_an_open_entry_survives_the_switch` |
 | A case switches only when nothing runs | TC `test_a_switch_waits_while_an_activity_runs` |
 | A case's history replays with the same code, and fails with changed code | TC `test_a_case_history_replays`, `test_a_case_history_replayed_with_changed_code_fails` |
-| The guide's examples are what the engine does | C `test_the_guides_examples_run_as_written`; TC `test_the_guides_case_gives_the_same_history_as_in_memory` |
+| The guide's examples are what the engine does | C `test_the_guides_examples_run_as_written`, `test_the_guides_plan_step_runs_as_written`; TC `test_the_guides_case_gives_the_same_history_as_in_memory` |
 | Not ours to test: a signal arriving while a switch is committed fails the switch, and the old run decides it first (Temporal's behaviour) | none of its own; the nearest check, an answer around a switch counted once, is `test_an_open_entry_survives_the_switch` |

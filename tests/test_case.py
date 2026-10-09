@@ -591,9 +591,9 @@ def test_a_high_risk_step_with_no_approval_stops() -> None:
 
 # --- Slice 6: the guide, run as written ---
 
-# The guide, without the sections whose code lands later in layer 8c: plan steps (slice 1), and
-# cases on Temporal, whose examples run on Temporal's test server (tests/test_temporal_case.py).
-NOT_RUN_HERE = ("## Plan steps\n", "## Running a case on Temporal\n")
+# The guide, without cases on Temporal, whose examples run on Temporal's test server
+# (tests/test_temporal_case.py).
+NOT_RUN_HERE = ("## Running a case on Temporal\n",)
 
 
 def without_sections(text: str, headings: tuple[str, ...]) -> str:
@@ -656,6 +656,8 @@ def test_the_guides_examples_run_as_written() -> None:
         "refund_with_rework": guide_refund_with_rework(),
         "retry": retry,
         "PEOPLE": OPERATORS,
+        "refund_with_plan": guide_refund_with_plan(),
+        "refund_order": refund_order(),
     }
     for code in blocks("python"):
         exec(code, namespace)  # noqa: S102 -- our guide, as in layer 7
@@ -708,6 +710,37 @@ def guide_with(index: int) -> dict[str, Any]:
     definition = guide_json(0)
     definition["steps"].update(guide_json(index))
     return definition
+
+
+PLANS_GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
+
+
+def refund_order() -> dict[str, Any]:
+    """The plans guide's `refund-order` plan, its first JSON block, as stored data."""
+    example = PLANS_GUIDE.read_text().split("```json\n")[1].split("```")[0]
+    plan: dict[str, Any] = json.loads(example, parse_float=Decimal)
+    return plan
+
+
+def guide_refund_with_plan() -> dict[str, Any]:
+    """The guide's refund, its payment made by the guide's plan step (JSON block 5)."""
+    definition = guide_json(0)
+    del definition["steps"]["pay"], definition["sequence"]
+    definition["steps"].update(guide_json(5))
+    return definition
+
+
+def test_the_guides_plan_step_runs_as_written() -> None:
+    run = run_case(
+        guide_refund_with_plan(),
+        file=LARGE,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+    )
+    shown = blocks("")[4].splitlines()
+    assert run.history[-len(shown) :] == shown
 
 
 def guide_with_close_reasons() -> dict[str, Any]:

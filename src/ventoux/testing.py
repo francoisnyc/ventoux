@@ -262,6 +262,11 @@ def plan_runner(
             plan = parse_plan(plans[command.plan])
         except PlanInvalid as invalid:
             return Failed(command.entry, f"{command.plan} can't be read: {invalid}")
+        if (supplied := f"{plan.plan}@{plan.version}") != command.plan:
+            return Failed(
+                command.entry,
+                f"{command.plan} is supplied as {supplied}: supply the plan it names",
+            )
         script = scripts.setdefault(command.entry.split("#")[0], [])
         try:
             # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it.
