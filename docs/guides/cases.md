@@ -247,7 +247,9 @@ assert retried.closed
 A case closes by itself when nothing is left to do (brief, D10). Two definition keys change that:
 `"closes_when": ["paid"]` closes it as soon as the milestones are reached, and `"stays_open":
 true` keeps it open until a person closes it. A case whose steps all wait to be proposed needs
-`stays_open`: otherwise nothing is pending when it opens, and it closes at once.
+`stays_open`: otherwise nothing is pending when it opens, and it closes at once. `closes_when`
+never cancels a step that needs attention: the case waits until an operator retries it, or a person
+closes the case with a reason.
 
 A person closes a case with a **close reason** the definition declares, with who may use it:
 

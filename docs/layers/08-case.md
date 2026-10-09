@@ -422,6 +422,19 @@ closes by itself.
 - **8a's promises that a condition on an unset field "stops the case", and that a high-risk step
   with no approval "stops", still hold:** the step stops, now as a failed run the case reports.
 
+### From the tutor review
+
+- **`closes_when` silently cancelled a failed step.** A parallel letter failed, then `paid` was
+  reached: the failed run was cancelled and the case closed, with no flag and nothing needing
+  attention. Had the failure come a moment after `paid`, the case would have been flagged: the
+  order of events decided whether anyone heard of it. A failed run is the one kind of pending
+  work that must wait for a person (brief, D17). Now `closes_when` doesn't close the case while a
+  run needs attention; it closes once the run is retried to completion, or a person closes it
+  with a reason. Added to D26, which this PR introduces.
+- **Carried to layer 10 (optional):** a declared outcome no step reacts to ends quietly (a
+  declined refund closes as `closed: nothing left to do`). Right for a case, but D9's planned
+  warning about "outcomes no rule reads" should cover activity outcomes too.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
@@ -451,4 +464,5 @@ retried again, a declared outcome while closing).
 | A case that stays open must declare a close reason; `closes_when` names milestones | C `test_a_case_that_stays_open_names_how_to_close_it` |
 | A case that stays open closes only when a person closes it (carried from the 8a review) | C `test_a_case_of_proposed_steps_stays_open_until_a_person_closes_it` |
 | `closes_when` closes the case once its milestones are reached, cancelling what waits | C `test_closes_when_closes_the_case_once_its_milestones_are_reached` |
+| `closes_when` never cancels a step that needs attention: the case waits, and closes once it is retried (tutor review) | C `test_closes_when_waits_while_a_step_needs_attention` |
 | The guide's new examples, histories and refusal rows are what the engine says | C `test_the_guides_examples_run_as_written`, `test_the_guides_histories_are_what_the_engine_records`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |

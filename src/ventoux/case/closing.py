@@ -73,9 +73,13 @@ def settle(case: CaseDefinition, state: CaseState) -> None:
 
 
 def close_when_reached(case: CaseDefinition, state: CaseState) -> None:
-    """Begin closing once every milestone in `closes_when` is reached (brief, D10)."""
+    """Begin closing once every milestone in `closes_when` is reached (brief, D10), unless a step
+    needs attention: a failed run waits for a person, never cancelled by a milestone (brief, D26).
+    The case closes once it is retried to completion, or a person closes it with a reason."""
     if state.phase != "open" or not case.closes_when:
         return
+    if any(run.status in ("failed", "retrying") for run in state.runs):
+        return  # nothing is skipped automatically (brief, D17)
     if all(milestone in state.milestones for milestone in case.closes_when):
         names = " and ".join(case.closes_when)
         verb = "are" if len(case.closes_when) > 1 else "is"

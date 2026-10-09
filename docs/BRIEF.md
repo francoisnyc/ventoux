@@ -637,6 +637,11 @@ be erased on request), has size limits, and a second copy of business records go
   which starts a new run of the workflow and so new keys (D19). The retry checks the step again
   first (its requirements, its condition, its inputs), and an approval spent on the run still
   holds only if the inputs it saw are unchanged (D11).
+- **A failed step is never cancelled by a milestone.** While a run needs attention, reaching the
+  milestones of `closes_when` doesn't close the case (D10's "cancelling any pending work" was
+  written before failed runs were pending work): it closes once the run is retried to completion,
+  or a person closes it with a declared reason. Nothing is skipped automatically (D17). *Added in
+  the tutor review of layer 8b, before D26 was merged.*
 
 ### Simplifications adopted
 

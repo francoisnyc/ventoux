@@ -1263,3 +1263,45 @@ def test_a_declared_outcome_while_closing_flags_the_case() -> None:
     )
     assert run.flags == ["pay#1 completed after the close was requested"]
     assert run.closed
+
+
+# --- Tutor review: closes_when never cancels a failed step ---
+
+
+def test_closes_when_waits_while_a_step_needs_attention() -> None:
+    # The tutor's probe: a parallel letter fails, then `paid` is reached. Nothing is skipped
+    # automatically (brief, D17): the case waits for a person, then closes on `paid`.
+    definition = refund(closes_when=["paid"])
+    definition["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter about the refund"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+    }
+    calls: list[str] = []
+
+    def letter_down_once(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs["idempotency_key"])
+        if len(calls) == 1:
+            raise ConnectionError("provider unreachable")
+        return {"draft_id": "draft-refund"}
+
+    fakes = {"letters.draft@2": letter_down_once}
+    waiting = run_case(
+        definition, file=SMALL, answers=[SMALL_REVIEW], people=OPERATORS, activities=fakes
+    )
+    assert "reached paid" in waiting.history
+    assert waiting.needs_attention == ["notify#1: letters.draft@2 failed: provider unreachable"]
+    assert waiting.status == "open"
+    calls.clear()
+    retried = run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW, retry("notify#1", "omar")],
+        people=OPERATORS,
+        activities=fakes,
+    )
+    assert retried.needs_attention == []
+    assert retried.history[-1] == "closed: paid reached"
