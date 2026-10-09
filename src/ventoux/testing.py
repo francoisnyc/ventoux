@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
@@ -126,6 +126,9 @@ for contract in (payments_refund, orders_lookup, letters_draft):
 # The labels fields may be declared untrusted with: `untrusted:llm`.
 for label in ("customer", "document", "email", "llm", "web"):
     CATALOG.register_label(label)
+# The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
+CATALOG.register_role("support")
+CATALOG.register_role("support-lead", approves="high")
 
 
 # Fake implementations, against no real system: nothing is paid, read or sent.
@@ -159,10 +162,6 @@ class DevelopmentPlans(PlanWorkflow):
         return await self.interpret(start)
 
 
-# TRACER: a fixed directory of people and roles; roles come with layer 7 (design question 12).
-PEOPLE: dict[str, set[str]] = {"ana": {"support"}, "sam": {"support", "support-lead"}}
-
-
 def load_definition(path: Path) -> dict[str, Any]:
     """Read a case definition from its JSON file (I/O, so here and not in `case`)."""
     # TRACER: a case definition is checked by nothing before it runs until layer 8 (its schema);
@@ -176,9 +175,12 @@ def run_case(
     definition: dict[str, Any],
     file: dict[str, Any],
     answers: list[tuple[Any, ...]],
+    people: Mapping[str, Iterable[str]],
 ) -> Run:
-    """Open a case with `file`, play the scripted `answers`, and report where it ended."""
-    return run(definition, file, answers, CATALOG, FAKES, PEOPLE)
+    """Open a case with `file`, play the scripted `answers`, and report where it ended. `people`
+    gives each person their roles, as the Ventoux API states them with every answer (brief, D22);
+    someone not listed has none."""
+    return run(definition, file, answers, CATALOG, FAKES, people)
 
 
 def run_plan(
@@ -187,16 +189,20 @@ def run_plan(
     answers: list[tuple[Any, ...]],
     activities: Mapping[str, Activity] = FAKES,
     run: str = "memory",
+    people: Mapping[str, Iterable[str]] | None = None,
 ) -> PlanRun:
     """Run the plan stored as `data` in memory, with `fields`, playing the scripted `answers`,
     calling the fake `activities` by reference. `run` names the run in its idempotency keys
-    (`memory/pay#1`).
+    (`memory/pay#1`). `people` gives each person their roles, as the Ventoux API states them with
+    every answer (brief, D22); someone not listed has none.
 
     The plan's shape is checked (`parse_plan`); `validate` is not called: the runtime checks
     depend on nothing it did (docs/layers/05-interpreter.md).
     """
 
-    script = list(answers)  # each answer is (state, outcome, who), or (state, "timeout")
+    # Each answer is (state, outcome, who), (state, outcome, who, form), or (state, "timeout").
+    script = list(answers)
+    roles = people or {}  # the test plays the API: it states each person's roles
 
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
         return activities[reference](inputs)
@@ -209,7 +215,9 @@ def run_plan(
         for answer in script:
             if answer[0] == state:
                 script.remove(answer)
-                return Answer(answer[1], answer[2] if len(answer) > 2 else None)
+                by = answer[2] if len(answer) > 2 else None
+                stated = frozenset(roles.get(by, ())) if by else frozenset[str]()
+                return Answer(answer[1], by, stated, answer[3] if len(answer) > 3 else None)
         return None
 
     # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it to the end.

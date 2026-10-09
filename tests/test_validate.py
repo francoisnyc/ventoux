@@ -151,11 +151,16 @@ def pay_on(on: dict[str, Any]) -> dict[str, Any]:
     return changed(pay={**guide_plan()["states"]["pay"], "on": on})
 
 
-def approval_with(wait: dict[str, Any], on: dict[str, Any]) -> dict[str, Any]:
-    return changed(approve_refund={"wait": wait, "on": on})
+def wait_with(wait: dict[str, Any], on: dict[str, Any]) -> dict[str, Any]:
+    """The guide's plan with a question, `confirm`, between the lookup and the approval."""
+    lookup = guide_plan()["states"]["check_order"]
+    return changed(
+        check_order={**lookup, "on": {"done": "confirm", "not_found": "failed"}},
+        confirm={"wait": {"roles": ["support"], **wait}, "on": on},
+    )
 
 
-APPROVE_OR_REJECT = {"outcomes": ["approve", "reject"]}
+ACCEPT_OR_DECLINE = {"outcomes": ["accept", "decline"]}
 
 
 def test_an_activity_never_gives_an_event_its_contract_does_not_declare() -> None:
@@ -182,48 +187,48 @@ def test_every_outcome_an_activity_declares_is_handled() -> None:
 
 
 def test_a_wait_never_gives_an_outcome_it_does_not_offer() -> None:
-    on = {"approve": "pay", "reject": "failed", "escalate": "failed"}
-    plan = approval_with(APPROVE_OR_REJECT, on)
+    on = {"accept": "approve_refund", "decline": "failed", "escalate": "failed"}
+    plan = wait_with(ACCEPT_OR_DECLINE, on)
     assert issues(plan) == [
         Issue(
-            "states.approve_refund.on.escalate",
+            "states.confirm.on.escalate",
             "UNKNOWN_EVENT",
-            "the wait approve_refund never gives escalate: its events are approve, reject",
+            "the wait confirm never gives escalate: its events are accept, decline",
         )
     ]
 
 
 def test_every_outcome_a_wait_offers_is_handled() -> None:
-    plan = approval_with(APPROVE_OR_REJECT, {"approve": "pay"})
+    plan = wait_with(ACCEPT_OR_DECLINE, {"accept": "approve_refund"})
     assert issues(plan) == [
         Issue(
-            "states.approve_refund.on",
+            "states.confirm.on",
             "MISSING_EVENT",
-            "reject is not handled: say where the plan goes on reject",
+            "decline is not handled: say where the plan goes on decline",
         )
     ]
 
 
 def test_a_wait_without_a_timeout_never_times_out() -> None:
-    plan = approval_with(
-        APPROVE_OR_REJECT, {"approve": "pay", "reject": "failed", "timeout": "failed"}
+    plan = wait_with(
+        ACCEPT_OR_DECLINE, {"accept": "approve_refund", "decline": "failed", "timeout": "failed"}
     )
     assert issues(plan) == [
         Issue(
-            "states.approve_refund.on.timeout",
+            "states.confirm.on.timeout",
             "UNKNOWN_EVENT",
-            "the wait approve_refund never gives timeout: its events are approve, reject; "
+            "the wait confirm never gives timeout: its events are accept, decline; "
             "declare wait.timeout to wait for timeout",
         )
     ]
 
 
 def test_a_wait_with_a_timeout_handles_it() -> None:
-    wait = APPROVE_OR_REJECT | {"timeout": "48h"}
-    plan = approval_with(wait, {"approve": "pay", "reject": "failed"})
+    wait = ACCEPT_OR_DECLINE | {"timeout": "48h"}
+    plan = wait_with(wait, {"accept": "approve_refund", "decline": "failed"})
     assert issues(plan) == [
         Issue(
-            "states.approve_refund.on",
+            "states.confirm.on",
             "MISSING_EVENT",
             "timeout is not handled: say where the plan goes on timeout",
         )
@@ -232,12 +237,38 @@ def test_a_wait_with_a_timeout_handles_it() -> None:
 
 def test_no_outcome_is_named_timeout() -> None:
     wait = {"outcomes": ["accept", "decline", "timeout"]}
-    plan = approval_with(wait, {"accept": "pay", "decline": "failed", "timeout": "failed"})
+    plan = wait_with(wait, {"accept": "approve_refund", "decline": "failed", "timeout": "failed"})
     assert with_code(plan, "RESERVED_OUTCOME") == [
         Issue(
-            "states.approve_refund.wait.outcomes",
+            "states.confirm.wait.outcomes",
             "RESERVED_OUTCOME",
             "timeout is the event of a wait's timeout, not an outcome: name the outcome differently",
+        )
+    ]
+
+
+def approval_on(on: dict[str, Any], **approval: Any) -> dict[str, Any]:
+    """The guide's plan with the approval's `on`, and any of its fields, changed."""
+    state = guide_plan()["states"]["approve_refund"]
+    return changed(approve_refund={"approval": {**state["approval"], **approval}, "on": on})
+
+
+def test_an_approval_gives_approve_reject_and_its_timeout_only() -> None:
+    plan = approval_on({"approve": "pay", "reject": "failed", "escalate": "failed"}, timeout=None)
+    del plan["states"]["approve_refund"]["approval"]["timeout"]
+    assert issues(plan) == [
+        Issue(
+            "states.approve_refund.on.escalate",
+            "UNKNOWN_EVENT",
+            "the approval approve_refund never gives escalate: its events are approve, reject",
+        ),
+    ]
+    with_timeout = approval_on({"approve": "pay", "timeout": "failed"})
+    assert issues(with_timeout) == [
+        Issue(
+            "states.approve_refund.on",
+            "MISSING_EVENT",
+            "reject is not handled: say where the plan goes on reject",
         )
     ]
 
@@ -295,7 +326,10 @@ def test_from_every_state_the_plan_can_end() -> None:
     pay = guide_plan()["states"]["pay"]
     plan = changed(
         pay={**pay, "on": {"done": "paid", "declined": "retry_payment"}},
-        retry_payment={"wait": {"outcomes": ["retry"]}, "on": {"retry": "retry_payment"}},
+        retry_payment={
+            "wait": {"outcomes": ["retry"], "roles": ["support"]},
+            "on": {"retry": "retry_payment"},
+        },
     )
     assert issues(plan) == [
         Issue(
@@ -311,20 +345,6 @@ def guide_fork() -> dict[str, Any]:
     block = GUIDE.read_text().split("```json\n")[2].split("```")[0]
     fork: dict[str, Any] = json.loads("{" + block + "}", parse_float=Decimal)
     return changed(**fork)
-
-
-def test_an_approval_offers_exactly_approve_and_reject() -> None:
-    plan = approval_with({"outcomes": ["approve", "edit"]}, {"approve": "pay", "edit": "failed"})
-    assert with_code(plan, "APPROVAL_OUTCOMES") == [
-        Issue(
-            "states.approve_refund.wait.outcomes",
-            "APPROVAL_OUTCOMES",
-            "a wait offering approve is an approval, and offers exactly approve and reject; "
-            "this one offers approve, edit: use another word than approve",
-        )
-    ]
-    # Fail closed: a wait that isn't a proper approval approves nothing.
-    assert [issue.code for issue in issues(plan)] == ["APPROVAL_OUTCOMES", "APPROVAL_REQUIRED"]
 
 
 def test_a_high_risk_activity_is_never_reached_without_an_approval() -> None:
@@ -365,7 +385,7 @@ def retry_after_decline(retry_to: str) -> dict[str, Any]:
     return changed(
         pay={**pay, "on": {"done": "paid", "declined": "retry_payment"}},
         retry_payment={
-            "wait": {"outcomes": ["retry", "give_up"]},
+            "wait": {"outcomes": ["retry", "give_up"], "roles": ["support"]},
             "on": {"retry": retry_to, "give_up": "failed"},
         },
     )
@@ -420,20 +440,34 @@ GUIDE_EXAMPLES: dict[str, Any] = {
     ),
     "UNKNOWN_EVENT": lambda: pay_on({"done": "paid", "declined": "failed", "cancelled": "failed"}),
     "MISSING_EVENT": lambda: pay_on({"done": "paid"}),
-    "RESERVED_OUTCOME": lambda: approval_with(
+    "RESERVED_OUTCOME": lambda: wait_with(
         {"outcomes": ["accept", "decline", "timeout"]},
-        {"accept": "pay", "decline": "failed", "timeout": "failed"},
+        {"accept": "approve_refund", "decline": "failed", "timeout": "failed"},
     ),
-    "APPROVAL_OUTCOMES": lambda: approval_with(
-        {"outcomes": ["approve", "edit"]}, {"approve": "pay", "edit": "failed"}
+    "APPROVAL_TARGET": lambda: changed(
+        approve_refund={
+            **guide_plan()["states"]["approve_refund"],
+            "on": {"approve": "refund_fee", "reject": "failed", "timeout": "failed"},
+        },
+        refund_fee={"final": "failed"},
     ),
+    "UNKNOWN_ROLE": lambda: approval_on(
+        guide_plan()["states"]["approve_refund"]["on"], roles=["support-laed"]
+    ),
+    "APPROVAL_ROLE": lambda: approval_on(
+        guide_plan()["states"]["approve_refund"]["on"], roles=["support"]
+    ),
+    "UNKNOWN_FIELD": lambda: guide_review_with(sets={"accept": ["approved_amout"]}),
     "EXPRESSION_INVALID": lambda: pay_with_inputs(
         {"order_id": ORDER_ID, "amount": {"var": "amout"}}
     ),
     "UNREACHABLE_STATE": lambda: changed(refund_fee={"final": "failed"}),
     "NO_PATH_TO_FINAL": lambda: changed(
         pay={**guide_plan()["states"]["pay"], "on": {"done": "paid", "declined": "retry_payment"}},
-        retry_payment={"wait": {"outcomes": ["retry"]}, "on": {"retry": "retry_payment"}},
+        retry_payment={
+            "wait": {"outcomes": ["retry"], "roles": ["support"]},
+            "on": {"retry": "retry_payment"},
+        },
     ),
     "APPROVAL_REQUIRED": guide_fork,
     "APPROVAL_REUSED": lambda: changed(
@@ -443,6 +477,14 @@ GUIDE_EXAMPLES: dict[str, Any] = {
     "UNKNOWN_SOURCE": lambda: with_source("amount", "untrusted:lml"),
     "INPUT_POLICY": lambda: guide_injection(),
 }
+
+
+def guide_review_with(**wait: Any) -> dict[str, Any]:
+    """The guide's fourth JSON block, its review then approval, with the review's wait changed."""
+    example = GUIDE.read_text().split("```json\n")[4].split("```")[0]
+    plan: dict[str, Any] = json.loads(example, parse_float=Decimal)
+    plan["states"]["review"]["wait"] |= wait
+    return plan
 
 
 def guide_table() -> list[tuple[str, str]]:

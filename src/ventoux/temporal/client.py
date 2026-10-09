@@ -1,6 +1,6 @@
 """Starting a plan run, answering its waits, and reading how it went (layer 6)."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from temporalio.client import Client, WorkflowHandle
@@ -27,11 +27,19 @@ async def start_plan(
 
 
 async def answer(
-    run: WorkflowHandle[PlanWorkflow, RunReport], wait: str, outcome: str, by: str
+    run: WorkflowHandle[PlanWorkflow, RunReport],
+    wait: str,
+    outcome: str,
+    by: str,
+    roles: Sequence[str],
+    form: Mapping[str, Any] | None = None,
 ) -> None:
     """Answer the wait `wait` (`approve_refund#1`, as `report` shows it) with `outcome`, as the
-    person `by`. An answer to a wait that isn't open is refused, and recorded."""
-    await run.signal(PlanWorkflow.answer, Sent(wait, outcome, by))
+    person `by`, who has `roles`, giving `form` when the outcome sets fields. The caller vouches
+    for who `by` is and their roles: only the Ventoux API may send answers (brief, D19). An answer
+    the wait doesn't take is refused, and recorded."""
+    sent = Sent(wait, outcome, by, sorted(roles), None if form is None else dict(form))
+    await run.signal(PlanWorkflow.answer, sent)
 
 
 async def report(run: WorkflowHandle[PlanWorkflow, RunReport]) -> RunReport:

@@ -15,7 +15,16 @@ from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, Work
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
 from temporalio.workflow import NondeterminismError
-from test_interpreter import GUIDE_FIELDS, ORDER, drafting, guide_plan, looking_up, recording
+from test_interpreter import (
+    GUIDE_FIELDS,
+    ORDER,
+    PEOPLE,
+    drafting,
+    guide_plan,
+    looking_up,
+    recording,
+)
+from test_validate import guide_review_with
 
 from ventoux.core.catalog import NotInCatalog
 from ventoux.core.interpreter import Outcome
@@ -328,14 +337,14 @@ def test_an_answer_the_wait_does_not_offer_is_refused_and_the_wait_goes_on() -> 
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
         await waiting_at(run, "approve_refund#1")
-        await answer(run, "approve_refund#1", "edit", by="ana")
-        await answer(run, "approve_refund#1", "approve", by="sam")
+        await answer(run, "approve_refund#1", "edit", by="ana", roles=PEOPLE["ana"])
+        await answer(run, "approve_refund#1", "approve", by="sam", roles=PEOPLE["sam"])
         return await run.result()
 
     report = on_temporal(scenario)
     assert report.status == "succeeded"
     assert "refused ana's answer edit: approve_refund offers approve or reject" in report.history
-    assert "sam answered approve" in report.history
+    assert "sam answered approve as support-lead" in report.history
 
 
 def test_an_answer_is_taken_only_by_the_wait_it_names() -> None:
@@ -346,8 +355,10 @@ def test_an_answer_is_taken_only_by_the_wait_it_names() -> None:
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
         await waiting_at(run, "approve_refund#1")
-        await answer(run, "check_order#1", "approve", by="sam")  # not a wait
-        await answer(run, "approve_refund#2", "approve", by="sam")  # not open yet
+        await answer(run, "check_order#1", "approve", by="sam", roles=PEOPLE["sam"])  # not a wait
+        await answer(
+            run, "approve_refund#2", "approve", by="sam", roles=PEOPLE["sam"]
+        )  # not open yet
         return await reported(run, lambda now: refusals(now) == 2)
 
     report = on_temporal(scenario)
@@ -365,7 +376,9 @@ def test_a_run_without_its_answer_reports_waiting() -> None:
         )
         return await settled(run)
 
-    assert on_temporal(scenario).status == "waiting"
+    report = on_temporal(scenario)
+    assert report.status == "waiting"
+    assert report.waiting_at == "approve_refund#1"  # the entry an answer must name
 
 
 def test_a_timeout_sent_by_a_person_is_refused() -> None:
@@ -374,8 +387,8 @@ def test_a_timeout_sent_by_a_person_is_refused() -> None:
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
         await waiting_at(run, "approve_refund#1")
-        await answer(run, "approve_refund#1", "timeout", by="mallory")
-        await answer(run, "approve_refund#1", "approve", by="sam")
+        await answer(run, "approve_refund#1", "timeout", by="mallory", roles=[])
+        await answer(run, "approve_refund#1", "approve", by="sam", roles=PEOPLE["sam"])
         return await run.result()
 
     report = on_temporal(scenario)
@@ -407,14 +420,19 @@ def test_a_wait_times_out_on_a_temporal_timer() -> None:
 def test_the_guides_run_gives_the_same_history_as_in_memory() -> None:
     # The same plan, fields and answers make the same decisions in memory and on Temporal: only
     # the idempotency keys differ, by the run's name.
-    in_memory = run_plan(guide_plan(), GUIDE_FIELDS, answers=[("approve_refund", "approve", "sam")])
+    in_memory = run_plan(
+        guide_plan(),
+        GUIDE_FIELDS,
+        answers=[("approve_refund", "approve", "sam")],
+        people=PEOPLE,
+    )
 
     async def scenario(client: Client) -> tuple[RunReport, str]:
         run = await start_plan(
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
         await waiting_at(run, "approve_refund#1")
-        await answer(run, "approve_refund#1", "approve", by="sam")
+        await answer(run, "approve_refund#1", "approve", by="sam", roles=PEOPLE["sam"])
         return await run.result(), run.result_run_id or ""
 
     report, run_id = on_temporal(scenario)
@@ -444,7 +462,7 @@ def finished_history() -> WorkflowHistory:
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
         await waiting_at(run, "approve_refund#1")
-        await answer(run, "approve_refund#1", "approve", by="sam")
+        await answer(run, "approve_refund#1", "approve", by="sam", roles=PEOPLE["sam"])
         await run.result()
         return await run.fetch_history()
 
@@ -528,17 +546,19 @@ def test_a_double_click_does_not_approve_the_retry() -> None:
             task_queue=QUEUE,
         )
         await waiting_at(run, "approve_refund#1")
-        await answer(run, "approve_refund#1", "approve", by="sam")
-        await answer(run, "approve_refund#1", "approve", by="sam")  # the double click
+        await answer(run, "approve_refund#1", "approve", by="sam", roles=PEOPLE["sam"])
+        await answer(
+            run, "approve_refund#1", "approve", by="sam", roles=PEOPLE["sam"]
+        )  # the double click
         retry = await waiting_at(run, "approve_refund#2")  # the retry waits for a new decision
-        await answer(run, "approve_refund#2", "approve", by="lee")
+        await answer(run, "approve_refund#2", "approve", by="lee", roles=["support-lead"])
         return retry, await run.result()
 
     retry, ended = on_temporal(
         scenario, activities={**FAKES, "payments.refund@2": declines_once(keys)}
     )
     assert "refused sam's answer approve: approve_refund#1 is closed" in retry.history
-    assert retry.history.count("sam answered approve") == 1
+    assert retry.history.count("sam answered approve as support-lead") == 1
     assert ended.status == "succeeded"
     assert len(keys) == 2  # the first refund, declined, and the retry lee approved
 
@@ -556,7 +576,9 @@ def test_an_answer_sent_before_the_wait_opens_is_refused() -> None:
         run = await start_plan(
             client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
         )
-        await answer(run, "approve_refund#1", "approve", by="sam")  # check_order still runs
+        await answer(
+            run, "approve_refund#1", "approve", by="sam", roles=PEOPLE["sam"]
+        )  # check_order still runs
         looked_up.set()
         return await waiting_at(run, "approve_refund#1")
 
@@ -564,3 +586,65 @@ def test_an_answer_sent_before_the_wait_opens_is_refused() -> None:
     assert report.status == "waiting"  # still waiting for an answer given while it waits
     assert "refused sam's answer approve: approve_refund#1 isn't open" in report.history
     assert "sam answered approve" not in report.history
+
+
+def test_an_answer_without_the_role_is_refused_on_temporal_as_in_memory() -> None:
+    # The roles come with the signal, as the Ventoux API states them (brief, D22), and the same
+    # check runs: Ana is in support, and approving a refund needs a team lead.
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, guide_plan(), GUIDE_FIELDS, id="refund-1", task_queue=QUEUE
+        )
+        await waiting_at(run, "approve_refund#1")
+        await answer(run, "approve_refund#1", "approve", by="ana", roles=PEOPLE["ana"])
+        await answer(run, "approve_refund#1", "approve", by="sam", roles=[])  # no role stated
+        return await reported(run, lambda now: refusals(now) == 2)
+
+    report = on_temporal(scenario)
+    assert report.status == "waiting"
+    assert [line for line in report.history if line.startswith("refused")] == [
+        (
+            "refused ana's answer approve: approve_refund#1 is answered by support-lead, and ana "
+            "has support"
+        ),
+        (
+            "refused sam's answer approve: approve_refund#1 is answered by support-lead, and sam "
+            "has no role"
+        ),
+    ]
+
+
+def test_a_form_crosses_in_the_signal_and_the_history_replays() -> None:
+    # The guide's review then approval: Ana's form sets the amount, exactly, and Sam approves it.
+    plan = guide_review_with()
+    order = {"order_id": sourced("A-1001", "system:orders")}
+    answers: list[tuple[Any, ...]] = [
+        ("review", "accept", "ana", {"approved_amount": Decimal("250.50")}),
+        ("approve_refund", "approve", "sam"),
+    ]
+    in_memory = run_plan(plan, order, answers=answers, people=PEOPLE)
+
+    async def scenario(client: Client) -> tuple[RunReport, str, WorkflowHistory]:
+        run = await start_plan(
+            client, DevelopmentPlans, plan, order, id="refund-1", task_queue=QUEUE
+        )
+        await waiting_at(run, "review#1")
+        await answer(
+            run,
+            "review#1",
+            "accept",
+            by="ana",
+            roles=PEOPLE["ana"],
+            form={"approved_amount": Decimal("250.50")},
+        )
+        await waiting_at(run, "approve_refund#1")
+        await answer(run, "approve_refund#1", "approve", by="sam", roles=PEOPLE["sam"])
+        return await run.result(), run.result_run_id or "", await run.fetch_history()
+
+    report, run_id, history = on_temporal(scenario)
+    assert report.status == in_memory.status == "succeeded"
+    assert report.history == [
+        str(event).replace("memory/", f"refund-1/{run_id}/") for event in in_memory.history
+    ]
+    assert "ana answered accept as support, setting approved_amount" in report.history
+    replay(history, DevelopmentPlans)

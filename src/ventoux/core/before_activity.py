@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import Expression, ExpressionError, evaluate
 from ventoux.core.policy import refusal
-from ventoux.core.provenance import provenance
+from ventoux.core.provenance import NoSources, provenance
 
 
 class InputRefused(Exception):
@@ -35,7 +35,11 @@ def checked_inputs(
     # Every policy on every input, before anything else (brief, D21): the injection is refused
     # on where the value came from, whatever it says.
     for field, expression in inputs.items():
-        found = provenance(expression, sources)
+        try:
+            found = provenance(expression, sources)
+        except NoSources as unset:
+            # Fail closed: a field nobody has set yet (a form not answered) has no value to check.
+            raise InputRefused(f"{field} can't be evaluated: {unset}") from None
         for policy in contract.policies(field):
             if policy.refuses(found) is not None:
                 raise InputRefused(refusal(contract.reference, field, policy, expression, sources))

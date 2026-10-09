@@ -71,11 +71,18 @@ class Gave:
 class Waiting:
     """The run waits for one of a closed list of answers (brief, D9)."""
 
+    entry: str  # the entry it waits in, such as `approve_refund#1`, which answers name
     outcomes: tuple[str, ...]  # the answers it accepts
+    roles: tuple[str, ...]  # who may give one (brief, D22)
     timeout: str | None  # how long it waits, such as `48h`; None: for as long as it takes
+    of: str | None = None  # for an approval, the activity state it approves
 
     def __str__(self) -> str:
-        line = f"waiting for {' or '.join(self.outcomes)}"
+        approves = f" of {self.of}" if self.of else ""
+        line = (
+            f"waiting at {self.entry} for {' or '.join(self.outcomes)}{approves} by "
+            f"{' or '.join(self.roles)}"
+        )
         return f"{line}, at most {self.timeout}" if self.timeout else line
 
 
@@ -85,9 +92,14 @@ class Answered:
 
     outcome: str  # one of the wait's outcomes, or `timeout`
     by: str | None  # who answered; None for a timeout, which no person gives
+    role: str | None  # the role that let them answer (brief, D22); None for a timeout
+    setting: tuple[str, ...] = ()  # the fields their form set, if any
 
     def __str__(self) -> str:
-        return f"{self.by} answered {self.outcome}" if self.by else "the wait timed out"
+        if self.by is None:
+            return "the wait timed out"
+        line = f"{self.by} answered {self.outcome} as {self.role}"
+        return f"{line}, setting {', '.join(self.setting)}" if self.setting else line
 
 
 @dataclass(frozen=True)

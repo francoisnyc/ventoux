@@ -120,17 +120,23 @@ Create `tests/test_refund.py`:
 from ventoux.testing import run_case
 from cases.refund import refund
 
+# Who has which role. In production the Ventoux API states each person's roles with their answer;
+# in tests, this plays that part.
+PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
+
 
 def test_small_refund_needs_no_team_lead():
     run = run_case(refund, file={"order_id": "ord-1", "amount": 40},
-                   answers=[("review", "approve", "ana", {"approved_amount": 40})])
+                   answers=[("review", "approve", "ana", {"approved_amount": 40})],
+                   people=PEOPLE)
     assert run.closed
     assert run.reached("pay")
 
 
 def test_large_refund_waits_for_a_team_lead():
     run = run_case(refund, file={"order_id": "ord-2", "amount": 250},
-                   answers=[("review", "approve", "ana", {"approved_amount": 250})])
+                   answers=[("review", "approve", "ana", {"approved_amount": 250})],
+                   people=PEOPLE)
     assert run.waiting_for == ["approval of pay by support-lead"]
     assert not run.reached("pay")
     assert not run.closed
@@ -138,7 +144,8 @@ def test_large_refund_waits_for_a_team_lead():
 
 def test_rejected_review_closes_without_paying():
     run = run_case(refund, file={"order_id": "ord-3", "amount": 250},
-                   answers=[("review", "reject", "ana")])
+                   answers=[("review", "reject", "ana")],
+                   people=PEOPLE)
     assert run.closed
     assert not run.reached("pay")
 ```
@@ -168,6 +175,23 @@ inputs={"order_id": order_id, "amount": message_amount}
 
 You didn't write any security rule: the platform team set it once on `payments.refund@2`, as an
 input policy on `amount`. Ventoux checks it for every case that uses the activity.
+
+Ventoux also says no to people. Sam is a team lead, but suppose Sam reviewed the request too:
+
+```python
+run_case(refund, file={"order_id": "ord-4", "amount": 250},
+         answers=[("review", "approve", "sam", {"approved_amount": 250}),
+                  ("pay", "approve", "sam")],
+         people=PEOPLE)
+```
+
+```text
+AnswerRefused: sam set approved_amount, which pay uses, so cannot approve it
+```
+
+You never listed who may not approve: Sam's answer set the amount `pay` sends, so the approval
+must come from someone else. A team lead's *reject* is an answer too: `pay` doesn't run, and the
+case closes.
 
 ## 7. Change it
 

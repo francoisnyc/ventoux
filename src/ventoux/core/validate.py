@@ -8,6 +8,7 @@ docs/guides/plans.md.
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from ventoux.core.approval import Unapprovable, approved, risk_refusal
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import (
@@ -19,14 +20,22 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.expressions.check import a_type
 from ventoux.core.graph import Arrow, arrows, reach, shortest_path
-from ventoux.core.plan import ActivityState, FinalState, Plan, Transition, WaitState
+from ventoux.core.plan import (
+    APPROVE,
+    REJECT,
+    ActivityState,
+    ApprovalState,
+    FinalState,
+    Plan,
+    Transition,
+    WaitState,
+    set_by,
+)
 from ventoux.core.policy import OnlyFrom, Policy, refusal
-from ventoux.core.provenance import CASE, provenance
+from ventoux.core.provenance import CASE, answering, provenance
+from ventoux.core.roles import may_approve
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
-# An approval is a wait offering exactly these two outcomes; `approve` is reserved for it
-# (brief, D11).
-APPROVE, REJECT = "approve", "reject"
 
 
 @dataclass(frozen=True)
@@ -57,8 +66,14 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
                 # One cause, one issue: an input whose expression is refused isn't asked where its
                 # value comes from.
                 issues += problems or policy_issues(path, field, expression, state, plan, catalog)
-        else:
+        elif isinstance(state, WaitState):
             issues += wait_issues(f"states.{name}", name, state)
+            issues += role_issues(f"states.{name}.wait.roles", state.wait.roles, catalog)
+            issues += sets_issues(f"states.{name}.wait.sets", name, state, plan)
+        else:
+            issues += approval_state_issues(f"states.{name}", name, state, plan)
+            issues += role_issues(f"states.{name}.approval.roles", state.approval.roles, catalog)
+            issues += approval_role_issues(f"states.{name}.approval.roles", state, plan, catalog)
         for event, transitions in state.on.items():
             for path, transition in each_transition(f"states.{name}.on.{event}", transitions):
                 if transition.target not in plan.states:
@@ -90,6 +105,66 @@ def source_issues(plan: Plan, catalog: Catalog) -> list[Issue]:
     return issues
 
 
+def role_issues(path: str, roles: tuple[str, ...], catalog: Catalog) -> list[Issue]:
+    """Every role a wait names is one the platform team registered (brief, D22)."""
+    return [
+        Issue(
+            path,
+            "UNKNOWN_ROLE",
+            f"{role} is a role nobody registered: the roles are {', '.join(catalog.roles)}; use "
+            "one of them, or ask the platform team to register it",
+        )
+        for role in roles
+        if role not in catalog.roles
+    ]
+
+
+def approval_role_issues(
+    path: str, state: ApprovalState, plan: Plan, catalog: Catalog
+) -> list[Issue]:
+    """Every registered role an approval names may approve its activity's risk (brief, D22)."""
+    try:
+        contract = approved(state, plan, catalog)
+    except Unapprovable:
+        return []  # already APPROVAL_TARGET or UNKNOWN_ACTIVITY
+    return [
+        Issue(
+            path,
+            "APPROVAL_ROLE",
+            f"{risk_refusal(role, catalog, contract)}: name a role that may approve "
+            f"{contract.risk} risk",
+        )
+        for role in state.approval.roles
+        if role in catalog.roles and not may_approve(catalog.roles[role], contract.risk)
+    ]
+
+
+def sets_issues(path: str, name: str, state: WaitState, plan: Plan) -> list[Issue]:
+    """Each outcome a form is for is one the wait offers, and each field it sets is declared."""
+    issues: list[Issue] = []
+    for outcome, fields in state.wait.sets.items():
+        if outcome not in state.wait.outcomes:
+            issues.append(
+                Issue(
+                    f"{path}.{outcome}",
+                    "UNKNOWN_EVENT",
+                    f"the wait {name} never gives {outcome}: its outcomes are "
+                    f"{', '.join(state.wait.outcomes)}",
+                )
+            )
+        for field in fields:
+            if field not in plan.fields:
+                issues.append(
+                    Issue(
+                        f"{path}.{outcome}",
+                        "UNKNOWN_FIELD",
+                        f"{name}'s {outcome} sets {field}, which is not a field: the fields are "
+                        f"{', '.join(sorted(plan.fields))}",
+                    )
+                )
+    return issues
+
+
 def policy_issues(
     path: str,
     field: str,
@@ -105,7 +180,15 @@ def policy_issues(
         return []  # no contract, no policy to read: already UNKNOWN_ACTIVITY
     # Each field's sources as the plan knows them: what it declared, or else the case's, which the
     # runtime checks again with the real sources before the activity runs (core/before_activity.py).
-    sources = {name: frozenset({plan.sources.get(name, CASE)}) for name in plan.fields}
+    # A field a person sets comes from whoever answers that wait: trusted, from no system. Its
+    # declared mark stays with it: a mark adds distrust, never removes it (non-negotiables).
+    setters = set_by(plan)
+    sources = {
+        name: frozenset({answering(setters[name])} | declared(plan, name))
+        if name in setters
+        else frozenset({plan.sources.get(name, CASE)})
+        for name in plan.fields
+    }
     found = provenance(expression, sources)
     issues = []
     for policy in contract.policies(field):
@@ -119,6 +202,11 @@ def policy_issues(
                 )
             )
     return issues
+
+
+def declared(plan: Plan, name: str) -> set[str]:
+    """The source the plan declares on the field `name`, such as `untrusted:customer`, if any."""
+    return {plan.sources[name]} if name in plan.sources else set()
 
 
 def what_to_do(policy: Policy) -> str:
@@ -156,16 +244,6 @@ def wait_issues(path: str, name: str, state: WaitState) -> list[Issue]:
                 "name the outcome differently",
             )
         )
-    if APPROVE in state.wait.outcomes and not is_approval(state):
-        issues.append(
-            Issue(
-                f"{path}.wait.outcomes",
-                "APPROVAL_OUTCOMES",
-                f"a wait offering {APPROVE} is an approval, and offers exactly {APPROVE} and "
-                f"{REJECT}; this one offers {', '.join(state.wait.outcomes)}: use another word "
-                f"than {APPROVE}",
-            )
-        )
     # A wait gives one of its outcomes, or `timeout` when it declares one.
     timed = (
         (TIMEOUT,) if state.wait.timeout is not None and TIMEOUT not in state.wait.outcomes else ()
@@ -174,6 +252,43 @@ def wait_issues(path: str, name: str, state: WaitState) -> list[Issue]:
     hint = "" if timed else f"; declare wait.timeout to wait for {TIMEOUT}"
     return issues + event_issues(
         path, state.on, events, gives=f"the wait {name} never gives", timeout_hint=hint
+    )
+
+
+def approval_state_issues(path: str, name: str, state: ApprovalState, plan: Plan) -> list[Issue]:
+    """What is wrong with an approval: what it approves, and the events its `on` handles."""
+    issues: list[Issue] = []
+    of = state.approval.of
+    if not isinstance(plan.states.get(of), ActivityState):
+        issues.append(
+            Issue(
+                f"{path}.approval.of",
+                "APPROVAL_TARGET",
+                f"{name} approves {of}, which is not an activity state: name the activity it "
+                "approves",
+            )
+        )
+    else:
+        # The approval is for `of`: its `approve` leads there, and nowhere else (brief, D23).
+        for transition in state.on.get(APPROVE, ()):
+            if transition.target != of:
+                issues.append(
+                    Issue(
+                        f"{path}.on.{APPROVE}",
+                        "APPROVAL_TARGET",
+                        f"{name} approves {of}, and its {APPROVE} goes to {transition.target}: "
+                        f"send {APPROVE} to {of}",
+                    )
+                )
+    # An approval gives approve or reject, or `timeout` when it declares one.
+    timed = (TIMEOUT,) if state.approval.timeout is not None else ()
+    hint = "" if timed else f"; declare approval.timeout to wait for {TIMEOUT}"
+    return issues + event_issues(
+        path,
+        state.on,
+        (APPROVE, REJECT, *timed),
+        gives=f"the approval {name} never gives",
+        timeout_hint=hint,
     )
 
 
@@ -302,9 +417,9 @@ def graph_issues(plan: Plan, catalog: Catalog) -> list[Issue]:
 
 
 def is_approval(state: object) -> bool:
-    """Whether `state` is an approval: a wait offering exactly `approve` and `reject` (brief, D11).
-    A wait offering `approve` with anything else is an issue, and approves nothing (fail closed)."""
-    return isinstance(state, WaitState) and sorted(state.wait.outcomes) == [APPROVE, REJECT]
+    """Whether `state` is an approval: declared as one, never read from an outcome's name, so a
+    wait offering `approve` approves nothing (brief, D23)."""
+    return isinstance(state, ApprovalState)
 
 
 def is_high_risk(state: object, catalog: Catalog) -> bool:

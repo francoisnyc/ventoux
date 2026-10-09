@@ -75,6 +75,10 @@ class Sent:
     wait: str  # the entry it answers, such as `approve_refund#1`: its state and entry count
     outcome: str  # one of the wait's outcomes, such as `approve`
     by: str  # who answered
+    # Their roles, as the Ventoux API states them; recorded in history with the signal, so a
+    # replay decides as the first run did, whatever their roles are now (brief, D22).
+    roles: list[str]
+    form: dict[str, Any] | None = None  # the values the outcome sets, if any
 
 
 class ActivityFailed(Exception):
@@ -220,4 +224,4 @@ class PlanWorkflow:
         finally:
             self.waiting = False
         sent = self.sent.pop(0)
-        return Answer(sent.outcome, sent.by)
+        return Answer(sent.outcome, sent.by, frozenset(sent.roles), sent.form)

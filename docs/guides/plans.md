@@ -27,7 +27,7 @@ ends. Its `on` says where to go next, by what happened: "on *this*, go *there*".
       "on": {"done": "approve_refund", "not_found": "failed"}
     },
     "approve_refund": {
-      "wait": {"outcomes": ["approve", "reject"], "timeout": "48h"},
+      "approval": {"of": "pay", "roles": ["support-lead"], "timeout": "48h"},
       "on": {"approve": "pay", "reject": "failed", "timeout": "failed"}
     },
     "pay": {
@@ -41,8 +41,8 @@ ends. Its `on` says where to go next, by what happened: "on *this*, go *there*".
 }
 ```
 
-Read aloud: look the order up; if it isn't found, fail. Otherwise wait up to 48 hours for an
-approval; on *approve*, refund the customer; on *reject* or after 48 hours, fail. A refund ends
+Read aloud: look the order up; if it isn't found, fail. Otherwise wait up to 48 hours for a team
+lead to approve the refund; on *approve*, refund the customer; on *reject* or after 48 hours, fail. A refund ends
 paid, or failed if the provider declines it.
 
 An event in `on` maps to a state name, or to a list of transitions tried in order, each with an
@@ -51,10 +51,11 @@ optional condition: `"done": [{"when": …, "target": "approve_refund"}, {"targe
 
 ## Approvals
 
-An **approval** is a wait whose outcomes are `approve` and `reject` (brief, D11). The outcome name
-`approve` is reserved for approvals: a wait that offers it must offer exactly those two, so for
-any other question use another word (`accept`, `confirm`). Only the `approve` transition counts as
-approving.
+An **approval** is its own kind of state: a person with one of its `roles` approves or rejects
+the activity state it names in `of` (brief, D11). Its outcomes are always `approve` and `reject`,
+so you don't write them; `approve` must lead to `of`, and `reject` (like `timeout`, when it has
+one) goes wherever the plan says. Nothing else approves anything: a wait whose outcome happens to
+be called `approve` is just a question.
 
 Two rules hold for every high-risk activity in a plan:
 
@@ -64,7 +65,7 @@ Two rules hold for every high-risk activity in a plan:
 - **One approval unlocks one run.** After a high-risk activity, reaching another one, or the same
   one again in a loop, needs a new approval.
 
-Roles on an approval come with people in the loop (layer 7).
+Who may approve, and what an approval is tied to, is in "People in the loop" below.
 
 ## What `ventoux check` proves
 
@@ -106,7 +107,10 @@ Every problem it finds:
 | `UNKNOWN_EVENT` | `on` handles an event the state never gives | `payments.refund@2 never gives cancelled: its events are done, declined` |
 | `MISSING_EVENT` | an event the state can give isn't handled | `declined is not handled: say where the plan goes on declined` |
 | `RESERVED_OUTCOME` | a wait offers `timeout` as an outcome | `timeout is the event of a wait's timeout, not an outcome: name the outcome differently` |
-| `APPROVAL_OUTCOMES` | a wait offers `approve` and other outcomes | `a wait offering approve is an approval, and offers exactly approve and reject; this one offers approve, edit: use another word than approve` |
+| `APPROVAL_TARGET` | an approval's `approve` leads somewhere other than its `of`, or `of` isn't an activity state | `approve_refund approves pay, and its approve goes to refund_fee: send approve to pay` |
+| `UNKNOWN_ROLE` | a wait or an approval names a role nobody registered | `support-laed is a role nobody registered: the roles are support, support-lead; use one of them, or ask the platform team to register it` |
+| `APPROVAL_ROLE` | an approval names a role that may not approve its activity's risk | `support may approve no risk, and payments.refund@2 is high risk: name a role that may approve high risk` |
+| `UNKNOWN_FIELD` | a wait's outcome sets a field the plan doesn't declare | `review's accept sets approved_amout, which is not a field: the fields are approved_amount, order_id` |
 | `EXPRESSION_INVALID` | an input or a condition fails the expression check | `amout is not a declared field` |
 | `UNREACHABLE_STATE` | no path from `initial` reaches the state | `no path from check_order reaches refund_fee: remove it, or add a transition to it` |
 | `NO_PATH_TO_FINAL` | the plan can never end from the state | `the plan can never end from retry_payment: add a path to a final state` |
@@ -177,8 +181,7 @@ Three things to know:
   either.
 
 What the check doesn't prove yet: that an input's type matches the contract's (checked when the
-step runs: see below), who may approve (layer 7), and whether an untrusted value steers a condition
-(design question 17).
+step runs: see below), and whether an untrusted value steers a condition (design question 17).
 
 ## Running a plan
 
@@ -198,6 +201,7 @@ run = run_plan(
         "amount": sourced(Decimal("250"), "system:opener"),
     },
     answers=[("approve_refund", "approve", "sam")],
+    people={"sam": ["support", "support-lead"]},
 )
 assert run.status == "succeeded"
 ```
@@ -211,8 +215,8 @@ scheduled orders.lookup@1 (order_id from system:orders)
 orders.lookup@1 gave done
 moved on done to approve_refund
 entered approve_refund
-waiting for approve or reject, at most 48h
-sam answered approve
+waiting at approve_refund#1 for approve or reject of pay by support-lead, at most 48h
+sam answered approve as support-lead
 moved on approve to pay
 entered pay
 scheduled payments.refund@2 (order_id from system:orders; amount from system:opener)
@@ -274,12 +278,122 @@ stops when:
 
 A run also refuses to start when a field is missing, isn't declared, or comes with no sources. An
 answer the wait doesn't offer (or `timeout` from a wait without one) is refused, and the wait goes
-on.
+on; so is an answer from someone the wait doesn't accept (see "People in the loop").
 
 The engine fills each activity's idempotency key: the run, the state and how many times the run
 has entered it. `run_plan` names its run `memory`, so the keys are `memory/pay#1`, then
 `memory/pay#2` on a second pass; on Temporal, the run is the workflow's ID and its run ID. A retry
 reuses the key, and a second pass or another run never does (brief, D17).
+
+## People in the loop
+
+Every wait and every approval says who may answer it, by role. Roles are registered by the
+platform team in the catalog, with the highest risk each may approve, so a typo is caught by
+`ventoux check` (`UNKNOWN_ROLE`):
+
+```python
+CATALOG.register_role("support")  # answers tasks, approves nothing
+CATALOG.register_role("support-lead", approves="high")
+```
+
+**Who answers, and their roles, come with the answer.** The engine never looks a person up: the
+Ventoux API, the only thing allowed to send answers, states who is signed in and their roles
+(brief, D19), and the history records both, so a replay decides the same way even after someone's
+roles change. In tests, `run_plan(..., people={...})` plays the API: it gives each scripted
+answer the roles listed for its person. Someone not listed has no roles.
+
+A person is named by an identifier written one way: lowercase letters, digits, `.`, `_`, `@` and
+`-`, such as `ana` or `ana.lee@example.com`. Any other spelling (`Sam`, ` sam`) is refused, so
+nobody becomes "someone else" by a change of case.
+
+A wait asks a question, and an outcome may ask for values with it: a small form, whose fields
+are fields the plan declares. Here the reviewer accepts and says how much to pay, and a team lead
+approves that amount:
+
+```json
+{
+  "plan": "review-and-pay",
+  "version": 1,
+  "display": {"title": "Review a refund, then pay it"},
+  "fields": {
+    "order_id": {"type": "reference", "system": "orders"},
+    "approved_amount": {"type": "number"}
+  },
+  "initial": "review",
+  "states": {
+    "review": {
+      "wait": {"outcomes": ["accept", "reject"], "roles": ["support"],
+               "sets": {"accept": ["approved_amount"]}},
+      "on": {"accept": "approve_refund", "reject": "failed"}
+    },
+    "approve_refund": {
+      "approval": {"of": "pay", "roles": ["support-lead"]},
+      "on": {"approve": "pay", "reject": "failed"}
+    },
+    "pay": {
+      "activity": "payments.refund@2",
+      "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+      "on": {"done": "paid", "declined": "failed"}
+    },
+    "paid": {"final": "succeeded"},
+    "failed": {"final": "failed"}
+  }
+}
+```
+
+The run is given `order_id` only: `approved_amount` is set by a person, never given at the start.
+Until then, reading it stops the step, as any missing field does.
+
+```python
+run = run_plan(
+    review_and_pay,
+    fields={"order_id": sourced("A-1001", "system:orders")},
+    answers=[
+        ("review", "accept", "ana", {"approved_amount": Decimal("250")}),
+        ("approve_refund", "approve", "sam"),
+    ],
+    people={"ana": ["support"], "sam": ["support", "support-lead"]},
+)
+assert run.status == "succeeded"
+```
+
+```
+ana answered accept as support, setting approved_amount
+...
+sam answered approve as support-lead
+...
+scheduled payments.refund@2 (order_id from system:orders; amount from person:ana)
+```
+
+Every answer is checked the same way, wait or approval, and one that fails a check is refused,
+recorded, and the wait goes on:
+
+| Refused when | Example |
+|---|---|
+| the outcome isn't one the wait offers | `refused sam's answer aprove: approve_refund offers approve or reject` |
+| the person has none of the wait's roles | `refused bob's answer approve: approve_refund#1 is answered by support-lead, and bob has support` |
+| the form doesn't fit what the outcome sets | `refused ana's answer accept: approved_amount is a number, and the answer gives '250'` |
+| for an approval: the person's answer flows into what it approves | `refused ana's answer approve: ana set approved_amount, which pay uses, so cannot approve it` |
+
+**Someone else, computed.** Nobody lists who may not approve: the engine reads it from where
+values came from. Whoever's answer flows into the approved activity's inputs, or into the
+condition on the approval's `approve`, cannot approve it, so a reviewer who is also a team lead
+still can't approve the amount they set (brief, D11). In tests, Sam reviewing and then approving
+is refused the same way.
+
+**A rejection is an answer like any other.** `reject` takes the plan where its `on` says; the
+approved activity doesn't run. Each time the plan asks for an approval, any earlier approval of
+the same activity is withdrawn, so an old *approve* never outvotes a new *reject*.
+
+**A form keeps the field's mark.** A field declared `"source": "untrusted:customer"` stays
+untrusted when a person's form sets it: the form adds who answered, and the mark stays.
+
+**An approval is tied to the values it saw.** When it is given, the engine records a digest of
+the inputs `of` will run with. If any of them has changed by the time it runs (another answer set
+a field again), the approval has lapsed: the step stops, saying a new approval is needed, and
+nothing is paid on a decision nobody made. Once the activity is scheduled, the approval is spent:
+one approval unlocks one run of one step. And a high-risk activity reached with no approval at
+all, in a plan that never went through `ventoux check`, stops before it is scheduled.
 
 ## Running a plan on Temporal
 
@@ -334,7 +448,7 @@ run = await start_plan(
     client, RefundPlans, refund_order, fields={...}, id="refund-A-1001", task_queue="refunds"
 )
 assert (await report(run)).waiting_at == "approve_refund#1"
-await answer(run, "approve_refund#1", "approve", by="sam")
+await answer(run, "approve_refund#1", "approve", by="sam", roles=["support", "support-lead"])
 assert (await run.result()).status == "succeeded"
 ```
 
@@ -367,6 +481,9 @@ same order and the run carries on where it was. Code changed in a way that asks 
 fails the replay, and Temporal holds the run until the code is fixed, rather than letting it go
 another way.
 
-Not yet: who may answer or approve (layer 7), and an activity's output reaching the case file
-(layer 8). A run never continues as new: the bound on loops keeps a run's history far below
+On Temporal, `answer` carries who answered and their roles, as the API states them, and a form
+when the outcome sets fields (`form={"approved_amount": Decimal("250")}`); the same checks run.
+
+Not yet: an activity's output reaching the case file, and a person's form landing in it rather
+than in the plan's fields (layer 8). A run never continues as new: the bound on loops keeps a run's history far below
 Temporal's limits (design question 18).
