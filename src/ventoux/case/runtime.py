@@ -19,6 +19,7 @@ from ventoux.case.admission import (
     requirements_met,
 )
 from ventoux.case.answers import AnswerRefused, judge_approval, judge_task
+from ventoux.case.approvals import ask, follow, lapsed, needs_approval
 from ventoux.case.definition import ActivityStep, CaseDefinition, TaskStep
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
@@ -154,6 +155,8 @@ def open_entry(state: CaseState, entry: str) -> StepRun | OpenApproval:
     for approval in state.approvals.values():
         if entry in (approval.entry, approval.step):
             return approval
+    if entry in state.withdrawn:
+        raise AnswerRefused(f"{entry} was withdrawn: {state.withdrawn[entry]}")
     raise AnswerRefused(f"{entry} is not open: nothing there waits for an answer")
 
 
@@ -274,6 +277,7 @@ def admit(
     started = True
     while started:
         started = False
+        follow(case, state)  # an open approval follows the case file (brief, D25)
         for name, step in case.steps.items():
             if not free_to_start(state, name, step) or not requirements_met(required[name], state):
                 continue
@@ -321,57 +325,25 @@ def start(
     schedule(catalog, state, name, step, commands)
 
 
-def needs_approval(state: CaseState, name: str, step: ActivityStep) -> bool:
-    """Whether the step needs an approval now: it has one, and its `when` holds (or it has none).
-    Fail closed: a condition that can't be read stops the case, never reads as "not needed"."""
-    if step.approval is None:
-        return False
-    condition = step.approval.when
-    return condition is None or holds(condition, state.values, f"{name}'s approval condition")
-
-
-def ask(state: CaseState, name: str, step: ActivityStep) -> None:
-    """Ask for the step's approval, as its own entry: `pay.approval#1`."""
-    assert step.approval is not None
-    state.asked[name] = state.asked.get(name, 0) + 1
-    entry = f"{name}.approval#{state.asked[name]}"
-    state.approvals[name] = OpenApproval(entry, name)
-    roles = " or ".join(step.approval.roles)
-    state.waiting[entry] = f"approval of {name} by {roles}"
-    state.history.append(f"asked {entry}: approval of {name} by {roles}")
-
-
-def lapsed(state: CaseState, name: str, step: ActivityStep, given: GivenApproval) -> None:
-    """Stop the step if its inputs changed since the approval saw them: it has lapsed
-    (brief, D11), and a person decides what happens next (brief, D23). In a case the approval is
-    spent in the decision that gives it, so only a change request (layer 12) could come between;
-    the check depends on nothing else."""
-    try:
-        now = inputs_digest(step.inputs, state.values)
-    except ExpressionError:
-        return  # can't be read: the input check stops the step, saying why
-    if now != given.digest:
-        raise StepStopped(
-            f"the inputs of {name} changed since {given.by} approved them: a new approval is needed"
-        )
-
-
 def schedule(
     catalog: Catalog, state: CaseState, name: str, step: ActivityStep, commands: list[Schedule]
 ) -> None:
     """Check the activity's inputs against the real sources (layer 5), then schedule it, with a
     key naming the case and the step run (brief, D17)."""
     contract = catalog.get(step.activity)  # fail closed: an activity the catalog lacks stops it
+    # Checked again at runtime, on nothing case validation did (learning question 34).
+    if contract.risk == "high" and step.approval is None:
+        raise StepStopped(f"{contract.reference} is high risk, and {name} has no approval")
     entry = next_entry(state, name)
-    inputs = checked_inputs(
-        contract, step.inputs, state.values, state.sources, f"{state.case}/{entry}"
-    )
+    key = f"{state.case}/{entry}"
+    inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key)
     state.runs.append(StepRun(entry, name, "running"))
     origins = "; ".join(
         f"{field} from {', '.join(sorted(provenance(expression, state.sources))) or 'the case'}"
         for field, expression in step.inputs.items()
     )
-    state.history.append(f"scheduled {entry}: {contract.reference} ({origins})")
+    keyed = f", key {key}" if contract.idempotency_key is not None else ""
+    state.history.append(f"scheduled {entry}: {contract.reference} ({origins}){keyed}")
     commands.append(Schedule(entry, contract.reference, inputs))
 
 

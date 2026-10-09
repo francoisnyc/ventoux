@@ -82,7 +82,7 @@ ana answered review#1 approve as support, setting approved_amount
 review#1 done
 asked pay.approval#1: approval of pay by support-lead
 sam answered pay.approval#1 approve as support-lead
-scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana)
+scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key memory/pay#1
 pay#1 done, giving refund_id
 closed: nothing left to do
 ```
@@ -145,7 +145,7 @@ approval sheet for 250, and Ana reworks it to 900:
 
 ```
 asked pay.approval#1: approval of pay by support-lead
-ana proposed review
+ana proposed review as support
 started review#2: waiting for approve or reject by support
 withdrew pay.approval#1: review started again
 ana answered review#2 approve as support, setting approved_amount

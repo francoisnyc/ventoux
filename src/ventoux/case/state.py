@@ -24,6 +24,7 @@ class OpenApproval:
 
     entry: str  # the step, `approval`, and how many times it was asked: `pay.approval#1`
     step: str  # the step it guards
+    seen: dict[str, object]  # the values its step read when it was asked, by field (brief, D25)
 
 
 @dataclass
@@ -48,6 +49,7 @@ class CaseState:
     approvals: dict[str, OpenApproval] = field(default_factory=dict[str, OpenApproval])  # by step
     given: dict[str, GivenApproval] = field(default_factory=dict[str, GivenApproval])  # by step
     asked: dict[str, int] = field(default_factory=dict[str, int])  # approvals asked, by step
+    withdrawn: dict[str, str] = field(default_factory=dict[str, str])  # entry: why
     # What waits on people, in the order it opened: entry, and how it reads (brief, D24).
     waiting: dict[str, str] = field(default_factory=dict[str, str])
     opened_by: str | None = None  # the person who opened the case, if a person did

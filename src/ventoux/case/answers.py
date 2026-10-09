@@ -70,6 +70,9 @@ def judge_approval(
     approver = approver_role(roles, answer.roles, contract, catalog)
     if approver is None:
         raise AnswerRefused(risk_refusal(role, catalog, contract))
+    # The person who opened the case approves none of its steps (brief, D11).
+    if answer.by == state.opened_by:
+        raise AnswerRefused(f"{answer.by} opened the case, so cannot approve its steps")
     refuse_unless(someone_else(state.sources, answer.by, name, step))
     return approver
 

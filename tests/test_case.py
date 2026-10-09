@@ -198,8 +198,8 @@ def test_opening_values_say_who_gave_them() -> None:
     by_lee = run_case(REFUND, file=small, answers=review, people=PEOPLE, opened_by="lee")
     assert "opened by lee, with amount and order_id" in by_lee.history
     assert (
-        "scheduled pay#1: payments.refund@2 (order_id from person:lee; amount from person:ana)"
-        in by_lee.history
+        "scheduled pay#1: payments.refund@2 (order_id from person:lee; amount from person:ana), "
+        "key memory/pay#1" in by_lee.history
     )
     # Who opened it is written one way, as who answers (brief, D22).
     with pytest.raises(CaseRefused, match="'Lee' is not written as a person's identifier"):
@@ -391,3 +391,114 @@ def test_steps_admitted_together_run_together() -> None:
         people=PEOPLE,
     )
     assert both.closed
+
+
+# --- Slice 5: approvals in a case ---
+
+
+def test_the_opener_cannot_approve() -> None:
+    # Lee opened the case and is a team lead; Ana reviewed. Lee is excluded all the same
+    # (brief, D11): the person who opened a case approves none of its steps.
+    with pytest.raises(AnswerRefused, match="^lee opened the case, so cannot approve its steps$"):
+        run_case(
+            REFUND,
+            file=LARGE,
+            answers=[REVIEWED, ("pay", "approve", "lee")],
+            people=PEOPLE,
+            opened_by="lee",
+        )
+
+
+REWORKED = [
+    REVIEWED,
+    propose("review", "ana"),
+    ("review", "approve", "ana", {"approved_amount": 900}),
+]
+
+
+def test_an_open_approval_follows_the_case_file() -> None:
+    # Sam reads the sheet for 250 while the review is sent back and reworked to 900 (brief, D25).
+    with pytest.raises(AnswerRefused, match="^pay.approval#1 was withdrawn: review started again$"):
+        run_case(
+            reworkable(),
+            file=LARGE,
+            answers=[*REWORKED, ("pay.approval#1", "approve", "sam")],
+            people=PEOPLE,
+        )
+    run = run_case(
+        reworkable(), file=LARGE, answers=[*REWORKED, ("pay", "approve", "sam")], people=PEOPLE
+    )
+    rework = run.history.index("ana proposed review as support")
+    assert run.history[rework : rework + 6] == [
+        "ana proposed review as support",
+        "started review#2: waiting for approve or reject by support",
+        "withdrew pay.approval#1: review started again",
+        "ana answered review#2 approve as support, setting approved_amount",
+        "review#2 done",
+        "asked pay.approval#2: approval of pay by support-lead",
+    ]
+    assert "sam answered pay.approval#2 approve as support-lead" in run.history
+    assert run.reached("pay")
+
+
+def test_an_open_approval_is_withdrawn_when_a_value_it_reads_changes() -> None:
+    # A team lead adjusts the amount while the approval is open: the step is still admitted, but
+    # what it would pay changed, so the approval asked for 250 approves nothing.
+    definition = refund()
+    definition["steps"]["adjust"] = {
+        "kind": "task",
+        "display": {"title": "Adjust the approved amount"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "requires": ["review"],
+        "outcomes": {"adjust": {"display": {"title": "Adjust"}, "sets": ["approved_amount"]}},
+    }
+    script = [
+        REVIEWED,
+        propose("adjust", "ana"),
+        ("adjust", "adjust", "ana", {"approved_amount": 260}),
+        ("pay.approval#1", "approve", "sam"),
+    ]
+    with pytest.raises(
+        AnswerRefused, match="^pay.approval#1 was withdrawn: approved_amount changed$"
+    ):
+        run_case(definition, file=LARGE, answers=script, people=PEOPLE)
+
+
+def test_a_rework_below_the_threshold_needs_no_approval() -> None:
+    run = run_case(
+        reworkable(),
+        file=LARGE,
+        answers=[
+            REVIEWED,
+            propose("review", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 50}),
+        ],
+        people=PEOPLE,
+    )
+    assert run.reached("pay")
+    assert run.closed
+    assert not any(line.startswith("asked pay.approval#2") for line in run.history)
+
+
+def test_an_approval_unlocks_one_run_with_its_own_key() -> None:
+    run = run_case(REFUND, file=LARGE, answers=[REVIEWED, ("pay", "approve", "sam")], people=PEOPLE)
+    scheduled = [line for line in run.history if line.startswith("scheduled pay")]
+    assert scheduled == [
+        (
+            "scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from "
+            "person:ana), key memory/pay#1"
+        )
+    ]
+    assert run.closed
+
+
+def test_a_high_risk_step_with_no_approval_stops() -> None:
+    # Checked at runtime, depending on nothing case validation (layer 10) will do.
+    definition = refund()
+    del definition["steps"]["pay"]["approval"]
+    with pytest.raises(
+        StepStopped, match="^payments.refund@2 is high risk, and pay has no approval$"
+    ):
+        run_case(definition, file=LARGE, answers=[REVIEWED], people=PEOPLE)
