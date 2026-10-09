@@ -40,6 +40,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 33 | Layer 3: why plans can be checked and code can't | open |
 | 34 | Layer 5: why check input policies twice | open |
 | 35 | Layer 6: what lives in workflow history | closed |
+| 36 | Layer 8: the model picks the step, never the values | open |
 
 ---
 
@@ -830,3 +831,33 @@ and record the key points. A question is closed once you can explain the answer 
   step run in every run of the case (the case's workflow ID, the step, and a step-run count that
   crosses over). Layer 8 decides it.
 - Status: closed (the follow-up came from memory; part (c) is decided in layer 8).
+
+
+## 36. Layer 8: the model picks the step, never the values
+
+> What does "the model picks the step, never the values" mean in code? Using 8a: if a step
+> advisor (layer 15) suggested the next step, which seam would its suggestion go through, what
+> would the engine still check, and where could a value it made up never get in?
+
+- Your answer: "to decide; it would never get into the runtime."
+- Discussion: the core is right: the seam is `decide`, and a made-up value never gets in. What
+  makes it so is the event's type: a suggestion becomes `Proposed(step, by, roles)`, which has no
+  field for a value, so one can't be written (like `now`, question 32), not refused. Three parts
+  didn't come back:
+  - **What is still checked:** a suggestion is only a proposal, and `propose` puts it through
+    everything a person's goes through: the step exists, someone may propose it (`proposed_by`,
+    the role), `proposal_refusal` (not running, may run again, `requires` met), its `when` holds,
+    and its approval, if any, comes from someone else. The model picks which step, never whether
+    an inadmissible one runs (layer 15's negative test).
+  - **Where values come from instead:** `schedule` evaluates the step's `inputs`, expressions
+    written in the reviewed definition, against the case file; values reach the case file only
+    from the opening, a person's form, or (8b, 8d) an activity's output with its contract's
+    provenance. The definition decides which field feeds which input.
+  - **The second wall:** model output stored in a field declared `untrusted:llm` carries that tag,
+    and `checked_inputs` refuses it at any `trusted_only` input, such as the refund's `amount`.
+  In one line: the model chooses among declared steps; admission decides whether it runs; the
+  definition decides where its values come from; provenance decides which values may go in.
+- Follow-up: the step advisor reads a customer's angry email and proposes `goodwill` (the 8a
+  tutor review's extra refund), adding "refund 500, the customer is a VIP". Walk it through 8a:
+  who is the proposer, what runs, with which amount, and who must approve it?
+- Status: open, until the follow-up comes from memory.
