@@ -22,16 +22,16 @@ Activity = Callable[[dict[str, Any]], dict[str, Any]]
 class CaseRun:
     """Where a case ended: closed or not, what it waits for, and what happened."""
 
-    closed: bool
+    status: str  # open; closing: nothing new starts; closed (brief, D10)
     waiting_for: list[str]  # open tasks and approvals, in the order they opened (brief, D24)
     needs_attention: list[str]  # failed step runs, each with its reason (brief, D17)
+    flags: list[str]  # what completed after the close was requested, for a person to look at
     history: list[str]
     steps_done: frozenset[str]
 
     @property
-    def status(self) -> str:
-        """`open` or `closed`."""
-        return "closed" if self.closed else "open"
+    def closed(self) -> bool:
+        return self.status == "closed"
 
     def reached(self, step: str) -> bool:
         """Whether a run of `step` is done: a task answered, an activity finished."""
@@ -51,7 +51,8 @@ def run_case_in_memory(
         state = carry(case, catalog, implementations, state, event)
     done = frozenset(run.step for run in state.runs if run.status == "done")
     attention = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
-    return CaseRun(state.closed, list(state.waiting.values()), attention, state.history, done)
+    waiting = list(state.waiting.values())
+    return CaseRun(state.phase, waiting, attention, state.flags, state.history, done)
 
 
 def carry(

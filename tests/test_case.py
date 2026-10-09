@@ -19,9 +19,11 @@ from ventoux.testing import (
     CATALOG,
     AnswerRefused,
     CaseRefused,
+    CloseRefused,
     Outcome,
     ProposalRefused,
     RetryRefused,
+    close,
     load_definition,
     propose,
     retry,
@@ -1007,3 +1009,62 @@ def test_a_retry_checks_the_step_again() -> None:
             answers=[("review", "reject", "ana"), retry("pay#1", "omar")],
             people=OPERATORS,
         )
+
+
+# --- Slice 4: closing a case with a declared reason ---
+
+
+def closable() -> dict[str, Any]:
+    """The refund, with the guide's close reason, and one for operations."""
+    definition = refund()
+    definition["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate request"}, "roles": ["support"]},
+        "abandoned": {"display": {"title": "Abandoned after a failure"}, "roles": ["operations"]},
+    }
+    return definition
+
+
+def test_an_undeclared_close_reason_is_refused() -> None:
+    with pytest.raises(
+        CloseRefused,
+        match="^refund has no close reason 'spam': its reasons are abandoned, duplicate$",
+    ):
+        run_case(closable(), file=LARGE, answers=[close("spam", "ana")], people=PEOPLE)
+
+
+def test_a_close_reason_names_who_may_use_it() -> None:
+    with pytest.raises(CloseRefused, match="^duplicate is closed by support, and eve has no role$"):
+        run_case(closable(), file=LARGE, answers=[close("duplicate", "eve")], people=PEOPLE)
+
+
+def test_closing_cancels_what_waits_saying_why() -> None:
+    # D10: the people an open task or approval was assigned to see why it went away.
+    run = run_case(
+        closable(), file=LARGE, answers=[REVIEWED, close("duplicate", "ana")], people=PEOPLE
+    )
+    assert "ana closed the case as duplicate, as support" in run.history
+    assert "cancelled pay.approval#1: closed as duplicate by ana" in run.history
+    assert run.history[-1] == "closed: duplicate, by ana"
+    assert run.waiting_for == []
+    assert run.closed
+    assert not run.reached("pay")
+    with pytest.raises(AnswerRefused, match="^the case is closed: nothing waits for an answer$"):
+        run_case(
+            closable(),
+            file=LARGE,
+            answers=[REVIEWED, close("duplicate", "ana"), ("pay", "approve", "sam")],
+            people=PEOPLE,
+        )
+
+
+def test_an_operator_closes_a_case_that_needs_attention() -> None:
+    run = run_case(
+        closable(),
+        file=SMALL,
+        answers=[SMALL_REVIEW, close("abandoned", "omar")],
+        people=OPERATORS,
+        activities={"payments.refund@2": unreachable},
+    )
+    assert "cancelled pay#1: closed as abandoned by omar" in run.history
+    assert run.needs_attention == []
+    assert run.closed

@@ -24,11 +24,13 @@ from ventoux.case.admission import (
 )
 from ventoux.case.answers import AnswerRefused, judge_approval, judge_task
 from ventoux.case.approvals import ask, follow, lapsed, needs_approval
+from ventoux.case.closing import begin_closing, refuse_to_close, settle
 from ventoux.case.definition import ActivityStep, CaseDefinition, TaskStep
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     Answered,
     CaseState,
+    CloseAsked,
     Completed,
     Event,
     Failed,
@@ -73,8 +75,8 @@ def decide(
     if isinstance(event, Opened):
         open_case(case, state, event)
     elif isinstance(event, Answered):
-        if state.closed:
-            raise AnswerRefused("the case is closed: nothing waits for an answer")
+        if state.phase != "open":
+            raise AnswerRefused(f"the case is {state.phase}: nothing waits for an answer")
         answer(case, catalog, state, event)
     elif isinstance(event, Proposed):
         propose(case, catalog, state, event, commands)
@@ -82,13 +84,16 @@ def decide(
         failed(state, event)
     elif isinstance(event, Retried):
         retry(case, catalog, state, event)
+    elif isinstance(event, CloseAsked):
+        role = refuse_to_close(case, catalog, state, event)
+        state.history.append(f"{event.by} closed the case as {event.reason}, as {role}")
+        why = f"closed as {event.reason} by {event.by}"
+        begin_closing(state, why, f"{event.reason}, by {event.by}")
     else:
         complete(case, catalog, state, event)
-    admit(case, catalog, state, commands)
-    # A case closes when nothing is left to do (brief, D10).
-    if not state.closed and not pending(state):
-        state.closed = True
-        state.history.append("closed: nothing left to do")
+    if state.phase == "open":
+        admit(case, catalog, state, commands)  # nothing new starts once the case is closing
+    settle(case, state)
     return state, commands
 
 
@@ -185,8 +190,8 @@ def propose(
     # Who proposed is written one way, before anything is checked against it (brief, D22).
     if (wrong := identifier_problem(event.by)) is not None:
         raise ProposalRefused(wrong)
-    if state.closed:
-        raise ProposalRefused("the case is closed: nothing starts")
+    if state.phase != "open":
+        raise ProposalRefused(f"the case is {state.phase}: nothing starts")
     if event.step not in case.steps:
         raise ProposalRefused(f"{event.step} is not a step of {case.case}")
     step = case.steps[event.step]
@@ -333,8 +338,8 @@ def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retri
     # Who retried is written one way, before anything is checked against it (brief, D22).
     if (wrong := identifier_problem(event.by)) is not None:
         raise RetryRefused(wrong)
-    if state.closed:
-        raise RetryRefused("the case is closed: nothing starts")
+    if state.phase != "open":
+        raise RetryRefused(f"the case is {state.phase}: nothing starts")
     run = next((run for run in state.runs if run.entry == event.entry), None)
     if run is None or run.status != "failed":
         raise RetryRefused(f"{event.entry} has not failed: nothing to retry")
@@ -490,13 +495,6 @@ def coming_run(
 def next_entry(state: CaseState, name: str) -> str:
     """The step's next run: `review#1`, then `review#2`."""
     return f"{name}#{sum(1 for run in state.runs if run.step == name) + 1}"
-
-
-def pending(state: CaseState) -> bool:
-    """Whether anything is left to do (brief, D10): a task open, an activity running, an approval
-    asked or given and not yet spent, or a step failed, which waits for a person (brief, D17)."""
-    unfinished = any(run.status in ("open", "running", "failed", "retrying") for run in state.runs)
-    return unfinished or bool(state.approvals) or bool(state.given)
 
 
 def listed(names: list[str]) -> str:

@@ -90,6 +90,13 @@ class Approval(Shape):
     display: ApprovalDisplay
 
 
+class CloseReason(Shape):
+    """A declared reason a person may close the case with, and who may (brief, D10)."""
+
+    display: Display
+    roles: Roles  # who may close the case with it
+
+
 class Step(Shape):
     """What every kind of step says about when it may start (admission)."""
 
@@ -142,6 +149,7 @@ class CaseDefinition(Shape):
     milestones: dict[Name, Milestone] = {}
     steps: Annotated[dict[Name, AnyStep], Field(min_length=1)]
     sequence: tuple[Name, ...] = ()  # each step requires the one before it
+    close_reasons: dict[Name, CloseReason] = {}  # how a person may close it, and who (brief, D10)
 
     # Pydantic: a validator with `mode="after"` runs on the whole object, once its fields passed.
     @model_validator(mode="after")

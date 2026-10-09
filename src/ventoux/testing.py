@@ -12,10 +12,11 @@ from temporalio import workflow
 
 from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
+from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import Activity, CaseRun, run_case_in_memory
 from ventoux.case.runtime import CaseRefused
-from ventoux.case.state import Answered, Event, Opened, Proposed, Retried
+from ventoux.case.state import Answered, CloseAsked, Event, Opened, Proposed, Retried
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
@@ -29,12 +30,14 @@ __all__ = [
     "Activity",
     "AnswerRefused",
     "CaseRefused",
+    "CloseRefused",
     "DevelopmentPlans",
     "InputRefused",
     "Outcome",
     "ProposalRefused",
     "RetryRefused",
     "StepStopped",
+    "close",
     "load_definition",
     "propose",
     "retry",
@@ -206,6 +209,9 @@ def run_case(
         if isinstance(item, Retry):
             events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ()))))
             continue
+        if isinstance(item, Close):
+            events.append(CloseAsked(item.reason, item.by, frozenset(people.get(item.by, ()))))
+            continue
         entry, outcome, who, *form = item
         # The test plays the API: it states who answered and their roles.
         roles = frozenset(people.get(who, ()))
@@ -230,6 +236,18 @@ class Retry(NamedTuple):
 def retry(entry: str, who: str) -> Retry:
     """A script's retry by an operator: `retry("pay#1", "omar")` (brief, D26)."""
     return Retry(entry, who)
+
+
+class Close(NamedTuple):
+    """A scripted close: `who` closes the case with the declared `reason`."""
+
+    reason: str
+    by: str
+
+
+def close(reason: str, who: str) -> Close:
+    """A script's close: `close("duplicate", "ana")` (brief, D10)."""
+    return Close(reason, who)
 
 
 def propose(step: str, who: str) -> Proposal:
