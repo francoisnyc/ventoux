@@ -15,6 +15,7 @@ from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import Activity, CaseRun, Finish, PlanRunner, run_case_in_memory
+from ventoux.case.plan_step import PlanNotSupplied, supplied
 from ventoux.case.runtime import CaseRefused
 from ventoux.case.state import (
     Answered,
@@ -31,7 +32,7 @@ from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.interpreter import Answer, Outcome, PlanRun, RunRefused, Wait, interpret
-from ventoux.core.plan import PlanInvalid, parse_plan
+from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
@@ -268,18 +269,10 @@ def plan_runner(
         return activities[reference](inputs)
 
     def run(command: StartPlan) -> Completed | Failed | None:
-        # Fail closed: a plan nobody supplied, or one that can't be read, never runs.
-        if command.plan not in plans:
-            return Failed(command.entry, f"no plan {command.plan} is available")
         try:
-            plan = parse_plan(plans[command.plan])
-        except PlanInvalid as invalid:
-            return Failed(command.entry, f"{command.plan} can't be read: {invalid}")
-        if (supplied := f"{plan.plan}@{plan.version}") != command.plan:
-            return Failed(
-                command.entry,
-                f"{command.plan} is supplied as {supplied}: supply the plan it names",
-            )
+            plan = supplied(plans, command.plan)
+        except PlanNotSupplied as missing:
+            return Failed(command.entry, str(missing))
         script = scripts.setdefault(command.entry.split("#")[0], [])
         try:
             # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it.

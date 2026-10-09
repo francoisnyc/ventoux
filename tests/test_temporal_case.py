@@ -4,6 +4,8 @@ See docs/layers/08-case.md (8c) and docs/guides/cases.md, "Running a case on Tem
 """
 
 import asyncio
+import copy
+import json
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import timedelta
 from decimal import Decimal
@@ -11,12 +13,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle
 from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
+from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import WorkflowEnvironment
 
+from ventoux.temporal import client as plans
 from ventoux.temporal.cases import (
     CaseReport,
+    CaseStart,
     CaseWorkflow,
     answer,
     close,
@@ -27,15 +33,21 @@ from ventoux.temporal.cases import (
 )
 from ventoux.temporal.converter import DATA_CONVERTER
 from ventoux.temporal.worker import case_worker
-from ventoux.testing import (
-    FAKES,
-    Activity,
-    DevelopmentCases,
-    DevelopmentPlans,
-    Outcome,
-    load_definition,
-    run_case,
-)
+from ventoux.temporal.workflow import PlanWorkflow, RunReport
+
+# Temporal: this module defines a workflow (`CasesWithPlans`, below), so the workflow sandbox
+# imports it afresh. The development catalog is passed through, imported once and shared:
+# rebuilt in the sandbox, it would hold contract classes the shared `core` doesn't know.
+with workflow.unsafe.imports_passed_through():
+    from ventoux.testing import (
+        FAKES,
+        Activity,
+        DevelopmentCases,
+        DevelopmentPlans,
+        Outcome,
+        load_definition,
+        run_case,
+    )
 
 QUEUE = "cases"
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
@@ -44,7 +56,9 @@ SMALL = {"order_id": "ord-1", "amount": Decimal(40)}
 
 
 def on_temporal[T](
-    scenario: Callable[[Client], Awaitable[T]], activities: Mapping[str, Activity] = FAKES
+    scenario: Callable[[Client], Awaitable[T]],
+    activities: Mapping[str, Activity] = FAKES,
+    cases: type[CaseWorkflow] = DevelopmentCases,
 ) -> T:
     """Run `scenario` against Temporal's time-skipping test server, with a worker serving the
     development cases, their plans and `activities`: nothing outside is reached."""
@@ -53,7 +67,7 @@ def on_temporal[T](
         environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
         async with (
             environment,
-            case_worker(environment.client, QUEUE, DevelopmentCases, DevelopmentPlans, activities),
+            case_worker(environment.client, QUEUE, cases, DevelopmentPlans, activities),
         ):
             # Bounded: a case that hangs (a workflow task retried forever) fails the test.
             return await asyncio.wait_for(scenario(environment.client), timeout=20)
@@ -63,6 +77,7 @@ def on_temporal[T](
 
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "lee": ["support-lead"]}
 Case = WorkflowHandle[CaseWorkflow, CaseReport]
+PlanRun = WorkflowHandle[PlanWorkflow, RunReport]
 
 
 async def reported(case: Case, holds: Callable[[CaseReport], bool]) -> CaseReport:
@@ -85,6 +100,7 @@ async def first_run(client: Client, id: str) -> str:
 def skipping[T](
     scenario: Callable[[WorkflowEnvironment], Awaitable[T]],
     activities: Mapping[str, Activity] = FAKES,
+    cases: type[CaseWorkflow] = DevelopmentCases,
 ) -> T:
     """As `on_temporal`, for a scenario that moves time on itself: the server skips time only
     while a client waits on a workflow's result, and a case waiting for a person never ends."""
@@ -93,7 +109,7 @@ def skipping[T](
         environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
         async with (
             environment,
-            case_worker(environment.client, QUEUE, DevelopmentCases, DevelopmentPlans, activities),
+            case_worker(environment.client, QUEUE, cases, DevelopmentPlans, activities),
         ):
             return await asyncio.wait_for(scenario(environment), timeout=20)
 
@@ -361,3 +377,183 @@ def test_every_attempt_and_a_retry_send_the_same_key() -> None:
     assert keys == [f"refund-1/{run_id}/pay#1"] * 6  # five attempts, then the retry's first
     assert "omar retried pay#1 as operations" in ended.history
     assert ended.status == "closed"
+
+
+# --- Slice 5: plan steps as child workflows ---
+
+PLANS_GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
+
+
+def refund_order(version: int = 1) -> dict[str, Any]:
+    """The plans guide's `refund-order` plan, as stored data, numbered `version`."""
+    example = PLANS_GUIDE.read_text().split("```json\n")[1].split("```")[0]
+    plan: dict[str, Any] = load_json(example)
+    return plan | {"version": version}
+
+
+def load_json(text: str) -> Any:
+    """`text` as JSON, its numbers exact decimals (brief, D20)."""
+    return json.loads(text, parse_float=Decimal)
+
+
+def unapproved_refund_order() -> dict[str, Any]:
+    """The plan paying straight after its lookup, with no approval: the engine stops it."""
+    plan = refund_order(version=2)
+    plan["states"]["check_order"]["on"]["done"] = "pay"
+    return plan
+
+
+# The plans the test deployment supplies: the guide's, one that stops, and one supplied under a
+# reference that isn't its own.
+TEST_PLANS = {
+    "refund-order@1": refund_order(),
+    "refund-order@2": unapproved_refund_order(),
+    "refund-order@3": refund_order(version=1),
+}
+
+
+# Temporal: a deployment's case workflow names its catalog and plans (the cases guide).
+@workflow.defn(name="ventoux.case")
+class CasesWithPlans(CaseWorkflow):
+    catalog = DevelopmentCases.catalog
+    plans = TEST_PLANS
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+SETTLE: dict[str, Any] = {
+    "kind": "plan",
+    "display": {"title": "Settle the refund"},
+    "plan": "refund-order@1",
+    "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+    "requires": ["review"],
+    "when": {"==": [{"var": "review.outcome"}, "approve"]},
+}
+
+
+def refund_with_plan(plan: str = "refund-order@1", **settle: Any) -> dict[str, Any]:
+    """The refund, `pay` replaced by the guide's plan step running `plan`."""
+    definition = copy.deepcopy(REFUND)
+    del definition["steps"]["pay"], definition["sequence"]
+    definition["steps"]["settle"] = {**SETTLE, "plan": plan, **settle}
+    return definition
+
+
+def test_a_plan_that_cannot_run_fails_its_step() -> None:
+    # Fail closed, as in memory: a plan that stops in its child workflow, and a plan supplied
+    # under another reference, each fail the step, which waits for a person (brief, D17, D28).
+    async def scenario(client: Client, plan: str) -> CaseReport:
+        definition = refund_with_plan(plan)
+        case = await start_case(client, CasesWithPlans, definition, LARGE, f"refund-{plan}", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        return await reported(case, lambda now: now.needs_attention != [])
+
+    stopped = on_temporal(lambda client: scenario(client, "refund-order@2"), cases=CasesWithPlans)
+    assert stopped.needs_attention == [
+        (
+            "settle#1: refund-order@2 stopped: payments.refund@2 is high risk, and nobody "
+            "approved this run of pay"
+        )
+    ]
+    misnamed = on_temporal(lambda client: scenario(client, "refund-order@3"), cases=CasesWithPlans)
+    assert misnamed.needs_attention == [
+        "settle#1: refund-order@3 is supplied as refund-order@1: supply the plan it names"
+    ]
+
+
+async def child_waiting_at(client: Client, id: str, entry: str) -> PlanRun:
+    """The child plan `id` once it waits at `entry`. The case starts it in its own time: until
+    then, Temporal says it is not found. Asked a bounded number of times."""
+    plan: PlanRun = client.get_workflow_handle(id, result_type=RunReport)
+    for _ in range(100):
+        try:
+            if (await plans.report(plan)).waiting_at == entry:
+                return plan
+        except RPCError as error:
+            if error.status != RPCStatusCode.NOT_FOUND:
+                raise
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"{id} never waited at {entry}")
+
+
+def proposed_settle() -> dict[str, Any]:
+    """The refund with the plan step, which a team lead proposes; it stays open until closed."""
+    definition = refund_with_plan(automatic=False, proposed_by=["support-lead"])
+    return definition | {"stays_open": True, "close_reasons": {"duplicate": DUPLICATE}}
+
+
+def test_a_plan_step_runs_as_a_child_workflow() -> None:
+    # Sam proposes settling the refund. Its plan runs as the child refund-1/settle#1, whose wait
+    # is answered on the child. Sam approves nothing he proposed, inside the plan too (brief,
+    # D25): refused, and the child waits on; Lee's approval pays, keyed by the case's step run.
+    keys: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-ord-1"}
+
+    async def scenario(client: Client) -> tuple[CaseReport, list[str], str]:
+        case = await start_case(client, CasesWithPlans, proposed_settle(), LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await propose(case, "settle", "sam", PEOPLE["sam"])
+        plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+        await plans.answer(plan, "approve_refund#1", "approve", "sam", PEOPLE["sam"])
+        await plans.answer(plan, "approve_refund#1", "approve", "lee", PEOPLE["lee"])
+        ended = await plan.result()
+        now = await reported(case, lambda now: "settle#1 done" in now.history)
+        return now, ended.history, await first_run(client, "refund-1")
+
+    now, plan_history, run_id = on_temporal(
+        scenario, {**FAKES, "payments.refund@2": refund}, cases=CasesWithPlans
+    )
+    assert "refused sam's answer approve: sam proposed settle, so cannot approve it" in (
+        plan_history
+    )
+    assert keys == [f"refund-1/{run_id}/settle#1/pay#1"]
+    assert (
+        "started settle#1: plan refund-order@1 (order_id from system:opener; amount from "
+        f"person:ana), run refund-1/{run_id}/settle#1"
+    ) in now.history
+    assert now.status == "open"  # it stays open until a person closes it
+
+
+def test_a_stopped_child_plan_is_retried_with_the_same_keys() -> None:
+    # The provider is down: inside the plan, pay fails past its retries, the plan stops, and the
+    # step needs attention. Once it is back, an operator retries settle#1: the same step run, so
+    # the child starts again under the same ID, and pays with the same key (brief, D26, D28).
+    keys: list[str] = []
+    back = False
+
+    def flaky(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        if not back:
+            raise ConnectionError("provider unreachable")
+        return {"refund_id": "refund-ord-1"}
+
+    async def scenario(environment: WorkflowEnvironment) -> tuple[CaseReport, CaseReport, str]:
+        nonlocal back
+        client = environment.client
+        case = await start_case(
+            client, CasesWithPlans, refund_with_plan(), LARGE, "refund-1", QUEUE
+        )
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+        await plans.answer(plan, "approve_refund#1", "approve", "sam", PEOPLE["sam"])
+        failed = await past_the_retries(environment, case)
+        back = True
+        await retry(case, "settle#1", "omar", ["operations"])
+        again = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+        await plans.answer(again, "approve_refund#1", "approve", "sam", PEOPLE["sam"])
+        return failed, await case.result(), await first_run(client, "refund-1")
+
+    failed, ended, run_id = skipping(
+        scenario, {**FAKES, "payments.refund@2": flaky}, cases=CasesWithPlans
+    )
+    assert failed.needs_attention == [
+        "settle#1: refund-order@1 stopped: payments.refund@2 failed: provider unreachable"
+    ]
+    assert keys == [f"refund-1/{run_id}/settle#1/pay#1"] * 6  # five attempts, then the retry's
+    assert "omar retried settle#1 as operations" in ended.history
+    assert ended.history[-2:] == ["settle#1 done", "closed: nothing left to do"]

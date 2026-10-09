@@ -472,7 +472,7 @@ retried again, a declared outcome while closing).
 ## 8c. Cases on Temporal
 
 Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); the six points
-decided while drafting confirmed the same day; slices 0–4 built.
+decided while drafting confirmed the same day; slices 0–5 built.
 
 User-facing description, written first: `docs/guides/cases.md`, "Plan steps" and "Running a case
 on Temporal". Decisions: brief D27 (design question 18) and D28.
@@ -662,6 +662,17 @@ Each starts with its negative test, seen failing for the right reason.
   time-skipping server skips time only while a client waits on a workflow's result; a plan
   stops, so layer 6's test waited on it, but a case that needs attention never ends. Those tests
   call the test environment's `sleep` between reports, past the contract's backoff.
+- **Looking up a supplied plan is one rule for both drivers,** `case/plan_step.py`'s `supplied`
+  (slice 5): it moved from `testing.py`, so the Temporal workflow refuses a missing, unreadable or
+  misnamed plan exactly as memory does. Pure: it only parses data.
+- **The case workflow names its plan workflow by the name a worker registers,**
+  `plan_workflow = "ventoux.plan"`, and `case_worker` serves both.
+- **A module defining a workflow passes through only what would clash** (slice 5). The test's
+  own case class made the sandbox import the test module afresh, and with it
+  `ventoux.testing`, whose catalog then held contract classes the shared `core` didn't know.
+  Passing everything through instead hid a Pydantic import inside the sandbox (a warning that
+  `annotated_types` was imported mid-run); importing as the guide shows, with only
+  `ventoux.testing` passed through, gives neither.
 - **The outcome of a plan step is tagged with the plan:** `settle.outcome` from
   `system:refund-order@1`, as an activity's is tagged with its contract (choice 5 in drafting).
 
@@ -683,7 +694,10 @@ proposals, retries and closes passed as written too, and were seen stuck with on
 `AnswerRefused` recorded. Slice 4's activity code came with slice 2, so its tests passed as
 written; seen failing with Temporal's default retry policy in place of the contract's (the
 payment retried forever, never needing attention), and with the declared-outcome branch removed
-(the declined refund never completed).
+(the declined refund never completed). Slice 5's first test failed with the case stuck on a plan
+step it couldn't carry; the exclusion inside a child was seen failing with `excluded` not passed
+to `interpret` (Sam's own approval taken), and the retried child's keys with the case's run name
+not passed (the keys named the child's own run).
 
 | Promise | Test |
 |---|---|
@@ -693,8 +707,8 @@ payment retried forever, never needing attention), and with the declared-outcome
 | A plan's fields carry the sources of what they read from the case file, and the plan's checks refuse by them | P `test_a_plan_steps_inputs_keep_their_sources` |
 | A plan that succeeds makes the step done; a failed final state is the outcome `failed`; a plan waiting keeps the step running | P `test_how_a_plan_ends_is_how_its_step_ends` |
 | A plan step ends done or failed, and nothing else | P `test_a_plan_ends_done_or_failed_and_nothing_else` |
-| The case's opener and the step's proposer approve nothing inside a plan step | P `test_who_may_not_approve_crosses_into_the_plan`; TC `test_the_opener_cannot_approve_inside_a_child_plan` |
-| A plan step's keys are the step run's, then the plan's own | P `test_a_plan_steps_keys_name_its_step_run`; TC `test_a_child_plans_keys_name_the_case` |
+| The case's opener and the step's proposer approve nothing inside a plan step | P `test_who_may_not_approve_crosses_into_the_plan`; TC `test_a_plan_step_runs_as_a_child_workflow` |
+| A plan step's keys are the step run's, then the plan's own | P `test_a_plan_steps_keys_name_its_step_run`; TC `test_a_plan_step_runs_as_a_child_workflow` |
 | A refused opening fails the case workflow at once | TC `test_a_refused_opening_fails_at_once` |
 | A second case with the same ID is refused | TC `test_a_case_id_opens_one_case` |
 | On Temporal a case makes the same decisions and history as in memory, its keys naming the case and its first run | TC `test_the_guides_case_gives_the_same_history_as_in_memory` |
@@ -706,7 +720,8 @@ payment retried forever, never needing attention), and with the declared-outcome
 | A declared outcome is never retried | TC `test_a_declared_outcome_is_never_retried` |
 | A retried activity, and an operator's retry, send the same key | TC `test_every_attempt_and_a_retry_send_the_same_key` |
 | A plan step runs as a child workflow named by its step run, answered on the child | TC `test_a_plan_step_runs_as_a_child_workflow` |
-| A stopped child plan fails its step; a retry starts it again with the same keys | TC `test_a_stopped_child_plan_is_retried_with_the_same_keys` |
+| A child plan that stops, or one supplied under another reference, fails its step | TC `test_a_plan_that_cannot_run_fails_its_step` |
+| A stopped child plan is retried under the same ID, with the same keys | TC `test_a_stopped_child_plan_is_retried_with_the_same_keys` |
 | An entry count never restarts across continue-as-new, so a key never repeats | TC `test_entry_counts_cross_continue_as_new` |
 | The state carried over keeps exact numbers and every value's sources | TC `test_a_carried_state_reads_back_as_it_was` |
 | An entry open before a switch is answered after it by the same name | TC `test_an_open_entry_survives_the_switch` |

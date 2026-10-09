@@ -14,7 +14,12 @@ from typing import Any, ClassVar
 from temporalio import workflow
 from temporalio.client import Client, WorkflowHandle
 from temporalio.common import WorkflowIDReusePolicy
-from temporalio.exceptions import ActivityError, ApplicationError, FailureError
+from temporalio.exceptions import (
+    ActivityError,
+    ApplicationError,
+    ChildWorkflowError,
+    FailureError,
+)
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh for every run; modules passed
 # through are imported once and shared. `core` and `case` are deterministic (the boundary test
@@ -24,6 +29,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.answers import AnswerRefused
     from ventoux.case.closing import CloseRefused
     from ventoux.case.definition import CaseInvalid, parse_case
+    from ventoux.case.plan_step import PlanNotSupplied, supplied
     from ventoux.case.runtime import CaseRefused, decide
     from ventoux.case.state import (
         Answered,
@@ -37,11 +43,13 @@ with workflow.unsafe.imports_passed_through():
         Proposed,
         Retried,
         Schedule,
+        StartPlan,
     )
     from ventoux.core.catalog import Catalog
     from ventoux.temporal.activities import OUTCOME
     from ventoux.temporal.converter import require_exact_numbers
     from ventoux.temporal.options import activity_options
+    from ventoux.temporal.workflow import Given, PlanStart, RunReport
 
 
 @dataclass
@@ -94,6 +102,8 @@ class CaseWorkflow:
 
     catalog: ClassVar[Catalog]  # the contracts this deployment's cases may call
     plans: ClassVar[Mapping[str, Any]] = {}  # the plans its plan steps may run, by reference
+    # The plan workflow a plan step runs as, by the name its worker registers it under.
+    plan_workflow: ClassVar[str] = "ventoux.plan"
 
     def __init__(self) -> None:
         self.state = CaseState("")  # named when the case opens
@@ -170,9 +180,50 @@ class CaseWorkflow:
 
     def carry(self, command: Command) -> None:
         """Start the command; what it gives comes back to the inbox when it arrives."""
-        assert isinstance(command, Schedule)  # plan steps: slice 5
         # asyncio: a task runs alongside the loop; Temporal's event loop runs it deterministically.
-        asyncio.create_task(self.run_activity(command))
+        if isinstance(command, StartPlan):
+            asyncio.create_task(self.run_plan(command))
+        else:
+            asyncio.create_task(self.run_activity(command))
+
+    async def run_plan(self, command: StartPlan) -> None:
+        """Run the step's plan as a child workflow, `<case ID>/<entry>`, and put how it ended in
+        the inbox (brief, D28): succeeded is done, a failed final state the outcome `failed`, a
+        plan that stops or can't start fails the step."""
+        try:
+            plan = supplied(self.plans, command.plan)
+        except PlanNotSupplied as missing:
+            self.inbox.append(Failed(command.entry, str(missing)))  # fail closed
+            return
+        fields = {
+            name: Given(given.value, sorted(given.sources))
+            for name, given in command.fields.items()
+        }
+        start = PlanStart(self.plans[command.plan], fields, command.run, dict(command.excluded))
+        try:
+            # Temporal: a child workflow is a workflow the case starts and waits for; its own
+            # history holds its waits and activities. Its ID names the step run; a retry starts it
+            # again under the same ID, with the same keys (brief, D26).
+            ran: RunReport = await workflow.execute_child_workflow(
+                self.plan_workflow,
+                start,
+                id=f"{workflow.info().workflow_id}/{command.entry}",
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+                result_type=RunReport,
+            )
+        except ChildWorkflowError as error:
+            cause = error.cause
+            said = cause.message if isinstance(cause, FailureError) else str(error)
+            self.inbox.append(
+                Failed(command.entry, f"{plan.plan}@{plan.version} can't start: {said}")
+            )
+            return
+        if ran.status == "succeeded":
+            self.inbox.append(Completed(command.entry, {}))
+        elif ran.status == "failed":
+            self.inbox.append(Completed(command.entry, {}, "failed"))  # a failed final state
+        else:
+            self.inbox.append(Failed(command.entry, f"{command.plan} stopped: {ran.reason}"))
 
     async def run_activity(self, command: Schedule) -> None:
         """Run the activity, retried and timed out as its contract says (brief, D17), and put

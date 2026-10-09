@@ -56,6 +56,12 @@ class PlanStart:
 
     plan: dict[str, Any]  # the plan, as stored data
     fields: dict[str, Given]  # every field the plan declares, with its sources
+    # When a case runs the plan as a step, the case names the run in its keys
+    # (`refund-1/<first run ID>/settle#1`) (brief, D28); None: the workflow's ID and run ID.
+    run_name: str | None = None
+    # Each person who approves nothing in this run, and why: the case's opener and the step's
+    # proposer (brief, D25).
+    excluded: dict[str, str] | None = None
 
 
 @dataclass
@@ -158,8 +164,9 @@ class PlanWorkflow:
                 self.catalog,
                 self.call,
                 self.wait,
-                run_name=self.name(),
+                run_name=start.run_name or self.name(),
                 record=self.record,
+                excluded=start.excluded,
             )
         except (RunRefused, PlanInvalid) as refused:
             # A run that can't start fails at once, saying why. Any other exception fails only the
