@@ -7,7 +7,7 @@ clock, randomness or I/O, so replay rebuilds the same case. See docs/layers/08-c
 """
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -47,6 +47,7 @@ with workflow.unsafe.imports_passed_through():
     )
     from ventoux.core.catalog import Catalog
     from ventoux.temporal.activities import OUTCOME
+    from ventoux.temporal.carried import state_as_data, state_from_data
     from ventoux.temporal.converter import require_exact_numbers
     from ventoux.temporal.options import activity_options
     from ventoux.temporal.workflow import Given, PlanStart, RunReport
@@ -59,6 +60,9 @@ class CaseStart:
     definition: dict[str, Any]  # the case definition, as stored data
     file: dict[str, Any]  # the case file's first values, each of its field's type
     opened_by: str | None = None  # the person who opened it, as the API states; None: a system
+    # The state of the case, when it continues as new: the new run decides from it alone
+    # (brief, D27). None: the case opens now.
+    carried: dict[str, Any] | None = None
 
 
 @dataclass
@@ -104,10 +108,16 @@ class CaseWorkflow:
     plans: ClassVar[Mapping[str, Any]] = {}  # the plans its plan steps may run, by reference
     # The plan workflow a plan step runs as, by the name its worker registers it under.
     plan_workflow: ClassVar[str] = "ventoux.plan"
+    # How many events one run decides before the case continues as new: a count, never a clock,
+    # so replay switches at the same place (brief, D27). Temporal warns at about 10,000 history
+    # events; a case's event makes a few.
+    events_per_run: ClassVar[int] = 1000
 
     def __init__(self) -> None:
         self.state = CaseState("")  # named when the case opens
         self.inbox: list[Event] = []  # events not yet decided, in the order they came
+        self.decided = 0  # events this run has decided
+        self.running = 0  # activities and child plans started and not yet back
 
     # Temporal: a signal is a message into a running workflow, recorded in its history, so replay
     # delivers it again at the same point.
@@ -153,14 +163,19 @@ class CaseWorkflow:
         self.state = CaseState(f"{info.workflow_id}/{info.first_execution_run_id}")
         try:
             case = parse_case(start.definition)
-            self.decide(case, Opened(start.file, start.opened_by))
+            if start.carried is None:
+                self.decide(case, Opened(start.file, start.opened_by))
+            else:
+                self.state = state_from_data(start.carried)  # a case continued as new
         except (CaseInvalid, CaseRefused) as refused:
             # A case that can't open fails at once, saying why. Any other exception fails only the
             # workflow task, which Temporal retries until fixed code is deployed (brief, D17).
             kind = type(refused).__name__
             raise ApplicationError(str(refused), type=kind, non_retryable=True) from None
         while self.state.phase != "closed":
-            await workflow.wait_condition(lambda: bool(self.inbox))
+            await workflow.wait_condition(lambda: bool(self.inbox) or self.time_to_switch())
+            if not self.inbox:
+                self.switch(start)
             event = self.inbox.pop(0)
             try:
                 names_its_entry(event, self.state)
@@ -172,8 +187,26 @@ class CaseWorkflow:
                 self.state.history.append(f"refused {asked(event)}: {refused}")
         return self.report()
 
+    def time_to_switch(self) -> bool:
+        """Whether the case should continue as new now: enough events in this run, or Temporal
+        suggests it (its history is getting large); and nothing is running, whose result would
+        come back to a run that has ended (brief, D27)."""
+        enough = self.decided >= self.events_per_run
+        return self.running == 0 and (enough or workflow.info().is_continue_as_new_suggested())
+
+    def switch(self, start: CaseStart) -> None:
+        """Continue as new, carrying the whole state. Only at a quiet point: no event waiting to
+        be decided, nothing running, no signal handler part-way. A signal that arrives while the
+        switch is committed fails it, and this run decides that signal first: no answer is ever
+        carried as a queue (brief, D27)."""
+        assert not self.inbox and self.running == 0 and workflow.all_handlers_finished()
+        carried = CaseStart(start.definition, {}, start.opened_by, state_as_data(self.state))
+        # Temporal: ends this run and starts the next one of the same workflow, with `carried`.
+        workflow.continue_as_new(carried)
+
     def decide(self, case: Any, event: Event) -> None:
         """Decide `event`, then start what the case asks for."""
+        self.decided += 1
         self.state, commands = decide(case, self.catalog, self.state, event)
         for command in commands:
             self.carry(command)
@@ -181,10 +214,18 @@ class CaseWorkflow:
     def carry(self, command: Command) -> None:
         """Start the command; what it gives comes back to the inbox when it arrives."""
         # asyncio: a task runs alongside the loop; Temporal's event loop runs it deterministically.
+        self.running += 1
         if isinstance(command, StartPlan):
-            asyncio.create_task(self.run_plan(command))
+            asyncio.create_task(self.until_back(self.run_plan(command)))
         else:
-            asyncio.create_task(self.run_activity(command))
+            asyncio.create_task(self.until_back(self.run_activity(command)))
+
+    async def until_back(self, carried: Coroutine[Any, Any, None]) -> None:
+        """Run `carried`, which puts what happened in the inbox; then it no longer runs."""
+        try:
+            await carried
+        finally:
+            self.running -= 1
 
     async def run_plan(self, command: StartPlan) -> None:
         """Run the step's plan as a child workflow, `<case ID>/<entry>`, and put how it ended in

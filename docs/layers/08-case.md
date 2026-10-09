@@ -472,7 +472,7 @@ retried again, a declared outcome while closing).
 ## 8c. Cases on Temporal
 
 Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); the six points
-decided while drafting confirmed the same day; slices 0–5 built.
+decided while drafting confirmed the same day; slices 0–6 built.
 
 User-facing description, written first: `docs/guides/cases.md`, "Plan steps" and "Running a case
 on Temporal". Decisions: brief D27 (design question 18) and D28.
@@ -673,6 +673,17 @@ Each starts with its negative test, seen failing for the right reason.
   Passing everything through instead hid a Pydantic import inside the sandbox (a warning that
   `annotated_types` was imported mid-run); importing as the guide shows, with only
   `ventoux.testing` passed through, gives neither.
+- **The carried state is written field by field** (`temporal/carried.py`), and its test checks
+  that every field of `CaseState` is written: a field added later and forgotten there would
+  vanish at every switch, unnoticed (slice 6).
+- **A report asked at the moment of a switch can time out** (found in slice 6). The query reaches
+  the run that is ending, which no longer answers it; asked again, it reaches the new run. Answers
+  are never affected: they are signals, decided by one run or the other. The tests ask with a
+  short timeout and again; the guide tells API writers the same.
+- **"Around the switch" is tested for what holds whichever way it falls.** Whether an answer sent
+  at once lands before or after the switch is Temporal's timing, not ours: the test asserts that
+  the approval counts once and the refund is paid once. A second part waits for the switch, so
+  the open entry is answered by the same name after it, deterministically.
 - **The outcome of a plan step is tagged with the plan:** `settle.outcome` from
   `system:refund-order@1`, as an activity's is tagged with its contract (choice 5 in drafting).
 
@@ -697,7 +708,11 @@ payment retried forever, never needing attention), and with the declared-outcome
 (the declined refund never completed). Slice 5's first test failed with the case stuck on a plan
 step it couldn't carry; the exclusion inside a child was seen failing with `excluded` not passed
 to `interpret` (Sam's own approval taken), and the retried child's keys with the case's run name
-not passed (the keys named the child's own run).
+not passed (the keys named the child's own run). Slice 6: the carried state failed on the
+missing module, then with a field dropped; the switch first failed by never happening; entry
+counts were seen restarting (`started review#1` again) with the carried runs cut down, and a
+switch while the payment ran lost its result (`pay#1` scheduled forever) with the "nothing
+running" check removed.
 
 | Promise | Test |
 |---|---|
@@ -728,4 +743,5 @@ not passed (the keys named the child's own run).
 | A case switches only when nothing runs | TC `test_a_switch_waits_while_an_activity_runs` |
 | A case's history replays with the same code, and fails with changed code | TC `test_a_case_history_replays`, `test_a_case_history_replayed_with_changed_code_fails` |
 | The guide's examples are what the engine does | C `test_the_guides_examples_run_as_written`, `test_the_guides_plan_step_runs_as_written`; TC `test_the_guides_case_gives_the_same_history_as_in_memory` |
-| Not ours to test: a signal arriving while a switch is committed fails the switch, and the old run decides it first (Temporal's behaviour) | none of its own; the nearest check, an answer around a switch counted once, is `test_an_open_entry_survives_the_switch` |
+| An answer sent around a switch counts once, whichever run decides it | TC `test_an_open_entry_survives_the_switch` |
+| Not ours to test: a signal arriving while a switch is committed fails the switch, and the old run decides it first (Temporal's behaviour) | none of its own: the row above holds either way |

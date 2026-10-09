@@ -5,7 +5,9 @@ See docs/layers/08-case.md (8c) and docs/guides/cases.md, "Running a case on Tem
 
 import asyncio
 import copy
+import dataclasses
 import json
+import threading
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import timedelta
 from decimal import Decimal
@@ -19,7 +21,11 @@ from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import WorkflowEnvironment
 
+from ventoux.case.definition import parse_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import Answered, CaseState, Opened
 from ventoux.temporal import client as plans
+from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import (
     CaseReport,
     CaseStart,
@@ -40,6 +46,7 @@ from ventoux.temporal.workflow import PlanWorkflow, RunReport
 # rebuilt in the sandbox, it would hold contract classes the shared `core` doesn't know.
 with workflow.unsafe.imports_passed_through():
     from ventoux.testing import (
+        CATALOG,
         FAKES,
         Activity,
         DevelopmentCases,
@@ -84,11 +91,21 @@ async def reported(case: Case, holds: Callable[[CaseReport], bool]) -> CaseRepor
     """The case's report once `holds` is true of it: the worker takes signals and runs on in its
     own time. Asked a bounded number of times, so a case that never gets there fails the test."""
     for _ in range(100):
-        now = await report(case)
-        if holds(now):
+        now = await answered_report(case)
+        if now is not None and holds(now):
             return now
         await asyncio.sleep(0.05)  # real time, for the worker to take its next workflow task
-    raise AssertionError(f"the case never got there: {await report(case)}")
+    raise AssertionError(f"the case never got there: {await answered_report(case)}")
+
+
+async def answered_report(case: Case) -> CaseReport | None:
+    """The case's report, or None if the query isn't answered in time. A query sent as the case
+    continues as new can reach the run that is ending, which no longer answers it; asked again,
+    it reaches the new run (brief, D27)."""
+    try:
+        return await asyncio.wait_for(report(case), timeout=1)
+    except TimeoutError:
+        return None
 
 
 async def first_run(client: Client, id: str) -> str:
@@ -557,3 +574,172 @@ def test_a_stopped_child_plan_is_retried_with_the_same_keys() -> None:
     assert keys == [f"refund-1/{run_id}/settle#1/pay#1"] * 6  # five attempts, then the retry's
     assert "omar retried settle#1 as operations" in ended.history
     assert ended.history[-2:] == ["settle#1 done", "closed: nothing left to do"]
+
+
+# --- Slice 6: continue-as-new (brief, D27) ---
+
+
+def test_a_carried_state_reads_back_as_it_was() -> None:
+    # The whole state crosses to the new run as data, through the same converter as everything
+    # else: an amount stays an exact Decimal, every value keeps its sources, and the order of
+    # what waits on people, and of the history, is kept (brief, D27).
+    state = case_state(REFUND, LARGE, [("review#1", REVIEW_FORM)])
+    payload = DATA_CONVERTER.payload_converter.to_payload(state_as_data(state))
+    back = state_from_data(DATA_CONVERTER.payload_converter.from_payload(payload, dict))
+    assert back == state
+    assert back.values["approved_amount"] == Decimal(250)
+    assert isinstance(back.values["approved_amount"], Decimal)
+    assert back.sources["approved_amount"] == frozenset({"person:ana"})
+    assert list(back.approvals) == ["pay"]
+    # Every field of the state crosses: one added later and forgotten here would vanish at every
+    # switch, unnoticed.
+    assert set(state_as_data(state)) == {field.name for field in dataclasses.fields(CaseState)}
+
+
+def case_state(definition: dict[str, Any], file: dict[str, Any], reviews: list[Any]) -> CaseState:
+    """The state `decide` reaches after opening `definition` with `file` and Ana's `reviews`."""
+    case = parse_case(definition)
+    state, _ = decide(case, CATALOG, CaseState("refund-1/run"), Opened(file, None))
+    for entry, form in reviews:
+        answered = Answered(entry, "approve", "ana", frozenset({"support"}), form)
+        state, _ = decide(case, CATALOG, state, answered)
+    return state
+
+
+# Temporal: a case workflow that continues as new after every 2 events, so a short test crosses
+# several runs. A deployment keeps the default (brief, D27).
+@workflow.defn(name="ventoux.case")
+class SwitchingCases(CaseWorkflow):
+    catalog = DevelopmentCases.catalog
+    events_per_run = 2
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+REWORKABLE = copy.deepcopy(REFUND)
+REWORKABLE["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+
+
+async def runs_of(client: Client, id: str) -> tuple[str, str]:
+    """The case's first run ID, and its current one."""
+    described = await client.get_workflow_handle(id).describe()
+    info = described.raw_description.workflow_execution_info
+    return info.first_run_id, info.execution.run_id
+
+
+def test_entry_counts_cross_continue_as_new() -> None:
+    # Reviewed, sent back, reworked to 900 and approved, over three runs of the case: every count
+    # carries on, so the rework is review#2 and its approval pay.approval#2, and the payment's
+    # key names the case's first run, as every key of the case does (brief, D27).
+    async def scenario(client: Client) -> tuple[CaseReport, tuple[str, str], list[str]]:
+        case = await start_case(client, SwitchingCases, REWORKABLE, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await propose(case, "review", "ana", PEOPLE["ana"])
+        await reported(case, lambda now: now.waiting_at == ["review#2"])
+        rework = {"approved_amount": Decimal(900)}
+        await answer(case, "review#2", "approve", "ana", PEOPLE["ana"], rework)
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#2"])
+        await answer(case, "pay.approval#2", "approve", "sam", PEOPLE["sam"])
+        ended = await case.result()
+        return ended, await runs_of(client, "refund-1"), keys
+
+    keys: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-ord-1"}
+
+    ended, (first, last), paid = on_temporal(
+        scenario, {**FAKES, "payments.refund@2": refund}, cases=SwitchingCases
+    )
+    assert last != first  # the case continued as new at least once
+    assert "started review#2: waiting for approve or reject by support" in ended.history
+    assert "asked pay.approval#2: approval of pay by support-lead" in ended.history
+    assert paid == [f"refund-1/{first}/pay#1"]
+    assert ended.history[0] == "opened by system:opener, with amount and order_id"  # as one
+    assert ended.status == "closed"
+
+
+def test_an_open_entry_survives_the_switch() -> None:
+    # Ana's review makes the second event, and the case switches with pay.approval#1 open: Sam
+    # answers it after the switch, by the same name, and his double click is refused as closed.
+    # Then the same answers sent at once, landing wherever the switch falls: whichever run
+    # decides them, the approval counts once and the refund is paid once (brief, D27).
+    paid: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paid.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-ord-1"}
+
+    async def after_the_switch(client: Client) -> tuple[CaseReport, str]:
+        case = await start_case(client, SwitchingCases, REFUND, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        for _ in range(100):  # until the case has continued as new
+            first, last = await runs_of(client, "refund-1")
+            if last != first:
+                break
+            await asyncio.sleep(0.05)
+        assert (await reported(case, lambda now: True)).waiting_at == ["pay.approval#1"]
+        await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
+        await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
+        return await case.result(), first
+
+    async def at_once(client: Client) -> CaseReport:
+        case = await start_case(client, SwitchingCases, REFUND, LARGE, "refund-2", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
+        await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
+        return await case.result()
+
+    activities = {**FAKES, "payments.refund@2": refund}
+    ended, first = on_temporal(after_the_switch, activities, cases=SwitchingCases)
+    assert ended.history.count("sam answered pay.approval#1 approve as support-lead") == 1
+    assert "refused sam's answer approve to pay.approval#1: pay.approval#1 is closed" in (
+        ended.history
+    )
+    assert paid == [f"refund-1/{first}/pay#1"]
+    assert ended.status == "closed"
+    paid.clear()
+    ended = on_temporal(at_once, activities, cases=SwitchingCases)
+    assert ended.history.count("sam answered pay.approval#1 approve as support-lead") == 1
+    assert len(paid) == 1
+    assert ended.status == "closed"
+
+
+def test_a_switch_waits_while_an_activity_runs() -> None:
+    # The case reaches its count with pay#1 running. It must not switch until the payment is back:
+    # its result would come back to a run that has ended, and be lost (brief, D27).
+    release = threading.Event()
+    calls: list[str] = []
+
+    def held(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs["idempotency_key"])
+        release.wait(timeout=10)
+        return {"refund_id": "refund-ord-1"}
+
+    staying = {**REFUND, "stays_open": True, "close_reasons": {"duplicate": DUPLICATE}}
+
+    async def scenario(client: Client) -> tuple[tuple[str, str], CaseReport, tuple[str, str]]:
+        case = await start_case(client, SwitchingCases, staying, SMALL, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], SMALL_FORM)
+        await reported(
+            case, lambda now: any(line.startswith("scheduled pay#1") for line in now.history)
+        )
+        await asyncio.sleep(0.5)  # time enough to switch, were it allowed
+        while_running = await runs_of(client, "refund-1")
+        release.set()
+        paid = await reported(case, lambda now: "pay#1 done, giving refund_id" in now.history)
+        await close(case, "duplicate", "ana", PEOPLE["ana"])
+        await case.result()
+        return while_running, paid, await runs_of(client, "refund-1")
+
+    (first, during), paid, (_, last) = on_temporal(
+        scenario, {**FAKES, "payments.refund@2": held}, cases=SwitchingCases
+    )
+    assert during == first  # no switch while the payment ran
+    assert last != first  # and one once it was back
+    assert len(calls) == 1
+    assert paid.history.count("pay#1 done, giving refund_id") == 1
