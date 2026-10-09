@@ -24,7 +24,7 @@ from ventoux.case.admission import (
 )
 from ventoux.case.answers import AnswerRefused, judge_approval, judge_task
 from ventoux.case.approvals import ask, follow, lapsed, needs_approval
-from ventoux.case.closing import begin_closing, refuse_to_close, settle
+from ventoux.case.closing import begin_closing, close_when_reached, refuse_to_close, settle
 from ventoux.case.definition import ActivityStep, CaseDefinition, TaskStep
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
@@ -91,6 +91,7 @@ def decide(
         begin_closing(state, why, f"{event.reason}, by {event.by}")
     else:
         complete(case, catalog, state, event)
+    close_when_reached(case, state)
     if state.phase == "open":
         admit(case, catalog, state, commands)  # nothing new starts once the case is closing
     settle(case, state)

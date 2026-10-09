@@ -62,14 +62,24 @@ def begin_closing(state: CaseState, cancelled_because: str, closed_because: str)
 
 
 def settle(case: CaseDefinition, state: CaseState) -> None:
-    """Close the case if it is done: open with nothing left to do, or closing with nothing still
-    running (brief, D10)."""
-    if state.phase == "open" and not pending(state):
+    """Close the case if it is done: open with nothing left to do (unless it stays open), or
+    closing with nothing still running (brief, D10)."""
+    if state.phase == "open" and not case.stays_open and not pending(state):
         state.phase = "closed"
         state.history.append("closed: nothing left to do")
     elif state.phase == "closing" and not any(run.status == "running" for run in state.runs):
         state.phase = "closed"
         state.history.append(f"closed: {state.closed_because}")
+
+
+def close_when_reached(case: CaseDefinition, state: CaseState) -> None:
+    """Begin closing once every milestone in `closes_when` is reached (brief, D10)."""
+    if state.phase != "open" or not case.closes_when:
+        return
+    if all(milestone in state.milestones for milestone in case.closes_when):
+        names = " and ".join(case.closes_when)
+        verb = "are" if len(case.closes_when) > 1 else "is"
+        begin_closing(state, f"the case closes when {names} {verb} reached", f"{names} reached")
 
 
 def pending(state: CaseState) -> bool:

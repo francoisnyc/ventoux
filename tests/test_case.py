@@ -1127,3 +1127,52 @@ def test_an_activity_failing_while_closing_flags_the_case() -> None:
     ]
     assert run.needs_attention == []
     assert run.closed
+
+
+# --- Slice 6: closes_when and stays_open ---
+
+
+def test_a_case_that_stays_open_names_how_to_close_it() -> None:
+    with pytest.raises(
+        CaseInvalid,
+        match="^stays_open: a case that stays open names close_reasons, or nobody could close it$",
+    ):
+        parse_case(refund(stays_open=True))
+    with pytest.raises(CaseInvalid, match="^closes_when: paid is not a milestone$"):
+        parse_case(refund(closes_when=["paid"]))
+
+
+def test_a_case_of_proposed_steps_stays_open_until_a_person_closes_it() -> None:
+    # Carried from the 8a review: without stays_open it closed the moment it opened.
+    definition = closable() | {"stays_open": True, "sequence": []}
+    for step in definition["steps"].values():
+        step["automatic"] = False
+        step["proposed_by"] = ["support"]
+    definition["steps"]["pay"]["requires"] = ["review"]
+    opened = run_case(definition, file=LARGE, answers=[], people=PEOPLE)
+    assert opened.status == "open"
+    assert opened.waiting_for == []
+    proposed = run_case(definition, file=LARGE, answers=[propose("review", "ana")], people=PEOPLE)
+    assert proposed.waiting_for == ["review by support"]
+    closed = run_case(definition, file=LARGE, answers=[close("duplicate", "ana")], people=PEOPLE)
+    assert closed.closed
+
+
+def test_closes_when_closes_the_case_once_its_milestones_are_reached() -> None:
+    # A survey task stays open alongside; reaching `paid` closes the case and cancels it.
+    definition = refund(closes_when=["paid"])
+    definition["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["steps"]["survey"] = {
+        "kind": "task",
+        "display": {"title": "Ask the customer for feedback"},
+        "roles": ["support"],
+        "outcomes": {"sent": {"display": {"title": "Survey sent"}}},
+    }
+    run = run_case(definition, file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE)
+    assert run.history[-3:] == [
+        "reached paid",
+        "cancelled survey#1: the case closes when paid is reached",
+        "closed: paid reached",
+    ]
+    assert run.closed
