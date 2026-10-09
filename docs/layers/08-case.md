@@ -472,7 +472,7 @@ retried again, a declared outcome while closing).
 ## 8c. Cases on Temporal
 
 Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); the six points
-decided while drafting confirmed the same day; slices 0–6 built.
+decided while drafting confirmed the same day; slices 0–7 built.
 
 User-facing description, written first: `docs/guides/cases.md`, "Plan steps" and "Running a case
 on Temporal". Decisions: brief D27 (design question 18) and D28.
@@ -712,7 +712,10 @@ not passed (the keys named the child's own run). Slice 6: the carried state fail
 missing module, then with a field dropped; the switch first failed by never happening; entry
 counts were seen restarting (`started review#1` again) with the carried runs cut down, and a
 switch while the payment ran lost its result (`pay#1` scheduled forever) with the "nothing
-running" check removed.
+running" check removed. Slice 7: the replay with changed code passed as written, Temporal's
+`NondeterminismError` raised by Temporal itself, as in layer 6; the three histories replayed with
+the same code (a finished case with a refusal in it, a continued case's last run, a case with a
+child plan) are the tests of our code.
 
 | Promise | Test |
 |---|---|
@@ -741,7 +744,7 @@ running" check removed.
 | The state carried over keeps exact numbers and every value's sources | TC `test_a_carried_state_reads_back_as_it_was` |
 | An entry open before a switch is answered after it by the same name | TC `test_an_open_entry_survives_the_switch` |
 | A case switches only when nothing runs | TC `test_a_switch_waits_while_an_activity_runs` |
-| A case's history replays with the same code, and fails with changed code | TC `test_a_case_history_replays`, `test_a_case_history_replayed_with_changed_code_fails` |
+| A case's history replays with the same code (refusals, a continued case's last run and a child plan included), and fails with changed code | TC `test_a_case_history_replays`, `test_a_case_history_replayed_with_changed_code_fails` |
 | The guide's examples are what the engine does | C `test_the_guides_examples_run_as_written`, `test_the_guides_plan_step_runs_as_written`; TC `test_the_guides_case_gives_the_same_history_as_in_memory` |
 | An answer sent around a switch counts once, whichever run decides it | TC `test_an_open_entry_survives_the_switch` |
 | Not ours to test: a signal arriving while a switch is committed fails the switch, and the old run decides it first (Temporal's behaviour) | none of its own: the row above holds either way |

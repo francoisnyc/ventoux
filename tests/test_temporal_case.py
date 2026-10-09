@@ -16,10 +16,12 @@ from typing import Any
 
 import pytest
 from temporalio import workflow
-from temporalio.client import Client, WorkflowFailureError, WorkflowHandle
+from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
 from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import Replayer
+from temporalio.workflow import NondeterminismError
 
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
@@ -743,3 +745,80 @@ def test_a_switch_waits_while_an_activity_runs() -> None:
     assert last != first  # and one once it was back
     assert len(calls) == 1
     assert paid.history.count("pay#1 done, giving refund_id") == 1
+
+
+# --- Slice 7: replay ---
+
+
+# Temporal: replay runs a workflow's code again against a recorded history, as a new worker does
+# after a crash. This version was changed to ask for a timer before the case opens.
+@workflow.defn(name="ventoux.case")
+class ChangedCases(CaseWorkflow):
+    catalog = DevelopmentCases.catalog
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        await workflow.sleep(1)  # a command the recorded history never saw
+        return await self.drive(start)
+
+
+def finished_case() -> WorkflowHistory:
+    """The history of the guide's refund, reviewed, approved after a double click, and paid."""
+
+    async def scenario(client: Client) -> WorkflowHistory:
+        case = await start_case(client, DevelopmentCases, REFUND, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
+        await case.result()
+        return await case.fetch_history()
+
+    return on_temporal(scenario)
+
+
+def replay(history: WorkflowHistory, workflow_class: type[CaseWorkflow]) -> None:
+    """Replay `history` against `workflow_class`, as a worker would after a restart."""
+    replayer = Replayer(workflows=[workflow_class], data_converter=DATA_CONVERTER)
+    asyncio.run(replayer.replay_workflow(history))
+
+
+def test_a_case_history_replayed_with_changed_code_fails() -> None:
+    # Temporal refuses rather than let the case go another way than it went: the case waits
+    # until the code is fixed (brief, D17).
+    with pytest.raises(NondeterminismError):
+        replay(finished_case(), ChangedCases)
+
+
+def test_a_case_history_replays() -> None:
+    # `decide` reads no clock, randomness or I/O, and the inbox decides events in the order
+    # history records them: the same code asks for the same things, and the recorded answers,
+    # refusals and results are read back, nothing done again.
+    replay(finished_case(), DevelopmentCases)
+
+    # A case that continued as new: its last run starts from the carried state, and replays.
+    async def switched(client: Client) -> WorkflowHistory:
+        case = await start_case(client, SwitchingCases, REFUND, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
+        await case.result()
+        first, last = await runs_of(client, "refund-1")
+        assert last != first
+        return await case.fetch_history()  # the latest run's
+
+    replay(on_temporal(switched, cases=SwitchingCases), SwitchingCases)
+
+    # A case whose plan step ran as a child workflow: the case's history records the child's
+    # start and result, and replays.
+    async def with_child(client: Client) -> WorkflowHistory:
+        case = await start_case(
+            client, CasesWithPlans, refund_with_plan(), LARGE, "refund-1", QUEUE
+        )
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+        await plans.answer(plan, "approve_refund#1", "approve", "sam", PEOPLE["sam"])
+        await case.result()
+        return await case.fetch_history()
+
+    replay(on_temporal(with_child, cases=CasesWithPlans), CasesWithPlans)
