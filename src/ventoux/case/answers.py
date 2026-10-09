@@ -2,8 +2,10 @@
 
 Every answer is judged the same way, in the same order, with `core`'s checks, as in a plan
 (brief, D23). The runtime checks the first two: the person is written as an identifier, and the
-entry is open. Then: the outcome is offered, the person has a role it names, the form fits. An approval adds its own checks last: the role may approve the
-activity's risk, and the person is someone else (brief, D11).
+entry is open. Then: the outcome is offered, the person has a role it names, the form fits. An
+approval adds its own checks last: the role may approve the activity's risk, and the person is
+someone else: not the opener, not the proposer, and not whoever's answer feeds the step
+(brief, D11).
 """
 
 from collections.abc import Mapping
@@ -73,6 +75,9 @@ def judge_approval(
     # The person who opened the case approves none of its steps (brief, D11).
     if answer.by == state.opened_by:
         raise AnswerRefused(f"{answer.by} opened the case, so cannot approve its steps")
+    # Nor does the person who proposed this run: their proposal decides that it runs (brief, D25).
+    if answer.by == state.proposers.get(name):
+        raise AnswerRefused(f"{answer.by} proposed {name}, so cannot approve it")
     refuse_unless(someone_else(state.sources, answer.by, name, step))
     return approver
 

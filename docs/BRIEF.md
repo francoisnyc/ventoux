@@ -616,6 +616,10 @@ be erased on request), has size limits, and a second copy of business records go
   the step.
 - **The person who opened the case approves none of its steps** (D11). Who opened it is stated by
   the trusted caller, like an answer's roles (D22); a case a system opened has no such person.
+- **Nor does the person who proposed a step's run approve that run.** A proposal decides that the
+  step runs, so its proposer is excluded like anyone whose answer decides it (D11), as change
+  requests are "applied only after someone else approves". *Added in the tutor review of layer 8a,
+  before D25 was merged.*
 
 ### Simplifications adopted
 

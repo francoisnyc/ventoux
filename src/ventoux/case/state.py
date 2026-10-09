@@ -50,6 +50,8 @@ class CaseState:
     given: dict[str, GivenApproval] = field(default_factory=dict[str, GivenApproval])  # by step
     asked: dict[str, int] = field(default_factory=dict[str, int])  # approvals asked, by step
     withdrawn: dict[str, str] = field(default_factory=dict[str, str])  # entry: why
+    # Who proposed each step's coming run, until it runs or is rejected (brief, D25).
+    proposers: dict[str, str] = field(default_factory=dict[str, str])
     # What waits on people, in the order it opened: entry, and how it reads (brief, D24).
     waiting: dict[str, str] = field(default_factory=dict[str, str])
     opened_by: str | None = None  # the person who opened the case, if a person did

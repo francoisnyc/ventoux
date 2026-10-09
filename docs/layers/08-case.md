@@ -220,6 +220,21 @@ Each starts with its negative test, seen failing for the right reason.
 - **Answers and approvals move to their own files** (`case/answers.py`, `case/approvals.py`),
   once slice 5 made the runtime long.
 
+### From the tutor review
+
+- **The person who proposed a step could approve it.** Sam, a team lead, proposed a goodwill
+  refund (high risk, approved by `support-lead`) and approved it himself. A proposal decides that
+  the step runs, so its proposer is excluded like anyone whose answer decides it (brief, D11),
+  and the curriculum asks for "approvals by someone other than the proposer". Now the case keeps
+  who proposed each step's coming run, until it runs or is rejected, and their approval is
+  refused: `sam proposed goodwill, so cannot approve it`. Added to D25, which this PR introduces.
+  In memory the refusal raises from `run_case`, as every refusal does in 8a; on Temporal (8c) a
+  refused answer is recorded and the case waits on.
+- **Carried to 8b:** a case whose steps all need proposing closes the moment it opens (nothing is
+  pending, brief D10), so every proposal is then refused; `stays_open` is the answer, and the
+  guide will warn about it. And a declined refund surfaces as a bare `Outcome` from `run_case`:
+  activity outcomes and "needs attention" are 8b's.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
@@ -252,6 +267,7 @@ code). The guide's refusal rows passed when written.
 | A milestone is reached by a task's outcome or a step's completion, and admits what requires it | C `test_a_milestone_admits_what_requires_it` |
 | Steps admitted together open together; the case waits for all of them | C `test_steps_admitted_together_run_together` |
 | The person who opened the case cannot approve its steps | C `test_the_opener_cannot_approve` |
+| The person who proposed a step's run cannot approve it; the case waits, and someone else's approval runs it once (tutor review) | C `test_the_person_who_proposed_a_step_cannot_approve_it` |
 | An open approval is withdrawn when a step it requires starts again, or a value it reads changes; an answer to it is refused with the reason; a new entry is asked | C `test_an_open_approval_follows_the_case_file`, `test_an_open_approval_is_withdrawn_when_a_value_it_reads_changes` |
 | After a withdrawal, an approval is asked again only if still needed | C `test_a_rework_below_the_threshold_needs_no_approval` |
 | An approval unlocks one run, scheduled with a key naming the case and the step run | C `test_an_approval_unlocks_one_run_with_its_own_key` |

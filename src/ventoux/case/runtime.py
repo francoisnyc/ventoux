@@ -198,6 +198,7 @@ def propose(
         if not decided:
             raise ProposalRefused(f"{event.step} doesn't run now: {render(step.when)} is false")
     state.history.append(f"{event.by} proposed {event.step} as {role}")
+    state.proposers[event.step] = event.by  # never its approver (brief, D25)
     start(catalog, state, event.step, step, commands)
 
 
@@ -248,6 +249,7 @@ def answer_approval(
         return
     # A rejection is an outcome: the step doesn't run (brief, D23).
     entry = next_entry(state, approval.step)
+    state.proposers.pop(approval.step, None)  # the proposed run is over
     state.runs.append(StepRun(entry, approval.step, "rejected"))
     state.history.append(f"{entry} won't run: {event.by} rejected {approval.entry}")
 
@@ -310,6 +312,7 @@ def start(
     if isinstance(step, TaskStep):
         entry = next_entry(state, name)
         state.runs.append(StepRun(entry, name, "open"))
+        state.proposers.pop(name, None)  # a task has no approval: the proposed run has started
         state.waiting[entry] = f"{name} by {' or '.join(step.roles)}"
         state.history.append(
             f"started {entry}: waiting for {' or '.join(step.outcomes)} by "
@@ -338,6 +341,7 @@ def schedule(
     key = f"{state.case}/{entry}"
     inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key)
     state.runs.append(StepRun(entry, name, "running"))
+    state.proposers.pop(name, None)  # the proposed run has started
     origins = "; ".join(
         f"{field} from {', '.join(sorted(provenance(expression, state.sources))) or 'the case'}"
         for field, expression in step.inputs.items()

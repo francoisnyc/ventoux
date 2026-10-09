@@ -684,3 +684,56 @@ def test_the_guides_refusals_are_what_the_engine_says(when: str, example: str) -
 
 def test_every_refusal_in_the_guide_is_tested() -> None:
     assert [when for when, _ in guide_refusal_rows()] == list(GUIDE_REFUSALS)
+
+
+# --- Tutor review: the person who proposes a step can't approve it ---
+
+
+def with_goodwill() -> dict[str, Any]:
+    """The refund, with an extra refund a team lead may propose: high risk, approved by one."""
+    definition = refund()
+    definition["steps"]["goodwill"] = {
+        "kind": "activity",
+        "display": {"title": "Refund a goodwill gesture"},
+        "activity": "payments.refund@2",
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "amount"}},
+        "automatic": False,
+        "proposed_by": ["support-lead"],
+        "requires": ["review"],
+        "approval": {
+            "roles": ["support-lead"],
+            "display": {"reason": "A goodwill refund needs a team lead"},
+        },
+    }
+    return definition
+
+
+def test_the_person_who_proposed_a_step_cannot_approve_it() -> None:
+    # Sam asks for the payment; someone else approves it (curriculum, layer 7; brief, D25). The
+    # refund waits for its own approval, so the case is open when Sam proposes.
+    proposed = [REVIEWED, propose("goodwill", "sam")]
+    with pytest.raises(AnswerRefused, match="^sam proposed goodwill, so cannot approve it$"):
+        run_case(
+            with_goodwill(),
+            file=LARGE,
+            answers=[*proposed, ("goodwill", "approve", "sam")],
+            people=PEOPLE,
+        )
+    waiting = run_case(with_goodwill(), file=LARGE, answers=proposed, people=PEOPLE)
+    assert waiting.waiting_for == [
+        "approval of pay by support-lead",
+        "approval of goodwill by support-lead",
+    ]
+    paid = run_case(
+        with_goodwill(),
+        file=LARGE,
+        answers=[*proposed, ("goodwill", "approve", "lee")],
+        people=PEOPLE,
+    )
+    assert [line for line in paid.history if line.startswith("scheduled goodwill")] == [
+        (
+            "scheduled goodwill#1: payments.refund@2 (order_id from system:opener; amount from "
+            "system:opener), key memory/goodwill#1"
+        )
+    ]
+    assert paid.waiting_for == ["approval of pay by support-lead"]

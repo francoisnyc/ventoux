@@ -137,7 +137,9 @@ An approval guards a step, and is asked when the step is about to start: its req
 met, its `when` holds, and the approval's own `when` holds now (`approved_amount > 100`).
 
 **Someone else, computed** (brief, D11). Nobody lists who may not approve. Excluded are:
-whoever's answer flows into the step's inputs or its `when`, and the person who opened the case.
+whoever's answer flows into the step's inputs or its `when`, the person who opened the case, and
+the person who proposed this run of the step: asking for a payment and approving it are two
+people's acts.
 
 **An open approval follows the case file** (brief, D25). While it waits, if the step stops being
 admitted, or a value it reads changes, the approval is withdrawn, and asked again with a new
