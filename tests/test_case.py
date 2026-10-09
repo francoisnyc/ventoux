@@ -15,7 +15,10 @@ from ventoux.testing import (
     AnswerRefused,
     CaseRefused,
     InputRefused,
+    ProposalRefused,
+    StepStopped,
     load_definition,
+    propose,
     run_case,
 )
 
@@ -215,3 +218,140 @@ def test_a_forms_values_land_in_the_case_file() -> None:
             answers=[("review", "approve", "ana", {"approved_amount": 40})],
             people=PEOPLE,
         )
+
+
+# --- Slice 3: requires, proposals, milestones ---
+
+
+def with_check_order() -> dict[str, Any]:
+    """The refund, with the guide's step a person proposes: look the order up again."""
+    definition = refund()
+    definition["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up again"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "automatic": False,
+        "proposed_by": ["support"],
+        "requires": ["review"],
+    }
+    return definition
+
+
+def reworkable() -> dict[str, Any]:
+    """The refund, whose review a person in support may send back for rework."""
+    definition = refund()
+    definition["steps"]["review"]["repeatable"] = True
+    definition["steps"]["review"]["proposed_by"] = ["support"]
+    return definition
+
+
+LARGE = {"order_id": "ord-1", "amount": 250}
+REVIEWED = ("review", "approve", "ana", {"approved_amount": 250})
+
+
+@pytest.mark.parametrize(
+    ("definition", "script", "message"),
+    [
+        (
+            with_check_order,
+            [propose("check_order", "ana")],
+            "check_order requires review, which hasn't completed",
+        ),
+        (
+            with_check_order,
+            [REVIEWED, propose("check_order", "eve")],
+            "check_order is proposed by support, and eve has no role",
+        ),
+        (
+            with_check_order,
+            [REVIEWED, propose("pay", "ana")],
+            "pay starts by itself: nobody proposes it",
+        ),
+        (reworkable, [propose("review", "ana")], "review is already running: review#1"),
+        (
+            with_check_order,
+            [REVIEWED, propose("check_order", "ana"), propose("check_order", "ana")],
+            "check_order has run, and is not repeatable",
+        ),
+        (
+            with_check_order,
+            [REVIEWED, propose("check_ordr", "ana")],
+            "check_ordr is not a step of refund",
+        ),
+    ],
+)
+def test_a_proposal_is_checked_against_admission(
+    definition: Any, script: list[Any], message: str
+) -> None:
+    with pytest.raises(ProposalRefused, match=f"^{message}$"):
+        run_case(definition(), file=LARGE, answers=script, people=PEOPLE)
+
+
+def test_a_proposal_whose_condition_is_false_is_refused() -> None:
+    definition = with_check_order()
+    definition["steps"]["check_order"]["when"] = {"==": [{"var": "review.outcome"}, "reject"]}
+    with pytest.raises(
+        ProposalRefused, match='^check_order doesn\'t run now: review.outcome = "reject" is false$'
+    ):
+        run_case(
+            definition,
+            file=LARGE,
+            answers=[REVIEWED, propose("check_order", "ana")],
+            people=PEOPLE,
+        )
+
+
+def test_a_proposed_step_runs() -> None:
+    run = run_case(
+        with_check_order(),
+        file=LARGE,
+        answers=[REVIEWED, propose("check_order", "ana")],
+        people=PEOPLE,
+    )
+    assert run.reached("check_order")
+    assert "ana proposed check_order as support" in run.history
+    assert run.waiting_for == ["approval of pay by support-lead"]
+
+
+def test_a_step_starts_by_itself_once() -> None:
+    # The review is done and the case waits for the approval: the review doesn't open again by
+    # itself, though it is repeatable; a person proposes it.
+    run = run_case(reworkable(), file=LARGE, answers=[REVIEWED], people=PEOPLE)
+    assert run.waiting_for == ["approval of pay by support-lead"]
+
+
+def test_a_condition_on_an_unset_field_stops_the_case() -> None:
+    # Without `sequence`, pay's condition is read before anyone answered the review: a missing
+    # value is an error, never "false" (fail closed).
+    definition = refund(sequence=[])
+    with pytest.raises(
+        StepStopped, match="^pay's condition review.outcome = \"approve\" can't be evaluated"
+    ):
+        run_case(definition, file=LARGE, answers=[], people=PEOPLE)
+
+
+def test_a_milestone_admits_what_requires_it() -> None:
+    definition = refund(sequence=[])
+    definition["milestones"] = {
+        "approved": {"display": {"title": "Refund approved"}},
+        "paid": {"display": {"title": "Refund paid"}},
+    }
+    definition["steps"]["review"]["outcomes"]["approve"]["reaches"] = ["approved"]
+    definition["steps"]["pay"]["requires"] = ["approved"]
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    del definition["steps"]["pay"]["when"]
+    small = {"order_id": "ord-1", "amount": 40}
+    run = run_case(
+        definition,
+        file=small,
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+    )
+    assert run.reached("pay")
+    assert run.history.index("reached approved") < run.history.index("reached paid")
+    rejected = run_case(
+        definition, file=small, answers=[("review", "reject", "ana")], people=PEOPLE
+    )
+    assert not rejected.reached("pay")
+    assert rejected.closed

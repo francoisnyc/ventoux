@@ -7,8 +7,13 @@ value, and a missing value is an error that stops the case, never "false" (fail 
 
 from collections.abc import Mapping
 
+from ventoux.case.definition import CaseDefinition
 from ventoux.case.state import CaseState, StepRun
 from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
+
+
+class ProposalRefused(Exception):
+    """A proposed step the engine won't start, with the reason."""
 
 
 class StepStopped(Exception):
@@ -42,3 +47,23 @@ def holds(condition: Expression, values: Mapping[str, object], whose: str) -> bo
             f"{whose} {render(condition)} gives {decided!r}: a condition gives true or false"
         )
     return decided
+
+
+def proposal_refusal(
+    case: CaseDefinition, name: str, required: tuple[str, ...], state: CaseState
+) -> str | None:
+    """Why the proposed step can't start now, or None if it can: admission, asked by a person.
+    Who may propose it is checked before this; its `when`, after."""
+    step = case.steps[name]
+    latest = latest_run(state, name)
+    if name in state.approvals:
+        return f"{name} is waiting for its approval: {state.approvals[name].entry}"
+    if latest is not None and latest.status in ("open", "running"):
+        return f"{name} is already running: {latest.entry}"
+    if latest is not None and not step.repeatable:
+        return f"{name} has run, and is not repeatable"
+    for requirement in required:
+        if not requirements_met((requirement,), state):
+            missing = "completed" if requirement in case.steps else "been reached"
+            return f"{name} requires {requirement}, which hasn't {missing}"
+    return None

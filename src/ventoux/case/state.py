@@ -75,6 +75,15 @@ class Answered:
 
 
 @dataclass(frozen=True)
+class Proposed:
+    """A person proposes starting a step: admission accepts it or refuses it."""
+
+    step: str
+    by: str  # who proposed it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with the proposal (brief, D22)
+
+
+@dataclass(frozen=True)
 class Completed:
     """A scheduled activity finished: its run, and what it gave."""
 
@@ -82,7 +91,7 @@ class Completed:
     output: Mapping[str, object]
 
 
-type Event = Opened | Answered | Completed
+type Event = Opened | Answered | Proposed | Completed
 
 
 @dataclass(frozen=True)

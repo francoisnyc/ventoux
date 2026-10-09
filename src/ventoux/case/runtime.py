@@ -10,7 +10,14 @@ import copy
 from collections.abc import Mapping
 from decimal import Decimal
 
-from ventoux.case.admission import StepStopped, holds, latest_run, requirements_met
+from ventoux.case.admission import (
+    ProposalRefused,
+    StepStopped,
+    holds,
+    latest_run,
+    proposal_refusal,
+    requirements_met,
+)
 from ventoux.case.answers import AnswerRefused, judge_approval, judge_task
 from ventoux.case.definition import ActivityStep, CaseDefinition, TaskStep
 from ventoux.case.sequence import requirements
@@ -22,18 +29,20 @@ from ventoux.case.state import (
     GivenApproval,
     OpenApproval,
     Opened,
+    Proposed,
     Schedule,
     StepRun,
 )
 from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import checked_inputs
 from ventoux.core.catalog import Catalog
-from ventoux.core.expressions import ExpressionError
+from ventoux.core.expressions import ExpressionError, render
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
 from ventoux.core.provenance import provenance
+from ventoux.core.roles import role_that_counts
 
 # Where the case file's first values came from when a system opened the case (brief, D12).
 OPENER = "system:opener"
@@ -57,8 +66,10 @@ def decide(
         if state.closed:
             raise AnswerRefused("the case is closed: nothing waits for an answer")
         answer(case, catalog, state, event)
+    elif isinstance(event, Proposed):
+        propose(case, catalog, state, event, commands)
     else:
-        complete(state, event)
+        complete(case, state, event)
     admit(case, catalog, state, commands)
     # A case closes when nothing is left to do (brief, D10).
     if not state.closed and not pending(state):
@@ -146,6 +157,47 @@ def open_entry(state: CaseState, entry: str) -> StepRun | OpenApproval:
     raise AnswerRefused(f"{entry} is not open: nothing there waits for an answer")
 
 
+def propose(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    event: Proposed,
+    commands: list[Schedule],
+) -> None:
+    """Start the step a person proposes, if they may and admission accepts it; or
+    `ProposalRefused`. The engine decides, a person only asks."""
+    # Who proposed is written one way, before anything is checked against it (brief, D22).
+    if (wrong := identifier_problem(event.by)) is not None:
+        raise ProposalRefused(wrong)
+    if state.closed:
+        raise ProposalRefused("the case is closed: nothing starts")
+    if event.step not in case.steps:
+        raise ProposalRefused(f"{event.step} is not a step of {case.case}")
+    step = case.steps[event.step]
+    if not step.proposed_by:
+        raise ProposalRefused(f"{event.step} starts by itself: nobody proposes it")
+    role = role_that_counts(step.proposed_by, event.roles, catalog.roles)
+    if role is None:
+        counted = sorted(r for r in event.roles if r in catalog.roles)
+        known = listed(counted) if counted else "no role"
+        raise ProposalRefused(
+            f"{event.step} is proposed by {' or '.join(step.proposed_by)}, and {event.by} has "
+            f"{known}"
+        )
+    refusal = proposal_refusal(case, event.step, requirements(case)[event.step], state)
+    if refusal is not None:
+        raise ProposalRefused(refusal)
+    if step.when is not None:
+        try:
+            decided = holds(step.when, state.values, f"{event.step}'s condition")
+        except StepStopped as unreadable:
+            raise ProposalRefused(str(unreadable)) from None  # fail closed: nothing starts
+        if not decided:
+            raise ProposalRefused(f"{event.step} doesn't run now: {render(step.when)} is false")
+    state.history.append(f"{event.by} proposed {event.step} as {role}")
+    start(catalog, state, event.step, step, commands)
+
+
 def answer_task(
     case: CaseDefinition, catalog: Catalog, state: CaseState, run: StepRun, event: Answered
 ) -> None:
@@ -166,6 +218,7 @@ def answer_task(
     setting = f", setting {listed(list(sets))}" if sets else ""
     state.history.append(f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}")
     state.history.append(f"{run.entry} done")
+    reach(state, (*step.outcomes[event.outcome].reaches, *step.reaches))
 
 
 def answer_approval(
@@ -196,12 +249,21 @@ def answer_approval(
     state.history.append(f"{entry} won't run: {event.by} rejected {approval.entry}")
 
 
-def complete(state: CaseState, event: Completed) -> None:
+def complete(case: CaseDefinition, state: CaseState, event: Completed) -> None:
     """A scheduled activity finished. Its output is recorded here, not in the case file."""
     run = next(run for run in state.runs if run.entry == event.entry)
     run.status = "done"
     giving = f", giving {listed(sorted(event.output))}" if event.output else ""
     state.history.append(f"{run.entry} done{giving}")
+    reach(state, case.steps[run.step].reaches)
+
+
+def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
+    """Record each milestone reached: a fact, never undone."""
+    for milestone in milestones:
+        if milestone not in state.milestones:
+            state.milestones.append(milestone)
+            state.history.append(f"reached {milestone}")
 
 
 def admit(
@@ -213,7 +275,7 @@ def admit(
     while started:
         started = False
         for name, step in case.steps.items():
-            if not free_to_start(state, name) or not requirements_met(required[name], state):
+            if not free_to_start(state, name, step) or not requirements_met(required[name], state):
                 continue
             # Read only once `requires` are met: a field nobody has set stops the case.
             if step.when is not None and not holds(step.when, state.values, f"{name}'s condition"):
@@ -222,14 +284,15 @@ def admit(
             started = True
 
 
-def free_to_start(state: CaseState, name: str) -> bool:
-    """Whether the step isn't running or waiting, and hasn't started by itself before."""
+def free_to_start(state: CaseState, name: str, step: TaskStep | ActivityStep) -> bool:
+    """Whether the step may start by itself: it isn't waiting for its approval, and it starts by
+    itself and hasn't started before; or its approval was just given."""
     if name in state.approvals:
         return False  # waiting for its approval
     if name in state.given:
         return True  # approved, so it starts now
-    # A step starts by itself at most once.
-    return latest_run(state, name) is None
+    # A step starts by itself at most once; again, or at all if not automatic, only if proposed.
+    return step.automatic and latest_run(state, name) is None
 
 
 def start(

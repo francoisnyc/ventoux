@@ -5,17 +5,17 @@ import json
 from collections.abc import Iterable, Mapping
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from pydantic import BaseModel
 from temporalio import workflow
 
-from ventoux.case.admission import StepStopped
+from ventoux.case.admission import ProposalRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import Activity, CaseRun, run_case_in_memory
 from ventoux.case.runtime import CaseRefused
-from ventoux.case.state import Answered, Event, Opened
+from ventoux.case.state import Answered, Event, Opened, Proposed
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
@@ -31,8 +31,10 @@ __all__ = [
     "CaseRefused",
     "DevelopmentPlans",
     "InputRefused",
+    "ProposalRefused",
     "StepStopped",
     "load_definition",
+    "propose",
     "run_case",
     "run_plan",
 ]
@@ -191,11 +193,27 @@ def run_case(
     a person did; otherwise a system did."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
     events: list[Event] = [Opened(as_json(file), opened_by)]
-    for entry, outcome, who, *form in answers:
+    for item in answers:
+        if isinstance(item, Proposal):
+            events.append(Proposed(item.step, item.by, frozenset(people.get(item.by, ()))))
+            continue
+        entry, outcome, who, *form = item
         # The test plays the API: it states who answered and their roles.
         roles = frozenset(people.get(who, ()))
         events.append(Answered(entry, outcome, who, roles, as_json(form[0]) if form else None))
     return run_case_in_memory(case, CATALOG, FAKES, events)
+
+
+class Proposal(NamedTuple):
+    """A scripted proposal: `who` proposes starting `step`."""
+
+    step: str
+    by: str
+
+
+def propose(step: str, who: str) -> Proposal:
+    """A script's proposal: `propose("check_order", "ana")`, played in order with the answers."""
+    return Proposal(step, who)
 
 
 def as_json(values: Mapping[str, Any]) -> dict[str, Any]:
