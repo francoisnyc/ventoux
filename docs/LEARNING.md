@@ -602,6 +602,14 @@ and record the key points. A question is closed once you can explain the answer 
     retry policy *stricter*, never looser (D17, non-negotiables), so it is written in the case
     definition, and changes the case's behaviour, so the case package gets a new release. The
     contract stays `@2`. The examples and the "changes when…" column didn't come back either.
+- Asked: "stricter, never looser: what if a constraint needs loosening?" The rule is about who
+  is *downstream*, not a ban on loosening. Only the owner of a constraint loosens it, at its
+  source, as a new version everyone can see: the platform team's 8 attempts (b1) is a loosening,
+  allowed because they own the contract, published as `@3`, shown in the semantic diff
+  (layer 13: a loosening is reported as such, never hidden) and adopted through a release. A case
+  can loosen only its own tightening, back to the contract's level, never past it. So a case
+  that needs more than the contract allows asks the platform team for a new version. Why: a
+  reader can then trust a contract's limits by reading the contract alone, whatever case uses it.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
 
 ## 29. Layer 1: why `@1` and not `@1.0`
