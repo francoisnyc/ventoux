@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from ventoux.case.definition import CaseInvalid
-from ventoux.testing import AnswerRefused, InputRefused, load_definition, run_case
+from ventoux.testing import AnswerRefused, CaseRefused, load_definition, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 
@@ -165,8 +165,9 @@ def test_whoever_decides_whether_the_step_runs_cannot_approve_it() -> None:
 
 
 def test_an_input_that_does_not_fit_is_refused_before_the_refund() -> None:
-    # The same check as a plan's, before every activity (docs/layers/05-interpreter.md).
-    with pytest.raises(InputRefused, match="order_id: Input should be a valid string"):
+    # The same check as a plan's, before every activity (docs/layers/05-interpreter.md). Since
+    # layer 8 the case file is checked against its fields' types when the case opens, earlier.
+    with pytest.raises(CaseRefused, match="order_id is a reference to orders, and the opening"):
         run_case(
             REFUND,
             file={"order_id": 1001, "amount": 40},  # a number: payments.refund@2 takes a text

@@ -14,6 +14,7 @@ from ventoux.case.admission import StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import Activity, CaseRun, run_case_in_memory
+from ventoux.case.runtime import CaseRefused
 from ventoux.case.state import Answered, Event, Opened
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
@@ -27,6 +28,7 @@ from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 __all__ = [
     "Activity",
     "AnswerRefused",
+    "CaseRefused",
     "DevelopmentPlans",
     "InputRefused",
     "StepStopped",
@@ -180,26 +182,30 @@ def run_case(
     file: dict[str, Any],
     answers: list[tuple[Any, ...]],
     people: Mapping[str, Iterable[str]],
+    opened_by: str | None = None,
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
     `people` gives each person their roles, as the Ventoux API states them with every answer
-    (brief, D22); someone not listed has none."""
+    (brief, D22); someone not listed has none. `opened_by` is the person who opened the case, if
+    a person did; otherwise a system did."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
-    events: list[Event] = [Opened({name: case_value(v) for name, v in file.items()}, None)]
+    events: list[Event] = [Opened(as_json(file), opened_by)]
     for entry, outcome, who, *form in answers:
         # The test plays the API: it states who answered and their roles.
         roles = frozenset(people.get(who, ()))
-        given = {name: case_value(v) for name, v in form[0].items()} if form else None
-        events.append(Answered(entry, outcome, who, roles, given))
+        events.append(Answered(entry, outcome, who, roles, as_json(form[0]) if form else None))
     return run_case_in_memory(case, CATALOG, FAKES, events)
 
 
-# TRACER: a case's opening and forms are read by their fields' declared types in layer 8 (slice
-# 2). Here a whole number becomes the exact decimal expressions read, and anything else passes.
-def case_value(value: Any) -> Any:
-    """`value` as the case file holds it: a whole number as a `Decimal`."""
-    return Decimal(value) if isinstance(value, int) and not isinstance(value, bool) else value
+def as_json(values: Mapping[str, Any]) -> dict[str, Any]:
+    """`values` as the API would pass them on from JSON, whose numbers are exact decimals
+    (brief, D20): a whole number in a test is one. A float is passed on as it is, and refused by
+    the type check, since it may already have lost its exact value."""
+    return {
+        name: Decimal(value) if isinstance(value, int) and not isinstance(value, bool) else value
+        for name, value in values.items()
+    }
 
 
 def run_plan(

@@ -11,7 +11,13 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.testing import load_definition, run_case
+from ventoux.testing import (
+    AnswerRefused,
+    CaseRefused,
+    InputRefused,
+    load_definition,
+    run_case,
+)
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 
@@ -137,3 +143,75 @@ def test_a_case_waiting_for_its_review_says_so() -> None:
     assert run.waiting_for == ["review by support"]
     assert not run.reached("review")
     assert not run.closed
+
+
+# --- Slice 2: the case file ---
+
+
+@pytest.mark.parametrize(
+    ("file", "message"),
+    [
+        (
+            {"order_id": "ord-1", "amount": 250, "approved_amount": 250},
+            "approved_amount is set by a person in review, never given at the opening",
+        ),
+        (
+            {"order_id": "ord-1", "amount": 250, "colour": "red"},
+            "colour is not a field of refund: its fields are amount, approved_amount and order_id",
+        ),
+        (
+            {"order_id": 1001, "amount": 40},
+            "order_id is a reference to orders, and the opening gives 1001",
+        ),
+    ],
+)
+def test_the_opening_gives_the_declared_fields_of_their_types(
+    file: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(CaseRefused, match=f"^{message}$"):
+        run_case(REFUND, file=file, answers=[], people=PEOPLE)
+
+
+def test_a_float_is_refused_never_guessed() -> None:
+    # A binary float may already have lost its exact value (brief, D20).
+    with pytest.raises(CaseRefused, match="^amount is a number, and the opening gives 0.1$"):
+        run_case(REFUND, file={"order_id": "ord-1", "amount": 0.1}, answers=[], people=PEOPLE)
+    with pytest.raises(
+        AnswerRefused, match="^approved_amount is a number, and the answer gives 40.5$"
+    ):
+        run_case(
+            REFUND,
+            file={"order_id": "ord-1", "amount": 40},
+            answers=[("review", "approve", "ana", {"approved_amount": 40.5})],
+            people=PEOPLE,
+        )
+
+
+def test_opening_values_say_who_gave_them() -> None:
+    small = {"order_id": "ord-1", "amount": 40}
+    review = [("review", "approve", "ana", {"approved_amount": 40})]
+    by_a_system = run_case(REFUND, file=small, answers=review, people=PEOPLE)
+    assert "opened by system:opener, with amount and order_id" in by_a_system.history
+    by_lee = run_case(REFUND, file=small, answers=review, people=PEOPLE, opened_by="lee")
+    assert "opened by lee, with amount and order_id" in by_lee.history
+    assert (
+        "scheduled pay#1: payments.refund@2 (order_id from person:lee; amount from person:ana)"
+        in by_lee.history
+    )
+    # Who opened it is written one way, as who answers (brief, D22).
+    with pytest.raises(CaseRefused, match="'Lee' is not written as a person's identifier"):
+        run_case(REFUND, file=small, answers=review, people=PEOPLE, opened_by="Lee")
+
+
+def test_a_forms_values_land_in_the_case_file() -> None:
+    # A field declared untrusted keeps its mark when a person's form sets it (layer 7's review):
+    # the form adds who answered, and payments.refund@2 takes no untrusted amount.
+    definition = refund()
+    definition["fields"]["approved_amount"]["source"] = "untrusted:customer"
+    with pytest.raises(InputRefused, match="amount"):
+        run_case(
+            definition,
+            file={"order_id": "ord-1", "amount": 40},
+            answers=[("review", "approve", "ana", {"approved_amount": 40})],
+            people=PEOPLE,
+        )

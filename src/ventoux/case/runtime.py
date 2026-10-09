@@ -7,6 +7,8 @@ See docs/layers/08-case.md.
 """
 
 import copy
+from collections.abc import Mapping
+from decimal import Decimal
 
 from ventoux.case.admission import StepStopped, holds, latest_run, requirements_met
 from ventoux.case.answers import AnswerRefused, judge_approval, judge_task
@@ -27,12 +29,18 @@ from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import checked_inputs
 from ventoux.core.catalog import Catalog
 from ventoux.core.expressions import ExpressionError
+from ventoux.core.expressions.check import a_type
+from ventoux.core.form import fits
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
 from ventoux.core.provenance import provenance
 
-# Where the case file's first values came from: the system that opened the case (brief, D12).
+# Where the case file's first values came from when a system opened the case (brief, D12).
 OPENER = "system:opener"
+
+
+class CaseRefused(Exception):
+    """A case the engine won't open: what is wrong with its first values."""
 
 
 def decide(
@@ -44,7 +52,7 @@ def decide(
     state = copy.deepcopy(state)  # the state passed in is never changed
     commands: list[Schedule] = []
     if isinstance(event, Opened):
-        open_case(state, event)
+        open_case(case, state, event)
     elif isinstance(event, Answered):
         if state.closed:
             raise AnswerRefused("the case is closed: nothing waits for an answer")
@@ -59,12 +67,60 @@ def decide(
     return state, commands
 
 
-def open_case(state: CaseState, event: Opened) -> None:
-    """The case file's first values, each saying where it came from."""
+def open_case(case: CaseDefinition, state: CaseState, event: Opened) -> None:
+    """The case file's first values, each of its field's type and saying where it came from:
+    the person who opened the case, or the system that did (brief, D12)."""
+    if event.by is not None and (wrong := identifier_problem(event.by)) is not None:
+        raise CaseRefused(wrong)
+    refuse_to_open(case, event.file)
+    state.opened_by = event.by
+    origin = OPENER if event.by is None else f"person:{event.by}"
     for name, value in event.file.items():
         state.values[name] = value
-        state.sources[name] = frozenset({OPENER})
-    state.history.append(f"opened by {OPENER}, with {listed(sorted(event.file))}")
+        state.sources[name] = marked(case, name, origin)
+    state.history.append(f"opened by {event.by or OPENER}, with {listed(sorted(event.file))}")
+
+
+def refuse_to_open(case: CaseDefinition, file: Mapping[str, object]) -> None:
+    """Refuse first values that aren't the case's fields, of their types, given at the opening."""
+    setters = set_by(case)
+    problems: list[str] = []
+    for name, value in file.items():
+        if name not in case.fields:
+            fields = listed(sorted(case.fields))
+            problems.append(f"{name} is not a field of {case.case}: its fields are {fields}")
+        # One source per field: a person's form sets it, so the opening never gives it.
+        elif name in setters:
+            problems.append(
+                f"{name} is set by a person in {setters[name]}, never given at the opening"
+            )
+        elif not fits(value, declared := case.fields[name].declared):
+            problems.append(f"{name} is {a_type(declared)}, and the opening gives {shown(value)}")
+    if problems:
+        raise CaseRefused("\n".join(problems))
+
+
+def shown(value: object) -> str:
+    """A value as its JSON reads: `1001`, `0.1`, `'ord-1'`."""
+    return str(value) if isinstance(value, Decimal) else repr(value)
+
+
+def set_by(case: CaseDefinition) -> dict[str, str]:
+    """Each field a task's form sets, and the first task that sets it."""
+    found: dict[str, str] = {}
+    for name, step in case.steps.items():
+        if isinstance(step, TaskStep):
+            for outcome in step.outcomes.values():
+                for field in outcome.sets:
+                    found.setdefault(field, name)
+    return found
+
+
+def marked(case: CaseDefinition, name: str, origin: str) -> frozenset[str]:
+    """Where a value of the field `name` came from: `origin`, and the field's declared mark. A
+    mark adds distrust, never removes it (brief, D12)."""
+    declared = case.fields[name].source if name in case.fields else None
+    return frozenset({origin} | ({declared} if declared else set()))
 
 
 def answer(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Answered) -> None:
@@ -99,14 +155,14 @@ def answer_task(
     role = judge_task(case, catalog, run.entry, run.step, step, event)
     run.status = "done"
     del state.waiting[run.entry]
-    who = frozenset({f"person:{event.by}"})
-    # The latest answer is the outcome (brief, D9).
+    who = f"person:{event.by}"
+    # The latest answer is the outcome (brief, D9), and a form's values replace earlier ones.
     state.values[f"{run.step}.outcome"] = event.outcome
-    state.sources[f"{run.step}.outcome"] = who
+    state.sources[f"{run.step}.outcome"] = frozenset({who})
     sets = step.outcomes[event.outcome].sets
     for name in sets:
         state.values[name] = (event.form or {})[name]
-        state.sources[name] = who
+        state.sources[name] = marked(case, name, who)
     setting = f", setting {listed(list(sets))}" if sets else ""
     state.history.append(f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}")
     state.history.append(f"{run.entry} done")
