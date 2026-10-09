@@ -466,6 +466,39 @@ REWORKED = [
 ]
 
 
+def test_an_entry_is_closed_or_not_open() -> None:
+    # Layer 8c: on Temporal an answer names its entry, and its refusal says which it was: an
+    # entry that has been open is closed (a double click); one that hasn't, isn't open.
+    reworked = [REVIEWED, propose("review", "ana")]
+    with pytest.raises(AnswerRefused, match="^review#1 is closed$"):
+        run_case(
+            reworkable(),
+            file=LARGE,
+            answers=[*reworked, ("review#1", "approve", "ana", {"approved_amount": 900})],
+            people=PEOPLE,
+        )
+    with pytest.raises(AnswerRefused, match="^review#3 isn't open$"):
+        run_case(
+            reworkable(),
+            file=LARGE,
+            answers=[*reworked, ("review#3", "approve", "ana", {"approved_amount": 900})],
+            people=PEOPLE,
+        )
+    # An approval's entry, the same: Sam's double click while the payment runs.
+    with pytest.raises(AnswerRefused, match="^pay.approval#1 is closed$"):
+        run_case(
+            REFUND,
+            file=LARGE,
+            answers=[
+                REVIEWED,
+                ("pay.approval#1", "approve", "sam"),
+                ("pay.approval#1", "approve", "sam"),
+            ],
+            people=PEOPLE,
+            held=["pay"],
+        )
+
+
 def test_an_open_approval_follows_the_case_file() -> None:
     # Sam reads the sheet for 250 while the review is sent back and reworked to 900 (brief, D25).
     with pytest.raises(AnswerRefused, match="^pay.approval#1 was withdrawn: review started again$"):

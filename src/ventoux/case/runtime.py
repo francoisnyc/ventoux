@@ -176,7 +176,19 @@ def open_entry(state: CaseState, entry: str) -> StepRun | OpenApproval:
             return approval
     if entry in state.withdrawn:
         raise AnswerRefused(f"{entry} was withdrawn: {state.withdrawn[entry]}")
-    raise AnswerRefused(f"{entry} is not open: nothing there waits for an answer")
+    # Which it was, as on a plan's waits (layer 6): an entry that has been open is closed (a
+    # double click, a late answer); one that hasn't isn't open (an answer sent too early).
+    if has_been_open(state, entry):
+        raise AnswerRefused(f"{entry} is closed")
+    raise AnswerRefused(f"{entry} isn't open")
+
+
+def has_been_open(state: CaseState, entry: str) -> bool:
+    """Whether `entry` names a step run the case has had, or an approval it has asked for."""
+    if any(run.entry == entry for run in state.runs):
+        return True
+    step, _, count = entry.partition(".approval#")  # `pay.approval#2`: `pay`, `2`
+    return count.isdigit() and 1 <= int(count) <= state.asked.get(step, 0)
 
 
 def propose(
