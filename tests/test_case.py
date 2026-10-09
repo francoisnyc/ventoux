@@ -355,3 +355,39 @@ def test_a_milestone_admits_what_requires_it() -> None:
     )
     assert not rejected.reached("pay")
     assert rejected.closed
+
+
+# --- Slice 4: parallel steps ---
+
+
+def test_steps_admitted_together_run_together() -> None:
+    # Simple parallelism (brief, D2): nothing orders the two checks, so both open at once.
+    definition = refund()
+    definition["steps"]["check_documents"] = {
+        "kind": "task",
+        "display": {"title": "Check the customer's documents"},
+        "roles": ["support"],
+        "outcomes": {"complete": {"display": {"title": "Documents complete"}}},
+    }
+    small = {"order_id": "ord-1", "amount": 40}
+    opened = run_case(definition, file=small, answers=[], people=PEOPLE)
+    assert opened.waiting_for == ["review by support", "check_documents by support"]
+    one = run_case(
+        definition,
+        file=small,
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+    )
+    assert one.reached("pay")
+    assert one.waiting_for == ["check_documents by support"]
+    assert not one.closed
+    both = run_case(
+        definition,
+        file=small,
+        answers=[
+            ("check_documents", "complete", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 40}),
+        ],
+        people=PEOPLE,
+    )
+    assert both.closed
