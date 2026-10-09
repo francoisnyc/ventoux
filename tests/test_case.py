@@ -19,9 +19,7 @@ from ventoux.testing import (
     CATALOG,
     AnswerRefused,
     CaseRefused,
-    InputRefused,
     ProposalRefused,
-    StepStopped,
     load_definition,
     propose,
     run_case,
@@ -216,13 +214,16 @@ def test_a_forms_values_land_in_the_case_file() -> None:
     # the form adds who answered, and payments.refund@2 takes no untrusted amount.
     definition = refund()
     definition["fields"]["approved_amount"]["source"] = "untrusted:customer"
-    with pytest.raises(InputRefused, match="amount"):
-        run_case(
-            definition,
-            file={"order_id": "ord-1", "amount": 40},
-            answers=[("review", "approve", "ana", {"approved_amount": 40})],
-            people=PEOPLE,
-        )
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+    )
+    # Since 8b a refused input fails the step, and the case needs attention.
+    [failed] = run.needs_attention
+    assert failed.startswith("pay#1: payments.refund@2 takes amount only from")
+    assert not run.reached("pay")
 
 
 # --- Slice 3: requires, proposals, milestones ---
@@ -361,10 +362,14 @@ def test_a_condition_on_an_unset_field_stops_the_case() -> None:
     # Without `sequence`, pay's condition is read before anyone answered the review: a missing
     # value is an error, never "false" (fail closed).
     definition = refund(sequence=[])
-    with pytest.raises(
-        StepStopped, match="^pay's condition review.outcome = \"approve\" can't be evaluated"
-    ):
-        run_case(definition, file=LARGE, answers=[], people=PEOPLE)
+    run = run_case(definition, file=LARGE, answers=[], people=PEOPLE)
+    # Since 8b the step fails and the case needs attention; the review still opens.
+    [failed] = run.needs_attention
+    assert failed.startswith(
+        "pay#1: pay's condition review.outcome = \"approve\" can't be evaluated"
+    )
+    assert run.waiting_for == ["review by support"]
+    assert not run.closed
 
 
 def test_a_milestone_admits_what_requires_it() -> None:
@@ -534,10 +539,9 @@ def test_a_high_risk_step_with_no_approval_stops() -> None:
     # Checked at runtime, depending on nothing case validation (layer 10) will do.
     definition = refund()
     del definition["steps"]["pay"]["approval"]
-    with pytest.raises(
-        StepStopped, match="^payments.refund@2 is high risk, and pay has no approval$"
-    ):
-        run_case(definition, file=LARGE, answers=[REVIEWED], people=PEOPLE)
+    run = run_case(definition, file=LARGE, answers=[REVIEWED], people=PEOPLE)
+    assert run.needs_attention == ["pay#1: payments.refund@2 is high risk, and pay has no approval"]
+    assert not run.reached("pay")
 
 
 # --- Slice 6: the guide, run as written ---
@@ -765,3 +769,51 @@ def test_decide_never_changes_the_state_passed_in() -> None:
     with pytest.raises(AnswerRefused):
         decide(case, CATALOG, opened, refused)
     assert opened == before
+
+
+# --- Slice 1: a failed step needs attention ---
+
+
+def unreachable(inputs: dict[str, Any]) -> dict[str, Any]:
+    raise ConnectionError("provider unreachable")
+
+
+SMALL = {"order_id": "ord-1", "amount": 40}
+SMALL_REVIEW = ("review", "approve", "ana", {"approved_amount": 40})
+
+
+def test_a_failed_step_needs_attention_and_keeps_the_case_open() -> None:
+    # Nothing is skipped automatically (brief, D17): the case waits for a person.
+    run = run_case(
+        REFUND,
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=PEOPLE,
+        activities={"payments.refund@2": unreachable},
+    )
+    assert run.needs_attention == ["pay#1: payments.refund@2 failed: provider unreachable"]
+    assert "pay#1 failed: payments.refund@2 failed: provider unreachable" in run.history
+    assert not run.reached("pay")
+    assert not run.closed
+    assert run.status == "open"
+
+
+def test_other_steps_go_on_while_one_needs_attention() -> None:
+    definition = refund()
+    definition["steps"]["check_documents"] = {
+        "kind": "task",
+        "display": {"title": "Check the customer's documents"},
+        "roles": ["support"],
+        "requires": ["review"],
+        "outcomes": {"complete": {"display": {"title": "Documents complete"}}},
+    }
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW, ("check_documents", "complete", "ana")],
+        people=PEOPLE,
+        activities={"payments.refund@2": unreachable},
+    )
+    assert run.reached("check_documents")
+    assert run.needs_attention == ["pay#1: payments.refund@2 failed: provider unreachable"]
+    assert not run.closed

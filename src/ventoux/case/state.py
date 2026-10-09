@@ -15,7 +15,9 @@ class StepRun:
 
     entry: str  # the step and its run's number, such as `review#1`
     step: str
-    status: Literal["open", "running", "done", "rejected"]  # rejected: its approval was refused
+    # rejected: its approval was refused; failed: it needs attention, with the reason (brief, D17).
+    status: Literal["open", "running", "done", "rejected", "failed"]
+    reason: str = ""  # why it failed
 
 
 @dataclass
@@ -95,7 +97,15 @@ class Completed:
     output: Mapping[str, object]
 
 
-type Event = Opened | Answered | Proposed | Completed
+@dataclass(frozen=True)
+class Failed:
+    """A scheduled activity failed after its retries: its run, and what went wrong."""
+
+    entry: str
+    reason: str
+
+
+type Event = Opened | Answered | Proposed | Completed | Failed
 
 
 @dataclass(frozen=True)

@@ -27,6 +27,7 @@ from ventoux.case.state import (
     CaseState,
     Completed,
     Event,
+    Failed,
     GivenApproval,
     OpenApproval,
     Opened,
@@ -35,8 +36,8 @@ from ventoux.case.state import (
     StepRun,
 )
 from ventoux.core.approval import inputs_digest
-from ventoux.core.before_activity import checked_inputs
-from ventoux.core.catalog import Catalog
+from ventoux.core.before_activity import InputRefused, checked_inputs
+from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.expressions import ExpressionError, render
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
@@ -56,9 +57,9 @@ class CaseRefused(Exception):
 def decide(
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: Event
 ) -> tuple[CaseState, list[Schedule]]:
-    """The case's state after `event`, and the activities to schedule. A refused answer raises
-    `AnswerRefused` and changes nothing; a step the engine can't decide about raises
-    `StepStopped` or `InputRefused`."""
+    """The case's state after `event`, and the activities to schedule. A refused event raises
+    (`AnswerRefused`, `ProposalRefused`, `CaseRefused`) and changes nothing; a step the engine
+    can't run fails, and the case needs attention (brief, D17)."""
     state = copy.deepcopy(state)  # the state passed in is never changed
     commands: list[Schedule] = []
     if isinstance(event, Opened):
@@ -69,6 +70,8 @@ def decide(
         answer(case, catalog, state, event)
     elif isinstance(event, Proposed):
         propose(case, catalog, state, event, commands)
+    elif isinstance(event, Failed):
+        failed(state, event)
     else:
         complete(case, state, event)
     admit(case, catalog, state, commands)
@@ -244,7 +247,8 @@ def answer_approval(
             digest = inputs_digest(step.inputs, state.values)
         except ExpressionError as error:
             # Fail closed: an approval of inputs nobody can read approves nothing.
-            raise StepStopped(f"the inputs of {approval.step} can't be read: {error}") from None
+            fail(state, approval.step, f"the inputs of {approval.step} can't be read: {error}")
+            return
         state.given[approval.step] = GivenApproval(approval.entry, event.by, digest)
         return
     # A rejection is an outcome: the step doesn't run (brief, D23).
@@ -261,6 +265,20 @@ def complete(case: CaseDefinition, state: CaseState, event: Completed) -> None:
     giving = f", giving {listed(sorted(event.output))}" if event.output else ""
     state.history.append(f"{run.entry} done{giving}")
     reach(state, case.steps[run.step].reaches)
+
+
+def failed(state: CaseState, event: Failed) -> None:
+    """A scheduled activity failed after its retries: its run fails, and waits for a person."""
+    run = next(run for run in state.runs if run.entry == event.entry)
+    run.status, run.reason = "failed", event.reason
+    state.history.append(f"{run.entry} failed: {event.reason}")
+
+
+def fail(state: CaseState, name: str, reason: str) -> None:
+    """The step's next run fails before it is scheduled, with the reason (brief, D17)."""
+    entry = next_entry(state, name)
+    state.runs.append(StepRun(entry, name, "failed", reason))
+    state.history.append(f"{entry} failed: {reason}")
 
 
 def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
@@ -283,10 +301,17 @@ def admit(
         for name, step in case.steps.items():
             if not free_to_start(state, name, step) or not requirements_met(required[name], state):
                 continue
-            # Read only once `requires` are met: a field nobody has set stops the case.
-            if step.when is not None and not holds(step.when, state.values, f"{name}'s condition"):
-                continue
-            start(catalog, state, name, step, commands)
+            try:
+                # Read only once `requires` are met: a field nobody has set fails the step.
+                if step.when is not None and not holds(
+                    step.when, state.values, f"{name}'s condition"
+                ):
+                    continue
+                start(catalog, state, name, step, commands)
+            except (StepStopped, InputRefused, NotInCatalog) as error:
+                # Nothing is skipped automatically: the step fails, and waits for a person; the
+                # other steps go on (brief, D17).
+                fail(state, name, str(error))
             started = True
 
 
@@ -357,9 +382,9 @@ def next_entry(state: CaseState, name: str) -> str:
 
 
 def pending(state: CaseState) -> bool:
-    """Whether anything is left to do: a task open, an activity running, an approval asked or
-    given and not yet spent (brief, D10)."""
-    unfinished = any(run.status in ("open", "running") for run in state.runs)
+    """Whether anything is left to do: a task open, an activity running, a step failed, an
+    approval asked or given and not yet spent (brief, D10, D17)."""
+    unfinished = any(run.status in ("open", "running", "failed") for run in state.runs)
     return unfinished or bool(state.approvals) or bool(state.given)
 
 

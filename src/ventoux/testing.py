@@ -185,12 +185,13 @@ def run_case(
     answers: list[tuple[Any, ...]],
     people: Mapping[str, Iterable[str]],
     opened_by: str | None = None,
+    activities: Mapping[str, Activity] = FAKES,
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
     `people` gives each person their roles, as the Ventoux API states them with every answer
     (brief, D22); someone not listed has none. `opened_by` is the person who opened the case, if
-    a person did; otherwise a system did."""
+    a person did; otherwise a system did. `activities` replaces fake activities by reference."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
     events: list[Event] = [Opened(as_json(file), opened_by)]
     for item in answers:
@@ -201,7 +202,7 @@ def run_case(
         # The test plays the API: it states who answered and their roles.
         roles = frozenset(people.get(who, ()))
         events.append(Answered(entry, outcome, who, roles, as_json(form[0]) if form else None))
-    return run_case_in_memory(case, CATALOG, FAKES, events)
+    return run_case_in_memory(case, CATALOG, {**FAKES, **activities}, events)
 
 
 class Proposal(NamedTuple):
