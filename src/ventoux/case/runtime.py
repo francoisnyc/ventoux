@@ -9,9 +9,13 @@ See docs/layers/08-case.md.
 import copy
 from collections.abc import Mapping
 from decimal import Decimal
+from typing import Literal
+
+from pydantic import ValidationError
 
 from ventoux.case.admission import (
     ProposalRefused,
+    RetryRefused,
     StepStopped,
     holds,
     latest_run,
@@ -20,23 +24,28 @@ from ventoux.case.admission import (
 )
 from ventoux.case.answers import AnswerRefused, judge_approval, judge_task
 from ventoux.case.approvals import ask, follow, lapsed, needs_approval
+from ventoux.case.closing import begin_closing, close_when_reached, refuse_to_close, settle
 from ventoux.case.definition import ActivityStep, CaseDefinition, TaskStep
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     Answered,
     CaseState,
+    CloseAsked,
     Completed,
     Event,
+    Failed,
     GivenApproval,
     OpenApproval,
     Opened,
     Proposed,
+    Retried,
     Schedule,
     StepRun,
 )
 from ventoux.core.approval import inputs_digest
-from ventoux.core.before_activity import checked_inputs
-from ventoux.core.catalog import Catalog
+from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
+from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import ExpressionError, render
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
@@ -47,6 +56,8 @@ from ventoux.core.roles import role_that_counts
 
 # Where the case file's first values came from when a system opened the case (brief, D12).
 OPENER = "system:opener"
+# The outcome of an activity that did what it was asked.
+DONE = "done"
 
 
 class CaseRefused(Exception):
@@ -56,26 +67,34 @@ class CaseRefused(Exception):
 def decide(
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: Event
 ) -> tuple[CaseState, list[Schedule]]:
-    """The case's state after `event`, and the activities to schedule. A refused answer raises
-    `AnswerRefused` and changes nothing; a step the engine can't decide about raises
-    `StepStopped` or `InputRefused`."""
+    """The case's state after `event`, and the activities to schedule. A refused event raises
+    (`AnswerRefused`, `ProposalRefused`, `CaseRefused`) and changes nothing; a step the engine
+    can't run fails, and the case needs attention (brief, D17)."""
     state = copy.deepcopy(state)  # the state passed in is never changed
     commands: list[Schedule] = []
     if isinstance(event, Opened):
         open_case(case, state, event)
     elif isinstance(event, Answered):
-        if state.closed:
-            raise AnswerRefused("the case is closed: nothing waits for an answer")
+        if state.phase != "open":
+            raise AnswerRefused(f"the case is {state.phase}: nothing waits for an answer")
         answer(case, catalog, state, event)
     elif isinstance(event, Proposed):
         propose(case, catalog, state, event, commands)
+    elif isinstance(event, Failed):
+        failed(state, event)
+    elif isinstance(event, Retried):
+        retry(case, catalog, state, event)
+    elif isinstance(event, CloseAsked):
+        role = refuse_to_close(case, catalog, state, event)
+        state.history.append(f"{event.by} closed the case as {event.reason}, as {role}")
+        why = f"closed as {event.reason} by {event.by}"
+        begin_closing(state, why, f"{event.reason}, by {event.by}")
     else:
-        complete(case, state, event)
-    admit(case, catalog, state, commands)
-    # A case closes when nothing is left to do (brief, D10).
-    if not state.closed and not pending(state):
-        state.closed = True
-        state.history.append("closed: nothing left to do")
+        complete(case, catalog, state, event)
+    close_when_reached(case, state)
+    if state.phase == "open":
+        admit(case, catalog, state, commands)  # nothing new starts once the case is closing
+    settle(case, state)
     return state, commands
 
 
@@ -172,8 +191,8 @@ def propose(
     # Who proposed is written one way, before anything is checked against it (brief, D22).
     if (wrong := identifier_problem(event.by)) is not None:
         raise ProposalRefused(wrong)
-    if state.closed:
-        raise ProposalRefused("the case is closed: nothing starts")
+    if state.phase != "open":
+        raise ProposalRefused(f"the case is {state.phase}: nothing starts")
     if event.step not in case.steps:
         raise ProposalRefused(f"{event.step} is not a step of {case.case}")
     step = case.steps[event.step]
@@ -244,7 +263,8 @@ def answer_approval(
             digest = inputs_digest(step.inputs, state.values)
         except ExpressionError as error:
             # Fail closed: an approval of inputs nobody can read approves nothing.
-            raise StepStopped(f"the inputs of {approval.step} can't be read: {error}") from None
+            fail(state, approval.step, f"the inputs of {approval.step} can't be read: {error}")
+            return
         state.given[approval.step] = GivenApproval(approval.entry, event.by, digest)
         return
     # A rejection is an outcome: the step doesn't run (brief, D23).
@@ -254,13 +274,115 @@ def answer_approval(
     state.history.append(f"{entry} won't run: {event.by} rejected {approval.entry}")
 
 
-def complete(case: CaseDefinition, state: CaseState, event: Completed) -> None:
-    """A scheduled activity finished. Its output is recorded here, not in the case file."""
+def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Completed) -> None:
+    """A scheduled activity finished: its outcome lands in the case file, tagged with the contract
+    that declares it. Its output is recorded here, not in the case file (layer 8d)."""
     run = next(run for run in state.runs if run.entry == event.entry)
+    step = case.steps[run.step]
+    assert isinstance(step, ActivityStep)  # only an activity is scheduled
+    contract = catalog.get(step.activity)
+    problem = outcome_problem(contract, event)
+    if problem is not None:
+        failed(state, Failed(event.entry, problem))
+        return
     run.status = "done"
+    state.values[f"{run.step}.outcome"] = event.outcome
+    # Trusted: the contract, owned by the platform team, declares the outcomes (brief, D12).
+    state.sources[f"{run.step}.outcome"] = frozenset({f"system:{contract.reference}"})
+    if event.outcome != DONE:
+        state.history.append(f"{run.entry} gave {event.outcome}")
+        if state.phase == "closing":
+            flag(state, f"{run.entry} completed after the close was requested")
+        return  # a step's milestones are reached only when it is done with `done`
     giving = f", giving {listed(sorted(event.output))}" if event.output else ""
     state.history.append(f"{run.entry} done{giving}")
-    reach(state, case.steps[run.step].reaches)
+    reach(state, step.reaches)
+    if state.phase == "closing":
+        flag(state, f"{run.entry} completed after the close was requested")
+
+
+def outcome_problem(contract: ActivityContract, event: Completed) -> str | None:
+    """Why what the activity gave can't be taken, or None: an outcome its contract doesn't
+    declare, or an output its contract doesn't describe. Fail closed: neither is read as done."""
+    if event.outcome != DONE:
+        if event.outcome in contract.outcomes:
+            return None
+        declared = ", ".join(contract.outcomes) or "none"
+        return (
+            f"{contract.reference} gave the outcome {event.outcome}, which its contract doesn't "
+            f"declare: its outcomes are {declared}"
+        )
+    try:
+        # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
+        contract.output.model_validate(event.output)
+    except ValidationError as error:
+        return (
+            f"{contract.reference} gave an output its contract doesn't declare: {one_line(error)}"
+        )
+    return None
+
+
+def failed(state: CaseState, event: Failed) -> None:
+    """A scheduled activity failed after its retries: its run fails, and waits for a person. While
+    the case is closing, nobody will retry it: it is cancelled, and the case is flagged."""
+    run = next(run for run in state.runs if run.entry == event.entry)
+    run.status, run.reason = "failed", event.reason
+    state.history.append(f"{run.entry} failed: {event.reason}")
+    if state.phase == "closing":
+        run.status = "cancelled"
+        flag(state, f"{run.entry} failed after the close was requested: {event.reason}")
+
+
+def flag(state: CaseState, why: str) -> None:
+    """Flag the case for a person: something happened that a close didn't stop (brief, D10)."""
+    state.flags.append(why)
+    state.history.append(f"flagged: {why}")
+
+
+def fail(state: CaseState, name: str, reason: str) -> None:
+    """The step's coming run fails before it is scheduled, with the reason (brief, D17)."""
+    run = coming_run(state, name, "failed")
+    run.reason = reason
+    state.history.append(f"{run.entry} failed: {reason}")
+
+
+def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retried) -> None:
+    """An operator retries a failed run: it runs again as the same run, with the same key, once
+    the step is checked again (brief, D26). Or `RetryRefused`."""
+    # Who retried is written one way, before anything is checked against it (brief, D22).
+    if (wrong := identifier_problem(event.by)) is not None:
+        raise RetryRefused(wrong)
+    if state.phase != "open":
+        raise RetryRefused(f"the case is {state.phase}: nothing starts")
+    run = next((run for run in state.runs if run.entry == event.entry), None)
+    if run is None or run.status != "failed":
+        raise RetryRefused(f"{event.entry} has not failed: nothing to retry")
+    counted = sorted(role for role in event.roles if role in catalog.operators)
+    if not counted:
+        registered = sorted(role for role in event.roles if role in catalog.roles)
+        known = listed(registered) if registered else ""
+        raise RetryRefused(
+            f"{event.entry} is retried by an operating role "
+            f"({', '.join(catalog.operators) or 'none registered'}), and {event.by} has "
+            f"{known or 'no role'}"
+        )
+    step = case.steps[run.step]
+    # The step is checked again: what made it fail may still hold. Fail closed: nothing starts.
+    for requirement in requirements(case)[run.step]:
+        if not requirements_met((requirement,), state):
+            raise RetryRefused(
+                f"{event.entry} can't be retried: {run.step} requires {requirement}, which "
+                "hasn't completed"
+            )
+    if step.when is not None:
+        try:
+            decided = holds(step.when, state.values, f"{run.step}'s condition")
+        except StepStopped as unreadable:
+            raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
+        if not decided:
+            raise RetryRefused(f"{event.entry} can't be retried: {render(step.when)} is false now")
+    run.status, run.reason = "retrying", ""
+    state.history.append(f"{event.by} retried {event.entry} as {counted[0]}")
 
 
 def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
@@ -283,10 +405,17 @@ def admit(
         for name, step in case.steps.items():
             if not free_to_start(state, name, step) or not requirements_met(required[name], state):
                 continue
-            # Read only once `requires` are met: a field nobody has set stops the case.
-            if step.when is not None and not holds(step.when, state.values, f"{name}'s condition"):
-                continue
-            start(catalog, state, name, step, commands)
+            try:
+                # Read only once `requires` are met: a field nobody has set fails the step.
+                if step.when is not None and not holds(
+                    step.when, state.values, f"{name}'s condition"
+                ):
+                    continue
+                start(catalog, state, name, step, commands)
+            except (StepStopped, InputRefused, NotInCatalog) as error:
+                # Nothing is skipped automatically: the step fails, and waits for a person; the
+                # other steps go on (brief, D17).
+                fail(state, name, str(error))
             started = True
 
 
@@ -297,6 +426,9 @@ def free_to_start(state: CaseState, name: str, step: TaskStep | ActivityStep) ->
         return False  # waiting for its approval
     if name in state.given:
         return True  # approved, so it starts now
+    latest = latest_run(state, name)
+    if latest is not None and latest.status == "retrying":
+        return True  # an operator retried it
     # A step starts by itself at most once; again, or at all if not automatic, only if proposed.
     return step.automatic and latest_run(state, name) is None
 
@@ -310,8 +442,7 @@ def start(
 ) -> None:
     """Open a task's run; ask for an activity's approval, or schedule the activity."""
     if isinstance(step, TaskStep):
-        entry = next_entry(state, name)
-        state.runs.append(StepRun(entry, name, "open"))
+        entry = coming_run(state, name, "open").entry
         state.proposers.pop(name, None)  # a task has no approval: the proposed run has started
         state.waiting[entry] = f"{name} by {' or '.join(step.roles)}"
         state.history.append(
@@ -320,16 +451,24 @@ def start(
         )
         return
     given = state.given.pop(name, None)  # spent, whatever happens next
+    latest = latest_run(state, name)
+    if given is None and latest is not None and latest.status == "retrying":
+        given = latest.approved  # a retry keeps the approval spent on its run (brief, D26)
     if given is None and needs_approval(state, name, step):
         ask(state, name, step)
         return
     if given is not None:
         lapsed(state, name, step, given)
-    schedule(catalog, state, name, step, commands)
+    schedule(catalog, state, name, step, given, commands)
 
 
 def schedule(
-    catalog: Catalog, state: CaseState, name: str, step: ActivityStep, commands: list[Schedule]
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    step: ActivityStep,
+    approved: GivenApproval | None,
+    commands: list[Schedule],
 ) -> None:
     """Check the activity's inputs against the real sources (layer 5), then schedule it, with a
     key naming the case and the step run (brief, D17)."""
@@ -337,10 +476,12 @@ def schedule(
     # Checked again at runtime, on nothing case validation did (learning question 34).
     if contract.risk == "high" and step.approval is None:
         raise StepStopped(f"{contract.reference} is high risk, and {name} has no approval")
-    entry = next_entry(state, name)
+    latest = latest_run(state, name)
+    entry = latest.entry if latest is not None and latest.status == "retrying" else None
+    entry = entry or next_entry(state, name)
     key = f"{state.case}/{entry}"
     inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key)
-    state.runs.append(StepRun(entry, name, "running"))
+    coming_run(state, name, "running").approved = approved
     state.proposers.pop(name, None)  # the proposed run has started
     origins = "; ".join(
         f"{field} from {', '.join(sorted(provenance(expression, state.sources))) or 'the case'}"
@@ -351,16 +492,23 @@ def schedule(
     commands.append(Schedule(entry, contract.reference, inputs))
 
 
+def coming_run(
+    state: CaseState, name: str, status: Literal["open", "running", "failed"]
+) -> StepRun:
+    """The step's coming run, now `status`: the run an operator retried, which keeps its entry and
+    so its key (brief, D26), or else a new one."""
+    latest = latest_run(state, name)
+    if latest is not None and latest.status == "retrying":
+        latest.status = status
+        return latest
+    run = StepRun(next_entry(state, name), name, status)
+    state.runs.append(run)
+    return run
+
+
 def next_entry(state: CaseState, name: str) -> str:
     """The step's next run: `review#1`, then `review#2`."""
     return f"{name}#{sum(1 for run in state.runs if run.step == name) + 1}"
-
-
-def pending(state: CaseState) -> bool:
-    """Whether anything is left to do: a task open, an activity running, an approval asked or
-    given and not yet spent (brief, D10)."""
-    unfinished = any(run.status in ("open", "running") for run in state.runs)
-    return unfinished or bool(state.approvals) or bool(state.given)
 
 
 def listed(names: list[str]) -> str:

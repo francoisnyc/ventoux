@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any, NamedTuple
@@ -10,16 +10,17 @@ from typing import Annotated, Any, NamedTuple
 from pydantic import BaseModel
 from temporalio import workflow
 
-from ventoux.case.admission import ProposalRefused, StepStopped
+from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
+from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import parse_case
-from ventoux.case.memory import Activity, CaseRun, run_case_in_memory
+from ventoux.case.memory import Activity, CaseRun, Finish, run_case_in_memory
 from ventoux.case.runtime import CaseRefused
-from ventoux.case.state import Answered, Event, Opened, Proposed
+from ventoux.case.state import Answered, CloseAsked, Event, Opened, Proposed, Retried
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
-from ventoux.core.interpreter import Answer, PlanRun, interpret
+from ventoux.core.interpreter import Answer, Outcome, PlanRun, interpret
 from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
@@ -29,12 +30,18 @@ __all__ = [
     "Activity",
     "AnswerRefused",
     "CaseRefused",
+    "CloseRefused",
     "DevelopmentPlans",
     "InputRefused",
+    "Outcome",
     "ProposalRefused",
+    "RetryRefused",
     "StepStopped",
+    "close",
+    "finish",
     "load_definition",
     "propose",
+    "retry",
     "run_case",
     "run_plan",
 ]
@@ -138,6 +145,8 @@ for label in ("customer", "document", "email", "llm", "web"):
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
 CATALOG.register_role("support")
 CATALOG.register_role("support-lead", approves="high")
+# Operations acts on a case's failed steps: retries them, or closes the case (brief, D26).
+CATALOG.register_role("operations", operates=True)
 
 
 # Fake implementations, against no real system: nothing is paid, read or sent.
@@ -182,26 +191,38 @@ def load_definition(path: Path) -> dict[str, Any]:
 def run_case(
     definition: dict[str, Any],
     file: dict[str, Any],
-    answers: list[tuple[Any, ...]],
+    answers: Sequence[tuple[Any, ...] | Finish],
     people: Mapping[str, Iterable[str]],
     opened_by: str | None = None,
+    activities: Mapping[str, Activity] = FAKES,
+    held: Iterable[str] = (),
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
     `people` gives each person their roles, as the Ventoux API states them with every answer
     (brief, D22); someone not listed has none. `opened_by` is the person who opened the case, if
-    a person did; otherwise a system did."""
+    a person did; otherwise a system did. `activities` replaces fake activities by reference.
+    The runs of the steps in `held` keep running until the script says `finish(entry)`."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
-    events: list[Event] = [Opened(as_json(file), opened_by)]
+    events: list[Event | Finish] = [Opened(as_json(file), opened_by)]
     for item in answers:
+        if isinstance(item, Finish):
+            events.append(item)
+            continue
         if isinstance(item, Proposal):
             events.append(Proposed(item.step, item.by, frozenset(people.get(item.by, ()))))
+            continue
+        if isinstance(item, Retry):
+            events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ()))))
+            continue
+        if isinstance(item, Close):
+            events.append(CloseAsked(item.reason, item.by, frozenset(people.get(item.by, ()))))
             continue
         entry, outcome, who, *form = item
         # The test plays the API: it states who answered and their roles.
         roles = frozenset(people.get(who, ()))
         events.append(Answered(entry, outcome, who, roles, as_json(form[0]) if form else None))
-    return run_case_in_memory(case, CATALOG, FAKES, events)
+    return run_case_in_memory(case, CATALOG, {**FAKES, **activities}, events, held=held)
 
 
 class Proposal(NamedTuple):
@@ -209,6 +230,35 @@ class Proposal(NamedTuple):
 
     step: str
     by: str
+
+
+class Retry(NamedTuple):
+    """A scripted retry: `who` retries the failed step run `entry`."""
+
+    entry: str
+    by: str
+
+
+def retry(entry: str, who: str) -> Retry:
+    """A script's retry by an operator: `retry("pay#1", "omar")` (brief, D26)."""
+    return Retry(entry, who)
+
+
+class Close(NamedTuple):
+    """A scripted close: `who` closes the case with the declared `reason`."""
+
+    reason: str
+    by: str
+
+
+def finish(entry: str) -> Finish:
+    """A script's step: let the held activity run `entry` finish now: `finish("pay#1")`."""
+    return Finish(entry)
+
+
+def close(reason: str, who: str) -> Close:
+    """A script's close: `close("duplicate", "ana")` (brief, D10)."""
+    return Close(reason, who)
 
 
 def propose(step: str, who: str) -> Proposal:

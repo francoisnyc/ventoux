@@ -1,6 +1,6 @@
 # Ventoux — design brief
 
-Status: draft, 2026-10-09; decisions D1–D25 (D3 superseded by D20). Read this
+Status: draft, 2026-10-09; decisions D1–D26 (D3 superseded by D20). Read this
 first; it is the short version of what we are building and why. The longer reference is
 `docs/design.md` in the `chartering` prototype.
 
@@ -620,6 +620,28 @@ be erased on request), has size limits, and a second copy of business records go
   step runs, so its proposer is excluded like anyone whose answer decides it (D11), as change
   requests are "applied only after someone else approves". *Added in the tutor review of layer 8a,
   before D25 was merged.*
+
+### D26. Who operates a case, and what a retry is
+
+*Decided 2026-10-09, in layer 8b.*
+
+- **Operating is a role the platform team registers,** like approving (D22):
+  `register_role("operations", operates=True)`. A role the catalog doesn't mark as operating may
+  not act on a failed step, whoever states it. "Needs attention" is the platform team's concept
+  (personas), so no case names its operators, and the quickstart meets nothing new.
+- **An operator acts on a failed step in two ways:** retry it, or close the case through a close
+  reason that lists their role (D10). There is no skip: skipping is a change request (D17).
+- **A retry is the same step run, with the same idempotency key.** A step fails after its retries
+  ran out, so its side effect may or may not have happened; sending the same key (`pay#1`) lets
+  the system return the first result instead of acting twice (D17). This is unlike a reset,
+  which starts a new run of the workflow and so new keys (D19). The retry checks the step again
+  first (its requirements, its condition, its inputs), and an approval spent on the run still
+  holds only if the inputs it saw are unchanged (D11).
+- **A failed step is never cancelled by a milestone.** While a run needs attention, reaching the
+  milestones of `closes_when` doesn't close the case (D10's "cancelling any pending work" was
+  written before failed runs were pending work): it closes once the run is retried to completion,
+  or a person closes it with a declared reason. Nothing is skipped automatically (D17). *Added in
+  the tutor review of layer 8b, before D26 was merged.*
 
 ### Simplifications adopted
 

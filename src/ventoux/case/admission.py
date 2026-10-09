@@ -16,6 +16,10 @@ class ProposalRefused(Exception):
     """A proposed step the engine won't start, with the reason."""
 
 
+class RetryRefused(Exception):
+    """A retry the engine won't make, with the reason."""
+
+
 class StepStopped(Exception):
     """A step the engine can't decide about: a condition it can't read. Nothing runs."""
 

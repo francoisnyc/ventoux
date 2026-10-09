@@ -90,6 +90,13 @@ class Approval(Shape):
     display: ApprovalDisplay
 
 
+class CloseReason(Shape):
+    """A declared reason a person may close the case with, and who may (brief, D10)."""
+
+    display: Display
+    roles: Roles  # who may close the case with it
+
+
 class Step(Shape):
     """What every kind of step says about when it may start (admission)."""
 
@@ -142,6 +149,9 @@ class CaseDefinition(Shape):
     milestones: dict[Name, Milestone] = {}
     steps: Annotated[dict[Name, AnyStep], Field(min_length=1)]
     sequence: tuple[Name, ...] = ()  # each step requires the one before it
+    close_reasons: dict[Name, CloseReason] = {}  # how a person may close it, and who (brief, D10)
+    closes_when: tuple[Name, ...] = ()  # milestones that close it once all are reached
+    stays_open: bool = False  # True: it never closes by itself; a person closes it
 
     # Pydantic: a validator with `mode="after"` runs on the whole object, once its fields passed.
     @model_validator(mode="after")
@@ -159,6 +169,16 @@ class CaseDefinition(Shape):
                 if name in self.steps
             ),
         ]
+        problems += [
+            f"closes_when: {name} is not a milestone"
+            for name in self.closes_when
+            if name not in self.milestones
+        ]
+        # A case nobody could ever close: fail closed when it is read, not when it is stuck.
+        if self.stays_open and not self.close_reasons:
+            problems.append(
+                "stays_open: a case that stays open names close_reasons, or nobody could close it"
+            )
         for name, step in self.steps.items():
             problems += step_problems(f"steps.{name}", step, self)
         if problems:

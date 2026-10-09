@@ -21,6 +21,7 @@ class Catalog:
         self._contracts: dict[str, ActivityContract] = {}  # by reference, `payments.refund@1`
         self._labels: set[str] = set()  # the labels a field may be declared untrusted with
         self._roles: dict[str, str | None] = {}  # each role, and the highest risk it may approve
+        self._operators: set[str] = set()  # the roles that may act on a failed step (brief, D26)
 
     def register_label(self, label: str) -> None:
         """Let fields be declared `untrusted:<label>`. Registered by the platform team, like roles,
@@ -36,12 +37,20 @@ class Catalog:
         """The registered labels, in order."""
         return sorted(self._labels)
 
-    def register_role(self, name: str, approves: str | None = None) -> None:
+    def register_role(self, name: str, approves: str | None = None, operates: bool = False) -> None:
         """Let waits and approvals name the role `name`, which may approve activities up to the
-        risk `approves` (none by default). Registered by the platform team, like labels, so a
-        typo is caught (brief, D22)."""
+        risk `approves` (none by default), and, if `operates`, act on a case's failed steps
+        (brief, D26). Registered by the platform team, like labels, so a typo is caught
+        (brief, D22)."""
         checked_role(name, approves)
         self._roles[name] = approves
+        if operates:
+            self._operators.add(name)
+
+    @property
+    def operators(self) -> list[str]:
+        """The registered roles that may act on a failed step, in order (brief, D26)."""
+        return sorted(self._operators)
 
     @property
     def roles(self) -> dict[str, str | None]:

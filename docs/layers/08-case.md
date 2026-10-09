@@ -18,9 +18,12 @@ its own Promises table and its own tutor review:
 | PR | Builds |
 |---|---|
 | **8a** | the case definition; the runtime, in memory; admission, proposals, parallel steps; the case file and forms; approvals in a case; what a waiting case reports; closing when nothing is pending |
-| **8b** | closing overrides and closing by a person; failed steps needing attention, and operator actions; activity outcomes; `plan` steps, in memory |
-| **8c** | cases on Temporal: the case workflow, signals, `plan` steps as child workflows, keys across runs, continue-as-new (design question 18) |
-| **8d** | `workflow` steps: workflow contracts, bindings, output provenance, a contract test |
+| **8b** | closing overrides and closing by a person; failed steps needing attention, and operator actions; activity outcomes |
+| **8c** | cases on Temporal: the case workflow, signals, `plan` steps (in memory and as child workflows), keys across runs, continue-as-new (design question 18) |
+| **8d** | `workflow` steps: workflow contracts, bindings; output provenance on activity and workflow contracts, and outputs into the case file; a contract test |
+
+`plan` steps moved from 8b to 8c, and outputs into the case file from 8b to 8d, when 8b was agreed
+(see 8b, choices 1 and 2).
 
 The `chartering` prototype is not checked out in this session; no file of it is drawn on in 8a.
 
@@ -234,6 +237,12 @@ Each starts with its negative test, seen failing for the right reason.
   pending, brief D10), so every proposal is then refused; `stays_open` is the answer, and the
   guide will warn about it. And a declined refund surfaces as a bare `Outcome` from `run_case`:
   activity outcomes and "needs attention" are 8b's.
+- **Carried to 8b, from the walk-through:** `decide`'s docstring promises that a refused event
+  "changes nothing", and it deep-copies the state so that a refusal or a stop part-way through
+  leaves the caller's state as it was. No test checks it: every 8a test goes through `run_case`,
+  which stops at the first refusal. 8b gives it a test (a state, an event `decide` refuses or
+  stops on after changing its copy, and the state passed in unchanged), or the promise leaves
+  the docstring. It matters most in 8c, where a refused answer is recorded and the case runs on.
 
 ### Promises
 
@@ -277,3 +286,183 @@ code). The guide's refusal rows passed when written.
 
 Not promised in 8a, and why: the lapse of a given approval (no case test until change requests,
 layer 12; see point 11 above).
+
+---
+
+## 8b. Closing, failures and activity outcomes, in memory
+
+Status: design agreed in the session, 2026-10-09 (all ten choices as proposed); built, slices
+0–7; Promises checked against the tests, 2026-10-09.
+
+User-facing description, written first: `docs/guides/cases.md`, "When a system says no", "When
+something breaks", "Closing a case", and the testing section. Decision: brief D26.
+
+### What this part is for
+
+8a's runtime knows only the happy path, and anything else raises out of `run_case`. 8b gives a
+case the three other ways it goes: a system says no (a declared outcome, brief D17), something
+breaks (a failed step that needs attention, D17), and someone decides it's over (closing, D10).
+Each becomes state the case reports and waits on, as 8c needs: on Temporal a case with a problem
+must sit there for a person, not crash.
+
+### Decided in the session
+
+1. **`plan` steps move to 8c.** A plan waiting on people suspends mid-run; the interpreter is
+   `async`, and `case` may not import `asyncio` (layer 6's boundary test), so neither `decide` nor
+   the in-memory driver can host one. On Temporal a plan step is a child workflow, which suspends
+   by nature (8c); in memory, `testing.py` hosts it with `asyncio.run`, as `run_plan` does.
+2. **Outputs into the case file move to 8d.** Their provenance is declared per output field by a
+   contract (brief, D12), which contracts don't do yet; adding it changes every contract's hash
+   (brief, D5), and 8d needs the same for workflow contracts. One decision, made once.
+3. **An activity's outcome is a case-file value:** `pay.outcome` is `done` or a declared outcome,
+   tagged `system:<the contract's reference>`, trusted, since the contract owns the list. An
+   outcome the contract doesn't declare fails the step (fail closed). A step's milestones are
+   reached only when it is done with `done`.
+4. **What fails, and what it does.** An activity's error, an undeclared outcome, an output its
+   contract doesn't declare, a refused input, a condition that can't be read and a lapsed
+   approval each make the step's run **failed**, with the reason. The case **needs attention**:
+   `needs_attention` lists `pay#1: <reason>`, a failed run is pending work, and other steps go on.
+   Refused answers, proposals, retries, closes and openings still raise: they are the caller's
+   mistakes, not the case's. 8a's tests expecting `InputRefused` or `StepStopped` now assert
+   `needs_attention`; their promises are unchanged.
+5. **Who operates** (brief, D26): `register_role("operations", operates=True)`, in the catalog.
+6. **A retry is the same step run, with the same key** (brief, D26). It checks the step again
+   (requirements, condition, inputs); an approval spent on the run holds only if its inputs are
+   unchanged. No skip: that is a change request (layer 12).
+7. **Closing by a person** uses close reasons declared on the case with their roles;
+   `close(reason, who)` in a script. An operator closes the same way, through a reason that
+   lists their role.
+8. **Closing, then closed.** Closing cancels open tasks, approvals and failed runs, each recorded
+   with why; refuses new answers, proposals and retries; lets running activities finish. A run
+   that completes while closing **flags** the case. In memory, `run_case(..., held=["pay"])` keeps
+   `pay`'s runs running until the script says `finish("pay#1")`.
+9. **`closes_when` and `stays_open`** (brief, D10): `closes_when` closes the case once all its
+   milestones are reached; `stays_open` means only a person closes it. A case that stays open
+   must declare a close reason, or nobody could ever close it.
+10. **`decide` becomes a seam for tests now,** for the item carried from 8a: an event, accepted or
+    refused, never changes the state passed in.
+
+### How it works
+
+**Events** gain `Failed` (a step run and the reason), `Retried` (a run, who, their roles) and
+`CloseAsked` (a reason, who, their roles); `Completed` carries the outcome (`done` or declared).
+The driver turns what an activity does into events: a return is `Completed`, `Outcome(name)` is
+`Completed` with that outcome, any other exception is `Failed`. Checking the outcome against the
+contract, and the output against its model, is `decide`'s, so it runs the same on Temporal.
+
+**A step run** may now be `failed` (with its reason), `retrying` or `cancelled`. Where 8a raised
+(`StepStopped`, `InputRefused`, an activity the catalog lacks, a lapse), admission records a
+failed run instead, and goes on with the other steps.
+
+**A case** is `open`, `closing` or `closed`. Admission runs only while it is open. Closing begins
+when a person closes it with a reason, or when every milestone in `closes_when` is reached; it
+cancels what waits, and the case is closed once nothing runs. A case that `stays_open` never
+closes by itself.
+
+### Where the code goes
+
+- `case/definition.py`: `close_reasons`, `closes_when`, `stays_open`.
+- `case/state.py`: the new events, run statuses and the case's phase.
+- `case/runtime.py`: outcomes, failures, retries, closing.
+- `case/closing.py`: whether a case closes, and closing it.
+- `case/memory.py`: activities' outcomes and errors as events; `held` and `finish`.
+- `core/catalog.py`: `register_role(..., operates=True)`, `operators`.
+- `testing.py`: `retry`, `close`, `finish`, `activities=`, `held=`; `Outcome`.
+
+### Not in 8b
+
+- `plan` steps (8c); outputs into the case file and output provenance (8d).
+- Retries with Temporal's retry policy and timeouts (8c); in memory an activity's error is a
+  failure after its retries.
+- Skipping a failed step, and the lapse test (change requests, layer 12).
+- Rules and timers, and what they keep open (layer 11).
+
+### Seams the tests use
+
+- `run_case(..., activities=, held=)`, script items `retry`, `close`, `finish`; `CaseRun.status`,
+  `.closed`, `.needs_attention`, `.flags`, `.waiting_for`, `.history`; the refusals `RetryRefused`
+  and `CloseRefused`.
+- `parse_case` for the new keys.
+- `decide(case, catalog, state, event)`, for the one test that a state passed in never changes.
+- The guide's examples, run as written, and each new row of its refusal table.
+
+### Slices, in order
+
+0. **`decide` never changes the state passed in** (carried from 8a). Negative: an accepted answer
+   changes the caller's state if `decide` works on it in place (seen by removing the copy).
+1. **Activity outcomes.** Negative: an outcome the contract doesn't declare fails the step. Then a
+   declined refund is done with `declined`, a step reacts, and `paid` isn't reached.
+2. **Needs attention.** Negative: an activity's error, a refused input and an unreadable
+   condition no longer raise; the case reports them and stays open; nothing is skipped. Then
+   another step goes on.
+3. **Retry.** Negative: a retry by a role that doesn't operate, of a run that hasn't failed, are
+   refused. Then the retry runs with the same key, and the case closes.
+4. **Close by reason.** Negative: an undeclared reason, a person without the reason's role.
+   Then open tasks and approvals are cancelled, saying why, and the case closes.
+5. **Closing.** Negative: an answer or a proposal while closing is refused. Then a held activity
+   finishes, the case closes after it and is flagged.
+6. **`closes_when` and `stays_open`.** Negative: a case that stays open with no close reason is
+   refused when read; `closes_when` naming no milestone is refused. Then a proposed-steps case
+   stays open, and `closes_when` closes when its milestone is reached.
+7. **The guide and the promises.**
+
+### Decided while building
+
+- **Slices 1 and 2 swapped:** an undeclared outcome "fails the step", so failing came first.
+- **An activity that fails while the case is closing is cancelled, and flags the case,** rather
+  than needing attention: nobody retries a step in a case that is closing. A declared outcome
+  that arrives while closing flags it too, like a completion.
+- **A retry or a close is refused unless the case is open:** `the case is closing: nothing
+  starts`, `the case is closing: it can't be closed again`.
+- **`closes_when` is checked before admission,** so nothing starts only to be cancelled.
+- **The in-memory driver became a small class,** holding the runs that `held` keeps running.
+- **Tests outside the case suite followed:** the catalog's test for an activity it lacks reports
+  needs attention (missed in slice 1, when only the case tests were run, and fixed after slice
+  3); `UNKNOWN_ROLE`'s list of roles includes `operations`, in a plans test and the plans guide.
+- **8a's promises that a condition on an unset field "stops the case", and that a high-risk step
+  with no approval "stops", still hold:** the step stops, now as a failed run the case reports.
+
+### From the tutor review
+
+- **`closes_when` silently cancelled a failed step.** A parallel letter failed, then `paid` was
+  reached: the failed run was cancelled and the case closed, with no flag and nothing needing
+  attention. Had the failure come a moment after `paid`, the case would have been flagged: the
+  order of events decided whether anyone heard of it. A failed run is the one kind of pending
+  work that must wait for a person (brief, D17). Now `closes_when` doesn't close the case while a
+  run needs attention; it closes once the run is retried to completion, or a person closes it
+  with a reason. Added to D26, which this PR introduces.
+- **Carried to layer 10 (optional):** a declared outcome no step reacts to ends quietly (a
+  declined refund closes as `closed: nothing left to do`). Right for a case, but D9's planned
+  warning about "outcomes no rule reads" should cover activity outcomes too.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`C` is `tests/test_case.py`, `K` `tests/test_catalog.py`. Every negative test was seen failing
+before its code, except: slice 0's, seen failing with `decide`'s copy removed; and two written
+after their code, in slice 7, seen failing with their check removed (a closing case closed or
+retried again, a declared outcome while closing).
+
+| Promise | Test |
+|---|---|
+| `decide` never changes the state passed in, for an accepted or a refused event (carried from 8a) | C `test_decide_never_changes_the_state_passed_in` |
+| An activity's error fails its step: the case needs attention, stays open, and nothing is skipped | C `test_a_failed_step_needs_attention_and_keeps_the_case_open` |
+| Other steps go on while one needs attention | C `test_other_steps_go_on_while_one_needs_attention` |
+| A refused input, an unreadable condition, an activity the catalog lacks and a high-risk step with no approval fail the step, never raise | C `test_a_forms_values_land_in_the_case_file`, `test_a_condition_on_an_unset_field_stops_the_case`, `test_a_high_risk_step_with_no_approval_stops`; K `test_a_definition_naming_an_activity_not_in_the_catalog_stops_the_case` |
+| An outcome the contract doesn't declare, or an output it doesn't describe, fails the step | C `test_an_outcome_the_contract_does_not_declare_fails_the_step`, `test_an_output_the_contract_does_not_declare_fails_the_step` |
+| A declared outcome is a case-file value a step reacts to; milestones are reached only on `done` | C `test_a_declined_refund_is_an_outcome_a_step_reacts_to` |
+| An outcome is tagged with the contract that declares it | C `test_an_outcome_is_tagged_with_the_contract_that_declares_it` |
+| Only an operating role retries, and only a failed run | C `test_only_an_operating_role_retries`, `test_only_a_failed_run_is_retried` |
+| A retry is the same run, with the same key, and the case can then close | C `test_a_retry_is_the_same_run_with_the_same_key` |
+| An approval spent on a run holds for its retry | C `test_an_approval_spent_on_the_run_holds_for_its_retry` |
+| A retry checks the step again: its condition is read again, and refused if false | C `test_a_retry_checks_the_step_again` |
+| An undeclared close reason, or a person without its role, is refused | C `test_an_undeclared_close_reason_is_refused`, `test_a_close_reason_names_who_may_use_it` |
+| Closing cancels open tasks, approvals and failed runs, saying why; a closed case takes no answer | C `test_closing_cancels_what_waits_saying_why`, `test_an_operator_closes_a_case_that_needs_attention` |
+| While closing, nothing waits and nothing starts; a closing case is not closed or retried again | C `test_while_closing_nothing_waits_and_nothing_starts`, `test_a_closing_case_is_not_closed_or_retried_again` |
+| A running activity finishes; the case closes after it, flagged | C `test_a_running_activity_finishes_and_the_closed_case_is_flagged`, `test_a_declared_outcome_while_closing_flags_the_case` |
+| An activity failing while closing flags the case and needs no attention | C `test_an_activity_failing_while_closing_flags_the_case` |
+| A case that stays open must declare a close reason; `closes_when` names milestones | C `test_a_case_that_stays_open_names_how_to_close_it` |
+| A case that stays open closes only when a person closes it (carried from the 8a review) | C `test_a_case_of_proposed_steps_stays_open_until_a_person_closes_it` |
+| `closes_when` closes the case once its milestones are reached, cancelling what waits | C `test_closes_when_closes_the_case_once_its_milestones_are_reached` |
+| `closes_when` never cancels a step that needs attention: the case waits, and closes once it is retried (tutor review) | C `test_closes_when_waits_while_a_step_needs_attention` |
+| The guide's new examples, histories and refusal rows are what the engine says | C `test_the_guides_examples_run_as_written`, `test_the_guides_histories_are_what_the_engine_records`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |

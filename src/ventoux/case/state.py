@@ -10,12 +10,26 @@ from typing import Literal
 
 
 @dataclass
+class GivenApproval:
+    """An approval given and not yet spent: who gave it, and the digest of the inputs it saw."""
+
+    entry: str
+    by: str
+    digest: str  # of the step's inputs (brief, D11)
+
+
+@dataclass
 class StepRun:
     """One run of a step: `review#1`, open while a task waits, running while an activity runs."""
 
     entry: str  # the step and its run's number, such as `review#1`
     step: str
-    status: Literal["open", "running", "done", "rejected"]  # rejected: its approval was refused
+    # rejected: its approval was refused; failed: it needs attention, with the reason (brief, D17);
+    # retrying: an operator retried it, and it runs again as the same run (brief, D26).
+    # cancelled: the case was closed while it waited (brief, D10).
+    status: Literal["open", "running", "done", "rejected", "failed", "retrying", "cancelled"]
+    reason: str = ""  # why it failed
+    approved: GivenApproval | None = None  # the approval spent on it, which a retry keeps
 
 
 @dataclass
@@ -25,15 +39,6 @@ class OpenApproval:
     entry: str  # the step, `approval`, and how many times it was asked: `pay.approval#1`
     step: str  # the step it guards
     seen: dict[str, object]  # the values its step read when it was asked, by field (brief, D25)
-
-
-@dataclass
-class GivenApproval:
-    """An approval given and not yet spent: who gave it, and the digest of the inputs it saw."""
-
-    entry: str
-    by: str
-    digest: str  # of the step's inputs (brief, D11)
 
 
 @dataclass
@@ -55,7 +60,10 @@ class CaseState:
     # What waits on people, in the order it opened: entry, and how it reads (brief, D24).
     waiting: dict[str, str] = field(default_factory=dict[str, str])
     opened_by: str | None = None  # the person who opened the case, if a person did
-    closed: bool = False
+    # open; closing: nothing new starts, running activities finish; closed (brief, D10).
+    phase: Literal["open", "closing", "closed"] = "open"
+    closed_because: str = ""  # why it is closing, as the closed line will say
+    flags: list[str] = field(default_factory=list[str])  # what a person should look at
     history: list[str] = field(default_factory=list[str])  # what happened, one line each
 
 
@@ -89,13 +97,41 @@ class Proposed:
 
 @dataclass(frozen=True)
 class Completed:
-    """A scheduled activity finished: its run, and what it gave."""
+    """A scheduled activity finished: its run, what it gave, and with which outcome: `done`, or
+    one its contract declares, such as `declined` (brief, D17)."""
 
     entry: str
     output: Mapping[str, object]
+    outcome: str = "done"
 
 
-type Event = Opened | Answered | Proposed | Completed
+@dataclass(frozen=True)
+class Failed:
+    """A scheduled activity failed after its retries: its run, and what went wrong."""
+
+    entry: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class Retried:
+    """An operator retries a failed step run: the same run, with the same key (brief, D26)."""
+
+    entry: str
+    by: str  # who retried it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with the retry (brief, D22)
+
+
+@dataclass(frozen=True)
+class CloseAsked:
+    """A person closes the case with a declared reason (brief, D10)."""
+
+    reason: str
+    by: str  # who closes it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with the request (brief, D22)
+
+
+type Event = Opened | Answered | Proposed | Completed | Failed | Retried | CloseAsked
 
 
 @dataclass(frozen=True)

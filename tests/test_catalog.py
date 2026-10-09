@@ -204,13 +204,16 @@ def test_the_same_schema_written_twice_is_the_same_promise() -> None:
 def test_a_definition_naming_an_activity_not_in_the_catalog_stops_the_case() -> None:
     refund = copy.deepcopy(load_definition(ROOT / "examples" / "refund" / "refund.json"))
     refund["steps"]["pay"]["activity"] = "payments.refund@3"
-    with pytest.raises(NotInCatalog, match="Registered: payments.refund@2"):
-        run_case(
-            refund,
-            file={"order_id": "ord-1", "amount": 40},
-            answers=[("review", "approve", "ana", {"approved_amount": 40})],
-            people={"ana": ["support"]},
-        )
+    run = run_case(
+        refund,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people={"ana": ["support"]},
+    )
+    # Since layer 8b the step fails and the case needs attention: nothing runs, nothing is skipped.
+    [failed] = run.needs_attention
+    assert failed.startswith("pay#1: ") and "Registered: payments.refund@2" in failed
+    assert not run.reached("pay")
 
 
 def test_every_development_contract_matches_its_recorded_hash() -> None:
