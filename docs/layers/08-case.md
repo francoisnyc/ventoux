@@ -234,6 +234,12 @@ Each starts with its negative test, seen failing for the right reason.
   pending, brief D10), so every proposal is then refused; `stays_open` is the answer, and the
   guide will warn about it. And a declined refund surfaces as a bare `Outcome` from `run_case`:
   activity outcomes and "needs attention" are 8b's.
+- **Carried to 8b, from the walk-through:** `decide`'s docstring promises that a refused event
+  "changes nothing", and it deep-copies the state so that a refusal or a stop part-way through
+  leaves the caller's state as it was. No test checks it: every 8a test goes through `run_case`,
+  which stops at the first refusal. 8b gives it a test (a state, an event `decide` refuses or
+  stops on after changing its copy, and the state passed in unchanged), or the promise leaves
+  the docstring. It matters most in 8c, where a refused answer is recorded and the case runs on.
 
 ### Promises
 
