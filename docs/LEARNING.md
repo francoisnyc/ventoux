@@ -39,7 +39,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 32 | Layer 2: why `now` can't be written | open |
 | 33 | Layer 3: why plans can be checked and code can't | open |
 | 34 | Layer 5: why check input policies twice | open |
-| 35 | Layer 6: what lives in workflow history | open |
+| 35 | Layer 6: what lives in workflow history | closed |
 
 ---
 
@@ -820,4 +820,13 @@ and record the key points. A question is closed once you can explain the answer 
   makes them safe.
 - Follow-up: a person *resets* that run to before `pay` (brief, D19). Is the refund paid twice
   now, and why does the key not save it?
-- Status: open, until the follow-up comes from memory.
+- Retrieval (layer 8 warm-up), the follow-up: "yes, paid twice; a reset gives a new run ID, so a
+  new key." Both right, and from memory. A reset starts a new run of the same workflow from an
+  earlier point; the key carries the run ID, so `pay#1` in the new run sends a key the payment
+  system has never seen, and it pays again. That is why the brief keeps resets small and audited
+  (D19). Part (c), asked as a lead into layer 8, didn't come up: *anything* that starts a new run
+  of the same case changes the run ID, and continue-as-new (design question 18) does exactly that
+  for every long case. So a case's keys can't simply carry the run ID: a key must name the same
+  step run in every run of the case (the case's workflow ID, the step, and a step-run count that
+  crosses over). Layer 8 decides it.
+- Status: closed (the follow-up came from memory; part (c) is decided in layer 8).

@@ -1,6 +1,6 @@
 # Ventoux — design brief
 
-Status: draft, 2026-10-08; decisions D1–D23 (D3 superseded by D20). Read this
+Status: draft, 2026-10-09; decisions D1–D25 (D3 superseded by D20). Read this
 first; it is the short version of what we are building and why. The longer reference is
 `docs/design.md` in the `chartering` prototype.
 
@@ -588,6 +588,39 @@ be erased on request), has size limits, and a second copy of business records go
   sent back to an approval by the engine on its own.
 - **Several approvers (`count=2`) come with the `four_eyes` pattern** (layer 11).
 
+### D24. A waiting case says what it waits for
+
+*Decided 2026-10-09, in layer 8 (design question 14).*
+
+- **`waiting_for` lists each open task and approval,** in the order they opened, in the words the
+  inbox uses: `review by support`, `approval of pay by support-lead`. A case waiting for its
+  review says so; it neither crashes nor closes.
+- **It is the part of pending work (D10) that waits on people.** Running steps, set timers and
+  failed steps are pending work too, and keep the case open; they are reported as they arrive
+  (failures and closing in layer 8, timers in layer 11), never folded into `waiting_for`.
+
+### D25. An open approval follows the case file
+
+*Decided 2026-10-09, in layer 8.*
+
+- **An approval is asked when its step is about to start:** its requirements are met, its `when`
+  holds, and the approval's own `when` holds now. Each time it is asked is its own entry
+  (`pay.approval#1`), answered by entry like any task (D23).
+- **While it is open, it follows what the step reads.** If the step stops being admitted, or any
+  value the step reads (its inputs, its `when`, the approval's `when`) changes, the open approval
+  is withdrawn and recorded with the reason; if the step is admitted again, a new entry is asked.
+  An answer to the withdrawn entry is refused as closed. So nobody approves values they didn't
+  see: Sam, reading a sheet that says 250, can't approve the 900 a reworked review set since.
+- **A given approval is spent in the decision that starts its step,** so in a case nothing comes
+  between them; a lapse (D11, D23) can only come from a change request (layer 12), and it stops
+  the step.
+- **The person who opened the case approves none of its steps** (D11). Who opened it is stated by
+  the trusted caller, like an answer's roles (D22); a case a system opened has no such person.
+- **Nor does the person who proposed a step's run approve that run.** A proposal decides that the
+  step runs, so its proposer is excluded like anyone whose answer decides it (D11), as change
+  requests are "applied only after someone else approves". *Added in the tutor review of layer 8a,
+  before D25 was merged.*
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
@@ -741,7 +774,8 @@ New questions found while building go here, numbered from 10.
     - *Open:* a case waiting for a *task* has no defined report. The quickstart only shows waiting
       for an approval, and the tracer crashes when no one has answered the review. Proposal:
       `waiting_for` lists open tasks too (`"review by support"`). To decide in layer 8, with
-      pending work (D10).
+      pending work (D10). **Decided in layer 8:** `waiting_for` lists open tasks and
+      approvals, the part of pending work that waits on people (D24).
     - *Open:* the quickstart's story (Ana reviews, Sam approves) never shows the D11 exclusion,
       because Ana isn't a team lead anyway. Only a reviewer who is also a team lead shows it
       (learning question 18). Proposal: the quickstart's "When Ventoux says no" adds Sam

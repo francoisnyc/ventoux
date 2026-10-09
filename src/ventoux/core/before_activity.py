@@ -2,7 +2,7 @@
 each value, before it is scheduled (layer 5).
 
 The static check (`validate`, layer 4) reads where a plan's fields are declared to come from; this
-one reads where each value really came from. Used by the interpreter and the tracer's case runner.
+one reads where each value really came from. Used by the interpreter and the case runtime.
 See docs/layers/05-interpreter.md.
 """
 

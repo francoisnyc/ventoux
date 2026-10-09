@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from ventoux.core.expressions import ExpressionInvalid
-from ventoux.testing import AnswerRefused, InputRefused, load_definition, run_case
+from ventoux.case.definition import CaseInvalid
+from ventoux.testing import AnswerRefused, CaseRefused, load_definition, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 
@@ -122,10 +122,11 @@ def test_answering_a_task_needs_its_role() -> None:
 def test_an_approval_the_engine_cannot_evaluate_stops_the_case() -> None:
     # The tracer review's finding, kept as a regression test (brief: fail closed). The tracer's
     # evaluator returned the unknown `{"now": []}` unchanged, `holds` read it as false, so the
-    # approval was "not needed" and a 250 refund was paid without a team lead.
+    # approval was "not needed" and a 250 refund was paid without a team lead. Since layer 8 the
+    # definition is refused when read, before anything runs.
     definition = copy.deepcopy(REFUND)
     definition["steps"]["pay"]["approval"]["when"] = {"now": []}
-    with pytest.raises(ExpressionInvalid, match="`now` is not an operator"):
+    with pytest.raises(CaseInvalid, match="`now` is not an operator"):
         run_case(
             definition,
             file={"order_id": "ord-4", "amount": 250},
@@ -164,8 +165,9 @@ def test_whoever_decides_whether_the_step_runs_cannot_approve_it() -> None:
 
 
 def test_an_input_that_does_not_fit_is_refused_before_the_refund() -> None:
-    # The same check as a plan's, before every activity (docs/layers/05-interpreter.md).
-    with pytest.raises(InputRefused, match="order_id: Input should be a valid string"):
+    # The same check as a plan's, before every activity (docs/layers/05-interpreter.md). Since
+    # layer 8 the case file is checked against its fields' types when the case opens, earlier.
+    with pytest.raises(CaseRefused, match="order_id is a reference to orders, and the opening"):
         run_case(
             REFUND,
             file={"order_id": 1001, "amount": 40},  # a number: payments.refund@2 takes a text

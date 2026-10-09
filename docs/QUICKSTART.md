@@ -154,7 +154,8 @@ def test_rejected_review_closes_without_paying():
 uv run pytest
 ```
 
-Tests run in memory, in milliseconds, with no Temporal server.
+Tests run in memory, in milliseconds, with no Temporal server. A case nobody has answered yet says
+what it waits for: with `answers=[]`, `run.waiting_for == ["review by support"]`.
 
 ## 6. When Ventoux says no
 
@@ -202,9 +203,14 @@ notify = refund.activity(
     "notify_rejection", "letters.draft@2",
     title="Draft a rejection letter",
     inputs={"order_id": order_id},
+    requires=[review],
     when=review.outcome == "reject",
 )
 ```
+
+`requires=[review]`: the condition reads the review's answer, which exists only once the review is
+done. Reading a value nobody has given yet is an error, never "false", so the step says what it
+waits for.
 
 ```sh
 uv run ventoux diff

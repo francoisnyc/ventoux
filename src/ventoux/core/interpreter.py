@@ -295,7 +295,7 @@ def approval_of(
     if not isinstance(target, ActivityState):  # `judge` already refused it: never assumed
         raise Stop(f"{state.approval.of} can't be approved: it is not an activity state")
     try:
-        return Approved(str(answer.by), inputs_digest(target, values))
+        return Approved(str(answer.by), inputs_digest(target.inputs, values))
     except ExpressionError as error:
         # Fail closed: an approval of inputs that can't be read approves nothing.
         raise Stop(f"the inputs of {state.approval.of} can't be read: {error}") from None
@@ -313,7 +313,7 @@ def check_approval(
     approval = approvals.pop(here, None)  # spent, whatever happens next
     if approval is not None:
         try:
-            now = inputs_digest(state, values)
+            now = inputs_digest(state.inputs, values)
         except ExpressionError:
             return  # can't be read: the input check stops the step, saying why
         if now != approval.digest:
