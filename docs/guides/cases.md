@@ -110,10 +110,11 @@ against admission, so a person can't start a step whose requirements aren't met:
 
 A **repeatable** step may run again, and only when proposed: it never starts itself a second time,
 or it would never stop. A task's `outcome` is then its latest answer, and a field its form sets
-holds the latest value (brief, D9). This is how a review is sent back for rework:
+holds the latest value (brief, D9). This is how a review is sent back for rework, with two keys
+added to `review`:
 
 ```json
-"review": {"kind": "task", "repeatable": true, "proposed_by": ["support"], "...": "..."}
+{"repeatable": true, "proposed_by": ["support"]}
 ```
 
 A step may **reach milestones**: `"reaches": ["reviewed"]` on a step is reached when it completes,
@@ -155,6 +156,9 @@ asked pay.approval#2: approval of pay by support-lead
 
 Sam's *approve* for `pay.approval#1` is now refused: it was withdrawn. Approving 900 takes an
 answer to `pay.approval#2`, from someone who sees 900.
+
+**A high-risk step has an approval.** A step calling a high-risk activity with no `approval`
+stops before it is scheduled, even in a definition nobody checked.
 
 **One approval, one run.** The approval is spent in the same step as the activity is scheduled:
 `pay#1`, with its own idempotency key. A *reject* is an outcome: the step doesn't run, and the case

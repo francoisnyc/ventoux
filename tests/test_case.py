@@ -5,6 +5,8 @@ See docs/layers/08-case.md and docs/guides/cases.md.
 """
 
 import copy
+import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -302,6 +304,37 @@ def test_a_proposal_whose_condition_is_false_is_refused() -> None:
         )
 
 
+def test_a_proposal_whose_condition_cannot_be_read_is_refused() -> None:
+    # Fail closed: nothing starts on a condition the engine can't read.
+    definition = with_check_order()
+    definition["steps"]["check_order"]["requires"] = []
+    definition["steps"]["check_order"]["when"] = {">": [{"var": "approved_amount"}, 0]}
+    with pytest.raises(
+        ProposalRefused, match="^check_order's condition approved_amount > 0 can't be evaluated"
+    ):
+        run_case(definition, file=LARGE, answers=[propose("check_order", "ana")], people=PEOPLE)
+
+
+def test_a_proposal_names_its_person_one_way() -> None:
+    with pytest.raises(ProposalRefused, match="'Ana' is not written as a person's identifier"):
+        run_case(
+            with_check_order(),
+            file=LARGE,
+            answers=[REVIEWED, propose("check_order", "Ana")],
+            people={**PEOPLE, "Ana": ["support"]},
+        )
+
+
+def test_a_closed_case_takes_no_more_answers() -> None:
+    with pytest.raises(AnswerRefused, match="^the case is closed: nothing waits for an answer$"):
+        run_case(
+            REFUND,
+            file=LARGE,
+            answers=[("review", "reject", "ana"), ("review", "approve", "ana")],
+            people=PEOPLE,
+        )
+
+
 def test_a_proposed_step_runs() -> None:
     run = run_case(
         with_check_order(),
@@ -502,3 +535,152 @@ def test_a_high_risk_step_with_no_approval_stops() -> None:
         StepStopped, match="^payments.refund@2 is high risk, and pay has no approval$"
     ):
         run_case(definition, file=LARGE, answers=[REVIEWED], people=PEOPLE)
+
+
+# --- Slice 6: the guide, run as written ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+
+
+def blocks(language: str) -> list[str]:
+    """The guide's code blocks in `language` (`""` for plain ones), in order."""
+    found: list[str] = []
+    opened: str | None = None  # the language of the block being read, while inside one
+    body: list[str] = []
+    for line in GUIDE.splitlines():
+        if not line.startswith("```"):
+            body.append(line)
+        elif opened is None:
+            opened, body = line.removeprefix("```"), []
+        else:
+            if opened == language:
+                found.append("\n".join(body) + "\n")
+            opened = None
+    return found
+
+
+def guide_json(index: int) -> dict[str, Any]:
+    """The guide's JSON block `index`; a fragment (`"name": {...}`) is read as an object."""
+    text = blocks("json")[index]
+    fragment = text if text.lstrip().startswith("{") else "{" + text + "}"
+    loaded: dict[str, Any] = json.loads(fragment, parse_float=Decimal)
+    return loaded
+
+
+def guide_refund_with_rework() -> dict[str, Any]:
+    """The guide's refund, its review sent back for rework with the guide's two keys."""
+    definition = guide_json(0)
+    definition["steps"]["review"].update(guide_json(2))
+    return definition
+
+
+def test_the_guides_refund_is_the_quickstarts() -> None:
+    assert guide_json(0) == REFUND
+
+
+def test_the_guides_examples_run_as_written() -> None:
+    # Our own documentation, run so it can't drift from the code; never a definition (data).
+    namespace: dict[str, Any] = {
+        "run_case": run_case,
+        "propose": propose,
+        "refund": guide_json(0),
+        "refund_with_rework": guide_refund_with_rework(),
+        "PEOPLE": PEOPLE,
+    }
+    for code in blocks("python"):
+        exec(code, namespace)  # noqa: S102 -- our guide, as in layer 7
+
+
+def test_the_guides_histories_are_what_the_engine_records() -> None:
+    plain = blocks("")
+    paid = run_case(
+        guide_json(0), file=LARGE, answers=[REVIEWED, ("pay", "approve", "sam")], people=PEOPLE
+    )
+    assert plain[0].splitlines() == paid.history
+    # The rework: the guide's lines appear one after the other in the run's history.
+    reworked = run_case(
+        guide_refund_with_rework(),
+        file=LARGE,
+        answers=[*REWORKED, ("pay", "approve", "sam")],
+        people=PEOPLE,
+    )
+    shown = plain[1].splitlines()
+    first = reworked.history.index(shown[0])
+    assert reworked.history[first : first + len(shown)] == shown
+
+
+def test_the_guides_proposed_step_runs() -> None:
+    definition = guide_json(0)
+    definition["steps"].update(guide_json(1))
+    run = run_case(
+        definition, file=LARGE, answers=[REVIEWED, propose("check_order", "ana")], people=PEOPLE
+    )
+    assert run.reached("check_order")
+
+
+def refusal(run: Any) -> str:
+    """What the engine says when it refuses `run`."""
+    try:
+        run()
+    except (AnswerRefused, ProposalRefused, CaseRefused) as refused:
+        return str(refused)
+    raise AssertionError("nothing was refused")
+
+
+def with_guides_check_order() -> dict[str, Any]:
+    definition = guide_json(0)
+    definition["steps"].update(guide_json(1))
+    return definition
+
+
+# Each "Refused when" row of the guide's table, and a run that is refused that way.
+GUIDE_REFUSALS: dict[str, Any] = {
+    "the person has none of the task's roles": lambda: run_case(
+        guide_json(0),
+        file=LARGE,
+        answers=[("review", "approve", "eve", {"approved_amount": 1})],
+        people=PEOPLE,
+    ),
+    "the person opened the case": lambda: run_case(
+        guide_json(0),
+        file=LARGE,
+        answers=[("review", "approve", "sam", {"approved_amount": 250}), ("pay", "approve", "ana")],
+        people={"ana": ["support-lead"], "sam": ["support"]},
+        opened_by="ana",
+    ),
+    "the approval was withdrawn": lambda: run_case(
+        guide_refund_with_rework(),
+        file=LARGE,
+        answers=[*REWORKED, ("pay.approval#1", "approve", "sam")],
+        people=PEOPLE,
+    ),
+    "a proposed step's requirements aren't met": lambda: run_case(
+        with_guides_check_order(),
+        file=LARGE,
+        answers=[propose("check_order", "ana")],
+        people=PEOPLE,
+    ),
+    "nobody proposes a step that starts by itself": lambda: run_case(
+        guide_json(0), file=LARGE, answers=[REVIEWED, propose("pay", "ana")], people=PEOPLE
+    ),
+    "the opening gives a field a person sets": lambda: run_case(
+        guide_json(0), file={**LARGE, "approved_amount": 250}, answers=[], people=PEOPLE
+    ),
+}
+
+
+def guide_refusal_rows() -> list[tuple[str, str]]:
+    """The rows of the guide's table "Refused when | Example", code unquoted."""
+    table = GUIDE.split("| Refused when | Example |")[1].split("\n\n")[0]
+    rows = [line.split("|") for line in table.splitlines()[2:] if line.startswith("| ")]
+    return [(when.strip(), example.strip().strip("`")) for _, when, example, _ in rows]
+
+
+@pytest.mark.parametrize(("when", "example"), guide_refusal_rows())
+def test_the_guides_refusals_are_what_the_engine_says(when: str, example: str) -> None:
+    assert when in GUIDE_REFUSALS, f"the guide's row {when!r} has no test"
+    assert refusal(GUIDE_REFUSALS[when]) == example
+
+
+def test_every_refusal_in_the_guide_is_tested() -> None:
+    assert [when for when, _ in guide_refusal_rows()] == list(GUIDE_REFUSALS)

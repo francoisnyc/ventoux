@@ -1,7 +1,8 @@
 # Layer 8: the case layer
 
 Status: split and 8a's seven choices agreed in the session, 2026-10-09; the eleven points
-decided while drafting confirmed the same day; 8a being built.
+decided while drafting confirmed the same day; 8a built, slices 0–6; Promises checked against the
+tests, 2026-10-09.
 
 ## What this layer is for
 
@@ -138,6 +139,8 @@ closed (brief, D10).
 - `case/sequence.py`: the `sequence` shorthand, expanded.
 - `case/state.py`: a case's state, its events and commands.
 - `case/admission.py`: may this step start now; a proposal's refusal.
+- `case/answers.py`: judging an answer to a task or an approval, with `core`'s checks.
+- `case/approvals.py`: asking for an approval, following the case file, the lapse check.
 - `case/runtime.py`: `decide`.
 - `case/memory.py`: the in-memory driver; replaces `case/runner.py`, which is removed.
 - `core/approval.py`: the digest takes a step's inputs, not only a plan's activity state.
@@ -193,31 +196,68 @@ Each starts with its negative test, seen failing for the right reason.
 6. **The guide and the promises.** The guide's examples run as written; each refusal row has a
    test; this table is checked against the tests.
 
+### Decided while building
+
+- **Fields need not all be given at the opening.** A plan's run must be given every field; a case
+  may be filled later (activity outputs, from 8b). Reading a field nobody has given stops the
+  case, as any missing value does.
+- **A rejected approval records the step's run as not run:** `pay#1 won't run: sam rejected
+  pay.approval#1`. The step has had its once, so it doesn't start by itself again; a repeatable
+  step can be proposed again.
+- **An open approval keeps the values its step reads, not a digest of them,** so a withdrawal
+  names what changed: `withdrew pay.approval#1: approved_amount changed`.
+- **The opener is checked before "someone else".** Lee opened the case, so Lee's values feed
+  `pay` too; the refusal says the broader reason: `lee opened the case, so cannot approve its
+  steps`.
+- **A high-risk step with no `approval` stops at runtime:** `payments.refund@2 is high risk, and
+  pay has no approval`. A runtime check that depends on nothing case validation (layer 10) will
+  do, as a plan's does (learning question 34). A step whose approval's `when` is false runs
+  without one: the definition says when approval is needed.
+- **A proposal is refused when its condition can't be read,** when the case is closed, when its
+  person isn't written as an identifier, or when it names no step. Fail closed: nothing starts.
+- **The scheduled line names the idempotency key:** `…, key memory/pay#1`; an activity's output
+  is recorded by its fields' names (`pay#1 done, giving refund_id`), not their values.
+- **Answers and approvals move to their own files** (`case/answers.py`, `case/approvals.py`),
+  once slice 5 made the runtime long.
+
 ### Promises
 
-Drafted before building; each row names the test that will prove it. `C` is `tests/test_case.py`
-(new), `Q` `tests/test_quickstart.py`.
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`C` is `tests/test_case.py`, `Q` `tests/test_quickstart.py`. Every negative test was seen failing
+before its code, except these, which passed when written because earlier code already did it,
+and were then seen failing with that code removed: a step starting by itself once and an unset
+condition stopping the case (slice 1's admission), steps admitted together (slice 1), the closed
+case, a misspelled proposer and a proposal's unreadable condition (written in slice 6, after the
+code). The guide's refusal rows passed when written.
 
 | Promise | Test |
 |---|---|
-| A step, field, outcome or case without a title is refused when read | C `test_everything_people_read_has_a_title` |
-| An unknown kind, a `sequence` or `requires` naming nothing, a milestone named like a step, an unproposable manual step are refused | C `test_a_definition_that_names_nothing_is_refused`, `test_a_step_nobody_can_start_is_refused` |
-| An expression the engine doesn't know is refused when the definition is read | Q `test_an_approval_the_engine_cannot_evaluate_stops_the_case` |
-| A case waiting for a task reports it in `waiting_for` and stays open | C `test_a_case_waiting_for_its_review_says_so` |
+| The quickstart's refund, with its titles in `display` blocks, is read | C `test_the_quickstarts_refund_is_read` |
+| A case, field, step, outcome or approval without a title is refused when read; a title is never empty | C `test_everything_people_read_has_a_title`, `test_a_title_is_never_empty` |
+| An unknown kind, a `sequence` or `requires` naming nothing, a milestone named like a step, an undeclared milestone or field are refused | C `test_a_definition_that_names_nothing_is_refused` |
+| A step that doesn't start by itself, or is repeatable, names who may propose it | C `test_a_step_nobody_can_start_is_refused` |
+| An expression the engine doesn't know is refused when the definition is read | C `test_an_expression_the_engine_does_not_know_is_refused_when_read`; Q `test_an_approval_the_engine_cannot_evaluate_stops_the_case` |
+| A case waiting for a task reports it in `waiting_for` and stays open (brief, D24) | C `test_a_case_waiting_for_its_review_says_so` |
 | A case with an open approval doesn't close | Q `test_large_refund_waits_for_a_team_lead` |
-| A case closes when nothing is left to do | Q `test_small_refund_needs_no_team_lead`, `test_rejected_review_closes_without_paying` |
-| The opening is checked against the declared types; a field a person sets is never given at it | C `test_the_opening_gives_the_declared_fields_of_their_types`; Q `test_an_input_that_does_not_fit_is_refused_before_the_refund` |
-| Opening values come from `system:opener`, or from the person who opened it | C `test_opening_values_say_who_gave_them` |
-| A form's values land tagged with who answered, keep a declared mark, and the latest answer wins | C `test_a_forms_values_land_in_the_case_file` |
+| A case closes when nothing is left to do, and then takes no more answers | Q `test_small_refund_needs_no_team_lead`, `test_rejected_review_closes_without_paying`, `test_a_rejected_approval_closes_the_case_without_paying`; C `test_a_closed_case_takes_no_more_answers` |
+| The opening gives only declared fields, of their types, and never one a person sets | C `test_the_opening_gives_the_declared_fields_of_their_types`; Q `test_an_input_that_does_not_fit_is_refused_before_the_refund` |
+| Opening values come from `system:opener`, or the person who opened the case, written one way | C `test_opening_values_say_who_gave_them` |
 | A float is refused, in the opening and in a form | C `test_a_float_is_refused_never_guessed` |
-| A proposal is refused if its requirements aren't met, its role is missing, the step starts by itself or is running | C `test_a_proposal_is_checked_against_admission` |
-| A step starts by itself at most once; a repeatable step runs again only when proposed | C `test_a_step_starts_by_itself_once` |
+| A form's value keeps a declared mark, and the input check sees it | C `test_a_forms_values_land_in_the_case_file` |
+| The latest answer is the one read | C `test_a_rework_below_the_threshold_needs_no_approval` |
+| A proposal is refused if its step is unknown, starts by itself, is running, ran and isn't repeatable, its role is missing, its requirements aren't met, or its condition is false or can't be read; its person is written one way | C `test_a_proposal_is_checked_against_admission`, `test_a_proposal_whose_condition_is_false_is_refused`, `test_a_proposal_whose_condition_cannot_be_read_is_refused`, `test_a_proposal_names_its_person_one_way` |
+| A proposed step runs | C `test_a_proposed_step_runs`, `test_the_guides_proposed_step_runs` |
+| A step starts by itself at most once | C `test_a_step_starts_by_itself_once` |
 | A `when` reading a field nobody has set stops the case, never reads as false | C `test_a_condition_on_an_unset_field_stops_the_case` |
-| A milestone, once reached, admits the steps that require it | C `test_a_milestone_admits_what_requires_it` |
+| A milestone is reached by a task's outcome or a step's completion, and admits what requires it | C `test_a_milestone_admits_what_requires_it` |
 | Steps admitted together open together; the case waits for all of them | C `test_steps_admitted_together_run_together` |
 | The person who opened the case cannot approve its steps | C `test_the_opener_cannot_approve` |
-| An open approval is withdrawn when its step is no longer admitted or what it reads changes; an answer to it is refused | C `test_an_open_approval_follows_the_case_file` |
-| After a withdrawal, the approval is asked again only if still needed | C `test_a_rework_below_the_threshold_needs_no_approval` |
-| An approval is spent when its step is scheduled, with a key naming the case and the step run | C `test_an_approval_unlocks_one_run_with_its_own_key` |
-| Every check from layers 5 and 7 still holds in a case (roles, forms, someone else, input policies, spellings) | Q (the file's other tests) |
-| The guide's examples and refusals are what the engine says | C `test_the_guides_examples_run_as_written`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |
+| An open approval is withdrawn when a step it requires starts again, or a value it reads changes; an answer to it is refused with the reason; a new entry is asked | C `test_an_open_approval_follows_the_case_file`, `test_an_open_approval_is_withdrawn_when_a_value_it_reads_changes` |
+| After a withdrawal, an approval is asked again only if still needed | C `test_a_rework_below_the_threshold_needs_no_approval` |
+| An approval unlocks one run, scheduled with a key naming the case and the step run | C `test_an_approval_unlocks_one_run_with_its_own_key` |
+| A high-risk step with no approval stops before it is scheduled | C `test_a_high_risk_step_with_no_approval_stops` |
+| Every check from layers 5 and 7 still holds in a case: roles, outcomes, forms, someone else, input policies, spellings | Q (the file's other tests) |
+| The guide's refund is the quickstart's; its examples, histories and refusals are what the engine says | C `test_the_guides_refund_is_the_quickstarts`, `test_the_guides_examples_run_as_written`, `test_the_guides_histories_are_what_the_engine_records`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |
+
+Not promised in 8a, and why: the lapse of a given approval (no case test until change requests,
+layer 12; see point 11 above).
