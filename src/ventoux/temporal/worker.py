@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from ventoux.case.runner import Activity
+from ventoux.case.memory import Activity
 from ventoux.temporal.activities import plan_activities
 from ventoux.temporal.converter import require_exact_numbers
 from ventoux.temporal.workflow import PlanWorkflow

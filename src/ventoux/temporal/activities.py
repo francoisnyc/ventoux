@@ -10,7 +10,7 @@ from typing import Any
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from ventoux.case.runner import Activity
+from ventoux.case.memory import Activity
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome
 

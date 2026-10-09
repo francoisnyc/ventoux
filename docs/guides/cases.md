@@ -83,7 +83,7 @@ review#1 done
 asked pay.approval#1: approval of pay by support-lead
 sam answered pay.approval#1 approve as support-lead
 scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana)
-pay#1 done
+pay#1 done, giving refund_id
 closed: nothing left to do
 ```
 

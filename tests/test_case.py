@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.testing import load_definition
+from ventoux.testing import load_definition, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 
@@ -123,3 +123,17 @@ def test_an_expression_the_engine_does_not_know_is_refused_when_read() -> None:
     definition["steps"]["pay"]["approval"]["when"] = {"now": []}
     with pytest.raises(CaseInvalid, match="steps.pay.approval.when: `now` is not an operator"):
         parse_case(definition)
+
+
+# --- Slice 1: the runtime replaces the tracer's walk ---
+
+# Who has which role: the test plays the Ventoux API (brief, D22).
+PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "lee": ["support-lead"]}
+
+
+def test_a_case_waiting_for_its_review_says_so() -> None:
+    # Design question 14 (brief, D24): the tracer crashed when nobody had answered the review.
+    run = run_case(REFUND, file={"order_id": "ord-1", "amount": 250}, answers=[], people=PEOPLE)
+    assert run.waiting_for == ["review by support"]
+    assert not run.reached("review")
+    assert not run.closed
