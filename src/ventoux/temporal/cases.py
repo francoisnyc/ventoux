@@ -1,0 +1,210 @@
+"""A case as a Temporal workflow, one per case for as long as it lives; and its client (layer 8c).
+
+The workflow is a driver around `decide`, as `case/memory.py` is in tests: every event (the opening,
+a person's signal, an activity's result) goes into one inbox, and the loop decides them one at a
+time, in the order history records them, then starts what `decide` asks for. `decide` reads no
+clock, randomness or I/O, so replay rebuilds the same case. See docs/layers/08-case.md (8c).
+"""
+
+import asyncio
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, ClassVar
+
+from temporalio import workflow
+from temporalio.client import Client, WorkflowHandle
+from temporalio.common import WorkflowIDReusePolicy
+from temporalio.exceptions import ActivityError, ApplicationError, FailureError
+
+# Temporal: the workflow sandbox imports a workflow's modules afresh for every run; modules passed
+# through are imported once and shared. `core` and `case` are deterministic (the boundary test
+# holds them to that), so they are shared.
+with workflow.unsafe.imports_passed_through():
+    from ventoux.case.definition import CaseInvalid, parse_case
+    from ventoux.case.runtime import CaseRefused, decide
+    from ventoux.case.state import (
+        Answered,
+        CaseState,
+        Command,
+        Completed,
+        Event,
+        Failed,
+        Opened,
+        Schedule,
+    )
+    from ventoux.core.catalog import Catalog
+    from ventoux.temporal.activities import OUTCOME
+    from ventoux.temporal.converter import require_exact_numbers
+    from ventoux.temporal.options import activity_options
+
+
+@dataclass
+class CaseStart:
+    """What a case opens with."""
+
+    definition: dict[str, Any]  # the case definition, as stored data
+    file: dict[str, Any]  # the case file's first values, each of its field's type
+    opened_by: str | None = None  # the person who opened it, as the API states; None: a system
+
+
+@dataclass
+class CaseReport:
+    """How a case is going: what `run_case` reports in memory, and the entries open."""
+
+    status: str  # open; closing: nothing new starts; closed (brief, D10)
+    waiting_for: list[str]  # open tasks and approvals, in the order they opened (brief, D24)
+    waiting_at: list[str]  # their entries, in the same order, to answer: `review#1`
+    needs_attention: list[str]  # failed step runs, each with its reason (brief, D17)
+    flags: list[str]  # what completed after the close was requested
+    history: list[str]  # what happened, one line each
+
+
+@dataclass
+class CaseAnswer:
+    """An answer, as a person sends it to a case."""
+
+    entry: str  # the entry it answers: `review#1` or `pay.approval#1`
+    outcome: str  # one of the entry's outcomes, such as `approve`
+    by: str  # who answered
+    # Their roles, as the Ventoux API states them; recorded in history with the signal, so a
+    # replay decides as the first run did, whatever their roles are now (brief, D22).
+    roles: list[str]
+    form: dict[str, Any] | None = None  # the values the outcome sets, if any
+
+
+class CaseWorkflow:
+    """The code of a case workflow. A deployment subclasses it to name its catalog and plans, and
+    registers the subclass (Temporal's SDK wants `@workflow.run` on the class it registers), as
+    the cases guide shows."""
+
+    catalog: ClassVar[Catalog]  # the contracts this deployment's cases may call
+    plans: ClassVar[Mapping[str, Any]] = {}  # the plans its plan steps may run, by reference
+
+    def __init__(self) -> None:
+        self.state = CaseState("")  # named when the case opens
+        self.inbox: list[Event] = []  # events not yet decided, in the order they came
+
+    # Temporal: a signal is a message into a running workflow, recorded in its history, so replay
+    # delivers it again at the same point.
+    @workflow.signal(name="answer")
+    def answer(self, sent: CaseAnswer) -> None:
+        form = None if sent.form is None else dict(sent.form)
+        self.inbox.append(Answered(sent.entry, sent.outcome, sent.by, frozenset(sent.roles), form))
+
+    # Temporal: a query reads a workflow's state without changing it, and isn't recorded.
+    @workflow.query(name="report")
+    def report(self) -> CaseReport:
+        state = self.state
+        attention = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
+        return CaseReport(
+            state.phase,
+            list(state.waiting.values()),
+            list(state.waiting),
+            attention,
+            list(state.flags),
+            list(state.history),
+        )
+
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+    async def drive(self, start: CaseStart) -> CaseReport:
+        """Open the case, then decide each event as it comes, until the case is closed."""
+        info = workflow.info()  # recorded in history, so the same on replay
+        # The case's name in its keys: its ID and its first run's, the same in every run of it
+        # (brief, D27).
+        self.state = CaseState(f"{info.workflow_id}/{info.first_execution_run_id}")
+        try:
+            case = parse_case(start.definition)
+            self.decide(case, Opened(start.file, start.opened_by))
+        except (CaseInvalid, CaseRefused) as refused:
+            # A case that can't open fails at once, saying why. Any other exception fails only the
+            # workflow task, which Temporal retries until fixed code is deployed (brief, D17).
+            kind = type(refused).__name__
+            raise ApplicationError(str(refused), type=kind, non_retryable=True) from None
+        while self.state.phase != "closed":
+            await workflow.wait_condition(lambda: bool(self.inbox))
+            self.decide(case, self.inbox.pop(0))
+        return self.report()
+
+    def decide(self, case: Any, event: Event) -> None:
+        """Decide `event`, then start what the case asks for."""
+        self.state, commands = decide(case, self.catalog, self.state, event)
+        for command in commands:
+            self.carry(command)
+
+    def carry(self, command: Command) -> None:
+        """Start the command; what it gives comes back to the inbox when it arrives."""
+        assert isinstance(command, Schedule)  # plan steps: slice 5
+        # asyncio: a task runs alongside the loop; Temporal's event loop runs it deterministically.
+        asyncio.create_task(self.run_activity(command))
+
+    async def run_activity(self, command: Schedule) -> None:
+        """Run the activity, retried and timed out as its contract says (brief, D17), and put
+        what happened in the inbox: its output, a declared outcome, or a failure."""
+        contract = self.catalog.get(command.activity)
+        try:
+            # Temporal: the result is recorded in history; on replay it is read back, never
+            # called again.
+            output: dict[str, Any] = await workflow.execute_activity(
+                command.activity, command.inputs, **activity_options(contract), result_type=dict
+            )
+        except ActivityError as error:
+            cause = error.cause
+            if isinstance(cause, ApplicationError) and cause.type == OUTCOME:
+                self.inbox.append(Completed(command.entry, {}, cause.message))
+                return
+            said = cause.message if isinstance(cause, FailureError) else str(error)
+            self.inbox.append(Failed(command.entry, f"{command.activity} failed: {said}"))
+            return
+        self.inbox.append(Completed(command.entry, output))
+
+
+async def start_case(
+    client: Client,
+    workflow: type[CaseWorkflow],
+    definition: dict[str, Any],
+    file: Mapping[str, Any],
+    id: str,
+    task_queue: str,
+    opened_by: str | None = None,
+) -> WorkflowHandle[CaseWorkflow, CaseReport]:
+    """Open a case of `definition` with `file`, as a run of `workflow`. `id` is the case
+    (`refund-A-1001`): a second case with the same ID is refused (brief, D27)."""
+    require_exact_numbers(client)
+    start = CaseStart(definition, dict(file), opened_by)
+    await client.start_workflow(
+        workflow.run,
+        start,
+        id=id,
+        task_queue=task_queue,
+        id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+    )
+    return case_handle(client, workflow, id)
+
+
+def case_handle(
+    client: Client, workflow: type[CaseWorkflow], id: str
+) -> WorkflowHandle[CaseWorkflow, CaseReport]:
+    """The case `id`, by its ID alone, so it always reaches its latest run (brief, D27)."""
+    return client.get_workflow_handle_for(workflow.run, id)
+
+
+async def answer(
+    case: WorkflowHandle[CaseWorkflow, CaseReport],
+    entry: str,
+    outcome: str,
+    by: str,
+    roles: list[str],
+    form: Mapping[str, Any] | None = None,
+) -> None:
+    """Answer the open `entry` (`review#1`, as `report` shows it in `waiting_at`) with `outcome`,
+    as the person `by`, who has `roles`. The caller vouches for who `by` is and their roles: only
+    the Ventoux API may send answers (brief, D19)."""
+    sent = CaseAnswer(entry, outcome, by, sorted(roles), None if form is None else dict(form))
+    await case.signal(CaseWorkflow.answer, sent)
+
+
+async def report(case: WorkflowHandle[CaseWorkflow, CaseReport]) -> CaseReport:
+    """How the case is going: what it waits for, and its history so far."""
+    return await case.query(CaseWorkflow.report)

@@ -11,7 +11,6 @@ from datetime import timedelta
 from typing import Any, ClassVar
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError, FailureError
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh for every run, to keep runs
@@ -31,6 +30,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.core.plan import PlanInvalid, parse_plan
     from ventoux.core.provenance import sourced
     from ventoux.temporal.activities import OUTCOME
+    from ventoux.temporal.options import activity_options
 
 
 # What each unit of a plan's duration (`48h`) is, as a Temporal timer reads it.
@@ -181,16 +181,7 @@ class PlanWorkflow:
         # again.
         try:
             output: dict[str, Any] = await workflow.execute_activity(
-                reference,
-                inputs,
-                start_to_close_timeout=timedelta(seconds=contract.timeouts.start_to_close),
-                schedule_to_start_timeout=timedelta(seconds=contract.timeouts.schedule_to_start),
-                retry_policy=RetryPolicy(
-                    maximum_attempts=contract.retry.maximum_attempts,
-                    initial_interval=timedelta(seconds=contract.retry.initial_interval),
-                    backoff_coefficient=contract.retry.backoff_coefficient,
-                ),
-                result_type=dict,
+                reference, inputs, **activity_options(contract), result_type=dict
             )
         except ActivityError as error:
             # Past its retries: the interpreter stops the step (brief, D17), and its reason says

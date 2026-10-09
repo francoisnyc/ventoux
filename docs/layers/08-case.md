@@ -472,7 +472,7 @@ retried again, a declared outcome while closing).
 ## 8c. Cases on Temporal
 
 Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); the six points
-decided while drafting confirmed the same day; slices 0–1 built.
+decided while drafting confirmed the same day; slices 0–2 built.
 
 User-facing description, written first: `docs/guides/cases.md`, "Plan steps" and "Running a case
 on Temporal". Decisions: brief D27 (design question 18) and D28.
@@ -645,6 +645,14 @@ Each starts with its negative test, seen failing for the right reason.
   A case of proposed steps needs `stays_open` (8a's carried catch), so the test declares it.
 - **`run_plan`'s scripted wait moved to `scripted` in `testing.py`,** shared by plan runs and plan
   steps, rather than copied.
+- **The case workflow and its client share one file,** `temporal/cases.py`, as the note planned;
+  the activity options moved to `temporal/options.py`, and `PlanWorkflow` uses them too
+  (slice 2). Until slice 5, a plan step reaching the case workflow is a bug, not a refusal: it
+  fails the workflow task, which waits for the code.
+- **An activity's failure reads as in memory:** `payments.refund@2 failed: <what it said>`, so
+  the two drivers record the same line.
+- **The client addresses a case by its ID alone** (`case_handle`), from the first call on, not
+  only after a switch: `start_case` returns such a handle.
 - **The outcome of a plan step is tagged with the plan:** `settle.outcome` from
   `system:refund-order@1`, as an activity's is tagged with its contract (choice 5 in drafting).
 
@@ -657,7 +665,9 @@ the pull request is opened. `C` is `tests/test_case.py`, `P` `tests/test_plan_st
 three that passed when written, the code already there, and were seen failing with it removed: a
 stopped plan failing the step (the runner's `stopped` branch), inputs keeping their sources (the
 sources laundered to `system:opener`), and a plan ending done or failed (the check removed). The
-plan the deployment lacks first failed on the missing `plans=` seam.
+plan the deployment lacks first failed on the missing `plans=` seam. On Temporal: a refused
+opening was seen hanging until the test's bound with its conversion removed, and a second case
+opening under the same ID with Temporal's default reuse policy.
 
 | Promise | Test |
 |---|---|

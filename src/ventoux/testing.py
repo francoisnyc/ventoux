@@ -34,6 +34,7 @@ from ventoux.core.interpreter import Answer, Outcome, PlanRun, RunRefused, Wait,
 from ventoux.core.plan import PlanInvalid, parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
+from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 
 __all__ = [
@@ -41,6 +42,7 @@ __all__ = [
     "AnswerRefused",
     "CaseRefused",
     "CloseRefused",
+    "DevelopmentCases",
     "DevelopmentPlans",
     "InputRefused",
     "Outcome",
@@ -188,6 +190,17 @@ class DevelopmentPlans(PlanWorkflow):
     @workflow.run
     async def run(self, start: PlanStart) -> RunReport:
         return await self.interpret(start)
+
+
+# Temporal: the development case workflow, for tests and the development worker: the development
+# catalog, and no plans (a test gives its own).
+@workflow.defn(name="ventoux.case")
+class DevelopmentCases(CaseWorkflow):
+    catalog = CATALOG
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
 
 
 def load_definition(path: Path) -> dict[str, Any]:
