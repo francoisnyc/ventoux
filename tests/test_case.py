@@ -13,7 +13,10 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import Answered, CaseState, Opened
 from ventoux.testing import (
+    CATALOG,
     AnswerRefused,
     CaseRefused,
     InputRefused,
@@ -737,3 +740,28 @@ def test_the_person_who_proposed_a_step_cannot_approve_it() -> None:
         )
     ]
     assert paid.waiting_for == ["approval of pay by support-lead"]
+
+
+# === Layer 8b ===
+
+# --- Slice 0: decide never changes the state passed in (carried from 8a) ---
+
+
+def test_decide_never_changes_the_state_passed_in() -> None:
+    # A driver keeps the state it had if an event is refused part-way, and on Temporal (8c) a
+    # refused answer is recorded and the case runs on: `decide` works on its own copy.
+    case = parse_case(REFUND)
+    opened, _ = decide(
+        case, CATALOG, CaseState("t"), Opened({"order_id": "o", "amount": Decimal(250)}, None)
+    )
+    before = copy.deepcopy(opened)
+    answer = Answered(
+        "review", "approve", "ana", frozenset({"support"}), {"approved_amount": Decimal(250)}
+    )
+    after, _ = decide(case, CATALOG, opened, answer)
+    assert opened == before
+    assert after != before
+    refused = Answered("review", "approve", "eve", frozenset(), {"approved_amount": Decimal(250)})
+    with pytest.raises(AnswerRefused):
+        decide(case, CATALOG, opened, refused)
+    assert opened == before
