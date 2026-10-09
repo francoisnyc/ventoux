@@ -472,7 +472,7 @@ retried again, a declared outcome while closing).
 ## 8c. Cases on Temporal
 
 Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); the six points
-decided while drafting confirmed the same day; slices 0–3 built.
+decided while drafting confirmed the same day; slices 0–4 built.
 
 User-facing description, written first: `docs/guides/cases.md`, "Plan steps" and "Running a case
 on Temporal". Decisions: brief D27 (design question 18) and D28.
@@ -658,6 +658,10 @@ Each starts with its negative test, seen failing for the right reason.
 - **An answer naming a step is refused in the loop, not in the signal handler,** so its line
   lands in the history in arrival order, like every other refusal; its example names the entry
   open for that step, if any (`such as review#1`).
+- **A test of a step that needs attention moves time on itself** (slice 4). Temporal's
+  time-skipping server skips time only while a client waits on a workflow's result; a plan
+  stops, so layer 6's test waited on it, but a case that needs attention never ends. Those tests
+  call the test environment's `sleep` between reports, past the contract's backoff.
 - **The outcome of a plan step is tagged with the plan:** `settle.outcome` from
   `system:refund-order@1`, as an activity's is tagged with its contract (choice 5 in drafting).
 
@@ -676,7 +680,10 @@ opening under the same ID with Temporal's default reuse policy. A double click, 
 refusals were recorded, left the case stuck (its workflow task failing) until the test's bound;
 an early click then passed as written, on slice 0's wording and the same recording; refused
 proposals, retries and closes passed as written too, and were seen stuck with only
-`AnswerRefused` recorded.
+`AnswerRefused` recorded. Slice 4's activity code came with slice 2, so its tests passed as
+written; seen failing with Temporal's default retry policy in place of the contract's (the
+payment retried forever, never needing attention), and with the declared-outcome branch removed
+(the declined refund never completed).
 
 | Promise | Test |
 |---|---|
