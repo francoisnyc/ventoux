@@ -19,6 +19,7 @@ from ventoux.testing import (
     CATALOG,
     AnswerRefused,
     CaseRefused,
+    Outcome,
     ProposalRefused,
     load_definition,
     propose,
@@ -817,3 +818,92 @@ def test_other_steps_go_on_while_one_needs_attention() -> None:
     assert run.reached("check_documents")
     assert run.needs_attention == ["pay#1: payments.refund@2 failed: provider unreachable"]
     assert not run.closed
+
+
+# --- Slice 2: an activity's outcome ---
+
+
+def gives(outcome: str) -> Any:
+    """A fake refund that gives the outcome `outcome`, as a provider would."""
+
+    def refund_giving(inputs: dict[str, Any]) -> dict[str, Any]:
+        raise Outcome(outcome)
+
+    return refund_giving
+
+
+def with_call_customer() -> dict[str, Any]:
+    """The refund, with the guide's step reacting to a declined refund, and a `paid` milestone."""
+    definition = refund()
+    definition["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["steps"]["call_customer"] = {
+        "kind": "task",
+        "display": {"title": "Call the customer about the declined refund"},
+        "roles": ["support"],
+        "requires": ["pay"],
+        "when": {"==": [{"var": "pay.outcome"}, "declined"]},
+        "outcomes": {"called": {"display": {"title": "Customer called"}}},
+    }
+    return definition
+
+
+def test_an_outcome_the_contract_does_not_declare_fails_the_step() -> None:
+    # Fail closed: never read as `done`, never ignored (brief, D17).
+    run = run_case(
+        REFUND,
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=PEOPLE,
+        activities={"payments.refund@2": gives("bounced")},
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: payments.refund@2 gave the outcome bounced, which its contract doesn't "
+            "declare: its outcomes are declined"
+        )
+    ]
+
+
+def test_an_output_the_contract_does_not_declare_fails_the_step() -> None:
+    run = run_case(
+        REFUND,
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=PEOPLE,
+        activities={"payments.refund@2": lambda inputs: {"refund": "r-1"}},
+    )
+    [failed] = run.needs_attention
+    assert failed.startswith(
+        "pay#1: payments.refund@2 gave an output its contract doesn't declare: refund_id:"
+    )
+
+
+def test_a_declined_refund_is_an_outcome_a_step_reacts_to() -> None:
+    run = run_case(
+        with_call_customer(),
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=PEOPLE,
+        activities={"payments.refund@2": gives("declined")},
+    )
+    assert "pay#1 gave declined" in run.history
+    assert run.waiting_for == ["call_customer by support"]
+    assert "reached paid" not in run.history  # milestones come only with `done`
+    assert run.needs_attention == []
+
+
+def test_an_outcome_is_tagged_with_the_contract_that_declares_it() -> None:
+    definition = refund()
+    definition["steps"]["letter"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter about the refund"},
+        "activity": "letters.draft@2",
+        "requires": ["pay"],
+        "inputs": {"to_customer": {"var": "order_id"}, "template": {"var": "pay.outcome"}},
+    }
+    run = run_case(definition, file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE)
+    assert (
+        "scheduled letter#1: letters.draft@2 (to_customer from system:opener; template from "
+        "system:payments.refund@2), key memory/letter#1"
+    ) in run.history

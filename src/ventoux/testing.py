@@ -19,7 +19,7 @@ from ventoux.case.state import Answered, Event, Opened, Proposed
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
-from ventoux.core.interpreter import Answer, PlanRun, interpret
+from ventoux.core.interpreter import Answer, Outcome, PlanRun, interpret
 from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
@@ -31,6 +31,7 @@ __all__ = [
     "CaseRefused",
     "DevelopmentPlans",
     "InputRefused",
+    "Outcome",
     "ProposalRefused",
     "StepStopped",
     "load_definition",

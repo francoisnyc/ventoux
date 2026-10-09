@@ -13,6 +13,7 @@ from ventoux.case.definition import CaseDefinition
 from ventoux.case.runtime import decide
 from ventoux.case.state import CaseState, Completed, Event, Failed, Schedule
 from ventoux.core.catalog import Catalog
+from ventoux.core.interpreter import Outcome
 
 Activity = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -76,6 +77,9 @@ def outcome_of(command: Schedule, activity: Activity) -> Completed | Failed:
     error is a failure after them (Temporal retries with the contract's policy, layer 8c)."""
     try:
         return Completed(command.entry, activity(command.inputs))
+    except Outcome as outcome:
+        # A business failure is an outcome; whether the contract declares it, `decide` checks.
+        return Completed(command.entry, {}, outcome.name)
     # Any error, whatever its kind: none is ignored; a person looks at it (brief, D17).
     except Exception as error:  # noqa: BLE001 (catching every kind is the rule here)
         return Failed(command.entry, f"{command.activity} failed: {error}")

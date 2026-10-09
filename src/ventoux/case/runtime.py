@@ -10,6 +10,8 @@ import copy
 from collections.abc import Mapping
 from decimal import Decimal
 
+from pydantic import ValidationError
+
 from ventoux.case.admission import (
     ProposalRefused,
     StepStopped,
@@ -36,8 +38,9 @@ from ventoux.case.state import (
     StepRun,
 )
 from ventoux.core.approval import inputs_digest
-from ventoux.core.before_activity import InputRefused, checked_inputs
+from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import ExpressionError, render
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
@@ -48,6 +51,8 @@ from ventoux.core.roles import role_that_counts
 
 # Where the case file's first values came from when a system opened the case (brief, D12).
 OPENER = "system:opener"
+# The outcome of an activity that did what it was asked.
+DONE = "done"
 
 
 class CaseRefused(Exception):
@@ -73,7 +78,7 @@ def decide(
     elif isinstance(event, Failed):
         failed(state, event)
     else:
-        complete(case, state, event)
+        complete(case, catalog, state, event)
     admit(case, catalog, state, commands)
     # A case closes when nothing is left to do (brief, D10).
     if not state.closed and not pending(state):
@@ -258,13 +263,49 @@ def answer_approval(
     state.history.append(f"{entry} won't run: {event.by} rejected {approval.entry}")
 
 
-def complete(case: CaseDefinition, state: CaseState, event: Completed) -> None:
-    """A scheduled activity finished. Its output is recorded here, not in the case file."""
+def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Completed) -> None:
+    """A scheduled activity finished: its outcome lands in the case file, tagged with the contract
+    that declares it. Its output is recorded here, not in the case file (layer 8d)."""
     run = next(run for run in state.runs if run.entry == event.entry)
+    step = case.steps[run.step]
+    assert isinstance(step, ActivityStep)  # only an activity is scheduled
+    contract = catalog.get(step.activity)
+    problem = outcome_problem(contract, event)
+    if problem is not None:
+        run.status, run.reason = "failed", problem
+        state.history.append(f"{run.entry} failed: {problem}")
+        return
     run.status = "done"
+    state.values[f"{run.step}.outcome"] = event.outcome
+    # Trusted: the contract, owned by the platform team, declares the outcomes (brief, D12).
+    state.sources[f"{run.step}.outcome"] = frozenset({f"system:{contract.reference}"})
+    if event.outcome != DONE:
+        state.history.append(f"{run.entry} gave {event.outcome}")
+        return  # a step's milestones are reached only when it is done with `done`
     giving = f", giving {listed(sorted(event.output))}" if event.output else ""
     state.history.append(f"{run.entry} done{giving}")
-    reach(state, case.steps[run.step].reaches)
+    reach(state, step.reaches)
+
+
+def outcome_problem(contract: ActivityContract, event: Completed) -> str | None:
+    """Why what the activity gave can't be taken, or None: an outcome its contract doesn't
+    declare, or an output its contract doesn't describe. Fail closed: neither is read as done."""
+    if event.outcome != DONE:
+        if event.outcome in contract.outcomes:
+            return None
+        declared = ", ".join(contract.outcomes) or "none"
+        return (
+            f"{contract.reference} gave the outcome {event.outcome}, which its contract doesn't "
+            f"declare: its outcomes are {declared}"
+        )
+    try:
+        # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
+        contract.output.model_validate(event.output)
+    except ValidationError as error:
+        return (
+            f"{contract.reference} gave an output its contract doesn't declare: {one_line(error)}"
+        )
+    return None
 
 
 def failed(state: CaseState, event: Failed) -> None:

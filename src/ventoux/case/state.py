@@ -91,10 +91,12 @@ class Proposed:
 
 @dataclass(frozen=True)
 class Completed:
-    """A scheduled activity finished: its run, and what it gave."""
+    """A scheduled activity finished: its run, what it gave, and with which outcome: `done`, or
+    one its contract declares, such as `declined` (brief, D17)."""
 
     entry: str
     output: Mapping[str, object]
+    outcome: str = "done"
 
 
 @dataclass(frozen=True)
