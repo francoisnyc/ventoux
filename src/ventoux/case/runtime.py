@@ -493,8 +493,8 @@ def next_entry(state: CaseState, name: str) -> str:
 
 
 def pending(state: CaseState) -> bool:
-    """Whether anything is left to do: a task open, an activity running, a step failed, an
-    approval asked or given and not yet spent (brief, D10, D17)."""
+    """Whether anything is left to do (brief, D10): a task open, an activity running, an approval
+    asked or given and not yet spent, or a step failed, which waits for a person (brief, D17)."""
     unfinished = any(run.status in ("open", "running", "failed", "retrying") for run in state.runs)
     return unfinished or bool(state.approvals) or bool(state.given)
 

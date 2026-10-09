@@ -39,8 +39,9 @@ class Catalog:
 
     def register_role(self, name: str, approves: str | None = None, operates: bool = False) -> None:
         """Let waits and approvals name the role `name`, which may approve activities up to the
-        risk `approves` (none by default), and, if `operates`, act on a case's failed steps.
-        Registered by the platform team, like labels, so a typo is caught (brief, D22, D26)."""
+        risk `approves` (none by default), and, if `operates`, act on a case's failed steps
+        (brief, D26). Registered by the platform team, like labels, so a typo is caught
+        (brief, D22)."""
         checked_role(name, approves)
         self._roles[name] = approves
         if operates:
