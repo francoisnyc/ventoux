@@ -1,31 +1,31 @@
 {
   "case": "refund",
-  "title": "Customer refund",
+  "display": {"title": "Customer refund"},
   "fields": {
-    "order_id": {"type": "reference", "system": "orders", "title": "Order"},
-    "amount": {"type": "number", "title": "Amount requested"},
-    "approved_amount": {"type": "number", "title": "Amount approved"}
+    "order_id": {"type": "reference", "system": "orders", "display": {"title": "Order"}},
+    "amount": {"type": "number", "display": {"title": "Amount requested"}},
+    "approved_amount": {"type": "number", "display": {"title": "Amount approved"}}
   },
   "steps": {
     "review": {
       "kind": "task",
-      "title": "Review the refund request",
+      "display": {"title": "Review the refund request"},
       "roles": ["support"],
       "outcomes": {
-        "approve": {"title": "Approve the refund", "sets": ["approved_amount"]},
-        "reject": {"title": "Reject the refund"}
+        "approve": {"display": {"title": "Approve the refund"}, "sets": ["approved_amount"]},
+        "reject": {"display": {"title": "Reject the refund"}}
       }
     },
     "pay": {
       "kind": "activity",
-      "title": "Refund the customer",
+      "display": {"title": "Refund the customer"},
       "activity": "payments.refund@2",
       "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
       "when": {"==": [{"var": "review.outcome"}, "approve"]},
       "approval": {
         "when": {">": [{"var": "approved_amount"}, 100]},
         "roles": ["support-lead"],
-        "reason": "Refunds over 100 need a team lead"
+        "display": {"reason": "Refunds over 100 need a team lead"}
       }
     }
   },

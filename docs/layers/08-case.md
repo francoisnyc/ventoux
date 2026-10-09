@@ -1,7 +1,7 @@
 # Layer 8: the case layer
 
-Status: split and 8a's seven choices agreed in the session, 2026-10-09; 8a drafted for review
-(the points under "Decided while drafting" are open until you confirm them). Nothing built yet.
+Status: split and 8a's seven choices agreed in the session, 2026-10-09; the eleven points
+decided while drafting confirmed the same day; 8a being built.
 
 ## What this layer is for
 
@@ -56,9 +56,9 @@ brief D24 (design question 14) and D25.
    start; it is withdrawn when the step stops being admitted or a value the step reads changes, and
    asked again with a new entry; an answer to the withdrawn entry is refused.
 
-### Decided while drafting, for your review
+### Decided while drafting, confirmed in the session
 
-Each is a choice the agreed design left open; my recommendation is written as the rule.
+Each is a choice the agreed design left open, written as the rule we confirmed.
 
 1. **Titles live in `display` blocks** (brief, D5), as in plans: `"display": {"title": ...}` on the
    case, each field, step and outcome; an approval's reason is `"display": {"reason": ...}`.

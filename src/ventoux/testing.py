@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel
 from temporalio import workflow
 
+from ventoux.case.definition import parse_case
 from ventoux.case.runner import Activity, AnswerRefused, Run, run
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
@@ -164,9 +165,8 @@ class DevelopmentPlans(PlanWorkflow):
 
 def load_definition(path: Path) -> dict[str, Any]:
     """Read a case definition from its JSON file (I/O, so here and not in `case`)."""
-    # TRACER: a case definition is checked by nothing before it runs until layer 8 (its schema);
-    # layer 10 adds provenance and deadlocks. Layer 3 validates plans, not case definitions.
-    # Numbers as exact decimals, never binary floats (brief, D20).
+    # Numbers as exact decimals, never binary floats (brief, D20). Its shape is checked when a
+    # case runs (`parse_case`); case validation, provenance and deadlocks, is layer 10's.
     definition: dict[str, Any] = json.loads(path.read_text(), parse_float=Decimal)
     return definition
 
@@ -180,6 +180,7 @@ def run_case(
     """Open a case with `file`, play the scripted `answers`, and report where it ended. `people`
     gives each person their roles, as the Ventoux API states them with every answer (brief, D22);
     someone not listed has none."""
+    parse_case(definition)  # fail closed: a definition that can't be read runs nothing
     return run(definition, file, answers, CATALOG, FAKES, people)
 
 
