@@ -584,6 +584,24 @@ and record the key points. A question is closed once you can explain the answer 
   a fixed baseline. So (b) is `payments.refund@2`, CI's hash check would refuse it under `@1`, and
   packages adopt `@2` through a release. Rule: what the activity promises is the contract; where
   it runs is the binding.
+- Retrieval (layer 8c warm-up), with a twist: `payments.refund@2` allows 5 attempts; (b1) the
+  platform team wants 8, (b2) the refund case wants at most 3. Answer: "catalog of activities,
+  places and contracts; contracts are on activities' inputs; a binding defines how workers
+  connect to the engine. Attempts are defined in the contract. Yes, it's a new contract version."
+  Discussion: the retry half came back from memory this time, after being the trap twice
+  (questions 9 and 28): attempts are in the contract (D17), so 8 attempts is
+  `payments.refund@3`, and packages adopt it through a release. Three parts didn't come back.
+  - **Catalog:** it lists *contracts* (and the roles and labels the platform team registers), not
+    places: where an activity runs is the binding's.
+  - **Contract:** inputs are only the start: the outputs, input policies, risk, effect, retry
+    policy and timeouts, idempotency and outcomes are all in it, and it never changes (a change is
+    a new `@N`).
+  - **Binding:** close: per environment, which task queue serves a reference. It changes when
+    operations move it, with no version and no release.
+  - **(b2), the case's 3 attempts:** not a new contract version. A case may make a contract's
+    retry policy *stricter*, never looser (D17, non-negotiables), so it is written in the case
+    definition, and changes the case's behaviour, so the case package gets a new release. The
+    contract stays `@2`. The examples and the "changes when…" column didn't come back either.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
 
 ## 29. Layer 1: why `@1` and not `@1.0`
