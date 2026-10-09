@@ -35,6 +35,10 @@ CaseName = Annotated[str, matching(r"[a-z][a-z0-9-]*", 'a case name looks like "
 # A field, step or milestone: no `.`, so `review.outcome` is never a field's name.
 Name = Annotated[str, matching(r"[a-z][a-z0-9_]*", 'a name looks like "approved_amount"')]
 Roles = Annotated[tuple[RoleName, ...], AfterValidator(some_roles)]
+# A plan, by its name and version: `refund-order@1` (brief, D28).
+PlanReference = Annotated[
+    str, matching(r"[a-z][a-z0-9-]*@[1-9][0-9]*", 'a plan reference looks like "refund-order@1"')
+]
 
 
 class Shape(BaseModel):
@@ -126,6 +130,24 @@ class ActivityStep(Step):
     approval: Approval | None = None
 
 
+class PlanStep(Step):
+    """A plan the deployment supplies, run as one step: its fields given from the case file
+    (brief, D28). A case references a plan, never defines one."""
+
+    kind: Literal["plan"]
+    plan: PlanReference
+    inputs: dict[Name, PlanExpression] = {}  # each of the plan's fields, read from the case file
+
+    # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
+    @model_validator(mode="before")
+    @classmethod
+    def no_approval(cls, data: Any) -> Any:
+        """A plan step has no approval: the plan carries its own, checked when it is read."""
+        if isinstance(data, dict) and "approval" in data:
+            raise ValueError("a plan step has no approval: its plan asks for its own")
+        return data
+
+
 def kind_of(step: object) -> str | None:
     """The kind a step says it is, which picks its shape; None if it says none."""
     if isinstance(step, dict):
@@ -135,7 +157,9 @@ def kind_of(step: object) -> str | None:
 
 
 type AnyStep = Annotated[
-    Annotated[TaskStep, Tag("task step")] | Annotated[ActivityStep, Tag("activity step")],
+    Annotated[TaskStep, Tag("task step")]
+    | Annotated[ActivityStep, Tag("activity step")]
+    | Annotated[PlanStep, Tag("plan step")],
     Discriminator(kind_of),
 ]
 
@@ -186,7 +210,9 @@ class CaseDefinition(Shape):
         return self
 
 
-def step_problems(path: str, step: TaskStep | ActivityStep, case: CaseDefinition) -> list[str]:
+def step_problems(
+    path: str, step: TaskStep | ActivityStep | PlanStep, case: CaseDefinition
+) -> list[str]:
     """What `step` names that `case` doesn't declare, and whether anyone can start it."""
     problems = [
         f"{path}.requires: {name} is neither a milestone nor a step"
@@ -233,7 +259,7 @@ def parse_case(data: object) -> CaseDefinition:
         raise CaseInvalid("\n".join(problem(e) for e in error.errors())) from None
 
 
-STEP_KINDS = "a task or an activity"
+STEP_KINDS = "a task, an activity or a plan"
 
 
 def problem(error: Any) -> str:

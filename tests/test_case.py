@@ -104,7 +104,10 @@ def changed(change: str) -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ("kind", "steps.pay.kind: a step is a task or an activity, and this one is 'script'"),
+        (
+            "kind",
+            "steps.pay.kind: a step is a task, an activity or a plan, and this one is 'script'",
+        ),
         ("sequence", "sequence: pya is not a step"),
         ("requires", "steps.pay.requires: reviwe is neither a milestone nor a step"),
         ("milestone", "milestones.review: a milestone is not named like a step"),

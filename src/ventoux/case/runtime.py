@@ -25,12 +25,13 @@ from ventoux.case.admission import (
 from ventoux.case.answers import AnswerRefused, judge_approval, judge_task
 from ventoux.case.approvals import ask, follow, lapsed, needs_approval
 from ventoux.case.closing import begin_closing, close_when_reached, refuse_to_close, settle
-from ventoux.case.definition import ActivityStep, CaseDefinition, TaskStep
+from ventoux.case.definition import ActivityStep, CaseDefinition, PlanStep, TaskStep
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     Answered,
     CaseState,
     CloseAsked,
+    Command,
     Completed,
     Event,
     Failed,
@@ -40,24 +41,27 @@ from ventoux.case.state import (
     Proposed,
     Retried,
     Schedule,
+    StartPlan,
     StepRun,
 )
 from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
-from ventoux.core.expressions import ExpressionError, render
+from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
-from ventoux.core.provenance import provenance
+from ventoux.core.provenance import NoSources, Sourced, provenance
 from ventoux.core.roles import role_that_counts
 
 # Where the case file's first values came from when a system opened the case (brief, D12).
 OPENER = "system:opener"
-# The outcome of an activity that did what it was asked.
+# The outcome of an activity that did what it was asked, or of a plan that succeeded.
 DONE = "done"
+# The outcome of a plan step whose plan ended in a failed final state (brief, D28).
+FAILED = "failed"
 
 
 class CaseRefused(Exception):
@@ -66,12 +70,12 @@ class CaseRefused(Exception):
 
 def decide(
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: Event
-) -> tuple[CaseState, list[Schedule]]:
+) -> tuple[CaseState, list[Command]]:
     """The case's state after `event`, and the activities to schedule. A refused event raises
     (`AnswerRefused`, `ProposalRefused`, `CaseRefused`) and changes nothing; a step the engine
     can't run fails, and the case needs attention (brief, D17)."""
     state = copy.deepcopy(state)  # the state passed in is never changed
-    commands: list[Schedule] = []
+    commands: list[Command] = []
     if isinstance(event, Opened):
         open_case(case, state, event)
     elif isinstance(event, Answered):
@@ -196,7 +200,7 @@ def propose(
     catalog: Catalog,
     state: CaseState,
     event: Proposed,
-    commands: list[Schedule],
+    commands: list[Command],
 ) -> None:
     """Start the step a person proposes, if they may and admission accepts it; or
     `ProposalRefused`. The engine decides, a person only asks."""
@@ -291,16 +295,20 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     that declares it. Its output is recorded here, not in the case file (layer 8d)."""
     run = next(run for run in state.runs if run.entry == event.entry)
     step = case.steps[run.step]
-    assert isinstance(step, ActivityStep)  # only an activity is scheduled
-    contract = catalog.get(step.activity)
-    problem = outcome_problem(contract, event)
+    assert not isinstance(step, TaskStep)  # only an activity or a plan is started and completes
+    if isinstance(step, PlanStep):
+        declares, problem = step.plan, plan_outcome_problem(step, event)
+    else:
+        contract = catalog.get(step.activity)
+        declares, problem = contract.reference, outcome_problem(contract, event)
     if problem is not None:
         failed(state, Failed(event.entry, problem))
         return
     run.status = "done"
     state.values[f"{run.step}.outcome"] = event.outcome
-    # Trusted: the contract, owned by the platform team, declares the outcomes (brief, D12).
-    state.sources[f"{run.step}.outcome"] = frozenset({f"system:{contract.reference}"})
+    # Trusted: the contract, owned by the platform team, or the reviewed plan, declares the
+    # outcomes (brief, D12).
+    state.sources[f"{run.step}.outcome"] = frozenset({f"system:{declares}"})
     if event.outcome != DONE:
         state.history.append(f"{run.entry} gave {event.outcome}")
         if state.phase == "closing":
@@ -311,6 +319,14 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     reach(state, step.reaches)
     if state.phase == "closing":
         flag(state, f"{run.entry} completed after the close was requested")
+
+
+def plan_outcome_problem(step: PlanStep, event: Completed) -> str | None:
+    """Why how the plan ended can't be taken, or None: a plan ends done (it succeeded) or
+    `failed` (a failed final state), and gives no output to the case (brief, D28)."""
+    if event.outcome not in (DONE, FAILED):
+        return f"{step.plan} ended with {event.outcome}: a plan ends done or failed"
+    return None
 
 
 def outcome_problem(contract: ActivityContract, event: Completed) -> str | None:
@@ -406,7 +422,7 @@ def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
 
 
 def admit(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Schedule]
+    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command]
 ) -> None:
     """Start every step that may start now, until no more can: no position, only admission."""
     required = requirements(case)
@@ -431,7 +447,7 @@ def admit(
             started = True
 
 
-def free_to_start(state: CaseState, name: str, step: TaskStep | ActivityStep) -> bool:
+def free_to_start(state: CaseState, name: str, step: TaskStep | ActivityStep | PlanStep) -> bool:
     """Whether the step may start by itself: it isn't waiting for its approval, and it starts by
     itself and hasn't started before; or its approval was just given."""
     if name in state.approvals:
@@ -449,10 +465,13 @@ def start(
     catalog: Catalog,
     state: CaseState,
     name: str,
-    step: TaskStep | ActivityStep,
-    commands: list[Schedule],
+    step: TaskStep | ActivityStep | PlanStep,
+    commands: list[Command],
 ) -> None:
-    """Open a task's run; ask for an activity's approval, or schedule the activity."""
+    """Open a task's run; start a plan; ask for an activity's approval, or schedule it."""
+    if isinstance(step, PlanStep):
+        start_plan(state, name, step, commands)
+        return
     if isinstance(step, TaskStep):
         entry = coming_run(state, name, "open").entry
         state.proposers.pop(name, None)  # a task has no approval: the proposed run has started
@@ -480,7 +499,7 @@ def schedule(
     name: str,
     step: ActivityStep,
     approved: GivenApproval | None,
-    commands: list[Schedule],
+    commands: list[Command],
 ) -> None:
     """Check the activity's inputs against the real sources (layer 5), then schedule it, with a
     key naming the case and the step run (brief, D17)."""
@@ -495,13 +514,49 @@ def schedule(
     inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key)
     coming_run(state, name, "running").approved = approved
     state.proposers.pop(name, None)  # the proposed run has started
-    origins = "; ".join(
-        f"{field} from {', '.join(sorted(provenance(expression, state.sources))) or 'the case'}"
-        for field, expression in step.inputs.items()
-    )
     keyed = f", key {key}" if contract.idempotency_key is not None else ""
-    state.history.append(f"scheduled {entry}: {contract.reference} ({origins}){keyed}")
+    state.history.append(
+        f"scheduled {entry}: {contract.reference} ({origins(step.inputs, state)}){keyed}"
+    )
     commands.append(Schedule(entry, contract.reference, inputs))
+
+
+def origins(inputs: Mapping[str, Expression], state: CaseState) -> str:
+    """Where each input's value came from, as the history says it: `amount from person:ana`."""
+    return "; ".join(
+        f"{field} from {', '.join(sorted(provenance(expression, state.sources))) or 'the case'}"
+        for field, expression in inputs.items()
+    )
+
+
+def start_plan(state: CaseState, name: str, step: PlanStep, commands: list[Command]) -> None:
+    """Start the step's plan with its fields, each with where its value came from, so the plan's
+    own checks see the real sources (brief, D28). The plan checks its fields when it starts."""
+    fields: dict[str, Sourced] = {}
+    for field, expression in step.inputs.items():
+        try:
+            fields[field] = Sourced(
+                evaluate(expression, state.values), provenance(expression, state.sources)
+            )
+        except (ExpressionError, NoSources) as error:
+            # Fail closed: a field that can't be read gets no default; the step fails.
+            raise InputRefused(f"{field} can't be evaluated: {error}") from None
+    run = coming_run(state, name, "running")
+    # Who may approve nothing in the plan crosses into it, or a plan step would be a way around
+    # them (brief, D25).
+    excluded: dict[str, str] = {}
+    if state.opened_by is not None:
+        excluded[state.opened_by] = (
+            f"{state.opened_by} opened the case, so cannot approve its steps"
+        )
+    proposer = state.proposers.pop(name, None)  # the proposed run has started
+    if proposer is not None:
+        excluded.setdefault(proposer, f"{proposer} proposed {name}, so cannot approve it")
+    plan_run = f"{state.case}/{run.entry}"
+    state.history.append(
+        f"started {run.entry}: plan {step.plan} ({origins(step.inputs, state)}), run {plan_run}"
+    )
+    commands.append(StartPlan(run.entry, step.plan, fields, plan_run, excluded))
 
 
 def coming_run(

@@ -11,11 +11,20 @@ from typing import Any
 
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.runtime import decide
-from ventoux.case.state import CaseState, Completed, Event, Failed, Schedule
+from ventoux.case.state import CaseState, Completed, Event, Failed, Schedule, StartPlan
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome
 
 Activity = Callable[[dict[str, Any]], dict[str, Any]]
+# Runs a plan step's plan to its end: what it gave, as an event; or None while it waits for an
+# answer nobody has given, and the step keeps running. Given by the caller: running a plan is
+# `async` (layer 5), and `case` doesn't import `asyncio` (layer 6's boundary test).
+PlanRunner = Callable[[StartPlan], Completed | Failed | None]
+
+
+def no_plans(command: StartPlan) -> Failed:
+    """A deployment that supplies no plans: a plan step fails, and a person looks at it."""
+    return Failed(command.entry, f"no plan {command.plan} is available")
 
 
 @dataclass(frozen=True)
@@ -52,12 +61,13 @@ def run_case_in_memory(
     events: Iterable[Event | Finish],
     name: str = "memory",
     held: Iterable[str] = (),
+    plans: PlanRunner = no_plans,
 ) -> CaseRun:
     """Play `events` in order, the first opening the case; `name` names the case in its keys.
     The runs of the steps in `held` keep running until a `Finish` names them, so a test can
     close a case while an activity runs (brief, D10)."""
     state = CaseState(name)
-    driver = Driver(case, catalog, implementations, frozenset(held))
+    driver = Driver(case, catalog, implementations, frozenset(held), plans)
     for event in events:
         if isinstance(event, Finish):
             state = driver.carry(state, outcome_of(driver.held.pop(event.entry), driver.activity))
@@ -77,6 +87,7 @@ class Driver:
     catalog: Catalog
     implementations: Mapping[str, Activity]
     holding: frozenset[str]  # steps whose runs wait for a `Finish`
+    plans: PlanRunner  # runs a plan step's plan
     held: dict[str, Schedule] = field(default_factory=dict[str, Schedule])  # by entry
 
     def activity(self, command: Schedule) -> Activity:
@@ -90,7 +101,10 @@ class Driver:
         while queue:
             state, commands = decide(self.case, self.catalog, state, queue.pop(0))
             for command in commands:
-                if command.entry.split("#")[0] in self.holding:
+                if isinstance(command, StartPlan):
+                    if (ended := self.plans(command)) is not None:
+                        queue.append(ended)  # else it waits for an answer: the step runs on
+                elif command.entry.split("#")[0] in self.holding:
                     self.held[command.entry] = command  # it keeps running until finished
                 else:
                     queue.append(outcome_of(command, self.activity))
