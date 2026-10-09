@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any, NamedTuple
@@ -14,7 +14,7 @@ from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import parse_case
-from ventoux.case.memory import Activity, CaseRun, run_case_in_memory
+from ventoux.case.memory import Activity, CaseRun, Finish, run_case_in_memory
 from ventoux.case.runtime import CaseRefused
 from ventoux.case.state import Answered, CloseAsked, Event, Opened, Proposed, Retried
 from ventoux.core.before_activity import InputRefused
@@ -38,6 +38,7 @@ __all__ = [
     "RetryRefused",
     "StepStopped",
     "close",
+    "finish",
     "load_definition",
     "propose",
     "retry",
@@ -190,19 +191,24 @@ def load_definition(path: Path) -> dict[str, Any]:
 def run_case(
     definition: dict[str, Any],
     file: dict[str, Any],
-    answers: list[tuple[Any, ...]],
+    answers: Sequence[tuple[Any, ...] | Finish],
     people: Mapping[str, Iterable[str]],
     opened_by: str | None = None,
     activities: Mapping[str, Activity] = FAKES,
+    held: Iterable[str] = (),
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
     `people` gives each person their roles, as the Ventoux API states them with every answer
     (brief, D22); someone not listed has none. `opened_by` is the person who opened the case, if
-    a person did; otherwise a system did. `activities` replaces fake activities by reference."""
+    a person did; otherwise a system did. `activities` replaces fake activities by reference.
+    The runs of the steps in `held` keep running until the script says `finish(entry)`."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
-    events: list[Event] = [Opened(as_json(file), opened_by)]
+    events: list[Event | Finish] = [Opened(as_json(file), opened_by)]
     for item in answers:
+        if isinstance(item, Finish):
+            events.append(item)
+            continue
         if isinstance(item, Proposal):
             events.append(Proposed(item.step, item.by, frozenset(people.get(item.by, ()))))
             continue
@@ -216,7 +222,7 @@ def run_case(
         # The test plays the API: it states who answered and their roles.
         roles = frozenset(people.get(who, ()))
         events.append(Answered(entry, outcome, who, roles, as_json(form[0]) if form else None))
-    return run_case_in_memory(case, CATALOG, {**FAKES, **activities}, events)
+    return run_case_in_memory(case, CATALOG, {**FAKES, **activities}, events, held=held)
 
 
 class Proposal(NamedTuple):
@@ -243,6 +249,11 @@ class Close(NamedTuple):
 
     reason: str
     by: str
+
+
+def finish(entry: str) -> Finish:
+    """A script's step: let the held activity run `entry` finish now: `finish("pay#1")`."""
+    return Finish(entry)
 
 
 def close(reason: str, who: str) -> Close:

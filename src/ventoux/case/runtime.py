@@ -282,8 +282,7 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     contract = catalog.get(step.activity)
     problem = outcome_problem(contract, event)
     if problem is not None:
-        run.status, run.reason = "failed", problem
-        state.history.append(f"{run.entry} failed: {problem}")
+        failed(state, Failed(event.entry, problem))
         return
     run.status = "done"
     state.values[f"{run.step}.outcome"] = event.outcome
@@ -291,10 +290,14 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     state.sources[f"{run.step}.outcome"] = frozenset({f"system:{contract.reference}"})
     if event.outcome != DONE:
         state.history.append(f"{run.entry} gave {event.outcome}")
+        if state.phase == "closing":
+            flag(state, f"{run.entry} completed after the close was requested")
         return  # a step's milestones are reached only when it is done with `done`
     giving = f", giving {listed(sorted(event.output))}" if event.output else ""
     state.history.append(f"{run.entry} done{giving}")
     reach(state, step.reaches)
+    if state.phase == "closing":
+        flag(state, f"{run.entry} completed after the close was requested")
 
 
 def outcome_problem(contract: ActivityContract, event: Completed) -> str | None:
@@ -319,10 +322,20 @@ def outcome_problem(contract: ActivityContract, event: Completed) -> str | None:
 
 
 def failed(state: CaseState, event: Failed) -> None:
-    """A scheduled activity failed after its retries: its run fails, and waits for a person."""
+    """A scheduled activity failed after its retries: its run fails, and waits for a person. While
+    the case is closing, nobody will retry it: it is cancelled, and the case is flagged."""
     run = next(run for run in state.runs if run.entry == event.entry)
     run.status, run.reason = "failed", event.reason
     state.history.append(f"{run.entry} failed: {event.reason}")
+    if state.phase == "closing":
+        run.status = "cancelled"
+        flag(state, f"{run.entry} failed after the close was requested: {event.reason}")
+
+
+def flag(state: CaseState, why: str) -> None:
+    """Flag the case for a person: something happened that a close didn't stop (brief, D10)."""
+    state.flags.append(why)
+    state.history.append(f"flagged: {why}")
 
 
 def fail(state: CaseState, name: str, reason: str) -> None:

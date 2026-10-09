@@ -24,6 +24,7 @@ from ventoux.testing import (
     ProposalRefused,
     RetryRefused,
     close,
+    finish,
     load_definition,
     propose,
     retry,
@@ -1066,5 +1067,63 @@ def test_an_operator_closes_a_case_that_needs_attention() -> None:
         activities={"payments.refund@2": unreachable},
     )
     assert "cancelled pay#1: closed as abandoned by omar" in run.history
+    assert run.needs_attention == []
+    assert run.closed
+
+
+# --- Slice 5: closing, then closed ---
+
+PAY_HELD = [SMALL_REVIEW, close("duplicate", "ana")]  # pay#1 is running when Ana closes
+
+
+def test_while_closing_nothing_waits_and_nothing_starts() -> None:
+    closing = run_case(closable(), file=SMALL, answers=PAY_HELD, people=PEOPLE, held=["pay"])
+    assert closing.status == "closing"
+    assert closing.waiting_for == []
+    with pytest.raises(AnswerRefused, match="^the case is closing: nothing waits for an answer$"):
+        run_case(
+            closable(),
+            file=SMALL,
+            answers=[*PAY_HELD, ("review", "approve", "ana")],
+            people=PEOPLE,
+            held=["pay"],
+        )
+    with pytest.raises(ProposalRefused, match="^the case is closing: nothing starts$"):
+        run_case(
+            with_check_order() | {"close_reasons": closable()["close_reasons"]},
+            file=SMALL,
+            answers=[*PAY_HELD, propose("check_order", "ana")],
+            people=PEOPLE,
+            held=["pay"],
+        )
+
+
+def test_a_running_activity_finishes_and_the_closed_case_is_flagged() -> None:
+    # A payment can't be cut off halfway (brief, D10): it finishes, and a person decides.
+    run = run_case(
+        closable(), file=SMALL, answers=[*PAY_HELD, finish("pay#1")], people=PEOPLE, held=["pay"]
+    )
+    assert run.flags == ["pay#1 completed after the close was requested"]
+    assert run.history[-4:] == [
+        "ana closed the case as duplicate, as support",
+        "pay#1 done, giving refund_id",
+        "flagged: pay#1 completed after the close was requested",
+        "closed: duplicate, by ana",
+    ]
+    assert run.closed
+
+
+def test_an_activity_failing_while_closing_flags_the_case() -> None:
+    run = run_case(
+        closable(),
+        file=SMALL,
+        answers=[*PAY_HELD, finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+        activities={"payments.refund@2": unreachable},
+    )
+    assert run.flags == [
+        "pay#1 failed after the close was requested: payments.refund@2 failed: provider unreachable"
+    ]
     assert run.needs_attention == []
     assert run.closed

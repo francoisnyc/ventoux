@@ -6,7 +6,7 @@ effect happens outside this module.
 """
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ventoux.case.definition import CaseDefinition
@@ -38,44 +38,71 @@ class CaseRun:
         return step in self.steps_done
 
 
+@dataclass(frozen=True)
+class Finish:
+    """Let a held activity's run finish now: `Finish("pay#1")`. For the driver, not `decide`."""
+
+    entry: str
+
+
 def run_case_in_memory(
     case: CaseDefinition,
     catalog: Catalog,
     implementations: Mapping[str, Activity],
-    events: Iterable[Event],
+    events: Iterable[Event | Finish],
     name: str = "memory",
+    held: Iterable[str] = (),
 ) -> CaseRun:
-    """Play `events` in order, the first opening the case; `name` names the case in its keys."""
+    """Play `events` in order, the first opening the case; `name` names the case in its keys.
+    The runs of the steps in `held` keep running until a `Finish` names them, so a test can
+    close a case while an activity runs (brief, D10)."""
     state = CaseState(name)
+    driver = Driver(case, catalog, implementations, frozenset(held))
     for event in events:
-        state = carry(case, catalog, implementations, state, event)
+        if isinstance(event, Finish):
+            state = driver.carry(state, outcome_of(driver.held.pop(event.entry), driver.activity))
+        else:
+            state = driver.carry(state, event)
     done = frozenset(run.step for run in state.runs if run.status == "done")
     attention = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
     waiting = list(state.waiting.values())
     return CaseRun(state.phase, waiting, attention, state.flags, state.history, done)
 
 
-def carry(
-    case: CaseDefinition,
-    catalog: Catalog,
-    implementations: Mapping[str, Activity],
-    state: CaseState,
-    event: Event,
-) -> CaseState:
-    """Decide on `event`, then run each activity it asks for, feeding back what it gave."""
-    queue = [event]
-    while queue:
-        state, commands = decide(case, catalog, state, queue.pop(0))
-        for command in commands:
-            if command.activity not in implementations:
-                raise LookupError(f"no implementation of {command.activity} is available")
-            queue.append(outcome_of(command, implementations[command.activity]))
-    return state
+@dataclass
+class Driver:
+    """Carries out what `decide` asks for, at once, unless the step is held."""
+
+    case: CaseDefinition
+    catalog: Catalog
+    implementations: Mapping[str, Activity]
+    holding: frozenset[str]  # steps whose runs wait for a `Finish`
+    held: dict[str, Schedule] = field(default_factory=dict[str, Schedule])  # by entry
+
+    def activity(self, command: Schedule) -> Activity:
+        if command.activity not in self.implementations:
+            raise LookupError(f"no implementation of {command.activity} is available")
+        return self.implementations[command.activity]
+
+    def carry(self, state: CaseState, event: Event) -> CaseState:
+        """Decide on `event`, then run each activity it asks for, feeding back what it gave."""
+        queue = [event]
+        while queue:
+            state, commands = decide(self.case, self.catalog, state, queue.pop(0))
+            for command in commands:
+                if command.entry.split("#")[0] in self.holding:
+                    self.held[command.entry] = command  # it keeps running until finished
+                else:
+                    queue.append(outcome_of(command, self.activity))
+        return state
 
 
-def outcome_of(command: Schedule, activity: Activity) -> Completed | Failed:
+def outcome_of(
+    command: Schedule, activity_for: Callable[[Schedule], Activity]
+) -> Completed | Failed:
     """Run the activity, and say what happened as an event. In memory there are no retries: an
     error is a failure after them (Temporal retries with the contract's policy, layer 8c)."""
+    activity = activity_for(command)
     try:
         return Completed(command.entry, activity(command.inputs))
     except Outcome as outcome:
