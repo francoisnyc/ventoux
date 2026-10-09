@@ -753,3 +753,36 @@ def test_asking_again_withdraws_an_open_approval_so_a_rejection_is_never_outvote
     assert refunds == []
     assert run.status == "stopped"
     assert run.reason == "payments.refund@2 is high risk, and nobody approved this run of pay"
+
+
+def customer_typed_amount() -> dict[str, Any]:
+    """The review then approval, with `approved_amount` declared as typed by the customer."""
+    plan = reviewing_then_approving()
+    plan["fields"]["approved_amount"]["source"] = "untrusted:customer"
+    return plan
+
+
+def test_a_form_keeps_the_plans_mark_in_validate() -> None:
+    # A mark adds distrust, never removes it: a person's form doesn't wash it off (non-negotiables;
+    # tutor review). `payments.refund@2` takes `amount` only from trusted data.
+    found = [(path, code) for path, code, _ in issues_of(customer_typed_amount())]
+    assert ("states.pay.inputs.amount", "INPUT_POLICY") in found
+
+
+def test_a_form_keeps_the_plans_mark_at_runtime() -> None:
+    refunds: list[dict[str, Any]] = []
+    run = run_plan(
+        customer_typed_amount(),
+        fields=ORDER,
+        answers=[
+            ("review", "accept", "ana", {"approved_amount": Decimal(250)}),
+            ("approve_refund", "approve", "sam"),
+        ],
+        activities={**FAKES, "payments.refund@2": recording_refunds(refunds)},
+        people=PEOPLE,
+    )
+    assert refunds == []
+    assert run.status == "stopped"
+    assert run.reason is not None
+    assert run.reason.startswith("payments.refund@2 takes amount only from a system or a person")
+    assert "untrusted:customer" in run.reason

@@ -190,7 +190,10 @@ async def interpret(
                 # the latest answer replaces an earlier pass's.
                 for name in setting:
                     values[name] = (answer.form or {})[name]
-                    sources[name] = frozenset({f"person:{answer.by}"})
+                    # The plan's mark stays, as on a field given at the start: a mark adds
+                    # distrust, never removes it (non-negotiables; tutor review).
+                    mark = {plan.sources[name]} if name in plan.sources else set()
+                    sources[name] = frozenset({f"person:{answer.by}"} | mark)
                 since_a_wait = 0  # someone answered: a loop through a wait isn't spinning
                 here = choose(here, state.on, answer.outcome, values)
                 run.history.append(Moved(answer.outcome, here))

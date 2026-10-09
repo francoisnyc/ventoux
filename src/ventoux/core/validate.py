@@ -180,10 +180,11 @@ def policy_issues(
         return []  # no contract, no policy to read: already UNKNOWN_ACTIVITY
     # Each field's sources as the plan knows them: what it declared, or else the case's, which the
     # runtime checks again with the real sources before the activity runs (core/before_activity.py).
-    # A field a person sets comes from whoever answers that wait: trusted, from no system.
+    # A field a person sets comes from whoever answers that wait: trusted, from no system. Its
+    # declared mark stays with it: a mark adds distrust, never removes it (non-negotiables).
     setters = set_by(plan)
     sources = {
-        name: frozenset({answering(setters[name])})
+        name: frozenset({answering(setters[name])} | declared(plan, name))
         if name in setters
         else frozenset({plan.sources.get(name, CASE)})
         for name in plan.fields
@@ -201,6 +202,11 @@ def policy_issues(
                 )
             )
     return issues
+
+
+def declared(plan: Plan, name: str) -> set[str]:
+    """The source the plan declares on the field `name`, such as `untrusted:customer`, if any."""
+    return {plan.sources[name]} if name in plan.sources else set()
 
 
 def what_to_do(policy: Policy) -> str:
