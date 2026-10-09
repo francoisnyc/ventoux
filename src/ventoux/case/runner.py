@@ -11,10 +11,11 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
-from ventoux.core.approval import approver_role, risk_refusal, set_by_them
+from ventoux.core.approval import approver_role, not_someone_else, risk_refusal
 from ventoux.core.before_activity import checked_inputs
 from ventoux.core.catalog import Catalog
 from ventoux.core.expressions import ExpressionError, evaluate, parse_expression
+from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE, REJECT
 from ventoux.core.roles import no_role, role_that_counts
 
@@ -110,6 +111,7 @@ def approval(
     if answer is None:
         return None
     _, outcome, person, *_ = answer
+    require_identifier(person)
     # An approval's outcomes are a closed list: a misspelling is refused, never "not approved".
     if outcome not in (APPROVE, REJECT):
         raise AnswerRefused(
@@ -127,11 +129,18 @@ def approval(
         raise AnswerRefused(risk_refusal(role, catalog, contract))
     # "Someone else" is computed, never listed (brief, D11): whoever's answer flows into the step,
     # through its inputs or its condition, may not approve it.
-    used = [*step["inputs"].values(), *([step["when"]] if "when" in step else [])]
-    field = set_by_them(person, [parse_expression(e) for e in used], sources)
-    if field is not None:
-        raise AnswerRefused(f"{person} set {field}, which {name} uses, so cannot approve it")
+    inputs = [parse_expression(e) for e in step["inputs"].values()]
+    conditions = [parse_expression(step["when"])] if "when" in step else []
+    excluded = not_someone_else(person, name, inputs, conditions, sources)
+    if excluded is not None:
+        raise AnswerRefused(excluded)
     return str(outcome)
+
+
+def require_identifier(person: str) -> None:
+    """Refuse `person` unless written as an identifier: one person, one name (brief, D22)."""
+    if (wrong := identifier_problem(person)) is not None:
+        raise AnswerRefused(wrong)
 
 
 def require_role(
@@ -168,6 +177,7 @@ def answer_task(
 ) -> None:
     """Record a person's answer to a task, after checking it is one the task accepts."""
     _, outcome, person, *form = answer
+    require_identifier(person)
     require_role(person, step["roles"], name, roles_of, catalog)
     # A task's outcomes are a closed list (brief, D9): anything else is refused, never guessed.
     if outcome not in step["outcomes"]:

@@ -521,7 +521,10 @@ def test_a_person_whose_answer_decides_the_approval_cannot_give_it() -> None:
         people={**PEOPLE, "ana": ["support", "support-lead"]},
     )
     assert refusals(run) == [
-        "refused ana's answer approve: ana set checked, which pay uses, so cannot approve it"
+        (
+            "refused ana's answer approve: ana set checked, which decides whether pay runs, so "
+            "cannot approve it"
+        )
     ]
     assert run.status == "succeeded"
 
@@ -786,3 +789,36 @@ def test_a_form_keeps_the_plans_mark_at_runtime() -> None:
     assert run.reason is not None
     assert run.reason.startswith("payments.refund@2 takes amount only from a system or a person")
     assert "untrusted:customer" in run.reason
+
+
+@pytest.mark.parametrize("spelled", ["Sam", " sam", "person:sam"])
+def test_a_person_spelled_any_other_way_is_refused_and_the_wait_goes_on(spelled: str) -> None:
+    # From the tutor review: Sam sets the amount, then "Sam" approves, and "someone else" is
+    # defeated by a spelling. An identifier is written one way (brief, D22); fail closed.
+    run = run_plan(
+        reviewing_then_approving(),
+        fields=ORDER,
+        answers=[
+            ("review", "accept", "sam", {"approved_amount": Decimal(250)}),
+            ("approve_refund", "approve", spelled),
+        ],
+        people={**PEOPLE, spelled: ["support", "support-lead"]},
+    )
+    assert refusals(run) == [
+        (
+            f"refused {spelled}'s answer approve: {spelled!r} is not written as a person's "
+            "identifier: lowercase letters, digits, ., _, @ and -, starting with a letter or digit, "
+            "such as ana or ana.lee@example.com"
+        )
+    ]
+    assert run.status == "waiting"  # the wait goes on
+
+
+def test_an_identifier_may_be_a_lowercase_email() -> None:
+    run = run_plan(
+        asking(),
+        fields=ORDER,
+        answers=[("confirm", "accept", "ana.lee@example.com")],
+        people={"ana.lee@example.com": ["support"]},
+    )
+    assert "ana.lee@example.com answered accept as support" in lines(run)

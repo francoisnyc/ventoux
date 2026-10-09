@@ -149,7 +149,9 @@ def test_whoever_decides_whether_the_step_runs_cannot_approve_it() -> None:
     refund["steps"]["pay"]["inputs"]["amount"] = {"var": "amount"}
     refund["steps"]["pay"]["when"] = {"exists": "approved_amount"}
     refund["steps"]["pay"]["approval"]["when"] = {">": [{"var": "amount"}, 100]}
-    with pytest.raises(AnswerRefused, match="sam set approved_amount, which pay uses"):
+    with pytest.raises(
+        AnswerRefused, match="sam set approved_amount, which decides whether pay runs"
+    ):
         run_case(
             refund,
             file={"order_id": "ord-8", "amount": 250},
@@ -202,3 +204,17 @@ def test_a_rejected_approval_closes_the_case_without_paying() -> None:
     assert not run.reached("pay")
     assert run.waiting_for == []
     assert run.closed
+
+
+def test_a_person_spelled_another_way_is_refused() -> None:
+    # "Sam" is not "sam": the reviewer can't approve under another spelling (brief, D22).
+    with pytest.raises(AnswerRefused, match="'Sam' is not written as a person's identifier"):
+        run_case(
+            REFUND,
+            file={"order_id": "ord-11", "amount": 250},
+            answers=[
+                ("review", "approve", "sam", {"approved_amount": 250}),
+                ("pay", "approve", "Sam"),
+            ],
+            people={**PEOPLE, "Sam": ["support", "support-lead"]},
+        )

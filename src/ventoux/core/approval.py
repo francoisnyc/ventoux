@@ -55,13 +55,15 @@ def risk_refusal(role: str, catalog: Catalog, contract: ActivityContract) -> str
     )
 
 
-def used_by(state: ApprovalState, plan: Plan) -> list[Expression]:
-    """What decides the approved run: its activity's inputs, and the conditions on the
-    approval's `approve` (brief, D11)."""
+def inputs_of(state: ApprovalState, plan: Plan) -> list[Expression]:
+    """What the approved activity is given: its inputs."""
     target = plan.states[state.approval.of]
-    inputs = list(target.inputs.values()) if isinstance(target, ActivityState) else []
-    conditions = [t.when for t in state.on.get(APPROVE, ()) if t.when is not None]
-    return inputs + conditions
+    return list(target.inputs.values()) if isinstance(target, ActivityState) else []
+
+
+def conditions_of(state: ApprovalState) -> list[Expression]:
+    """What decides whether the approved activity runs: the conditions on `approve`."""
+    return [t.when for t in state.on.get(APPROVE, ()) if t.when is not None]
 
 
 def set_by_them(
@@ -74,6 +76,22 @@ def set_by_them(
             # A field nobody has set yet has no sources: nobody's answer is in it.
             if f"person:{person}" in sources.get(field, frozenset()):
                 return field
+    return None
+
+
+def not_someone_else(
+    person: str,
+    step: str,
+    inputs: list[Expression],
+    conditions: list[Expression],
+    sources: Mapping[str, frozenset[str]],
+) -> str | None:
+    """Why `person` may not approve `step`: their answer set a value it uses, or one that decides
+    whether it runs (brief, D11). None: they are someone else."""
+    if (field := set_by_them(person, inputs, sources)) is not None:
+        return f"{person} set {field}, which {step} uses, so cannot approve it"
+    if (field := set_by_them(person, conditions, sources)) is not None:
+        return f"{person} set {field}, which decides whether {step} runs, so cannot approve it"
     return None
 
 

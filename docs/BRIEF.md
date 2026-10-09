@@ -559,6 +559,11 @@ be erased on request), has size limits, and a second copy of business records go
   default). A definition naming an unregistered role is refused by `ventoux check`, and a role the
   engine doesn't know counts for nothing at runtime (fail closed).
 - **Every wait and approval names its roles;** there is no "anyone may answer" default.
+- **A person's identifier is written one way:** lowercase letters, digits, `.`, `_`, `@` and `-`,
+  starting with a letter or digit (`ana`, `ana.lee@example.com`); no capitals, spaces or `:`. The
+  API normalises what its identity provider gives it; the engine refuses any other spelling at
+  the answer, before any other check, since "someone else" (D11) compares identifiers exactly and
+  `Sam` would otherwise be someone other than `sam`. Widening it is a decision recorded here.
 - **In tests, the test plays the API:** `run_case(..., people={...})` and `run_plan(...,
   people={...})` give each scripted answer the roles listed for its person.
 
@@ -576,6 +581,8 @@ be erased on request), has size limits, and a second copy of business records go
   person is not excluded (D11). A misspelled outcome is refused, never read as "not approved".
 - **A rejection is an outcome:** the plan goes where `reject` says, and the approved step doesn't
   run (in a case, the case can then close, or a rule react).
+- **Asking again withdraws the last answer:** entering an approval withdraws any open approval of
+  the same step, so an earlier approval never outvotes a later rejection.
 - **A lapsed approval stops the step.** If the step's inputs no longer match the digest the
   approval recorded (D11), the step stops and needs a new decision; it is never run, and never
   sent back to an approval by the engine on its own.

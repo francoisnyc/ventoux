@@ -15,10 +15,11 @@ from ventoux.core.approval import (
     Unapprovable,
     approved,
     approver_role,
+    conditions_of,
     inputs_digest,
+    inputs_of,
+    not_someone_else,
     risk_refusal,
-    set_by_them,
-    used_by,
 )
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
@@ -37,6 +38,7 @@ from ventoux.core.history import (
     Stopped,
     Waiting,
 )
+from ventoux.core.person import identifier_problem
 from ventoux.core.plan import (
     APPROVE,
     ActivityState,
@@ -342,6 +344,9 @@ def judge(
     answer. Every answer is judged the same way, in the same order, wait or approval; an approval
     adds its own checks last (brief, D23)."""
     question = asked(state)
+    # Who answered is written one way, before anything is checked against it (brief, D22).
+    if answer.by is not None and (wrong := identifier_problem(answer.by)) is not None:
+        return wrong, None
     reason = why_not(here, question, answer)
     if reason is not None or answer.by is None:
         return reason, None  # refused, or the timeout, which no person gives
@@ -377,10 +382,10 @@ def judge_approval(
     if approver is None:
         return risk_refusal(role, catalog, contract), role
     # Someone else: whoever's answer decides the run may not approve it (brief, D11).
-    field = set_by_them(by, used_by(state, plan), sources)
-    if field is not None:
-        return f"{by} set {field}, which {state.approval.of} uses, so cannot approve it", approver
-    return None, approver
+    excluded = not_someone_else(
+        by, state.approval.of, inputs_of(state, plan), conditions_of(state), sources
+    )
+    return excluded, approver
 
 
 def why_not(here: str, question: Question, answer: Answer) -> str | None:

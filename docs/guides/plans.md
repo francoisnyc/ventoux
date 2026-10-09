@@ -302,6 +302,10 @@ Ventoux API, the only thing allowed to send answers, states who is signed in and
 roles change. In tests, `run_plan(..., people={...})` plays the API: it gives each scripted
 answer the roles listed for its person. Someone not listed has no roles.
 
+A person is named by an identifier written one way: lowercase letters, digits, `.`, `_`, `@` and
+`-`, such as `ana` or `ana.lee@example.com`. Any other spelling (`Sam`, ` sam`) is refused, so
+nobody becomes "someone else" by a change of case.
+
 A wait asks a question, and an outcome may ask for values with it: a small form, whose fields
 are fields the plan declares. Here the reviewer accepts and says how much to pay, and a team lead
 approves that amount:
@@ -378,7 +382,11 @@ still can't approve the amount they set (brief, D11). In tests, Sam reviewing an
 is refused the same way.
 
 **A rejection is an answer like any other.** `reject` takes the plan where its `on` says; the
-approved activity doesn't run.
+approved activity doesn't run. Each time the plan asks for an approval, any earlier approval of
+the same activity is withdrawn, so an old *approve* never outvotes a new *reject*.
+
+**A form keeps the field's mark.** A field declared `"source": "untrusted:customer"` stays
+untrusted when a person's form sets it: the form adds who answered, and the mark stays.
 
 **An approval is tied to the values it saw.** When it is given, the engine records a digest of
 the inputs `of` will run with. If any of them has changed by the time it runs (another answer set

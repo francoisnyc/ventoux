@@ -137,6 +137,7 @@ quickstart's acceptance tests stay green. The rest of the runner stays tracer co
   this risk".
 - `core/form.py`: a form against the declared types of the fields an outcome sets.
 - `core/approval.py`: who is excluded, and the digest of a step's inputs.
+- `core/person.py`: how a person's identifier is written (tutor review).
 - `core/plan.py`: `roles` and `sets` on a wait, the approval state.
 - `core/catalog.py` (`register_role`), `core/validate.py`, `core/interpreter.py`,
   `core/history.py`, `temporal/workflow.py` and `client.py`, `testing.py`, `case/runner.py`.
@@ -212,6 +213,24 @@ quickstart's acceptance tests stay green. The rest of the runner stays tracer co
 - **The guide's examples are run:** the "People in the loop" example as written, and each row of
   its refusal table.
 
+## From the tutor review
+
+- **A rejection was outvoted by an earlier approval.** `approvals[of]` was set on `approve` and
+  spent only when `of` ran, so a plan that asked again (in a plan `validate` refuses) paid the
+  refund on Sam's approval from `approve_refund#1` after Lee rejected at `#2`. Now entering an
+  approval state withdraws any open approval of its `of` (brief, D23).
+- **A form dropped the plan's declared mark.** A field declared `untrusted:customer` and set by
+  a review reached `payments.refund@2`'s `trusted_only` amount, statically and at runtime. Now a
+  form's value keeps the mark, as a start field does: `person:<who>` (statically
+  `person:answering <wait>`) plus the declared source. A mark adds distrust, never removes it.
+- **One person, two spellings.** `"Sam"` approved what `sam` set, and `"person:sam"` became the
+  source `person:person:sam`. D22 now says how an identifier is written, and any other spelling
+  is refused at the answer, before any other check, in plans and in the tracer's runner.
+- **Optional, carried:** when a person's answer feeds the `approve` condition (or a case step's
+  `when`), the refusal says `… which decides whether pay runs`, not `… which pay uses`.
+
+Each negative test was written first and seen failing with the old code.
+
 ## Promises
 
 Each claim this note makes about behaviour, and the test that would fail if it weren't true. `P`
@@ -249,4 +268,7 @@ two negatives, which first failed on `people=` and were then run against the run
 | On Temporal, roles and forms cross in the signal, the same checks run, the history matches memory's, and it replays | T `test_an_answer_without_the_role_is_refused_on_temporal_as_in_memory`, `test_a_form_crosses_in_the_signal_and_the_history_replays`, `test_the_guides_run_gives_the_same_history_as_in_memory` |
 | In the tracer's runner, a misspelled approval is refused and a rejection closes the case without paying; roles and "someone else" are checked as in a plan | Q `test_a_misspelled_approval_is_refused_never_read_as_not_approved`, `test_a_rejected_approval_closes_the_case_without_paying`, `test_the_reviewer_cannot_approve_the_payment`, `test_approving_needs_the_approval_role`, `test_answering_a_task_needs_its_role` |
 | A condition reading a misspelled outcome is rejected (curriculum; layer 2's check) | E `test_a_misspelled_outcome_is_rejected_before_anything_runs` |
+| Asking for an approval again withdraws any open approval of its `of`: a rejection is never outvoted (tutor review) | P `test_asking_again_withdraws_an_open_approval_so_a_rejection_is_never_outvoted` |
+| A form's value keeps the plan's declared mark, in `validate` and at runtime (tutor review) | P `test_a_form_keeps_the_plans_mark_in_validate`, `test_a_form_keeps_the_plans_mark_at_runtime` |
+| A person's identifier is written one way; any other spelling is refused and the wait goes on; a lowercase email is one (tutor review) | P `test_a_person_spelled_any_other_way_is_refused_and_the_wait_goes_on` (`Sam`, ` sam`, `person:sam`), `test_an_identifier_may_be_a_lowercase_email`; Q `test_a_person_spelled_another_way_is_refused` |
 | The guide's examples and refusals are what the engine says | P `test_the_guides_people_example_runs_as_written`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested`; V `test_the_guides_messages_are_what_validate_says`; I `test_the_guides_history` |
