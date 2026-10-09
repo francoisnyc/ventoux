@@ -279,6 +279,13 @@ and record the key points. A question is closed once you can explain the answer 
   brief (Sam may approve, Ana may not since her answer set `approved_amount`; the case waits for
   the approval of `pay` by a `support-lead`; the test asserts `waiting_for`, not reached, not
   closed). Layer 7 builds this exclusion, so it comes back in code.
+- Retrieval (layer 8b warm-up): "Sam can approve, Ana can't; it waits for a support-lead
+  approval." Most of it, from memory. Two parts didn't come back. *Why Ana can't:* not because
+  she isn't a team lead: her answer set `approved_amount`, which `pay` sends, so provenance
+  excludes her (D11); with the `support-lead` role she would still be refused (`ana set
+  approved_amount, which pay uses, so cannot approve it`). *The test:* `waiting_for == ["approval
+  of pay by support-lead"]`, `not run.reached("pay")` and `not run.closed`; since layer 8a it runs
+  on the real runtime.
 - Status: open, kept in the warm-up rotation until it comes from memory.
 
 ## 15. Case data
