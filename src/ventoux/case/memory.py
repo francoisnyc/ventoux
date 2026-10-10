@@ -19,11 +19,13 @@ from ventoux.case.state import (
     PlanCancelled,
     Schedule,
     StartPlan,
+    StartWorkflow,
     StopPlan,
 )
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome
 
+# An activity's code, or a workflow's in memory: its inputs in, its output back.
 Activity = Callable[[dict[str, Any]], dict[str, Any]]
 # Runs a plan step's plan to its end: what it gave, as an event; or None while it waits for an
 # answer nobody has given, and the step keeps running. Given by the caller: running a plan is
@@ -71,12 +73,14 @@ def run_case_in_memory(
     name: str = "memory",
     held: Iterable[str] = (),
     plans: PlanRunner = no_plans,
+    workflows: Mapping[str, Activity] | None = None,
 ) -> CaseRun:
     """Play `events` in order, the first opening the case; `name` names the case in its keys.
     The runs of the steps in `held` keep running until a `Finish` names them, so a test can
-    close a case while an activity runs (brief, D10)."""
+    close a case while an activity runs (brief, D10). `workflows` binds each workflow contract
+    to the code that runs it, by reference; one it doesn't bind fails its step."""
     state = CaseState(name)
-    driver = Driver(case, catalog, implementations, frozenset(held), plans)
+    driver = Driver(case, catalog, implementations, frozenset(held), plans, workflows or {})
     for event in events:
         if isinstance(event, Finish):
             state = driver.carry(state, outcome_of(driver.held.pop(event.entry), driver.activity))
@@ -97,9 +101,14 @@ class Driver:
     implementations: Mapping[str, Activity]
     holding: frozenset[str]  # steps whose runs wait for a `Finish`
     plans: PlanRunner  # runs a plan step's plan
-    held: dict[str, Schedule] = field(default_factory=dict[str, Schedule])  # by entry
+    workflows: Mapping[str, Activity]  # the workflows bound here, by contract
+    held: dict[str, Schedule | StartWorkflow] = field(
+        default_factory=dict[str, Schedule | StartWorkflow]
+    )  # by entry
 
-    def activity(self, command: Schedule) -> Activity:
+    def activity(self, command: Schedule | StartWorkflow) -> Activity:
+        if isinstance(command, StartWorkflow):
+            return self.workflows[command.workflow]
         if command.activity not in self.implementations:
             raise LookupError(f"no implementation of {command.activity} is available")
         return self.implementations[command.activity]
@@ -117,6 +126,9 @@ class Driver:
                 elif isinstance(command, StartPlan):
                     if (ended := self.plans(command)) is not None:
                         queue.append(ended)  # else it waits for an answer: the step runs on
+                elif isinstance(command, StartWorkflow) and command.workflow not in self.workflows:
+                    # Fail closed: nothing guesses where to run an unbound workflow (brief, D29).
+                    queue.append(Failed(command.entry, unbound(command.workflow)))
                 elif command.entry.split("#")[0] in self.holding:
                     self.held[command.entry] = command  # it keeps running until finished
                 else:
@@ -124,8 +136,13 @@ class Driver:
         return state
 
 
+def unbound(workflow: str) -> str:
+    """Why a workflow step can't start: the deployment hasn't bound its contract."""
+    return f"{workflow} has no binding here: bind it to a workflow"
+
+
 def outcome_of(
-    command: Schedule, activity_for: Callable[[Schedule], Activity]
+    command: Schedule | StartWorkflow, activity_for: Callable[[Schedule | StartWorkflow], Activity]
 ) -> Completed | Failed:
     """Run the activity, and say what happened as an event. In memory there are no retries: an
     error is a failure after them (Temporal retries with the contract's policy, layer 8c)."""
@@ -137,4 +154,5 @@ def outcome_of(
         return Completed(command.entry, {}, outcome.name)
     # Any error, whatever its kind: none is ignored; a person looks at it (brief, D17).
     except Exception as error:  # noqa: BLE001 (catching every kind is the rule here)
-        return Failed(command.entry, f"{command.activity} failed: {error}")
+        called = command.workflow if isinstance(command, StartWorkflow) else command.activity
+        return Failed(command.entry, f"{called} failed: {error}")

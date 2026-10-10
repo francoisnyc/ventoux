@@ -773,6 +773,20 @@ Each starts with its negative test, seen failing for the right reason.
   can't have.
 - **The development catalog registers its labels before its contracts:** `kyc.check@1`'s
   `analyst_notes` names `untrusted:llm`, which must be registered first.
+- **A workflow step and an activity step share `CallStep`** (slice 3): its `inputs` and
+  `approval`, and `called`, the reference of what it calls. Approvals, answers and scheduling take
+  a `CallStep`; `case/called.py` looks its contract up as its kind; `core`'s checks before a call
+  (`checked_inputs`, the approver's risk) take any `Contract`, since they read only the shared
+  parts.
+- **A workflow step's start line names its run,** `started kyc#1: workflow kyc.check@1
+  (customer_id from system:opener), run memory/kyc#1`, as a plan step's does: the run is its child
+  workflow on Temporal. Its key is that name, put in the input its contract names, if it names one
+  (`kyc.check@1` reads only, so takes none). The guide said `key memory/kyc#1`; corrected there.
+- **An unbound workflow fails in the driver,** not in `decide`: where a workflow runs is the
+  deployment's (brief, D5), which `decide` doesn't know. In memory, `run_case` binds the fake
+  `kyc.check@1` by default; a test's own workflow contract is unbound unless it passes one.
+- **Until slice 4, a workflow step reaching the case workflow on Temporal is a bug** (a
+  `TypeError` failing the workflow task, which waits for the code), as plan steps were in 8c.
 
 ### Promises
 
@@ -851,7 +865,7 @@ keys (D27): Temporal's documentation, and the test server can't reset a workflow
 ## 8d. Outputs into the case file, and workflow steps
 
 Status: the seven choices agreed in the session, 2026-10-10 (all as proposed, `cancellable`
-deferred); the eight points decided while drafting confirmed the same day; slices 0–2 built.
+deferred); the eight points decided while drafting confirmed the same day; slices 0–3 built.
 
 User-facing description, written first: `docs/guides/activities.md`, "Output sources" and
 "Workflow contracts" (with the contract test); `docs/guides/cases.md`, "What a step gives",
@@ -1069,6 +1083,20 @@ Each starts with its negative test, seen failing for the right reason.
   can't have.
 - **The development catalog registers its labels before its contracts:** `kyc.check@1`'s
   `analyst_notes` names `untrusted:llm`, which must be registered first.
+- **A workflow step and an activity step share `CallStep`** (slice 3): its `inputs` and
+  `approval`, and `called`, the reference of what it calls. Approvals, answers and scheduling take
+  a `CallStep`; `case/called.py` looks its contract up as its kind; `core`'s checks before a call
+  (`checked_inputs`, the approver's risk) take any `Contract`, since they read only the shared
+  parts.
+- **A workflow step's start line names its run,** `started kyc#1: workflow kyc.check@1
+  (customer_id from system:opener), run memory/kyc#1`, as a plan step's does: the run is its child
+  workflow on Temporal. Its key is that name, put in the input its contract names, if it names one
+  (`kyc.check@1` reads only, so takes none). The guide said `key memory/kyc#1`; corrected there.
+- **An unbound workflow fails in the driver,** not in `decide`: where a workflow runs is the
+  deployment's (brief, D5), which `decide` doesn't know. In memory, `run_case` binds the fake
+  `kyc.check@1` by default; a test's own workflow contract is unbound unless it passes one.
+- **Until slice 4, a workflow step reaching the case workflow on Temporal is a bug** (a
+  `TypeError` failing the workflow task, which waits for the code), as plan steps were in 8c.
 
 ### Promises
 
@@ -1093,9 +1121,9 @@ the pull request is opened. `K` is `tests/test_catalog.py`, `V` `tests/test_vali
 | The guide's workflow contract is the development `kyc.check@1` | K `test_the_guides_workflow_contract_is_the_development_one` |
 | An activity lookup refuses a workflow contract, and a workflow lookup an activity contract: a plan's activity state naming one is `UNKNOWN_ACTIVITY`, and a case's activity step naming one fails | K `test_a_workflow_contract_is_in_the_catalog`; V `test_an_activity_state_naming_a_workflow_contract_is_refused`; C `test_an_activity_step_naming_a_workflow_contract_fails` |
 | A workflow step's output with undeclared provenance cannot reach a sink that requires trusted data (the curriculum's), in memory and on Temporal | W `test_an_undeclared_workflow_output_cannot_reach_a_trusted_input`; TC `test_an_undeclared_workflow_output_is_refused_on_temporal` |
-| A workflow step is admitted, approved and checked like an activity step; a high-risk one with no approval fails | W `test_a_workflow_step_is_checked_like_an_activity`, `test_a_high_risk_workflow_without_approval_fails` |
-| A step naming a contract of the other kind, or an unbound workflow, fails the step | W `test_a_step_and_its_contract_are_of_one_kind`, `test_an_unbound_workflow_fails_its_step`; TC `test_an_unbound_workflow_needs_attention` |
-| A workflow step's outputs land with the sources its contract declares | W `test_the_guides_workflow_step_runs_as_written` |
+| A workflow step is admitted, approved (by a role that may approve its risk) and checked like an activity step, its key in the input its contract names; a high-risk one with no approval fails | W `test_a_workflow_step_is_checked_like_an_activity`, `test_a_high_risk_workflow_without_approval_fails` |
+| A workflow step naming an activity contract, or an unbound workflow, fails the step | W `test_a_workflow_step_naming_an_activity_contract_fails`, `test_an_unbound_workflow_fails_its_step`; TC `test_an_unbound_workflow_needs_attention` |
+| A workflow step's outputs land with the sources its contract declares; its start and done lines are the guide's | W `test_the_guides_workflow_step_runs_as_written` |
 | A failed workflow step needs attention, and its retry sends the same key; on Temporal under the same ID | W `test_a_failed_workflow_step_is_retried_with_the_same_key`; TC `test_a_failed_child_workflow_is_retried_with_the_same_id_and_key` |
 | A workflow running past its contract's `timeout` fails its step | TC `test_a_workflow_past_its_timeout_needs_attention` |
 | A running workflow step finishes when the case closes; its output lands and the case is flagged | W `test_a_workflow_finishing_after_the_close_flags_the_case`; TC `test_closing_lets_a_workflow_step_finish` |

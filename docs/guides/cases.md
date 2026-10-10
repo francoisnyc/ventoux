@@ -372,11 +372,12 @@ workflow type and a task queue. Here the refund checks the customer first:
 
 It is checked like an activity step: its requirements and condition, an `approval` if it has one
 (a high-risk workflow needs one), and its inputs against the contract's input policies, with the
-real sources. It gets a key, `memory/kyc#1`, in the input its contract names for it. When it is
-done, its output lands in the case file with the sources its contract declares:
+real sources. Its run is named `memory/kyc#1` (on Temporal, its child workflow's ID); a workflow
+that writes gets that name as its key, in the input its contract names for it. When it is done,
+its output lands in the case file with the sources its contract declares:
 
 ```
-started kyc#1: workflow kyc.check@1 (customer_id from system:opener), key memory/kyc#1
+started kyc#1: workflow kyc.check@1 (customer_id from system:opener), run memory/kyc#1
 kyc#1 done, giving analyst_notes from untrusted:llm; contact_email from untrusted:undeclared; risk_score from system:kyc; status from system:kyc
 ```
 

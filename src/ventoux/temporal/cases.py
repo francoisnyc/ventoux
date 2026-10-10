@@ -45,6 +45,7 @@ with workflow.unsafe.imports_passed_through():
         Retried,
         Schedule,
         StartPlan,
+        StartWorkflow,
         StopPlan,
     )
     from ventoux.core.catalog import Catalog
@@ -222,6 +223,10 @@ class CaseWorkflow:
         if isinstance(command, StopPlan):
             asyncio.create_task(self.stop_plan(command))
             return
+        if isinstance(command, StartWorkflow):
+            # Not carried yet (layer 8d, slice 4): a bug, which fails the workflow task, retried
+            # by Temporal until the code that carries it is deployed (brief, D17).
+            raise TypeError(f"{command.entry}: workflow steps don't run on Temporal yet")
         self.running += 1
         if isinstance(command, StartPlan):
             asyncio.create_task(self.until_back(self.run_plan(command)))

@@ -8,7 +8,7 @@ is admitted again. Nobody approves values they didn't see (brief, D25).
 """
 
 from ventoux.case.admission import StepStopped, holds, latest_run, requirements_met
-from ventoux.case.definition import ActivityStep, CaseDefinition
+from ventoux.case.definition import CallStep, CaseDefinition
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState, GivenApproval, OpenApproval
 from ventoux.core.approval import inputs_digest
@@ -16,7 +16,7 @@ from ventoux.core.expressions import ExpressionError
 from ventoux.core.provenance import fields_read
 
 
-def needs_approval(state: CaseState, name: str, step: ActivityStep) -> bool:
+def needs_approval(state: CaseState, name: str, step: CallStep) -> bool:
     """Whether the step needs an approval now: it has one, and its `when` holds (or it has none).
     Fail closed: a condition that can't be read stops the case, never reads as "not needed"."""
     if step.approval is None:
@@ -25,7 +25,7 @@ def needs_approval(state: CaseState, name: str, step: ActivityStep) -> bool:
     return condition is None or holds(condition, state.values, f"{name}'s approval condition")
 
 
-def ask(state: CaseState, name: str, step: ActivityStep) -> None:
+def ask(state: CaseState, name: str, step: CallStep) -> None:
     """Ask for the step's approval, as its own entry (`pay.approval#1`), noting what it reads."""
     assert step.approval is not None  # only a step with an approval is asked for one
     state.asked[name] = state.asked.get(name, 0) + 1
@@ -36,7 +36,7 @@ def ask(state: CaseState, name: str, step: ActivityStep) -> None:
     state.history.append(f"asked {entry}: approval of {name} by {roles}")
 
 
-def what_it_reads(step: ActivityStep, values: dict[str, object]) -> dict[str, object]:
+def what_it_reads(step: CallStep, values: dict[str, object]) -> dict[str, object]:
     """The values the step reads now, by field: its inputs, its `when` and its approval's `when`.
     A field nobody has set is left out, so setting it later is a change too."""
     expressions = [*step.inputs.values()]
@@ -53,7 +53,7 @@ def follow(case: CaseDefinition, state: CaseState) -> None:
     required = requirements(case)
     for name, approval in list(state.approvals.items()):
         step = case.steps[name]
-        assert isinstance(step, ActivityStep)  # only an activity is asked for an approval
+        assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
         reason = not_admitted(case, required[name], state) or changed(approval, step, state)
         if reason is not None:
             withdraw(state, approval, reason)
@@ -69,7 +69,7 @@ def not_admitted(case: CaseDefinition, required: tuple[str, ...], state: CaseSta
     return None
 
 
-def changed(approval: OpenApproval, step: ActivityStep, state: CaseState) -> str | None:
+def changed(approval: OpenApproval, step: CallStep, state: CaseState) -> str | None:
     """Which values the step reads changed since its approval was asked, or None."""
     now = what_it_reads(step, state.values)
     fields = sorted(set(approval.seen) | set(now))
@@ -87,7 +87,7 @@ def withdraw(state: CaseState, approval: OpenApproval, reason: str) -> None:
     state.history.append(f"withdrew {approval.entry}: {reason}")
 
 
-def lapsed(state: CaseState, name: str, step: ActivityStep, given: GivenApproval) -> None:
+def lapsed(state: CaseState, name: str, step: CallStep, given: GivenApproval) -> None:
     """Stop the step if its inputs changed since the approval saw them: it has lapsed
     (brief, D11), and a person decides what happens next (brief, D23). In a case the approval is
     spent in the decision that gives it, so only a change request (layer 12) could come between;

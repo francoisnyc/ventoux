@@ -10,7 +10,7 @@ import json
 from collections.abc import Mapping
 
 from ventoux.core.catalog import Catalog, NotInCatalog
-from ventoux.core.contract import ActivityContract
+from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions import Expression, evaluate
 from ventoux.core.plan import APPROVE, ActivityState, ApprovalState, Plan
 from ventoux.core.provenance import fields_read
@@ -33,7 +33,7 @@ def approved(state: ApprovalState, plan: Plan, catalog: Catalog) -> ActivityCont
 
 
 def approver_role(
-    roles: tuple[str, ...], stated: frozenset[str], contract: ActivityContract, catalog: Catalog
+    roles: tuple[str, ...], stated: frozenset[str], contract: Contract, catalog: Catalog
 ) -> str | None:
     """The role that lets a person approve `contract`'s activity: the first, in order, of their
     roles that the approval lists and that may approve its risk. None: no role of theirs may."""
@@ -47,7 +47,7 @@ def approver_role(
     return able[0] if able else None
 
 
-def risk_refusal(role: str, catalog: Catalog, contract: ActivityContract) -> str:
+def risk_refusal(role: str, catalog: Catalog, contract: Contract) -> str:
     """Why `role` may not approve `contract`'s activity: `support may approve no risk, …`."""
     return (
         f"{role} may approve {what_it_approves(catalog.roles.get(role))}, and "

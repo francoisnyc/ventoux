@@ -121,13 +121,40 @@ class TaskStep(Step):
     outcomes: Annotated[dict[EventName, Outcome], Field(min_length=1)]
 
 
-class ActivityStep(Step):
-    """One call to an activity from the catalog, perhaps behind an approval."""
+class CallStep(Step):
+    """A step that calls what a contract in the catalog promises, perhaps behind an approval: an
+    activity, or an existing workflow. Both are checked the same way before they start."""
+
+    inputs: dict[str, PlanExpression] = {}  # each input the contract takes, from the case file
+    approval: Approval | None = None
+
+    @property
+    def called(self) -> str:
+        """The reference of the contract it calls: `payments.refund@2`, `kyc.check@1`."""
+        raise NotImplementedError
+
+
+class ActivityStep(CallStep):
+    """One call to an activity from the catalog."""
 
     kind: Literal["activity"]
     activity: ActivityReference
-    inputs: dict[str, PlanExpression] = {}
-    approval: Approval | None = None
+
+    @property
+    def called(self) -> str:
+        return self.activity
+
+
+class WorkflowStep(CallStep):
+    """An existing Temporal workflow, run as one step: its contract in the catalog, where it runs
+    bound by the deployment (brief, D6)."""
+
+    kind: Literal["workflow"]
+    workflow: ActivityReference  # its workflow contract's reference, such as `kyc.check@1`
+
+    @property
+    def called(self) -> str:
+        return self.workflow
 
 
 class PlanStep(Step):
@@ -159,7 +186,8 @@ def kind_of(step: object) -> str | None:
 type AnyStep = Annotated[
     Annotated[TaskStep, Tag("task step")]
     | Annotated[ActivityStep, Tag("activity step")]
-    | Annotated[PlanStep, Tag("plan step")],
+    | Annotated[PlanStep, Tag("plan step")]
+    | Annotated[WorkflowStep, Tag("workflow step")],
     Discriminator(kind_of),
 ]
 
@@ -211,7 +239,7 @@ class CaseDefinition(Shape):
 
 
 def step_problems(
-    path: str, step: TaskStep | ActivityStep | PlanStep, case: CaseDefinition
+    path: str, step: TaskStep | CallStep | PlanStep, case: CaseDefinition
 ) -> list[str]:
     """What `step` names that `case` doesn't declare, and whether anyone can start it."""
     problems = [
@@ -259,7 +287,7 @@ def parse_case(data: object) -> CaseDefinition:
         raise CaseInvalid("\n".join(problem(e) for e in error.errors())) from None
 
 
-STEP_KINDS = "a task, an activity or a plan"
+STEP_KINDS = "a task, an activity, a plan or a workflow"
 
 
 def problem(error: Any) -> str:

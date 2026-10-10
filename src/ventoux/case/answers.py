@@ -10,7 +10,8 @@ someone else: not the opener, not the proposer, and not whoever's answer feeds t
 
 from collections.abc import Mapping
 
-from ventoux.case.definition import ActivityStep, CaseDefinition, TaskStep
+from ventoux.case.called import called
+from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
 from ventoux.case.state import Answered, CaseState
 from ventoux.core.approval import approver_role, not_someone_else, risk_refusal
 from ventoux.core.catalog import Catalog
@@ -54,7 +55,7 @@ def judge_approval(
     state: CaseState,
     entry: str,
     name: str,
-    step: ActivityStep,
+    step: CallStep,
     answer: Answered,
 ) -> str:
     """The role that lets `answer` answer the approval `entry` of the step `name`, or
@@ -68,7 +69,7 @@ def judge_approval(
     if role is None:
         raise AnswerRefused(no_role(entry, roles, answer.by, answer.roles, catalog.roles))
     refuse_unless(form_problem(answer.outcome, (), answer.form, {}))
-    contract = catalog.get(step.activity)
+    contract = called(catalog, step)
     approver = approver_role(roles, answer.roles, contract, catalog)
     if approver is None:
         raise AnswerRefused(risk_refusal(role, catalog, contract))
@@ -83,7 +84,7 @@ def judge_approval(
 
 
 def someone_else(
-    sources: Mapping[str, frozenset[str]], by: str, name: str, step: ActivityStep
+    sources: Mapping[str, frozenset[str]], by: str, name: str, step: CallStep
 ) -> str | None:
     """Why `by` may not approve the step: their answer flows into its inputs or its `when`
     (brief, D11). None: they are someone else."""
