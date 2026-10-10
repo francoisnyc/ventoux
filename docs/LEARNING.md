@@ -822,7 +822,22 @@ and record the key points. A question is closed once you can explain the answer 
   and they don't exist when `validate` runs.
 - Follow-up: if the runtime check catches everything with the real sources, why keep the static
   one at all?
-- Status: open, until the follow-up comes from memory.
+- Retrieval (layer 8d warm-up), the follow-up: "the static one catches issues before they fail at
+  runtime." Right: *before* is the core. Three parts didn't come back, and they are why "before"
+  matters:
+  - **Every path, not this one.** The runtime check sees only the path a run takes. A bad flow on
+    a rare branch (a refund over 1000, a rework after a rejection) may never run in a test and
+    surfaces months later, in a live case. `validate` checks every path at once.
+  - **Who hears of it.** The static refusal reaches the *author*, at `ventoux check` or in the pull
+    request, with what to change. The runtime one reaches an *operator*: a case needs attention, a
+    customer waits, and the person looking at it can't change the definition.
+  - **What fixing it costs.** Caught before release, it is an edit. Caught at runtime, it is a new
+    release, and open cases still on the old one (layer 12). For a drafted plan (layer 15), the
+    static issues are what the authoring loop feeds back to the model to repair it.
+  In one line: the static check prevents, for authors, on every path; the runtime check enforces,
+  for this value, on this path. Neither replaces the other. In 8d, output provenance gets only the
+  runtime check; case validation (layer 10) will read the declared sources statically.
+- Status: open, until "every path" and "who hears of it" come back from memory.
 
 
 ## 35. Layer 6: what lives in workflow history
