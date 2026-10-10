@@ -23,6 +23,7 @@ from ventoux.case.state import (
     StartWorkflow,
     StopPlan,
 )
+from ventoux.case.visibility import CaseView, case_view
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome
 
@@ -49,6 +50,12 @@ class CaseRun:
     flags: list[str]  # what completed after the close was requested, for a person to look at
     history: list[str]
     steps_done: frozenset[str]
+    definition: CaseDefinition  # what ran, so a view can be filtered by it
+    state: CaseState  # where it ended
+
+    def view(self, roles: Iterable[str]) -> CaseView:
+        """The case file as a person holding `roles` sees it (brief, D30)."""
+        return case_view(self.definition, self.state, roles)
 
     @property
     def closed(self) -> bool:
@@ -90,7 +97,7 @@ def run_case_in_memory(
     done = frozenset(run.step for run in state.runs if run.status == "done")
     attention = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
     waiting = list(state.waiting.values())
-    return CaseRun(state.phase, waiting, attention, state.flags, state.history, done)
+    return CaseRun(state.phase, waiting, attention, state.flags, state.history, done, case, state)
 
 
 @dataclass

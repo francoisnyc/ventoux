@@ -31,7 +31,11 @@ CLAIM: dict[str, Any] = {
         "customer_id": {"type": "reference", "system": "crm", "display": {"title": "Customer"}},
         "policy_id": {"type": "reference", "system": "policies", "display": {"title": "Policy"}},
         "estimated_damage": {"type": "number", "display": {"title": "Estimated damage"}},
-        "fraud_score": {"type": "number", "display": {"title": "Fraud score"}},
+        "fraud_score": {
+            "type": "number",
+            "visible_to": ["fraud"],
+            "display": {"title": "Fraud score"},
+        },
     },
     "steps": {
         "assess": {
@@ -115,3 +119,47 @@ def test_a_reference_of_its_system_goes_in() -> None:
     run = run_case(claim(), file=FILE, answers=[DENIED], people=PEOPLE)
     assert run.reached("deny")
     assert run.closed
+
+
+# Slice 3: who sees what.
+
+
+def test_a_hidden_field_is_absent_from_the_view() -> None:
+    # The curriculum's: a field hidden from a role is not in that role's view at all, and the
+    # view says it is hidden and what it needs (brief, D16, D30).
+    run = run_case(claim(), file=FILE, answers=[], people=PEOPLE)
+    adjuster = run.view(roles=["adjuster"])
+    assert "fraud_score" not in adjuster.values
+    assert "fraud_score" not in adjuster.sources
+    assert adjuster.hidden == {"fraud_score": ("fraud",)}
+    assert "Fraud score: hidden (needs fraud)" in adjuster.lines
+    assert run.view(roles=["fraud"]).values["fraud_score"] == 12
+
+
+def test_what_a_role_on_the_case_sees() -> None:
+    run = run_case(claim(), file=FILE, answers=[DENIED], people=PEOPLE)
+    # Anyone holding a role the case names sees its ordinary fields, outcomes and outputs.
+    adjuster = run.view(roles=["adjuster"])
+    assert adjuster.values["customer_id"] == "cus-7"
+    assert adjuster.sources["customer_id"] == frozenset({"system:opener"})
+    assert adjuster.values["assess.outcome"] == "deny"
+    assert adjuster.values["deny.draft_id"] == "draft-claim-denied"
+    # Someone holding none of them sees nothing of the case file.
+    outsider = run.view(roles=["support"])
+    assert outsider.values == {}
+    assert outsider.hidden["customer_id"] == ("adjuster", "fraud")
+    assert outsider.lines[0] == "Customer: hidden (needs adjuster or fraud)"
+
+
+def test_the_view_reads_as_the_guide_says() -> None:
+    run = run_case(claim(), file=FILE, answers=[], people=PEOPLE)
+    assert run.view(roles=["adjuster"]).lines == [
+        "Customer: cus-7, from system:opener",
+        "Policy: pol-3, from system:opener",
+        "Estimated damage: 1200, from system:opener",
+        "Fraud score: hidden (needs fraud)",
+    ]
+    # A field nobody has given yet says so, to those who may see it.
+    unscored = {name: value for name, value in FILE.items() if name != "fraud_score"}
+    run = run_case(claim(), file=unscored, answers=[], people=PEOPLE)
+    assert run.view(roles=["fraud"]).lines[3] == "Fraud score: not set"
