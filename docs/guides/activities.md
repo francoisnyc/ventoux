@@ -215,9 +215,10 @@ kyc_check = WorkflowContract(
 catalog.register(kyc_check)
 ```
 
-Activity and workflow contracts share one catalog, so a reference names one promise:
-`catalog.get("kyc.check@1")` gives the workflow contract. The hash, the lock file and the rules
-above (idempotency, input policies, output sources) are the same.
+Activity and workflow contracts share one catalog, so a reference names one promise. Each lookup
+says which kind it wants: `catalog.workflow("kyc.check@1")` gives the workflow contract, and
+`catalog.get(...)`, which plans and activity steps use, gives only activity contracts. The hash,
+the lock file and the rules above (idempotency, input policies, output sources) are the same.
 
 What it doesn't have, and why:
 
@@ -292,6 +293,8 @@ writes them.
 | `catalog.register_label("LLM")` | `'LLM'` is not a label: a label is lowercase, such as `llm` or `customer-portal`. |
 | A second, different `payments.refund@2` | `payments.refund@2` is already registered with different content: register it as `payments.refund@3`. |
 | `catalog.get("payments.refund@3")` | `payments.refund@3` is not in the catalog. Registered: `payments.refund@2`. Use a registered version, or register this one first. |
+| `retry=RetryPolicy(…)` on a workflow contract | A workflow contract has no retry policy: Temporal doesn't retry a workflow step as a whole (its own activities retry inside it), and an operator retries a failed one. |
+| `catalog.get("kyc.check@1")`, a workflow contract | `kyc.check@1` is a workflow contract, not an activity: run it as a workflow step. |
 | `catalog.get("payments.refund@1.0")` | `'payments.refund@1.0'` is not a reference: a reference is name@N, such as `payments.refund@1`, with a whole-number version. |
 
 ## Changing a contract

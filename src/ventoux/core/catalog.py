@@ -1,14 +1,15 @@
 """The catalog: the activities a definition can call, each looked up by its reference."""
 
-from ventoux.core.contract import ActivityContract, is_reference
+from ventoux.core.contract import ActivityContract, Contract, is_reference
 from ventoux.core.contract_hash import contract_hash
 from ventoux.core.output_sources import UNDECLARED_LABEL, declared_sources
 from ventoux.core.provenance import is_label
 from ventoux.core.roles import checked_role
+from ventoux.core.workflow_contract import WorkflowContract
 
 
 class NotInCatalog(LookupError):
-    """A reference the catalog doesn't hold."""
+    """A reference the catalog doesn't hold, or holds as the other kind of contract."""
 
 
 class ContractConflict(ValueError):
@@ -16,10 +17,11 @@ class ContractConflict(ValueError):
 
 
 class Catalog:
-    """Contracts by reference. Contracts only, never implementations: `core` runs no I/O."""
+    """Contracts by reference, activities' and workflows' in one namespace, so a reference names
+    one promise. Contracts only, never implementations: `core` runs no I/O."""
 
     def __init__(self) -> None:
-        self._contracts: dict[str, ActivityContract] = {}  # by reference, `payments.refund@1`
+        self._contracts: dict[str, Contract] = {}  # by reference, `payments.refund@1`
         self._labels: set[str] = set()  # the labels a field may be declared untrusted with
         self._roles: dict[str, str | None] = {}  # each role, and the highest risk it may approve
         self._operators: set[str] = set()  # the roles that may act on a failed step (brief, D26)
@@ -64,12 +66,13 @@ class Catalog:
         """The registered roles, in order, each with the highest risk it may approve."""
         return dict(sorted(self._roles.items()))
 
-    def register(self, contract: ActivityContract) -> None:
+    def register(self, contract: Contract) -> None:
         # Every rule runs again on what is registered: a copy made with `model_copy` skipped them all
         # (learning question 31). Fail closed: a contract that breaks a rule never enters the catalog.
         # Pydantic: `model_validate` checks its input, raising `ValidationError` if a rule fails. The
         # checked copy it returns isn't needed: the contract passed, and being frozen, can't change.
-        ActivityContract.model_validate(contract)
+        # Checked as its own kind: a workflow contract by a workflow contract's rules.
+        type(contract).model_validate(contract)
         self.check_output_labels(contract)
         # A reference stands for one promise for good: a changed promise needs a new version
         # (brief, D5).
@@ -82,7 +85,7 @@ class Catalog:
         # New, the same promise again (a worker restarting), or new wording, which applies at once.
         self._contracts[contract.reference] = contract
 
-    def check_output_labels(self, contract: ActivityContract) -> None:
+    def check_output_labels(self, contract: Contract) -> None:
         """Every `untrusted:` label an output declares is registered, as a field's must be
         (brief, D12): a typo in a label is caught, never a new kind of untrusted."""
         for name, declared in declared_sources(contract.output).items():
@@ -99,11 +102,31 @@ class Catalog:
         versions = [c.version for c in self._contracts.values() if c.name == name]
         return f"{name}@{max(versions, default=0) + 1}"
 
-    def contracts(self) -> list[ActivityContract]:
-        """Every registered contract, by reference."""
+    def contracts(self) -> list[Contract]:
+        """Every registered contract, of both kinds, by reference."""
         return sorted(self._contracts.values(), key=lambda c: c.reference)
 
     def get(self, reference: str) -> ActivityContract:
+        """The activity contract `reference` names. Plans and activity steps call activities, so a
+        workflow contract is refused, never handed over (fail closed)."""
+        contract = self.lookup(reference)
+        if not isinstance(contract, ActivityContract):
+            raise NotInCatalog(
+                f"{reference} is a workflow contract, not an activity: run it as a workflow step."
+            )
+        return contract
+
+    def workflow(self, reference: str) -> WorkflowContract:
+        """The workflow contract `reference` names; an activity contract is refused."""
+        contract = self.lookup(reference)
+        if not isinstance(contract, WorkflowContract):
+            raise NotInCatalog(
+                f"{reference} is an activity contract, not a workflow: run it as an activity step."
+            )
+        return contract
+
+    def lookup(self, reference: str) -> Contract:
+        """The contract `reference` names, of either kind."""
         if not is_reference(reference):
             raise NotInCatalog(
                 f"{reference!r} is not a reference: a reference is name@N, such as "

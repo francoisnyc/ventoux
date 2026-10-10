@@ -98,6 +98,16 @@ def test_every_activity_is_in_the_catalog() -> None:
     ) in issues(plan)
 
 
+def test_an_activity_state_naming_a_workflow_contract_is_refused() -> None:
+    # A plan calls activities; a workflow runs only as a case's workflow step (brief, D29).
+    plan = changed(pay={**guide_plan()["states"]["pay"], "activity": "kyc.check@1"})
+    assert Issue(
+        "states.pay.activity",
+        "UNKNOWN_ACTIVITY",
+        "kyc.check@1 is a workflow contract, not an activity: run it as a workflow step.",
+    ) in issues(plan)
+
+
 def pay_with_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
     return changed(pay={**guide_plan()["states"]["pay"], "inputs": inputs})
 

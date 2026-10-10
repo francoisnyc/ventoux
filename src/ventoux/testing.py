@@ -32,9 +32,11 @@ from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.interpreter import Answer, Outcome, PlanRun, RunRefused, Wait, interpret
+from ventoux.core.output_sources import source
 from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
+from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 
@@ -148,13 +150,40 @@ letters_draft = ActivityContract(
     ),
 )
 
+
+# The activities guide's workflow contract, word for word: an existing Temporal workflow run as one
+# step (brief, D6). Its outputs say where each value comes from (brief, D29).
+class KycInput(BaseModel):
+    customer_id: Annotated[str, trusted_only()]
+
+
+class KycOutput(BaseModel):
+    status: Annotated[str, source("system:kyc")]  # the KYC system decides it
+    risk_score: Annotated[Decimal, source("system:kyc")]
+    analyst_notes: Annotated[str, source("untrusted:llm")]  # a model writes it from documents
+    contact_email: str  # nothing declared: untrusted:undeclared
+
+
+kyc_check = WorkflowContract(
+    name="kyc.check",
+    version=1,
+    input=KycInput,
+    output=KycOutput,
+    risk="low",
+    effect="read",
+    timeout=600,  # seconds: the longest the workflow may run
+    idempotency_key=None,  # a write or notify workflow names its input for the key
+    display=Display(title="Check a customer", description="Runs the KYC checks on a customer."),
+)
+
 # The development catalog: what a case can call in tests and the quickstart.
 CATALOG = Catalog()
-for contract in (payments_refund, orders_lookup, letters_draft):
-    CATALOG.register(contract)
-# The labels fields may be declared untrusted with: `untrusted:llm`.
+# The labels fields and outputs may be declared untrusted with: `untrusted:llm`. First, since a
+# contract's outputs may name them.
 for label in ("customer", "document", "email", "llm", "web"):
     CATALOG.register_label(label)
+for contract in (payments_refund, orders_lookup, letters_draft, kyc_check):
+    CATALOG.register(contract)
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
 CATALOG.register_role("support")
 CATALOG.register_role("support-lead", approves="high")

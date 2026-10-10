@@ -20,6 +20,7 @@ from ventoux.core.contract_hash import contract_hash
 from ventoux.core.hash_check import check_hashes
 from ventoux.core.output_sources import OutputSource, source
 from ventoux.core.policy import Policy, only_from, trusted_only
+from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.testing import CATALOG, load_definition, payments_refund, run_case
 
 ROOT = Path(__file__).parent.parent
@@ -223,6 +224,17 @@ def test_every_development_contract_matches_its_recorded_hash() -> None:
     assert check_hashes(CATALOG, recorded) == []
 
 
+def test_the_guides_workflow_contract_is_the_development_one() -> None:
+    guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
+    # The refund's block (its imports), the output sources' block, and the workflow contract's.
+    examples = guide.split("```python\n")[1:4]
+    namespace: dict[str, Any] = {"catalog": labelled_catalog()}
+    for example in examples:
+        exec(example.split("```")[0], namespace)  # noqa: S102 -- our guide, as above
+    assert contract_hash(namespace["kyc_check"]) == contract_hash(testing.kyc_check)
+    assert namespace["catalog"].workflow("kyc.check@1") == namespace["kyc_check"]
+
+
 def test_the_guides_example_is_the_development_refund_contract() -> None:
     guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
     example = guide.split("```python\n")[1].split("```")[0]
@@ -292,10 +304,10 @@ class KycNamedOutcome(BaseModel):
     outcome: str
 
 
-def kyc(output: type[BaseModel]) -> ActivityContract:
-    """The guide's `kyc.check@1` with `output`. Until slice 2 of 8d builds workflow contracts, an
-    activity contract: the output rules are the same on both kinds."""
-    return lookup_contract(name="kyc.check", output=output)
+def kyc(output: type[BaseModel]) -> WorkflowContract:
+    """The guide's workflow contract, `kyc.check@1`, with `output`."""
+    fields = {name: getattr(testing.kyc_check, name) for name in WorkflowContract.model_fields}
+    return WorkflowContract(**fields | {"output": output})
 
 
 # Each "You wrote" cell of the guide's refusal table, and the code that does it.
@@ -335,6 +347,10 @@ GUIDE_REFUSALS: dict[str, Any] = {
         "payments.refund@3"
     ),
     '`catalog.get("payments.refund@1.0")`': lambda: Catalog().get("payments.refund@1.0"),
+    "`retry=RetryPolicy(…)` on a workflow contract": lambda: kyc_workflow(
+        retry=payments_refund.retry
+    ),
+    '`catalog.get("kyc.check@1")`, a workflow contract': lambda: CATALOG.get("kyc.check@1"),
 }
 
 
@@ -589,3 +605,77 @@ def test_declaring_an_output_source_changes_the_hash() -> None:
     from_kyc = contract_hash(lookup_contract(output=kyc_output(source("system:kyc"))))
     from_crm = contract_hash(lookup_contract(output=kyc_output(source("system:crm"))))
     assert len({undeclared, from_kyc, from_crm}) == 3
+
+
+# Layer 8d, slice 2: workflow contracts (brief, D6, D29).
+
+
+class KycInput(BaseModel):
+    customer_id: Annotated[str, trusted_only()]
+    idempotency_key: str
+
+
+class KycOutput(BaseModel):
+    status: Annotated[str, source("system:kyc")]
+    analyst_notes: Annotated[str, source("untrusted:llm")]
+
+
+def kyc_workflow(**changes: Any) -> WorkflowContract:
+    """A workflow contract, `kyc.check@1`, with any field changed."""
+    fields: dict[str, Any] = {
+        "name": "kyc.check",
+        "version": 1,
+        "input": KycInput,
+        "output": KycOutput,
+        "risk": "low",
+        "effect": "read",
+        "timeout": 600,
+        "idempotency_key": None,
+        "display": Display(title="Check a customer", description="Runs the KYC checks."),
+    }
+    return WorkflowContract(**fields | changes)
+
+
+@pytest.mark.parametrize(
+    ("changes", "says"),
+    [
+        ({"effect": "write"}, "carries its idempotency key"),
+        ({"timeout": 0}, "greater than 0"),
+        (
+            {"retry": RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2)},
+            "a workflow contract has no retry policy",
+        ),
+        ({"outcomes": ["rejected"]}, "a workflow contract has no outcomes"),
+        (
+            {"display": Display(title="t", description="d", outcomes={"rejected": "Rejected"})},
+            "a workflow contract has no outcomes",
+        ),
+    ],
+)
+def test_a_workflow_contract_is_refused_when_it_breaks_a_rule(
+    changes: dict[str, Any], says: str
+) -> None:
+    with pytest.raises(ValidationError, match=says):
+        kyc_workflow(**changes)
+
+
+def test_a_workflow_contract_is_in_the_catalog() -> None:
+    catalog = labelled_catalog()
+    catalog.register(payments_refund)
+    catalog.register(kyc_workflow())
+    assert catalog.workflow("kyc.check@1") == kyc_workflow()
+    # One namespace, one promise per reference: each lookup says which kind it wants, and the
+    # other kind is refused, never handed over (fail closed).
+    with pytest.raises(NotInCatalog, match="kyc.check@1 is a workflow contract, not an activity"):
+        catalog.get("kyc.check@1")
+    with pytest.raises(NotInCatalog, match="payments.refund@2 is an activity contract, not a wo"):
+        catalog.workflow("payments.refund@2")
+    with pytest.raises(NotInCatalog, match="kyc.check@2 is not in the catalog"):
+        catalog.workflow("kyc.check@2")
+    # Hashed and checked like an activity's: a changed promise is a new version.
+    with pytest.raises(ContractConflict, match="register it as kyc.check@2"):
+        catalog.register(kyc_workflow(timeout=60))
+    assert [c.reference for c in catalog.contracts()] == ["kyc.check@1", "payments.refund@2"]
+    # A copy runs no check (learning question 31), so registering checks it again, as its kind.
+    with pytest.raises(ValidationError, match="greater than 0"):
+        labelled_catalog().register(kyc_workflow().model_copy(update={"timeout": 0}))

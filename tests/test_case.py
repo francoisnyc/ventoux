@@ -1596,3 +1596,16 @@ def test_the_latest_runs_output_is_read() -> None:
         catalog=with_crm(),
     )
     assert sent == ["new@example.com"]
+
+
+# --- Layer 8d, slice 2: workflow contracts ---
+
+
+def test_an_activity_step_naming_a_workflow_contract_fails() -> None:
+    # Fail closed: nothing guesses how to run a contract of the other kind (8d, drafting 4).
+    definition = refund()
+    definition["steps"]["pay"]["activity"] = "kyc.check@1"
+    run = run_case(definition, file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE)
+    assert run.needs_attention == [
+        "pay#1: kyc.check@1 is a workflow contract, not an activity: run it as a workflow step."
+    ]

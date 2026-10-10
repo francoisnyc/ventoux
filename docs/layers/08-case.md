@@ -759,6 +759,20 @@ Each starts with its negative test, seen failing for the right reason.
   two Temporal tests' `done` lines changed with the in-memory ones, and passed.
 - **A field the contract doesn't declare is how an activity would "send back" a source;** one
   test covers both promises (`refund_id_source` in the output never reaches the case file).
+- **Contract moved out of ActivityContract first, as a pure move** (slice 2, its own commit):
+  every test and every recorded hash unchanged.
+- **Each lookup names its kind** (slice 2): `catalog.get` keeps meaning "an activity contract",
+  as every plan, approval and driver already calls it, and refuses a workflow contract with a
+  `NotInCatalog` (`kyc.check@1 is a workflow contract, not an activity: run it as a workflow
+  step`); `catalog.workflow` is the other way round. Every existing fail-closed path for a missing
+  activity handles it unchanged: a plan's activity state naming it is `UNKNOWN_ACTIVITY`, a case's
+  activity step naming it fails. So half of drafting point 4 landed in slice 2, with its tests;
+  slice 3 adds the workflow step naming an activity contract.
+- **A workflow contract refuses an activity's parts with why** (`retry`, `outcomes`, `timeouts`),
+  not as unknown fields, whose message points to a deployment binding; and titles for outcomes it
+  can't have.
+- **The development catalog registers its labels before its contracts:** `kyc.check@1`'s
+  `analyst_notes` names `untrusted:llm`, which must be registered first.
 
 ### Promises
 
@@ -837,7 +851,7 @@ keys (D27): Temporal's documentation, and the test server can't reset a workflow
 ## 8d. Outputs into the case file, and workflow steps
 
 Status: the seven choices agreed in the session, 2026-10-10 (all as proposed, `cancellable`
-deferred); the eight points decided while drafting confirmed the same day; slices 0–1 built.
+deferred); the eight points decided while drafting confirmed the same day; slices 0–2 built.
 
 User-facing description, written first: `docs/guides/activities.md`, "Output sources" and
 "Workflow contracts" (with the contract test); `docs/guides/cases.md`, "What a step gives",
@@ -957,7 +971,8 @@ its failure or timeout `Failed`, appended to the inbox as an activity's result i
 - `core/contract.py`: `Contract`, shared, and `ActivityContract`; the output-source and `outcome`
   rules.
 - `core/workflow_contract.py`: `WorkflowContract`.
-- `core/catalog.py`: either kind; the label check on output sources; `undeclared` refused.
+- `core/catalog.py`: either kind; `get` for an activity, `workflow` for a workflow; the label
+  check on output sources; `undeclared` refused.
 - `case/definition.py`: `WorkflowStep`.
 - `case/state.py`: `StartWorkflow`; the command type gains it.
 - `case/runtime.py`: starting a workflow step; outputs into the case file; kinds that don't match.
@@ -1040,12 +1055,26 @@ Each starts with its negative test, seen failing for the right reason.
   two Temporal tests' `done` lines changed with the in-memory ones, and passed.
 - **A field the contract doesn't declare is how an activity would "send back" a source;** one
   test covers both promises (`refund_id_source` in the output never reaches the case file).
+- **Contract moved out of ActivityContract first, as a pure move** (slice 2, its own commit):
+  every test and every recorded hash unchanged.
+- **Each lookup names its kind** (slice 2): `catalog.get` keeps meaning "an activity contract",
+  as every plan, approval and driver already calls it, and refuses a workflow contract with a
+  `NotInCatalog` (`kyc.check@1 is a workflow contract, not an activity: run it as a workflow
+  step`); `catalog.workflow` is the other way round. Every existing fail-closed path for a missing
+  activity handles it unchanged: a plan's activity state naming it is `UNKNOWN_ACTIVITY`, a case's
+  activity step naming it fails. So half of drafting point 4 landed in slice 2, with its tests;
+  slice 3 adds the workflow step naming an activity contract.
+- **A workflow contract refuses an activity's parts with why** (`retry`, `outcomes`, `timeouts`),
+  not as unknown fields, whose message points to a deployment binding; and titles for outcomes it
+  can't have.
+- **The development catalog registers its labels before its contracts:** `kyc.check@1`'s
+  `analyst_notes` names `untrusted:llm`, which must be registered first.
 
 ### Promises
 
 Each claim this section makes about behaviour, and the test that will fail if it isn't true.
 Drafted before building, with the tests named in advance; checked against the real tests before
-the pull request is opened. `K` is `tests/test_catalog.py`, `C` `tests/test_case.py`, `W`
+the pull request is opened. `K` is `tests/test_catalog.py`, `V` `tests/test_validate.py`, `C` `tests/test_case.py`, `W`
 `tests/test_workflow_step.py`, `TC` `tests/test_temporal_case.py`.
 
 | Promise | Test |
@@ -1059,8 +1088,10 @@ the pull request is opened. `K` is `tests/test_catalog.py`, `C` `tests/test_case
 | A declared outcome gives no output | C `test_a_declared_outcome_gives_no_output` |
 | The latest run's output is the one read | C `test_the_latest_runs_output_is_read` |
 | The `done` line names each output with its source | C `test_a_declared_output_is_as_trusted_as_its_contract_says`, `test_the_guides_histories_are_what_the_engine_records` |
-| A workflow contract has an idempotency key if it writes, a `timeout` above 0, no retry policy and no outcomes | K `test_a_workflow_contract_is_refused_when_it_breaks_a_rule` |
-| A workflow contract is registered, looked up, hashed and recorded like an activity's | K `test_a_workflow_contract_is_in_the_catalog` |
+| A workflow contract has an idempotency key if it writes, a `timeout` above 0, no retry policy and no outcomes | K `test_a_workflow_contract_is_refused_when_it_breaks_a_rule`, `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |
+| A workflow contract is registered, looked up, hashed and recorded like an activity's, checked again as its kind at registration | K `test_a_workflow_contract_is_in_the_catalog`, `test_every_development_contract_matches_its_recorded_hash` |
+| The guide's workflow contract is the development `kyc.check@1` | K `test_the_guides_workflow_contract_is_the_development_one` |
+| An activity lookup refuses a workflow contract, and a workflow lookup an activity contract: a plan's activity state naming one is `UNKNOWN_ACTIVITY`, and a case's activity step naming one fails | K `test_a_workflow_contract_is_in_the_catalog`; V `test_an_activity_state_naming_a_workflow_contract_is_refused`; C `test_an_activity_step_naming_a_workflow_contract_fails` |
 | A workflow step's output with undeclared provenance cannot reach a sink that requires trusted data (the curriculum's), in memory and on Temporal | W `test_an_undeclared_workflow_output_cannot_reach_a_trusted_input`; TC `test_an_undeclared_workflow_output_is_refused_on_temporal` |
 | A workflow step is admitted, approved and checked like an activity step; a high-risk one with no approval fails | W `test_a_workflow_step_is_checked_like_an_activity`, `test_a_high_risk_workflow_without_approval_fails` |
 | A step naming a contract of the other kind, or an unbound workflow, fails the step | W `test_a_step_and_its_contract_are_of_one_kind`, `test_an_unbound_workflow_fails_its_step`; TC `test_an_unbound_workflow_needs_attention` |
