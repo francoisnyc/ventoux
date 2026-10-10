@@ -642,6 +642,13 @@ def guide_json(index: int) -> dict[str, Any]:
     return loaded
 
 
+def guide_seen_by_support() -> dict[str, Any]:
+    """The guide's refund, its approved amount seen only by support (the case data guide)."""
+    refund = guide_json(0)
+    refund["fields"]["approved_amount"]["visible_to"] = ["support"]
+    return refund
+
+
 def guide_refund_with_rework() -> dict[str, Any]:
     """The guide's refund, its review sent back for rework with the guide's two keys."""
     definition = guide_json(0)
@@ -838,6 +845,12 @@ GUIDE_REFUSALS: dict[str, Any] = {
         answers=[SMALL_REVIEW, close("duplicate", "ana"), ("review", "approve", "ana")],
         people=PEOPLE,
         held=["pay"],
+    ),
+    "the approver can't see a value the step reads": lambda: run_case(
+        guide_seen_by_support(),
+        file=LARGE,
+        answers=[REVIEWED, ("pay", "approve", "lee")],
+        people=PEOPLE,
     ),
 }
 

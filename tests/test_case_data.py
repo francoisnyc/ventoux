@@ -4,12 +4,16 @@ See docs/layers/09-case-data.md and docs/guides/case-data.md.
 """
 
 import copy
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from ventoux.case.answers import AnswerRefused
 from ventoux.case.runtime import CaseRefused
-from ventoux.testing import run_case
+from ventoux.testing import load_definition, run_case
+
+ROOT = Path(__file__).parent.parent
 
 # Who has which role, as the Ventoux API would state it (brief, D22).
 PEOPLE = {
@@ -163,3 +167,45 @@ def test_the_view_reads_as_the_guide_says() -> None:
     unscored = {name: value for name, value in FILE.items() if name != "fraud_score"}
     run = run_case(claim(), file=unscored, answers=[], people=PEOPLE)
     assert run.view(roles=["fraud"]).lines[3] == "Fraud score: not set"
+
+
+# Slice 4: approvers see what they approve.
+
+
+def refund_seen_by_support() -> dict[str, Any]:
+    """The quickstart's refund, its approved amount seen only by support."""
+    refund = load_definition(ROOT / "examples" / "refund" / "refund.json")
+    refund["fields"]["approved_amount"]["visible_to"] = ["support"]
+    return refund
+
+
+REFUND_PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "lee": ["support-lead"]}
+REVIEWED = ("review", "approve", "ana", {"approved_amount": 250})
+
+
+@pytest.mark.parametrize("outcome", ["approve", "reject"])
+def test_an_approver_must_see_what_they_approve(outcome: str) -> None:
+    # Lee may approve refunds, but can't see the amount pay reads: neither approving nor
+    # rejecting it is a judgement of what they saw (brief, D30).
+    with pytest.raises(AnswerRefused, match="lee can't see approved_amount, which pay reads: it n"):
+        run_case(
+            refund_seen_by_support(),
+            file={"order_id": "ord-1", "amount": 250},
+            answers=[REVIEWED, ("pay", outcome, "lee")],
+            people=REFUND_PEOPLE,
+        )
+
+
+def test_an_approver_who_sees_it_approves() -> None:
+    run = run_case(
+        refund_seen_by_support(),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[REVIEWED, ("pay", "approve", "sam")],
+        people=REFUND_PEOPLE,
+    )
+    assert run.reached("pay")
+    scheduled = (
+        "scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from "
+        "person:ana), key memory/pay#1"
+    )
+    assert [line for line in run.history if line.startswith("scheduled pay#")] == [scheduled]

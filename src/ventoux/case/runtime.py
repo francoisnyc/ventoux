@@ -289,7 +289,7 @@ def answer_approval(
     """An approval given, tied to the inputs it saw; or a rejection: the step won't run."""
     step = case.steps[approval.step]
     assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
-    role = judge_approval(catalog, state, approval.entry, approval.step, step, event)
+    role = judge_approval(case, catalog, state, approval.entry, approval.step, step, event)
     del state.approvals[approval.step]
     del state.waiting[approval.entry]
     state.history.append(f"{event.by} answered {approval.entry} {event.outcome} as {role}")
