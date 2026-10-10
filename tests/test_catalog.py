@@ -20,6 +20,7 @@ from ventoux.core.contract_hash import contract_hash
 from ventoux.core.hash_check import check_hashes
 from ventoux.core.output_sources import OutputSource, source
 from ventoux.core.policy import Policy, only_from, trusted_only
+from ventoux.core.references import Reference, reference
 from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.testing import CATALOG, load_definition, payments_refund, run_case
 
@@ -356,6 +357,11 @@ GUIDE_REFUSALS: dict[str, Any] = {
         retry=payments_refund.retry
     ),
     '`catalog.get("kyc.check@1")`, a workflow contract': lambda: CATALOG.get("kyc.check@1"),
+    '`reference("sail")`, a system nobody registered': lambda: CATALOG.register(
+        letter(LetterToSail)
+    ),
+    '`reference("crm")` on a field that isn\'t a `str`': lambda: letter(LetterToANumber),
+    '`catalog.register_system("CRM")`': lambda: Catalog().register_system("CRM"),
 }
 
 
@@ -457,6 +463,18 @@ class RefundNamedOutcome(BaseModel):
     outcome: str
 
 
+class RefundWithANumberReference(BaseModel):
+    order_id: str
+    amount: Annotated[Decimal, reference("payments")]
+    idempotency_key: str
+
+
+class RefundWithTwoReferences(BaseModel):
+    order_id: Annotated[str, reference("orders"), reference("crm")]
+    amount: Decimal
+    idempotency_key: str
+
+
 # Every rule a contract enforces (docs/layers/03-validation.md), each with a change that breaks it.
 # A change to a part (`timeouts`, `retry`) is written as that part's changed fields.
 CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
@@ -484,6 +502,9 @@ CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
     ("an output is never a float", {"output": RefundAsFloat}, "output refunded is float"),
     ("an output is never a nested model", {"output": RefundWithDetails}, "output details is Band"),
     ("an output is never an int", {"output": RefundCounted}, "output attempts is int"),
+    # Layer 9a: a reference input is a text, of one system (brief, D30).
+    ("a reference is a text", {"input": RefundWithANumberReference}, "so it is a text"),
+    ("a reference names one system", {"input": RefundWithTwoReferences}, "2 systems"),
 ]
 RULE_NAMES = [rule for rule, _, _ in CONTRACT_RULES]
 
@@ -708,3 +729,66 @@ def test_a_workflow_contract_is_in_the_catalog() -> None:
     # A copy runs no check (learning question 31), so registering checks it again, as its kind.
     with pytest.raises(ValidationError, match="greater than 0"):
         labelled_catalog().register(kyc_workflow().model_copy(update={"timeout": 0}))
+
+
+# Layer 9a, slice 0: systems, and inputs that take a reference to one (brief, D30).
+
+
+class LetterToSail(BaseModel):
+    customer: Annotated[str, trusted_only(), reference("sail")]
+    template: str
+    idempotency_key: str
+
+
+class LetterToANumber(BaseModel):
+    customer: Annotated[Decimal, trusted_only(), reference("crm")]
+    template: str
+    idempotency_key: str
+
+
+def letter(input: type[BaseModel]) -> ActivityContract:
+    """The guide's `letters.draft@3`, taking `input`."""
+    fields = {
+        name: getattr(testing.letters_draft_3, name) for name in ActivityContract.model_fields
+    }
+    return ActivityContract(**fields | {"input": input})
+
+
+def test_a_system_is_registered_by_name() -> None:
+    # Systems are registered like labels, so a typo in a case or a contract is caught (D30).
+    catalog = Catalog()
+    with pytest.raises(ValueError, match="'CRM' is not a system name"):
+        catalog.register_system("CRM")
+    catalog.register_system("crm")
+    catalog.register_system("claims-archive")
+    assert catalog.systems == ["claims-archive", "crm"]
+
+
+def test_a_reference_input_names_a_registered_system() -> None:
+    with pytest.raises(ValueError, match="customer is a reference to sail, which is not a regis"):
+        CATALOG.register(letter(LetterToSail))
+    # Also a copy, which no check ran on (learning question 31).
+    copy_to_sail = testing.letters_draft_3.model_copy(update={"input": LetterToSail})
+    with pytest.raises(ValueError, match="customer is a reference to sail"):
+        CATALOG.register(copy_to_sail)
+    assert CATALOG.get("letters.draft@3").reference == "letters.draft@3"
+
+
+def lookup_input(*marks: Reference) -> type[BaseModel]:
+    """The lookup's input, its `order_id` carrying `marks`: one class name, so only they differ."""
+    order_type: Any = Annotated[str, *marks] if marks else str
+
+    class LookupInput(BaseModel):
+        order_id: order_type
+
+    return LookupInput
+
+
+def test_declaring_a_reference_changes_the_hash() -> None:
+    # A reference is part of the promise, so declaring one is a new version; declaring none adds
+    # nothing, which is why every contract written before 9a keeps its recorded hash (brief, D30).
+    plain = contract_hash(lookup_contract(input=lookup_input()))
+    from_orders = contract_hash(lookup_contract(input=lookup_input(reference("orders"))))
+    from_crm = contract_hash(lookup_contract(input=lookup_input(reference("crm"))))
+    assert len({plain, from_orders, from_crm}) == 3
+    assert plain == contract_hash(lookup_contract())

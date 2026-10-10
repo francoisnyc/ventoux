@@ -110,8 +110,8 @@ def test_a_role_nobody_registered_is_an_issue() -> None:
             "states.confirm.wait.roles",
             "UNKNOWN_ROLE",
             (
-                "support-laed is a role nobody registered: the roles are operations, support, support-lead; "
-                "use one of them, or ask the platform team to register it"
+                "support-laed is a role nobody registered: the roles are adjuster, fraud, operations, "
+                "support, support-lead; use one of them, or ask the platform team to register it"
             ),
         )
     ]

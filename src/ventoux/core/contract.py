@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ventoux.core.output_sources import HELD, HELD_NAMES, OutputSource, is_output_source
 from ventoux.core.policy import KIND_NAMES, KINDS, Policy
+from ventoux.core.references import marks
 
 # A contract never changes once written, down to its parts (brief, D5); and a field it doesn't
 # know is refused, never silently dropped (fail closed).
@@ -140,6 +141,25 @@ class Contract(BaseModel):
                         f"({type(policy).__name__}). The kinds are {KIND_NAMES}; a new kind is "
                         "added to the engine, never in a contract."
                     )
+        return self
+
+    @model_validator(mode="after")
+    def references_are_texts_of_one_system(self) -> Self:
+        # A reference is the ID of a record in one system: a text, as a case file holds it, and
+        # one system, or the engine couldn't say which records it names (brief, D30).
+        for name, field in self.input.model_fields.items():
+            found = marks(self.input, name)
+            if len(found) > 1:
+                raise ValueError(
+                    f"{self.reference}: input {name} names {len(found)} systems. A reference "
+                    "names one: the system whose records it names."
+                )
+            if found and field.annotation is not str:
+                kind = getattr(field.annotation, "__name__", str(field.annotation))
+                raise ValueError(
+                    f"{self.reference}: input {name} is a reference, so it is a text (str), and "
+                    f"this one is {kind}."
+                )
         return self
 
     @model_validator(mode="after")
