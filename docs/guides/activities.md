@@ -1,6 +1,6 @@
 # Activities: adding a capability to the catalog
 
-> **For the platform team.** This guide describes layers 1, 4 and 8d as if they already worked;
+> **For the platform team.** This guide describes layers 1, 4, 8d and 9a as if they already worked;
 > the code that makes it true is built test-first in those layers. Case developers rarely need it: they meet
 > contracts only through the activities they call and the errors `ventoux check` gives them.
 
@@ -274,6 +274,64 @@ It checks the shape of what the workflow gives, not where each value really come
 breaks the test: in a case, a field the contract doesn't declare is dropped, but here it means the
 contract is out of date.
 
+## Reference inputs: a record from the right system
+
+A case file holds **references** to records your systems own (`customer_id` in `crm`), and an
+activity that needs the record takes the reference and fetches it itself (see the case data
+guide). Say which system's reference an input takes, next to its type:
+
+```python
+from ventoux.core.references import reference
+
+
+class LetterInput(BaseModel):
+    customer: Annotated[str, trusted_only(), reference("crm")]  # the letter's addressee, by ID
+    template: str
+    idempotency_key: str
+```
+
+A step can then give `customer` only a reference field of a `crm` reference, read as it is
+(`{"var": "customer_id"}`). A `policies` reference, a text field or a computed value fails the
+step before your activity is called: an ID from the wrong system can look exactly like a right
+one, and your activity would fetch the wrong record. The check runs in plans too.
+
+`reference()` goes on a `str` field, names one registered system, and is part of the input's JSON
+Schema (`x-reference`), so the hash covers it: adding one is a new version. An input without it
+takes any text, a reference included, as before.
+
+## Systems and resolvers
+
+The systems references name are registered by you, like source labels, so a typo in a case or a
+contract is caught:
+
+```text
+catalog.register_system("crm")
+```
+
+A person looking at a case sees `cus-7`; to see the customer, the inbox asks a **resolver**, which
+you register for each system. A resolver is not an activity: it only reads, runs outside the case
+(in the inbox, never in a workflow), and nothing it returns enters the case file or its history
+(brief, D16). It calls your system **on behalf of the person looking**, so your system's own
+permissions decide what they see:
+
+```python
+from ventoux.tooling.resolvers import Resolvers, Viewer
+
+
+def crm_customer(reference: str, viewer: Viewer) -> dict[str, object]:
+    # Your CRM client, asked as the person looking: it shows them what they may see.
+    return crm.customer(reference, on_behalf_of=viewer.person)
+
+
+resolvers = Resolvers(catalog)
+resolvers.register("crm", crm_customer)
+```
+
+`resolvers.show(view, "customer_id", viewer)` shows the record behind a reference in a person's
+case view: it reads the reference from the view, which Ventoux has already filtered for them, so a
+field they can't see has no reference to resolve. A system with no resolver shows nothing, and
+says so (`crm has no resolver: register one to show its records`).
+
 ## What the catalog refuses
 
 Every refusal says what is wrong; the catalog's own refusals then say what to do instead. Pydantic's
@@ -295,6 +353,10 @@ writes them.
 | `source("untrusted:fax")`, a label nobody registered | `kyc.check@1`: output `analyst_notes` is `untrusted:fax`, and `fax` is not a registered label. Register it first, or use one of: customer, document, email, llm, web. |
 | An output field named `outcome` | `kyc.check@1`: an output can't be named `outcome`: `<step>.outcome` is the step's outcome. Rename the field. |
 | An output field `score: float` | `kyc.check@1`: output `score` is `float`, which the case file can't hold exactly. An output is a decimal (Decimal), a text (str) or true or false (bool): numbers are exact decimals, never binary floats (brief, D20). |
+| `reference("sail")`, a system nobody registered | `letters.draft@3`: input `customer` is a reference to `sail`, which is not a registered system. Register it first, or use one of: crm, documents, orders, policies. |
+| `reference("crm")` on a field that isn't a `str` | `letters.draft@3`: input `customer` is a reference, so it is a text (str), and this one is `Decimal`. |
+| `catalog.register_system("CRM")` | `'CRM'` is not a system name: a system is lowercase, such as `crm` or `claims-archive`. |
+| `resolvers.register("sail", …)`, a system nobody registered | `sail` is not a registered system: register it in the catalog first. |
 | `catalog.register_label("undeclared")` | `undeclared` is the engine's label for an output nobody declared a source for: register another. |
 | `catalog.register_label("LLM")` | `'LLM'` is not a label: a label is lowercase, such as `llm` or `customer-portal`. |
 | A second, different `payments.refund@2` | `payments.refund@2` is already registered with different content: register it as `payments.refund@3`. |
@@ -317,14 +379,16 @@ To catch an edit made in place, the catalog hashes each contract (everything exc
 
 ## Development activities
 
-`ventoux.testing` ships three activities and one workflow, with fake implementations that touch no
-real system, and the source labels `customer`, `document`, `email`, `llm` and `web`:
+`ventoux.testing` ships four activities and one workflow, with fake implementations that touch no
+real system, the source labels `customer`, `document`, `email`, `llm` and `web`, and the systems
+`crm`, `documents`, `orders` and `policies`:
 
 | Activity | Effect | Risk | Input policies | Notes |
 |---|---|---|---|---|
 | `payments.refund@2` | write | high | `order_id`, `amount`: trusted only | outcome `declined`; nothing is paid |
 | `orders.lookup@1` | read | low | none | no idempotency key needed |
 | `letters.draft@2` | write | low | `to_customer`: trusted only | only drafts, never sends |
+| `letters.draft@3` | write | low | `customer`: trusted only, a `crm` reference | the contract above; fetches the address itself, only drafts |
 | `kyc.check@1` (a workflow) | read | low | `customer_id`: trusted only | the contract above; its outputs as declared there |
 
 No development activity declares an output source, so every output they give is
