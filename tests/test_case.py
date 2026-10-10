@@ -8,13 +8,19 @@ import copy
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
+from pydantic import BaseModel
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Opened
+from ventoux.core.catalog import Catalog
+from ventoux.core.contract import ActivityContract, RetryPolicy, Timeouts
+from ventoux.core.contract import Display as ContractDisplay
+from ventoux.core.output_sources import source
+from ventoux.core.policy import only_from
 from ventoux.testing import (
     CATALOG,
     AnswerRefused,
@@ -690,7 +696,14 @@ def test_the_guides_histories_are_what_the_engine_records() -> None:
         people=PEOPLE,
         held=["pay"],
     )
-    for shown, run in ((plain[1], reworked), (plain[2], declined), (plain[3], closing)):
+    small = run_case(guide_json(0), file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE)
+    shown_runs = (
+        (plain[1], reworked),
+        (plain[2], declined),
+        (plain[3], small),
+        (plain[4], closing),
+    )
+    for shown, run in shown_runs:
         lines = shown.splitlines()
         first = run.history.index(lines[0])
         assert run.history[first : first + len(lines)] == lines
@@ -739,7 +752,7 @@ def test_the_guides_plan_step_runs_as_written() -> None:
         plans={"refund-order@1": refund_order()},
         plan_answers={"settle": [("approve_refund", "approve", "sam")]},
     )
-    shown = blocks("")[4].splitlines()
+    shown = blocks("")[5].splitlines()
     assert run.history[-len(shown) :] == shown
 
 
@@ -1247,7 +1260,7 @@ def test_a_running_activity_finishes_and_the_closed_case_is_flagged() -> None:
     assert run.flags == ["pay#1 completed after the close was requested"]
     assert run.history[-4:] == [
         "ana closed the case as duplicate, as support",
-        "pay#1 done, giving refund_id",
+        "pay#1 done, giving refund_id from untrusted:undeclared",
         "flagged: pay#1 completed after the close was requested",
         "closed: duplicate, by ana",
     ]
@@ -1391,3 +1404,195 @@ def test_closes_when_waits_while_a_step_needs_attention() -> None:
     )
     assert retried.needs_attention == []
     assert retried.history[-1] == "closed: paid reached"
+
+
+# --- Layer 8d, slice 1: outputs into the case file ---
+
+
+def with_letter(to_customer: dict[str, Any]) -> dict[str, Any]:
+    """The refund, then a letter drafted once it is paid, addressed with `to_customer`."""
+    definition = refund()
+    definition["steps"]["letter"] = {
+        "kind": "activity",
+        "display": {"title": "Draft the refund letter"},
+        "activity": "letters.draft@2",
+        "requires": ["pay"],
+        "inputs": {"to_customer": to_customer, "template": "refund-done"},
+    }
+    return definition
+
+
+def test_an_undeclared_output_cannot_reach_a_trusted_input() -> None:
+    # Nobody declared where `refund_id` comes from, so it is untrusted (brief, D6), and an input
+    # that accepts only trusted data refuses it: the step fails before it starts.
+    run = run_case(
+        with_letter({"var": "pay.refund_id"}), file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE
+    )
+    refused = (
+        "letter#1: letters.draft@2 takes to_customer only from a system or a person, never from "
+        "untrusted data, and this value comes from pay.refund_id (untrusted:undeclared)"
+    )
+    assert run.needs_attention == [refused]
+    assert not run.closed
+
+
+def test_only_declared_outputs_reach_the_case_file() -> None:
+    # The activity sends back a field its contract doesn't declare, and a "source" for its
+    # refund_id: neither reaches the case file. Only the contract says where a value comes from.
+    def vouching(inputs: dict[str, Any]) -> dict[str, Any]:
+        return {"refund_id": "r-1", "email": "a@b.c", "refund_id_source": "system:payments"}
+
+    for read in ("pay.email", "pay.refund_id_source"):
+        run = run_case(
+            with_letter({"var": read}),
+            file=SMALL,
+            answers=[SMALL_REVIEW],
+            people=PEOPLE,
+            activities={"payments.refund@2": vouching},
+        )
+        assert run.needs_attention == [
+            f"letter#1: to_customer can't be evaluated: {read} has no known sources"
+        ]
+    assert "pay#1 done, giving refund_id from untrusted:undeclared" in run.history
+
+
+def test_a_declared_outcome_gives_no_output() -> None:
+    run = run_case(
+        with_letter({"var": "pay.refund_id"}),
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=PEOPLE,
+        activities={"payments.refund@2": gives("declined")},
+    )
+    assert "pay#1 gave declined" in run.history
+    # A declined refund is still a run that ended, so the letter reads, and finds nothing.
+    assert run.needs_attention == [
+        "letter#1: to_customer can't be evaluated: pay.refund_id has no known sources"
+    ]
+
+
+class CustomerFound(BaseModel):
+    email: Annotated[str, source("system:crm")]  # the CRM holds the customer's address
+    name: str  # nothing declared
+
+
+class FindInput(BaseModel):
+    customer: str
+
+
+class NoticeInput(BaseModel):
+    to: Annotated[str, only_from("crm")]
+    idempotency_key: str
+
+
+class NoticeOutput(BaseModel):
+    notice_id: str
+
+
+def contract(name: str, input: type[BaseModel], output: type[BaseModel], **more: Any) -> Any:
+    """A low-risk activity contract `name@1`, for a test's own catalog."""
+    fields: dict[str, Any] = {
+        "version": 1,
+        "risk": "low",
+        "effect": "read",
+        "timeouts": Timeouts(start_to_close=10, schedule_to_start=60),
+        "retry": RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+        "idempotency_key": None,
+        "outcomes": [],
+        "display": ContractDisplay(title=name, description=name),
+    }
+    return ActivityContract(name=name, input=input, output=output, **fields | more)
+
+
+def with_crm() -> Catalog:
+    """The development catalog, and a CRM lookup whose `email` is declared `system:crm`."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(contract("crm.find", FindInput, CustomerFound))
+    catalog.register(
+        contract(
+            "notices.draft",
+            NoticeInput,
+            NoticeOutput,
+            effect="write",
+            idempotency_key="idempotency_key",
+        )
+    )
+    return catalog
+
+
+def with_customer_steps(to: str, activity: str, field: str) -> dict[str, Any]:
+    """The refund, a CRM lookup, then `activity` addressed with `to` in its input `field`."""
+    definition = refund()
+    definition["steps"]["find"] = {
+        "kind": "activity",
+        "display": {"title": "Find the customer"},
+        "activity": "crm.find@1",
+        "inputs": {"customer": {"var": "order_id"}},
+    }
+    definition["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a notice"},
+        "activity": activity,
+        "requires": ["find"],
+        "inputs": {field: {"var": to}}
+        | ({"template": "found"} if activity == "letters.draft@2" else {}),
+    }
+    return definition
+
+
+def test_a_declared_output_is_as_trusted_as_its_contract_says() -> None:
+    crm = {"crm.find@1": lambda inputs: {"email": "c@example.com", "name": "Cleo"}}
+    drafts = {"notices.draft@1": lambda inputs: {"notice_id": "n-1"}}
+    for activity, field in (("letters.draft@2", "to_customer"), ("notices.draft@1", "to")):
+        run = run_case(
+            with_customer_steps("find.email", activity, field),
+            file=SMALL,
+            answers=[SMALL_REVIEW],
+            people=PEOPLE,
+            activities=crm | drafts,
+            catalog=with_crm(),
+        )
+        assert run.needs_attention == [] and run.closed, run.history
+        assert (
+            "find#1 done, giving email from system:crm; name from untrusted:undeclared"
+            in run.history
+        )
+    # The same lookup's undeclared `name` is refused by both.
+    for activity, field in (("letters.draft@2", "to_customer"), ("notices.draft@1", "to")):
+        run = run_case(
+            with_customer_steps("find.name", activity, field),
+            file=SMALL,
+            answers=[SMALL_REVIEW],
+            people=PEOPLE,
+            activities=crm | drafts,
+            catalog=with_crm(),
+        )
+        [failed] = run.needs_attention
+        assert failed.startswith("notify#1: ") and "find.name (untrusted:undeclared)" in failed
+
+
+def test_the_latest_runs_output_is_read() -> None:
+    definition = with_customer_steps("find.email", "notices.draft@1", "to")
+    definition["steps"]["find"] |= {"repeatable": True, "proposed_by": ["support"]}
+    definition["steps"]["notify"] |= {"automatic": False, "proposed_by": ["support"]}
+    definition["stays_open"] = True
+    definition["close_reasons"] = {"done": {"display": {"title": "Done"}, "roles": ["support"]}}
+    addresses = iter(["old@example.com", "new@example.com"])
+    sent: list[str] = []
+
+    def drafting(inputs: dict[str, Any]) -> dict[str, Any]:
+        sent.append(inputs["to"])
+        return {"notice_id": "n-1"}
+
+    run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW, propose("find", "ana"), propose("notify", "ana")],
+        people=PEOPLE,
+        activities={
+            "crm.find@1": lambda inputs: {"email": next(addresses), "name": "Cleo"},
+            "notices.draft@1": drafting,
+        },
+        catalog=with_crm(),
+    )
+    assert sent == ["new@example.com"]

@@ -749,10 +749,16 @@ Each starts with its negative test, seen failing for the right reason.
 - **"Existing contracts keep their hashes" is layer 1's lock test,**
   `test_every_development_contract_matches_its_recorded_hash`, unchanged and green, with
   `contracts.lock.json` untouched: a source added to an undeclared field would fail it.
-- **The guides were written ahead of the code,** so two of their tests fail until the slices that
-  build what they show: `test_the_guides_histories_are_what_the_engine_records` and
-  `test_the_guides_plan_step_runs_as_written` (the `done` line, slice 1; the workflow step's
-  history, slice 3).
+- **The guides were written ahead of the code,** so two of their tests failed in slice 0: the
+  `done` line, and the new history blocks shifting the order the guide tests read them in. Both
+  green again in slice 1, the outputs block now checked against a run of its own.
+- **`run_case` gains `catalog=`** (slice 1), the development catalog by default: a test registers
+  its own contracts (a CRM lookup declaring `email` as `system:crm`) without adding them to the
+  development catalog, whose contracts the guides list.
+- **Outputs are written by `decide`, so Temporal got them in slice 1** (`complete` is shared):
+  two Temporal tests' `done` lines changed with the in-memory ones, and passed.
+- **A field the contract doesn't declare is how an activity would "send back" a source;** one
+  test covers both promises (`refund_id_source` in the output never reaches the case file).
 
 ### Promises
 
@@ -831,7 +837,7 @@ keys (D27): Temporal's documentation, and the test server can't reset a workflow
 ## 8d. Outputs into the case file, and workflow steps
 
 Status: the seven choices agreed in the session, 2026-10-10 (all as proposed, `cancellable`
-deferred); the eight points decided while drafting confirmed the same day; slice 0 built.
+deferred); the eight points decided while drafting confirmed the same day; slices 0–1 built.
 
 User-facing description, written first: `docs/guides/activities.md`, "Output sources" and
 "Workflow contracts" (with the contract test); `docs/guides/cases.md`, "What a step gives",
@@ -976,7 +982,7 @@ its failure or timeout `Failed`, appended to the inbox as an activity's result i
 
 - `catalog.register`, `catalog.get`, `register_label`, `contract_hash` and the lock check, for
   contracts of both kinds.
-- `run_case(..., activities=, workflows=, held=)` and what it reports.
+- `run_case(..., activities=, workflows=, held=, catalog=)` and what it reports.
 - `parse_case` for `kind: "workflow"`.
 - `case_worker`, `start_case`, `report`, `retry`, `close` and the case's `result()` on Temporal's
   time-skipping test server, with a test workflow on its own task queue.
@@ -1024,10 +1030,16 @@ Each starts with its negative test, seen failing for the right reason.
 - **"Existing contracts keep their hashes" is layer 1's lock test,**
   `test_every_development_contract_matches_its_recorded_hash`, unchanged and green, with
   `contracts.lock.json` untouched: a source added to an undeclared field would fail it.
-- **The guides were written ahead of the code,** so two of their tests fail until the slices that
-  build what they show: `test_the_guides_histories_are_what_the_engine_records` and
-  `test_the_guides_plan_step_runs_as_written` (the `done` line, slice 1; the workflow step's
-  history, slice 3).
+- **The guides were written ahead of the code,** so two of their tests failed in slice 0: the
+  `done` line, and the new history blocks shifting the order the guide tests read them in. Both
+  green again in slice 1, the outputs block now checked against a run of its own.
+- **`run_case` gains `catalog=`** (slice 1), the development catalog by default: a test registers
+  its own contracts (a CRM lookup declaring `email` as `system:crm`) without adding them to the
+  development catalog, whose contracts the guides list.
+- **Outputs are written by `decide`, so Temporal got them in slice 1** (`complete` is shared):
+  two Temporal tests' `done` lines changed with the in-memory ones, and passed.
+- **A field the contract doesn't declare is how an activity would "send back" a source;** one
+  test covers both promises (`refund_id_source` in the output never reaches the case file).
 
 ### Promises
 
@@ -1042,11 +1054,11 @@ the pull request is opened. `K` is `tests/test_catalog.py`, `C` `tests/test_case
 | An output can't be named `outcome` | K `test_every_rule_refuses_a_contract_that_breaks_it`, `test_every_rule_runs_again_when_a_copy_is_registered` (`an output is never named outcome`) |
 | A contract with no source declared hashes as before 8d; declaring one changes the hash | K `test_every_development_contract_matches_its_recorded_hash`, `test_declaring_an_output_source_changes_the_hash` |
 | An output field with no declared source is `untrusted:undeclared`, and an input that accepts only trusted data refuses it: the step fails before it starts | C `test_an_undeclared_output_cannot_reach_a_trusted_input` |
-| A declared `system:` output is trusted, and `only_from` its system accepts it | C `test_a_declared_output_is_as_trusted_as_its_contract_says` |
-| An output's source comes from the contract, never from what the activity returns | C `test_an_outputs_source_is_the_contracts` |
-| Only the fields a contract declares reach the case file; a declared outcome gives no output | C `test_only_declared_outputs_reach_the_case_file` |
+| A declared `system:` output is trusted, and `only_from` its system accepts it; an undeclared one of the same output is refused by both | C `test_a_declared_output_is_as_trusted_as_its_contract_says` |
+| Only the fields a contract declares reach the case file, so a source can't come from what the activity returns | C `test_only_declared_outputs_reach_the_case_file` |
+| A declared outcome gives no output | C `test_a_declared_outcome_gives_no_output` |
 | The latest run's output is the one read | C `test_the_latest_runs_output_is_read` |
-| The `done` line names each output with its source | C `test_the_done_line_names_each_outputs_source` |
+| The `done` line names each output with its source | C `test_a_declared_output_is_as_trusted_as_its_contract_says`, `test_the_guides_histories_are_what_the_engine_records` |
 | A workflow contract has an idempotency key if it writes, a `timeout` above 0, no retry policy and no outcomes | K `test_a_workflow_contract_is_refused_when_it_breaks_a_rule` |
 | A workflow contract is registered, looked up, hashed and recorded like an activity's | K `test_a_workflow_contract_is_in_the_catalog` |
 | A workflow step's output with undeclared provenance cannot reach a sink that requires trusted data (the curriculum's), in memory and on Temporal | W `test_an_undeclared_workflow_output_cannot_reach_a_trusted_input`; TC `test_an_undeclared_workflow_output_is_refused_on_temporal` |

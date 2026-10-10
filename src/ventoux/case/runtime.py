@@ -53,6 +53,7 @@ from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
+from ventoux.core.output_sources import output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
 from ventoux.core.provenance import NoSources, Sourced, provenance
@@ -321,11 +322,28 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
         if state.phase == "closing":
             flag(state, f"{run.entry} completed after the close was requested")
         return  # a step's milestones are reached only when it is done with `done`
-    giving = f", giving {listed(sorted(event.output))}" if event.output else ""
-    state.history.append(f"{run.entry} done{giving}")
+    given = {} if isinstance(step, PlanStep) else write_outputs(state, run.step, contract, event)
+    giving = "; ".join(f"{name} from {given[name]}" for name in sorted(given))
+    state.history.append(f"{run.entry} done{f', giving {giving}' if giving else ''}")
     reach(state, step.reaches)
     if state.phase == "closing":
         flag(state, f"{run.entry} completed after the close was requested")
+
+
+def write_outputs(
+    state: CaseState, step: str, contract: ActivityContract, event: Completed
+) -> dict[str, str]:
+    """Each field the contract declares lands in the case file as `<step>.<field>`, tagged with
+    the source the contract declares for it, never one the activity sends back (brief, D29).
+    Gives each field's source, for the history."""
+    # Pydantic: `model_validate` checks a dict against the model's fields and builds the model; a
+    # field the model doesn't declare is left out, so it never reaches the case file.
+    given = contract.output.model_validate(event.output)
+    sources = output_sources(contract.output)
+    for name, source in sources.items():
+        state.values[f"{step}.{name}"] = getattr(given, name)
+        state.sources[f"{step}.{name}"] = frozenset({source})
+    return sources
 
 
 def plan_outcome_problem(step: PlanStep, event: Completed) -> str | None:

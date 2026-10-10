@@ -222,6 +222,7 @@ def run_case(
     held: Iterable[str] = (),
     plans: Mapping[str, Any] | None = None,
     plan_answers: Mapping[str, Sequence[tuple[Any, ...]]] | None = None,
+    catalog: Catalog = CATALOG,
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
@@ -230,7 +231,8 @@ def run_case(
     a person did; otherwise a system did. `activities` replaces fake activities by reference.
     The runs of the steps in `held` keep running until the script says `finish(entry)`.
     `plans` gives the plans plan steps run, as stored data, by reference (`refund-order@1`);
-    `plan_answers` answers each plan step's waits, in order, by state: `(state, outcome, who)`."""
+    `plan_answers` answers each plan step's waits, in order, by state: `(state, outcome, who)`.
+    `catalog` replaces the development catalog, for a test's own contracts."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
     events: list[Event | Finish] = [Opened(as_json(file), opened_by)]
     for item in answers:
@@ -252,7 +254,7 @@ def run_case(
         events.append(Answered(entry, outcome, who, roles, as_json(form[0]) if form else None))
     implementations = {**FAKES, **activities}
     runner = plan_runner(plans or {}, plan_answers or {}, implementations, people)
-    return run_case_in_memory(case, CATALOG, implementations, events, held=held, plans=runner)
+    return run_case_in_memory(case, catalog, implementations, events, held=held, plans=runner)
 
 
 def plan_runner(
