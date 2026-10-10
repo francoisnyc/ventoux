@@ -983,7 +983,9 @@ Each is a choice the agreed design left open, written as the rule we confirmed.
    flagged, as 8b flags a completion: it happened, and the case file says what it gave.
 6. **An output's type is the contract's,** read as the output model gives it. An expression
    reading a type it doesn't know (an `int` where expressions read exact decimals) stops the step,
-   as any unreadable value does (fail closed); no new rule at registration.
+   as any unreadable value does (fail closed); no new rule at registration. *Revised in the tutor
+   review (below): an output's type is now checked at registration, and its value when it
+   arrives.*
 7. **`ventoux.testing` gains `kyc.check@1`,** the guide's workflow contract, with a fake that gives
    its declared output, and its entry in `contracts.lock.json` (a new contract, not a changed one).
 8. **The contract test lives in `ventoux.temporal`** (it starts a workflow) and is re-exported by
@@ -1157,6 +1159,25 @@ Each starts with its negative test, seen failing for the right reason.
   workflow type while cases are open is a change of its own. Added to D29 (new in this PR), and
   carried to layer 12, whose activation checks bindings.
 
+### From the tutor review
+
+- **A contract could declare outputs the case file can't hold exactly** (brief, D20). `Contract`
+  put no rule on output types, and `write_outputs` stored what Pydantic built. The tutor's probe:
+  `risk.score@1` with `score: float` and `details: Details`, given the exact
+  `Decimal("0.1")`: the case file held a binary float and a Python object, and on Temporal the
+  next continue-as-new failed in the exact converter, stalling the case until code changed.
+  Workflow contracts, often written by other teams, share the gap.
+- **The fix, added to D29:** an output field is a `Decimal`, a `str` or a `bool`; a `float`, an
+  `int` or a nested model is refused when the contract is registered, with D20's reason. Nested
+  outputs are refused rather than designed: nothing in layer 8 needs them. And checked again when
+  the value arrives, on nothing registration did: `outcome_problem` fails the step on a value of
+  any other type, before anything lands, so the `done` line, the outputs and the milestones never
+  happen. Drafting point 6 (an `int` output stopping only the step that reads it) is replaced: the
+  `int` is now refused at registration, and its test with it.
+- **All three negative tests were written first and seen failing:** the `float`, nested and `int`
+  contracts were accepted (also as copies at registration), and with registration bypassed the
+  `float` landed, the next step started and reached an activity nobody had bound.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that will fail if it isn't true.
@@ -1182,8 +1203,7 @@ on Temporal (removed: the case waited forever), the retry under the same ID (dup
 the switch (a running workflow not counted: its result lost), the contract test's undeclared field
 (its check removed), a workflow contract's `timeouts` (its reason removed). Passed as written,
 with nothing of ours to remove: a declared outcome giving no output (an outcome carries none),
-the curriculum's test and the same history on Temporal (`decide` is shared), an `int` output
-stopping the step (layer 2's evaluator), the guide's examples (written first, the code to them),
+the curriculum's test and the same history on Temporal (`decide` is shared), the guide's examples (written first, the code to them),
 and the replay with the workflow type changed (Temporal's own `NondeterminismError`, as in 8c);
 the replays with the same code and with the queue moved are the tests of our code.
 
@@ -1197,7 +1217,8 @@ the replays with the same code and with the queue moved are the tests of our cod
 | Only the fields a contract declares reach the case file, so a source can't come from what the activity returns | C `test_only_declared_outputs_reach_the_case_file` |
 | A declared outcome gives no output | C `test_a_declared_outcome_gives_no_output` |
 | The latest run's output is the one read | C `test_the_latest_runs_output_is_read` |
-| An output keeps its contract's type: one expressions can't read (an `int`) stops the step that reads it, never reads as false | C `test_an_output_expressions_cannot_read_stops_the_step_that_reads_it` |
+| An output field is a `Decimal`, a `str` or a `bool`: a `float`, an `int` or a nested model is refused when registered, also as a copy (tutor review) | K `test_every_rule_refuses_a_contract_that_breaks_it`, `test_every_rule_runs_again_when_a_copy_is_registered`, `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |
+| With registration bypassed, an output value the case file can't hold fails the step, and nothing the step gave lands (tutor review) | C `test_an_output_the_case_file_cannot_hold_fails_the_step` |
 | The `done` line names each output with its source | C `test_a_declared_output_is_as_trusted_as_its_contract_says`, `test_the_guides_histories_are_what_the_engine_records` |
 | A workflow contract has an idempotency key if it writes, a `timeout` above 0, no retry policy, no activity timeouts and no outcomes, each refused with why | K `test_a_workflow_contract_is_refused_when_it_breaks_a_rule`, `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |
 | A workflow contract is registered, looked up, hashed and recorded like an activity's, checked again as its kind at registration | K `test_a_workflow_contract_is_in_the_catalog`, `test_every_development_contract_matches_its_recorded_hash` |

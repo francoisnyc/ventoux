@@ -304,6 +304,10 @@ class KycNamedOutcome(BaseModel):
     outcome: str
 
 
+class KycAsFloat(BaseModel):
+    score: float
+
+
 def kyc(output: type[BaseModel]) -> WorkflowContract:
     """The guide's workflow contract, `kyc.check@1`, with `output`."""
     fields = {name: getattr(testing.kyc_check, name) for name in WorkflowContract.model_fields}
@@ -339,6 +343,7 @@ GUIDE_REFUSALS: dict[str, Any] = {
         kyc(KycNotesFromFax)
     ),
     "An output field named `outcome`": lambda: kyc(KycNamedOutcome),
+    "An output field `score: float`": lambda: kyc(KycAsFloat),
     '`catalog.register_label("undeclared")`': lambda: Catalog().register_label("undeclared"),
     "A second, different `payments.refund@2`": lambda: catalog_of(payments_refund).register(
         refund(risk="medium")
@@ -428,6 +433,25 @@ class RefundWithTwoSources(BaseModel):
     refund_id: Annotated[str, source("system:payments"), source("untrusted:llm")]
 
 
+class RefundAsFloat(BaseModel):
+    refund_id: str
+    refunded: float
+
+
+class Band(BaseModel):
+    band: str
+
+
+class RefundWithDetails(BaseModel):
+    refund_id: str
+    details: Band
+
+
+class RefundCounted(BaseModel):
+    refund_id: str
+    attempts: int
+
+
 class RefundNamedOutcome(BaseModel):
     refund_id: str
     outcome: str
@@ -456,6 +480,10 @@ CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
     ("an output source is a system or a label", {"output": RefundFromAPerson}, "never a person"),
     ("an output has one source", {"output": RefundWithTwoSources}, "has 2 sources"),
     ("an output is never named outcome", {"output": RefundNamedOutcome}, "can't be named outcome"),
+    # Tutor review of 8d: an output lands in the case file, which holds values exactly (D20).
+    ("an output is never a float", {"output": RefundAsFloat}, "output refunded is float"),
+    ("an output is never a nested model", {"output": RefundWithDetails}, "output details is Band"),
+    ("an output is never an int", {"output": RefundCounted}, "output attempts is int"),
 ]
 RULE_NAMES = [rule for rule, _, _ in CONTRACT_RULES]
 

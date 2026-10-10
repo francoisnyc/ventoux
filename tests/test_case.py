@@ -1611,27 +1611,28 @@ def test_an_activity_step_naming_a_workflow_contract_fails() -> None:
     ]
 
 
-class Counted(BaseModel):
-    orders: Annotated[int, source("system:crm")]  # a whole number, which expressions don't read
+class Scored(BaseModel):
+    email: Annotated[str, source("system:crm")]
+    score: float  # what registration refuses (brief, D20); here it is never registered
 
 
-def test_an_output_expressions_cannot_read_stops_the_step_that_reads_it() -> None:
-    # An output keeps its contract's type (8d, drafting 6). Expressions read exact decimals, so a
-    # condition reading an `int` can't be read: the step fails, never reads it as false.
+def test_an_output_the_case_file_cannot_hold_fails_the_step() -> None:
+    # Tutor review: checked at runtime on nothing registration did. A contract that skipped
+    # registration gives a float: the step fails, and nothing it gave lands, not even its email.
     catalog = with_crm()
-    catalog.register(contract("crm.count", FindInput, Counted))
-    definition = with_customer_steps("find.email", "notices.draft@1", "to")
-    definition["steps"]["find"]["activity"] = "crm.count@1"
-    definition["steps"]["notify"]["when"] = {">": [{"var": "find.orders"}, 1]}
+    found = catalog.get("crm.find@1").model_copy(update={"output": Scored})  # no check runs
+    catalog._contracts["crm.find@1"] = found  # bypassing registration, on purpose
     run = run_case(
-        definition,
+        with_customer_steps("find.email", "notices.draft@1", "to"),
         file=SMALL,
         answers=[SMALL_REVIEW],
         people=PEOPLE,
-        activities={"crm.count@1": lambda inputs: {"orders": 3}},
+        activities={"crm.find@1": lambda inputs: {"email": "c@x.com", "score": Decimal("0.1")}},
         catalog=catalog,
     )
     assert run.needs_attention == [
-        "notify#1: notify's condition find.orders > 1 can't be evaluated: find.orders holds 3, "
-        + "a int, and an expression reads only decimals, texts and booleans"
+        "find#1: crm.find@1 gave score as 0.1, a float, which the case file can't hold exactly "
+        + "(brief, D20)"
     ]
+    assert not any(line.startswith("find#1 done") for line in run.history)
+    assert not any(line.startswith("scheduled notify#1") for line in run.history)

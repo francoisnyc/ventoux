@@ -9,7 +9,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ventoux.core.output_sources import OutputSource, is_output_source
+from ventoux.core.output_sources import HELD, HELD_NAMES, OutputSource, is_output_source
 from ventoux.core.policy import KIND_NAMES, KINDS, Policy
 
 # A contract never changes once written, down to its parts (brief, D5); and a field it doesn't
@@ -161,6 +161,20 @@ class Contract(BaseModel):
                         "An output's source is system:<name> or untrusted:<label>: an activity "
                         "is never a person, and trust is earned, not declared."
                     )
+        return self
+
+    @model_validator(mode="after")
+    def outputs_are_held_exactly(self) -> Self:
+        # An output lands in the case file, which holds values exactly: never a binary float, never
+        # a Python object (brief, D20). Checked by the field's type, before any value arrives.
+        for name, field in self.output.model_fields.items():
+            if field.annotation not in HELD:
+                kind = getattr(field.annotation, "__name__", str(field.annotation))
+                raise ValueError(
+                    f"{self.reference}: output {name} is {kind}, which the case file can't hold "
+                    f"exactly. An output is {HELD_NAMES}: numbers are exact decimals, never "
+                    "binary floats (brief, D20)."
+                )
         return self
 
     @model_validator(mode="after")

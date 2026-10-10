@@ -730,6 +730,11 @@ be erased on request), has size limits, and a second copy of business records go
 - **Outputs land in the case file as `<step>.<field>`,** like the step's outcome, with the source
   the contract declares, never one the activity or workflow sends back; only the fields the
   contract declares, only with `done`, the latest run's read.
+- **An output is a value the case file holds exactly:** a decimal, a text or true or false (D20).
+  A contract whose output field is a `float`, an `int` or a nested model is refused when
+  registered; and checked again when the value arrives, on nothing registration did, a value of
+  any other type fails the step, and nothing it gave lands. *Added in the tutor review of layer
+  8d, before D29 was merged.*
 - **A workflow contract** shares the catalog, its references and its hash with activity contracts.
   It promises a `timeout` instead of a retry policy, and declares no outcomes. `cancellable` (D6)
   comes with the first thing that stops a running step; until then closing lets a workflow step

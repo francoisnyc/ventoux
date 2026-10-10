@@ -184,7 +184,12 @@ contracts registered before output sources existed hash as they did, and read ev
 untrusted, the strictest reading. To make `payments.refund@2`'s `refund_id` trusted, you would
 register `payments.refund@3` declaring it.
 
-An output field can't be named `outcome`: `pay.outcome` is the step's outcome.
+An output field can't be named `outcome`: `pay.outcome` is the step's outcome. And it holds a
+value the case file holds exactly: a `Decimal`, a `str` (a reference is one) or a `bool`. A
+`float` is refused, as everywhere else (brief, D20): `0.1` as a binary float isn't 0.1. So are an
+`int` (use `Decimal`) and a nested model, which would put an object in the case file, not data.
+The engine checks every value again when it arrives: one it can't hold fails the step, and nothing
+the step gave lands.
 
 ## Workflow contracts: an existing workflow as one step
 
@@ -289,6 +294,7 @@ writes them.
 | `source("person:ana")` or `source("trusted:kyc")` on an output field | `kyc.check@1`: output `status` has the source `'person:ana'`. An output's source is `system:<name>` or `untrusted:<label>`: an activity is never a person, and trust is earned, not declared. |
 | `source("untrusted:fax")`, a label nobody registered | `kyc.check@1`: output `analyst_notes` is `untrusted:fax`, and `fax` is not a registered label. Register it first, or use one of: customer, document, email, llm, web. |
 | An output field named `outcome` | `kyc.check@1`: an output can't be named `outcome`: `<step>.outcome` is the step's outcome. Rename the field. |
+| An output field `score: float` | `kyc.check@1`: output `score` is `float`, which the case file can't hold exactly. An output is a decimal (Decimal), a text (str) or true or false (bool): numbers are exact decimals, never binary floats (brief, D20). |
 | `catalog.register_label("undeclared")` | `undeclared` is the engine's label for an output nobody declared a source for: register another. |
 | `catalog.register_label("LLM")` | `'LLM'` is not a label: a label is lowercase, such as `llm` or `customer-portal`. |
 | A second, different `payments.refund@2` | `payments.refund@2` is already registered with different content: register it as `payments.refund@3`. |

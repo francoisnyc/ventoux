@@ -5,6 +5,7 @@ policy is written on an input field. See docs/guides/activities.md.
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, GetJsonSchemaHandler
@@ -20,6 +21,11 @@ ORIGINS = ("system:", "untrusted:")
 # less trusted, never more (brief, D6). `undeclared` is the engine's label, never registered.
 UNDECLARED_LABEL = "undeclared"
 UNDECLARED = f"untrusted:{UNDECLARED_LABEL}"
+# What an output field may hold: what the case file holds exactly and expressions read (brief, D20).
+# Numbers are exact decimals, never binary floats; a reference is a text. A nested model would put a
+# Python object in the case file, not data, so it is refused too (tutor review of layer 8d).
+HELD = (Decimal, str, bool)
+HELD_NAMES = "a decimal (Decimal), a text (str) or true or false (bool)"
 
 
 @dataclass(frozen=True)
@@ -66,3 +72,9 @@ def output_sources(output: type[BaseModel]) -> dict[str, str]:
     """Each output field's source: the one declared, or `untrusted:undeclared` (brief, D6)."""
     declared = declared_sources(output)
     return {name: declared.get(name, UNDECLARED) for name in output.model_fields}
+
+
+def is_held(value: object) -> bool:
+    """Whether the case file can hold `value` exactly: `Decimal("0.1")`, `"ord-1"`, `True` are,
+    `0.1` and `3` aren't. By its exact type: a `bool` is an `int` to Python, an `int` is not held."""
+    return type(value) in HELD

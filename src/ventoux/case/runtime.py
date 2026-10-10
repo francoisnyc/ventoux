@@ -61,7 +61,7 @@ from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
-from ventoux.core.output_sources import output_sources
+from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
 from ventoux.core.provenance import NoSources, Sourced, provenance
@@ -307,8 +307,9 @@ def answer_approval(
 
 
 def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Completed) -> None:
-    """A scheduled activity finished: its outcome lands in the case file, tagged with the contract
-    that declares it. Its output is recorded here, not in the case file (layer 8d)."""
+    """A scheduled activity, a workflow or a plan finished: its outcome lands in the case file,
+    tagged with the contract (or plan) that declares it, and so does an activity's or a workflow's
+    output, each field tagged with its contract's source (brief, D29)."""
     run = next(run for run in state.runs if run.entry == event.entry)
     step = case.steps[run.step]
     assert not isinstance(step, TaskStep)  # only an activity, a workflow or a plan completes
@@ -377,11 +378,20 @@ def outcome_problem(contract: Contract, event: Completed) -> str | None:
         )
     try:
         # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
-        contract.output.model_validate(event.output)
+        given = contract.output.model_validate(event.output)
     except ValidationError as error:
         return (
             f"{contract.reference} gave an output its contract doesn't declare: {one_line(error)}"
         )
+    # Checked again here, on nothing registration did: the case file holds values exactly, so a
+    # value it can't hold fails the step, and nothing the step gave lands (brief, D20).
+    for name in contract.output.model_fields:
+        value = getattr(given, name)
+        if not is_held(value):
+            return (
+                f"{contract.reference} gave {name} as {value}, a {type(value).__name__}, which "
+                "the case file can't hold exactly (brief, D20)"
+            )
     return None
 
 
