@@ -262,7 +262,7 @@ promise:
 | returns no `status` | `kyc.check@1 gave an output its contract doesn't declare: status: Field required` |
 | returns a `score` the contract doesn't have | `kyc.check@1 gave score, which its contract doesn't declare` |
 | waits for a signal | `kyc.check@1 didn't finish within its timeout of 600s: a workflow step must not wait for people` |
-| raises | `kyc.check@1 failed: <what it said>` |
+| raises `ApplicationError("documents unreadable")` | `kyc.check@1 failed: documents unreadable` |
 
 It checks the shape of what the workflow gives, not where each value really comes from: whether
 `risk_score` is the scoring system's is for code review. A field the case will never read still

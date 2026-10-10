@@ -38,6 +38,7 @@ from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
 from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
+from ventoux.temporal.contract_check import check_workflow_contract
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 
 __all__ = [
@@ -52,6 +53,7 @@ __all__ = [
     "ProposalRefused",
     "RetryRefused",
     "StepStopped",
+    "check_workflow_contract",
     "close",
     "finish",
     "load_definition",

@@ -1,4 +1,4 @@
-"""Bindings: where each workflow contract runs, in this deployment (brief, D5, layer 8d).
+"""Bindings: where each workflow contract runs, in this deployment (brief, D5).
 
 A contract says what a workflow promises; a binding says where it runs: its workflow type and task
 queue. Moving where it runs is an operations change, never a contract change. See

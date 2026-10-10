@@ -801,6 +801,14 @@ Each starts with its negative test, seen failing for the right reason.
   building): in memory the check finishes before the review is answered, on Temporal after; the
   "same history" test makes `kyc` require `pay`. And the close test waits for the payment to be
   done, or it is flagged too, rightly.
+- **The contract test starts the workflow from the client** (slice 5), under an ID of its own,
+  `contract-test/kyc.check@1/<a random suffix>`: a test, never a case, run in the team's own test
+  suite rather than in a workflow, so its randomness touches no replay. It checks the input it is
+  given against the contract first: a wrong input is the caller's mistake, not the workflow's.
+- **The guide's "raises" row names what was raised,** `ApplicationError("documents
+  unreadable")`, so the row is checked word for word, not with a placeholder.
+- **The guide's contract-test example runs as written,** with the test's `KycCheck` as the team's
+  workflow.
 
 ### Promises
 
@@ -879,7 +887,7 @@ keys (D27): Temporal's documentation, and the test server can't reset a workflow
 ## 8d. Outputs into the case file, and workflow steps
 
 Status: the seven choices agreed in the session, 2026-10-10 (all as proposed, `cancellable`
-deferred); the eight points decided while drafting confirmed the same day; slices 0–4 built.
+deferred); the eight points decided while drafting confirmed the same day; slices 0–5 built.
 
 User-facing description, written first: `docs/guides/activities.md`, "Output sources" and
 "Workflow contracts" (with the contract test); `docs/guides/cases.md`, "What a step gives",
@@ -1007,7 +1015,7 @@ its failure or timeout `Failed`, appended to the inbox as an activity's result i
 - `case/memory.py`: carries `StartWorkflow`.
 - `temporal/bindings.py`: `Binding`.
 - `temporal/cases.py`: `workflows`; `StartWorkflow` as a child workflow; its result.
-- `temporal/contract_check.py`: `check_workflow_contract`.
+- `temporal/contract_check.py`: `check_workflow_contract`; `temporal/bindings.py`: `Binding`.
 - `testing.py`: `kyc.check@1` and its fake; `run_case(..., workflows=)`; the re-export.
 - `contracts.lock.json`: `kyc.check@1`.
 
@@ -1125,6 +1133,14 @@ Each starts with its negative test, seen failing for the right reason.
   building): in memory the check finishes before the review is answered, on Temporal after; the
   "same history" test makes `kyc` require `pay`. And the close test waits for the payment to be
   done, or it is flagged too, rightly.
+- **The contract test starts the workflow from the client** (slice 5), under an ID of its own,
+  `contract-test/kyc.check@1/<a random suffix>`: a test, never a case, run in the team's own test
+  suite rather than in a workflow, so its randomness touches no replay. It checks the input it is
+  given against the contract first: a wrong input is the caller's mistake, not the workflow's.
+- **The guide's "raises" row names what was raised,** `ApplicationError("documents
+  unreadable")`, so the row is checked word for word, not with a placeholder.
+- **The guide's contract-test example runs as written,** with the test's `KycCheck` as the team's
+  workflow.
 
 ### Promises
 
@@ -1158,6 +1174,6 @@ the pull request is opened. `K` is `tests/test_catalog.py`, `V` `tests/test_vali
 | A running workflow step finishes when the case closes; its output lands and the case is flagged | W `test_a_workflow_finishing_after_the_close_flags_the_case`; TW `test_closing_lets_a_workflow_step_finish` |
 | On Temporal a workflow step is a child workflow `<case ID>/<entry>` on its binding's queue, with the same history as in memory | TW `test_a_workflow_step_runs_as_a_bound_child` |
 | A case doesn't continue as new while a workflow step runs | TW `test_a_switch_waits_while_a_workflow_runs` |
-| The contract test reports a missing, extra or mistyped output, a workflow that waits, and one that fails; a workflow that keeps its contract passes | TC `test_the_contract_test_finds_each_broken_promise`, `test_the_kyc_workflow_keeps_its_contract` |
+| The contract test reports a missing, extra or mistyped output, a workflow that waits, and one that fails, as the guide's table says; a workflow that keeps its contract passes, the guide's example as written | TW `test_the_contract_test_finds_each_broken_promise`, `test_the_kyc_workflow_keeps_its_contract`, `test_the_guides_contract_test_runs_as_written` |
 | A case history with a workflow step replays with the same code | TC `test_a_case_history_replays` |
 | The guides' examples and refusal rows are what the engine says | C `test_the_guides_examples_run_as_written`, `test_the_guides_histories_are_what_the_engine_records`; K `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |

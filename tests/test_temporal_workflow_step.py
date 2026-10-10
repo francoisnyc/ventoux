@@ -31,6 +31,7 @@ from ventoux.temporal.cases import (
     retry,
     start_case,
 )
+from ventoux.temporal.contract_check import check_workflow_contract
 from ventoux.temporal.converter import DATA_CONVERTER
 from ventoux.temporal.worker import case_worker
 
@@ -42,6 +43,7 @@ with workflow.unsafe.imports_passed_through():
         FAKES,
         DevelopmentCases,
         DevelopmentPlans,
+        kyc_check,
         load_definition,
         run_case,
     )
@@ -93,12 +95,20 @@ class KycCheck:
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=RetryPolicy(maximum_attempts=1),
             )
-        return {
+        output: dict[str, Any] = {
             "status": "clear",
             "risk_score": Decimal(12),
             "analyst_notes": "No concerns in the documents.",
             "contact_email": f"{inputs['customer_id']}@example.com",
         }
+        # How a team's workflow drifts from its contract, for the contract test to find.
+        if inputs["customer_id"] == "c-no-status":
+            del output["status"]
+        if inputs["customer_id"] == "c-score":
+            output["score"] = Decimal(12)
+        if inputs["customer_id"] == "c-wordy":
+            output["risk_score"] = "low"
+        return output
 
 
 @workflow.defn(name="ventoux.case")
@@ -378,3 +388,69 @@ def test_a_switch_waits_while_a_workflow_runs() -> None:
     assert during == first  # no switch while the check ran
     assert last != first  # and one once it was back
     assert checked.history.count(DONE) == 1
+
+
+# --- Slice 5: the contract test ---
+
+ACTIVITIES_GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "activities.md"
+# Each "Your workflow" cell of the guide's contract-test table, and the customer whose check does
+# it in the KYC team's workflow above.
+DRIFTS = {
+    "returns no `status`": "c-no-status",
+    "returns a `score` the contract doesn't have": "c-score",
+    "waits for a signal": "c-waits",
+    'raises `ApplicationError("documents unreadable")`': "c-fails",
+}
+
+
+def contract_test_rows() -> list[tuple[str, str]]:
+    """The rows of the guide's table of what the contract test says, as (workflow, says)."""
+    text = ACTIVITIES_GUIDE.read_text()
+    table = text.split("| Your workflow | The contract test says |")[1].split("\n\n")[0]
+    rows = [line for line in table.splitlines() if line.startswith("| ")]
+    return [
+        (cells[1].strip(), cells[2].strip().strip("`")) for cells in (r.split("|") for r in rows)
+    ]
+
+
+def contract_test_of(customer: str) -> list[str]:
+    """What the contract test says of the KYC team's workflow, checking `customer`."""
+
+    async def scenario(environment: WorkflowEnvironment) -> list[str]:
+        binding = CasesWithKyc.workflows["kyc.check@1"]
+        return await check_workflow_contract(
+            environment.client, kyc_check, binding, {"customer_id": customer}
+        )
+
+    return on_temporal(scenario)
+
+
+def test_the_contract_test_finds_each_broken_promise() -> None:
+    rows = contract_test_rows()
+    assert [drift for drift, _ in rows] == list(DRIFTS)
+    for drift, says in rows:
+        # The guide writes code in marks; the problem reads without them.
+        assert contract_test_of(DRIFTS[drift]) == [says.replace("`", "")], drift
+    [mistyped] = contract_test_of("c-wordy")
+    assert mistyped.startswith(
+        "kyc.check@1 gave an output its contract doesn't declare: risk_score:"
+    )
+
+
+def test_the_kyc_workflow_keeps_its_contract() -> None:
+    assert contract_test_of("c-1") == []
+
+
+def test_the_guides_contract_test_runs_as_written() -> None:
+    # The guide's example, the fourth Python block of the activities guide, with the KYC team's
+    # workflow above as its `KycCheck`.
+    example = ACTIVITIES_GUIDE.read_text().split("```python\n")[4].split("```")[0]
+    namespace: dict[str, Any] = {"Worker": Worker, "KycCheck": KycCheck, "kyc_check": kyc_check}
+    exec(example, namespace)  # noqa: S102 -- our guide, run so it can't drift from the code
+
+    async def go() -> None:
+        environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
+        async with environment:
+            await namespace["test_kyc_check_keeps_its_contract"](environment)
+
+    asyncio.run(go())
