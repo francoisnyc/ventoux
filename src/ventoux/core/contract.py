@@ -9,6 +9,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ventoux.core.output_sources import OutputSource, is_output_source
 from ventoux.core.policy import KIND_NAMES, KINDS, Policy
 
 # A contract never changes once written, down to its parts (brief, D5); and a field it doesn't
@@ -152,6 +153,38 @@ class ActivityContract(BaseModel):
                         f"({type(policy).__name__}). The kinds are {KIND_NAMES}; a new kind is "
                         "added to the engine, never in a contract."
                     )
+        return self
+
+    @model_validator(mode="after")
+    def output_sources_are_systems_or_labels(self) -> Self:
+        # Trust comes from a system the platform team vouches for, or a person's answer, never
+        # from a contract calling its output "trusted" (brief, D12).
+        for name, field in self.output.model_fields.items():
+            sources = [m for m in field.metadata if isinstance(m, OutputSource)]
+            # Fail closed: two sources can't both be right, and the engine won't pick one.
+            if len(sources) > 1:
+                raise ValueError(
+                    f"{self.reference}: output {name} has {len(sources)} sources. Declare one: "
+                    "where its content really comes from."
+                )
+            for declared in sources:
+                if not is_output_source(declared.source):
+                    raise ValueError(
+                        f"{self.reference}: output {name} has the source {declared.source!r}. "
+                        "An output's source is system:<name> or untrusted:<label>: an activity "
+                        "is never a person, and trust is earned, not declared."
+                    )
+        return self
+
+    @model_validator(mode="after")
+    def no_output_named_outcome(self) -> Self:
+        # Outputs land in the case file as `<step>.<field>`, where `<step>.outcome` is the step's
+        # outcome: one name, one value (brief, D29).
+        if "outcome" in self.output.model_fields:
+            raise ValueError(
+                f"{self.reference}: an output can't be named outcome: <step>.outcome is the "
+                "step's outcome. Rename the field."
+            )
         return self
 
     def policies(self, field: str) -> list[Policy]:

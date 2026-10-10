@@ -736,6 +736,24 @@ Each starts with its negative test, seen failing for the right reason.
 - **Both negative tests were written first and seen failing:** the payment was made once, the
   letter after it never started, and the flags were empty, for the completion and the failure.
 
+### Decided while building
+
+- **An output declares at most one source** (slice 0): two sources on one field can't both be
+  right, and the engine won't pick one (fail closed): `output status has 2 sources`.
+- **The label check is the catalog's, and reads only the sources a contract writes** (slice 0).
+  It first read every output's source, the `untrusted:undeclared` default included, and refused
+  every contract written before 8d; `declared_sources` (what the contract writes) and
+  `output_sources` (with the default) are now two functions.
+- **The guide's refusal rows for output sources run on an activity contract named
+  `kyc.check@1` until slice 2** builds workflow contracts: the rules are the same on both kinds.
+- **"Existing contracts keep their hashes" is layer 1's lock test,**
+  `test_every_development_contract_matches_its_recorded_hash`, unchanged and green, with
+  `contracts.lock.json` untouched: a source added to an undeclared field would fail it.
+- **The guides were written ahead of the code,** so two of their tests fail until the slices that
+  build what they show: `test_the_guides_histories_are_what_the_engine_records` and
+  `test_the_guides_plan_step_runs_as_written` (the `done` line, slice 1; the workflow step's
+  history, slice 3).
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that will fail if it isn't true.
@@ -813,7 +831,7 @@ keys (D27): Temporal's documentation, and the test server can't reset a workflow
 ## 8d. Outputs into the case file, and workflow steps
 
 Status: the seven choices agreed in the session, 2026-10-10 (all as proposed, `cancellable`
-deferred); the points decided while drafting to confirm.
+deferred); the eight points decided while drafting confirmed the same day; slice 0 built.
 
 User-facing description, written first: `docs/guides/activities.md`, "Output sources" and
 "Workflow contracts" (with the contract test); `docs/guides/cases.md`, "What a step gives",
@@ -879,9 +897,9 @@ prototype is not checked out in this session.
    output field, a timeout (it waited, for people or anything else), a failure. It checks shape,
    not truth ("a promise, not a proof", brief D6).
 
-### Decided while drafting, to confirm
+### Decided while drafting, confirmed in the session
 
-Each is a choice the agreed design left open, written as the rule I propose.
+Each is a choice the agreed design left open, written as the rule we confirmed.
 
 1. **The `done` line names each output with its source,** as the scheduled line names each input:
    `pay#1 done, giving refund_id from untrusted:undeclared`. 8a's line, `giving refund_id`,
@@ -993,6 +1011,24 @@ Each starts with its negative test, seen failing for the right reason.
 6. **Replay.** A case history with a workflow step replays with the same code.
 7. **The guides and the promises.**
 
+### Decided while building
+
+- **An output declares at most one source** (slice 0): two sources on one field can't both be
+  right, and the engine won't pick one (fail closed): `output status has 2 sources`.
+- **The label check is the catalog's, and reads only the sources a contract writes** (slice 0).
+  It first read every output's source, the `untrusted:undeclared` default included, and refused
+  every contract written before 8d; `declared_sources` (what the contract writes) and
+  `output_sources` (with the default) are now two functions.
+- **The guide's refusal rows for output sources run on an activity contract named
+  `kyc.check@1` until slice 2** builds workflow contracts: the rules are the same on both kinds.
+- **"Existing contracts keep their hashes" is layer 1's lock test,**
+  `test_every_development_contract_matches_its_recorded_hash`, unchanged and green, with
+  `contracts.lock.json` untouched: a source added to an undeclared field would fail it.
+- **The guides were written ahead of the code,** so two of their tests fail until the slices that
+  build what they show: `test_the_guides_histories_are_what_the_engine_records` and
+  `test_the_guides_plan_step_runs_as_written` (the `done` line, slice 1; the workflow step's
+  history, slice 3).
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that will fail if it isn't true.
@@ -1002,9 +1038,9 @@ the pull request is opened. `K` is `tests/test_catalog.py`, `C` `tests/test_case
 
 | Promise | Test |
 |---|---|
-| An output's source is `system:<name>` or `untrusted:<registered label>`; `person:`, `trusted:`, an unregistered label and the label `undeclared` are refused | K `test_an_output_source_is_a_system_or_a_registered_label` |
-| An output can't be named `outcome` | K `test_an_output_is_never_named_outcome` |
-| A contract with no source declared hashes as before 8d; declaring one changes the hash | K `test_existing_contracts_keep_their_hashes`, `test_declaring_an_output_source_changes_the_hash` |
+| An output's source is `system:<name>` or `untrusted:<registered label>`, one per field; `person:`, `trusted:`, an unregistered label and the label `undeclared` are refused, also on a copy at registration | K `test_an_output_source_is_a_system_or_a_registered_label`, `test_an_output_has_one_source`, `test_an_output_source_names_a_registered_label`, `test_undeclared_is_the_engines_label`, `test_every_rule_refuses_a_contract_that_breaks_it`, `test_every_rule_runs_again_when_a_copy_is_registered` |
+| An output can't be named `outcome` | K `test_every_rule_refuses_a_contract_that_breaks_it`, `test_every_rule_runs_again_when_a_copy_is_registered` (`an output is never named outcome`) |
+| A contract with no source declared hashes as before 8d; declaring one changes the hash | K `test_every_development_contract_matches_its_recorded_hash`, `test_declaring_an_output_source_changes_the_hash` |
 | An output field with no declared source is `untrusted:undeclared`, and an input that accepts only trusted data refuses it: the step fails before it starts | C `test_an_undeclared_output_cannot_reach_a_trusted_input` |
 | A declared `system:` output is trusted, and `only_from` its system accepts it | C `test_a_declared_output_is_as_trusted_as_its_contract_says` |
 | An output's source comes from the contract, never from what the activity returns | C `test_an_outputs_source_is_the_contracts` |

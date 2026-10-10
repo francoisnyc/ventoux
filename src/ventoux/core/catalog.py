@@ -2,6 +2,7 @@
 
 from ventoux.core.contract import ActivityContract, is_reference
 from ventoux.core.contract_hash import contract_hash
+from ventoux.core.output_sources import UNDECLARED_LABEL, declared_sources
 from ventoux.core.provenance import is_label
 from ventoux.core.roles import checked_role
 
@@ -29,6 +30,12 @@ class Catalog:
         if not is_label(label):
             raise ValueError(
                 f"{label!r} is not a label: a label is lowercase, such as llm or customer-portal."
+            )
+        # Nobody can declare a value `untrusted:undeclared` and blur what it means (brief, D29).
+        if label == UNDECLARED_LABEL:
+            raise ValueError(
+                f"{label} is the engine's label for an output nobody declared a source for: "
+                "register another."
             )
         self._labels.add(label)
 
@@ -63,6 +70,7 @@ class Catalog:
         # Pydantic: `model_validate` checks its input, raising `ValidationError` if a rule fails. The
         # checked copy it returns isn't needed: the contract passed, and being frozen, can't change.
         ActivityContract.model_validate(contract)
+        self.check_output_labels(contract)
         # A reference stands for one promise for good: a changed promise needs a new version
         # (brief, D5).
         registered = self._contracts.get(contract.reference)
@@ -73,6 +81,18 @@ class Catalog:
             )
         # New, the same promise again (a worker restarting), or new wording, which applies at once.
         self._contracts[contract.reference] = contract
+
+    def check_output_labels(self, contract: ActivityContract) -> None:
+        """Every `untrusted:` label an output declares is registered, as a field's must be
+        (brief, D12): a typo in a label is caught, never a new kind of untrusted."""
+        for name, declared in declared_sources(contract.output).items():
+            origin, _, label = declared.partition(":")
+            if origin == "untrusted" and label not in self._labels:
+                registered = ", ".join(self.labels) or "none yet"
+                raise ValueError(
+                    f"{contract.reference}: output {name} is {declared}, and {label} is not a "
+                    f"registered label. Register it first, or use one of: {registered}."
+                )
 
     def next_reference(self, name: str) -> str:
         """The reference a changed contract should take: one past the latest version."""

@@ -18,6 +18,7 @@ from ventoux.core.catalog import Catalog, ContractConflict, NotInCatalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.contract_hash import contract_hash
 from ventoux.core.hash_check import check_hashes
+from ventoux.core.output_sources import OutputSource, source
 from ventoux.core.policy import Policy, only_from, trusted_only
 from ventoux.testing import CATALOG, load_definition, payments_refund, run_case
 
@@ -278,6 +279,25 @@ def refund(**changes: Any) -> ActivityContract:
     return ActivityContract(**fields | changes)
 
 
+class KycStatusFromAPerson(BaseModel):
+    status: Annotated[str, source("person:ana")]
+
+
+class KycNotesFromFax(BaseModel):
+    status: Annotated[str, source("system:kyc")]
+    analyst_notes: Annotated[str, source("untrusted:fax")]
+
+
+class KycNamedOutcome(BaseModel):
+    outcome: str
+
+
+def kyc(output: type[BaseModel]) -> ActivityContract:
+    """The guide's `kyc.check@1` with `output`. Until slice 2 of 8d builds workflow contracts, an
+    activity contract: the output rules are the same on both kinds."""
+    return lookup_contract(name="kyc.check", output=output)
+
+
 # Each "You wrote" cell of the guide's refusal table, and the code that does it.
 GUIDE_REFUSALS: dict[str, Any] = {
     '`effect="write"` with no `idempotency_key`': lambda: refund(idempotency_key=None),
@@ -300,6 +320,14 @@ GUIDE_REFUSALS: dict[str, Any] = {
         input=RefundWithUnless
     ),
     '`catalog.register_label("LLM")`': lambda: Catalog().register_label("LLM"),
+    '`source("person:ana")` or `source("trusted:kyc")` on an output field': lambda: kyc(
+        KycStatusFromAPerson
+    ),
+    '`source("untrusted:fax")`, a label nobody registered': lambda: labelled_catalog().register(
+        kyc(KycNotesFromFax)
+    ),
+    "An output field named `outcome`": lambda: kyc(KycNamedOutcome),
+    '`catalog.register_label("undeclared")`': lambda: Catalog().register_label("undeclared"),
     "A second, different `payments.refund@2`": lambda: catalog_of(payments_refund).register(
         refund(risk="medium")
     ),
@@ -376,6 +404,19 @@ class RefundWithUnless(BaseModel):
     idempotency_key: str
 
 
+class RefundFromAPerson(BaseModel):
+    refund_id: Annotated[str, source("person:ana")]
+
+
+class RefundWithTwoSources(BaseModel):
+    refund_id: Annotated[str, source("system:payments"), source("untrusted:llm")]
+
+
+class RefundNamedOutcome(BaseModel):
+    refund_id: str
+    outcome: str
+
+
 # Every rule a contract enforces (docs/layers/03-validation.md), each with a change that breaks it.
 # A change to a part (`timeouts`, `retry`) is written as that part's changed fields.
 CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
@@ -395,6 +436,10 @@ CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
     ("an effect from its list", {"effect": "delete"}, "'read', 'compute', 'write' or 'notify'"),
     # Layer 4: the kinds of input policy are the engine's (brief, D21).
     ("a policy kind the engine knows", {"input": RefundWithUnless}, "Ventoux doesn't know"),
+    # Layer 8d: outputs say where they come from, and land in the case file (brief, D29).
+    ("an output source is a system or a label", {"output": RefundFromAPerson}, "never a person"),
+    ("an output has one source", {"output": RefundWithTwoSources}, "has 2 sources"),
+    ("an output is never named outcome", {"output": RefundNamedOutcome}, "can't be named outcome"),
 ]
 RULE_NAMES = [rule for rule, _, _ in CONTRACT_RULES]
 
@@ -472,3 +517,75 @@ def test_a_version_without_the_policy_is_not_served(retired: str) -> None:
     # Left beside @2, a @1 without the policy would let a definition step around it.
     with pytest.raises(NotInCatalog, match=f"{retired} is not in the catalog"):
         CATALOG.get(retired)
+
+
+# Layer 8d: where each output comes from, declared on its field (brief, D12, D29).
+
+
+def kyc_output(*sources: OutputSource) -> type[BaseModel]:
+    """The guide's KYC output, with `sources` on its `status`."""
+    status_type: Any = Annotated[str, *sources] if sources else str
+
+    class KycOutput(BaseModel):
+        status: status_type
+        analyst_notes: Annotated[str, source("untrusted:llm")]
+
+    return KycOutput
+
+
+def labelled_catalog() -> Catalog:
+    """A catalog with the development labels, `customer` to `web`, and nothing else."""
+    catalog = Catalog()
+    for label in CATALOG.labels:
+        catalog.register_label(label)
+    return catalog
+
+
+@pytest.mark.parametrize(
+    ("declared", "says"),
+    [
+        (source("person:ana"), "has the source 'person:ana'"),
+        (source("trusted:kyc"), "has the source 'trusted:kyc'"),
+        (source("system:"), "has the source 'system:'"),
+        (source("KYC"), "has the source 'KYC'"),
+    ],
+)
+def test_an_output_source_is_a_system_or_a_registered_label(
+    declared: OutputSource, says: str
+) -> None:
+    # A value becomes trusted only through a contract the platform team owns, as a system, or a
+    # person's answer: an activity is never a person, and "trusted" is not a source (brief, D12).
+    with pytest.raises(ValidationError, match=says):
+        lookup_contract(output=kyc_output(declared))
+
+
+def test_an_output_has_one_source() -> None:
+    # Fail closed: two sources on one field can't both be right, and the engine won't pick one.
+    with pytest.raises(ValidationError, match="output status has 2 sources"):
+        lookup_contract(output=kyc_output(source("system:kyc"), source("untrusted:llm")))
+
+
+def test_an_output_source_names_a_registered_label() -> None:
+    contract = lookup_contract(output=kyc_output(source("untrusted:fax")))
+    with pytest.raises(ValueError, match="status is untrusted:fax, and fax is not a registered"):
+        labelled_catalog().register(contract)
+    labelled_catalog().register(lookup_contract(output=kyc_output(source("system:kyc"))))
+
+
+def test_undeclared_is_the_engines_label() -> None:
+    # Nobody can declare a field `untrusted:undeclared` and blur what it means (8d, drafting 2).
+    with pytest.raises(ValueError, match="undeclared is the engine's label"):
+        Catalog().register_label("undeclared")
+    with pytest.raises(ValueError, match="undeclared is not a registered label"):
+        labelled_catalog().register(
+            lookup_contract(output=kyc_output(source("untrusted:undeclared")))
+        )
+
+
+def test_declaring_an_output_source_changes_the_hash() -> None:
+    # A source is part of the promise, so declaring one is a new version; declaring none adds
+    # nothing, which is why every contract written before 8d keeps its recorded hash (brief, D29).
+    undeclared = contract_hash(lookup_contract(output=kyc_output()))
+    from_kyc = contract_hash(lookup_contract(output=kyc_output(source("system:kyc"))))
+    from_crm = contract_hash(lookup_contract(output=kyc_output(source("system:crm"))))
+    assert len({undeclared, from_kyc, from_crm}) == 3
