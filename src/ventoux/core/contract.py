@@ -67,23 +67,21 @@ class Display(BaseModel):
     outcomes: dict[str, str] = {}  # each declared outcome's title: "declined" -> "The ... declined"
 
 
-class ActivityContract(BaseModel):
-    """What one activity promises (brief, D17). Where it runs is a deployment binding, not this."""
+class Contract(BaseModel):
+    """What every contract promises, an activity's or a workflow's (brief, D6). Where it runs
+    is a deployment binding, never the contract."""
 
     model_config = FROZEN
 
     name: str  # dotted lowercase, `payments.refund`
     version: int  # a whole number from 1; the reference is `name@version`
     # Pydantic: `type[BaseModel]` holds a model class itself, not an object of it.
-    input: type[BaseModel]  # what the activity takes; published as JSON Schema
-    output: type[BaseModel]  # what it returns; published as JSON Schema
+    input: type[BaseModel]  # what it takes; published as JSON Schema
+    output: type[BaseModel]  # what it gives, with each field's source; published as JSON Schema
     # Pydantic: `Literal[...]` accepts exactly one of the values listed, nothing else.
     risk: Literal["low", "medium", "high"]  # how bad a mistake would be; high needs an approval
     effect: Literal["read", "compute", "write", "notify"]  # what it does to the world
-    timeouts: Timeouts  # how long it may wait and run
-    retry: RetryPolicy  # how Temporal retries it
     idempotency_key: str | None  # the input field carrying the key a retry repeats, if any
-    outcomes: tuple[str, ...]  # declared business failures, such as "declined" (brief, D17)
     display: Display  # what people read; outside the hash
 
     # Pydantic: a validator with `mode="before"` runs first, on the raw input (here a dict), before
@@ -127,17 +125,6 @@ class ActivityContract(BaseModel):
                 f"{self.reference}: idempotency key {self.idempotency_key!r} is not a field of its "
                 f"input ({self.input.__name__}), so the engine would have nowhere to put the key. "
                 f"Name one of its fields: {', '.join(sorted(self.input.model_fields))}."
-            )
-        return self
-
-    @model_validator(mode="after")
-    def outcomes_have_titles(self) -> Self:
-        # People read outcomes by their titles (brief, D1), and a title for no outcome is a typo.
-        if set(self.outcomes) != set(self.display.outcomes):
-            raise ValueError(
-                f"{self.reference}: outcomes and their display titles must match: outcomes "
-                f"{sorted(self.outcomes)}, titles for {sorted(self.display.outcomes)}. Give each "
-                "outcome exactly one title in display.outcomes."
             )
         return self
 
@@ -198,3 +185,23 @@ class ActivityContract(BaseModel):
     def reference(self) -> str:
         """How definitions name this contract: `payments.refund@1`."""
         return f"{self.name}@{self.version}"
+
+
+class ActivityContract(Contract):
+    """What one activity promises (brief, D17): the parts every contract has, and how Temporal
+    runs and retries it, and the business failures it declares."""
+
+    timeouts: Timeouts  # how long it may wait and run
+    retry: RetryPolicy  # how Temporal retries it
+    outcomes: tuple[str, ...]  # declared business failures, such as "declined" (brief, D17)
+
+    @model_validator(mode="after")
+    def outcomes_have_titles(self) -> Self:
+        # People read outcomes by their titles (brief, D1), and a title for no outcome is a typo.
+        if set(self.outcomes) != set(self.display.outcomes):
+            raise ValueError(
+                f"{self.reference}: outcomes and their display titles must match: outcomes "
+                f"{sorted(self.outcomes)}, titles for {sorted(self.display.outcomes)}. Give each "
+                "outcome exactly one title in display.outcomes."
+            )
+        return self
