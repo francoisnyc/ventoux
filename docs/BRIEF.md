@@ -738,6 +738,11 @@ be erased on request), has size limits, and a second copy of business records go
   deployment (D5's "what vs where"). No binding, or a step naming a contract of the other kind,
   fails the step (fail closed). On Temporal a workflow step is a child workflow `<case ID>/<entry>`,
   retried under the same ID and key (D26, D27).
+- **A binding's task queue may move under open cases; its workflow type may not.** A case's
+  history records the type of each child it started, so a case replayed with its workflow bound to
+  another type fails replay and waits; moved to another queue, it replays. Changing a workflow
+  type while cases are open is planned with releases and activation (layer 12). *Found in slice 6
+  of layer 8d.*
 - **The contract test checks shape, not truth:** it runs the bound workflow on Temporal's test
   server and reports a missing, extra or mistyped output, a timeout and a failure. Whether a
   declared source is true is for review (D6).

@@ -809,6 +809,13 @@ Each starts with its negative test, seen failing for the right reason.
   unreadable")`, so the row is checked word for word, not with a placeholder.
 - **The guide's contract-test example runs as written,** with the test's `KycCheck` as the team's
   workflow.
+- **Found in slice 6: a binding's task queue may move under open cases, its workflow type may
+  not.** A case's history records the type of each child it started, not its queue: replayed
+  with `kyc.check@1` bound to another type, a case that started the check fails replay (Temporal's
+  `NondeterminismError`) and waits until the binding is put back; moved to another queue, it
+  replays. So D5's "moving where it runs is an operations change" holds for queues; changing a
+  workflow type while cases are open is a change of its own. Added to D29 (new in this PR), and
+  carried to layer 12, whose activation checks bindings.
 
 ### Promises
 
@@ -887,7 +894,7 @@ keys (D27): Temporal's documentation, and the test server can't reset a workflow
 ## 8d. Outputs into the case file, and workflow steps
 
 Status: the seven choices agreed in the session, 2026-10-10 (all as proposed, `cancellable`
-deferred); the eight points decided while drafting confirmed the same day; slices 0–5 built.
+deferred); the eight points decided while drafting confirmed the same day; slices 0–6 built.
 
 User-facing description, written first: `docs/guides/activities.md`, "Output sources" and
 "Workflow contracts" (with the contract test); `docs/guides/cases.md`, "What a step gives",
@@ -1024,8 +1031,8 @@ its failure or timeout `Failed`, appended to the inbox as an activity's result i
 - `cancellable` on workflow contracts (choice 4); a case making a contract stricter (brief, D17).
 - Declared human waits in a workflow step (brief, D6, "later"); workflows of other teams through
   Nexus (D6, later).
-- Activity bindings and activation checks (layer 12); `payments.refund@3` with a trusted
-  `refund_id`.
+- Activity bindings and activation checks (layer 12), including a binding whose workflow type
+  changes while cases are open (slice 6); `payments.refund@3` with a trusted `refund_id`.
 - The static check of output sources through the case file (case validation, layer 10).
 - No new dependency.
 
@@ -1141,6 +1148,13 @@ Each starts with its negative test, seen failing for the right reason.
   unreadable")`, so the row is checked word for word, not with a placeholder.
 - **The guide's contract-test example runs as written,** with the test's `KycCheck` as the team's
   workflow.
+- **Found in slice 6: a binding's task queue may move under open cases, its workflow type may
+  not.** A case's history records the type of each child it started, not its queue: replayed
+  with `kyc.check@1` bound to another type, a case that started the check fails replay (Temporal's
+  `NondeterminismError`) and waits until the binding is put back; moved to another queue, it
+  replays. So D5's "moving where it runs is an operations change" holds for queues; changing a
+  workflow type while cases are open is a change of its own. Added to D29 (new in this PR), and
+  carried to layer 12, whose activation checks bindings.
 
 ### Promises
 
@@ -1175,5 +1189,5 @@ the pull request is opened. `K` is `tests/test_catalog.py`, `V` `tests/test_vali
 | On Temporal a workflow step is a child workflow `<case ID>/<entry>` on its binding's queue, with the same history as in memory | TW `test_a_workflow_step_runs_as_a_bound_child` |
 | A case doesn't continue as new while a workflow step runs | TW `test_a_switch_waits_while_a_workflow_runs` |
 | The contract test reports a missing, extra or mistyped output, a workflow that waits, and one that fails, as the guide's table says; a workflow that keeps its contract passes, the guide's example as written | TW `test_the_contract_test_finds_each_broken_promise`, `test_the_kyc_workflow_keeps_its_contract`, `test_the_guides_contract_test_runs_as_written` |
-| A case history with a workflow step replays with the same code | TC `test_a_case_history_replays` |
+| A case history with a workflow step (failed, retried, done) replays with the same code, and with its workflow moved to another task queue; with its workflow type changed, replay fails | TW `test_a_case_history_replays`, `test_a_case_history_with_its_workflow_type_changed_fails_replay` |
 | The guides' examples and refusal rows are what the engine says | C `test_the_guides_examples_run_as_written`, `test_the_guides_histories_are_what_the_engine_records`; K `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |

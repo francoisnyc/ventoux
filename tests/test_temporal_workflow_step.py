@@ -13,12 +13,14 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar
 
+import pytest
 from temporalio import activity, workflow
-from temporalio.client import Client, WorkflowHandle
+from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Worker
+from temporalio.worker import Replayer, Worker
+from temporalio.workflow import NondeterminismError
 
 from ventoux.temporal.bindings import Binding
 from ventoux.temporal.cases import (
@@ -454,3 +456,71 @@ def test_the_guides_contract_test_runs_as_written() -> None:
             await namespace["test_kyc_check_keeps_its_contract"](environment)
 
     asyncio.run(go())
+
+
+# --- Slice 6: replay ---
+
+
+def replay(history: WorkflowHistory, workflow_class: type[CaseWorkflow]) -> None:
+    """Replay `history` against `workflow_class`, as a worker would after a restart."""
+    replayer = Replayer(workflows=[workflow_class], data_converter=DATA_CONVERTER)
+    asyncio.run(replayer.replay_workflow(history))
+
+
+def checked_and_retried() -> WorkflowHistory:
+    """The history of a case whose check failed once, was retried by an operator, and closed."""
+    DOCUMENT_READS.clear()
+
+    async def scenario(environment: WorkflowEnvironment) -> WorkflowHistory:
+        case = await reviewed(environment.client, with_kyc(), customer="c-flaky")
+        await reported(case, lambda now: bool(now.needs_attention))
+        await retry(case, "kyc#1", by="omar", roles=["operations"])
+        await case.result()
+        return await case.fetch_history()
+
+    return on_temporal(scenario)
+
+
+@workflow.defn(name="ventoux.case")
+class RetypedCases(CaseWorkflow):
+    """The same cases, with `kyc.check@1` bound to another workflow type."""
+
+    catalog = CATALOG
+    workflows: ClassVar[Mapping[str, Binding]] = {
+        "kyc.check@1": Binding(workflow="KycCheckV2", task_queue=KYC)
+    }
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+@workflow.defn(name="ventoux.case")
+class RequeuedCases(CaseWorkflow):
+    """The same cases, with `kyc.check@1` moved to another task queue."""
+
+    catalog = CATALOG
+    workflows: ClassVar[Mapping[str, Binding]] = {
+        "kyc.check@1": Binding(workflow="KycCheck", task_queue="kyc-v2")
+    }
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+def test_a_case_history_with_its_workflow_type_changed_fails_replay() -> None:
+    # The type of each child a case started is in its history: bound to another type under a case
+    # that started one, replay refuses, and the case waits until the binding is put back.
+    with pytest.raises(NondeterminismError):
+        replay(checked_and_retried(), RetypedCases)
+
+
+def test_a_case_history_replays() -> None:
+    # A failed child, an operator's retry, the child started again and its output: all read back
+    # from the case's history, nothing done again.
+    history = checked_and_retried()
+    replay(history, CasesWithKyc)
+    # Moving the workflow to another task queue is an operations change (brief, D5): the case's
+    # history still replays.
+    replay(history, RequeuedCases)
