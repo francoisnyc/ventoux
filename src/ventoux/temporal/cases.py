@@ -33,7 +33,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.closing import CloseRefused
     from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.plan_step import PlanNotSupplied, supplied
-    from ventoux.case.runtime import CaseRefused, decide
+    from ventoux.case.runtime import CaseRefused, ShownRefused, decide
     from ventoux.case.state import (
         Answered,
         CaseState,
@@ -47,10 +47,12 @@ with workflow.unsafe.imports_passed_through():
         Proposed,
         Retried,
         Schedule,
+        Shown,
         StartPlan,
         StartWorkflow,
         StopPlan,
     )
+    from ventoux.case.visibility import CaseView, case_view
     from ventoux.core.catalog import Catalog
     from ventoux.core.workflow_contract import WorkflowContract
     from ventoux.temporal.activities import OUTCOME
@@ -126,6 +128,7 @@ class CaseWorkflow:
 
     def __init__(self) -> None:
         self.state = CaseState("")  # named when the case opens
+        self.case: Any = None  # the case definition, once read
         self.inbox: list[Event] = []  # events not yet decided, in the order they came
         self.decided = 0  # events this run has decided
         self.running = 0  # activities and child plans started and not yet back
@@ -152,6 +155,10 @@ class CaseWorkflow:
     def close(self, sent: CaseRequest) -> None:
         self.inbox.append(CloseAsked(sent.what, sent.by, frozenset(sent.roles)))
 
+    @workflow.signal(name="shown")
+    def shown(self, sent: CaseRequest) -> None:
+        self.inbox.append(Shown(sent.what, sent.by, frozenset(sent.roles)))
+
     # Temporal: a query reads a workflow's state without changing it, and isn't recorded.
     @workflow.query(name="report")
     def report(self) -> CaseReport:
@@ -166,6 +173,12 @@ class CaseWorkflow:
             list(state.history),
         )
 
+    @workflow.query(name="view")
+    def view(self, roles: list[str]) -> CaseView:
+        """The case file as a person holding `roles` sees it, filtered here, in the worker, so
+        nothing hidden from them leaves it (brief, D30)."""
+        return case_view(self.case, self.state, roles)
+
     async def run(self, start: CaseStart) -> CaseReport:
         return await self.drive(start)
 
@@ -176,7 +189,7 @@ class CaseWorkflow:
         # (brief, D27).
         self.state = CaseState(f"{info.workflow_id}/{info.first_execution_run_id}")
         try:
-            case = parse_case(start.definition)
+            case = self.case = parse_case(start.definition)
             if start.carried is None:
                 self.decide(case, Opened(start.file, start.opened_by))
             else:
@@ -194,7 +207,13 @@ class CaseWorkflow:
             try:
                 names_its_entry(event, self.state)
                 self.decide(case, event)
-            except (AnswerRefused, ProposalRefused, RetryRefused, CloseRefused) as refused:
+            except (
+                AnswerRefused,
+                ProposalRefused,
+                RetryRefused,
+                CloseRefused,
+                ShownRefused,
+            ) as refused:
                 # In memory a refusal raises to the test; here nobody is there to catch it. It is
                 # recorded, and the case waits on as if it hadn't come: `decide` changed nothing
                 # (8b, slice 0). Never queued for later (layer 6).
@@ -385,6 +404,8 @@ def asked(event: Event) -> str:
         return f"{event.by}'s retry of {event.entry}"
     if isinstance(event, CloseAsked):
         return f"{event.by}'s close as {event.reason}"
+    if isinstance(event, Shown):
+        return f"the record of {event.field} shown to {event.by}"
     return type(event).__name__  # only people's requests are refused; anything else is a bug
 
 
@@ -453,6 +474,19 @@ async def close(
 ) -> None:
     """Close the case with the declared `reason`, as the person `by` (brief, D10)."""
     await case.signal(CaseWorkflow.close, CaseRequest(reason, by, sorted(roles)))
+
+
+async def shown(
+    case: WorkflowHandle[CaseWorkflow, CaseReport], field: str, by: str, roles: list[str]
+) -> None:
+    """Record that the person `by` was shown the record behind the reference `field`, as the API
+    does after asking its system's resolver (brief, D16)."""
+    await case.signal(CaseWorkflow.shown, CaseRequest(field, by, sorted(roles)))
+
+
+async def view(case: WorkflowHandle[CaseWorkflow, CaseReport], roles: list[str]) -> CaseView:
+    """The case file as a person holding `roles` sees it, filtered in the worker (brief, D30)."""
+    return await case.query(CaseWorkflow.view, sorted(roles))
 
 
 async def report(case: WorkflowHandle[CaseWorkflow, CaseReport]) -> CaseReport:

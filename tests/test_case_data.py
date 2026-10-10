@@ -146,7 +146,7 @@ def test_what_a_role_on_the_case_sees() -> None:
     # Anyone holding a role the case names sees its ordinary fields, outcomes and outputs.
     adjuster = run.view(roles=["adjuster"])
     assert adjuster.values["customer_id"] == "cus-7"
-    assert adjuster.sources["customer_id"] == frozenset({"system:opener"})
+    assert adjuster.sources["customer_id"] == ("system:opener",)
     assert adjuster.values["assess.outcome"] == "deny"
     assert adjuster.values["deny.draft_id"] == "draft-claim-denied"
     # Someone holding none of them sees nothing of the case file.

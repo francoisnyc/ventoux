@@ -9,6 +9,7 @@ See docs/layers/09-case-data.md and docs/guides/case-data.md.
 from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
 from ventoux.case.state import CaseState
@@ -49,8 +50,12 @@ def may_see(case: CaseDefinition, name: str, roles: Iterable[str]) -> bool:
 class CaseView:
     """The case file as one person sees it: only what their roles may see, and what is hidden."""
 
-    values: dict[str, object]  # each value they may see, by name: fields, outcomes, outputs
-    sources: dict[str, frozenset[str]]  # where each of those values came from
+    # Each value they may see, by name: fields, outcomes, outputs. `Any`, not `object`: Temporal
+    # reads a query's result back to its type hints, and leaves `Any` as the JSON gave it.
+    values: dict[str, Any]
+    # Where each of those values came from, in order: a tuple, not a set, so it crosses Temporal
+    # as JSON (a set has no JSON form).
+    sources: dict[str, tuple[str, ...]]
     hidden: dict[str, tuple[str, ...]]  # each field hidden from them, and the roles that see it
     lines: list[str]  # one per declared field, in the definition's order, as people read it
     systems: dict[str, str]  # each reference field they may see, and the system it names
@@ -63,7 +68,7 @@ def case_view(case: CaseDefinition, state: CaseState, roles: Iterable[str]) -> C
     visible = [name for name in names if may_see(case, name, held)]
     hidden = {name: seen_by(case, name) for name in names if name not in visible}
     values = {name: state.values[name] for name in visible if name in state.values}
-    sources = {name: state.sources[name] for name in values}
+    sources = {name: tuple(sorted(state.sources[name])) for name in values}
     lines = []
     for name, declared in case.fields.items():
         title = declared.display.title
