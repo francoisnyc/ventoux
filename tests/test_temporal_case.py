@@ -314,7 +314,12 @@ def test_a_proposal_and_a_close_by_reason_are_decided_as_in_memory() -> None:
         case = await start_case(client, DevelopmentCases, WITH_REQUESTS, LARGE, "refund-1", QUEUE)
         await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
         await propose(case, "check_order", "ana", PEOPLE["ana"])
-        await reported(case, lambda now: "check_order#1 done, giving status" in now.history)
+        await reported(
+            case,
+            lambda now: (
+                "check_order#1 done, giving status from untrusted:undeclared" in now.history
+            ),
+        )
         await close(case, "duplicate", "ana", PEOPLE["ana"])
         return await case.result()
 
@@ -758,7 +763,10 @@ def test_a_switch_waits_while_an_activity_runs() -> None:
         await asyncio.sleep(0.5)  # time enough to switch, were it allowed
         while_running = await runs_of(client, "refund-1")
         release.set()
-        paid = await reported(case, lambda now: "pay#1 done, giving refund_id" in now.history)
+        paid = await reported(
+            case,
+            lambda now: "pay#1 done, giving refund_id from untrusted:undeclared" in now.history,
+        )
         await close(case, "duplicate", "ana", PEOPLE["ana"])
         await case.result()
         return while_running, paid, await runs_of(client, "refund-1")
@@ -769,7 +777,7 @@ def test_a_switch_waits_while_an_activity_runs() -> None:
     assert during == first  # no switch while the payment ran
     assert last != first  # and one once it was back
     assert len(calls) == 1
-    assert paid.history.count("pay#1 done, giving refund_id") == 1
+    assert paid.history.count("pay#1 done, giving refund_id from untrusted:undeclared") == 1
 
 
 # --- Slice 7: replay ---

@@ -10,7 +10,7 @@ from collections.abc import Mapping
 
 from pydantic import ValidationError
 
-from ventoux.core.contract import ActivityContract
+from ventoux.core.contract import Contract
 from ventoux.core.expressions import Expression, ExpressionError, evaluate
 from ventoux.core.policy import refusal
 from ventoux.core.provenance import NoSources, provenance
@@ -21,7 +21,7 @@ class InputRefused(Exception):
 
 
 def checked_inputs(
-    contract: ActivityContract,
+    contract: Contract,
     inputs: Mapping[str, Expression],
     values: Mapping[str, object],
     sources: Mapping[str, frozenset[str]],

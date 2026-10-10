@@ -24,8 +24,15 @@ from ventoux.case.admission import (
 )
 from ventoux.case.answers import AnswerRefused, judge_approval, judge_task
 from ventoux.case.approvals import ask, follow, lapsed, needs_approval
+from ventoux.case.called import called
 from ventoux.case.closing import begin_closing, close_when_reached, refuse_to_close, settle
-from ventoux.case.definition import ActivityStep, CaseDefinition, PlanStep, TaskStep
+from ventoux.case.definition import (
+    CallStep,
+    CaseDefinition,
+    PlanStep,
+    TaskStep,
+    WorkflowStep,
+)
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     Answered,
@@ -43,16 +50,18 @@ from ventoux.case.state import (
     Retried,
     Schedule,
     StartPlan,
+    StartWorkflow,
     StepRun,
     StopPlan,
 )
 from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
-from ventoux.core.contract import ActivityContract
+from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
+from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
 from ventoux.core.provenance import NoSources, Sourced, provenance
@@ -276,7 +285,7 @@ def answer_approval(
 ) -> None:
     """An approval given, tied to the inputs it saw; or a rejection: the step won't run."""
     step = case.steps[approval.step]
-    assert isinstance(step, ActivityStep)  # only an activity is asked for an approval
+    assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
     role = judge_approval(catalog, state, approval.entry, approval.step, step, event)
     del state.approvals[approval.step]
     del state.waiting[approval.entry]
@@ -298,15 +307,16 @@ def answer_approval(
 
 
 def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Completed) -> None:
-    """A scheduled activity finished: its outcome lands in the case file, tagged with the contract
-    that declares it. Its output is recorded here, not in the case file (layer 8d)."""
+    """A scheduled activity, a workflow or a plan finished: its outcome lands in the case file,
+    tagged with the contract (or plan) that declares it, and so does an activity's or a workflow's
+    output, each field tagged with its contract's source (brief, D29)."""
     run = next(run for run in state.runs if run.entry == event.entry)
     step = case.steps[run.step]
-    assert not isinstance(step, TaskStep)  # only an activity or a plan is started and completes
+    assert not isinstance(step, TaskStep)  # only an activity, a workflow or a plan completes
     if isinstance(step, PlanStep):
         declares, problem = step.plan, plan_outcome_problem(step, event)
     else:
-        contract = catalog.get(step.activity)
+        contract = called(catalog, step)
         declares, problem = contract.reference, outcome_problem(contract, event)
     if problem is not None:
         failed(state, Failed(event.entry, problem))
@@ -321,11 +331,28 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
         if state.phase == "closing":
             flag(state, f"{run.entry} completed after the close was requested")
         return  # a step's milestones are reached only when it is done with `done`
-    giving = f", giving {listed(sorted(event.output))}" if event.output else ""
-    state.history.append(f"{run.entry} done{giving}")
+    given = {} if isinstance(step, PlanStep) else write_outputs(state, run.step, contract, event)
+    giving = "; ".join(f"{name} from {given[name]}" for name in sorted(given))
+    state.history.append(f"{run.entry} done{f', giving {giving}' if giving else ''}")
     reach(state, step.reaches)
     if state.phase == "closing":
         flag(state, f"{run.entry} completed after the close was requested")
+
+
+def write_outputs(
+    state: CaseState, step: str, contract: Contract, event: Completed
+) -> dict[str, str]:
+    """Each field the contract declares lands in the case file as `<step>.<field>`, tagged with
+    the source the contract declares for it, never one the activity sends back (brief, D29).
+    Gives each field's source, for the history."""
+    # Pydantic: `model_validate` checks a dict against the model's fields and builds the model; a
+    # field the model doesn't declare is left out, so it never reaches the case file.
+    given = contract.output.model_validate(event.output)
+    sources = output_sources(contract.output)
+    for name, source in sources.items():
+        state.values[f"{step}.{name}"] = getattr(given, name)
+        state.sources[f"{step}.{name}"] = frozenset({source})
+    return sources
 
 
 def plan_outcome_problem(step: PlanStep, event: Completed) -> str | None:
@@ -336,24 +363,35 @@ def plan_outcome_problem(step: PlanStep, event: Completed) -> str | None:
     return None
 
 
-def outcome_problem(contract: ActivityContract, event: Completed) -> str | None:
+def outcome_problem(contract: Contract, event: Completed) -> str | None:
     """Why what the activity gave can't be taken, or None: an outcome its contract doesn't
     declare, or an output its contract doesn't describe. Fail closed: neither is read as done."""
     if event.outcome != DONE:
-        if event.outcome in contract.outcomes:
+        # A workflow declares no outcomes: its business result is in its output (brief, D29).
+        outcomes = contract.outcomes if isinstance(contract, ActivityContract) else ()
+        if event.outcome in outcomes:
             return None
-        declared = ", ".join(contract.outcomes) or "none"
+        declared = ", ".join(outcomes) or "none"
         return (
             f"{contract.reference} gave the outcome {event.outcome}, which its contract doesn't "
             f"declare: its outcomes are {declared}"
         )
     try:
         # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
-        contract.output.model_validate(event.output)
+        given = contract.output.model_validate(event.output)
     except ValidationError as error:
         return (
             f"{contract.reference} gave an output its contract doesn't declare: {one_line(error)}"
         )
+    # Checked again here, on nothing registration did: the case file holds values exactly, so a
+    # value it can't hold fails the step, and nothing the step gave lands (brief, D20).
+    for name in contract.output.model_fields:
+        value = getattr(given, name)
+        if not is_held(value):
+            return (
+                f"{contract.reference} gave {name} as {value}, a {type(value).__name__}, which "
+                "the case file can't hold exactly (brief, D20)"
+            )
     return None
 
 
@@ -475,7 +513,7 @@ def admit(
             started = True
 
 
-def free_to_start(state: CaseState, name: str, step: TaskStep | ActivityStep | PlanStep) -> bool:
+def free_to_start(state: CaseState, name: str, step: TaskStep | CallStep | PlanStep) -> bool:
     """Whether the step may start by itself: it isn't waiting for its approval, and it starts by
     itself and hasn't started before; or its approval was just given."""
     if name in state.approvals:
@@ -493,10 +531,11 @@ def start(
     catalog: Catalog,
     state: CaseState,
     name: str,
-    step: TaskStep | ActivityStep | PlanStep,
+    step: TaskStep | CallStep | PlanStep,
     commands: list[Command],
 ) -> None:
-    """Open a task's run; start a plan; ask for an activity's approval, or schedule it."""
+    """Open a task's run; start a plan; ask for an activity's or a workflow's approval, or start
+    it."""
     if isinstance(step, PlanStep):
         start_plan(state, name, step, commands)
         return
@@ -525,13 +564,14 @@ def schedule(
     catalog: Catalog,
     state: CaseState,
     name: str,
-    step: ActivityStep,
+    step: CallStep,
     approved: GivenApproval | None,
     commands: list[Command],
 ) -> None:
-    """Check the activity's inputs against the real sources (layer 5), then schedule it, with a
-    key naming the case and the step run (brief, D17)."""
-    contract = catalog.get(step.activity)  # fail closed: an activity the catalog lacks stops it
+    """Check the inputs against the real sources (layer 5), then schedule the activity, or start
+    the workflow, with a key naming the case and the step run (brief, D17). A workflow step is
+    checked exactly as an activity step is (brief, D6)."""
+    contract = called(catalog, step)  # fail closed: a contract the catalog lacks stops it
     # Checked again at runtime, on nothing case validation did (learning question 34).
     if contract.risk == "high" and step.approval is None:
         raise StepStopped(f"{contract.reference} is high risk, and {name} has no approval")
@@ -542,6 +582,14 @@ def schedule(
     inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key)
     coming_run(state, name, "running").approved = approved
     state.proposers.pop(name, None)  # the proposed run has started
+    if isinstance(step, WorkflowStep):
+        # The run's name names its child workflow on Temporal, as a plan step's does.
+        state.history.append(
+            f"started {entry}: workflow {contract.reference} ({origins(step.inputs, state)}), "
+            f"run {key}"
+        )
+        commands.append(StartWorkflow(entry, contract.reference, inputs, key))
+        return
     keyed = f", key {key}" if contract.idempotency_key is not None else ""
     state.history.append(
         f"scheduled {entry}: {contract.reference} ({origins(step.inputs, state)}){keyed}"

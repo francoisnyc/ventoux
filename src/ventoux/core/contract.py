@@ -9,6 +9,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ventoux.core.output_sources import HELD, HELD_NAMES, OutputSource, is_output_source
 from ventoux.core.policy import KIND_NAMES, KINDS, Policy
 
 # A contract never changes once written, down to its parts (brief, D5); and a field it doesn't
@@ -66,23 +67,21 @@ class Display(BaseModel):
     outcomes: dict[str, str] = {}  # each declared outcome's title: "declined" -> "The ... declined"
 
 
-class ActivityContract(BaseModel):
-    """What one activity promises (brief, D17). Where it runs is a deployment binding, not this."""
+class Contract(BaseModel):
+    """What every contract promises, an activity's or a workflow's (brief, D6). Where it runs
+    is a deployment binding, never the contract."""
 
     model_config = FROZEN
 
     name: str  # dotted lowercase, `payments.refund`
     version: int  # a whole number from 1; the reference is `name@version`
     # Pydantic: `type[BaseModel]` holds a model class itself, not an object of it.
-    input: type[BaseModel]  # what the activity takes; published as JSON Schema
-    output: type[BaseModel]  # what it returns; published as JSON Schema
+    input: type[BaseModel]  # what it takes; published as JSON Schema
+    output: type[BaseModel]  # what it gives, with each field's source; published as JSON Schema
     # Pydantic: `Literal[...]` accepts exactly one of the values listed, nothing else.
     risk: Literal["low", "medium", "high"]  # how bad a mistake would be; high needs an approval
     effect: Literal["read", "compute", "write", "notify"]  # what it does to the world
-    timeouts: Timeouts  # how long it may wait and run
-    retry: RetryPolicy  # how Temporal retries it
     idempotency_key: str | None  # the input field carrying the key a retry repeats, if any
-    outcomes: tuple[str, ...]  # declared business failures, such as "declined" (brief, D17)
     display: Display  # what people read; outside the hash
 
     # Pydantic: a validator with `mode="before"` runs first, on the raw input (here a dict), before
@@ -130,17 +129,6 @@ class ActivityContract(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def outcomes_have_titles(self) -> Self:
-        # People read outcomes by their titles (brief, D1), and a title for no outcome is a typo.
-        if set(self.outcomes) != set(self.display.outcomes):
-            raise ValueError(
-                f"{self.reference}: outcomes and their display titles must match: outcomes "
-                f"{sorted(self.outcomes)}, titles for {sorted(self.display.outcomes)}. Give each "
-                "outcome exactly one title in display.outcomes."
-            )
-        return self
-
-    @model_validator(mode="after")
     def policies_are_known(self) -> Self:
         # Fail closed: a kind of policy the engine doesn't know is refused, never ignored, since
         # nothing would check it (brief, D21).
@@ -154,6 +142,52 @@ class ActivityContract(BaseModel):
                     )
         return self
 
+    @model_validator(mode="after")
+    def output_sources_are_systems_or_labels(self) -> Self:
+        # Trust comes from a system the platform team vouches for, or a person's answer, never
+        # from a contract calling its output "trusted" (brief, D12).
+        for name, field in self.output.model_fields.items():
+            sources = [m for m in field.metadata if isinstance(m, OutputSource)]
+            # Fail closed: two sources can't both be right, and the engine won't pick one.
+            if len(sources) > 1:
+                raise ValueError(
+                    f"{self.reference}: output {name} has {len(sources)} sources. Declare one: "
+                    "where its content really comes from."
+                )
+            for declared in sources:
+                if not is_output_source(declared.source):
+                    raise ValueError(
+                        f"{self.reference}: output {name} has the source {declared.source!r}. "
+                        "An output's source is system:<name> or untrusted:<label>: an activity "
+                        "is never a person, and trust is earned, not declared."
+                    )
+        return self
+
+    @model_validator(mode="after")
+    def outputs_are_held_exactly(self) -> Self:
+        # An output lands in the case file, which holds values exactly: never a binary float, never
+        # a Python object (brief, D20). Checked by the field's type, before any value arrives.
+        for name, field in self.output.model_fields.items():
+            if field.annotation not in HELD:
+                kind = getattr(field.annotation, "__name__", str(field.annotation))
+                raise ValueError(
+                    f"{self.reference}: output {name} is {kind}, which the case file can't hold "
+                    f"exactly. An output is {HELD_NAMES}: numbers are exact decimals, never "
+                    "binary floats (brief, D20)."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def no_output_named_outcome(self) -> Self:
+        # Outputs land in the case file as `<step>.<field>`, where `<step>.outcome` is the step's
+        # outcome: one name, one value (brief, D29).
+        if "outcome" in self.output.model_fields:
+            raise ValueError(
+                f"{self.reference}: an output can't be named outcome: <step>.outcome is the "
+                "step's outcome. Rename the field."
+            )
+        return self
+
     def policies(self, field: str) -> list[Policy]:
         """The input policies written on input `field`, each of which applies."""
         if field not in self.input.model_fields:
@@ -165,3 +199,23 @@ class ActivityContract(BaseModel):
     def reference(self) -> str:
         """How definitions name this contract: `payments.refund@1`."""
         return f"{self.name}@{self.version}"
+
+
+class ActivityContract(Contract):
+    """What one activity promises (brief, D17): the parts every contract has, and how Temporal
+    runs and retries it, and the business failures it declares."""
+
+    timeouts: Timeouts  # how long it may wait and run
+    retry: RetryPolicy  # how Temporal retries it
+    outcomes: tuple[str, ...]  # declared business failures, such as "declined" (brief, D17)
+
+    @model_validator(mode="after")
+    def outcomes_have_titles(self) -> Self:
+        # People read outcomes by their titles (brief, D1), and a title for no outcome is a typo.
+        if set(self.outcomes) != set(self.display.outcomes):
+            raise ValueError(
+                f"{self.reference}: outcomes and their display titles must match: outcomes "
+                f"{sorted(self.outcomes)}, titles for {sorted(self.display.outcomes)}. Give each "
+                "outcome exactly one title in display.outcomes."
+            )
+        return self

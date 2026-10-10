@@ -2,8 +2,8 @@
 
 > **For workflow developers.** A case is how Ventoux runs long work with people in it: one
 > customer's refund, one claim. This guide shows a case as stored (the JSON `ventoux check`
-> writes from your Python file), how it runs in memory, in tests, and how it runs on Temporal.
-> Existing workflows as steps come next.
+> writes from your Python file), how it runs in memory, in tests, and how it runs on Temporal,
+> with plans and existing Temporal workflows as steps.
 
 ## A case, read aloud
 
@@ -83,7 +83,7 @@ review#1 done
 asked pay.approval#1: approval of pay by support-lead
 sam answered pay.approval#1 approve as support-lead
 scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key memory/pay#1
-pay#1 done, giving refund_id
+pay#1 done, giving refund_id from untrusted:undeclared
 closed: nothing left to do
 ```
 
@@ -204,6 +204,27 @@ started call_customer#1: waiting for called by support
 A step's milestones are reached only when it is done with `done`: a declined refund doesn't reach
 `paid`. An outcome the contract doesn't declare is never read as one: it is a failure.
 
+## What a step gives: outputs in the case file
+
+When an activity is done, each field of its output lands in the case file under the step's name,
+as its outcome does: `pay.refund_id`, `kyc.risk_score`. Nothing to declare on the case: the
+contract says what the activity gives, and of which type. The latest run's values are the ones
+read, and a step done with a declared outcome (`declined`) gives no output.
+
+Each value carries the source its contract declares for that field (brief, D12), never one the
+activity sends back. A field the contract declares no source for is `untrusted:undeclared`
+(brief, D6), and the history says so:
+
+```
+scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key memory/pay#1
+pay#1 done, giving refund_id from untrusted:undeclared
+```
+
+`pay.refund_id` can be shown to people and put in a draft, but an input that accepts only trusted
+data refuses it, and its step fails before it starts. The fix is in the contract, not the case:
+the platform team declares `refund_id`'s source in `payments.refund@3`, and the case adopts it. A
+field the contract doesn't declare at all never reaches the case file.
+
 ## When something breaks
 
 Systems go down, and Temporal retries them with the contract's retry policy. When the retries run
@@ -264,7 +285,7 @@ person can decide whether to reverse it:
 
 ```
 ana closed the case as duplicate, as support
-pay#1 done, giving refund_id
+pay#1 done, giving refund_id from untrusted:undeclared
 flagged: pay#1 completed after the close was requested
 closed: duplicate, by ana
 ```
@@ -333,6 +354,54 @@ A team lead's approval that arrives after the close can't pay the refund (brief,
 that was already running, and finished or failed after the close, flags the case, as a step does:
 `settle#1: payments.refund@2 completed after the close was requested`.
 
+## Workflow steps
+
+A **workflow step** runs an existing Temporal workflow, written by another team in any SDK
+language, as one step of the case (brief, D6). The case names its **workflow contract**, which the
+platform team registered in the catalog (see the activities guide); the deployment binds it to a
+workflow type and a task queue. Here the refund also checks the customer, alongside the review:
+
+```json
+"kyc": {
+  "kind": "workflow",
+  "display": {"title": "Check the customer"},
+  "workflow": "kyc.check@1",
+  "inputs": {"customer_id": {"var": "customer_id"}}
+}
+```
+
+It is checked like an activity step: its requirements and condition, an `approval` if it has one
+(a high-risk workflow needs one), and its inputs against the contract's input policies, with the
+real sources. Its run is named `memory/kyc#1` (on Temporal, its child workflow's ID); a workflow
+that writes gets that name as its key, in the input its contract names for it. When it is done,
+its output lands in the case file with the sources its contract declares:
+
+```
+started kyc#1: workflow kyc.check@1 (customer_id from system:opener), run memory/kyc#1
+kyc#1 done, giving analyst_notes from untrusted:llm; contact_email from untrusted:undeclared; risk_score from system:kyc; status from system:kyc
+```
+
+So a later step can require an approval when `kyc.risk_score` is over 70, which the KYC system
+decided; but `kyc.analyst_notes`, written by a model, can't decide anything, and only goes where
+an input accepts untrusted data, such as a draft a person reviews. Nobody declared where
+`contact_email` comes from, so a welcome letter can't be addressed with it:
+
+```
+welcome#1 failed: letters.draft@2 takes to_customer only from a system or a person, never from untrusted data, and this value comes from kyc.contact_email (untrusted:undeclared)
+```
+
+The case needs attention, and nothing is drafted. The KYC team declares the field's source in
+`kyc.check@2`, or the case takes the address from somewhere it trusts.
+
+A workflow step that fails, or runs past its contract's `timeout`, fails: the case needs attention,
+and an operator retries it, with the same key. A workflow contract the deployment hasn't bound, or
+a step naming an activity contract (or an activity step naming a workflow contract), fails the
+step too: nothing guesses where to run it. When the case begins closing, a running workflow step
+finishes, as an activity does; if it completes after the close, its output still lands, and the
+case is flagged.
+
+A workflow step never waits for people: put the human work in a task step before or after it.
+
 ## Testing a case
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`
@@ -342,7 +411,10 @@ form)`, and the other things people do: `propose(step, who)`, `retry(entry, who)
 `close(reason, who)`. An answer to a step answers its open entry; naming the entry
 (`"pay.approval#1"`) answers that one. `people` gives each person their roles, as the Ventoux API
 does (brief, D22); `opened_by` says who opened the case, when a person did. `activities` replaces
-the fake activities; an activity raises `Outcome("declined")` for a declared outcome. `held=["pay"]`
+the fake activities; an activity raises `Outcome("declined")` for a declared outcome. `workflows`
+replaces the fake workflows in the same way, a function from the inputs to the output, by
+reference: `workflows={"kyc.check@1": lambda inputs: {...}}`. A workflow contract with no function
+there is not bound, and its step fails. `held=["pay"]`
 keeps `pay`'s runs running until the script says `finish("pay#1")`.
 
 ```python
@@ -379,11 +451,13 @@ Anything the engine won't accept is refused, with the reason:
 ## Running a case on Temporal
 
 On Temporal, the same engine runs the case as a workflow: one workflow per case, for as long as
-the case lives. Your deployment names its catalog and its plans in a workflow of its own:
+the case lives. Your deployment names its catalog, its plans and where each workflow contract runs (its
+**binding**: the workflow type and task queue) in a workflow of its own:
 
 ```python
 from temporalio import workflow
 
+from ventoux.temporal.bindings import Binding
 from ventoux.temporal.cases import CaseStart, CaseWorkflow, CaseReport
 from refunds.catalog import CATALOG, PLANS  # the contracts and plans this deployment allows
 
@@ -392,6 +466,7 @@ from refunds.catalog import CATALOG, PLANS  # the contracts and plans this deplo
 class RefundCases(CaseWorkflow):
     catalog = CATALOG
     plans = PLANS
+    workflows = {"kyc.check@1": Binding(workflow="KycCheck", task_queue="kyc")}
 
     @workflow.run
     async def run(self, start: CaseStart) -> CaseReport:
@@ -471,6 +546,10 @@ What changes from memory, and what doesn't:
   await plans.answer(plan, "approve_refund#1", "approve", by="sam", roles=["support-lead"])
   ```
 
+- **A workflow step is a child workflow** of the type and on the task queue its binding names,
+  with the ID `<case ID>/<entry>`: `refund-A-1001/kyc#1`. Its team's worker serves it; yours
+  doesn't need to. It runs for at most its contract's `timeout`, and a retry starts it again under
+  the same ID, with the same key.
 - **A long case continues as new.** Temporal keeps every event of a run, and a case lives for
   weeks. After enough events, at a moment when nothing is running, the case starts a fresh run
   carrying its whole state: case file, step runs, approvals, history (brief, D27). Nothing

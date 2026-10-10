@@ -9,6 +9,7 @@ clock, randomness or I/O, so replay rebuilds the same case. See docs/layers/08-c
 import asyncio
 from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, ClassVar
 
 from temporalio import workflow
@@ -20,6 +21,7 @@ from temporalio.exceptions import (
     ChildWorkflowError,
     FailureError,
 )
+from temporalio.exceptions import TimeoutError as TemporalTimeout  # not Python's own TimeoutError
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh for every run; modules passed
 # through are imported once and shared. `core` and `case` are deterministic (the boundary test
@@ -27,6 +29,7 @@ from temporalio.exceptions import (
 with workflow.unsafe.imports_passed_through():
     from ventoux.case.admission import ProposalRefused, RetryRefused
     from ventoux.case.answers import AnswerRefused
+    from ventoux.case.called import unbound
     from ventoux.case.closing import CloseRefused
     from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.plan_step import PlanNotSupplied, supplied
@@ -45,10 +48,13 @@ with workflow.unsafe.imports_passed_through():
         Retried,
         Schedule,
         StartPlan,
+        StartWorkflow,
         StopPlan,
     )
     from ventoux.core.catalog import Catalog
+    from ventoux.core.workflow_contract import WorkflowContract
     from ventoux.temporal.activities import OUTCOME
+    from ventoux.temporal.bindings import Binding
     from ventoux.temporal.carried import state_as_data, state_from_data
     from ventoux.temporal.converter import require_exact_numbers
     from ventoux.temporal.options import activity_options
@@ -110,6 +116,9 @@ class CaseWorkflow:
     plans: ClassVar[Mapping[str, Any]] = {}  # the plans its plan steps may run, by reference
     # The plan workflow a plan step runs as, by the name its worker registers it under.
     plan_workflow: ClassVar[str] = "ventoux.plan"
+    # Where each workflow contract runs, in this deployment (brief, D5): its workflow type and
+    # task queue. A workflow step whose contract isn't bound here fails (brief, D29).
+    workflows: ClassVar[Mapping[str, Binding]] = {}
     # How many events one run decides before the case continues as new: a count, never a clock,
     # so replay switches at the same place (brief, D27). Temporal warns at about 10,000 history
     # events; a case's event makes a few.
@@ -225,6 +234,8 @@ class CaseWorkflow:
         self.running += 1
         if isinstance(command, StartPlan):
             asyncio.create_task(self.until_back(self.run_plan(command)))
+        elif isinstance(command, StartWorkflow):
+            asyncio.create_task(self.until_back(self.run_workflow(command)))
         else:
             asyncio.create_task(self.until_back(self.run_activity(command)))
 
@@ -283,6 +294,34 @@ class CaseWorkflow:
         else:
             self.inbox.append(Failed(command.entry, f"{command.plan} stopped: {ran.reason}"))
 
+    async def run_workflow(self, command: StartWorkflow) -> None:
+        """Run the workflow step as a child workflow, `<case ID>/<entry>`, of the type and on the
+        task queue its binding names, for at most its contract's timeout; put what it gave in the
+        inbox (brief, D6). Its output is checked and tagged by `decide`, from the contract."""
+        binding = self.workflows.get(command.workflow)
+        if binding is None:
+            self.inbox.append(Failed(command.entry, unbound(command.workflow)))  # fail closed
+            return
+        contract = self.catalog.workflow(command.workflow)
+        try:
+            # Temporal: the team's workflow runs on their worker; the case waits for its result,
+            # recorded in its history. A retry starts it again under the same ID (brief, D26).
+            output: dict[str, Any] = await workflow.execute_child_workflow(
+                binding.workflow,
+                command.inputs,
+                id=f"{workflow.info().workflow_id}/{command.entry}",
+                task_queue=binding.task_queue,
+                execution_timeout=timedelta(seconds=contract.timeout),
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+                result_type=dict,
+            )
+        except ChildWorkflowError as error:
+            self.inbox.append(
+                Failed(command.entry, workflow_failure(command.workflow, contract, error))
+            )
+            return
+        self.inbox.append(Completed(command.entry, output))
+
     async def stop_plan(self, command: StopPlan) -> None:
         """Stop a child plan because the case is closing (brief, D28). A signal, not Temporal's
         cancellation: cancellation would cut short the await on an activity running in the
@@ -312,6 +351,15 @@ class CaseWorkflow:
             self.inbox.append(Failed(command.entry, f"{command.activity} failed: {said}"))
             return
         self.inbox.append(Completed(command.entry, output))
+
+
+def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWorkflowError) -> str:
+    """Why a workflow step failed, as the history says it: past its timeout, or what it said."""
+    cause = error.cause
+    if isinstance(cause, TemporalTimeout):
+        return f"{reference} didn't finish within its timeout of {contract.timeout}s"
+    said = cause.message if isinstance(cause, FailureError) else str(error)
+    return f"{reference} failed: {said}"
 
 
 def names_its_entry(event: Event, state: CaseState) -> None:

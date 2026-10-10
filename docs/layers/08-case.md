@@ -736,6 +736,87 @@ Each starts with its negative test, seen failing for the right reason.
 - **Both negative tests were written first and seen failing:** the payment was made once, the
   letter after it never started, and the flags were empty, for the completion and the failure.
 
+### Decided while building
+
+- **An output declares at most one source** (slice 0): two sources on one field can't both be
+  right, and the engine won't pick one (fail closed): `output status has 2 sources`.
+- **The label check is the catalog's, and reads only the sources a contract writes** (slice 0).
+  It first read every output's source, the `untrusted:undeclared` default included, and refused
+  every contract written before 8d; `declared_sources` (what the contract writes) and
+  `output_sources` (with the default) are now two functions.
+- **The guide's refusal rows for output sources run on an activity contract named
+  `kyc.check@1` until slice 2** builds workflow contracts: the rules are the same on both kinds.
+- **"Existing contracts keep their hashes" is layer 1's lock test,**
+  `test_every_development_contract_matches_its_recorded_hash`, unchanged and green, with
+  `contracts.lock.json` untouched: a source added to an undeclared field would fail it.
+- **The guides were written ahead of the code,** so two of their tests failed in slice 0: the
+  `done` line, and the new history blocks shifting the order the guide tests read them in. Both
+  green again in slice 1, the outputs block now checked against a run of its own.
+- **`run_case` gains `catalog=`** (slice 1), the development catalog by default: a test registers
+  its own contracts (a CRM lookup declaring `email` as `system:crm`) without adding them to the
+  development catalog, whose contracts the guides list.
+- **Outputs are written by `decide`, so Temporal got them in slice 1** (`complete` is shared):
+  two Temporal tests' `done` lines changed with the in-memory ones, and passed.
+- **A field the contract doesn't declare is how an activity would "send back" a source;** one
+  test covers both promises (`refund_id_source` in the output never reaches the case file).
+- **Contract moved out of ActivityContract first, as a pure move** (slice 2, its own commit):
+  every test and every recorded hash unchanged.
+- **Each lookup names its kind** (slice 2): `catalog.get` keeps meaning "an activity contract",
+  as every plan, approval and driver already calls it, and refuses a workflow contract with a
+  `NotInCatalog` (`kyc.check@1 is a workflow contract, not an activity: run it as a workflow
+  step`); `catalog.workflow` is the other way round. Every existing fail-closed path for a missing
+  activity handles it unchanged: a plan's activity state naming it is `UNKNOWN_ACTIVITY`, a case's
+  activity step naming it fails. So half of drafting point 4 landed in slice 2, with its tests;
+  slice 3 adds the workflow step naming an activity contract.
+- **A workflow contract refuses an activity's parts with why** (`retry`, `outcomes`, `timeouts`),
+  not as unknown fields, whose message points to a deployment binding; and titles for outcomes it
+  can't have.
+- **The development catalog registers its labels before its contracts:** `kyc.check@1`'s
+  `analyst_notes` names `untrusted:llm`, which must be registered first.
+- **A workflow step and an activity step share `CallStep`** (slice 3): its `inputs` and
+  `approval`, and `called`, the reference of what it calls. Approvals, answers and scheduling take
+  a `CallStep`; `case/called.py` looks its contract up as its kind; `core`'s checks before a call
+  (`checked_inputs`, the approver's risk) take any `Contract`, since they read only the shared
+  parts.
+- **A workflow step's start line names its run,** `started kyc#1: workflow kyc.check@1
+  (customer_id from system:opener), run memory/kyc#1`, as a plan step's does: the run is its child
+  workflow on Temporal. Its key is that name, put in the input its contract names, if it names one
+  (`kyc.check@1` reads only, so takes none). The guide said `key memory/kyc#1`; corrected there.
+- **An unbound workflow fails in the driver,** not in `decide`: where a workflow runs is the
+  deployment's (brief, D5), which `decide` doesn't know. In memory, `run_case` binds the fake
+  `kyc.check@1` by default; a test's own workflow contract is unbound unless it passes one.
+- **Until slice 4, a workflow step reaching the case workflow on Temporal is a bug** (a
+  `TypeError` failing the workflow task, which waits for the code), as plan steps were in 8c.
+- **Workflow steps on Temporal have their own test file,** `tests/test_temporal_workflow_step.py`
+  (`TW` below), as plan steps did in 8c: `tests/test_temporal_case.py` is past 1,100 lines. Its
+  tests play the KYC team: their workflow, `KycCheck`, on their own worker and task queue, `kyc`,
+  bound to `kyc.check@1` by the test's case workflow; a document store of theirs that fails once
+  shows a retry.
+- **Both drivers say an unbound workflow the same way,** `case/called.py`'s `unbound`; and a
+  workflow past its timeout reads `kyc.check@1 didn't finish within its timeout of 600s`.
+- **A child runs under its case's ID and step run with Temporal's default reuse policy, allowing
+  a duplicate,** as a plan step's does: a retry starts it again once the failed one has closed.
+  Seen failing with duplicates refused: the retry never started.
+- **Two tests depend on the order of what runs in parallel, so they fix it** (found while
+  building): in memory the check finishes before the review is answered, on Temporal after; the
+  "same history" test makes `kyc` require `pay`. And the close test waits for the payment to be
+  done, or it is flagged too, rightly.
+- **The contract test starts the workflow from the client** (slice 5), under an ID of its own,
+  `contract-test/kyc.check@1/<a random suffix>`: a test, never a case, run in the team's own test
+  suite rather than in a workflow, so its randomness touches no replay. It checks the input it is
+  given against the contract first: a wrong input is the caller's mistake, not the workflow's.
+- **The guide's "raises" row names what was raised,** `ApplicationError("documents
+  unreadable")`, so the row is checked word for word, not with a placeholder.
+- **The guide's contract-test example runs as written,** with the test's `KycCheck` as the team's
+  workflow.
+- **Found in slice 6: a binding's task queue may move under open cases, its workflow type may
+  not.** A case's history records the type of each child it started, not its queue: replayed
+  with `kyc.check@1` bound to another type, a case that started the check fails replay (Temporal's
+  `NondeterminismError`) and waits until the binding is put back; moved to another queue, it
+  replays. So D5's "moving where it runs is an operations change" holds for queues; changing a
+  workflow type while cases are open is a change of its own. Added to D29 (new in this PR), and
+  carried to layer 12, whose activation checks bindings.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that will fail if it isn't true.
@@ -807,3 +888,351 @@ Not promised in 8c, and why: the switch when Temporal suggests it (D27): the cod
 `is_continue_as_new_suggested()`, but the test server can't be made to suggest a switch, which
 takes a history near Temporal's limits; only the count is tested. And a reset keeping a case's
 keys (D27): Temporal's documentation, and the test server can't reset a workflow.
+
+---
+
+## 8d. Outputs into the case file, and workflow steps
+
+Status: the seven choices agreed in the session, 2026-10-10 (all as proposed, `cancellable`
+deferred); the eight points decided while drafting confirmed the same day; built, slices 0–7;
+Promises checked against the tests, 2026-10-10.
+
+User-facing description, written first: `docs/guides/activities.md`, "Output sources" and
+"Workflow contracts" (with the contract test); `docs/guides/cases.md`, "What a step gives",
+"Workflow steps", the testing section's `workflows`, and "Running a case on Temporal" (bindings, a
+workflow step as a child). Decision: brief D29.
+
+### What this part is for
+
+Until now an activity's output is a line in the history, `pay#1 done, giving refund_id`: nothing
+can read it. 8d writes outputs into the case file, and that needs an answer to one question first:
+who says whether an output may be trusted? The contract does, field by field, written by the
+platform team (brief, D12), and what it leaves undeclared is untrusted (brief, D6). With outputs
+carrying their sources, 8d adds the fourth kind of step, `workflow`: an existing Temporal workflow,
+started from its contract and a deployment binding, its output written to the case file with the
+sources its contract declares, and a contract test showing the workflow keeps that contract.
+
+Drawn on: our own layer 4 (`core/policy.py`, how an input policy reaches the contract hash through
+JSON Schema) and 8c (`case/plan_step.py`, `temporal/cases.py`: a step run as a child workflow); the
+prototype is not checked out in this session.
+
+### Decided in the session
+
+1. **Output sources are declared on output fields,** as input policies are on input fields:
+   `Annotated[Decimal, source("system:kyc")]`, `source("untrusted:llm")`. Only `system:<name>` or
+   `untrusted:<registered label>`; `person:` and `trusted:` are refused when the contract is
+   registered. An output field with nothing declared is read as `untrusted:undeclared` (brief, D6).
+2. **Existing contracts keep their hashes.** The source goes into the output field's JSON Schema
+   (`x-source`), which the hash covers, as `x-input-policies` does (brief, D5, D21). A field with
+   nothing declared adds nothing, so every contract registered before 8d hashes as before and
+   `contracts.lock.json` keeps its entries. Nothing is loosened: before 8d no output reached the
+   case file, and from 8d an undeclared one gets the strictest reading. A contract that wants an
+   output trusted declares it, which changes its hash, so it is a new version (`payments.refund@3`;
+   not done in 8d, since nothing needs `refund_id` trusted). Rejected: always hashing a `sources`
+   key, which changes every hash and means new versions everywhere, or a rewritten lock file.
+3. **Outputs land as `<step>.<field>`,** as the outcome is `<step>.outcome`. Nothing declared on
+   the case: the contract gives the fields and their types. Only with `done`, only the fields the
+   contract declares, and the latest run's values are read. An output field named `outcome` is
+   refused when the contract is registered. Rejected: a `sets` mapping on the step into declared
+   case fields (more to write, and a second place where types must agree).
+4. **A workflow contract** (brief, D6), in the same catalog, one namespace of references: name,
+   version, input (with input policies), output (with sources), risk, effect, `idempotency_key`
+   (the same rule as activities), `timeout` (the longest it may run, so a workflow that hangs or
+   waits for people fails loudly) and `display`. No retry policy (a child workflow isn't retried as
+   a whole; an operator retries it, brief D26), no outcomes (a business result is in its output,
+   with its source). `cancellable` is deferred: closing lets running work finish (brief, D10), so
+   nothing cancels a workflow step yet; whatever first stops a running step (rules, layer 11) adds
+   it, changing the hash only of the contracts that declare it.
+5. **Bindings live in `ventoux.temporal`:** `Binding(workflow=..., task_queue=...)`, supplied by
+   the deployment on its case workflow (`workflows = {"kyc.check@1": Binding(...)}`), as it
+   supplies `plans`. A reference with no binding fails the step (fail closed). Activities keep their
+   implicit binding, the case's task queue, until activation checks (layer 12). In memory,
+   `run_case(..., workflows=...)` takes functions, as `activities=` does.
+6. **A workflow step is checked as an activity step is:** `kind: "workflow"`, `workflow`, `inputs`,
+   an optional `approval`; admission, approval and risk, input policies with the real sources, the
+   key. `decide` gives `StartWorkflow`; `case` still imports nothing from Temporal. On Temporal it
+   is a child workflow `<case ID>/<entry>` on its binding's queue, run for at most the contract's
+   `timeout`. Its result is checked against the contract and tagged from the contract the catalog
+   holds, never from anything the workflow returns. A failure or a timeout fails the step (needs
+   attention); a retry starts it again under the same ID and key; one completing after a close
+   flags the case; a switch (continue-as-new) waits while it runs.
+7. **The contract test,** `check_workflow_contract(client, contract, binding, input)`, runs the
+   bound workflow on Temporal's test server and lists the problems: a missing, extra or mistyped
+   output field, a timeout (it waited, for people or anything else), a failure. It checks shape,
+   not truth ("a promise, not a proof", brief D6).
+
+### Decided while drafting, confirmed in the session
+
+Each is a choice the agreed design left open, written as the rule we confirmed.
+
+1. **The `done` line names each output with its source,** as the scheduled line names each input:
+   `pay#1 done, giving refund_id from untrusted:undeclared`. 8a's line, `giving refund_id`,
+   changes in the tests and guides that show it, said in the commit; the promise behind it (an
+   output is recorded by its names, never its values) is unchanged.
+2. **`undeclared` is the engine's label:** `register_label("undeclared")` is refused, so nobody
+   can declare a field `untrusted:undeclared` and blur what it means.
+3. **A field the contract doesn't declare is dropped at runtime, and is a problem in the contract
+   test.** In a case, only what the contract promises gets in (dropping is safe: the field never
+   reaches the case file). In the contract test, the same field means the contract is out of date,
+   which its owners should hear.
+4. **A step and its contract must be of the same kind.** A workflow step naming an activity
+   contract, or an activity step naming a workflow contract, fails the step, in both drivers.
+   Checked at runtime, against the catalog the case runs with; `parse_case` doesn't know the
+   catalog (case validation, layer 10, will refuse it earlier).
+5. **An output that arrives while closing still lands in the case file,** and the case is
+   flagged, as 8b flags a completion: it happened, and the case file says what it gave.
+6. **An output's type is the contract's,** read as the output model gives it. An expression
+   reading a type it doesn't know (an `int` where expressions read exact decimals) stops the step,
+   as any unreadable value does (fail closed); no new rule at registration. *Revised in the tutor
+   review (below): an output's type is now checked at registration, and its value when it
+   arrives.*
+7. **`ventoux.testing` gains `kyc.check@1`,** the guide's workflow contract, with a fake that gives
+   its declared output, and its entry in `contracts.lock.json` (a new contract, not a changed one).
+8. **The contract test lives in `ventoux.temporal`** (it starts a workflow) and is re-exported by
+   `ventoux.testing`, where the guide imports it.
+
+### How it works
+
+**Contracts.** `core/contract.py` keeps what both kinds share in `Contract` (name, version,
+input, output, risk, effect, idempotency key, display, and their rules) and `ActivityContract`
+(timeouts, retry policy, outcomes). `WorkflowContract` adds `timeout`. The catalog registers
+either, checks each output source's label against its registered labels, and hashes both the same
+way. `output_sources(contract)` gives each output field's source, `untrusted:undeclared` where
+none is declared.
+
+**The case runtime.** `WorkflowStep` in the definition; `StartWorkflow` (entry, reference, checked
+inputs, key) from `decide`; the start shares the activity step's path (approval, inputs, key) and
+differs only in the command. `Completed` for an activity or a workflow writes each declared output
+field to `<step>.<field>`, with its declared source, before reaching the step's milestones.
+
+**Drivers.** In memory, the driver carries `StartWorkflow` with the function `workflows` names, as
+it carries `Schedule`. On Temporal, `CaseWorkflow.workflows` gives the bindings; `StartWorkflow`
+becomes `workflow.start_child_workflow(binding.workflow, inputs, id=f"{case}/{entry}",
+task_queue=binding.task_queue, execution_timeout=contract.timeout)`; its result is `Completed`,
+its failure or timeout `Failed`, appended to the inbox as an activity's result is.
+
+### Where the code goes
+
+- `core/output_sources.py`: `source()`, the `x-source` it writes, `output_sources`, `UNDECLARED`.
+- `core/contract.py`: `Contract`, shared, and `ActivityContract`; the output-source and `outcome`
+  rules.
+- `core/workflow_contract.py`: `WorkflowContract`.
+- `core/catalog.py`: either kind; `get` for an activity, `workflow` for a workflow; the label
+  check on output sources; `undeclared` refused.
+- `case/definition.py`: `WorkflowStep`.
+- `case/state.py`: `StartWorkflow`; the command type gains it.
+- `case/runtime.py`: starting a workflow step; outputs into the case file; kinds that don't match.
+- `case/memory.py`: carries `StartWorkflow`.
+- `temporal/bindings.py`: `Binding`.
+- `temporal/cases.py`: `workflows`; `StartWorkflow` as a child workflow; its result.
+- `temporal/contract_check.py`: `check_workflow_contract`; `temporal/bindings.py`: `Binding`.
+- `testing.py`: `kyc.check@1` and its fake; `run_case(..., workflows=)`; the re-export.
+- `contracts.lock.json`: `kyc.check@1`.
+
+### Not in 8d
+
+- `cancellable` on workflow contracts (choice 4); a case making a contract stricter (brief, D17).
+- Declared human waits in a workflow step (brief, D6, "later"); workflows of other teams through
+  Nexus (D6, later).
+- Activity bindings and activation checks (layer 12), including a binding whose workflow type
+  changes while cases are open (slice 6); `payments.refund@3` with a trusted `refund_id`.
+- The static check of output sources through the case file (case validation, layer 10).
+- No new dependency.
+
+### Seams the tests use
+
+- `catalog.register`, `catalog.get`, `register_label`, `contract_hash` and the lock check, for
+  contracts of both kinds.
+- `run_case(..., activities=, workflows=, held=, catalog=)` and what it reports.
+- `parse_case` for `kind: "workflow"`.
+- `case_worker`, `start_case`, `report`, `retry`, `close` and the case's `result()` on Temporal's
+  time-skipping test server, with a test workflow on its own task queue.
+- `check_workflow_contract`; Temporal's `Replayer` on a case's history.
+- The guides' examples, run as written, and each new row of the activities guide's refusal table.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **Output sources on contracts.** Negative: `person:` and `trusted:` sources, an unregistered
+   label, an output named `outcome`, and `register_label("undeclared")` are refused. Then the
+   lock file still matches every existing contract, and declaring a source changes the hash.
+1. **Outputs into the case file, in memory.** Negative: an undeclared output reaching a
+   `trusted_only` input fails that step; a field the contract doesn't declare never reaches the
+   case file; a declined outcome gives no output. Then a declared `system:` output passes
+   `trusted_only` and `only_from`, the latest run's value is read, and the `done` line names each
+   source.
+2. **Workflow contracts.** Negative: a write workflow with no idempotency key, a retry policy or
+   outcomes on one, a `timeout` of 0. Then one is registered, looked up, hashed and in the lock.
+3. **Workflow steps, in memory.** Negative: a workflow step's output with undeclared provenance
+   can't reach a sink that requires trusted data (the curriculum's); a step naming a contract of
+   the other kind, an unbound workflow, and a high-risk workflow with no approval fail the step.
+   Then the guide's `kyc` step runs, its outputs with their sources; a failure is retried with
+   the same key; a held workflow finishing after a close lands its output and flags the case.
+4. **Workflow steps on Temporal.** Negative: an unbound workflow, a failing workflow and one past
+   its `timeout` need attention; the curriculum's negative test again. Then the child
+   `refund-1/kyc#1` runs on its binding's queue with the same history as in memory; a retry uses
+   the same ID and key; closing lets it finish, flagged; a switch waits while it runs.
+5. **The contract test.** Negative: a missing field, an extra field, a workflow waiting for a
+   signal, one that raises. Then the KYC workflow keeps its contract.
+6. **Replay.** A case history with a workflow step replays with the same code.
+7. **The guides and the promises.**
+
+### Decided while building
+
+- **An output declares at most one source** (slice 0): two sources on one field can't both be
+  right, and the engine won't pick one (fail closed): `output status has 2 sources`.
+- **The label check is the catalog's, and reads only the sources a contract writes** (slice 0).
+  It first read every output's source, the `untrusted:undeclared` default included, and refused
+  every contract written before 8d; `declared_sources` (what the contract writes) and
+  `output_sources` (with the default) are now two functions.
+- **The guide's refusal rows for output sources run on an activity contract named
+  `kyc.check@1` until slice 2** builds workflow contracts: the rules are the same on both kinds.
+- **"Existing contracts keep their hashes" is layer 1's lock test,**
+  `test_every_development_contract_matches_its_recorded_hash`, unchanged and green, with
+  `contracts.lock.json` untouched: a source added to an undeclared field would fail it.
+- **The guides were written ahead of the code,** so two of their tests failed in slice 0: the
+  `done` line, and the new history blocks shifting the order the guide tests read them in. Both
+  green again in slice 1, the outputs block now checked against a run of its own.
+- **`run_case` gains `catalog=`** (slice 1), the development catalog by default: a test registers
+  its own contracts (a CRM lookup declaring `email` as `system:crm`) without adding them to the
+  development catalog, whose contracts the guides list.
+- **Outputs are written by `decide`, so Temporal got them in slice 1** (`complete` is shared):
+  two Temporal tests' `done` lines changed with the in-memory ones, and passed.
+- **A field the contract doesn't declare is how an activity would "send back" a source;** one
+  test covers both promises (`refund_id_source` in the output never reaches the case file).
+- **Contract moved out of ActivityContract first, as a pure move** (slice 2, its own commit):
+  every test and every recorded hash unchanged.
+- **Each lookup names its kind** (slice 2): `catalog.get` keeps meaning "an activity contract",
+  as every plan, approval and driver already calls it, and refuses a workflow contract with a
+  `NotInCatalog` (`kyc.check@1 is a workflow contract, not an activity: run it as a workflow
+  step`); `catalog.workflow` is the other way round. Every existing fail-closed path for a missing
+  activity handles it unchanged: a plan's activity state naming it is `UNKNOWN_ACTIVITY`, a case's
+  activity step naming it fails. So half of drafting point 4 landed in slice 2, with its tests;
+  slice 3 adds the workflow step naming an activity contract.
+- **A workflow contract refuses an activity's parts with why** (`retry`, `outcomes`, `timeouts`),
+  not as unknown fields, whose message points to a deployment binding; and titles for outcomes it
+  can't have.
+- **The development catalog registers its labels before its contracts:** `kyc.check@1`'s
+  `analyst_notes` names `untrusted:llm`, which must be registered first.
+- **A workflow step and an activity step share `CallStep`** (slice 3): its `inputs` and
+  `approval`, and `called`, the reference of what it calls. Approvals, answers and scheduling take
+  a `CallStep`; `case/called.py` looks its contract up as its kind; `core`'s checks before a call
+  (`checked_inputs`, the approver's risk) take any `Contract`, since they read only the shared
+  parts.
+- **A workflow step's start line names its run,** `started kyc#1: workflow kyc.check@1
+  (customer_id from system:opener), run memory/kyc#1`, as a plan step's does: the run is its child
+  workflow on Temporal. Its key is that name, put in the input its contract names, if it names one
+  (`kyc.check@1` reads only, so takes none). The guide said `key memory/kyc#1`; corrected there.
+- **An unbound workflow fails in the driver,** not in `decide`: where a workflow runs is the
+  deployment's (brief, D5), which `decide` doesn't know. In memory, `run_case` binds the fake
+  `kyc.check@1` by default; a test's own workflow contract is unbound unless it passes one.
+- **Until slice 4, a workflow step reaching the case workflow on Temporal is a bug** (a
+  `TypeError` failing the workflow task, which waits for the code), as plan steps were in 8c.
+- **Workflow steps on Temporal have their own test file,** `tests/test_temporal_workflow_step.py`
+  (`TW` below), as plan steps did in 8c: `tests/test_temporal_case.py` is past 1,100 lines. Its
+  tests play the KYC team: their workflow, `KycCheck`, on their own worker and task queue, `kyc`,
+  bound to `kyc.check@1` by the test's case workflow; a document store of theirs that fails once
+  shows a retry.
+- **Both drivers say an unbound workflow the same way,** `case/called.py`'s `unbound`; and a
+  workflow past its timeout reads `kyc.check@1 didn't finish within its timeout of 600s`.
+- **A child runs under its case's ID and step run with Temporal's default reuse policy, allowing
+  a duplicate,** as a plan step's does: a retry starts it again once the failed one has closed.
+  Seen failing with duplicates refused: the retry never started.
+- **Two tests depend on the order of what runs in parallel, so they fix it** (found while
+  building): in memory the check finishes before the review is answered, on Temporal after; the
+  "same history" test makes `kyc` require `pay`. And the close test waits for the payment to be
+  done, or it is flagged too, rightly.
+- **The contract test starts the workflow from the client** (slice 5), under an ID of its own,
+  `contract-test/kyc.check@1/<a random suffix>`: a test, never a case, run in the team's own test
+  suite rather than in a workflow, so its randomness touches no replay. It checks the input it is
+  given against the contract first: a wrong input is the caller's mistake, not the workflow's.
+- **The guide's "raises" row names what was raised,** `ApplicationError("documents
+  unreadable")`, so the row is checked word for word, not with a placeholder.
+- **The guide's contract-test example runs as written,** with the test's `KycCheck` as the team's
+  workflow.
+- **Found in slice 6: a binding's task queue may move under open cases, its workflow type may
+  not.** A case's history records the type of each child it started, not its queue: replayed
+  with `kyc.check@1` bound to another type, a case that started the check fails replay (Temporal's
+  `NondeterminismError`) and waits until the binding is put back; moved to another queue, it
+  replays. So D5's "moving where it runs is an operations change" holds for queues; changing a
+  workflow type while cases are open is a change of its own. Added to D29 (new in this PR), and
+  carried to layer 12, whose activation checks bindings.
+
+### From the tutor review
+
+- **A contract could declare outputs the case file can't hold exactly** (brief, D20). `Contract`
+  put no rule on output types, and `write_outputs` stored what Pydantic built. The tutor's probe:
+  `risk.score@1` with `score: float` and `details: Details`, given the exact
+  `Decimal("0.1")`: the case file held a binary float and a Python object, and on Temporal the
+  next continue-as-new failed in the exact converter, stalling the case until code changed.
+  Workflow contracts, often written by other teams, share the gap.
+- **The fix, added to D29:** an output field is a `Decimal`, a `str` or a `bool`; a `float`, an
+  `int` or a nested model is refused when the contract is registered, with D20's reason. Nested
+  outputs are refused rather than designed: nothing in layer 8 needs them. And checked again when
+  the value arrives, on nothing registration did: `outcome_problem` fails the step on a value of
+  any other type, before anything lands, so the `done` line, the outputs and the milestones never
+  happen. Drafting point 6 (an `int` output stopping only the step that reads it) is replaced: the
+  `int` is now refused at registration, and its test with it.
+- **All three negative tests were written first and seen failing:** the `float`, nested and `int`
+  contracts were accepted (also as copies at registration), and with registration bypassed the
+  `float` landed, the next step started and reached an activity nobody had bound.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that will fail if it isn't true.
+Drafted before building, with the tests named in advance; checked against the real tests before
+the pull request is opened (every test named exists, and asserts what its row claims). `K` is
+`tests/test_catalog.py`, `V` `tests/test_validate.py`, `C` `tests/test_case.py`, `W`
+`tests/test_workflow_step.py`, `TW` `tests/test_temporal_workflow_step.py`.
+
+Seen failing before their code: the output-source rules (each contract accepted), the label and
+`undeclared` checks, the `outcome` rule; an undeclared output reaching a trusted input (the field
+missing); each workflow-contract rule (accepted, or refused with a binding's message), the catalog
+holding a workflow contract, its unrecorded hash; the curriculum's test in memory (no workflow
+kind); an unbound workflow on Temporal (the case hung on slice 3's placeholder); each broken
+promise of the contract test (the stub reported none). The rest passed when written, their code
+having come with an earlier test, and were seen failing with that code removed or changed: a
+declared source changing the hash (`x-source` removed), only declared fields landing (everything
+copied), a declared output trusted (every output tagged undeclared), the latest run read (the
+first kept), a plan's state or a case's step naming a workflow contract (`get`'s kind check
+removed), a workflow step naming an activity contract (looked up of either kind), an unbound
+workflow and a high-risk one without approval in memory (each check removed), its approval
+(skipped), its retry's key and its output after the close (the shared code changed), the timeout
+on Temporal (removed: the case waited forever), the retry under the same ID (duplicates refused),
+the switch (a running workflow not counted: its result lost), the contract test's undeclared field
+(its check removed), a workflow contract's `timeouts` (its reason removed). Passed as written,
+with nothing of ours to remove: a declared outcome giving no output (an outcome carries none),
+the curriculum's test and the same history on Temporal (`decide` is shared), the guide's examples (written first, the code to them),
+and the replay with the workflow type changed (Temporal's own `NondeterminismError`, as in 8c);
+the replays with the same code and with the queue moved are the tests of our code.
+
+| Promise | Test |
+|---|---|
+| An output's source is `system:<name>` or `untrusted:<registered label>`, one per field; `person:`, `trusted:`, an unregistered label and the label `undeclared` are refused, also on a copy at registration | K `test_an_output_source_is_a_system_or_a_registered_label`, `test_an_output_has_one_source`, `test_an_output_source_names_a_registered_label`, `test_undeclared_is_the_engines_label`, `test_every_rule_refuses_a_contract_that_breaks_it`, `test_every_rule_runs_again_when_a_copy_is_registered` |
+| An output can't be named `outcome` | K `test_every_rule_refuses_a_contract_that_breaks_it`, `test_every_rule_runs_again_when_a_copy_is_registered` (`an output is never named outcome`) |
+| A contract with no source declared hashes as before 8d; declaring one changes the hash | K `test_every_development_contract_matches_its_recorded_hash`, `test_declaring_an_output_source_changes_the_hash` |
+| An output field with no declared source is `untrusted:undeclared`, and an input that accepts only trusted data refuses it: the step fails before it starts | C `test_an_undeclared_output_cannot_reach_a_trusted_input` |
+| A declared `system:` output is trusted, and `only_from` its system accepts it; an undeclared one of the same output is refused by both | C `test_a_declared_output_is_as_trusted_as_its_contract_says` |
+| Only the fields a contract declares reach the case file, so a source can't come from what the activity returns | C `test_only_declared_outputs_reach_the_case_file` |
+| A declared outcome gives no output | C `test_a_declared_outcome_gives_no_output` |
+| The latest run's output is the one read | C `test_the_latest_runs_output_is_read` |
+| An output field is a `Decimal`, a `str` or a `bool`: a `float`, an `int` or a nested model is refused when registered, also as a copy (tutor review) | K `test_every_rule_refuses_a_contract_that_breaks_it`, `test_every_rule_runs_again_when_a_copy_is_registered`, `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |
+| With registration bypassed, an output value the case file can't hold fails the step, and nothing the step gave lands (tutor review) | C `test_an_output_the_case_file_cannot_hold_fails_the_step` |
+| The `done` line names each output with its source | C `test_a_declared_output_is_as_trusted_as_its_contract_says`, `test_the_guides_histories_are_what_the_engine_records` |
+| A workflow contract has an idempotency key if it writes, a `timeout` above 0, no retry policy, no activity timeouts and no outcomes, each refused with why | K `test_a_workflow_contract_is_refused_when_it_breaks_a_rule`, `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |
+| A workflow contract is registered, looked up, hashed and recorded like an activity's, checked again as its kind at registration | K `test_a_workflow_contract_is_in_the_catalog`, `test_every_development_contract_matches_its_recorded_hash` |
+| The guide's workflow contract is the development `kyc.check@1` | K `test_the_guides_workflow_contract_is_the_development_one` |
+| An activity lookup refuses a workflow contract, and a workflow lookup an activity contract: a plan's activity state naming one is `UNKNOWN_ACTIVITY`, and a case's activity step naming one fails | K `test_a_workflow_contract_is_in_the_catalog`; V `test_an_activity_state_naming_a_workflow_contract_is_refused`; C `test_an_activity_step_naming_a_workflow_contract_fails` |
+| A workflow step's output with undeclared provenance cannot reach a sink that requires trusted data (the curriculum's), in memory and on Temporal | W `test_an_undeclared_workflow_output_cannot_reach_a_trusted_input`; TW `test_an_undeclared_workflow_output_is_refused_on_temporal` |
+| A workflow step is admitted, approved (by a role that may approve its risk) and checked like an activity step, its key in the input its contract names; a high-risk one with no approval fails | W `test_a_workflow_step_is_checked_like_an_activity`, `test_a_high_risk_workflow_without_approval_fails` |
+| A workflow step naming an activity contract, or an unbound workflow, fails the step | W `test_a_workflow_step_naming_an_activity_contract_fails`, `test_an_unbound_workflow_fails_its_step`; TW `test_an_unbound_workflow_needs_attention` |
+| A workflow step's outputs land with the sources its contract declares; its start and done lines are the guide's | W `test_the_guides_workflow_step_runs_as_written` |
+| A failed workflow step needs attention, and its retry sends the same key; on Temporal under the same ID | W `test_a_failed_workflow_step_is_retried_with_the_same_key`; TW `test_a_failed_child_workflow_is_retried_with_the_same_id_and_key` |
+| A workflow running past its contract's `timeout`, or failing, fails its step: the case needs attention | TW `test_a_workflow_past_its_timeout_needs_attention`, `test_a_failing_workflow_needs_attention` |
+| A running workflow step finishes when the case closes; its output lands and the case is flagged | W `test_a_workflow_finishing_after_the_close_flags_the_case`; TW `test_closing_lets_a_workflow_step_finish` |
+| On Temporal a workflow step is a child workflow `<case ID>/<entry>` on its binding's queue, with the same history as in memory | TW `test_a_workflow_step_runs_as_a_bound_child` |
+| A case doesn't continue as new while a workflow step runs | TW `test_a_switch_waits_while_a_workflow_runs` |
+| The contract test reports a missing, extra or mistyped output, a workflow that waits, and one that fails, as the guide's table says; a workflow that keeps its contract passes, the guide's example as written | TW `test_the_contract_test_finds_each_broken_promise`, `test_the_kyc_workflow_keeps_its_contract`, `test_the_guides_contract_test_runs_as_written` |
+| A case history with a workflow step (failed, retried, done) replays with the same code, and with its workflow moved to another task queue; with its workflow type changed, replay fails | TW `test_a_case_history_replays`, `test_a_case_history_with_its_workflow_type_changed_fails_replay` |
+| The guides' examples and refusal rows are what the engine says | C `test_the_guides_examples_run_as_written`, `test_the_guides_histories_are_what_the_engine_records`; K `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |

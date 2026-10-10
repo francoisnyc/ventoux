@@ -715,6 +715,43 @@ be erased on request), has size limits, and a second copy of business records go
   read (layer 3); "Approve this plan" (D14), for plans an AI drafts, comes with authoring
   (layer 15).
 
+### D29. Outputs carry their contract's sources; workflow steps are bound children
+
+*Decided 2026-10-10, in layer 8d.*
+
+- **An output's source is declared on its field, in the contract:** `system:<name>` or
+  `untrusted:<registered label>`, never `person:` or `trusted:` (D12). A field with nothing
+  declared is `untrusted:undeclared` (D6); `undeclared` is the engine's label, never registered.
+- **Declaring a source changes the contract's hash; declaring none changes nothing.** The source
+  is part of the output's JSON Schema, which the hash covers (D5), and a field with none adds
+  nothing to it. So contracts written before output sources existed keep their hashes, and read
+  every output as untrusted: the strictest reading, so no promise was loosened. Making an output
+  trusted is a new version.
+- **Outputs land in the case file as `<step>.<field>`,** like the step's outcome, with the source
+  the contract declares, never one the activity or workflow sends back; only the fields the
+  contract declares, only with `done`, the latest run's read.
+- **An output is a value the case file holds exactly:** a decimal, a text or true or false (D20).
+  A contract whose output field is a `float`, an `int` or a nested model is refused when
+  registered; and checked again when the value arrives, on nothing registration did, a value of
+  any other type fails the step, and nothing it gave lands. *Added in the tutor review of layer
+  8d, before D29 was merged.*
+- **A workflow contract** shares the catalog, its references and its hash with activity contracts.
+  It promises a `timeout` instead of a retry policy, and declares no outcomes. `cancellable` (D6)
+  comes with the first thing that stops a running step; until then closing lets a workflow step
+  finish (D10).
+- **A binding says where a workflow contract runs** (workflow type, task queue), supplied by the
+  deployment (D5's "what vs where"). No binding, or a step naming a contract of the other kind,
+  fails the step (fail closed). On Temporal a workflow step is a child workflow `<case ID>/<entry>`,
+  retried under the same ID and key (D26, D27).
+- **A binding's task queue may move under open cases; its workflow type may not.** A case's
+  history records the type of each child it started, so a case replayed with its workflow bound to
+  another type fails replay and waits; moved to another queue, it replays. Changing a workflow
+  type while cases are open is planned with releases and activation (layer 12). *Found in slice 6
+  of layer 8d.*
+- **The contract test checks shape, not truth:** it runs the bound workflow on Temporal's test
+  server and reports a missing, extra or mistyped output, a timeout and a failure. Whether a
+  declared source is true is for review (D6).
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step

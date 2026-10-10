@@ -32,10 +32,13 @@ from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.interpreter import Answer, Outcome, PlanRun, RunRefused, Wait, interpret
+from ventoux.core.output_sources import source
 from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
+from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
+from ventoux.temporal.contract_check import check_workflow_contract
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 
 __all__ = [
@@ -50,6 +53,7 @@ __all__ = [
     "ProposalRefused",
     "RetryRefused",
     "StepStopped",
+    "check_workflow_contract",
     "close",
     "finish",
     "load_definition",
@@ -148,13 +152,40 @@ letters_draft = ActivityContract(
     ),
 )
 
+
+# The activities guide's workflow contract, word for word: an existing Temporal workflow run as one
+# step (brief, D6). Its outputs say where each value comes from (brief, D29).
+class KycInput(BaseModel):
+    customer_id: Annotated[str, trusted_only()]
+
+
+class KycOutput(BaseModel):
+    status: Annotated[str, source("system:kyc")]  # the KYC system decides it
+    risk_score: Annotated[Decimal, source("system:kyc")]
+    analyst_notes: Annotated[str, source("untrusted:llm")]  # a model writes it from documents
+    contact_email: str  # nothing declared: untrusted:undeclared
+
+
+kyc_check = WorkflowContract(
+    name="kyc.check",
+    version=1,
+    input=KycInput,
+    output=KycOutput,
+    risk="low",
+    effect="read",
+    timeout=600,  # seconds: the longest the workflow may run
+    idempotency_key=None,  # a write or notify workflow names its input for the key
+    display=Display(title="Check a customer", description="Runs the KYC checks on a customer."),
+)
+
 # The development catalog: what a case can call in tests and the quickstart.
 CATALOG = Catalog()
-for contract in (payments_refund, orders_lookup, letters_draft):
-    CATALOG.register(contract)
-# The labels fields may be declared untrusted with: `untrusted:llm`.
+# The labels fields and outputs may be declared untrusted with: `untrusted:llm`. First, since a
+# contract's outputs may name them.
 for label in ("customer", "document", "email", "llm", "web"):
     CATALOG.register_label(label)
+for contract in (payments_refund, orders_lookup, letters_draft, kyc_check):
+    CATALOG.register(contract)
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
 CATALOG.register_role("support")
 CATALOG.register_role("support-lead", approves="high")
@@ -180,6 +211,20 @@ FAKES: dict[str, Activity] = {
     "orders.lookup@1": fake_lookup,
     "letters.draft@2": fake_draft,
 }
+
+
+def fake_kyc(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The KYC workflow, in memory: a clear customer, as the KYC team's code would say."""
+    return {
+        "status": "clear",
+        "risk_score": Decimal(12),
+        "analyst_notes": "No concerns in the documents.",
+        "contact_email": f"{inputs['customer_id']}@example.com",
+    }
+
+
+# The workflows a case's workflow steps run in memory, by contract: each one bound (brief, D29).
+WORKFLOW_FAKES: dict[str, Activity] = {"kyc.check@1": fake_kyc}
 
 
 # Temporal: a workflow class is registered with a worker under its name; this one runs plans
@@ -222,6 +267,8 @@ def run_case(
     held: Iterable[str] = (),
     plans: Mapping[str, Any] | None = None,
     plan_answers: Mapping[str, Sequence[tuple[Any, ...]]] | None = None,
+    catalog: Catalog = CATALOG,
+    workflows: Mapping[str, Activity] = WORKFLOW_FAKES,
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
@@ -230,7 +277,10 @@ def run_case(
     a person did; otherwise a system did. `activities` replaces fake activities by reference.
     The runs of the steps in `held` keep running until the script says `finish(entry)`.
     `plans` gives the plans plan steps run, as stored data, by reference (`refund-order@1`);
-    `plan_answers` answers each plan step's waits, in order, by state: `(state, outcome, who)`."""
+    `plan_answers` answers each plan step's waits, in order, by state: `(state, outcome, who)`.
+    `catalog` replaces the development catalog, for a test's own contracts. `workflows` binds each
+    workflow contract to a function from its inputs to its output, by reference, replacing the
+    fake workflows; a workflow contract with none is not bound, and its step fails."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
     events: list[Event | Finish] = [Opened(as_json(file), opened_by)]
     for item in answers:
@@ -252,7 +302,10 @@ def run_case(
         events.append(Answered(entry, outcome, who, roles, as_json(form[0]) if form else None))
     implementations = {**FAKES, **activities}
     runner = plan_runner(plans or {}, plan_answers or {}, implementations, people)
-    return run_case_in_memory(case, CATALOG, implementations, events, held=held, plans=runner)
+    bound = {**WORKFLOW_FAKES, **workflows}
+    return run_case_in_memory(
+        case, catalog, implementations, events, held=held, plans=runner, workflows=bound
+    )
 
 
 def plan_runner(

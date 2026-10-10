@@ -18,7 +18,9 @@ from ventoux.core.catalog import Catalog, ContractConflict, NotInCatalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.contract_hash import contract_hash
 from ventoux.core.hash_check import check_hashes
+from ventoux.core.output_sources import OutputSource, source
 from ventoux.core.policy import Policy, only_from, trusted_only
+from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.testing import CATALOG, load_definition, payments_refund, run_case
 
 ROOT = Path(__file__).parent.parent
@@ -222,6 +224,17 @@ def test_every_development_contract_matches_its_recorded_hash() -> None:
     assert check_hashes(CATALOG, recorded) == []
 
 
+def test_the_guides_workflow_contract_is_the_development_one() -> None:
+    guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
+    # The refund's block (its imports), the output sources' block, and the workflow contract's.
+    examples = guide.split("```python\n")[1:4]
+    namespace: dict[str, Any] = {"catalog": labelled_catalog()}
+    for example in examples:
+        exec(example.split("```")[0], namespace)  # noqa: S102 -- our guide, as above
+    assert contract_hash(namespace["kyc_check"]) == contract_hash(testing.kyc_check)
+    assert namespace["catalog"].workflow("kyc.check@1") == namespace["kyc_check"]
+
+
 def test_the_guides_example_is_the_development_refund_contract() -> None:
     guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
     example = guide.split("```python\n")[1].split("```")[0]
@@ -278,6 +291,29 @@ def refund(**changes: Any) -> ActivityContract:
     return ActivityContract(**fields | changes)
 
 
+class KycStatusFromAPerson(BaseModel):
+    status: Annotated[str, source("person:ana")]
+
+
+class KycNotesFromFax(BaseModel):
+    status: Annotated[str, source("system:kyc")]
+    analyst_notes: Annotated[str, source("untrusted:fax")]
+
+
+class KycNamedOutcome(BaseModel):
+    outcome: str
+
+
+class KycAsFloat(BaseModel):
+    score: float
+
+
+def kyc(output: type[BaseModel]) -> WorkflowContract:
+    """The guide's workflow contract, `kyc.check@1`, with `output`."""
+    fields = {name: getattr(testing.kyc_check, name) for name in WorkflowContract.model_fields}
+    return WorkflowContract(**fields | {"output": output})
+
+
 # Each "You wrote" cell of the guide's refusal table, and the code that does it.
 GUIDE_REFUSALS: dict[str, Any] = {
     '`effect="write"` with no `idempotency_key`': lambda: refund(idempotency_key=None),
@@ -300,6 +336,15 @@ GUIDE_REFUSALS: dict[str, Any] = {
         input=RefundWithUnless
     ),
     '`catalog.register_label("LLM")`': lambda: Catalog().register_label("LLM"),
+    '`source("person:ana")` or `source("trusted:kyc")` on an output field': lambda: kyc(
+        KycStatusFromAPerson
+    ),
+    '`source("untrusted:fax")`, a label nobody registered': lambda: labelled_catalog().register(
+        kyc(KycNotesFromFax)
+    ),
+    "An output field named `outcome`": lambda: kyc(KycNamedOutcome),
+    "An output field `score: float`": lambda: kyc(KycAsFloat),
+    '`catalog.register_label("undeclared")`': lambda: Catalog().register_label("undeclared"),
     "A second, different `payments.refund@2`": lambda: catalog_of(payments_refund).register(
         refund(risk="medium")
     ),
@@ -307,6 +352,10 @@ GUIDE_REFUSALS: dict[str, Any] = {
         "payments.refund@3"
     ),
     '`catalog.get("payments.refund@1.0")`': lambda: Catalog().get("payments.refund@1.0"),
+    "`retry=RetryPolicy(…)` on a workflow contract": lambda: kyc_workflow(
+        retry=payments_refund.retry
+    ),
+    '`catalog.get("kyc.check@1")`, a workflow contract': lambda: CATALOG.get("kyc.check@1"),
 }
 
 
@@ -376,6 +425,38 @@ class RefundWithUnless(BaseModel):
     idempotency_key: str
 
 
+class RefundFromAPerson(BaseModel):
+    refund_id: Annotated[str, source("person:ana")]
+
+
+class RefundWithTwoSources(BaseModel):
+    refund_id: Annotated[str, source("system:payments"), source("untrusted:llm")]
+
+
+class RefundAsFloat(BaseModel):
+    refund_id: str
+    refunded: float
+
+
+class Band(BaseModel):
+    band: str
+
+
+class RefundWithDetails(BaseModel):
+    refund_id: str
+    details: Band
+
+
+class RefundCounted(BaseModel):
+    refund_id: str
+    attempts: int
+
+
+class RefundNamedOutcome(BaseModel):
+    refund_id: str
+    outcome: str
+
+
 # Every rule a contract enforces (docs/layers/03-validation.md), each with a change that breaks it.
 # A change to a part (`timeouts`, `retry`) is written as that part's changed fields.
 CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
@@ -395,6 +476,14 @@ CONTRACT_RULES: list[tuple[str, dict[str, Any], str]] = [
     ("an effect from its list", {"effect": "delete"}, "'read', 'compute', 'write' or 'notify'"),
     # Layer 4: the kinds of input policy are the engine's (brief, D21).
     ("a policy kind the engine knows", {"input": RefundWithUnless}, "Ventoux doesn't know"),
+    # Layer 8d: outputs say where they come from, and land in the case file (brief, D29).
+    ("an output source is a system or a label", {"output": RefundFromAPerson}, "never a person"),
+    ("an output has one source", {"output": RefundWithTwoSources}, "has 2 sources"),
+    ("an output is never named outcome", {"output": RefundNamedOutcome}, "can't be named outcome"),
+    # Tutor review of 8d: an output lands in the case file, which holds values exactly (D20).
+    ("an output is never a float", {"output": RefundAsFloat}, "output refunded is float"),
+    ("an output is never a nested model", {"output": RefundWithDetails}, "output details is Band"),
+    ("an output is never an int", {"output": RefundCounted}, "output attempts is int"),
 ]
 RULE_NAMES = [rule for rule, _, _ in CONTRACT_RULES]
 
@@ -472,3 +561,150 @@ def test_a_version_without_the_policy_is_not_served(retired: str) -> None:
     # Left beside @2, a @1 without the policy would let a definition step around it.
     with pytest.raises(NotInCatalog, match=f"{retired} is not in the catalog"):
         CATALOG.get(retired)
+
+
+# Layer 8d: where each output comes from, declared on its field (brief, D12, D29).
+
+
+def kyc_output(*sources: OutputSource) -> type[BaseModel]:
+    """The guide's KYC output, with `sources` on its `status`."""
+    status_type: Any = Annotated[str, *sources] if sources else str
+
+    class KycOutput(BaseModel):
+        status: status_type
+        analyst_notes: Annotated[str, source("untrusted:llm")]
+
+    return KycOutput
+
+
+def labelled_catalog() -> Catalog:
+    """A catalog with the development labels, `customer` to `web`, and nothing else."""
+    catalog = Catalog()
+    for label in CATALOG.labels:
+        catalog.register_label(label)
+    return catalog
+
+
+@pytest.mark.parametrize(
+    ("declared", "says"),
+    [
+        (source("person:ana"), "has the source 'person:ana'"),
+        (source("trusted:kyc"), "has the source 'trusted:kyc'"),
+        (source("system:"), "has the source 'system:'"),
+        (source("KYC"), "has the source 'KYC'"),
+    ],
+)
+def test_an_output_source_is_a_system_or_a_registered_label(
+    declared: OutputSource, says: str
+) -> None:
+    # A value becomes trusted only through a contract the platform team owns, as a system, or a
+    # person's answer: an activity is never a person, and "trusted" is not a source (brief, D12).
+    with pytest.raises(ValidationError, match=says):
+        lookup_contract(output=kyc_output(declared))
+
+
+def test_an_output_has_one_source() -> None:
+    # Fail closed: two sources on one field can't both be right, and the engine won't pick one.
+    with pytest.raises(ValidationError, match="output status has 2 sources"):
+        lookup_contract(output=kyc_output(source("system:kyc"), source("untrusted:llm")))
+
+
+def test_an_output_source_names_a_registered_label() -> None:
+    contract = lookup_contract(output=kyc_output(source("untrusted:fax")))
+    with pytest.raises(ValueError, match="status is untrusted:fax, and fax is not a registered"):
+        labelled_catalog().register(contract)
+    labelled_catalog().register(lookup_contract(output=kyc_output(source("system:kyc"))))
+
+
+def test_undeclared_is_the_engines_label() -> None:
+    # Nobody can declare a field `untrusted:undeclared` and blur what it means (8d, drafting 2).
+    with pytest.raises(ValueError, match="undeclared is the engine's label"):
+        Catalog().register_label("undeclared")
+    with pytest.raises(ValueError, match="undeclared is not a registered label"):
+        labelled_catalog().register(
+            lookup_contract(output=kyc_output(source("untrusted:undeclared")))
+        )
+
+
+def test_declaring_an_output_source_changes_the_hash() -> None:
+    # A source is part of the promise, so declaring one is a new version; declaring none adds
+    # nothing, which is why every contract written before 8d keeps its recorded hash (brief, D29).
+    undeclared = contract_hash(lookup_contract(output=kyc_output()))
+    from_kyc = contract_hash(lookup_contract(output=kyc_output(source("system:kyc"))))
+    from_crm = contract_hash(lookup_contract(output=kyc_output(source("system:crm"))))
+    assert len({undeclared, from_kyc, from_crm}) == 3
+
+
+# Layer 8d, slice 2: workflow contracts (brief, D6, D29).
+
+
+class KycInput(BaseModel):
+    customer_id: Annotated[str, trusted_only()]
+    idempotency_key: str
+
+
+class KycOutput(BaseModel):
+    status: Annotated[str, source("system:kyc")]
+    analyst_notes: Annotated[str, source("untrusted:llm")]
+
+
+def kyc_workflow(**changes: Any) -> WorkflowContract:
+    """A workflow contract, `kyc.check@1`, with any field changed."""
+    fields: dict[str, Any] = {
+        "name": "kyc.check",
+        "version": 1,
+        "input": KycInput,
+        "output": KycOutput,
+        "risk": "low",
+        "effect": "read",
+        "timeout": 600,
+        "idempotency_key": None,
+        "display": Display(title="Check a customer", description="Runs the KYC checks."),
+    }
+    return WorkflowContract(**fields | changes)
+
+
+@pytest.mark.parametrize(
+    ("changes", "says"),
+    [
+        ({"effect": "write"}, "carries its idempotency key"),
+        ({"timeout": 0}, "greater than 0"),
+        (
+            {"retry": RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2)},
+            "a workflow contract has no retry policy",
+        ),
+        ({"outcomes": ["rejected"]}, "a workflow contract has no outcomes"),
+        ({"timeouts": payments_refund.timeouts}, "a workflow contract has one timeout"),
+        (
+            {"display": Display(title="t", description="d", outcomes={"rejected": "Rejected"})},
+            "a workflow contract has no outcomes",
+        ),
+    ],
+)
+def test_a_workflow_contract_is_refused_when_it_breaks_a_rule(
+    changes: dict[str, Any], says: str
+) -> None:
+    with pytest.raises(ValidationError, match=says):
+        kyc_workflow(**changes)
+
+
+def test_a_workflow_contract_is_in_the_catalog() -> None:
+    catalog = labelled_catalog()
+    catalog.register(payments_refund)
+    catalog.register(kyc_workflow())
+    assert catalog.workflow("kyc.check@1") == kyc_workflow()
+    # One namespace, one promise per reference: each lookup says which kind it wants, and the
+    # other kind is refused, never handed over (fail closed).
+    with pytest.raises(NotInCatalog, match="kyc.check@1 is a workflow contract, not an activity"):
+        catalog.get("kyc.check@1")
+    with pytest.raises(NotInCatalog, match="payments.refund@2 is an activity contract, not a wo"):
+        catalog.workflow("payments.refund@2")
+    with pytest.raises(NotInCatalog, match="kyc.check@2 is not in the catalog"):
+        catalog.workflow("kyc.check@2")
+    # Hashed and checked like an activity's: a changed promise is a new version.
+    with pytest.raises(ContractConflict, match="register it as kyc.check@2"):
+        catalog.register(kyc_workflow(timeout=60))
+    assert [c.reference for c in catalog.contracts()] == ["kyc.check@1", "payments.refund@2"]
+    # A copy runs no check (learning question 31), so registering checks it again, as its kind.
+    with pytest.raises(ValidationError, match="greater than 0"):
+        labelled_catalog().register(kyc_workflow().model_copy(update={"timeout": 0}))

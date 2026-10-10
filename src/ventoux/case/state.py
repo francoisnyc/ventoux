@@ -159,6 +159,17 @@ class Schedule:
 
 
 @dataclass(frozen=True)
+class StartWorkflow:
+    """Run an existing workflow as a step (brief, D6): its contract, its checked inputs (key
+    included, if its contract takes one), and the run's name, which names its child workflow."""
+
+    entry: str  # the step run, such as `kyc#1`
+    workflow: str  # its workflow contract's reference, such as `kyc.check@1`
+    inputs: dict[str, object]
+    run: str  # `memory/kyc#1`; on Temporal the child workflow is `<case ID>/kyc#1`
+
+
+@dataclass(frozen=True)
 class StartPlan:
     """Run one plan as a step (brief, D28): its reference, its fields with where each value came
     from, the run's name in its keys, and who may approve nothing in it."""
@@ -180,4 +191,4 @@ class StopPlan:
     entry: str  # the step run, such as `settle#1`
 
 
-type Command = Schedule | StartPlan | StopPlan
+type Command = Schedule | StartWorkflow | StartPlan | StopPlan
