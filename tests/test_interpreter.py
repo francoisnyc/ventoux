@@ -671,3 +671,46 @@ def test_a_plan_reference_to_an_unregistered_system_is_refused() -> None:
             },
             answers=[],
         )
+
+
+def lettering(customer: str) -> dict[str, Any]:
+    """A plan drafting a letter to the reference in its field `customer`, of its system."""
+    return {
+        "plan": "write-to",
+        "version": 1,
+        "display": {"title": "Write to a customer"},
+        "fields": {
+            "customer_id": {"type": "reference", "system": "crm"},
+            "policy_id": {"type": "reference", "system": "policies"},
+        },
+        "initial": "draft",
+        "states": {
+            "draft": {
+                "activity": "letters.draft@3",
+                "inputs": {"customer": {"var": customer}, "template": "hello"},
+                "on": {"done": "done"},
+            },
+            "done": {"final": "succeeded"},
+        },
+    }
+
+
+def test_a_plan_gives_a_reference_input_only_its_system() -> None:
+    fields = {
+        "customer_id": sourced("cus-7", "system:opener"),
+        "policy_id": sourced("pol-3", "system:opener"),
+    }
+    calls: list[dict[str, Any]] = []
+    run = run_plan(
+        lettering("policy_id"),
+        fields=fields,
+        answers=[],
+        activities={"letters.draft@3": recording(calls)},
+    )
+    assert calls == []
+    assert run.status == "stopped"
+    assert run.reason == (
+        "letters.draft@3 takes customer as a reference to crm, and is given policy_id, a "
+        "reference to policies"
+    )
+    assert run_plan(lettering("customer_id"), fields=fields, answers=[]).status == "succeeded"

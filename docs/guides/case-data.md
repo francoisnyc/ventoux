@@ -86,14 +86,15 @@ never enters the case history.
 ### A reference goes only where its system is expected
 
 The contract of `letters.draft@3` says its `customer` input is a `crm` reference. Give it the
-policy instead, and the step fails before the activity is called, whatever the two IDs look like:
+policy instead, and the step fails before the activity is called, whatever the two IDs look like.
+The case needs attention, with the reason:
 
 ```
-letters.draft@3 takes customer as a crm reference, and deny gives it policy_id, a policies reference
+deny#1: letters.draft@3 takes customer as a reference to crm, and is given policy_id, a reference to policies
 ```
 
 The same for a value that isn't a reference at all: a text field, or a `cat` that builds an ID
-(`letters.draft@3 takes customer as a crm reference, and deny gives it a computed value`). Only a
+(`letters.draft@3 takes customer as a reference to crm, and is given a computed value`). Only a
 reference field of the right system passes, read as it is (`{"var": "customer_id"}`).
 
 ### Seeing a referenced record
@@ -155,8 +156,8 @@ must approve.
 | Refused when | Example |
 |---|---|
 | a reference names a system nobody registered | `customer_id is a reference to sail, which is not a registered system` |
-| a reference reaches an input expecting another system | `letters.draft@3 takes customer as a crm reference, and deny gives it policy_id, a policies reference` |
-| a computed value reaches a reference input | `letters.draft@3 takes customer as a crm reference, and deny gives it a computed value` |
+| a reference reaches an input expecting another system | `letters.draft@3 takes customer as a reference to crm, and is given policy_id, a reference to policies` |
+| a computed value reaches a reference input | `letters.draft@3 takes customer as a reference to crm, and is given a computed value` |
 | an approver can't see a value the step reads | `lee can't see approved_amount, which pay reads: it needs support` |
 | a record is shown to someone who can't see its field | `eve can't see customer_id: it needs adjuster or fraud` |
 | a field shown isn't a reference | `estimated_damage is not a reference: there is no record to show` |

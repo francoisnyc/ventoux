@@ -23,7 +23,7 @@ from ventoux.core.approval import (
 )
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
-from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
+from ventoux.core.expressions import Expression, ExpressionError, FieldType, evaluate, render
 from ventoux.core.form import form_problem
 from ventoux.core.history import (
     Answered,
@@ -173,7 +173,9 @@ async def interpret(
                 # The step's run: the run, the state, and how many times the run has entered it,
                 # so a retry reuses the key and another pass or another run never does (brief, D17).
                 key = f"{run_name}/{here}#{entries[here]}"
-                gave = await run_activity(state, values, sources, key, catalog, call, run)
+                gave = await run_activity(
+                    state, values, sources, key, catalog, call, run, plan.fields
+                )
                 run.history.append(gave)
                 here = choose(here, state.on, gave.event, values)
                 run.history.append(Moved(gave.event, here))
@@ -233,14 +235,16 @@ async def run_activity(
     catalog: Catalog,
     call: Call,
     run: PlanRun,
+    types: Mapping[str, FieldType],
 ) -> Gave:
-    """Call the state's activity with its inputs, and say what it gave."""
+    """Call the state's activity with its inputs, and say what it gave. `types` are the plan's
+    fields' declared types."""
     try:
         contract = catalog.get(state.activity)
     except NotInCatalog as missing:
         raise Stop(str(missing)) from None
     try:
-        inputs = checked_inputs(contract, state.inputs, values, sources, key)
+        inputs = checked_inputs(contract, state.inputs, values, sources, key, types)
     except InputRefused as refused:
         raise Stop(str(refused)) from None
     found = {name: provenance(expression, sources) for name, expression in state.inputs.items()}

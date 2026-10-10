@@ -253,7 +253,7 @@ def propose(
             raise ProposalRefused(f"{event.step} doesn't run now: {render(step.when)} is false")
     state.history.append(f"{event.by} proposed {event.step} as {role}")
     state.proposers[event.step] = event.by  # never its approver (brief, D25)
-    start(catalog, state, event.step, step, commands)
+    start(case, catalog, state, event.step, step, commands)
 
 
 def answer_task(
@@ -508,7 +508,7 @@ def admit(
                     step.when, state.values, f"{name}'s condition"
                 ):
                     continue
-                start(catalog, state, name, step, commands)
+                start(case, catalog, state, name, step, commands)
             except (StepStopped, InputRefused, NotInCatalog) as error:
                 # Nothing is skipped automatically: the step fails, and waits for a person; the
                 # other steps go on (brief, D17).
@@ -531,6 +531,7 @@ def free_to_start(state: CaseState, name: str, step: TaskStep | CallStep | PlanS
 
 
 def start(
+    case: CaseDefinition,
     catalog: Catalog,
     state: CaseState,
     name: str,
@@ -560,10 +561,11 @@ def start(
         return
     if given is not None:
         lapsed(state, name, step, given)
-    schedule(catalog, state, name, step, given, commands)
+    schedule(case, catalog, state, name, step, given, commands)
 
 
 def schedule(
+    case: CaseDefinition,
     catalog: Catalog,
     state: CaseState,
     name: str,
@@ -582,7 +584,8 @@ def schedule(
     entry = latest.entry if latest is not None and latest.status == "retrying" else None
     entry = entry or next_entry(state, name)
     key = f"{state.case}/{entry}"
-    inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key)
+    types = {name: field.declared for name, field in case.fields.items()}
+    inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key, types)
     coming_run(state, name, "running").approved = approved
     state.proposers.pop(name, None)  # the proposed run has started
     if isinstance(step, WorkflowStep):
