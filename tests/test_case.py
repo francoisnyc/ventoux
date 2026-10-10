@@ -104,7 +104,10 @@ def changed(change: str) -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ("kind", "steps.pay.kind: a step is a task or an activity, and this one is 'script'"),
+        (
+            "kind",
+            "steps.pay.kind: a step is a task, an activity or a plan, and this one is 'script'",
+        ),
         ("sequence", "sequence: pya is not a step"),
         ("requires", "steps.pay.requires: reviwe is neither a milestone nor a step"),
         ("milestone", "milestones.review: a milestone is not named like a step"),
@@ -466,6 +469,39 @@ REWORKED = [
 ]
 
 
+def test_an_entry_is_closed_or_not_open() -> None:
+    # Layer 8c: on Temporal an answer names its entry, and its refusal says which it was: an
+    # entry that has been open is closed (a double click); one that hasn't, isn't open.
+    reworked = [REVIEWED, propose("review", "ana")]
+    with pytest.raises(AnswerRefused, match="^review#1 is closed$"):
+        run_case(
+            reworkable(),
+            file=LARGE,
+            answers=[*reworked, ("review#1", "approve", "ana", {"approved_amount": 900})],
+            people=PEOPLE,
+        )
+    with pytest.raises(AnswerRefused, match="^review#3 isn't open$"):
+        run_case(
+            reworkable(),
+            file=LARGE,
+            answers=[*reworked, ("review#3", "approve", "ana", {"approved_amount": 900})],
+            people=PEOPLE,
+        )
+    # An approval's entry, the same: Sam's double click while the payment runs.
+    with pytest.raises(AnswerRefused, match="^pay.approval#1 is closed$"):
+        run_case(
+            REFUND,
+            file=LARGE,
+            answers=[
+                REVIEWED,
+                ("pay.approval#1", "approve", "sam"),
+                ("pay.approval#1", "approve", "sam"),
+            ],
+            people=PEOPLE,
+            held=["pay"],
+        )
+
+
 def test_an_open_approval_follows_the_case_file() -> None:
     # Sam reads the sheet for 250 while the review is sent back and reworked to 900 (brief, D25).
     with pytest.raises(AnswerRefused, match="^pay.approval#1 was withdrawn: review started again$"):
@@ -555,7 +591,24 @@ def test_a_high_risk_step_with_no_approval_stops() -> None:
 
 # --- Slice 6: the guide, run as written ---
 
-GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+# The guide, without cases on Temporal, whose examples run on Temporal's test server
+# (tests/test_temporal_case.py).
+NOT_RUN_HERE = ("## Running a case on Temporal\n",)
+
+
+def without_sections(text: str, headings: tuple[str, ...]) -> str:
+    """`text` without each section that starts with one of `headings`, up to the next one."""
+    for heading in headings:
+        if heading in text:
+            before, after = text.split(heading, 1)
+            rest = after.split("\n## ", 1)
+            text = before + ("## " + rest[1] if len(rest) > 1 else "")
+    return text
+
+
+GUIDE = without_sections(
+    (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text(), NOT_RUN_HERE
+)
 
 
 def blocks(language: str) -> list[str]:
@@ -603,6 +656,8 @@ def test_the_guides_examples_run_as_written() -> None:
         "refund_with_rework": guide_refund_with_rework(),
         "retry": retry,
         "PEOPLE": OPERATORS,
+        "refund_with_plan": guide_refund_with_plan(),
+        "refund_order": refund_order(),
     }
     for code in blocks("python"):
         exec(code, namespace)  # noqa: S102 -- our guide, as in layer 7
@@ -655,6 +710,37 @@ def guide_with(index: int) -> dict[str, Any]:
     definition = guide_json(0)
     definition["steps"].update(guide_json(index))
     return definition
+
+
+PLANS_GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
+
+
+def refund_order() -> dict[str, Any]:
+    """The plans guide's `refund-order` plan, its first JSON block, as stored data."""
+    example = PLANS_GUIDE.read_text().split("```json\n")[1].split("```")[0]
+    plan: dict[str, Any] = json.loads(example, parse_float=Decimal)
+    return plan
+
+
+def guide_refund_with_plan() -> dict[str, Any]:
+    """The guide's refund, its payment made by the guide's plan step (JSON block 5)."""
+    definition = guide_json(0)
+    del definition["steps"]["pay"], definition["sequence"]
+    definition["steps"].update(guide_json(5))
+    return definition
+
+
+def test_the_guides_plan_step_runs_as_written() -> None:
+    run = run_case(
+        guide_refund_with_plan(),
+        file=LARGE,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+    )
+    shown = blocks("")[4].splitlines()
+    assert run.history[-len(shown) :] == shown
 
 
 def guide_with_close_reasons() -> dict[str, Any]:

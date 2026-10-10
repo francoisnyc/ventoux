@@ -466,3 +466,344 @@ retried again, a declared outcome while closing).
 | `closes_when` closes the case once its milestones are reached, cancelling what waits | C `test_closes_when_closes_the_case_once_its_milestones_are_reached` |
 | `closes_when` never cancels a step that needs attention: the case waits, and closes once it is retried (tutor review) | C `test_closes_when_waits_while_a_step_needs_attention` |
 | The guide's new examples, histories and refusal rows are what the engine says | C `test_the_guides_examples_run_as_written`, `test_the_guides_histories_are_what_the_engine_records`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |
+
+---
+
+## 8c. Cases on Temporal
+
+Status: the seven choices agreed in the session, 2026-10-09 (all as proposed); the six points
+decided while drafting confirmed the same day; built, slices 0–8; Promises checked against the
+tests, 2026-10-09; the tutor review's fix built test-first, the same day.
+
+User-facing description, written first: `docs/guides/cases.md`, "Plan steps" and "Running a case
+on Temporal". Decisions: brief D27 (design question 18) and D28.
+
+### What this part is for
+
+8a and 8b made `decide` the whole case runtime, reading no clock, randomness or I/O, and gave it a
+driver that runs in memory. 8c gives it a second driver: a Temporal workflow, one per case, for as
+long as the case lives. Answers, proposals, retries and closes arrive as signals; activities run
+with their contracts' retry policies and timeouts; a `plan` step runs as a child workflow; and a
+case that outlives one run's history continues as new, keeping its keys.
+
+Drawn on: our own layer 6 (`temporal/workflow.py`, `client.py`, `worker.py`), not the prototype
+(not checked out in this session). Checked by hand on the test server before writing this note:
+`workflow.info().first_execution_run_id` is the same in three runs joined by continue-as-new, and
+a handle from `start_workflow` is pinned to the first run, so signals after a switch must address
+the workflow ID alone.
+
+### Decided in the session
+
+1. **One inbox, one event at a time.** Signal handlers and the results of activities and child
+   plans only append an event to an inbox. The main loop takes the next event, calls `decide`,
+   starts what it asks for, and loops. The inbox keeps arrival order, which history records, so
+   "the entry open when it arrives" means: open in the state the earlier events left. The opening
+   is the workflow's input (the definition as data, the first values, who opened it). A refused
+   opening (`CaseRefused`, `CaseInvalid`) fails the workflow at once, as `RunRefused` does in
+   layer 6; any other exception is a bug, which fails only the workflow task, retried by Temporal
+   until fixed code is deployed (brief, D17).
+2. **On Temporal an answer names its entry, and anything refused is recorded.** A signal answers
+   `review#1` or `pay.approval#1`, never a step's name: after a rework, a late click on `review`
+   would answer `review#2`, which its sender never saw (layer 6's double click). The in-memory
+   script still answers by step; the rule is the signal's. A refused answer, proposal, retry or
+   close becomes one history line, `refused <who>'s <what>: <reason>`, and the case waits on as
+   if it hadn't come; `decide` leaves the state as it was (8b, slice 0). The runtime's refusal of
+   an entry that isn't open splits in two, as layer 6's: `review#1 is closed` for an entry that
+   has been open, `review#1 isn't open` for one that hasn't.
+3. **Keys across runs** (brief, D27): `<workflow ID>/<first run ID>/<entry>`. The entry counts
+   come from the case's step runs, which cross over, so a key never repeats. The client opens a
+   case refusing a duplicate ID, and the first run ID keeps two cases apart if Temporal has
+   forgotten a closed one. A reset keeps the first run ID (Temporal's documentation), so it sends
+   the same keys again; not promised here, since the test server can't reset.
+4. **Retry policy and timeouts from the contract,** through the same code as plans (layer 6): an
+   error after the retries is `Failed` with the activity's own message, and the case needs
+   attention; a declared outcome is `Completed` with it, never retried. A case making a contract
+   stricter (brief, D17) is not on 8c's Build line: not in 8c.
+5. **Plan steps** (brief, D28): `kind: "plan"`, a plan reference, `inputs` over the case file.
+   The deployment supplies plans by reference; one it lacks fails the step. On Temporal, a child
+   workflow `<case ID>/<entry>`, whose run the case names, so its keys are
+   `<case key>/<entry>/<state>#<n>`; a retry starts it again under the same ID and keys. Succeeded
+   is `done`; a failed final state is the outcome `failed`; stopped fails the step. The case's
+   opener and the step's proposer cross into the plan as people who approve nothing in it: an
+   optional `excluded` parameter on `interpret` (a small `core` change). The plan's waits are
+   answered on the child; the case's history shows the step started, and the case waits for
+   it. In memory, `testing.py` runs the plan with `asyncio.run` (8b, choice 1), answered from
+   `plan_answers`; a plan left waiting keeps the step running. No approval of a whole plan (D14) until layer 15.
+6. **Continue-as-new** (brief, D27): after `events_per_run` events decided in one run (a count on
+   the workflow class, lowered in tests), or when Temporal suggests it, and only at a quiet point:
+   the inbox empty, nothing running, every signal handler finished. The whole `CaseState` crosses,
+   with the definition; nothing crosses as a queue. The state is written to data and read back by
+   `ventoux.temporal` (the exact converter refuses sets, and a `frozenset` of sources is one).
+7. **Replay:** a recorded case history replays with the same code, and fails with code changed to
+   ask for something else first.
+
+### How it works
+
+**The workflow.** `CaseWorkflow` holds the code; a deployment subclasses it to name its `catalog`
+and `plans` (shown in the guide), as with `PlanWorkflow`. `drive(start)` parses the definition,
+decides `Opened`, then loops: wait until the inbox has an event, decide it, carry out its commands.
+A `Schedule` becomes `workflow.start_activity` with the contract's options, its result turned into
+`Completed` or `Failed` and appended to the inbox when it arrives. A `StartPlan` becomes
+`workflow.start_child_workflow` of the deployment's plan workflow, with a `PlanStart` naming the run
+and who is excluded; its `RunReport` becomes `Completed` (`done` or `failed`) or `Failed` (stopped).
+The loop ends when the case is closed, returning a `CaseReport`.
+
+**Signals:** `answer(Sent)` (entry, outcome, by, roles, form), `propose`, `retry`, `close`, each
+appending its event. A bare step name in an answer is refused by the signal, before `decide`.
+**Query:** `report` gives `CaseReport`: `status`, `waiting_for`, `waiting_at` (the open entries),
+`needs_attention`, `flags`, `history`.
+
+**`case` gains** the plan step and its command: `PlanStep` in the definition, `StartPlan` (entry,
+plan reference, fields with sources, run name, excluded people) from `decide`, and `Completed`
+read for a plan step as `done` or `failed`. `case` still imports nothing from Temporal.
+
+**Continue-as-new.** Before waiting on the inbox, the loop checks: count reached or Temporal
+suggests it, inbox empty, nothing running, handlers finished. Then `workflow.continue_as_new` with
+a `CaseStart` carrying the state as data. The new run decides nothing on starting: it reads the
+state back and waits on the inbox. Temporal fails the switch if a signal arrived meanwhile, and the
+old run decides it first.
+
+### Where the code goes
+
+- `case/definition.py`: `PlanStep` (`kind: "plan"`, `plan`, `inputs`; no `approval`).
+- `case/state.py`: `StartPlan`; the command type becomes `Schedule | StartPlan`.
+- `case/runtime.py`: starting a plan step; its result; `is closed` and `isn't open`.
+- `case/memory.py`: carries `StartPlan` with a plan runner it is given.
+- `core/interpreter.py`: `excluded`, the people who approve nothing in this run, and why.
+- `testing.py`: `run_case(..., plans=, plan_answers=)`, the plan runner (`asyncio.run`); the
+  development case workflow.
+- `temporal/options.py`: a contract's retry policy and timeouts, for both workflows (moved from
+  `workflow.py`).
+- `temporal/cases.py`: `CaseWorkflow`, `CaseStart`, `CaseReport`, the signals' shapes, and the
+  client (`start_case`, `answer`, `propose`, `retry`, `close`, `report`).
+- `temporal/carried.py`: a case's state written to data and read back.
+- `temporal/workflow.py`: `PlanStart` gains the run name and the excluded people, both optional.
+- `temporal/worker.py`: `case_worker`.
+
+### Not in 8c
+
+- Outputs into the case file, and `workflow` steps (8d).
+- A case making a contract's retry policy or timeouts stricter (brief, D17): no layer names it
+  yet; to be placed with releases (layer 12).
+- A plan step's waits in the case's `waiting_for` (brief, D28): needs the child to tell its
+  parent.
+- Approving a whole plan, "Approve this plan" (brief, D14): layer 15.
+- Resets, tested: the time-skipping test server can't reset a workflow.
+- No new dependency.
+
+### Seams the tests use
+
+- `run_case(..., plans=, plan_answers=)` and what it reports, for plan steps in memory.
+- `case_worker`, `start_case`, `answer`, `propose`, `retry`, `close`, `report` and the case's
+  `result()`, against Temporal's time-skipping test server; `CaseReport`'s fields.
+- The plans client's `answer` and `report`, on a plan step's child.
+- Temporal's `Replayer`, on a case's history.
+- The guide's examples: in memory, run as written; on Temporal, the same history as in memory.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **Closed or not open.** Negative: after a rework, an answer to `review#1` says
+   `review#1 is closed`, and one to `review#3` says `review#3 isn't open`.
+1. **Plan steps, in memory.** Negative: a plan step with an `approval`, or naming no plan, is
+   refused when read; a plan the deployment lacks fails the step; a plan that stops fails the
+   step; the case's opener approving inside the plan is refused. Then the guide's plan step runs,
+   with keys `memory/settle#1/pay#1`, and a failed final state gives `settle.outcome == "failed"`.
+2. **A case runs as a workflow.** Negative: a refused opening fails the workflow at once; a
+   second case with the same ID is refused. Then the guide's refund, answered by entry, closes
+   with the same history as in memory, keys apart; a waiting case reports `waiting_for` and
+   `waiting_at`.
+3. **Signals and refusals.** Negative: a double click, an answer before its entry opens, an
+   answer naming a step, a refused proposal, retry and close: each recorded, and the case waits
+   on. Then a proposal and a close by reason, accepted.
+4. **Activities.** Negative: an activity failing past its contract's attempts makes the case need
+   attention; a declared outcome isn't retried. Then a retried activity, and an operator's retry,
+   send the same key, `refund-1/<first run ID>/pay#1`.
+5. **Plan steps as child workflows.** Negative: the case's opener approving inside the child is
+   refused; a stopped plan fails the step. Then the child `refund-1/settle#1` waits, is answered
+   on the child, and the step is done; its keys are `refund-1/<first run ID>/settle#1/pay#1`.
+6. **Continue-as-new.** Negative: an entry count never restarts: after a switch, a rework is
+   `review#2` and its key is new; a state carried over keeps exact numbers and sources. Then an
+   entry open before the switch is answered after it by the same name; a switch waits while an
+   activity runs; the case's history reads as one, across runs.
+7. **Replay.** Negative: a case's history replayed with changed code fails. Then it replays with
+   the same code, a continued case's last run included.
+8. **The guide and the promises.**
+
+### Decided while building
+
+- **Plan steps have their own test file,** `tests/test_plan_step.py` (`P` below):
+  `tests/test_case.py` is past 1,300 lines.
+- **A plan supplied under another reference fails the step** (slice 1, found while building the
+  runner): a deployment mapping `refund-order@1` to a plan that is really `refund-order@2` would
+  run something the case doesn't name. Fail closed: `refund-order@1 is supplied as
+  refund-order@2: supply the plan it names`. The same check comes to Temporal in slice 5.
+- **The test for exclusions inside a plan uses the proposer, not the opener.** Sam opening the
+  case and approving inside the plan was already refused by layer 7's provenance check: his
+  opening values feed the plan's `pay`. The proposer's values feed nothing, so only D25's rule
+  stops him; that test failed for the right reason (Sam's refund paid) before `excluded` existed.
+  A case of proposed steps needs `stays_open` (8a's carried catch), so the test declares it.
+- **`run_plan`'s scripted wait moved to `scripted` in `testing.py`,** shared by plan runs and plan
+  steps, rather than copied.
+- **The case workflow and its client share one file,** `temporal/cases.py`, as the note planned;
+  the activity options moved to `temporal/options.py`, and `PlanWorkflow` uses them too
+  (slice 2). Until slice 5, a plan step reaching the case workflow is a bug, not a refusal: it
+  fails the workflow task, which waits for the code.
+- **An activity's failure reads as in memory:** `payments.refund@2 failed: <what it said>`, so
+  the two drivers record the same line.
+- **The client addresses a case by its ID alone** (`case_handle`), from the first call on, not
+  only after a switch: `start_case` returns such a handle.
+- **A request's signals share one shape,** `CaseRequest` (what, by, roles): a proposal names a
+  step, a retry a run, a close a reason (slice 3). An answer keeps its own, `CaseAnswer`.
+- **An answer naming a step is refused in the loop, not in the signal handler,** so its line
+  lands in the history in arrival order, like every other refusal; its example names the entry
+  open for that step, if any (`such as review#1`).
+- **A test of a step that needs attention moves time on itself** (slice 4). Temporal's
+  time-skipping server skips time only while a client waits on a workflow's result; a plan
+  stops, so layer 6's test waited on it, but a case that needs attention never ends. Those tests
+  call the test environment's `sleep` between reports, past the contract's backoff.
+- **Looking up a supplied plan is one rule for both drivers,** `case/plan_step.py`'s `supplied`
+  (slice 5): it moved from `testing.py`, so the Temporal workflow refuses a missing, unreadable or
+  misnamed plan exactly as memory does. Pure: it only parses data.
+- **The case workflow names its plan workflow by the name a worker registers,**
+  `plan_workflow = "ventoux.plan"`, and `case_worker` serves both.
+- **A module defining a workflow passes through only what would clash** (slice 5). The test's
+  own case class made the sandbox import the test module afresh, and with it
+  `ventoux.testing`, whose catalog then held contract classes the shared `core` didn't know.
+  Passing everything through instead hid a Pydantic import inside the sandbox (a warning that
+  `annotated_types` was imported mid-run); importing as the guide shows, with only
+  `ventoux.testing` passed through, gives neither.
+- **The carried state is written field by field** (`temporal/carried.py`), and its test checks
+  that every field of `CaseState` is written: a field added later and forgotten there would
+  vanish at every switch, unnoticed (slice 6).
+- **A report asked at the moment of a switch can time out** (found in slice 6). The query reaches
+  the run that is ending, which no longer answers it; asked again, it reaches the new run. Answers
+  are never affected: they are signals, decided by one run or the other. The tests ask with a
+  short timeout and again; the guide tells API writers the same.
+- **"Around the switch" is tested for what holds whichever way it falls.** Whether an answer sent
+  at once lands before or after the switch is Temporal's timing, not ours: the test asserts that
+  the approval counts once and the refund is paid once. A second part waits for the switch, so
+  the open entry is answered by the same name after it, deterministically.
+- **Two of the guide's claims were corrected in slice 8, not built to:** a plan step is not
+  "reported as running" (`CaseReport` has no such list: the history shows it started, and the
+  case waits), corrected in the guide, D28 (new in this PR) and this note; and replay fails on
+  code "changed to ask for something else", not code that "decides differently" (layer 6:
+  replay compares commands, not their inputs).
+- **The guide's client example runs as written,** on the guide's own task queue, `refunds`.
+- **The outcome of a plan step is tagged with the plan:** `settle.outcome` from
+  `system:refund-order@1`, as an activity's is tagged with its contract (choice 5 in drafting).
+
+### From the tutor review
+
+- **Closing a case didn't stop a plan step waiting on a person.** The tutor's probe: the refund
+  paid through `refund-order@1`, the child `refund-1/settle#1` waiting at `approve_refund#1`,
+  Ana closes the case as a duplicate. The case went to closing with `waiting_for` empty; Lee then
+  approved on the child, the refund was paid, and the case closed flagged. The close existed to
+  prevent exactly that payment. In memory the case stayed closing forever. Both negative tests
+  were written first and seen failing that way (Lee's refund paid; `closing`, not `closed`).
+- **The fix, added to D28:** when a case begins closing, `decide` gives `StopPlan` for each
+  running plan step. On Temporal the case workflow signals the child `stop`; its open wait ends
+  with no answer, answers to it are refused, a new activity is refused before it is scheduled,
+  and an activity already running finishes. The plan ends `cancelled`, the case records
+  `PlanCancelled`, the step run is cancelled because the case is closing, and the case closes. In
+  memory a running plan step always waits on an answer, so the driver ends it at once.
+- **A signal, not Temporal's cancellation.** Cancelling the child interrupts every await in it,
+  including the one on a running activity, which D10 says must finish; and the interruption
+  would surface in `core` as an asyncio cancellation, which `core` can't import. The signal lets
+  the plan's driver act at its two seams, `wait` and `call`. `core` is unchanged: `cancelled` is
+  the plan workflow's report, not an interpreter status.
+- **The rule's other two promises got their own tests,** written after the code and seen failing
+  with it removed: an activity running in the stopped plan finishes, once; and nothing new starts
+  (with the refusal of a new activity removed, the letter was drafted after the close).
+
+### From the tutor review, second pass
+
+- **A stopped plan hid what finished after the close.** The plan workflow reported every run
+  stopped by its case as `cancelled`, so an activity that finished, or failed past its retries,
+  after `stop` vanished: the case recorded `settle#1 cancelled: the case is closing` with no flag.
+  The tutor's probe: Lee approves inside the child, the payment starts and is held, Ana closes the
+  case as a duplicate, the payment is released. The refund was paid once, the case said nothing.
+  8b flags the same event on an ordinary step (`pay#1 completed after the close was requested`).
+- **The fix, added to D28:** the plan workflow notes each activity that ends after `stop`, done
+  or a declared outcome as `completed`, a failure past its retries as `failed` with what it said,
+  and reports them (`RunReport.after_stop`). The case receives them with `PlanCancelled` and
+  flags each one, worded as 8b's flags: `settle#1: payments.refund@2 completed after the close
+  was requested`, `settle#1: payments.refund@2 failed after the close was requested: provider
+  unreachable`. A plan that ended on its own after the close keeps its flag, `settle#1 completed
+  after the close was requested`. In memory nothing runs inside a plan when it is stopped, so
+  nothing is reported.
+- **Both negative tests were written first and seen failing:** the payment was made once, the
+  letter after it never started, and the flags were empty, for the completion and the failure.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that will fail if it isn't true.
+Drafted before building, with the tests named in advance; checked against the real tests before
+the pull request is opened. `C` is `tests/test_case.py`, `P` `tests/test_plan_step.py`, `TC`
+`tests/test_temporal_case.py`. Seen failing before their code: every negative test so far, except
+three that passed when written, the code already there, and were seen failing with it removed: a
+stopped plan failing the step (the runner's `stopped` branch), inputs keeping their sources (the
+sources laundered to `system:opener`), and a plan ending done or failed (the check removed). The
+plan the deployment lacks first failed on the missing `plans=` seam. On Temporal: a refused
+opening was seen hanging until the test's bound with its conversion removed, and a second case
+opening under the same ID with Temporal's default reuse policy. A double click, before the
+refusals were recorded, left the case stuck (its workflow task failing) until the test's bound;
+an early click then passed as written, on slice 0's wording and the same recording; refused
+proposals, retries and closes passed as written too, and were seen stuck with only
+`AnswerRefused` recorded. Slice 4's activity code came with slice 2, so its tests passed as
+written; seen failing with Temporal's default retry policy in place of the contract's (the
+payment retried forever, never needing attention), and with the declared-outcome branch removed
+(the declined refund never completed). Slice 5's first test failed with the case stuck on a plan
+step it couldn't carry; the exclusion inside a child was seen failing with `excluded` not passed
+to `interpret` (Sam's own approval taken), and the retried child's keys with the case's run name
+not passed (the keys named the child's own run). Slice 6: the carried state failed on the
+missing module, then with a field dropped; the switch first failed by never happening; entry
+counts were seen restarting (`started review#1` again) with the carried runs cut down, and a
+switch while the payment ran lost its result (`pay#1` scheduled forever) with the "nothing
+running" check removed. Slice 7: the replay with changed code passed as written, Temporal's
+`NondeterminismError` raised by Temporal itself, as in layer 6; the three histories replayed with
+the same code (a finished case with a refusal in it, a continued case's last run, a case with a
+child plan) are the tests of our code.
+
+| Promise | Test |
+|---|---|
+| An answer to an entry that has been open says it is closed; one that hasn't, that it isn't open | C `test_an_entry_is_closed_or_not_open` |
+| A plan step has no approval and names a plan, or is refused when read | P `test_a_plan_step_is_read_with_its_shape_checked` |
+| A plan the deployment lacks, one supplied under another reference, or a plan that stops, fails the step: the case needs attention | P `test_a_plan_the_deployment_lacks_fails_the_step`, `test_a_plan_supplied_under_another_reference_fails_the_step`, `test_a_plan_that_stops_fails_the_step` |
+| A plan's fields carry the sources of what they read from the case file, and the plan's checks refuse by them | P `test_a_plan_steps_inputs_keep_their_sources` |
+| A plan that succeeds makes the step done; a failed final state is the outcome `failed`; a plan waiting keeps the step running | P `test_how_a_plan_ends_is_how_its_step_ends` |
+| A plan step ends done or failed, and nothing else | P `test_a_plan_ends_done_or_failed_and_nothing_else` |
+| The case's opener and the step's proposer approve nothing inside a plan step | P `test_who_may_not_approve_crosses_into_the_plan`; TC `test_a_plan_step_runs_as_a_child_workflow` |
+| A plan step's keys are the step run's, then the plan's own | P `test_a_plan_steps_keys_name_its_step_run`; TC `test_a_plan_step_runs_as_a_child_workflow` |
+| A refused opening fails the case workflow at once | TC `test_a_refused_opening_fails_at_once` |
+| A second case with the same ID is refused | TC `test_a_case_id_opens_one_case` |
+| On Temporal a case makes the same decisions and history as in memory, its keys naming the case and its first run | TC `test_the_guides_case_gives_the_same_history_as_in_memory` |
+| A waiting case reports what it waits for, and the entries open for an answer | TC `test_a_waiting_case_reports_its_open_entries` |
+| An answer counts only for the entry open when it arrives: a double click and an early click are refused, recorded, and the case waits on | TC `test_a_double_click_is_refused_and_recorded`, `test_an_answer_before_its_entry_opens_is_refused` |
+| An answer naming a step, not an entry, is refused and recorded | TC `test_an_answer_names_its_entry` |
+| A refused proposal, retry or close is recorded, and the case waits on | TC `test_a_refused_request_is_recorded_and_the_case_waits_on` |
+| An activity is retried as its contract says; past its retries, the case needs attention | TC `test_an_activity_failing_past_its_retries_needs_attention` |
+| A declared outcome is never retried | TC `test_a_declared_outcome_is_never_retried` |
+| A retried activity, and an operator's retry, send the same key | TC `test_every_attempt_and_a_retry_send_the_same_key` |
+| A plan step runs as a child workflow named by its step run, answered on the child | TC `test_a_plan_step_runs_as_a_child_workflow` |
+| A child plan that stops, or one supplied under another reference, fails its step | TC `test_a_plan_that_cannot_run_fails_its_step` |
+| A stopped child plan is retried under the same ID, with the same keys | TC `test_a_stopped_child_plan_is_retried_with_the_same_keys` |
+| An entry count never restarts across continue-as-new, so a key never repeats | TC `test_entry_counts_cross_continue_as_new` |
+| The state carried over keeps exact numbers and every value's sources | TC `test_a_carried_state_reads_back_as_it_was` |
+| An entry open before a switch is answered after it by the same name | TC `test_an_open_entry_survives_the_switch` |
+| A case switches only when nothing runs | TC `test_a_switch_waits_while_an_activity_runs` |
+| Closing a case ends a plan step waiting inside it: the case closes, never stays closing (tutor review) | P `test_closing_a_case_ends_its_waiting_plan_step` |
+| After a close, an answer on the child can't approve: nothing is paid, the step run is cancelled, and the case closes as the close said (tutor review) | TC `test_closing_a_case_stops_its_child_plan` |
+| An activity running in a plan stopped by the close finishes, once; then nothing new starts in it (tutor review) | TC `test_an_activity_running_in_a_stopped_plan_finishes`, `test_a_stopped_plan_starts_nothing_new` |
+| An activity in a plan stopped by the close that finishes after it flags the case, worded as 8b's flags; the case closes as the close said (second tutor review) | TC `test_a_payment_finishing_in_a_stopped_plan_flags_the_case` |
+| An activity in a plan stopped by the close that fails past its retries flags the case with the failure, never just "cancelled", and needs no attention (second tutor review) | TC `test_an_activity_failing_in_a_stopped_plan_flags_the_case` |
+| A case's history replays with the same code (refusals, a continued case's last run and a child plan included), and fails with changed code | TC `test_a_case_history_replays`, `test_a_case_history_replayed_with_changed_code_fails` |
+| The guide's examples are what the engine does: in memory as written; on Temporal its client example as written, its history as in memory, and every refusal line it shows | C `test_the_guides_examples_run_as_written`, `test_the_guides_plan_step_runs_as_written`; TC `test_the_guides_client_example_runs_as_written`, `test_the_guides_case_gives_the_same_history_as_in_memory`, `test_the_guides_refusals_on_temporal_are_what_the_engine_records` |
+| An answer sent around a switch counts once, whichever run decides it | TC `test_an_open_entry_survives_the_switch` |
+| Not ours to test: a signal arriving while a switch is committed fails the switch, and the old run decides it first (Temporal's behaviour) | none of its own: the row above holds either way |
+
+Not promised in 8c, and why: the switch when Temporal suggests it (D27): the code reads
+`is_continue_as_new_suggested()`, but the test server can't be made to suggest a switch, which
+takes a history near Temporal's limits; only the count is tested. And a reset keeping a case's
+keys (D27): Temporal's documentation, and the test server can't reset a workflow.

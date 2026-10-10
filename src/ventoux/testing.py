@@ -14,16 +14,28 @@ from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import parse_case
-from ventoux.case.memory import Activity, CaseRun, Finish, run_case_in_memory
+from ventoux.case.memory import Activity, CaseRun, Finish, PlanRunner, run_case_in_memory
+from ventoux.case.plan_step import PlanNotSupplied, supplied
 from ventoux.case.runtime import CaseRefused
-from ventoux.case.state import Answered, CloseAsked, Event, Opened, Proposed, Retried
+from ventoux.case.state import (
+    Answered,
+    CloseAsked,
+    Completed,
+    Event,
+    Failed,
+    Opened,
+    Proposed,
+    Retried,
+    StartPlan,
+)
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
-from ventoux.core.interpreter import Answer, Outcome, PlanRun, interpret
+from ventoux.core.interpreter import Answer, Outcome, PlanRun, RunRefused, Wait, interpret
 from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
+from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 
 __all__ = [
@@ -31,6 +43,7 @@ __all__ = [
     "AnswerRefused",
     "CaseRefused",
     "CloseRefused",
+    "DevelopmentCases",
     "DevelopmentPlans",
     "InputRefused",
     "Outcome",
@@ -180,6 +193,17 @@ class DevelopmentPlans(PlanWorkflow):
         return await self.interpret(start)
 
 
+# Temporal: the development case workflow, for tests and the development worker: the development
+# catalog, and no plans (a test gives its own).
+@workflow.defn(name="ventoux.case")
+class DevelopmentCases(CaseWorkflow):
+    catalog = CATALOG
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
 def load_definition(path: Path) -> dict[str, Any]:
     """Read a case definition from its JSON file (I/O, so here and not in `case`)."""
     # Numbers as exact decimals, never binary floats (brief, D20). Its shape is checked when a
@@ -196,13 +220,17 @@ def run_case(
     opened_by: str | None = None,
     activities: Mapping[str, Activity] = FAKES,
     held: Iterable[str] = (),
+    plans: Mapping[str, Any] | None = None,
+    plan_answers: Mapping[str, Sequence[tuple[Any, ...]]] | None = None,
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
     `people` gives each person their roles, as the Ventoux API states them with every answer
     (brief, D22); someone not listed has none. `opened_by` is the person who opened the case, if
     a person did; otherwise a system did. `activities` replaces fake activities by reference.
-    The runs of the steps in `held` keep running until the script says `finish(entry)`."""
+    The runs of the steps in `held` keep running until the script says `finish(entry)`.
+    `plans` gives the plans plan steps run, as stored data, by reference (`refund-order@1`);
+    `plan_answers` answers each plan step's waits, in order, by state: `(state, outcome, who)`."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
     events: list[Event | Finish] = [Opened(as_json(file), opened_by)]
     for item in answers:
@@ -222,7 +250,74 @@ def run_case(
         # The test plays the API: it states who answered and their roles.
         roles = frozenset(people.get(who, ()))
         events.append(Answered(entry, outcome, who, roles, as_json(form[0]) if form else None))
-    return run_case_in_memory(case, CATALOG, {**FAKES, **activities}, events, held=held)
+    implementations = {**FAKES, **activities}
+    runner = plan_runner(plans or {}, plan_answers or {}, implementations, people)
+    return run_case_in_memory(case, CATALOG, implementations, events, held=held, plans=runner)
+
+
+def plan_runner(
+    plans: Mapping[str, Any],
+    plan_answers: Mapping[str, Sequence[tuple[Any, ...]]],
+    activities: Mapping[str, Activity],
+    people: Mapping[str, Iterable[str]],
+) -> PlanRunner:
+    """Runs a plan step's plan in memory, to its end or its first wait nobody answers, and says
+    how it ended as an event (brief, D28)."""
+    scripts = {step: list(answers) for step, answers in plan_answers.items()}
+
+    async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
+        return activities[reference](inputs)
+
+    def run(command: StartPlan) -> Completed | Failed | None:
+        try:
+            plan = supplied(plans, command.plan)
+        except PlanNotSupplied as missing:
+            return Failed(command.entry, str(missing))
+        script = scripts.setdefault(command.entry.split("#")[0], [])
+        try:
+            # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it.
+            ran = asyncio.run(
+                interpret(
+                    plan,
+                    command.fields,
+                    CATALOG,
+                    call,
+                    scripted(script, people),
+                    run_name=command.run,
+                    excluded=command.excluded,
+                )
+            )
+        except RunRefused as refused:
+            return Failed(command.entry, f"{command.plan} can't start: {refused}")
+        if ran.status == "succeeded":
+            return Completed(command.entry, {})
+        if ran.status == "failed":
+            return Completed(command.entry, {}, "failed")  # a failed final state: an outcome
+        if ran.status == "stopped":
+            return Failed(command.entry, f"{command.plan} stopped: {ran.reason}")
+        return None  # waiting for an answer the script doesn't give: the step runs on
+
+    return run
+
+
+def scripted(script: list[tuple[Any, ...]], people: Mapping[str, Iterable[str]]) -> Wait:
+    """A plan's waits, answered from `script`: each takes the next answer to its state, or None
+    once the script has none left for it. A script answers a state, whatever its entry: it runs
+    in order, with no one clicking. `people` gives each person their roles, as the API states
+    them with every answer (brief, D22)."""
+
+    async def wait(
+        state: str, entry: str, outcomes: tuple[str, ...], timeout: str | None
+    ) -> Answer | None:
+        for answer in script:
+            if answer[0] == state:
+                script.remove(answer)
+                by = answer[2] if len(answer) > 2 else None
+                stated = frozenset(people.get(by, ())) if by else frozenset[str]()
+                return Answer(answer[1], by, stated, answer[3] if len(answer) > 3 else None)
+        return None
+
+    return wait
 
 
 class Proposal(NamedTuple):
@@ -294,24 +389,10 @@ def run_plan(
     """
 
     # Each answer is (state, outcome, who), (state, outcome, who, form), or (state, "timeout").
-    script = list(answers)
-    roles = people or {}  # the test plays the API: it states each person's roles
+    wait = scripted(list(answers), people or {})  # the test plays the API, stating roles
 
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
         return activities[reference](inputs)
-
-    async def wait(
-        state: str, entry: str, outcomes: tuple[str, ...], timeout: str | None
-    ) -> Answer | None:
-        """The next scripted answer to `state`, or None once the script has none left for it.
-        A script answers a state, whatever its entry: it runs in order, with no one clicking."""
-        for answer in script:
-            if answer[0] == state:
-                script.remove(answer)
-                by = answer[2] if len(answer) > 2 else None
-                stated = frozenset(roles.get(by, ())) if by else frozenset[str]()
-                return Answer(answer[1], by, stated, answer[3] if len(answer) > 3 else None)
-        return None
 
     # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it to the end.
     return asyncio.run(interpret(parse_plan(data), fields, CATALOG, call, wait, run_name=run))

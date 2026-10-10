@@ -121,6 +121,7 @@ async def interpret(
     *,
     run_name: str,
     record: PlanRun | None = None,
+    excluded: Mapping[str, str] | None = None,
 ) -> PlanRun:
     """Run `plan` from its `initial` state, with the `fields` the case gives it.
 
@@ -129,6 +130,9 @@ async def interpret(
 
     `record` is the run to write into, when the driver records events of its own in the same
     history: on Temporal, an answer refused because its wait isn't open.
+
+    `excluded` names each person who approves nothing in this run, and why: when a case runs the
+    plan as a step, its opener and the step's proposer (brief, D25).
     """
     refuse_to_start(plan, fields)
     run = PlanRun() if record is None else record
@@ -178,7 +182,15 @@ async def interpret(
                     # the answer given now, such as a rejection (brief, D23; tutor review).
                     approvals.pop(state.approval.of, None)
                 taken = await take_answer(
-                    here, f"{here}#{entries[here]}", state, plan, sources, catalog, wait, run
+                    here,
+                    f"{here}#{entries[here]}",
+                    state,
+                    plan,
+                    sources,
+                    catalog,
+                    wait,
+                    run,
+                    excluded or {},
                 )
                 if taken is None:
                     run.status = "waiting"  # nothing more will come, for now
@@ -265,6 +277,7 @@ async def take_answer(
     catalog: Catalog,
     wait: Wait,
     run: PlanRun,
+    excluded: Mapping[str, str],
 ) -> tuple[Answer, str | None] | None:
     """The first answer the state accepts, and the role that let its person answer (None for the
     timeout); each one it doesn't accept is refused, and it waits on."""
@@ -272,7 +285,7 @@ async def take_answer(
     of = state.approval.of if isinstance(state, ApprovalState) else None
     run.history.append(Waiting(entry, question.outcomes, question.roles, question.timeout, of))
     while (answer := await wait(here, entry, question.outcomes, question.timeout)) is not None:
-        reason, role = judge(here, entry, state, plan, sources, catalog, answer)
+        reason, role = judge(here, entry, state, plan, sources, catalog, answer, excluded)
         if reason is None:
             return answer, role
         run.history.append(Refused(answer.outcome, answer.by, reason))
@@ -339,6 +352,7 @@ def judge(
     sources: Mapping[str, frozenset[str]],
     catalog: Catalog,
     answer: Answer,
+    excluded: Mapping[str, str],
 ) -> tuple[str | None, str | None]:
     """Why the state won't take `answer` (None if it will), and the role that let its person
     answer. Every answer is judged the same way, in the same order, wait or approval; an approval
@@ -358,7 +372,9 @@ def judge(
     if problem is not None:
         return problem, role
     if isinstance(state, ApprovalState):
-        return judge_approval(state, plan, sources, catalog, answer.by, answer.roles, role)
+        return judge_approval(
+            state, plan, sources, catalog, answer.by, answer.roles, role, excluded
+        )
     return None, role
 
 
@@ -370,6 +386,7 @@ def judge_approval(
     by: str,
     stated: frozenset[str],
     role: str,
+    excluded: Mapping[str, str],
 ) -> tuple[str | None, str]:
     """Why `by` may not give this approval, or None; and the role that counted, which for an
     approval is one that may approve the activity's risk."""
@@ -381,11 +398,15 @@ def judge_approval(
     approver = approver_role(state.approval.roles, stated, contract, catalog)
     if approver is None:
         return risk_refusal(role, catalog, contract), role
+    # Those the case running this plan excludes, whatever their answers fed: its opener and the
+    # step's proposer approve nothing in it (brief, D25).
+    if by in excluded:
+        return excluded[by], approver
     # Someone else: whoever's answer decides the run may not approve it (brief, D11).
-    excluded = not_someone_else(
+    decided = not_someone_else(
         by, state.approval.of, inputs_of(state, plan), conditions_of(state), sources
     )
-    return excluded, approver
+    return decided, approver
 
 
 def why_not(here: str, question: Question, answer: Answer) -> str | None:

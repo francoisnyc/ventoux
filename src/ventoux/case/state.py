@@ -8,6 +8,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
+from ventoux.core.provenance import Sourced
+
 
 @dataclass
 class GivenApproval:
@@ -131,7 +133,20 @@ class CloseAsked:
     roles: frozenset[str]  # their roles, stated with the request (brief, D22)
 
 
-type Event = Opened | Answered | Proposed | Completed | Failed | Retried | CloseAsked
+@dataclass(frozen=True)
+class PlanCancelled:
+    """A plan step's plan ended early because the case is closing: its open waits were
+    cancelled, and nothing new started in it (brief, D28)."""
+
+    entry: str
+    # Each activity in it that finished or failed after the close was requested, which the case
+    # flags: `payments.refund@2 completed after the close was requested` (brief, D10).
+    after_stop: tuple[str, ...] = ()
+
+
+type Event = (
+    Opened | Answered | Proposed | Completed | Failed | Retried | CloseAsked | PlanCancelled
+)
 
 
 @dataclass(frozen=True)
@@ -141,3 +156,28 @@ class Schedule:
     entry: str
     activity: str  # its reference, such as `payments.refund@2`
     inputs: dict[str, object]
+
+
+@dataclass(frozen=True)
+class StartPlan:
+    """Run one plan as a step (brief, D28): its reference, its fields with where each value came
+    from, the run's name in its keys, and who may approve nothing in it."""
+
+    entry: str  # the step run, such as `settle#1`
+    plan: str  # its reference, such as `refund-order@1`
+    fields: dict[str, Sourced]  # the plan's fields, read from the case file
+    run: str  # names the run in its keys: `memory/settle#1`, so `memory/settle#1/pay#1`
+    # Each person who approves nothing in the plan, and why: the case's opener and the step's
+    # proposer cross into it (brief, D25).
+    excluded: dict[str, str]
+
+
+@dataclass(frozen=True)
+class StopPlan:
+    """Stop a plan step's plan, because the case is closing: cancel its open waits, start
+    nothing new in it, and let an activity running inside it finish (brief, D10) (brief, D28)."""
+
+    entry: str  # the step run, such as `settle#1`
+
+
+type Command = Schedule | StartPlan | StopPlan
