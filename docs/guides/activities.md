@@ -1,7 +1,7 @@
 # Activities: adding a capability to the catalog
 
-> **For the platform team.** This guide describes layers 1 and 4 as if they already worked; the
-> code that makes it true is built test-first in those layers. Case developers rarely need it: they meet
+> **For the platform team.** This guide describes layers 1, 4 and 8d as if they already worked;
+> the code that makes it true is built test-first in those layers. Case developers rarely need it: they meet
 > contracts only through the activities they call and the errors `ventoux check` gives them.
 
 **The rule of thumb:** a case definition can only *name* an activity (`payments.refund@2`). What
@@ -14,7 +14,7 @@ from the list.
 | Word | Question it answers | Example | Changes when… |
 |---|---|---|---|
 | **Catalog** | What can a definition call? | `payments.refund@1`, `risk.score@1` | a contract is added or retired |
-| **Contract** | What does one entry promise? | schemas, input policies, risk, effect, retries, timeouts, idempotency, outcomes | never: a change is a new `@N` |
+| **Contract** | What does one entry promise? | schemas, input policies, output sources, risk, effect, retries, timeouts, idempotency, outcomes | never: a change is a new `@N` |
 | **Binding** | Where does it run, here? | production: queue `payments` | operations move it; no version, no release |
 
 The catalog lists contracts; each environment binds them. A contract has no field for a task
@@ -148,6 +148,126 @@ catalog.register_label("llm")
 A developer may declare a field untrusted with a registered label; nobody can declare a field
 trusted. Trust comes only from a contract you own, or a person's answer.
 
+## Output sources: where each value an activity gives comes from
+
+An activity's output lands in the case file, one value per output field: `pay.refund_id`, read like
+any other field (see the cases guide). Each value needs a source, as every value in a case does,
+and you are the one who knows it: you write it on the output field, as an input policy is written on
+an input field (brief, D12).
+
+```python
+from ventoux.core.output_sources import source
+
+
+class KycOutput(BaseModel):
+    status: Annotated[str, source("system:kyc")]  # the KYC system decides it
+    risk_score: Annotated[Decimal, source("system:kyc")]
+    analyst_notes: Annotated[str, source("untrusted:llm")]  # a model writes it from documents
+    contact_email: str  # nothing declared: untrusted:undeclared
+```
+
+- **`system:<name>`** says a system produced the value, and you vouch for it: it is trusted, and
+  `only_from("<name>")` accepts it. Write the system that decides the content, not the one that
+  carries it: an amount a customer typed into a portal is `untrusted:customer`, even when the
+  portal returns it.
+- **`untrusted:<label>`**, with a label you registered, says where untrusted content came from.
+- **Nothing declared is untrusted,** read as `untrusted:undeclared` (brief, D6): forgetting a
+  source can only make a value less trusted, never more. A step whose `trusted_only` input reads it
+  stops before it starts, and the case needs attention.
+
+`person:` is refused (an activity is never a person's answer), and so is `trusted:` (trust is what
+a source earns, not a source). `undeclared` is the engine's own label: you can't register it.
+
+The source goes into the output's JSON Schema, which the contract hash covers, so declaring or
+changing one is a new version. A field with nothing declared adds nothing to the schema: the
+contracts registered before output sources existed hash as they did, and read every output as
+untrusted, the strictest reading. To make `payments.refund@2`'s `refund_id` trusted, you would
+register `payments.refund@3` declaring it.
+
+An output field can't be named `outcome`: `pay.outcome` is the step's outcome.
+
+## Workflow contracts: an existing workflow as one step
+
+A team that already has the logic as Temporal code, in any SDK language, offers it to cases as a
+**workflow contract** (brief, D6). It promises what an activity contract promises, except that a
+workflow isn't retried as a whole (its own activities retry inside it) and runs for at most one
+`timeout`:
+
+```python
+from ventoux.core.workflow_contract import WorkflowContract
+
+
+class KycInput(BaseModel):
+    customer_id: Annotated[str, trusted_only()]
+
+
+kyc_check = WorkflowContract(
+    name="kyc.check",
+    version=1,
+    input=KycInput,
+    output=KycOutput,
+    risk="low",
+    effect="read",
+    timeout=600,  # seconds: the longest the workflow may run
+    idempotency_key=None,  # a write or notify workflow names its input for the key
+    display=Display(title="Check a customer", description="Runs the KYC checks on a customer."),
+)
+catalog.register(kyc_check)
+```
+
+Activity and workflow contracts share one catalog, so a reference names one promise:
+`catalog.get("kyc.check@1")` gives the workflow contract. The hash, the lock file and the rules
+above (idempotency, input policies, output sources) are the same.
+
+What it doesn't have, and why:
+
+- **No retry policy.** Temporal doesn't retry a child workflow; a workflow that fails, or runs past
+  its `timeout`, fails its step, and the case needs attention until an operator retries it, with the
+  same workflow ID and the same key (brief, D26).
+- **No outcomes.** A business result is part of the output, with its source (`status`).
+- **No waiting for people.** A workflow step is automated (brief, D6): human work is a task step
+  before or after it, where it is routed and audited. Nothing can see inside your code to enforce
+  this, so the `timeout` makes a workflow that waits fail loudly, and the contract test below
+  catches it first.
+
+Where it runs is a **binding**, given by the deployment, never the contract: its workflow type and
+task queue (see "Running a case on Temporal" in the cases guide).
+
+### The contract test
+
+A contract is a promise, not a proof (brief, D6). Run your workflow against its contract on
+Temporal's test server, with your own worker:
+
+```python
+from ventoux.temporal.bindings import Binding
+from ventoux.testing import check_workflow_contract
+
+
+async def test_kyc_check_keeps_its_contract(env):
+    async with Worker(env.client, task_queue="kyc", workflows=[KycCheck]):
+        problems = await check_workflow_contract(
+            env.client, kyc_check, Binding(workflow="KycCheck", task_queue="kyc"),
+            {"customer_id": "c-1"},
+        )
+    assert problems == []
+```
+
+It starts the bound workflow with an input the contract accepts, waits for it (time skips on the
+test server, so a `timeout` of 600 costs nothing), and lists every way the result breaks the
+promise:
+
+| Your workflow | The contract test says |
+|---|---|
+| returns no `status` | `kyc.check@1 gave an output its contract doesn't declare: status: Field required` |
+| returns a `score` the contract doesn't have | `kyc.check@1 gave score, which its contract doesn't declare` |
+| waits for a signal | `kyc.check@1 didn't finish within its timeout of 600s: a workflow step must not wait for people` |
+| raises | `kyc.check@1 failed: <what it said>` |
+
+It checks the shape of what the workflow gives, not where each value really comes from: whether
+`risk_score` is the scoring system's is for code review. A field the case will never read still
+breaks the test: in a case, a field the contract doesn't declare is dropped, but here it means the
+contract is out of date.
+
 ## What the catalog refuses
 
 Every refusal says what is wrong; the catalog's own refusals then say what to do instead. Pydantic's
@@ -165,6 +285,10 @@ writes them.
 | `catalog.register(payments_refund.model_copy(update={"risk": "hihg"}))` | `risk`: Input should be 'low', 'medium' or 'high'. |
 | `only_from()`, naming no system | `only_from` names at least one system: with none, no value could ever pass. |
 | A policy kind of your own, `class Unless(Policy)` on `amount` | `payments.refund@2`: input `amount` has a policy Ventoux doesn't know (`Unless`). The kinds are `trusted_only` and `only_from`; a new kind is added to the engine, never in a contract. |
+| `source("person:ana")` or `source("trusted:kyc")` on an output field | `kyc.check@1`: output `status` has the source `'person:ana'`. An output's source is `system:<name>` or `untrusted:<label>`: an activity is never a person, and trust is earned, not declared. |
+| `source("untrusted:fax")`, a label nobody registered | `kyc.check@1`: output `analyst_notes` is `untrusted:fax`, and `fax` is not a registered label. Register it first, or use one of: customer, document, email, llm, web. |
+| An output field named `outcome` | `kyc.check@1`: an output can't be named `outcome`: `<step>.outcome` is the step's outcome. Rename the field. |
+| `catalog.register_label("undeclared")` | `undeclared` is the engine's label for an output nobody declared a source for: register another. |
 | `catalog.register_label("LLM")` | `'LLM'` is not a label: a label is lowercase, such as `llm` or `customer-portal`. |
 | A second, different `payments.refund@2` | `payments.refund@2` is already registered with different content: register it as `payments.refund@3`. |
 | `catalog.get("payments.refund@3")` | `payments.refund@3` is not in the catalog. Registered: `payments.refund@2`. Use a registered version, or register this one first. |
@@ -184,14 +308,18 @@ To catch an edit made in place, the catalog hashes each contract (everything exc
 
 ## Development activities
 
-`ventoux.testing` ships three activities, with fake implementations that touch no real system, and
-the source labels `customer`, `document`, `email`, `llm` and `web`:
+`ventoux.testing` ships three activities and one workflow, with fake implementations that touch no
+real system, and the source labels `customer`, `document`, `email`, `llm` and `web`:
 
 | Activity | Effect | Risk | Input policies | Notes |
 |---|---|---|---|---|
 | `payments.refund@2` | write | high | `order_id`, `amount`: trusted only | outcome `declined`; nothing is paid |
 | `orders.lookup@1` | read | low | none | no idempotency key needed |
 | `letters.draft@2` | write | low | `to_customer`: trusted only | only drafts, never sends |
+| `kyc.check@1` (a workflow) | read | low | `customer_id`: trusted only | the contract above; its outputs as declared there |
+
+No development activity declares an output source, so every output they give is
+`untrusted:undeclared`, as the contracts were written before output sources existed.
 
 `payments.refund@1` and `letters.draft@1`, without policies, were retired when `@2` added them:
 a version without the policy, left in the catalog, would let a definition step around it.
