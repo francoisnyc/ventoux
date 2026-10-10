@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from ventoux.case.called import unbound
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.runtime import decide
 from ventoux.case.state import (
@@ -134,11 +135,6 @@ class Driver:
                 else:
                     queue.append(outcome_of(command, self.activity))
         return state
-
-
-def unbound(workflow: str) -> str:
-    """Why a workflow step can't start: the deployment hasn't bound its contract."""
-    return f"{workflow} has no binding here: bind it to a workflow"
 
 
 def outcome_of(

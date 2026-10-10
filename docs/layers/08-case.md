@@ -787,6 +787,20 @@ Each starts with its negative test, seen failing for the right reason.
   `kyc.check@1` by default; a test's own workflow contract is unbound unless it passes one.
 - **Until slice 4, a workflow step reaching the case workflow on Temporal is a bug** (a
   `TypeError` failing the workflow task, which waits for the code), as plan steps were in 8c.
+- **Workflow steps on Temporal have their own test file,** `tests/test_temporal_workflow_step.py`
+  (`TW` below), as plan steps did in 8c: `tests/test_temporal_case.py` is past 1,100 lines. Its
+  tests play the KYC team: their workflow, `KycCheck`, on their own worker and task queue, `kyc`,
+  bound to `kyc.check@1` by the test's case workflow; a document store of theirs that fails once
+  shows a retry.
+- **Both drivers say an unbound workflow the same way,** `case/called.py`'s `unbound`; and a
+  workflow past its timeout reads `kyc.check@1 didn't finish within its timeout of 600s`.
+- **A child runs under its case's ID and step run with Temporal's default reuse policy, allowing
+  a duplicate,** as a plan step's does: a retry starts it again once the failed one has closed.
+  Seen failing with duplicates refused: the retry never started.
+- **Two tests depend on the order of what runs in parallel, so they fix it** (found while
+  building): in memory the check finishes before the review is answered, on Temporal after; the
+  "same history" test makes `kyc` require `pay`. And the close test waits for the payment to be
+  done, or it is flagged too, rightly.
 
 ### Promises
 
@@ -865,7 +879,7 @@ keys (D27): Temporal's documentation, and the test server can't reset a workflow
 ## 8d. Outputs into the case file, and workflow steps
 
 Status: the seven choices agreed in the session, 2026-10-10 (all as proposed, `cancellable`
-deferred); the eight points decided while drafting confirmed the same day; slices 0–3 built.
+deferred); the eight points decided while drafting confirmed the same day; slices 0–4 built.
 
 User-facing description, written first: `docs/guides/activities.md`, "Output sources" and
 "Workflow contracts" (with the contract test); `docs/guides/cases.md`, "What a step gives",
@@ -1097,13 +1111,28 @@ Each starts with its negative test, seen failing for the right reason.
   `kyc.check@1` by default; a test's own workflow contract is unbound unless it passes one.
 - **Until slice 4, a workflow step reaching the case workflow on Temporal is a bug** (a
   `TypeError` failing the workflow task, which waits for the code), as plan steps were in 8c.
+- **Workflow steps on Temporal have their own test file,** `tests/test_temporal_workflow_step.py`
+  (`TW` below), as plan steps did in 8c: `tests/test_temporal_case.py` is past 1,100 lines. Its
+  tests play the KYC team: their workflow, `KycCheck`, on their own worker and task queue, `kyc`,
+  bound to `kyc.check@1` by the test's case workflow; a document store of theirs that fails once
+  shows a retry.
+- **Both drivers say an unbound workflow the same way,** `case/called.py`'s `unbound`; and a
+  workflow past its timeout reads `kyc.check@1 didn't finish within its timeout of 600s`.
+- **A child runs under its case's ID and step run with Temporal's default reuse policy, allowing
+  a duplicate,** as a plan step's does: a retry starts it again once the failed one has closed.
+  Seen failing with duplicates refused: the retry never started.
+- **Two tests depend on the order of what runs in parallel, so they fix it** (found while
+  building): in memory the check finishes before the review is answered, on Temporal after; the
+  "same history" test makes `kyc` require `pay`. And the close test waits for the payment to be
+  done, or it is flagged too, rightly.
 
 ### Promises
 
 Each claim this section makes about behaviour, and the test that will fail if it isn't true.
 Drafted before building, with the tests named in advance; checked against the real tests before
 the pull request is opened. `K` is `tests/test_catalog.py`, `V` `tests/test_validate.py`, `C` `tests/test_case.py`, `W`
-`tests/test_workflow_step.py`, `TC` `tests/test_temporal_case.py`.
+`tests/test_workflow_step.py`, `TC` `tests/test_temporal_case.py`, `TW`
+`tests/test_temporal_workflow_step.py`.
 
 | Promise | Test |
 |---|---|
@@ -1120,15 +1149,15 @@ the pull request is opened. `K` is `tests/test_catalog.py`, `V` `tests/test_vali
 | A workflow contract is registered, looked up, hashed and recorded like an activity's, checked again as its kind at registration | K `test_a_workflow_contract_is_in_the_catalog`, `test_every_development_contract_matches_its_recorded_hash` |
 | The guide's workflow contract is the development `kyc.check@1` | K `test_the_guides_workflow_contract_is_the_development_one` |
 | An activity lookup refuses a workflow contract, and a workflow lookup an activity contract: a plan's activity state naming one is `UNKNOWN_ACTIVITY`, and a case's activity step naming one fails | K `test_a_workflow_contract_is_in_the_catalog`; V `test_an_activity_state_naming_a_workflow_contract_is_refused`; C `test_an_activity_step_naming_a_workflow_contract_fails` |
-| A workflow step's output with undeclared provenance cannot reach a sink that requires trusted data (the curriculum's), in memory and on Temporal | W `test_an_undeclared_workflow_output_cannot_reach_a_trusted_input`; TC `test_an_undeclared_workflow_output_is_refused_on_temporal` |
+| A workflow step's output with undeclared provenance cannot reach a sink that requires trusted data (the curriculum's), in memory and on Temporal | W `test_an_undeclared_workflow_output_cannot_reach_a_trusted_input`; TW `test_an_undeclared_workflow_output_is_refused_on_temporal` |
 | A workflow step is admitted, approved (by a role that may approve its risk) and checked like an activity step, its key in the input its contract names; a high-risk one with no approval fails | W `test_a_workflow_step_is_checked_like_an_activity`, `test_a_high_risk_workflow_without_approval_fails` |
-| A workflow step naming an activity contract, or an unbound workflow, fails the step | W `test_a_workflow_step_naming_an_activity_contract_fails`, `test_an_unbound_workflow_fails_its_step`; TC `test_an_unbound_workflow_needs_attention` |
+| A workflow step naming an activity contract, or an unbound workflow, fails the step | W `test_a_workflow_step_naming_an_activity_contract_fails`, `test_an_unbound_workflow_fails_its_step`; TW `test_an_unbound_workflow_needs_attention` |
 | A workflow step's outputs land with the sources its contract declares; its start and done lines are the guide's | W `test_the_guides_workflow_step_runs_as_written` |
-| A failed workflow step needs attention, and its retry sends the same key; on Temporal under the same ID | W `test_a_failed_workflow_step_is_retried_with_the_same_key`; TC `test_a_failed_child_workflow_is_retried_with_the_same_id_and_key` |
-| A workflow running past its contract's `timeout` fails its step | TC `test_a_workflow_past_its_timeout_needs_attention` |
-| A running workflow step finishes when the case closes; its output lands and the case is flagged | W `test_a_workflow_finishing_after_the_close_flags_the_case`; TC `test_closing_lets_a_workflow_step_finish` |
-| On Temporal a workflow step is a child workflow `<case ID>/<entry>` on its binding's queue, with the same history as in memory | TC `test_a_workflow_step_runs_as_a_bound_child` |
-| A case doesn't continue as new while a workflow step runs | TC `test_a_switch_waits_while_a_workflow_runs` |
+| A failed workflow step needs attention, and its retry sends the same key; on Temporal under the same ID | W `test_a_failed_workflow_step_is_retried_with_the_same_key`; TW `test_a_failed_child_workflow_is_retried_with_the_same_id_and_key` |
+| A workflow running past its contract's `timeout`, or failing, fails its step: the case needs attention | TW `test_a_workflow_past_its_timeout_needs_attention`, `test_a_failing_workflow_needs_attention` |
+| A running workflow step finishes when the case closes; its output lands and the case is flagged | W `test_a_workflow_finishing_after_the_close_flags_the_case`; TW `test_closing_lets_a_workflow_step_finish` |
+| On Temporal a workflow step is a child workflow `<case ID>/<entry>` on its binding's queue, with the same history as in memory | TW `test_a_workflow_step_runs_as_a_bound_child` |
+| A case doesn't continue as new while a workflow step runs | TW `test_a_switch_waits_while_a_workflow_runs` |
 | The contract test reports a missing, extra or mistyped output, a workflow that waits, and one that fails; a workflow that keeps its contract passes | TC `test_the_contract_test_finds_each_broken_promise`, `test_the_kyc_workflow_keeps_its_contract` |
 | A case history with a workflow step replays with the same code | TC `test_a_case_history_replays` |
 | The guides' examples and refusal rows are what the engine says | C `test_the_guides_examples_run_as_written`, `test_the_guides_histories_are_what_the_engine_records`; K `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |

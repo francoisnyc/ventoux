@@ -12,3 +12,9 @@ def called(catalog: Catalog, step: CallStep) -> Contract:
     if isinstance(step, WorkflowStep):
         return catalog.workflow(step.workflow)
     return catalog.get(step.called)
+
+
+def unbound(workflow: str) -> str:
+    """Why a workflow step can't start: the deployment hasn't bound its contract. Each driver
+    knows its deployment's bindings; neither guesses where to run it (brief, D29)."""
+    return f"{workflow} has no binding here: bind it to a workflow"
