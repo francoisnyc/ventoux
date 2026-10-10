@@ -3,7 +3,8 @@
 See docs/layers/09-case-data.md and docs/guides/case-data.md.
 """
 
-import copy
+import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -24,44 +25,16 @@ PEOPLE = {
 }
 
 
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "case-data.md").read_text()
+
+
 def claim() -> dict[str, Any]:
-    """The case data guide's claim (its first JSON block), as stored data."""
-    return copy.deepcopy(CLAIM)
+    """The case data guide's claim, its first JSON block, as stored data: the tests run what the
+    guide shows."""
+    block = GUIDE.split("```json\n")[1].split("```")[0]
+    data: dict[str, Any] = json.loads(block, parse_float=Decimal)
+    return data
 
-
-CLAIM: dict[str, Any] = {
-    "case": "claim",
-    "display": {"title": "Insurance claim"},
-    "fields": {
-        "customer_id": {"type": "reference", "system": "crm", "display": {"title": "Customer"}},
-        "policy_id": {"type": "reference", "system": "policies", "display": {"title": "Policy"}},
-        "estimated_damage": {"type": "number", "display": {"title": "Estimated damage"}},
-        "fraud_score": {
-            "type": "number",
-            "visible_to": ["fraud"],
-            "display": {"title": "Fraud score"},
-        },
-    },
-    "steps": {
-        "assess": {
-            "kind": "task",
-            "display": {"title": "Assess the claim"},
-            "roles": ["adjuster"],
-            "outcomes": {
-                "accept": {"display": {"title": "Accept the claim"}},
-                "deny": {"display": {"title": "Deny the claim"}},
-            },
-        },
-        "deny": {
-            "kind": "activity",
-            "display": {"title": "Draft the denial letter"},
-            "activity": "letters.draft@3",
-            "requires": ["assess"],
-            "when": {"==": [{"var": "assess.outcome"}, "deny"]},
-            "inputs": {"customer": {"var": "customer_id"}, "template": "claim-denied"},
-        },
-    },
-}
 
 FILE = {"customer_id": "cus-7", "policy_id": "pol-3", "estimated_damage": 1200, "fraud_score": 12}
 
@@ -285,3 +258,92 @@ def test_a_resolver_shows_only_what_the_view_shows(
 def test_a_resolver_is_registered_for_a_registered_system() -> None:
     with pytest.raises(ValueError, match="sail is not a registered system: register it in the"):
         Resolvers(CATALOG).register("sail", lambda reference, viewer: {})
+
+
+# Slice 7: the guides, as written.
+
+
+def test_the_guides_examples_run_as_written() -> None:
+    # The case data guide's view example, and its claim's deny step, as the guide shows them.
+    [example] = GUIDE.split("```python\n")[1:]
+    namespace: dict[str, Any] = {"run_case": run_case, "claim": claim(), "PEOPLE": PEOPLE}
+    exec(example.split("```")[0], namespace)  # noqa: S102 -- our guide, run so it can't drift
+    denied = run_case(claim(), file=FILE, answers=[DENIED], people=PEOPLE)
+    assert "deny#1 done, giving draft_id from untrusted:undeclared" in denied.history
+
+
+def test_the_guides_resolver_example_runs_as_written() -> None:
+    # The activities guide's resolver, its CRM client played by a fake that answers as the
+    # person looking (brief, D16).
+    guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
+    example = guide.split("```python\n")[6].split("```")[0]
+
+    class Crm:
+        def customer(self, reference: str, on_behalf_of: str) -> dict[str, object]:
+            return {"reference": reference, "seen_by": on_behalf_of}
+
+    namespace: dict[str, Any] = {"crm": Crm(), "catalog": CATALOG}
+    exec(example, namespace)  # noqa: S102 -- our guide, run so it can't drift from the code
+    view = run_case(claim(), file=FILE, answers=[], people=PEOPLE).view(roles=["adjuster"])
+    record = namespace["resolvers"].show(view, "customer_id", ANA)
+    assert record == {"reference": "cus-7", "seen_by": "ana"}
+
+
+# Each "Refused when" cell of the case data guide's table, and the code that does it.
+GUIDE_REFUSALS: dict[str, Any] = {
+    "a reference names a system nobody registered": lambda: run_case(
+        sailing(), file=FILE, answers=[], people=PEOPLE
+    ),
+    "a reference reaches an input expecting another system": lambda: needing_attention(
+        denying_with({"var": "policy_id"})
+    ),
+    "a computed value reaches a reference input": lambda: needing_attention(
+        denying_with({"cat": [{"var": "customer_id"}, ""]})
+    ),
+    "an approver can't see a value the step reads": lambda: run_case(
+        refund_seen_by_support(),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[REVIEWED, ("pay", "approve", "lee")],
+        people=REFUND_PEOPLE,
+    ),
+    "a record is shown to someone who can't see its field": lambda: run_case(
+        claim(), file=FILE, answers=[shown("customer_id", "eve")], people=PEOPLE
+    ),
+    "a field shown isn't a reference": lambda: run_case(
+        claim(), file=FILE, answers=[shown("estimated_damage", "ana")], people=PEOPLE
+    ),
+}
+
+
+def sailing() -> dict[str, Any]:
+    """The claim, its customer a reference to a system nobody registered."""
+    data = claim()
+    data["fields"]["customer_id"]["system"] = "sail"
+    return data
+
+
+def needing_attention(definition: dict[str, Any]) -> None:
+    """Run `definition` to its denial, and raise what its failed step says."""
+    run = run_case(definition, file=FILE, answers=[DENIED], people=PEOPLE)
+    raise RuntimeError("; ".join(run.needs_attention))
+
+
+def guide_refusal_rows() -> list[tuple[str, str]]:
+    """The rows of the guide's table "What the engine refuses", as (when, example)."""
+    table = GUIDE.split("### What the engine refuses")[1].split("\n## ")[0]
+    rows = [line for line in table.splitlines() if line.startswith("| ")][1:]  # after the header
+    return [
+        (cells[1].strip(), cells[2].strip().strip("`")) for cells in (r.split("|") for r in rows)
+    ]
+
+
+@pytest.mark.parametrize(("when", "example"), guide_refusal_rows())
+def test_the_guides_refusals_are_what_the_engine_says(when: str, example: str) -> None:
+    assert when in GUIDE_REFUSALS, f"the guide's row {when!r} has no test"
+    with pytest.raises(Exception) as refused:  # each row raises its own kind of refusal
+        GUIDE_REFUSALS[when]()
+    assert example in str(refused.value)
+
+
+def test_every_refusal_in_the_guide_is_tested() -> None:
+    assert [when for when, _ in guide_refusal_rows()] == list(GUIDE_REFUSALS)

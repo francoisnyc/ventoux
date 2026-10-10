@@ -796,3 +796,13 @@ def test_declaring_a_reference_changes_the_hash() -> None:
     from_crm = contract_hash(lookup_contract(input=lookup_input(reference("crm"))))
     assert len({plain, from_orders, from_crm}) == 3
     assert plain == contract_hash(lookup_contract())
+
+
+def test_the_guides_letter_is_the_development_one() -> None:
+    # The activities guide's reference input, run as written, is letters.draft@3's.
+    guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
+    blocks = guide.split("```python\n")
+    namespace: dict[str, Any] = {}
+    for example in (blocks[1], blocks[5]):  # the refund's block (its imports), and the letter's
+        exec(example.split("```")[0], namespace)  # noqa: S102 -- our guide, as above
+    assert contract_hash(letter(namespace["LetterInput"])) == contract_hash(testing.letters_draft_3)

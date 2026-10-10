@@ -1,7 +1,8 @@
 # Layer 9: case data
 
 Status: split into four parts and the eighteen choices agreed in the session, 2026-10-10 (all as
-proposed); 9a's design note drafted, waiting for agreement.
+proposed); 9a's note and its nine drafting points confirmed the same day; 9a built, slices 0–7;
+Promises checked against the tests, 2026-10-10.
 
 ## What this layer is for
 
@@ -76,9 +77,9 @@ on behalf of the person looking, and filters the case file by role before anyone
    can't see. D16's static warning stays with case validation (layer 10); this check depends on
    nothing it does.
 
-### Decided while drafting, for you to confirm
+### Decided while drafting, confirmed in the session
 
-Each is a choice the agreed design left open, written as the rule I propose.
+Each is a choice the agreed design left open, written as the rule we confirmed.
 
 1. **The development catalog gains systems and roles:** the systems `crm`, `documents`, `orders`
    and `policies` (the quickstart's `order_id` names `orders`, so its opening needs it), and the
@@ -200,25 +201,68 @@ Each starts with its negative test, seen failing for the right reason.
    replays.
 7. **The guides and the promises.**
 
+### Decided while building
+
+- **The plans guide's `UNKNOWN_ROLE` message lists two more roles** (slice 0): the development
+  catalog's `adjuster` and `fraud` are in every list of registered roles. The guide and its test
+  changed with it.
+- **The first hash test passed for the wrong reason** (slice 0): its three input models had three
+  class names, which the hash covers, so they hashed apart with or without `x-reference`. They
+  now share one name, and the test failed until the reference reached the schema.
+- **Two workflow-step fixtures named a system `customers`** (slice 1), which nothing registers; a
+  customer's record is the CRM's, so they name `crm`.
+- **The reference refusal doesn't name the step** (slice 2): `checked_inputs` doesn't know it,
+  and the needs-attention line adds it: `deny#1: letters.draft@3 takes customer as a reference to
+  crm, and is given policy_id, a reference to policies`. Types are said as everywhere else (`a
+  reference to policies`, `a number`); an outcome or output `is not a reference`; a literal is `a
+  value written in the definition`, anything else `a computed value`. The guide says so.
+- **`start` and `schedule` take the case** (slice 2), to give `checked_inputs` its fields' types.
+- **The approver's check reads conditions by `is not None`** (slice 4, found rereading it): a
+  first version kept a condition only if it was truthy, which would have skipped a literal
+  `false`.
+- **`shown` is also refused for a field the case doesn't have, one not set, and a person not
+  written as an identifier** (slice 5), as every event from a person is; `Resolvers.show` refuses
+  an unset reference too.
+- **`CaseView` gains `systems`** (slice 5): the system of each reference field the viewer may see,
+  which `Resolvers.show` reads, so it needs nothing from the definition.
+- **A view's sources are sorted tuples, and its values `Any`** (slice 6): the exact converter has
+  no JSON form for a set, and Temporal reads a query's result back to its type hints, which it
+  can't do for `object`.
+- **The tests read the claim from the case data guide's JSON block** (slice 7), so the guide and
+  the tests can't drift.
+
 ### Promises
 
-Each claim this section makes about behaviour, and the test that will fail if it isn't true.
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
 Drafted before building, with the tests named in advance; checked against the real tests before
-the pull request is opened. `K` is `tests/test_catalog.py`, `I` `tests/test_interpreter.py`, `D`
+the pull request is opened (every test named exists, and asserts what its row claims). `K` is
+`tests/test_catalog.py`, `I` `tests/test_interpreter.py`, `C` `tests/test_case.py`, `D`
 `tests/test_case_data.py` (new), `TD` `tests/test_temporal_case_data.py` (new).
+
+Seen failing before their code: every rule on a reference input and `register_system` (accepted,
+or no such method); the hash test, once its models shared a name; both openings with an unknown
+system (accepted); every wrong value into a reference input, in a case and in a plan (accepted,
+the activity called); the view (no `visible_to`, then no view); both of Lee's answers (accepted);
+every refused `shown`, and `Resolvers.show` of what the view doesn't show (recorded, crashed or
+resolved); the view on Temporal (a set refused by the converter); a refused `shown` on Temporal
+(the case hung on it). Passed when written, their code having come with an earlier test: the
+refused approval on Temporal (8c already recorded `AnswerRefused`), and the guides' examples and
+refusal rows (written after the code).
 
 | Promise | Test |
 |---|---|
-| A system is registered with a lowercase name; a contract's reference names a registered system, on a `str` field, also on a copy at registration | K `test_a_system_is_registered_by_name`, `test_a_reference_input_names_a_registered_system` |
-| Declaring a reference changes a contract's hash; contracts without one hash as before | K `test_every_development_contract_matches_its_recorded_hash`, `test_declaring_a_reference_changes_the_hash` |
+| A system is registered with a lowercase name | K `test_a_system_is_registered_by_name` |
+| A contract's reference names a registered system, also on a copy at registration; it is a text, of one system, also on a copy | K `test_a_reference_input_names_a_registered_system`, `test_every_rule_refuses_a_contract_that_breaks_it`, `test_every_rule_runs_again_when_a_copy_is_registered` (`a reference is a text`, `a reference names one system`) |
+| Declaring a reference changes a contract's hash; contracts without one hash as before, and every recorded hash is unchanged | K `test_declaring_a_reference_changes_the_hash`, `test_every_development_contract_matches_its_recorded_hash` |
+| The guide's letter is the development `letters.draft@3` | K `test_the_guides_letter_is_the_development_one` |
 | A case, or a plan run, whose reference names an unregistered system is refused | D `test_a_reference_to_an_unregistered_system_is_refused`; I `test_a_plan_reference_to_an_unregistered_system_is_refused` |
-| A reference input takes only a reference field of its system, read as it is: another system's reference, a text field or a computed value fails the step, in a case and in a plan | D `test_a_reference_goes_only_where_its_system_is_expected`; I `test_a_plan_gives_a_reference_input_only_its_system` |
-| The guide's `deny` step gives the customer's reference to `letters.draft@3` | D `test_the_guides_examples_run_as_written` |
+| A reference input takes only a reference field of its system, read as it is: another system's reference, a field of another type, an outcome, a computed value or a literal fails the step before the activity is called, in a case and in a plan | D `test_a_reference_goes_only_where_its_system_is_expected`; I `test_a_plan_gives_a_reference_input_only_its_system` |
+| A reference of the right system goes in, and the guide's `deny` step runs | D `test_a_reference_of_its_system_goes_in`, `test_the_guides_examples_run_as_written` |
 | A field hidden from a role is absent from that role's view, and said hidden with the roles that would see it | D `test_a_hidden_field_is_absent_from_the_view` |
 | Fields, outcomes and outputs are visible to anyone with a role the case names; a viewer with none sees every field hidden | D `test_what_a_role_on_the_case_sees` |
-| The view's lines are the guide's | D `test_the_guides_examples_run_as_written` |
-| An approval or a rejection by someone who can't see a value the step reads is refused, naming it; someone who sees it approves, and the step runs once | D `test_an_approver_must_see_what_they_approve` |
-| `shown` records a line with the system and reference, never the record; it is refused for a hidden field, a field that isn't a reference, and a closed case | D `test_showing_a_record_is_recorded_without_its_content`, `test_shown_is_refused_when_it_cannot_be_true` |
-| A resolver is called with the viewer, and only for a reference their view shows; a system with no resolver, or an unregistered one, is refused | D `test_a_resolver_is_asked_on_behalf_of_the_viewer`, `test_a_resolver_shows_only_what_the_view_shows` |
+| The view's lines are the guide's, a field not given reads `not set` | D `test_the_view_reads_as_the_guide_says`, `test_the_guides_examples_run_as_written` |
+| An approval or a rejection by someone who can't see a value the step reads is refused, naming it; someone who sees it approves, and the step runs once | D `test_an_approver_must_see_what_they_approve`, `test_an_approver_who_sees_it_approves` |
+| `shown` records a line with the system and reference, never the record, and changes nothing else; it is refused for a hidden field, a field that isn't a reference or isn't the case's, and a closed case | D `test_showing_a_record_is_recorded_without_its_content`, `test_shown_is_refused_when_it_cannot_be_true` |
+| A resolver is called with the viewer, and only for a reference their view shows; a system with no resolver, or an unregistered one, is refused | D `test_a_resolver_is_asked_on_behalf_of_the_viewer`, `test_a_resolver_shows_only_what_the_view_shows`, `test_a_resolver_is_registered_for_a_registered_system`, `test_the_guides_resolver_example_runs_as_written` |
 | On Temporal the view is the same as in memory, filtered in the worker; a refused `shown` or approval is recorded and the case waits on; a history with `shown` replays | TD `test_the_view_on_temporal_is_the_view_in_memory`, `test_refusals_are_recorded_and_the_case_waits`, `test_a_case_history_with_shown_replays` |
-| The guides' refusal rows are what the engine says | K `test_the_guides_refusals_are_what_the_catalog_says` (its new rows); D `test_the_guides_refusals_are_what_the_engine_says` |
+| The guides' refusal rows are what the engine says | K `test_the_guides_refusals_are_what_the_catalog_says` (its new rows); C `test_the_guides_refusals_are_what_the_engine_says` (its new row); D `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |
