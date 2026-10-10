@@ -329,7 +329,9 @@ plan whose waits the script doesn't answer keeps the step running, and the case 
 When the case begins closing, a running plan step stops taking answers: its open waits are
 cancelled, nothing new starts in it, and an activity already running inside it finishes. The
 plan then ends, the history says `settle#1 cancelled: the case is closing`, and the case closes.
-A team lead's approval that arrives after the close can't pay the refund (brief, D28).
+A team lead's approval that arrives after the close can't pay the refund (brief, D28). An activity
+that was already running, and finished or failed after the close, flags the case, as a step does:
+`settle#1: payments.refund@2 completed after the close was requested`.
 
 ## Testing a case
 

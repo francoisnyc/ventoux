@@ -139,6 +139,9 @@ class PlanCancelled:
     cancelled, and nothing new started in it (brief, D28)."""
 
     entry: str
+    # Each activity in it that finished or failed after the close was requested, which the case
+    # flags: `payments.refund@2 completed after the close was requested` (brief, D10).
+    after_stop: tuple[str, ...] = ()
 
 
 type Event = (

@@ -1018,3 +1018,110 @@ def test_a_stopped_plan_starts_nothing_new() -> None:
     assert drafted == []
     assert "settle#1 cancelled: the case is closing" in ended.history
     assert ended.history[-1] == "closed: duplicate, by ana"
+
+
+# --- Tutor review, second pass: a stopped plan reports what finished after the close ---
+
+
+def refund_then_letter() -> dict[str, Any]:
+    """The guide's `refund-order`, drafting a letter after the payment before it ends `paid`."""
+    plan = refund_order(version=4)
+    plan["states"]["pay"]["on"]["done"] = "draft"
+    plan["states"]["draft"] = {
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+        "on": {"done": "paid"},
+    }
+    return plan
+
+
+LETTER_PLANS = {**TEST_PLANS, "refund-order@4": refund_then_letter()}
+
+
+@workflow.defn(name="ventoux.case")
+class CasesWithLetters(CaseWorkflow):
+    catalog = DevelopmentCases.catalog
+    plans = LETTER_PLANS
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+async def close_while_paying(
+    client: Client, paying: list[str], release: threading.Event
+) -> tuple[Case, PlanRun]:
+    """Open the refund settled by `refund-order@4`; Lee approves inside the child; Ana closes the
+    case as a duplicate while the payment runs; then the payment is released."""
+    definition = refund_with_plan("refund-order@4") | {"close_reasons": {"duplicate": DUPLICATE}}
+    case = await start_case(client, CasesWithLetters, definition, LARGE, "refund-1", QUEUE)
+    await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+    plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+    await plans.answer(plan, "approve_refund#1", "approve", "lee", PEOPLE["lee"])
+    for _ in range(100):  # until the payment runs inside the child
+        if paying:
+            break
+        await asyncio.sleep(0.05)
+    await close(case, "duplicate", "ana", PEOPLE["ana"])
+    await reported(case, lambda now: now.status != "open")
+    release.set()
+    return case, plan
+
+
+def test_a_payment_finishing_in_a_stopped_plan_flags_the_case() -> None:
+    # The tutor's probe: a duplicate refund paid after the close must never disappear into
+    # "cancelled". The case closes as a duplicate, flagged with the payment, as 8b flags a
+    # payment step (brief, D10, D28); the letter after it never starts.
+    release = threading.Event()
+    paying: list[str] = []
+    drafted: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paying.append(inputs["idempotency_key"])
+        release.wait(timeout=10)
+        return {"refund_id": "refund-ord-1"}
+
+    def draft(inputs: dict[str, Any]) -> dict[str, Any]:
+        drafted.append(inputs["idempotency_key"])
+        return {"draft_id": "draft-1"}
+
+    async def scenario(client: Client) -> CaseReport:
+        case, _ = await close_while_paying(client, paying, release)
+        return await case.result()
+
+    activities = {**FAKES, "payments.refund@2": refund, "letters.draft@2": draft}
+    ended = on_temporal(scenario, activities, cases=CasesWithLetters)
+    assert len(paying) == 1 and drafted == []
+    assert ended.flags == ["settle#1: payments.refund@2 completed after the close was requested"]
+    assert "flagged: settle#1: payments.refund@2 completed after the close was requested" in (
+        ended.history
+    )
+    assert ended.history[-1] == "closed: duplicate, by ana"
+
+
+def test_an_activity_failing_in_a_stopped_plan_flags_the_case() -> None:
+    # The payment running at the close fails past its retries: the case closes, flagged with the
+    # failure, never just "cancelled" (brief, D10, D28).
+    release = threading.Event()
+    paying: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paying.append(inputs["idempotency_key"])
+        release.wait(timeout=10)
+        raise ConnectionError("provider unreachable")
+
+    async def scenario(environment: WorkflowEnvironment) -> CaseReport:
+        case, _ = await close_while_paying(environment.client, paying, release)
+        for _ in range(100):  # past the backoff between attempts, until the case closes
+            now = await report(case)
+            if now.status == "closed":
+                return now
+            await environment.sleep(timedelta(seconds=10))
+        raise AssertionError(f"the case never closed: {await report(case)}")
+
+    ended = skipping(scenario, {**FAKES, "payments.refund@2": refund}, cases=CasesWithLetters)
+    assert ended.flags == [
+        "settle#1: payments.refund@2 failed after the close was requested: provider unreachable"
+    ]
+    assert ended.needs_attention == []
+    assert ended.history[-1] == "closed: duplicate, by ana"

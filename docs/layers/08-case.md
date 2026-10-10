@@ -717,6 +717,25 @@ Each starts with its negative test, seen failing for the right reason.
   with it removed: an activity running in the stopped plan finishes, once; and nothing new starts
   (with the refusal of a new activity removed, the letter was drafted after the close).
 
+### From the tutor review, second pass
+
+- **A stopped plan hid what finished after the close.** The plan workflow reported every run
+  stopped by its case as `cancelled`, so an activity that finished, or failed past its retries,
+  after `stop` vanished: the case recorded `settle#1 cancelled: the case is closing` with no flag.
+  The tutor's probe: Lee approves inside the child, the payment starts and is held, Ana closes the
+  case as a duplicate, the payment is released. The refund was paid once, the case said nothing.
+  8b flags the same event on an ordinary step (`pay#1 completed after the close was requested`).
+- **The fix, added to D28:** the plan workflow notes each activity that ends after `stop`, done
+  or a declared outcome as `completed`, a failure past its retries as `failed` with what it said,
+  and reports them (`RunReport.after_stop`). The case receives them with `PlanCancelled` and
+  flags each one, worded as 8b's flags: `settle#1: payments.refund@2 completed after the close
+  was requested`, `settle#1: payments.refund@2 failed after the close was requested: provider
+  unreachable`. A plan that ended on its own after the close keeps its flag, `settle#1 completed
+  after the close was requested`. In memory nothing runs inside a plan when it is stopped, so
+  nothing is reported.
+- **Both negative tests were written first and seen failing:** the payment was made once, the
+  letter after it never started, and the flags were empty, for the completion and the failure.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that will fail if it isn't true.
@@ -777,6 +796,8 @@ child plan) are the tests of our code.
 | Closing a case ends a plan step waiting inside it: the case closes, never stays closing (tutor review) | P `test_closing_a_case_ends_its_waiting_plan_step` |
 | After a close, an answer on the child can't approve: nothing is paid, the step run is cancelled, and the case closes as the close said (tutor review) | TC `test_closing_a_case_stops_its_child_plan` |
 | An activity running in a plan stopped by the close finishes, once; then nothing new starts in it (tutor review) | TC `test_an_activity_running_in_a_stopped_plan_finishes`, `test_a_stopped_plan_starts_nothing_new` |
+| An activity in a plan stopped by the close that finishes after it flags the case, worded as 8b's flags; the case closes as the close said (second tutor review) | TC `test_a_payment_finishing_in_a_stopped_plan_flags_the_case` |
+| An activity in a plan stopped by the close that fails past its retries flags the case with the failure, never just "cancelled", and needs no attention (second tutor review) | TC `test_an_activity_failing_in_a_stopped_plan_flags_the_case` |
 | A case's history replays with the same code (refusals, a continued case's last run and a child plan included), and fails with changed code | TC `test_a_case_history_replays`, `test_a_case_history_replayed_with_changed_code_fails` |
 | The guide's examples are what the engine does: in memory as written; on Temporal its client example as written, its history as in memory, and every refusal line it shows | C `test_the_guides_examples_run_as_written`, `test_the_guides_plan_step_runs_as_written`; TC `test_the_guides_client_example_runs_as_written`, `test_the_guides_case_gives_the_same_history_as_in_memory`, `test_the_guides_refusals_on_temporal_are_what_the_engine_records` |
 | An answer sent around a switch counts once, whichever run decides it | TC `test_an_open_entry_survives_the_switch` |

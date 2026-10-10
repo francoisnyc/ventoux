@@ -6,7 +6,7 @@ the same things in the same order every time. The interpreter reads no clock, ra
 (`tests/test_layers.py`), and everything it asks for goes through `call` and `wait` below.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, ClassVar
 
@@ -74,6 +74,10 @@ class RunReport:
     reason: str | None  # why it stopped, if it did
     history: list[str]  # every event so far, one line each
     waiting_at: str | None = None  # the wait open for an answer, such as `approve_refund#1`
+    # Each activity that finished or failed after the case running this plan began closing, for
+    # the case to flag as it flags a step's run (brief, D10), never hidden (brief, D28):
+    # `payments.refund@2 completed after the close was requested`.
+    after_stop: list[str] = field(default_factory=list[str])
 
 
 @dataclass
@@ -124,6 +128,7 @@ class PlanWorkflow:
         self.waiting = False  # whether a wait is waiting for an answer now
         self.stopping = False  # whether the case running this plan as a step is closing
         self.cancelled = False  # whether the run ended because its case closed
+        self.after_stop: list[str] = []  # activities that ended after the stop, for the case
 
     # Temporal: a signal is a message into a running workflow, recorded in its history, so replay
     # delivers it again at the same point.
@@ -161,9 +166,8 @@ class PlanWorkflow:
     def report(self) -> RunReport:
         """How the run is going: its history so far, and the wait open for an answer, if any."""
         if self.cancelled:
-            return RunReport(
-                "cancelled", CASE_CLOSING, [str(event) for event in self.record.history]
-            )
+            history = [str(event) for event in self.record.history]
+            return RunReport("cancelled", CASE_CLOSING, history, after_stop=self.after_stop)
         status = self.record.status or ("waiting" if self.waiting else None)
         return RunReport(
             status,
@@ -222,9 +226,20 @@ class PlanWorkflow:
             # what the activity itself said, not "Activity task failed".
             cause = error.cause
             if isinstance(cause, ApplicationError) and cause.type == OUTCOME:
+                self.ended_after_stop(f"{reference} completed")
                 raise Outcome(cause.message) from None  # read as in memory: `declined`
-            raise ActivityFailed(cause.message if isinstance(cause, FailureError) else str(error))
+            said = cause.message if isinstance(cause, FailureError) else str(error)
+            self.ended_after_stop(f"{reference} failed", said)
+            raise ActivityFailed(said) from None
+        self.ended_after_stop(f"{reference} completed")
         return output
+
+    def ended_after_stop(self, what: str, said: str | None = None) -> None:
+        """Note an activity that ended after the case began closing: it ran on, since it may have
+        moved money (brief, D10), and the case flags it, as it flags a step (brief, D28)."""
+        if self.stopping:
+            line = f"{what} after the close was requested"
+            self.after_stop.append(line if said is None else f"{line}: {said}")
 
     async def wait(
         self, state: str, entry: str, outcomes: tuple[str, ...], timeout: str | None

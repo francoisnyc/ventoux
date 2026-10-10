@@ -274,7 +274,8 @@ class CaseWorkflow:
         finally:
             self.children.pop(command.entry, None)
         if ran.status == "cancelled":
-            self.inbox.append(PlanCancelled(command.entry))  # ended by the close
+            # Ended by the close, with what finished or failed in it after the close (brief, D28).
+            self.inbox.append(PlanCancelled(command.entry, tuple(ran.after_stop)))
         elif ran.status == "succeeded":
             self.inbox.append(Completed(command.entry, {}))
         elif ran.status == "failed":

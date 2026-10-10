@@ -705,6 +705,12 @@ be erased on request), has size limits, and a second copy of business records go
   On Temporal the case signals its child to stop; it doesn't cancel it, since cancellation
   would cut short the wait on an activity that must finish. *Added in the tutor review of layer
   8c, before D28 was merged.*
+- **What ran on after the close is flagged, never hidden.** A stopped plan reports each activity
+  that finished or failed after the stop, and the case flags each one as it flags a step (D10):
+  `settle#1: payments.refund@2 completed after the close was requested`, or `… failed after the
+  close was requested: <what it said>`. A duplicate refund paid after the close never
+  disappears into "cancelled". *Added in the second tutor review of layer 8c, before D28 was
+  merged.*
 - **No approval of the whole plan yet.** A plan carries its own approvals, checked when it is
   read (layer 3); "Approve this plan" (D14), for plans an AI drafts, comes with authoring
   (layer 15).

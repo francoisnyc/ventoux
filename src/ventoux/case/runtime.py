@@ -378,10 +378,15 @@ def stop_plans(case: CaseDefinition, state: CaseState, commands: list[Command]) 
 
 
 def plan_cancelled(state: CaseState, event: PlanCancelled) -> None:
-    """A plan stopped by the close has ended: its step run is cancelled, and the case can close."""
+    """A plan stopped by the close has ended: its step run is cancelled, and the case can close.
+    Each activity in it that finished or failed after the close flags the case, as a step's run
+    would (brief, D10): a payment made after a close never disappears into "cancelled"
+    (brief, D28)."""
     run = next(run for run in state.runs if run.entry == event.entry)
     run.status = "cancelled"
     state.history.append(f"{run.entry} cancelled: the case is closing")
+    for ended in event.after_stop:
+        flag(state, f"{run.entry}: {ended}")
 
 
 def flag(state: CaseState, why: str) -> None:
