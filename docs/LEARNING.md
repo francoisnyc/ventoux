@@ -743,7 +743,26 @@ and record the key points. A question is closed once you can explain the answer 
   `TimerFired`. On replay, the code reads `TimerFired` from history at the same point instead of
   waiting or reading a clock, so it decides the same way. Layer 6 builds exactly this, for a
   wait's timeout (`at most 48h`).
-- Status: open, kept in the warm-up rotation until the follow-up comes from memory.
+- Retrieval (layer 9 warm-up), the follow-up, with a third part added (on Temporal, after a
+  restart and replay, why does the case decide the same way?): "when we reach claim a timer starts
+  and if nothing happens within 5 days ventoux closes the task and opens an escalation." The
+  **timer** came back, from memory, for the first time, anchored on an event (the claim arriving).
+  That was the missing part in the last two warm-ups. Three parts didn't come back:
+  - **The *if* is a question about the case file, not "nothing happens".** The rule reads
+    *if `assessed` is not reached*. "Nothing happens" would let any event (a document arriving, a
+    note) stop the escalation, though the claim is still not assessed. Or, read the other way,
+    the escalation would wait on events that don't matter.
+  - **Nothing closes the task.** The assessment stays open, and `escalate` starts beside it,
+    typically to a team lead. Closing a person's task because time passed would cancel work
+    nobody decided to cancel. Work is never cancelled or skipped automatically (brief, D17). The
+    `sla` pattern cancels its own *timer* once the step completes, never the step.
+  - **Replay (the added part).** History records `TimerStarted` when the claim arrives and
+    `TimerFired` five days later. On replay the code reads `TimerFired` from history at the same
+    point, and nothing waits or reads a clock, so the condition sees the same case file and the
+    case decides the same way. Layer 9 needs the same idea for `max_age`: the time a decision is
+    made reaches `decide` as data that history recorded, never from a clock that `case` reads.
+- Status: open. The timer is solid now; the question stays in the rotation until the *if* and
+  replay come back too.
 
 
 ## 33. Layer 3: why plans can be checked and code can't
