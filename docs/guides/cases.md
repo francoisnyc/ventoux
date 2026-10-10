@@ -359,7 +359,7 @@ that was already running, and finished or failed after the close, flags the case
 A **workflow step** runs an existing Temporal workflow, written by another team in any SDK
 language, as one step of the case (brief, D6). The case names its **workflow contract**, which the
 platform team registered in the catalog (see the activities guide); the deployment binds it to a
-workflow type and a task queue. Here the refund checks the customer first:
+workflow type and a task queue. Here the refund also checks the customer, alongside the review:
 
 ```json
 "kyc": {

@@ -646,6 +646,7 @@ def kyc_workflow(**changes: Any) -> WorkflowContract:
             "a workflow contract has no retry policy",
         ),
         ({"outcomes": ["rejected"]}, "a workflow contract has no outcomes"),
+        ({"timeouts": payments_refund.timeouts}, "a workflow contract has one timeout"),
         (
             {"display": Display(title="t", description="d", outcomes={"rejected": "Rejected"})},
             "a workflow contract has no outcomes",

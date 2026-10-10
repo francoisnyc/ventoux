@@ -230,7 +230,8 @@ Open a pull request: the same summary appears there, for your reviewers and your
 - **Deploy on Temporal:** run Ventoux on your own Temporal, release and activate a case.
 - **Add your own activity:** register a system call with its contract (for the platform team; the
   guide "Activities").
-- **Use an existing Temporal workflow as a step.**
+- **Use an existing Temporal workflow as a step** (the guide "Cases", "Workflow steps"; its
+  contract in the guide "Activities").
 - **Change cases that are already open:** migration.
 - **When things fail:** retries, declined payments and the "needs attention" queue.
 - **Case data:** references, sensitive fields and forgetting a person (the guide "Case data").

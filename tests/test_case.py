@@ -1609,3 +1609,29 @@ def test_an_activity_step_naming_a_workflow_contract_fails() -> None:
     assert run.needs_attention == [
         "pay#1: kyc.check@1 is a workflow contract, not an activity: run it as a workflow step."
     ]
+
+
+class Counted(BaseModel):
+    orders: Annotated[int, source("system:crm")]  # a whole number, which expressions don't read
+
+
+def test_an_output_expressions_cannot_read_stops_the_step_that_reads_it() -> None:
+    # An output keeps its contract's type (8d, drafting 6). Expressions read exact decimals, so a
+    # condition reading an `int` can't be read: the step fails, never reads it as false.
+    catalog = with_crm()
+    catalog.register(contract("crm.count", FindInput, Counted))
+    definition = with_customer_steps("find.email", "notices.draft@1", "to")
+    definition["steps"]["find"]["activity"] = "crm.count@1"
+    definition["steps"]["notify"]["when"] = {">": [{"var": "find.orders"}, 1]}
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=PEOPLE,
+        activities={"crm.count@1": lambda inputs: {"orders": 3}},
+        catalog=catalog,
+    )
+    assert run.needs_attention == [
+        "notify#1: notify's condition find.orders > 1 can't be evaluated: find.orders holds 3, "
+        + "a int, and an expression reads only decimals, texts and booleans"
+    ]

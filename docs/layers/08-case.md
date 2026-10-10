@@ -894,7 +894,8 @@ keys (D27): Temporal's documentation, and the test server can't reset a workflow
 ## 8d. Outputs into the case file, and workflow steps
 
 Status: the seven choices agreed in the session, 2026-10-10 (all as proposed, `cancellable`
-deferred); the eight points decided while drafting confirmed the same day; slices 0–6 built.
+deferred); the eight points decided while drafting confirmed the same day; built, slices 0–7;
+Promises checked against the tests, 2026-10-10.
 
 User-facing description, written first: `docs/guides/activities.md`, "Output sources" and
 "Workflow contracts" (with the contract test); `docs/guides/cases.md`, "What a step gives",
@@ -1160,9 +1161,31 @@ Each starts with its negative test, seen failing for the right reason.
 
 Each claim this section makes about behaviour, and the test that will fail if it isn't true.
 Drafted before building, with the tests named in advance; checked against the real tests before
-the pull request is opened. `K` is `tests/test_catalog.py`, `V` `tests/test_validate.py`, `C` `tests/test_case.py`, `W`
-`tests/test_workflow_step.py`, `TC` `tests/test_temporal_case.py`, `TW`
-`tests/test_temporal_workflow_step.py`.
+the pull request is opened (every test named exists, and asserts what its row claims). `K` is
+`tests/test_catalog.py`, `V` `tests/test_validate.py`, `C` `tests/test_case.py`, `W`
+`tests/test_workflow_step.py`, `TW` `tests/test_temporal_workflow_step.py`.
+
+Seen failing before their code: the output-source rules (each contract accepted), the label and
+`undeclared` checks, the `outcome` rule; an undeclared output reaching a trusted input (the field
+missing); each workflow-contract rule (accepted, or refused with a binding's message), the catalog
+holding a workflow contract, its unrecorded hash; the curriculum's test in memory (no workflow
+kind); an unbound workflow on Temporal (the case hung on slice 3's placeholder); each broken
+promise of the contract test (the stub reported none). The rest passed when written, their code
+having come with an earlier test, and were seen failing with that code removed or changed: a
+declared source changing the hash (`x-source` removed), only declared fields landing (everything
+copied), a declared output trusted (every output tagged undeclared), the latest run read (the
+first kept), a plan's state or a case's step naming a workflow contract (`get`'s kind check
+removed), a workflow step naming an activity contract (looked up of either kind), an unbound
+workflow and a high-risk one without approval in memory (each check removed), its approval
+(skipped), its retry's key and its output after the close (the shared code changed), the timeout
+on Temporal (removed: the case waited forever), the retry under the same ID (duplicates refused),
+the switch (a running workflow not counted: its result lost), the contract test's undeclared field
+(its check removed), a workflow contract's `timeouts` (its reason removed). Passed as written,
+with nothing of ours to remove: a declared outcome giving no output (an outcome carries none),
+the curriculum's test and the same history on Temporal (`decide` is shared), an `int` output
+stopping the step (layer 2's evaluator), the guide's examples (written first, the code to them),
+and the replay with the workflow type changed (Temporal's own `NondeterminismError`, as in 8c);
+the replays with the same code and with the queue moved are the tests of our code.
 
 | Promise | Test |
 |---|---|
@@ -1174,8 +1197,9 @@ the pull request is opened. `K` is `tests/test_catalog.py`, `V` `tests/test_vali
 | Only the fields a contract declares reach the case file, so a source can't come from what the activity returns | C `test_only_declared_outputs_reach_the_case_file` |
 | A declared outcome gives no output | C `test_a_declared_outcome_gives_no_output` |
 | The latest run's output is the one read | C `test_the_latest_runs_output_is_read` |
+| An output keeps its contract's type: one expressions can't read (an `int`) stops the step that reads it, never reads as false | C `test_an_output_expressions_cannot_read_stops_the_step_that_reads_it` |
 | The `done` line names each output with its source | C `test_a_declared_output_is_as_trusted_as_its_contract_says`, `test_the_guides_histories_are_what_the_engine_records` |
-| A workflow contract has an idempotency key if it writes, a `timeout` above 0, no retry policy and no outcomes | K `test_a_workflow_contract_is_refused_when_it_breaks_a_rule`, `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |
+| A workflow contract has an idempotency key if it writes, a `timeout` above 0, no retry policy, no activity timeouts and no outcomes, each refused with why | K `test_a_workflow_contract_is_refused_when_it_breaks_a_rule`, `test_the_guides_refusals_are_what_the_catalog_says` (its new rows) |
 | A workflow contract is registered, looked up, hashed and recorded like an activity's, checked again as its kind at registration | K `test_a_workflow_contract_is_in_the_catalog`, `test_every_development_contract_matches_its_recorded_hash` |
 | The guide's workflow contract is the development `kyc.check@1` | K `test_the_guides_workflow_contract_is_the_development_one` |
 | An activity lookup refuses a workflow contract, and a workflow lookup an activity contract: a plan's activity state naming one is `UNKNOWN_ACTIVITY`, and a case's activity step naming one fails | K `test_a_workflow_contract_is_in_the_catalog`; V `test_an_activity_state_naming_a_workflow_contract_is_refused`; C `test_an_activity_step_naming_a_workflow_contract_fails` |
