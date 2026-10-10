@@ -654,3 +654,20 @@ def test_a_loop_through_a_wait_does_not_count_against_the_bound() -> None:
     )
     assert lines(run).count("entered look") == 601
     assert run.status == "waiting"  # the script ran out; nothing was stopped
+
+
+# Layer 9a, slice 1: a plan's references name registered systems (brief, D30).
+
+
+def test_a_plan_reference_to_an_unregistered_system_is_refused() -> None:
+    plan = ending_at_once()
+    plan["fields"]["order_id"] = {"type": "reference", "system": "sail"}
+    with pytest.raises(RunRefused, match="order_id is a reference to sail, which is not a regist"):
+        run_plan(
+            plan,
+            fields={
+                "amount": sourced(Decimal(250), "system:opener"),
+                "order_id": sourced("ord-1", "system:opener"),
+            },
+            answers=[],
+        )

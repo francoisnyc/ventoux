@@ -52,6 +52,7 @@ from ventoux.core.plan import (
 )
 from ventoux.core.plan import Wait as Question
 from ventoux.core.provenance import CASE, Sourced, provenance
+from ventoux.core.references import unregistered
 from ventoux.core.roles import no_role, role_that_counts
 
 # How a run ends (docs/guides/plans.md, "Running a plan").
@@ -134,7 +135,7 @@ async def interpret(
     `excluded` names each person who approves nothing in this run, and why: when a case runs the
     plan as a step, its opener and the step's proposer (brief, D25).
     """
-    refuse_to_start(plan, fields)
+    refuse_to_start(plan, catalog, fields)
     run = PlanRun() if record is None else record
     run.history.append(Started(plan.plan, plan.version))
     # The run's fields: what the case gave, then what people's forms set (brief, D9).
@@ -457,13 +458,14 @@ def holds(when: Expression, event: str, values: Mapping[str, object]) -> bool:
     return decided
 
 
-def refuse_to_start(plan: Plan, fields: Mapping[str, Sourced]) -> None:
-    """Refuse a run not given exactly the plan's fields a person doesn't set, each saying where
-    its value came from."""
+def refuse_to_start(plan: Plan, catalog: Catalog, fields: Mapping[str, Sourced]) -> None:
+    """Refuse a plan whose references name systems nobody registered, and a run not given
+    exactly the plan's fields a person doesn't set, each saying where its value came from."""
     setters = set_by(plan)
     given_at_start = [name for name in plan.fields if name not in setters]
     declared = ", ".join(sorted(given_at_start))
-    problems = [
+    problems = unregistered(plan.fields, catalog.systems)
+    problems += [
         f"{name} is missing: give every field the plan declares ({declared})"
         for name in given_at_start
         if name not in fields

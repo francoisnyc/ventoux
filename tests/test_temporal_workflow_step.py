@@ -132,7 +132,7 @@ def with_kyc(**steps: dict[str, Any]) -> dict[str, Any]:
     definition = copy.deepcopy(REFUND)
     definition["fields"]["customer_id"] = {
         "type": "reference",
-        "system": "customers",
+        "system": "crm",
         "display": {"title": "Customer"},
     }
     definition["steps"]["kyc"] = {

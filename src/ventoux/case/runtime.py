@@ -65,6 +65,7 @@ from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
 from ventoux.core.provenance import NoSources, Sourced, provenance
+from ventoux.core.references import unregistered
 from ventoux.core.roles import role_that_counts
 
 # Where the case file's first values came from when a system opened the case (brief, D12).
@@ -89,7 +90,7 @@ def decide(
     commands: list[Command] = []
     was_open = state.phase == "open"
     if isinstance(event, Opened):
-        open_case(case, state, event)
+        open_case(case, catalog, state, event)
     elif isinstance(event, Answered):
         if state.phase != "open":
             raise AnswerRefused(f"the case is {state.phase}: nothing waits for an answer")
@@ -118,12 +119,12 @@ def decide(
     return state, commands
 
 
-def open_case(case: CaseDefinition, state: CaseState, event: Opened) -> None:
+def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Opened) -> None:
     """The case file's first values, each of its field's type and saying where it came from:
     the person who opened the case, or the system that did (brief, D12)."""
     if event.by is not None and (wrong := identifier_problem(event.by)) is not None:
         raise CaseRefused(wrong)
-    refuse_to_open(case, event.file)
+    refuse_to_open(case, catalog, event.file)
     state.opened_by = event.by
     origin = OPENER if event.by is None else f"person:{event.by}"
     for name, value in event.file.items():
@@ -132,10 +133,12 @@ def open_case(case: CaseDefinition, state: CaseState, event: Opened) -> None:
     state.history.append(f"opened by {event.by or OPENER}, with {listed(sorted(event.file))}")
 
 
-def refuse_to_open(case: CaseDefinition, file: Mapping[str, object]) -> None:
-    """Refuse first values that aren't the case's fields, of their types, given at the opening."""
+def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, object]) -> None:
+    """Refuse a case whose references name systems nobody registered, and first values that
+    aren't the case's fields, of their types, given at the opening."""
     setters = set_by(case)
-    problems: list[str] = []
+    declared_types = {name: field.declared for name, field in case.fields.items()}
+    problems = unregistered(declared_types, catalog.systems)
     for name, value in file.items():
         if name not in case.fields:
             fields = listed(sorted(case.fields))
