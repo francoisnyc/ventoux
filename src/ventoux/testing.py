@@ -26,6 +26,7 @@ from ventoux.case.state import (
     Opened,
     Proposed,
     Retried,
+    Shown,
     StartPlan,
 )
 from ventoux.core.before_activity import InputRefused
@@ -62,6 +63,7 @@ __all__ = [
     "retry",
     "run_case",
     "run_plan",
+    "shown",
 ]
 
 
@@ -330,6 +332,9 @@ def run_case(
         if isinstance(item, Retry):
             events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ()))))
             continue
+        if isinstance(item, ShownTo):
+            events.append(Shown(item.field, item.by, frozenset(people.get(item.by, ()))))
+            continue
         if isinstance(item, Close):
             events.append(CloseAsked(item.reason, item.by, frozenset(people.get(item.by, ()))))
             continue
@@ -444,6 +449,19 @@ def finish(entry: str) -> Finish:
 def close(reason: str, who: str) -> Close:
     """A script's close: `close("duplicate", "ana")` (brief, D10)."""
     return Close(reason, who)
+
+
+class ShownTo(NamedTuple):
+    """A scripted record shown: `who` was shown the record behind the reference `field`."""
+
+    field: str
+    by: str
+
+
+def shown(field: str, who: str) -> ShownTo:
+    """A script's record shown: `shown("customer_id", "ana")`, recorded in the case's history,
+    as the API records it after asking the system's resolver (brief, D16)."""
+    return ShownTo(field, who)
 
 
 def propose(step: str, who: str) -> Proposal:

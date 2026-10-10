@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
 from ventoux.case.state import CaseState
+from ventoux.core.expressions import ReferenceType
 
 
 def roles_named(case: CaseDefinition) -> tuple[str, ...]:
@@ -52,6 +53,7 @@ class CaseView:
     sources: dict[str, frozenset[str]]  # where each of those values came from
     hidden: dict[str, tuple[str, ...]]  # each field hidden from them, and the roles that see it
     lines: list[str]  # one per declared field, in the definition's order, as people read it
+    systems: dict[str, str]  # each reference field they may see, and the system it names
 
 
 def case_view(case: CaseDefinition, state: CaseState, roles: Iterable[str]) -> CaseView:
@@ -73,7 +75,12 @@ def case_view(case: CaseDefinition, state: CaseState, roles: Iterable[str]) -> C
             )
         else:
             lines.append(f"{title}: not set")
-    return CaseView(values, sources, hidden, lines)
+    systems = {
+        name: declared.declared.system
+        for name, declared in case.fields.items()
+        if name in visible and isinstance(declared.declared, ReferenceType)
+    }
+    return CaseView(values, sources, hidden, lines, systems)
 
 
 def as_read(value: object) -> str:

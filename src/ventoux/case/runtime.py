@@ -49,16 +49,18 @@ from ventoux.case.state import (
     Proposed,
     Retried,
     Schedule,
+    Shown,
     StartPlan,
     StartWorkflow,
     StepRun,
     StopPlan,
 )
+from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract, Contract
-from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
+from ventoux.core.expressions import Expression, ExpressionError, ReferenceType, evaluate, render
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
 from ventoux.core.output_sources import is_held, output_sources
@@ -78,6 +80,10 @@ FAILED = "failed"
 
 class CaseRefused(Exception):
     """A case the engine won't open: what is wrong with its first values."""
+
+
+class ShownRefused(Exception):
+    """A record shown that the case won't record, because it couldn't have been: why."""
 
 
 def decide(
@@ -103,6 +109,8 @@ def decide(
         plan_cancelled(state, event)
     elif isinstance(event, Retried):
         retry(case, catalog, state, event)
+    elif isinstance(event, Shown):
+        record_shown(case, state, event)
     elif isinstance(event, CloseAsked):
         role = refuse_to_close(case, catalog, state, event)
         state.history.append(f"{event.by} closed the case as {event.reason}, as {role}")
@@ -117,6 +125,27 @@ def decide(
         admit(case, catalog, state, commands)  # nothing new starts once the case is closing
     settle(case, state)
     return state, commands
+
+
+def record_shown(case: CaseDefinition, state: CaseState, event: Shown) -> None:
+    """Record that `event.by` was shown the record behind a reference: its system and reference,
+    never its content (brief, D16). Refused if it couldn't have happened (brief, D30)."""
+    if (wrong := identifier_problem(event.by)) is not None:
+        raise ShownRefused(wrong)
+    if state.phase == "closed":
+        raise ShownRefused("the case is closed: nothing records it any more")
+    if event.field not in case.fields:
+        raise ShownRefused(f"{event.field} is not a field of {case.case}")
+    declared = case.fields[event.field].declared
+    if not isinstance(declared, ReferenceType):
+        raise ShownRefused(f"{event.field} is not a reference: there is no record to show")
+    if not may_see(case, event.field, event.roles):
+        needs = " or ".join(seen_by(case, event.field))
+        raise ShownRefused(f"{event.by} can't see {event.field}: it needs {needs}")
+    if event.field not in state.values:
+        raise ShownRefused(f"{event.field} is not set: there is no record to show")
+    reference = state.values[event.field]
+    state.history.append(f"{event.by} was shown {event.field} ({declared.system} {reference})")
 
 
 def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Opened) -> None:

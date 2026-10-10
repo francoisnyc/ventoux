@@ -10,8 +10,9 @@ from typing import Any
 import pytest
 
 from ventoux.case.answers import AnswerRefused
-from ventoux.case.runtime import CaseRefused
-from ventoux.testing import load_definition, run_case
+from ventoux.case.runtime import CaseRefused, ShownRefused
+from ventoux.testing import CATALOG, load_definition, run_case, shown
+from ventoux.tooling.resolvers import Resolvers, ShowRefused, Viewer
 
 ROOT = Path(__file__).parent.parent
 
@@ -209,3 +210,78 @@ def test_an_approver_who_sees_it_approves() -> None:
         "person:ana), key memory/pay#1"
     )
     assert [line for line in run.history if line.startswith("scheduled pay#")] == [scheduled]
+
+
+# Slice 5: showing a referenced record.
+
+
+@pytest.mark.parametrize(
+    ("answers", "says"),
+    [
+        ([shown("customer_id", "eve")], "eve can't see customer_id: it needs adjuster or fraud"),
+        (
+            [shown("estimated_damage", "ana")],
+            "estimated_damage is not a reference: there is no record to show",
+        ),
+        ([shown("customr_id", "ana")], "customr_id is not a field of claim"),
+        ([DENIED, shown("customer_id", "ana")], "the case is closed: nothing records it any more"),
+    ],
+)
+def test_shown_is_refused_when_it_cannot_be_true(answers: list[Any], says: str) -> None:
+    # The history only records what could have happened: a record shown to someone who may see
+    # its reference, while the case is there to record it (brief, D16, D30).
+    with pytest.raises(ShownRefused, match=says):
+        run_case(claim(), file=FILE, answers=answers, people=PEOPLE)
+
+
+def test_showing_a_record_is_recorded_without_its_content() -> None:
+    run = run_case(claim(), file=FILE, answers=[shown("customer_id", "ana")], people=PEOPLE)
+    assert run.history[-1] == "ana was shown customer_id (crm cus-7)"
+    assert run.waiting_for == ["assess by adjuster"]  # nothing else changed
+
+
+ANA = Viewer("ana", ("adjuster",))
+
+
+def crm_resolvers(asked: list[tuple[str, Viewer]]) -> Resolvers:
+    """Resolvers with one for crm, which records who asked for what."""
+
+    def crm_customer(reference: str, viewer: Viewer) -> dict[str, object]:
+        asked.append((reference, viewer))
+        return {"name": "Cora Diaz", "city": "Lyon"}
+
+    resolvers = Resolvers(CATALOG)
+    resolvers.register("crm", crm_customer)
+    return resolvers
+
+
+def test_a_resolver_is_asked_on_behalf_of_the_viewer() -> None:
+    # The CRM is asked as the person looking, so its own permissions apply (brief, D16).
+    asked: list[tuple[str, Viewer]] = []
+    view = run_case(claim(), file=FILE, answers=[], people=PEOPLE).view(roles=ANA.roles)
+    record = crm_resolvers(asked).show(view, "customer_id", ANA)
+    assert record == {"name": "Cora Diaz", "city": "Lyon"}
+    assert asked == [("cus-7", ANA)]
+
+
+@pytest.mark.parametrize(
+    ("field", "roles", "says"),
+    [
+        ("customer_id", ("support",), "customer_id is hidden from you: it needs adjuster or fraud"),
+        ("estimated_damage", ("adjuster",), "estimated_damage is not a reference: there is no r"),
+        ("policy_id", ("adjuster",), "policies has no resolver: register one to show its records"),
+    ],
+)
+def test_a_resolver_shows_only_what_the_view_shows(
+    field: str, roles: tuple[str, ...], says: str
+) -> None:
+    asked: list[tuple[str, Viewer]] = []
+    view = run_case(claim(), file=FILE, answers=[], people=PEOPLE).view(roles=roles)
+    with pytest.raises(ShowRefused, match=says):
+        crm_resolvers(asked).show(view, field, Viewer("ana", roles))
+    assert asked == []
+
+
+def test_a_resolver_is_registered_for_a_registered_system() -> None:
+    with pytest.raises(ValueError, match="sail is not a registered system: register it in the"):
+        Resolvers(CATALOG).register("sail", lambda reference, viewer: {})

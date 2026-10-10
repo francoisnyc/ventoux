@@ -144,8 +144,18 @@ class PlanCancelled:
     after_stop: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class Shown:
+    """A person was shown the record a reference field names, by its system's resolver: recorded,
+    never its content (brief, D16)."""
+
+    field: str  # the reference field, such as `customer_id`
+    by: str  # who was shown it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with it (brief, D22)
+
+
 type Event = (
-    Opened | Answered | Proposed | Completed | Failed | Retried | CloseAsked | PlanCancelled
+    Opened | Answered | Proposed | Completed | Failed | Retried | CloseAsked | PlanCancelled | Shown
 )
 
 

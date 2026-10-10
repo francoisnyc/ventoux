@@ -23,6 +23,7 @@ from ventoux.core.policy import Policy, only_from, trusted_only
 from ventoux.core.references import Reference, reference
 from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.testing import CATALOG, load_definition, payments_refund, run_case
+from ventoux.tooling.resolvers import Resolvers
 
 ROOT = Path(__file__).parent.parent
 
@@ -362,6 +363,9 @@ GUIDE_REFUSALS: dict[str, Any] = {
     ),
     '`reference("crm")` on a field that isn\'t a `str`': lambda: letter(LetterToANumber),
     '`catalog.register_system("CRM")`': lambda: Catalog().register_system("CRM"),
+    '`resolvers.register("sail", …)`, a system nobody registered': lambda: Resolvers(
+        CATALOG
+    ).register("sail", lambda reference, viewer: {}),
 }
 
 
