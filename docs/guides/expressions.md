@@ -107,7 +107,7 @@ When the case runs, a value the check couldn't see is an error that stops the st
 | Situation | Error |
 |---|---|
 | `approved_amount` has no value yet | `approved_amount has no value` |
-| `{"/": [{"var": "amount"}, {"var": "items"}]}`, with 250 and 0 | `division by zero in amount / items (250 / 0)` |
+| `{"/": [{"var": "amount"}, {"var": "items"}]}`, with 250 and 0 | `division by zero in amount / items` |
 | a result beyond what decimal128 can hold | `` `*` gives a number too large for an expression (decimal128) `` |
 | an element of `items` lacks `risk`, in `count(items where item.risk == "high")` | `item.risk has no value (element 2 of items)` |
 | a field holds a value of the wrong type | `approved_amount should be a number, and it holds a string` |

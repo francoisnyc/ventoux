@@ -29,6 +29,7 @@ from ventoux.core.expressions.model import (
     SumOver,
     Value,
     Var,
+    a_kind,
     fits_decimal128,
     kind,
 )
@@ -80,11 +81,9 @@ def evaluate(
             number(expression.operator, evaluate(a, values, element)) for a in expression.args
         ]
         if isinstance(expression, Div) and numbers[1] == 0:
-            # Both: the fields say where to look, the values what happened.
-            raise ExpressionError(
-                f"division by zero in {render(expression)} "
-                f"({shown(numbers[0])} / {shown(numbers[1])})"
-            )
+            # The fields say where to look; never the values, which may be hidden from whoever
+            # reads the history (brief, D30).
+            raise ExpressionError(f"division by zero in {render(expression)}")
         result = numbers[0]
         for n in numbers[1:]:
             result = calculate(expression.operator, result, n)
@@ -150,15 +149,15 @@ def readable(name: str, value: object, where: str = "") -> Value:
     # The case file is data from outside: check what it holds, never assume it.
     if not isinstance(value, bool | str | Decimal):
         raise ExpressionError(
-            f"{name} holds {value!r}, a {type(value).__name__}, and an expression "
-            f"reads only decimals, texts and booleans{where}"
+            f"{name} holds {a_kind(value)}, and an expression reads only decimals, texts and "
+            f"booleans{where}"
         )
     if isinstance(value, Decimal) and not value.is_finite():
         raise ExpressionError(
-            f"{name} holds {value}, which is not a number an expression can use{where}"
+            f"{name} holds a number that isn't finite, which an expression can't use{where}"
         )
     if isinstance(value, Decimal) and not fits_decimal128(value):
-        raise ExpressionError(f"{name} holds {value}, which doesn't fit {DECIMAL128}{where}")
+        raise ExpressionError(f"{name} holds a number that doesn't fit {DECIMAL128}{where}")
     return value
 
 
@@ -168,14 +167,16 @@ def records(operator: str, name: str, values: Mapping[str, object]) -> list[Mapp
     if held is None:
         raise ExpressionError(f"{name} has no value")
     if not isinstance(held, list) or not all(isinstance(element, Mapping) for element in held):
-        raise ExpressionError(f"{name} holds {held!r}, and {operator} reads a list of records")
+        raise ExpressionError(
+            f"{name} holds {a_kind(held)}, and {operator} reads a list of records"
+        )
     return held
 
 
 def calculate(operator: str, a: Decimal, b: Decimal) -> Decimal:
     """`a` and `b` combined by one of the four arithmetic operators, in decimal128."""
     if operator == "/" and b == 0:
-        raise ExpressionError(f"division by zero: {shown(a)} / {shown(b)}")
+        raise ExpressionError("division by zero")
     try:
         if operator == "+":
             return CONTEXT.add(a, b)
@@ -221,9 +222,7 @@ def boolean(operator: str, value: Value) -> bool:
     """`value` as a boolean for `operator`; nothing is truthy (brief, D20)."""
     if not isinstance(value, bool):
         verb = "takes a boolean" if operator in ("!", "if", "where") else "combines booleans"
-        raise ExpressionError(
-            f"`{operator}` {verb}, and it was given a {kind(value)}: {shown(value)}"
-        )
+        raise ExpressionError(f"`{operator}` {verb}, and it was given {a_kind(value)}")
     return value
 
 
@@ -231,7 +230,7 @@ def text(value: Value) -> str:
     """`value` as a text for `cat`; a number or a boolean is turned into text only by `string`."""
     if not isinstance(value, str):
         raise ExpressionError(
-            f"`cat` joins texts, and it was given a {kind(value)}: {shown(value)}; "
+            f"`cat` joins texts, and it was given {a_kind(value)}; "
             "write string(…) to turn it into text"
         )
     return value
@@ -247,16 +246,5 @@ def number(operator: str, value: Value) -> Decimal:
             "*": "multiplies",
             "/": "divides",
         }.get(operator, "compares")
-        raise ExpressionError(
-            f"`{operator}` {verb} numbers, and it was given a {kind(value)}: {shown(value)}"
-        )
+        raise ExpressionError(f"`{operator}` {verb} numbers, and it was given {a_kind(value)}")
     return value
-
-
-def shown(value: Value) -> str:
-    """`value` as a message shows it: `250`, `'250'`, `true`."""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, str):
-        return repr(value)
-    return str(value)

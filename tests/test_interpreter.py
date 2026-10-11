@@ -339,7 +339,7 @@ def test_a_condition_that_cannot_be_evaluated_stops_instead_of_skipping_the_appr
     assert refunds == []  # the next transition, straight to pay, is never tried
     assert lines(run)[-1] == (
         "stopped at check_order: on done, amount > 100 can't be evaluated: `>` compares numbers, "
-        "and it was given a string: '250': the step needs attention, and nothing after it runs"
+        "and it was given a string: the step needs attention, and nothing after it runs"
     )
 
 
@@ -354,7 +354,7 @@ def test_a_condition_must_give_a_boolean() -> None:
     run = run_plan(text_as_condition, fields=ORDER, answers=[])
     assert run.status == "stopped"
     assert run.reason == (
-        "on done, the condition order_id gives 'A-1001': a condition gives true or false"
+        "on done, the condition order_id gives a string: a condition gives true or false"
     )
 
 

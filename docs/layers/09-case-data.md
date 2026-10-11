@@ -2,7 +2,8 @@
 
 Status: split into four parts and the eighteen choices agreed in the session, 2026-10-10 (all as
 proposed); 9a's note and its nine drafting points confirmed the same day; 9a built, slices 0–7;
-Promises checked against the tests, 2026-10-10.
+Promises checked against the tests, 2026-10-10; the tutor review's fix built test-first,
+2026-10-11.
 
 ## What this layer is for
 
@@ -98,7 +99,9 @@ Each is a choice the agreed design left open, written as the rule we confirmed.
    opening: a system nobody registered refuses the run (`RunRefused`).
 5. **"A role the case names"** is every role in the definition: a task's `roles`, an approval's,
    `proposed_by`, a close reason's, and every `visible_to`. Operating roles are registered, not
-   named by a case, so an operator sees the report (which holds no values), not the case file.
+   named by a case, so an operator sees the report, not the case file. *Corrected in the tutor
+   review:* the report then held values, quoted in refusals and failures; now it quotes none
+   (see "From the tutor review").
    A viewer holding none of them sees every field hidden.
 6. **The view:** `CaseView` with `values` (only what the viewer may see: declared fields, outcomes
    `assess.outcome` and outputs `lookup.status`), `sources` for each, `hidden` (each hidden
@@ -231,6 +234,33 @@ Each starts with its negative test, seen failing for the right reason.
 - **The tests read the claim from the case data guide's JSON block** (slice 7), so the guide and
   the tests can't drift.
 
+### From the tutor review
+
+- **Refusals and failures quoted values, so the history leaked hidden fields.** With
+  `approved_amount` seen only by `support`, Ana answering it as the text `4,812.50` was refused
+  with `approved_amount is a number, and the answer gives '4,812.50'`. On Temporal a refusal is a
+  history line, and `report` returns the history unfiltered, so Lee, who may not see the amount,
+  read it there. The same was true of the opening's type check, 8d's output check, a condition
+  that gives anything but true or false, and every expression error that showed a value
+  (`` `>` compares numbers, and it was given a string: '…' ``, `division by zero in amount /
+  items (250 / 0)`). In 9b, a national ID typed with spaces would have landed in the history in
+  plain text.
+- **The fix, added to D30:** a refusal or failure names the field and the kind of value it was
+  given, never the value: `approved_amount is a number, and the answer gives a string`.
+  `a_kind(value)` says it (`a number`, `a string`, `a boolean`, `a binary float`, `a list`), in
+  the field types' own words, which is why it says `a string` where the review's example said
+  `a text`. Division by zero names the fields only. The `shown` line keeps its reference, as D16
+  asks; a sensitive reference is 9b's to encrypt. Layer 2's promise that division by zero names
+  "the fields and the values" is replaced: its test now expects the fields alone. The guides,
+  and 34 tests that expected a quoted value, say the kind instead.
+- **Both negative tests were written first and seen failing:** the review's scenario (the
+  refusal quoted `'4,812.50'`), and a sweep over a condition giving a number and four expression
+  errors on a field only `fraud` may see (each quoted `4812.77` or the hidden note), with the
+  opening's refusal beside them.
+- **Carried to 9b:** an activity's own error message (`payments.refund@2 failed: <what it
+  said>`) is external text recorded as it came, and may carry sensitive data. 9b decides how it
+  is handled.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
@@ -265,4 +295,5 @@ refusal rows (written after the code).
 | `shown` records a line with the system and reference, never the record, and changes nothing else; it is refused for a hidden field, a field that isn't a reference or isn't the case's, and a closed case | D `test_showing_a_record_is_recorded_without_its_content`, `test_shown_is_refused_when_it_cannot_be_true` |
 | A resolver is called with the viewer, and only for a reference their view shows; a system with no resolver, or an unregistered one, is refused | D `test_a_resolver_is_asked_on_behalf_of_the_viewer`, `test_a_resolver_shows_only_what_the_view_shows`, `test_a_resolver_is_registered_for_a_registered_system`, `test_the_guides_resolver_example_runs_as_written` |
 | On Temporal the view is the same as in memory, filtered in the worker; a refused `shown` or approval is recorded and the case waits on; a history with `shown` replays | TD `test_the_view_on_temporal_is_the_view_in_memory`, `test_refusals_are_recorded_and_the_case_waits`, `test_a_case_history_with_shown_replays` |
+| A refusal or failure names the field and the kind of value given, never the value: in a form, the opening, a condition, an expression's error and an output (tutor review) | D `test_a_refusal_names_the_type_never_the_value`, `test_no_failure_quotes_a_hidden_value`, `test_no_opening_refusal_quotes_a_value`; C `test_an_output_the_case_file_cannot_hold_fails_the_step` |
 | The guides' refusal rows are what the engine says | K `test_the_guides_refusals_are_what_the_catalog_says` (its new rows); C `test_the_guides_refusals_are_what_the_engine_says` (its new row); D `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |

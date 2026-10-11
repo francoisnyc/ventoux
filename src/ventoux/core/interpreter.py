@@ -23,7 +23,14 @@ from ventoux.core.approval import (
 )
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
-from ventoux.core.expressions import Expression, ExpressionError, FieldType, evaluate, render
+from ventoux.core.expressions import (
+    Expression,
+    ExpressionError,
+    FieldType,
+    a_kind,
+    evaluate,
+    render,
+)
 from ventoux.core.form import form_problem
 from ventoux.core.history import (
     Answered,
@@ -456,7 +463,7 @@ def holds(when: Expression, event: str, values: Mapping[str, object]) -> bool:
     # Nothing is truthy: anything but true or false stops the step, never read as false.
     if not isinstance(decided, bool):
         raise Stop(
-            f"on {event}, the condition {render(when)} gives {decided!r}: a condition gives true "
+            f"on {event}, the condition {render(when)} gives {a_kind(decided)}: a condition gives true "
             "or false"
         )
     return decided

@@ -8,7 +8,6 @@ See docs/layers/08-case.md.
 
 import copy
 from collections.abc import Mapping
-from decimal import Decimal
 from typing import Literal
 
 from pydantic import ValidationError
@@ -60,7 +59,14 @@ from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract, Contract
-from ventoux.core.expressions import Expression, ExpressionError, ReferenceType, evaluate, render
+from ventoux.core.expressions import (
+    Expression,
+    ExpressionError,
+    ReferenceType,
+    a_kind,
+    evaluate,
+    render,
+)
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
 from ventoux.core.output_sources import is_held, output_sources
@@ -178,14 +184,10 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
                 f"{name} is set by a person in {setters[name]}, never given at the opening"
             )
         elif not fits(value, declared := case.fields[name].declared):
-            problems.append(f"{name} is {a_type(declared)}, and the opening gives {shown(value)}")
+            # The type, never the value: refusals reach people who may not see it (brief, D30).
+            problems.append(f"{name} is {a_type(declared)}, and the opening gives {a_kind(value)}")
     if problems:
         raise CaseRefused("\n".join(problems))
-
-
-def shown(value: object) -> str:
-    """A value as its JSON reads: `1001`, `0.1`, `'ord-1'`."""
-    return str(value) if isinstance(value, Decimal) else repr(value)
 
 
 def set_by(case: CaseDefinition) -> dict[str, str]:
@@ -421,8 +423,8 @@ def outcome_problem(contract: Contract, event: Completed) -> str | None:
         value = getattr(given, name)
         if not is_held(value):
             return (
-                f"{contract.reference} gave {name} as {value}, a {type(value).__name__}, which "
-                "the case file can't hold exactly (brief, D20)"
+                f"{contract.reference} gave {name} as {a_kind(value)}, which the case file "
+                "can't hold exactly (brief, D20)"
             )
     return None
 

@@ -776,6 +776,11 @@ be erased on request), has size limits, and a second copy of business records go
   the reference from the viewer's filtered view, so nothing hidden can be resolved, and what they
   return is never stored. That a record was shown is recorded on an open case by a `shown` event,
   as a line naming the field, the system and the reference.
+- **A refusal or a failure names the field and the kind of value, never the value:**
+  `approved_amount is a number, and the answer gives a string`. The history, and every report
+  read from it, reaches people who may not see a field; a message quoting its value would show it
+  to them. Only a `shown` line names a reference, as D16 asks. *Added in the tutor review of 9a,
+  before D30 was merged.*
 
 ### Simplifications adopted
 

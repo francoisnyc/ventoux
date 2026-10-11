@@ -182,7 +182,7 @@ def test_a_case_waiting_for_its_review_says_so() -> None:
         ),
         (
             {"order_id": 1001, "amount": 40},
-            "order_id is a reference to orders, and the opening gives 1001",
+            "order_id is a reference to orders, and the opening gives a number",
         ),
     ],
 )
@@ -195,10 +195,12 @@ def test_the_opening_gives_the_declared_fields_of_their_types(
 
 def test_a_float_is_refused_never_guessed() -> None:
     # A binary float may already have lost its exact value (brief, D20).
-    with pytest.raises(CaseRefused, match="^amount is a number, and the opening gives 0.1$"):
+    with pytest.raises(
+        CaseRefused, match="^amount is a number, and the opening gives a binary float$"
+    ):
         run_case(REFUND, file={"order_id": "ord-1", "amount": 0.1}, answers=[], people=PEOPLE)
     with pytest.raises(
-        AnswerRefused, match="^approved_amount is a number, and the answer gives 40.5$"
+        AnswerRefused, match="^approved_amount is a number, and the answer gives a binary float$"
     ):
         run_case(
             REFUND,
@@ -1644,7 +1646,7 @@ def test_an_output_the_case_file_cannot_hold_fails_the_step() -> None:
         catalog=catalog,
     )
     assert run.needs_attention == [
-        "find#1: crm.find@1 gave score as 0.1, a float, which the case file can't hold exactly "
+        "find#1: crm.find@1 gave score as a binary float, which the case file can't hold exactly "
         + "(brief, D20)"
     ]
     assert not any(line.startswith("find#1 done") for line in run.history)

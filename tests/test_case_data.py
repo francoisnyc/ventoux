@@ -347,3 +347,61 @@ def test_the_guides_refusals_are_what_the_engine_says(when: str, example: str) -
 
 def test_every_refusal_in_the_guide_is_tested() -> None:
     assert [when for when, _ in guide_refusal_rows()] == list(GUIDE_REFUSALS)
+
+
+# Tutor review of 9a: a refusal or a failure names the field and the type, never the value, so
+# the history can't show anyone a value hidden from them.
+
+
+def test_a_refusal_names_the_type_never_the_value() -> None:
+    # Ana types the amount as text; Lee, who reads the history, may not see approved_amount.
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            refund_seen_by_support(),
+            file={"order_id": "ord-1", "amount": 250},
+            answers=[("review", "approve", "ana", {"approved_amount": "4,812.50"})],
+            people=REFUND_PEOPLE,
+        )
+    assert str(refused.value) == "approved_amount is a number, and the answer gives a string"
+
+
+SECRET = Decimal("4812.77")  # fraud_score, seen only by fraud
+SECRET_NOTE = "flagged-by-ring-7"  # fraud_note, seen only by fraud
+
+
+def checked_when(when: dict[str, Any]) -> dict[str, Any]:
+    """The claim with a hidden note, its `deny` step run only when `when` holds."""
+    data = claim()
+    data["fields"]["fraud_note"] = {
+        "type": "string",
+        "visible_to": ["fraud"],
+        "display": {"title": "Fraud note"},
+    }
+    data["steps"]["deny"]["when"] = when
+    return data
+
+
+@pytest.mark.parametrize(
+    "when",
+    [
+        {"var": "fraud_score"},  # a condition giving a number, not true or false
+        {"!": [{"var": "fraud_score"}]},
+        {">": [{"var": "fraud_note"}, 1]},
+        {"==": [{"cat": [{"var": "fraud_score"}, "x"]}, "x"]},
+        {">": [{"/": [{"var": "fraud_score"}, 0]}, 1]},
+    ],
+)
+def test_no_failure_quotes_a_hidden_value(when: dict[str, Any]) -> None:
+    # Every step failure is a history line a role without sight of fraud_score may read.
+    file = FILE | {"fraud_score": SECRET, "fraud_note": SECRET_NOTE}
+    run = run_case(checked_when(when), file=file, answers=[DENIED], people=PEOPLE)
+    assert run.needs_attention  # the step failed, saying why
+    said = "\n".join([*run.history, *run.needs_attention, *run.flags])
+    assert str(SECRET) not in said
+    assert SECRET_NOTE not in said
+
+
+def test_no_opening_refusal_quotes_a_value() -> None:
+    with pytest.raises(CaseRefused) as refused:
+        run_case(claim(), file=FILE | {"fraud_score": SECRET_NOTE}, answers=[], people=PEOPLE)
+    assert str(refused.value) == "fraud_score is a number, and the opening gives a string"
