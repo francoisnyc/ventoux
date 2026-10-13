@@ -265,7 +265,7 @@ def test_a_resolver_is_registered_for_a_registered_system() -> None:
 
 def test_the_guides_examples_run_as_written() -> None:
     # The case data guide's view example, and its claim's deny step, as the guide shows them.
-    [example] = GUIDE.split("```python\n")[1:]
+    example = GUIDE.split("```python\n")[1]  # the first: 9b's tests run the sensitive ones
     namespace: dict[str, Any] = {"run_case": run_case, "claim": claim(), "PEOPLE": PEOPLE}
     exec(example.split("```")[0], namespace)  # noqa: S102 -- our guide, run so it can't drift
     denied = run_case(claim(), file=FILE, answers=[DENIED], people=PEOPLE)

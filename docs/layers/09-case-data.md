@@ -3,7 +3,7 @@
 Status: split into four parts and the eighteen choices agreed in the session, 2026-10-10 (all as
 proposed); 9a's note and its nine drafting points confirmed the same day; 9a built, slices 0–7;
 Promises checked against the tests, 2026-10-10; the tutor review's fix built test-first,
-2026-10-11.
+2026-10-11. 9b's choices agreed in the session, 2026-10-13 (all as proposed).
 
 ## What this layer is for
 
@@ -297,3 +297,217 @@ refusal rows (written after the code).
 | On Temporal the view is the same as in memory, filtered in the worker; a refused `shown` or approval is recorded and the case waits on; a history with `shown` replays | TD `test_the_view_on_temporal_is_the_view_in_memory`, `test_refusals_are_recorded_and_the_case_waits`, `test_a_case_history_with_shown_replays` |
 | A refusal or failure names the field and the kind of value given, never the value: in a form, the opening, a condition, an expression's error and an output (tutor review) | D `test_a_refusal_names_the_type_never_the_value`, `test_no_failure_quotes_a_hidden_value`, `test_no_opening_refusal_quotes_a_value`; C `test_an_output_the_case_file_cannot_hold_fails_the_step` |
 | The guides' refusal rows are what the engine says | K `test_the_guides_refusals_are_what_the_catalog_says` (its new rows); C `test_the_guides_refusals_are_what_the_engine_says` (its new row); D `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |
+
+---
+
+## 9b. Sensitive fields, keys and the codec
+
+User-facing description, written first: `docs/guides/case-data.md` ("Sensitive data", "On
+Temporal: encrypted with the case's key", its refusal table, a common question, design note 10);
+`docs/guides/cases.md` and `docs/guides/plans.md` (connecting with `data_converter(keys)`, IDs
+without `/`, an activity's message shown as `‹sensitive›`). Decision: brief D31 (drafted with this
+note).
+
+### What this part is for
+
+9a hides a field from the view, but anyone with access to the Temporal namespace still reads it in
+the history (brief, D16). 9b makes a declared sensitive value unreadable everywhere outside the
+worker: encrypted with a key per case, so that 9c can forget a person by destroying one key
+(brief, D15).
+
+A small example. The claim declares `national_id`, sensitive, seen by `claims-sensitive`. Ana's
+form gives `1 85 05 78 006 084 36`.
+
+- In the state it is `Sensitive("1 85 …")`, whose `str` and `repr` are `‹sensitive›`, so any
+  line, message or traceback that formats it writes the placeholder.
+- Crossing Temporal, the converter writes `{"‹sensitive›": 0}` in its place and the value's JSON
+  as the payload's part `sensitive/0`; the codec encrypts that part with the case's key. The rest
+  of the payload (the entry, the outcome, who answered) stays readable.
+- Inside the worker the codec decrypts the part and the converter rebuilds `Sensitive(...)`: the
+  form's type check, a `when` and a contract's input check read the real value.
+
+### Agreed earlier, checked against `temporalio` 1.34.0
+
+1. **Wrapped in the state, shown as `‹sensitive›`.** SDK-independent. One finding shapes the
+   split: the payload converter runs inside the workflow sandbox, the codec's `encode` and
+   `decode` are `async` and run outside it. So the converter only splits a value into parts
+   (deterministic), and only the codec fetches keys and encrypts.
+2. **Each value in its own part, encrypted with the case's key, found from the workflow ID.**
+   The codec implements `WithSerializationContext`. Read in the SDK's source: the start,
+   signals, queries, the result and continue-as-new get `WorkflowSerializationContext` with the
+   case's ID, on the client, the worker and the `Replayer` (the same `_WorkflowWorker` path);
+   activity inputs, results and failures get `ActivitySerializationContext`, whose `workflow_id`
+   is the case's, on both sides; a child workflow's payloads get the **child's** ID,
+   `claim-7/collect#1`. So the key is found from the ID's part before the first `/`, and a case
+   ID may not hold one. `encode_common_attributes` applies at every level of a failure's cause
+   chain, and the codec walks every cause.
+3. **A key is made when the case starts, never again.** SDK-independent: `start_case` asks the
+   key provider, then starts the workflow.
+
+### Decided in the session
+
+1. **The dependency: `cryptography`,** for AES-256-GCM, authenticated: a damaged or misplaced
+   ciphertext fails to decrypt instead of decoding to something else. The case's ID is the
+   associated data, binding each part to its case. Alternatives weighed: the standard library
+   has no authenticated cipher (building one from `hmac` and `hashlib` is home-made
+   cryptography); PyNaCl is sound but less common. Used only in `ventoux.temporal.codec`.
+2. **`answer` encrypts every form value:** the client doesn't know which fields are sensitive. The
+   case keeps wrapped only the values of sensitive fields. Cost: a non-sensitive form value is
+   encrypted in its signal event, and nowhere else. The same for a plan's `answer`.
+3. **An activity's own error message is always sensitive** (9a's question): Ventoux can't know
+   what it says, and a Pydantic error on a contract's input quotes the input. The case records
+   `pay#1: payments.refund@2 failed: ‹sensitive›` and keeps nothing more; so does a plan, a
+   workflow step's failure, and D28's "failed after the close was requested". In Temporal every
+   failure's message and stack trace, whoever raised it, crosses as sensitive parts (a failure
+   converter on `encode_common_attributes`). Operators read it with the key, through a codec
+   server (deployment, after v1.0); forgetting the case (9c) makes it unreadable too. This
+   replaces layer 6's promise that a step stops "with its own message".
+4. **A workflow step can't be given a sensitive value:** its worker is another team's and doesn't
+   hold the key. The step fails before it starts. **Sensitive outputs are not in 9b:** no
+   contract can declare one, so an activity's output is plain, as today.
+5. **A case ID, and a standalone plan run's ID, has no `/`; a key is made once.** `start_plan`
+   makes its run's key too, since its failures are encrypted. If the start fails after the key
+   was made, the ID is spent.
+6. **A sensitive field must list `visible_to`** (brief, D16). The view's `lines` show
+   `‹sensitive›` to everyone; `values` carries the wrapped value to the roles it lists only.
+7. **A plain value for a sensitive field is refused at `decide`,** at the opening and in a form:
+   it has already been seen in plain text, so the case says so loudly. This depends on nothing
+   the client did; in memory `run_case` wraps at its boundary, as the client does.
+8. **Where it goes:** `KeyProvider` and the development `FileKeys` in `ventoux.tooling.keys`; the
+   codec and the failure converter in `ventoux.temporal`; D31 in the brief.
+9. **Cases started before 9b** have no key. Their payloads have no parts, so they replay
+   untouched; an activity failing in one would stop with "there is no key", since its failure is
+   encrypted. No such case exists outside tests: accepted.
+
+### How it works
+
+**`Sensitive`** (`core/sensitive.py`): a frozen dataclass holding `value`, with `‹sensitive›` as
+its text. `core`, because plans hold it too. `unwrapped(values)` gives the plain values;
+`reads_sensitive(expression, values)` says whether an expression reads a wrapped value.
+
+**In the case.** The opening and a form wrap the values of sensitive fields, unwrap the others,
+and refuse an unwrapped value for a sensitive field. `checked_inputs` evaluates on unwrapped
+values, then wraps each input whose expression read a wrapped one; it is in `core`, so plans get
+the same rule. A `workflow` step's input reading one fails the step. Conditions and approvals'
+`when` read unwrapped values. `case_view` writes values through `str`, so a sensitive line reads
+`‹sensitive›`; a `shown` line likewise. In a plan, a field given a sensitive value stays
+sensitive for the run: a form writing it is wrapped.
+
+**Crossing Temporal.** `ExactJSON` writes a `Sensitive` as `{"‹sensitive›": n}` and its value's
+exact JSON as the metadata entry `sensitive/<n>`; it reads them back the same way, and refuses an
+`encrypted/<n>` part (the payload wasn't decoded) and a dict of its own with the key
+`‹sensitive›`. The codec turns each `sensitive/<n>` into `encrypted/<n>`: a fresh 12-byte nonce,
+then AES-GCM under the case's key, with the case's ID as associated data; and back. A payload with
+no part passes untouched, with no key asked for. The failure converter extends Temporal's
+`DefaultFailureConverter(encode_common_attributes=True)`, writing the message and stack trace as
+`Sensitive`. `data_converter(keys)` puts the three together; `require_codec` refuses a client or
+worker without it, as `require_exact_numbers` does.
+
+**Keys.** `KeyProvider`: `create(case)` makes a 256-bit key and refuses a case that had one;
+`key(case)` gives it or refuses. `FileKeys(path)` keeps them in a JSON file (development only).
+`start_case` and `start_plan` refuse an ID with `/`, then create the key, then start.
+
+**The activity side.** `as_activity` unwraps its inputs before calling the implementation, so
+the contract's own check and the implementation see plain values.
+
+### Where the code goes
+
+- `core/sensitive.py` (new): `Sensitive`, `unwrapped`, `reads_sensitive`.
+- `core/before_activity.py`: inputs reading a sensitive value are wrapped.
+- `core/interpreter.py`: a plan's fields given wrapped stay wrapped; an activity's failure reads
+  `‹sensitive›`.
+- `case/definition.py`: `sensitive` on `CaseField`, needing `visible_to`.
+- `case/runtime.py`, `case/answers.py`: wrapping at the opening and in forms, the plain-value
+  refusal, the workflow step refusal.
+- `case/visibility.py`: `values` keep the wrapper.
+- `case/memory.py`, `testing.py`: `run_case` and `run_plan` wrap at their boundary; an
+  activity's failure reads `‹sensitive›`.
+- `tooling/keys.py` (new): `KeyProvider`, `FileKeys`.
+- `temporal/converter.py`: parts; `data_converter(keys)`, `require_codec`.
+- `temporal/codec.py` (new): the codec and the failure converter.
+- `temporal/cases.py`, `client.py`, `workflow.py`, `activities.py`, `worker.py`: keys at the
+  start, IDs without `/`, form values wrapped, messages shown `‹sensitive›`, inputs unwrapped.
+- `pyproject.toml`, `uv.lock`: `cryptography`.
+
+### Not in 9b
+
+- Forgetting and destroying a key (9c); fresh facts (9d).
+- Sensitive outputs declared by a contract; a production key provider (Vault, KMS) and a codec
+  server for the Temporal UI (after v1.0); the audit export (after layer 15).
+- The static check that a sensitive value can't reach a workflow step (case validation, layer
+  10); this runtime refusal depends on nothing it does.
+
+### Seams the tests use
+
+- `parse_case`; `run_case(...)` and `CaseRun.view(roles=)`, `run_plan`, their histories.
+- `Sensitive`; `FileKeys` (`create`, `key`).
+- `data_converter(keys)` and its `encode`, `decode`, `encode_failure`, `decode_failure`, given a
+  serialization context, for the converter and codec on their own.
+- On Temporal's test server: `start_case`, `answer`, `view`, `report`, `start_plan`; the
+  workflow handle's `fetch_history()` (events as stored, still encoded) for the raw bytes; the
+  `Replayer`.
+- The guides' examples, run as written, and each new row of their refusal tables.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **Declaring a sensitive field.** Negative: a sensitive field without `visible_to` is refused;
+   `str` and `repr` of a `Sensitive` give `‹sensitive›`. Then the guide's view: the line reads
+   `‹sensitive›`, the value goes to `claims-sensitive` only.
+1. **At the opening and in forms.** Negative: an unwrapped value for a sensitive field, at the
+   opening and in a form, is refused; a form value of the wrong type is refused without quoting
+   it. Then a form wraps it, and a wrapped value for a field that isn't sensitive is unwrapped.
+2. **Into steps.** Negative: a sensitive value given to a workflow step fails the step. Then an
+   input reading it (`var` and `cat`) is wrapped, the activity gets the plain value, a condition
+   reads it, a plan step's field carries it, and a `shown` line of a sensitive reference reads
+   `‹sensitive›`.
+3. **An activity's own message.** Negative: an activity failing with a message that quotes the
+   value, in a case and in a plan: the history reads `failed: ‹sensitive›`. Layer 6's and 8's
+   tests that expected the message change with it.
+4. **Keys.** Negative: a second `create` for a case, `key` for a case without one, and an ID with
+   `/` at `start_case` and `start_plan` are refused. Then a key is made and read back.
+5. **The converter and the codec.** Negative: a client without the codec is refused; a part with
+   no key, with no workflow ID, or damaged is refused, never passed on; a payload whose parts
+   weren't decoded is refused by the converter. Then a value written and read back is the same
+   `Sensitive`, its part's bytes hold no plain text, a child's ID finds its case's key, and a
+   payload without parts is untouched.
+6. **No plain text in history** (the curriculum's negative test). A planted `national_id`, sought
+   in the raw bytes of fetched histories and their JSON export: at the opening, in a form refused
+   for its type, across a continue-as-new (both runs), into a child plan (the parent's events and
+   the child's whole history), and in an activity's failure quoting it. Each seen failing on
+   today's converter first. Then `view` gives the value to `claims-sensitive` on Temporal.
+7. **Replay.** Negative: a history replayed with a key provider missing its key fails. Then it
+   replays with the key, and a history written before 9b (no parts) replays with the codec.
+8. **The guides and the promises.**
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+Drafted before building, with the tests named in advance; checked against the real tests before
+the pull request is opened. `S` is `tests/test_sensitive.py` (new), `TS`
+`tests/test_temporal_sensitive.py` (new), `I` `tests/test_interpreter.py`.
+
+| Promise | Test |
+|---|---|
+| A sensitive field must list `visible_to` | S `test_a_sensitive_field_names_who_sees_it` |
+| A sensitive value's text is `‹sensitive›`, in `str` and `repr` | S `test_a_sensitive_value_never_prints` |
+| The view gives a sensitive value to the roles its field lists only; its line reads `‹sensitive›` for everyone | S `test_who_sees_a_sensitive_value`, `test_the_guides_examples_run_as_written` |
+| An unwrapped value for a sensitive field is refused, at the opening and in a form | S `test_a_plain_sensitive_value_is_refused` |
+| A form value of the wrong type for a sensitive field is refused naming its kind, never its value | S `test_a_refused_sensitive_answer_names_only_its_kind` |
+| A form wraps a sensitive field's value and unwraps any other field's | S `test_a_form_keeps_wrapped_only_sensitive_values` |
+| An input reading a sensitive value is wrapped; the activity gets the plain value; a condition reads it | S `test_an_input_from_a_sensitive_value_stays_sensitive`; I `test_a_plan_input_from_a_sensitive_value_stays_sensitive` |
+| A sensitive value given to a workflow step fails the step before it starts | S `test_a_workflow_step_is_never_given_a_sensitive_value` |
+| A `shown` line for a sensitive reference reads `‹sensitive›` | S `test_showing_a_sensitive_reference_writes_no_reference` |
+| An activity's own message is never recorded, in a case or a plan | S `test_an_activitys_message_is_never_recorded`; I `test_a_plan_records_no_activity_message` |
+| A key is made once per case; a case without one has none to give | TS `test_a_key_is_made_once` |
+| A case or plan run ID with `/` is refused | TS `test_an_id_with_a_slash_is_refused` |
+| A client or worker without the codec is refused | TS `test_a_client_without_the_codec_is_refused` |
+| Each sensitive value crosses in its own part, encrypted with its case's key (a child uses its case's), and comes back the same; the rest stays readable | TS `test_a_sensitive_value_crosses_encrypted`, `test_a_child_uses_its_cases_key` |
+| A part the codec can't encrypt or decrypt (no key, no workflow ID, damaged, not decoded) is an error, never plain text | TS `test_the_codec_fails_closed` |
+| A payload without parts passes untouched, without a key | TS `test_a_payload_without_parts_needs_no_key` |
+| Every failure's message and stack trace crosses as sensitive parts | TS `test_a_failure_crosses_encrypted` |
+| No sensitive value is in plain text in a case's history or its export: opening, refused form, continue-as-new, child plan, activity failure | TS `test_no_sensitive_value_in_plain_text_in_history` |
+| On Temporal the view gives the value to the roles its field lists | TS `test_the_view_on_temporal_decrypts_for_who_may_see` |
+| A history replays with its key, fails without it, and one written before 9b replays with the codec | TS `test_replay_needs_the_key`, `test_a_history_from_before_9b_replays` |
+| The guides' refusal rows are what the engine says | S `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |

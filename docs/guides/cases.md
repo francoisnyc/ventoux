@@ -493,7 +493,8 @@ await worker.run()
 
 The client opens a case with its first values, answers it, and reads how it is going. The case's
 ID is the case: `refund-A-1001` names it for as long as it lives, and opening a second case with
-the same ID is refused.
+the same ID is refused. An ID has no `/`, and opening a case makes its key: the client connects
+with `data_converter(keys)`, as the case data guide shows.
 
 ```python
 from decimal import Decimal
@@ -540,8 +541,9 @@ What changes from memory, and what doesn't:
 
 - **Activities are retried as their contract says.** Its retry policy and timeouts are the ones
   Temporal uses; a declared outcome is never retried. An activity still failing after its
-  retries fails the step, and the case needs attention; every attempt, and an operator's retry,
-  sends the same key.
+  retries fails the step, and the case needs attention (`pay#1: payments.refund@2 failed:
+  ‹sensitive›`: what it said stays encrypted in Temporal, the case data guide says why); every
+  attempt, and an operator's retry, sends the same key.
 - **A plan step is a child workflow,** with the ID `<case ID>/<entry>`: `refund-A-1001/settle#1`.
   Its waits are answered on the child, as the plans guide shows; the case's history shows
   the step started (`started settle#1: plan …`), and the case waits for it until the plan ends.
