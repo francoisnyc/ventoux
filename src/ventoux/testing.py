@@ -342,7 +342,12 @@ def run_case(
         entry, outcome, who, *form = item
         # The test plays the API: it states who answered and their roles.
         roles = frozenset(people.get(who, ()))
-        events.append(Answered(entry, outcome, who, roles, as_json(form[0]) if form else None))
+        # Every value of a form wrapped, as the client sends it: it can't tell which fields are
+        # sensitive (brief, D31).
+        given = (
+            {name: Sensitive(value) for name, value in as_json(form[0]).items()} if form else None
+        )
+        events.append(Answered(entry, outcome, who, roles, given))
     implementations = {**FAKES, **activities}
     runner = plan_runner(plans or {}, plan_answers or {}, implementations, people)
     bound = {**WORKFLOW_FAKES, **workflows}

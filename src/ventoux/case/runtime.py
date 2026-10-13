@@ -75,7 +75,7 @@ from ventoux.core.plan import APPROVE
 from ventoux.core.provenance import NoSources, Sourced, provenance
 from ventoux.core.references import unregistered
 from ventoux.core.roles import role_that_counts
-from ventoux.core.sensitive import plain
+from ventoux.core.sensitive import Sensitive, plain
 
 # Where the case file's first values came from when a system opened the case (brief, D12).
 OPENER = "system:opener"
@@ -161,6 +161,7 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
     if event.by is not None and (wrong := identifier_problem(event.by)) is not None:
         raise CaseRefused(wrong)
     refuse_to_open(case, catalog, event.file)
+    refuse_unless_wrapped(case, event.file, CaseRefused)
     state.opened_by = event.by
     origin = OPENER if event.by is None else f"person:{event.by}"
     for name, value in event.file.items():
@@ -189,6 +190,27 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
             problems.append(f"{name} is {a_type(declared)}, and the opening gives {a_kind(value)}")
     if problems:
         raise CaseRefused("\n".join(problems))
+
+
+def refuse_unless_wrapped(
+    case: CaseDefinition,
+    values: Mapping[str, object],
+    refused: type[CaseRefused] | type[AnswerRefused],
+) -> None:
+    """Refuse a sensitive field's value that arrived unwrapped: it has already crossed in plain
+    text, so the case says so loudly. Checked here, on nothing the client did (brief, D31)."""
+    for name, value in values.items():
+        if name in case.fields and case.fields[name].sensitive and not isinstance(value, Sensitive):
+            raise refused(
+                f"{name} is sensitive and was given in plain text: send it through "
+                "ventoux.temporal.cases, which encrypts it"
+            )
+
+
+def kept(case: CaseDefinition, name: str, value: object) -> object:
+    """A form's value as the case file keeps it: wrapped for a sensitive field, plain otherwise.
+    The client wraps every value of a form, since it can't tell which are sensitive."""
+    return value if name in case.fields and case.fields[name].sensitive else plain(value)
 
 
 def set_by(case: CaseDefinition) -> dict[str, str]:
@@ -295,6 +317,7 @@ def answer_task(
     step = case.steps[run.step]
     assert isinstance(step, TaskStep)  # only a task's run is ever open
     role = judge_task(case, catalog, run.entry, run.step, step, event)
+    refuse_unless_wrapped(case, event.form or {}, AnswerRefused)
     run.status = "done"
     del state.waiting[run.entry]
     who = f"person:{event.by}"
@@ -303,7 +326,7 @@ def answer_task(
     state.sources[f"{run.step}.outcome"] = frozenset({who})
     sets = step.outcomes[event.outcome].sets
     for name in sets:
-        state.values[name] = (event.form or {})[name]
+        state.values[name] = kept(case, name, (event.form or {})[name])
         state.sources[name] = marked(case, name, who)
     setting = f", setting {listed(list(sets))}" if sets else ""
     state.history.append(f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}")

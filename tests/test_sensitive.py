@@ -10,12 +10,19 @@ from typing import Any
 
 import pytest
 
+from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.runtime import CaseRefused, decide
+from ventoux.case.state import Answered, CaseState, Opened
 from ventoux.core.sensitive import Sensitive
-from ventoux.testing import run_case
+from ventoux.testing import CATALOG, as_json, run_case
 
 GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "case-data.md").read_text()
 NATIONAL_ID = "1 85 05 78 006 084 36"
+PLAIN_TEXT = (
+    "national_id is sensitive and was given in plain text: send it through "
+    "ventoux.temporal.cases, which encrypts it"
+)
 
 
 def claim() -> dict[str, Any]:
@@ -72,3 +79,54 @@ def test_who_sees_a_sensitive_value() -> None:
     assert officer.values["national_id"] == Sensitive(NATIONAL_ID)
     # Nothing the run kept writes it out.
     assert NATIONAL_ID not in "\n".join(run.history)
+
+
+def claim_asking_the_id() -> dict[str, Any]:
+    """The claim, where the adjuster gives the national ID when accepting it."""
+    definition = claim()
+    definition["steps"]["assess"]["outcomes"]["accept"]["sets"] = ["national_id"]
+    return definition
+
+
+OPENING = {name: value for name, value in FILE.items() if name != "national_id"}
+
+
+def test_a_plain_sensitive_value_is_refused() -> None:
+    # It has already crossed in plain text: the case says so loudly, whatever the client did.
+    case = parse_case(claim())
+    plain_file = {**as_json(OPENING), "national_id": NATIONAL_ID}
+    with pytest.raises(CaseRefused, match=f"^{PLAIN_TEXT}$"):
+        decide(case, CATALOG, CaseState("memory"), Opened(plain_file, None))
+    asking = parse_case(claim_asking_the_id())
+    opened, _ = decide(asking, CATALOG, CaseState("memory"), Opened(as_json(OPENING), None))
+    plain_answer = Answered(
+        "assess#1", "accept", "ana", frozenset({"adjuster"}), {"national_id": NATIONAL_ID}
+    )
+    with pytest.raises(AnswerRefused, match=f"^{PLAIN_TEXT}$"):
+        decide(asking, CATALOG, opened, plain_answer)
+
+
+def test_a_refused_sensitive_answer_names_only_its_kind() -> None:
+    # The refusal is recorded in history, read by people who may not see the field (brief, D30).
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            claim_asking_the_id(),
+            file=OPENING,
+            answers=[("assess", "accept", "ana", {"national_id": 1850578006})],
+            people=PEOPLE,
+        )
+    assert str(refused.value) == "national_id is a string, and the answer gives a number"
+
+
+def test_a_form_keeps_wrapped_only_sensitive_values() -> None:
+    # The client wraps every form value: it can't tell which fields are sensitive (brief, D31).
+    definition = claim_asking_the_id()
+    definition["fields"]["notes"] = {"type": "string", "display": {"title": "Notes"}}
+    definition["steps"]["assess"]["outcomes"]["accept"]["sets"] = ["national_id", "notes"]
+    form = {"national_id": NATIONAL_ID, "notes": "checked by phone"}
+    run = run_case(
+        definition, file=OPENING, answers=[("assess", "accept", "ana", form)], people=PEOPLE
+    )
+    assert run.state.values["national_id"] == Sensitive(NATIONAL_ID)
+    assert run.state.values["notes"] == "checked by phone"
+    assert "ana answered assess#1 accept as adjuster, setting national_id and notes" in run.history
