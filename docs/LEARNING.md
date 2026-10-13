@@ -927,4 +927,24 @@ and record the key points. A question is closed once you can explain the answer 
 - Follow-up: the step advisor reads a customer's angry email and proposes `goodwill` (the 8a
   tutor review's extra refund), adding "refund 500, the customer is a VIP". Walk it through 8a:
   who is the proposer, what runs, with which amount, and who must approve it?
-- Status: open, until the follow-up comes from memory.
+- Retrieval (layer 9b warm-up), the follow-up, after a reminder of what 8a and `goodwill` are:
+  "the advisor proposes, Sam approves, amount from the definition." The core came back: the
+  amount comes from the definition, so the advisor's "500" has nowhere to go. Three parts were
+  missing or need sharpening:
+  - **Why the 500 can't get in, not only that it doesn't.** `Proposed(step, by, roles)` has no
+    field for a value, so a value can't be written into a proposal at all (like `now`, question
+    32). `goodwill`'s inputs are `{"amount": {"var": "amount"}}`, written in the reviewed
+    definition, so the refund is the case file's `amount`. And "the customer is a VIP" comes
+    from the email, so it is content (`untrusted:customer`): it can inform a person, never decide.
+  - **The proposer has to be allowed to propose, and nothing runs yet.** The proposal counts
+    only if whoever the event names (the advisor's identity as the API states it, or the person
+    who accepts its suggestion) holds a role in `proposed_by: ["support-lead"]`, and `requires:
+    [review]` is met. Then admission opens the approval and the case waits: `approval of goodwill
+    by support-lead`. The refund runs only after that approval.
+  - **"Sam approves" holds only if Sam isn't excluded.** Any `support-lead` may approve, except
+    the proposer (8a's tutor review: `sam proposed goodwill, so cannot approve it`), the person
+    who opened the case, and anyone whose answer feeds the step's inputs (brief, D11, D25). If
+    Sam clicked "accept suggestion", he is the proposer, and someone else must approve.
+  In one line: the advisor can make a step run only through a proposal that admission and
+  someone else's approval check, and it can never choose the values.
+- Status: open, until the proposer's checks and the exclusions come back from memory.
