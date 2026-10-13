@@ -286,3 +286,20 @@ def test_showing_a_sensitive_reference_writes_no_reference() -> None:
     run = run_case(definition, file=FILE, answers=[shown("customer_id", "ana")], people=PEOPLE)
     assert "ana was shown customer_id (crm ‹sensitive›)" in run.history
     assert "cus-7" not in "\n".join(run.history)
+
+
+def test_an_activitys_message_is_never_recorded() -> None:
+    # Ventoux can't know what an activity says: a CRM's error may quote the ID it was given.
+    def failing(inputs: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError(f"no order {inputs['order_id']}")
+
+    for given in ({"var": "national_id"}, {"var": "policy_id"}):  # sensitive or not, the same
+        run = run_case(
+            with_steps(check=lookup(given)),
+            file=FILE,
+            answers=[],
+            people=PEOPLE,
+            activities={"orders.lookup@1": failing},
+        )
+        assert run.needs_attention == ["check#1: orders.lookup@1 failed: ‹sensitive›"]
+        assert "no order" not in "\n".join(run.history)

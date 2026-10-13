@@ -250,7 +250,7 @@ def down_once(inputs):
 failed = run_case(refund, file={"order_id": "ord-1", "amount": 40},
                   answers=[("review", "approve", "ana", {"approved_amount": 40})],
                   people=PEOPLE, activities={"payments.refund@2": down_once})
-assert failed.needs_attention == ["pay#1: payments.refund@2 failed: provider unreachable"]
+assert failed.needs_attention == ["pay#1: payments.refund@2 failed: ‹sensitive›"]
 assert not failed.closed
 ```
 

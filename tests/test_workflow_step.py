@@ -236,7 +236,7 @@ def test_a_failed_workflow_step_is_retried_with_the_same_key() -> None:
         workflows={"accounts.open@1": down_once},
     )
     assert failed.needs_attention == [
-        "account#1: accounts.open@1 failed: accounts system unreachable"
+        "account#1: accounts.open@1 failed: ‹sensitive›"
     ]
     keys.clear()
     retried = run_case(

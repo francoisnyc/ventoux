@@ -270,9 +270,10 @@ async def run_activity(
             ) from None
         return Gave(contract.reference, outcome.name, None)
     # Every other failure, whatever its kind: none is read as an outcome or ignored; a person looks
-    # at it (brief, D17).
+    # at it (brief, D17). What it said is never recorded: it may quote a sensitive value, and
+    # Ventoux can't tell (brief, D31). It reads `‹sensitive›`.
     except Exception as error:  # noqa: BLE001 (catching every kind is the rule here)
-        raise Stop(f"{contract.reference} failed: {error}") from None
+        raise Stop(f"{contract.reference} failed: {Sensitive(str(error))}") from None
     try:
         # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
         contract.output.model_validate(output)

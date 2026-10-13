@@ -26,7 +26,7 @@ from ventoux.case.state import (
 from ventoux.case.visibility import CaseView, case_view
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome
-from ventoux.core.sensitive import unwrapped
+from ventoux.core.sensitive import Sensitive, unwrapped
 
 # An activity's code, or a workflow's in memory: its inputs in, its output back.
 Activity = Callable[[dict[str, Any]], dict[str, Any]]
@@ -160,4 +160,5 @@ def outcome_of(
     # Any error, whatever its kind: none is ignored; a person looks at it (brief, D17).
     except Exception as error:  # noqa: BLE001 (catching every kind is the rule here)
         called = command.workflow if isinstance(command, StartWorkflow) else command.activity
-        return Failed(command.entry, f"{called} failed: {error}")
+        # What it said is never recorded: it may quote a sensitive value (brief, D31).
+        return Failed(command.entry, f"{called} failed: {Sensitive(str(error))}")

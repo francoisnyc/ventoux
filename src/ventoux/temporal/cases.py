@@ -54,6 +54,7 @@ with workflow.unsafe.imports_passed_through():
     )
     from ventoux.case.visibility import CaseView, case_view
     from ventoux.core.catalog import Catalog
+    from ventoux.core.sensitive import Sensitive
     from ventoux.core.workflow_contract import WorkflowContract
     from ventoux.temporal.activities import OUTCOME
     from ventoux.temporal.bindings import Binding
@@ -367,7 +368,10 @@ class CaseWorkflow:
                 self.inbox.append(Completed(command.entry, {}, cause.message))
                 return
             said = cause.message if isinstance(cause, FailureError) else str(error)
-            self.inbox.append(Failed(command.entry, f"{command.activity} failed: {said}"))
+            # Never recorded: it may quote a sensitive value (brief, D31).
+            self.inbox.append(
+                Failed(command.entry, f"{command.activity} failed: {Sensitive(said)}")
+            )
             return
         self.inbox.append(Completed(command.entry, output))
 
@@ -378,7 +382,7 @@ def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWor
     if isinstance(cause, TemporalTimeout):
         return f"{reference} didn't finish within its timeout of {contract.timeout}s"
     said = cause.message if isinstance(cause, FailureError) else str(error)
-    return f"{reference} failed: {said}"
+    return f"{reference} failed: {Sensitive(said)}"  # never recorded (brief, D31)
 
 
 def names_its_entry(event: Event, state: CaseState) -> None:

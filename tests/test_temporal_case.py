@@ -351,7 +351,7 @@ def test_an_activity_failing_past_its_retries_needs_attention() -> None:
 
     now = skipping(scenario, {**FAKES, "payments.refund@2": down})
     assert len(attempts) == 5
-    assert now.needs_attention == ["pay#1: payments.refund@2 failed: provider unreachable"]
+    assert now.needs_attention == ["pay#1: payments.refund@2 failed: ‹sensitive›"]
     assert now.status == "open"
 
 
@@ -601,7 +601,7 @@ def test_a_stopped_child_plan_is_retried_with_the_same_keys() -> None:
         scenario, {**FAKES, "payments.refund@2": flaky}, cases=CasesWithPlans
     )
     assert failed.needs_attention == [
-        "settle#1: refund-order@1 stopped: payments.refund@2 failed: provider unreachable"
+        "settle#1: refund-order@1 stopped: payments.refund@2 failed: ‹sensitive›"
     ]
     assert keys == [f"refund-1/{run_id}/settle#1/pay#1"] * 6  # five attempts, then the retry's
     assert "omar retried settle#1 as operations" in ended.history
@@ -889,7 +889,7 @@ def test_the_guides_refusals_on_temporal_are_what_the_engine_records() -> None:
     for line in shown:
         assert line in now.history
     assert now.status == "open"
-    assert now.needs_attention == ["pay#1: payments.refund@2 failed: provider unreachable"]
+    assert now.needs_attention == ["pay#1: payments.refund@2 failed: ‹sensitive›"]
 
 
 def test_the_guides_client_example_runs_as_written() -> None:
@@ -1129,7 +1129,7 @@ def test_an_activity_failing_in_a_stopped_plan_flags_the_case() -> None:
 
     ended = skipping(scenario, {**FAKES, "payments.refund@2": refund}, cases=CasesWithLetters)
     assert ended.flags == [
-        "settle#1: payments.refund@2 failed after the close was requested: provider unreachable"
+        "settle#1: payments.refund@2 failed after the close was requested: ‹sensitive›"
     ]
     assert ended.needs_attention == []
     assert ended.history[-1] == "closed: duplicate, by ana"

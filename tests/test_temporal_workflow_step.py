@@ -216,7 +216,7 @@ def test_a_failing_workflow_needs_attention() -> None:
         return await reported(case, lambda now: bool(now.needs_attention))
 
     now = on_temporal(scenario)
-    assert now.needs_attention == ["kyc#1: kyc.check@1 failed: documents unreadable"]
+    assert now.needs_attention == ["kyc#1: kyc.check@1 failed: ‹sensitive›"]
 
 
 def test_a_workflow_past_its_timeout_needs_attention() -> None:

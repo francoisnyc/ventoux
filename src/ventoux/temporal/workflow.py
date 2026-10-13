@@ -29,6 +29,7 @@ with workflow.unsafe.imports_passed_through():
     )
     from ventoux.core.plan import PlanInvalid, parse_plan
     from ventoux.core.provenance import sourced
+    from ventoux.core.sensitive import Sensitive
     from ventoux.temporal.activities import OUTCOME
     from ventoux.temporal.options import activity_options
 
@@ -222,8 +223,8 @@ class PlanWorkflow:
                 reference, inputs, **activity_options(contract), result_type=dict
             )
         except ActivityError as error:
-            # Past its retries: the interpreter stops the step (brief, D17), and its reason says
-            # what the activity itself said, not "Activity task failed".
+            # Past its retries: the interpreter stops the step (brief, D17). What the activity
+            # said is never recorded: its reason reads `‹sensitive›` (brief, D31).
             cause = error.cause
             if isinstance(cause, ApplicationError) and cause.type == OUTCOME:
                 self.ended_after_stop(f"{reference} completed")
@@ -239,7 +240,8 @@ class PlanWorkflow:
         moved money (brief, D10), and the case flags it, as it flags a step (brief, D28)."""
         if self.stopping:
             line = f"{what} after the close was requested"
-            self.after_stop.append(line if said is None else f"{line}: {said}")
+            # What the activity said is never recorded: it may quote a sensitive value (brief, D31).
+            self.after_stop.append(line if said is None else f"{line}: {Sensitive(said)}")
 
     async def wait(
         self, state: str, entry: str, outcomes: tuple[str, ...], timeout: str | None

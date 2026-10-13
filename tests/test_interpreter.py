@@ -105,7 +105,7 @@ def failing(inputs: dict[str, Any]) -> dict[str, Any]:
 def test_an_activity_failure_stops_the_step() -> None:
     run = run_plan(looking_up(), fields=ORDER, answers=[], activities={"orders.lookup@1": failing})
     assert run.status == "stopped"
-    assert run.reason == "orders.lookup@1 failed: the orders system is down"
+    assert run.reason == "orders.lookup@1 failed: ‹sensitive›"
 
 
 def lines(run: PlanRun) -> list[str]:
@@ -776,3 +776,19 @@ def test_a_plan_input_from_a_sensitive_value_stays_sensitive() -> None:
     assert note_only.inputs["order_id"] == "/2"
     assert given == [{"order_id": f"{NATIONAL_ID}/2"}, {"order_id": "/2"}]
     assert NATIONAL_ID not in "\n".join(map(str, run.history))
+
+
+def test_a_plan_records_no_activity_message() -> None:
+    def failing(inputs: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError(f"no order {inputs['order_id']}")
+
+    run = run_plan(
+        checking_an_id(),
+        fields={"id": sourced(Sensitive(NATIONAL_ID), "system:opener")},
+        answers=[("confirm", "confirm", "ana", {"note": "/2"})],
+        activities={**FAKES, "orders.lookup@1": failing},
+        people={"ana": ["support"]},
+    )
+    assert run.status == "stopped"
+    assert run.reason == "orders.lookup@1 failed: ‹sensitive›"
+    assert "no order" not in "\n".join(map(str, run.history))
