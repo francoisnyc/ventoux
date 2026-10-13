@@ -75,6 +75,7 @@ from ventoux.core.plan import APPROVE
 from ventoux.core.provenance import NoSources, Sourced, provenance
 from ventoux.core.references import unregistered
 from ventoux.core.roles import role_that_counts
+from ventoux.core.sensitive import plain
 
 # Where the case file's first values came from when a system opened the case (brief, D12).
 OPENER = "system:opener"
@@ -183,7 +184,7 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
             problems.append(
                 f"{name} is set by a person in {setters[name]}, never given at the opening"
             )
-        elif not fits(value, declared := case.fields[name].declared):
+        elif not fits(plain(value), declared := case.fields[name].declared):
             # The type, never the value: refusals reach people who may not see it (brief, D30).
             problems.append(f"{name} is {a_type(declared)}, and the opening gives {a_kind(value)}")
     if problems:

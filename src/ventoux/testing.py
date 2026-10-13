@@ -13,7 +13,7 @@ from temporalio import workflow
 from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused
-from ventoux.case.definition import parse_case
+from ventoux.case.definition import CaseDefinition, parse_case
 from ventoux.case.memory import Activity, CaseRun, Finish, PlanRunner, run_case_in_memory
 from ventoux.case.plan_step import PlanNotSupplied, supplied
 from ventoux.case.runtime import CaseRefused
@@ -38,6 +38,7 @@ from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
 from ventoux.core.references import reference
+from ventoux.core.sensitive import Sensitive
 from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.contract_check import check_workflow_contract
@@ -321,7 +322,7 @@ def run_case(
     workflow contract to a function from its inputs to its output, by reference, replacing the
     fake workflows; a workflow contract with none is not bound, and its step fails."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
-    events: list[Event | Finish] = [Opened(as_json(file), opened_by)]
+    events: list[Event | Finish] = [Opened(wrapped(case, as_json(file)), opened_by)]
     for item in answers:
         if isinstance(item, Finish):
             events.append(item)
@@ -476,6 +477,14 @@ def as_json(values: Mapping[str, Any]) -> dict[str, Any]:
     return {
         name: Decimal(value) if isinstance(value, int) and not isinstance(value, bool) else value
         for name, value in values.items()
+    }
+
+
+def wrapped(case: CaseDefinition, file: Mapping[str, Any]) -> dict[str, Any]:
+    """`file` as the client sends it: each sensitive field's value wrapped (brief, D31)."""
+    return {
+        name: Sensitive(value) if name in case.fields and case.fields[name].sensitive else value
+        for name, value in file.items()
     }
 
 

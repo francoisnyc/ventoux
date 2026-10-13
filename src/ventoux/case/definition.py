@@ -55,6 +55,8 @@ class CaseField(Shape):
     source: Source | None = None  # `untrusted:<label>`, never trusted (brief, D12)
     # Who may see it, narrowing the default: anyone holding a role the case names (brief, D30).
     visible_to: Roles | None = None
+    # Personal data a decision needs: encrypted with the case's key, never written out (brief, D31).
+    sensitive: bool = False
 
     # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
     @model_validator(mode="before")
@@ -63,7 +65,7 @@ class CaseField(Shape):
         """The field's type (`type` and what goes with it) gathered under `declared`."""
         if not isinstance(data, dict):
             return data
-        around = ("display", "source", "visible_to")
+        around = ("display", "source", "visible_to", "sensitive")
         declared = {key: value for key, value in data.items() if key not in around}
         return {"declared": declared} | {key: data[key] for key in around if key in data}
 
@@ -233,6 +235,13 @@ class CaseDefinition(Shape):
             problems.append(
                 "stays_open: a case that stays open names close_reasons, or nobody could close it"
             )
+        # A sensitive value is seen only by the roles its field lists (brief, D16), so it lists
+        # them: no default reaches it.
+        problems += [
+            f"{name} is sensitive, so it must say who may see it: add visible_to"
+            for name, field in self.fields.items()
+            if field.sensitive and field.visible_to is None
+        ]
         for name, step in self.steps.items():
             problems += step_problems(f"steps.{name}", step, self)
         if problems:
