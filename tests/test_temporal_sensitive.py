@@ -6,6 +6,7 @@ See docs/layers/09-case-data.md (9b) and docs/guides/case-data.md ("On Temporal"
 import asyncio
 import dataclasses
 from collections.abc import Awaitable, Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar
@@ -23,9 +24,12 @@ from temporalio.converter import (
 )
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import Replayer, Worker
 
 from ventoux.case.visibility import CaseView
+from ventoux.temporal.activities import plan_activities
 from ventoux.temporal.cases import (
+    CaseAnswer,
     CaseReport,
     CaseStart,
     CaseWorkflow,
@@ -36,12 +40,12 @@ from ventoux.temporal.cases import (
 )
 from ventoux.temporal.client import start_plan
 from ventoux.temporal.converter import ExactPayloadConverter, data_converter
-from ventoux.temporal.worker import case_worker
+from ventoux.temporal.worker import SANDBOX, case_worker
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it
 # uses from the development setup is passed through, imported once and shared (as in 8c's tests).
 with workflow.unsafe.imports_passed_through():
-    from test_sensitive import FILE, claim
+    from test_sensitive import FILE, OPENING, claim
 
     from ventoux.core.sensitive import Sensitive
     from ventoux.testing import CATALOG, FAKES, DevelopmentPlans, as_json, development_converter
@@ -423,3 +427,81 @@ def test_an_id_with_a_slash_is_refused() -> None:
             await start_plan(client, DevelopmentPlans, CHECK_ID_PLAN, {}, "check/1", QUEUE)
 
     on_temporal(scenario)
+
+
+# --- Replay ---
+
+
+def sensitive_history(converter: DataConverter) -> WorkflowHistory:
+    """The latest run of a case holding a national ID and a tax ID, its parts sealed by
+    `converter`: it continued as new, ran a plan and recorded failures."""
+
+    async def scenario(client: Client) -> WorkflowHistory:
+        case = await start_case(
+            client, SensitiveCases, sensitive_claim(), as_json(FILE), "claim-7", QUEUE
+        )
+        await answer(case, "assess#1", "accept", "ana", ["adjuster"], {"tax_id": TAX_ID})
+        await reported(case, lambda now: len(now.needs_attention) == 2)
+        return await case.fetch_history()
+
+    return on_temporal(scenario, converter)
+
+
+def replay(history: WorkflowHistory, converter: DataConverter) -> None:
+    """Replay `history` as a worker would after a restart, with Ventoux's runner (brief, D31)."""
+    replayer = Replayer(
+        workflows=[SensitiveCases, DevelopmentPlans],
+        data_converter=converter,
+        workflow_runner=SANDBOX,
+    )
+    asyncio.run(replayer.replay_workflow(history))
+
+
+def test_replay_needs_the_key() -> None:
+    converter = development_converter()
+    history = sensitive_history(converter)
+    # Without the case's key, nothing sealed can be read: replay fails, never reads plain text.
+    with pytest.raises(Exception, match="no key for claim-7"):
+        replay(history, development_converter())
+    replay(history, converter)
+
+
+def test_a_history_from_before_9b_replays() -> None:
+    # A case recorded with no codec at all, as before 9b: its payloads have no parts, so the
+    # codec passes them as they are, asking for no key (brief, D31).
+    before_9b = dataclasses.replace(
+        DataConverter.default, payload_converter_class=ExactPayloadConverter
+    )
+
+    async def go() -> WorkflowHistory:
+        async with await WorkflowEnvironment.start_time_skipping(
+            data_converter=before_9b
+        ) as environment:
+            client = environment.client
+            async with Worker(
+                client,
+                task_queue=QUEUE,
+                workflows=[SensitiveCases, DevelopmentPlans],
+                activities=plan_activities(CATALOG, FAKES),
+                activity_executor=ThreadPoolExecutor(),
+                workflow_runner=SANDBOX,
+            ):
+                start = CaseStart(claim_without_the_id(), as_json(OPENING))
+                case = await client.start_workflow(
+                    SensitiveCases.run, start, id="claim-1", task_queue=QUEUE
+                )
+                await answered(lambda: case.query(SensitiveCases.report))
+                denied = CaseAnswer("assess#1", "deny", "ana", ["adjuster"])
+                await case.signal(SensitiveCases.answer, denied)
+                assert (await case.result()).status == "closed"
+                return await case.fetch_history()
+
+    history = asyncio.run(go())
+    replay(history, development_converter())
+
+
+def claim_without_the_id() -> dict[str, Any]:
+    """The guide's claim as it was before it had a sensitive field."""
+    definition = claim()
+    del definition["fields"]["national_id"]
+    return definition
