@@ -3,7 +3,9 @@
 Status: split into four parts and the eighteen choices agreed in the session, 2026-10-10 (all as
 proposed); 9a's note and its nine drafting points confirmed the same day; 9a built, slices 0–7;
 Promises checked against the tests, 2026-10-10; the tutor review's fix built test-first,
-2026-10-11. 9b's choices agreed in the session, 2026-10-13 (all as proposed).
+2026-10-11. 9b's choices agreed in the session, 2026-10-13 (all as proposed, with the key
+provider sealing and opening); 9b built, slices 0–8; Promises checked against the tests,
+2026-10-13.
 
 ## What this layer is for
 
@@ -352,9 +354,9 @@ form gives `1 85 05 78 006 084 36`.
    has no authenticated cipher (building one from `hmac` and `hashlib` is home-made
    cryptography); PyNaCl is sound but less common. Confirmed after the alternatives were weighed
    again: also PyCryptodome, calling `openssl`, and letting the key provider encrypt. Agreed
-   with it: **the key provider seals and opens; it never hands out a key.** `seal(case, data, part)` and `open(case, data, part)`, so a key never leaves the
-   provider, which is how Vault's transit engine and a cloud KMS already work (brief, D15: keys
-   kept outside Temporal). The codec holds no cryptography: it only finds the parts and hands
+   with it: **the key provider seals and opens; it never hands out a key.** `seal(case, data,
+   part)` and `open(case, data, part)`, so a key never leaves the provider, which is how Vault's
+   transit engine and a cloud KMS already work (brief, D15: keys kept outside Temporal). The codec holds no cryptography: it only finds the parts and hands
    them to the provider. `cryptography` is used in one place, the development provider
    `FileKeys`. A remote provider would be asked once per part; a data key per case, cached
    ("envelope encryption"), is the production adapter's to build, after v1.0.
@@ -493,12 +495,66 @@ Each starts with its negative test, seen failing for the right reason.
    replays with the key, and a history written before 9b (no parts) replays with the codec.
 8. **The guides and the promises.**
 
+### Decided while building
+
+- **A plan never keeps a form's value wrapped** (slice 2). The note said a form writing a plan
+  field given a sensitive value would wrap it; a plan refuses a field both given at the start
+  and set by a form, so that can't happen. A plan's form values are kept plain; its fields given
+  wrapped stay wrapped.
+- **The helpers about what an expression reads live in `core/sensitive_inputs.py`** (slice 2):
+  in `core/sensitive.py` they made a circular import with the evaluator, which unwraps a value
+  as it reads it.
+- **An approval's digest of a sensitive input is wrapped too** (slice 2, found rereading
+  `inputs_digest`): it crosses continue-as-new, and the digest of a national ID is reversed by
+  trying every one. A new promise below.
+- **The development catalog registers `claims-sensitive`** (slice 2), the guide's role, as 9a
+  registered `adjuster` and `fraud`; the plans guide's `UNKNOWN_ROLE` list gains it.
+- **An activity's message is wrapped where the message is made** (slice 3): `f"... failed:
+  {Sensitive(said)}"` reads `‹sensitive›`, in memory, the interpreter and both workflows. Nine
+  tests and the cases guide expected the message; they expect the placeholder.
+- **A second case under a used ID is refused by the key provider first** (slice 5): `a key was
+  already made for refund-1`, before Temporal's own refusal; 8c's test expects it.
+- **The sandbox made two `Sensitive` classes** (slice 5). Temporal's workflow sandbox imports a
+  module defining workflows afresh; `ventoux.testing` imports `core` and `case` at its top, so
+  their fresh copies were used in the workflow while the converter, built outside, made the
+  outside class: `plain()` didn't recognise it, and an answer was refused as `a Sensitive`.
+  Workers and replays now run with `SANDBOX` (`ventoux.temporal.worker`), passing `ventoux.core`,
+  `ventoux.case`, `ventoux.tooling` and `cryptography` through: one copy, whichever module
+  imports them first, as a deployment's own catalog module would too. `cryptography` is compiled
+  code, which can't be imported twice.
+- **Tests get fresh keys per test server** (slice 5): `development_converter()` in
+  `ventoux.testing`, since tests reuse IDs and a key is never made twice. A replay test gives the
+  recording's converter to the `Replayer`. `DATA_CONVERTER` is replaced by `data_converter(keys)`.
+- **The contract test's run has an ID without `/` and its key** (slice 5), when its client seals
+  with Ventoux's codec: its failures are sealed too.
+- **Activities on Temporal got the wrapper** (slice 6, found by the curriculum's test: a
+  failing lookup quoted `‹sensitive›`, so planting unsealed failures went unnoticed).
+  `as_activity` unwraps, as the note said it would; the test checks the code got the ID.
+- **A query asked as a case continues as new can go unanswered** (slice 6), as the cases guide
+  says: the tests ask again.
+- **The guide's refusal rows about keys and clients are checked on Temporal** (slice 8), with the
+  other rows, in `TS`.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
 Drafted before building, with the tests named in advance; checked against the real tests before
-the pull request is opened. `S` is `tests/test_sensitive.py` (new), `TS`
-`tests/test_temporal_sensitive.py` (new), `I` `tests/test_interpreter.py`.
+the pull request is opened (every test named exists, and asserts what its row claims). `S` is
+`tests/test_sensitive.py` (new), `TS` `tests/test_temporal_sensitive.py` (new), `I`
+`tests/test_interpreter.py`, `TC` `tests/test_temporal_case.py`.
+
+Seen failing before their code: the `visible_to` rule (`sensitive` not a field), the view's line
+(the value in plain text), both plain-value refusals (accepted), a form kept unwrapped, the
+workflow step, an input read as it is or computed, a condition, a plan step's field and the
+digest (each failing on the evaluator not reading a wrapped value), a plan's note kept wrapped,
+both activity messages (each quoted the ID), the key provider (no module, then the key's
+`key()` method public), the converter and codec (no `data_converter`), the activity's plain
+value on Temporal (it got the wrapper). The curriculum's test, written after the codec, was seen
+failing twice by planting: a codec that seals nothing (the ID in the opening's bytes), and
+failures left unsealed (the ID in the lookup's failure). Passed when written, their code having
+come with an earlier test: the refused answer naming its kind, the `shown` line (a wrapped value
+writes `‹sensitive›`), the view on Temporal, a client without the codec, IDs with `/`, both
+replay tests, and the guide's example and refusal rows.
 
 | Promise | Test |
 |---|---|
@@ -508,18 +564,20 @@ the pull request is opened. `S` is `tests/test_sensitive.py` (new), `TS`
 | An unwrapped value for a sensitive field is refused, at the opening and in a form | S `test_a_plain_sensitive_value_is_refused` |
 | A form value of the wrong type for a sensitive field is refused naming its kind, never its value | S `test_a_refused_sensitive_answer_names_only_its_kind` |
 | A form wraps a sensitive field's value and unwraps any other field's | S `test_a_form_keeps_wrapped_only_sensitive_values` |
-| An input reading a sensitive value is wrapped; the activity gets the plain value; a condition reads it | S `test_an_input_from_a_sensitive_value_stays_sensitive`; I `test_a_plan_input_from_a_sensitive_value_stays_sensitive` |
+| An input reading a sensitive value is wrapped; the activity's code gets the plain value, in memory and on Temporal; a condition reads it | S `test_an_input_from_a_sensitive_value_stays_sensitive`; I `test_a_plan_input_from_a_sensitive_value_stays_sensitive`; TS `test_no_sensitive_value_in_plain_text_in_history` |
+| A plan step's field read from a sensitive value carries it into the plan; a plan keeps its form values plain | S `test_a_plan_step_carries_a_sensitive_value`; I `test_a_plan_input_from_a_sensitive_value_stays_sensitive` |
+| An approval's digest of a sensitive input is itself sensitive | S `test_an_approval_of_a_sensitive_input_keeps_its_digest_sensitive` |
 | A sensitive value given to a workflow step fails the step before it starts | S `test_a_workflow_step_is_never_given_a_sensitive_value` |
 | A `shown` line for a sensitive reference reads `‹sensitive›` | S `test_showing_a_sensitive_reference_writes_no_reference` |
 | An activity's own message is never recorded, in a case or a plan | S `test_an_activitys_message_is_never_recorded`; I `test_a_plan_records_no_activity_message` |
-| A key is made once per case and never leaves the provider; a case without one can't seal or open; a part opens only for its case and place | TS `test_a_key_is_made_once`, `test_a_part_opens_only_where_it_was_sealed` |
+| A key is made once per case and never leaves the provider; a case without one can't seal or open; a part opens only for its case and place; a second case under a used ID is refused | TS `test_a_key_is_made_once`, `test_a_part_opens_only_where_it_was_sealed`; TC `test_a_case_id_opens_one_case` |
 | A case or plan run ID with `/` is refused | TS `test_an_id_with_a_slash_is_refused` |
 | A client or worker without the codec is refused | TS `test_a_client_without_the_codec_is_refused` |
 | Each sensitive value crosses in its own part, encrypted with its case's key (a child uses its case's), and comes back the same; the rest stays readable | TS `test_a_sensitive_value_crosses_encrypted`, `test_a_child_uses_its_cases_key` |
-| A part the codec can't encrypt or decrypt (no key, no workflow ID, damaged, not decoded) is an error, never plain text | TS `test_the_codec_fails_closed` |
+| A part the codec can't encrypt or decrypt (no key, no workflow ID, damaged, not decoded) is an error, never plain text; data can't forge the converter's marker | TS `test_the_codec_fails_closed` |
 | A payload without parts passes untouched, without a key | TS `test_a_payload_without_parts_needs_no_key` |
 | Every failure's message and stack trace crosses as sensitive parts | TS `test_a_failure_crosses_encrypted` |
 | No sensitive value is in plain text in a case's history or its export: opening, refused form, continue-as-new, child plan, activity failure | TS `test_no_sensitive_value_in_plain_text_in_history` |
 | On Temporal the view gives the value to the roles its field lists | TS `test_the_view_on_temporal_decrypts_for_who_may_see` |
 | A history replays with its key, fails without it, and one written before 9b replays with the codec | TS `test_replay_needs_the_key`, `test_a_history_from_before_9b_replays` |
-| The guides' refusal rows are what the engine says | S `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |
+| The guides' refusal rows are what the engine says | TS `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |

@@ -303,3 +303,11 @@ def test_an_activitys_message_is_never_recorded() -> None:
         )
         assert run.needs_attention == ["check#1: orders.lookup@1 failed: ‹sensitive›"]
         assert "no order" not in "\n".join(run.history)
+
+
+def test_the_guides_examples_run_as_written() -> None:
+    # The case data guide's sensitive example, its second Python block, run as the guide shows it.
+    example = GUIDE.split("```python\n")[2].split("```")[0]
+    assert "national_id" in example
+    namespace: dict[str, Any] = {"run_case": run_case, "claim": claim(), "PEOPLE": PEOPLE}
+    exec(example, namespace)  # noqa: S102 -- our guide, run so it can't drift from the code

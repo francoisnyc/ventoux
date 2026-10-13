@@ -47,8 +47,18 @@ from ventoux.temporal.worker import SANDBOX, case_worker
 with workflow.unsafe.imports_passed_through():
     from test_sensitive import FILE, OPENING, claim
 
+    from ventoux.case.definition import CaseInvalid, parse_case
+    from ventoux.case.runtime import CaseRefused, decide
+    from ventoux.case.state import CaseState, Opened
     from ventoux.core.sensitive import Sensitive
-    from ventoux.testing import CATALOG, FAKES, DevelopmentPlans, as_json, development_converter
+    from ventoux.testing import (
+        CATALOG,
+        FAKES,
+        DevelopmentPlans,
+        as_json,
+        development_converter,
+        run_case,
+    )
     from ventoux.tooling.keys import FileKeys, KeyRefused
 
 Case = WorkflowHandle[CaseWorkflow, CaseReport]
@@ -196,6 +206,7 @@ def test_a_failure_crosses_encrypted(tmp_path: Path) -> None:
             await claim_7.encode_failure(error, failure)
         assert NATIONAL_ID.encode() not in failure.SerializeToString()
         assert failure.message == failure.cause.message == "Encoded failure"
+        assert failure.stack_trace == failure.cause.stack_trace == ""  # moved, and sealed
         back = await claim_7.decode_failure(failure)
         # Read back where the key is, as it was raised.
         assert isinstance(back, ApplicationError)
@@ -505,3 +516,96 @@ def claim_without_the_id() -> dict[str, Any]:
     definition = claim()
     del definition["fields"]["national_id"]
     return definition
+
+
+# --- The guide ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "case-data.md").read_text()
+
+
+def guide_refusal_rows() -> list[tuple[str, str]]:
+    """The rows of the guide's second "What the engine refuses" table: 9b's."""
+    table = GUIDE.split("### What the engine refuses")[2].split("\n## ")[0]
+    rows = [line for line in table.splitlines() if line.startswith("| ")][1:]  # after the header
+    return [
+        (cells[1].strip(), cells[2].strip().strip("`")) for cells in (r.split("|") for r in rows)
+    ]
+
+
+def refusal_in_memory(when: str) -> str:
+    """What the engine says, for each of the guide's rows that needs no Temporal server."""
+    if when == "a sensitive field doesn't say who may see it":
+        definition = claim()
+        del definition["fields"]["national_id"]["visible_to"]
+        with pytest.raises(CaseInvalid) as invalid:
+            parse_case(definition)
+        return str(invalid.value)
+    if when == "a sensitive value arrives in plain text":
+        with pytest.raises(CaseRefused) as refused:
+            decide(parse_case(claim()), CATALOG, CaseState("memory"), Opened(as_json(FILE), None))
+        return str(refused.value)
+    if when == "a sensitive value reaches a workflow step":
+        kyc = {
+            "kind": "workflow",
+            "display": {"title": "Check the customer"},
+            "workflow": "kyc.check@1",
+            "inputs": {"customer_id": {"var": "national_id"}},
+        }
+        definition = claim()
+        definition["steps"]["kyc"] = kyc
+        run = run_case(definition, file=FILE, answers=[], people={})
+        return run.needs_attention[0].removeprefix("kyc#1: ")
+    raise LookupError(when)
+
+
+async def refusal_on_temporal(when: str, client: Client, keys_file: Path) -> str:
+    """What the engine says, for each of the guide's rows about keys and clients."""
+    keys = FileKeys(keys_file)
+    try:
+        if when == "a case ID has a `/`":
+            await start_case(client, SensitiveCases, claim(), FILE, "claim/7", QUEUE)
+        elif when == "a case's key was already made":
+            keys.create("claim-7")
+            keys.create("claim-7")
+        elif when == "a client or worker doesn't encrypt":
+            exact_only = dataclasses.replace(
+                DataConverter.default, payload_converter_class=ExactPayloadConverter
+            )
+            plain = await Client.connect(
+                client.service_client.config.target_host, data_converter=exact_only
+            )
+            await start_case(plain, SensitiveCases, claim(), FILE, "claim-7", QUEUE)
+        elif when == "a case has no key":
+            keys.seal("claim-7", b"", "sensitive/0")
+    except (ValueError, KeyRefused) as refused:
+        return str(refused)
+    raise LookupError(when)
+
+
+GUIDE_REFUSALS = [
+    "a sensitive field doesn't say who may see it",
+    "a sensitive value arrives in plain text",
+    "a sensitive value reaches a workflow step",
+    "a case ID has a `/`",
+    "a case's key was already made",
+    "a client or worker doesn't encrypt",
+    "a case has no key",
+]
+
+
+def test_every_refusal_in_the_guide_is_tested() -> None:
+    assert [when for when, _ in guide_refusal_rows()] == GUIDE_REFUSALS
+
+
+def test_the_guides_refusals_are_what_the_engine_says(tmp_path: Path) -> None:
+    rows = guide_refusal_rows()
+    for when, says in rows[:3]:
+        assert refusal_in_memory(when) == says, when
+
+    async def scenario(client: Client) -> list[str]:
+        return [
+            await refusal_on_temporal(when, client, tmp_path / f"keys-{n}.json")
+            for n, (when, _) in enumerate(rows[3:])
+        ]
+
+    assert on_temporal(scenario) == [says for _, says in rows[3:]]
