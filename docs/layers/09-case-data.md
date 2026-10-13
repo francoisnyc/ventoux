@@ -350,7 +350,14 @@ form gives `1 85 05 78 006 084 36`.
    ciphertext fails to decrypt instead of decoding to something else. The case's ID is the
    associated data, binding each part to its case. Alternatives weighed: the standard library
    has no authenticated cipher (building one from `hmac` and `hashlib` is home-made
-   cryptography); PyNaCl is sound but less common. Used only in `ventoux.temporal.codec`.
+   cryptography); PyNaCl is sound but less common. Confirmed after the alternatives were weighed
+   again: also PyCryptodome, calling `openssl`, and letting the key provider encrypt. Agreed
+   with it: **the key provider seals and opens; it never hands out a key.** `seal(case, data, part)` and `open(case, data, part)`, so a key never leaves the
+   provider, which is how Vault's transit engine and a cloud KMS already work (brief, D15: keys
+   kept outside Temporal). The codec holds no cryptography: it only finds the parts and hands
+   them to the provider. `cryptography` is used in one place, the development provider
+   `FileKeys`. A remote provider would be asked once per part; a data key per case, cached
+   ("envelope encryption"), is the production adapter's to build, after v1.0.
 2. **`answer` encrypts every form value:** the client doesn't know which fields are sensitive. The
    case keeps wrapped only the values of sensitive fields. Cost: a non-sensitive form value is
    encrypted in its signal event, and nowhere else. The same for a plan's `answer`.
@@ -396,15 +403,18 @@ sensitive for the run: a form writing it is wrapped.
 **Crossing Temporal.** `ExactJSON` writes a `Sensitive` as `{"‹sensitive›": n}` and its value's
 exact JSON as the metadata entry `sensitive/<n>`; it reads them back the same way, and refuses an
 `encrypted/<n>` part (the payload wasn't decoded) and a dict of its own with the key
-`‹sensitive›`. The codec turns each `sensitive/<n>` into `encrypted/<n>`: a fresh 12-byte nonce,
-then AES-GCM under the case's key, with the case's ID as associated data; and back. A payload with
+`‹sensitive›`. The codec turns each `sensitive/<n>` into `encrypted/<n>`, sealed by the key
+provider for the case, and back by opening it. A payload with
 no part passes untouched, with no key asked for. The failure converter extends Temporal's
 `DefaultFailureConverter(encode_common_attributes=True)`, writing the message and stack trace as
 `Sensitive`. `data_converter(keys)` puts the three together; `require_codec` refuses a client or
 worker without it, as `require_exact_numbers` does.
 
-**Keys.** `KeyProvider`: `create(case)` makes a 256-bit key and refuses a case that had one;
-`key(case)` gives it or refuses. `FileKeys(path)` keeps them in a JSON file (development only).
+**Keys.** `KeyProvider`: `create(case)` makes the case's key and refuses a case that had one;
+`seal(case, data, part)` encrypts, `open(case, data, part)` decrypts, each refusing a case with no
+key. `FileKeys(path)` keeps 256-bit keys in a JSON file (development only) and seals with
+AES-256-GCM: a fresh 12-byte nonce, and the case's ID and the part's name as associated data, so
+a part moved to another case or place fails to open.
 `start_case` and `start_plan` refuse an ID with `/`, then create the key, then start.
 
 **The activity side.** `as_activity` unwraps its inputs before calling the implementation, so
@@ -422,7 +432,7 @@ the contract's own check and the implementation see plain values.
 - `case/visibility.py`: `values` keep the wrapper.
 - `case/memory.py`, `testing.py`: `run_case` and `run_plan` wrap at their boundary; an
   activity's failure reads `‹sensitive›`.
-- `tooling/keys.py` (new): `KeyProvider`, `FileKeys`.
+- `tooling/keys.py` (new): `KeyProvider`, `FileKeys`, the only user of `cryptography`.
 - `temporal/converter.py`: parts; `data_converter(keys)`, `require_codec`.
 - `temporal/codec.py` (new): the codec and the failure converter.
 - `temporal/cases.py`, `client.py`, `workflow.py`, `activities.py`, `worker.py`: keys at the
@@ -440,7 +450,7 @@ the contract's own check and the implementation see plain values.
 ### Seams the tests use
 
 - `parse_case`; `run_case(...)` and `CaseRun.view(roles=)`, `run_plan`, their histories.
-- `Sensitive`; `FileKeys` (`create`, `key`).
+- `Sensitive`; `FileKeys` (`create`, `seal`, `open`).
 - `data_converter(keys)` and its `encode`, `decode`, `encode_failure`, `decode_failure`, given a
   serialization context, for the converter and codec on their own.
 - On Temporal's test server: `start_case`, `answer`, `view`, `report`, `start_plan`; the
@@ -465,8 +475,9 @@ Each starts with its negative test, seen failing for the right reason.
 3. **An activity's own message.** Negative: an activity failing with a message that quotes the
    value, in a case and in a plan: the history reads `failed: ‹sensitive›`. Layer 6's and 8's
    tests that expected the message change with it.
-4. **Keys.** Negative: a second `create` for a case, `key` for a case without one, and an ID with
-   `/` at `start_case` and `start_plan` are refused. Then a key is made and read back.
+4. **Keys.** Negative: a second `create` for a case, `seal` or `open` for a case without a key,
+   a sealed part opened for another case or part, and an ID with `/` at `start_case` and
+   `start_plan` are refused. Then a part sealed is opened back, and its bytes hold no plain text.
 5. **The converter and the codec.** Negative: a client without the codec is refused; a part with
    no key, with no workflow ID, or damaged is refused, never passed on; a payload whose parts
    weren't decoded is refused by the converter. Then a value written and read back is the same
@@ -500,7 +511,7 @@ the pull request is opened. `S` is `tests/test_sensitive.py` (new), `TS`
 | A sensitive value given to a workflow step fails the step before it starts | S `test_a_workflow_step_is_never_given_a_sensitive_value` |
 | A `shown` line for a sensitive reference reads `‹sensitive›` | S `test_showing_a_sensitive_reference_writes_no_reference` |
 | An activity's own message is never recorded, in a case or a plan | S `test_an_activitys_message_is_never_recorded`; I `test_a_plan_records_no_activity_message` |
-| A key is made once per case; a case without one has none to give | TS `test_a_key_is_made_once` |
+| A key is made once per case and never leaves the provider; a case without one can't seal or open; a part opens only for its case and place | TS `test_a_key_is_made_once`, `test_a_part_opens_only_where_it_was_sealed` |
 | A case or plan run ID with `/` is refused | TS `test_an_id_with_a_slash_is_refused` |
 | A client or worker without the codec is refused | TS `test_a_client_without_the_codec_is_refused` |
 | Each sensitive value crosses in its own part, encrypted with its case's key (a child uses its case's), and comes back the same; the rest stays readable | TS `test_a_sensitive_value_crosses_encrypted`, `test_a_child_uses_its_cases_key` |

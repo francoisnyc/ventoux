@@ -231,8 +231,8 @@ inputs, a plan step's fields, the state carried when a long case continues as ne
 answers to `view`. Failures are covered too: Temporal keeps a failure's message and stack trace
 beside the payloads, so Ventoux encrypts both, whoever raised it.
 
-Your platform team runs the **key provider** (Vault or a cloud KMS, after v1.0). In development,
-keys are kept in a local file. The client and the worker connect with a data converter that
+Your platform team runs the **key provider** (Vault or a cloud KMS, after v1.0). It encrypts and
+decrypts for Ventoux, so a key never leaves it. In development, keys are kept in a local file. The client and the worker connect with a data converter that
 holds it:
 
 ```python

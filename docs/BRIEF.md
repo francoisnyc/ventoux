@@ -795,9 +795,11 @@ be erased on request), has size limits, and a second copy of business records go
   encrypted, and the activity receives the plain value. Conditions and checks read the plain
   value inside the worker. A sensitive value arriving unwrapped is refused: it has already been
   seen. A workflow step can't be given one: its worker doesn't hold the key.
-- **Each value crosses Temporal in its own part of a payload,** which the payload codec encrypts
-  (AES-256-GCM, from `cryptography`) with the case's key, found from the workflow ID Temporal
-  gives it; a child `<case ID>/<entry>` uses its case's. So a case ID has no `/`. A payload with
+- **Each value crosses Temporal in its own part of a payload,** which the payload codec has the
+  key provider seal with the case's key, found from the workflow ID Temporal gives it; a child
+  `<case ID>/<entry>` uses its case's. The provider seals and opens; it never hands out a key, so
+  a key never leaves it, as with Vault's transit engine or a cloud KMS. The development provider
+  seals with AES-256-GCM, from `cryptography`. So a case ID has no `/`. A payload with
   no sensitive part passes untouched, needing no key: histories written before 9b replay as
   they are. Anything the codec can't encrypt or decrypt (no key, no workflow ID, a damaged
   part) is an error, never plain text.
