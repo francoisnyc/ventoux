@@ -13,6 +13,7 @@ from temporalio.exceptions import ApplicationError
 from ventoux.case.memory import Activity
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome
+from ventoux.core.sensitive import unwrapped
 
 # The type of error an activity's declared outcome travels as, from activity to workflow.
 OUTCOME = "Outcome"
@@ -36,7 +37,9 @@ def as_activity(reference: str, implementation: Activity) -> Callable[..., Any]:
 
     def run(inputs: dict[str, Any]) -> dict[str, Any]:
         try:
-            return implementation(inputs)
+            # Plain values: the codec opened each sealed input on this worker; the contract's own
+            # check and the code read the real value (brief, D31).
+            return implementation(unwrapped(inputs))
         except Outcome as outcome:
             # A business failure is an answer, not an outage: never retried (brief, D17). The
             # workflow reads it back as the outcome; whether the contract declares it is the
