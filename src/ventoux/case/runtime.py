@@ -8,7 +8,6 @@ See docs/layers/08-case.md.
 
 import copy
 from collections.abc import Mapping
-from decimal import Decimal
 from typing import Literal
 
 from pydantic import ValidationError
@@ -49,22 +48,32 @@ from ventoux.case.state import (
     Proposed,
     Retried,
     Schedule,
+    Shown,
     StartPlan,
     StartWorkflow,
     StepRun,
     StopPlan,
 )
+from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract, Contract
-from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
+from ventoux.core.expressions import (
+    Expression,
+    ExpressionError,
+    ReferenceType,
+    a_kind,
+    evaluate,
+    render,
+)
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
 from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
 from ventoux.core.provenance import NoSources, Sourced, provenance
+from ventoux.core.references import unregistered
 from ventoux.core.roles import role_that_counts
 
 # Where the case file's first values came from when a system opened the case (brief, D12).
@@ -79,6 +88,10 @@ class CaseRefused(Exception):
     """A case the engine won't open: what is wrong with its first values."""
 
 
+class ShownRefused(Exception):
+    """A record shown that the case won't record, because it couldn't have been: why."""
+
+
 def decide(
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: Event
 ) -> tuple[CaseState, list[Command]]:
@@ -89,7 +102,7 @@ def decide(
     commands: list[Command] = []
     was_open = state.phase == "open"
     if isinstance(event, Opened):
-        open_case(case, state, event)
+        open_case(case, catalog, state, event)
     elif isinstance(event, Answered):
         if state.phase != "open":
             raise AnswerRefused(f"the case is {state.phase}: nothing waits for an answer")
@@ -102,6 +115,8 @@ def decide(
         plan_cancelled(state, event)
     elif isinstance(event, Retried):
         retry(case, catalog, state, event)
+    elif isinstance(event, Shown):
+        record_shown(case, state, event)
     elif isinstance(event, CloseAsked):
         role = refuse_to_close(case, catalog, state, event)
         state.history.append(f"{event.by} closed the case as {event.reason}, as {role}")
@@ -118,12 +133,33 @@ def decide(
     return state, commands
 
 
-def open_case(case: CaseDefinition, state: CaseState, event: Opened) -> None:
+def record_shown(case: CaseDefinition, state: CaseState, event: Shown) -> None:
+    """Record that `event.by` was shown the record behind a reference: its system and reference,
+    never its content (brief, D16). Refused if it couldn't have happened (brief, D30)."""
+    if (wrong := identifier_problem(event.by)) is not None:
+        raise ShownRefused(wrong)
+    if state.phase == "closed":
+        raise ShownRefused("the case is closed: nothing records it any more")
+    if event.field not in case.fields:
+        raise ShownRefused(f"{event.field} is not a field of {case.case}")
+    declared = case.fields[event.field].declared
+    if not isinstance(declared, ReferenceType):
+        raise ShownRefused(f"{event.field} is not a reference: there is no record to show")
+    if not may_see(case, event.field, event.roles):
+        needs = " or ".join(seen_by(case, event.field))
+        raise ShownRefused(f"{event.by} can't see {event.field}: it needs {needs}")
+    if event.field not in state.values:
+        raise ShownRefused(f"{event.field} is not set: there is no record to show")
+    reference = state.values[event.field]
+    state.history.append(f"{event.by} was shown {event.field} ({declared.system} {reference})")
+
+
+def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Opened) -> None:
     """The case file's first values, each of its field's type and saying where it came from:
     the person who opened the case, or the system that did (brief, D12)."""
     if event.by is not None and (wrong := identifier_problem(event.by)) is not None:
         raise CaseRefused(wrong)
-    refuse_to_open(case, event.file)
+    refuse_to_open(case, catalog, event.file)
     state.opened_by = event.by
     origin = OPENER if event.by is None else f"person:{event.by}"
     for name, value in event.file.items():
@@ -132,10 +168,12 @@ def open_case(case: CaseDefinition, state: CaseState, event: Opened) -> None:
     state.history.append(f"opened by {event.by or OPENER}, with {listed(sorted(event.file))}")
 
 
-def refuse_to_open(case: CaseDefinition, file: Mapping[str, object]) -> None:
-    """Refuse first values that aren't the case's fields, of their types, given at the opening."""
+def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, object]) -> None:
+    """Refuse a case whose references name systems nobody registered, and first values that
+    aren't the case's fields, of their types, given at the opening."""
     setters = set_by(case)
-    problems: list[str] = []
+    declared_types = {name: field.declared for name, field in case.fields.items()}
+    problems = unregistered(declared_types, catalog.systems)
     for name, value in file.items():
         if name not in case.fields:
             fields = listed(sorted(case.fields))
@@ -146,14 +184,10 @@ def refuse_to_open(case: CaseDefinition, file: Mapping[str, object]) -> None:
                 f"{name} is set by a person in {setters[name]}, never given at the opening"
             )
         elif not fits(value, declared := case.fields[name].declared):
-            problems.append(f"{name} is {a_type(declared)}, and the opening gives {shown(value)}")
+            # The type, never the value: refusals reach people who may not see it (brief, D30).
+            problems.append(f"{name} is {a_type(declared)}, and the opening gives {a_kind(value)}")
     if problems:
         raise CaseRefused("\n".join(problems))
-
-
-def shown(value: object) -> str:
-    """A value as its JSON reads: `1001`, `0.1`, `'ord-1'`."""
-    return str(value) if isinstance(value, Decimal) else repr(value)
 
 
 def set_by(case: CaseDefinition) -> dict[str, str]:
@@ -250,7 +284,7 @@ def propose(
             raise ProposalRefused(f"{event.step} doesn't run now: {render(step.when)} is false")
     state.history.append(f"{event.by} proposed {event.step} as {role}")
     state.proposers[event.step] = event.by  # never its approver (brief, D25)
-    start(catalog, state, event.step, step, commands)
+    start(case, catalog, state, event.step, step, commands)
 
 
 def answer_task(
@@ -286,7 +320,7 @@ def answer_approval(
     """An approval given, tied to the inputs it saw; or a rejection: the step won't run."""
     step = case.steps[approval.step]
     assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
-    role = judge_approval(catalog, state, approval.entry, approval.step, step, event)
+    role = judge_approval(case, catalog, state, approval.entry, approval.step, step, event)
     del state.approvals[approval.step]
     del state.waiting[approval.entry]
     state.history.append(f"{event.by} answered {approval.entry} {event.outcome} as {role}")
@@ -389,8 +423,8 @@ def outcome_problem(contract: Contract, event: Completed) -> str | None:
         value = getattr(given, name)
         if not is_held(value):
             return (
-                f"{contract.reference} gave {name} as {value}, a {type(value).__name__}, which "
-                "the case file can't hold exactly (brief, D20)"
+                f"{contract.reference} gave {name} as {a_kind(value)}, which the case file "
+                "can't hold exactly (brief, D20)"
             )
     return None
 
@@ -505,7 +539,7 @@ def admit(
                     step.when, state.values, f"{name}'s condition"
                 ):
                     continue
-                start(catalog, state, name, step, commands)
+                start(case, catalog, state, name, step, commands)
             except (StepStopped, InputRefused, NotInCatalog) as error:
                 # Nothing is skipped automatically: the step fails, and waits for a person; the
                 # other steps go on (brief, D17).
@@ -528,6 +562,7 @@ def free_to_start(state: CaseState, name: str, step: TaskStep | CallStep | PlanS
 
 
 def start(
+    case: CaseDefinition,
     catalog: Catalog,
     state: CaseState,
     name: str,
@@ -557,10 +592,11 @@ def start(
         return
     if given is not None:
         lapsed(state, name, step, given)
-    schedule(catalog, state, name, step, given, commands)
+    schedule(case, catalog, state, name, step, given, commands)
 
 
 def schedule(
+    case: CaseDefinition,
     catalog: Catalog,
     state: CaseState,
     name: str,
@@ -579,7 +615,8 @@ def schedule(
     entry = latest.entry if latest is not None and latest.status == "retrying" else None
     entry = entry or next_entry(state, name)
     key = f"{state.case}/{entry}"
-    inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key)
+    types = {name: field.declared for name, field in case.fields.items()}
+    inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key, types)
     coming_run(state, name, "running").approved = approved
     state.proposers.pop(name, None)  # the proposed run has started
     if isinstance(step, WorkflowStep):

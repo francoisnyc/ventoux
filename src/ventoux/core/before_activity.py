@@ -7,13 +7,23 @@ See docs/layers/05-interpreter.md.
 """
 
 from collections.abc import Mapping
+from decimal import Decimal
 
 from pydantic import ValidationError
 
 from ventoux.core.contract import Contract
-from ventoux.core.expressions import Expression, ExpressionError, evaluate
+from ventoux.core.expressions import (
+    Expression,
+    ExpressionError,
+    FieldType,
+    ReferenceType,
+    Var,
+    evaluate,
+)
+from ventoux.core.expressions.check import a_type
 from ventoux.core.policy import refusal
 from ventoux.core.provenance import NoSources, provenance
+from ventoux.core.references import references
 
 
 class InputRefused(Exception):
@@ -26,12 +36,22 @@ def checked_inputs(
     values: Mapping[str, object],
     sources: Mapping[str, frozenset[str]],
     key: str,
+    types: Mapping[str, FieldType],
 ) -> dict[str, object]:
     """The inputs `contract`'s activity gets, evaluated from `values`, with the idempotency `key`
     if it takes one; or `InputRefused`.
 
-    `sources` are where each value really came from, never only what a definition declared.
+    `sources` are where each value really came from, never only what a definition declared;
+    `types` are the declared fields' types, which say which system each reference names.
     """
+    # A reference input takes a reference of its system, before anything else is read: an ID from
+    # the wrong system can look exactly like a right one (brief, D30).
+    for field, system in references(contract.input).items():
+        if field in inputs and (wrong := not_a_reference_to(system, inputs[field], types)):
+            raise InputRefused(
+                f"{contract.reference} takes {field} as a reference to {system}, and is given "
+                f"{wrong}"
+            )
     # Every policy on every input, before anything else (brief, D21): the injection is refused
     # on where the value came from, whatever it says.
     for field, expression in inputs.items():
@@ -78,3 +98,21 @@ def evaluated(field: str, expression: Expression, values: Mapping[str, object]) 
         return evaluate(expression, values)
     except ExpressionError as error:
         raise InputRefused(f"{field} can't be evaluated: {error}") from None
+
+
+def not_a_reference_to(
+    system: str, expression: Expression, types: Mapping[str, FieldType]
+) -> str | None:
+    """What `expression` gives instead of a reference to `system`, or None if it gives one."""
+    # Only a field read as it is: a computed value has no system, whatever it looks like.
+    if not isinstance(expression, Var):
+        if isinstance(expression, Decimal | str | bool):
+            return "a value written in the definition"
+        return "a computed value"
+    declared = types.get(expression.var)
+    if declared is None:
+        # An outcome or an output (`assess.outcome`, `pay.refund_id`): never a reference.
+        return f"{expression.var}, which is not a reference"
+    if isinstance(declared, ReferenceType) and declared.system == system:
+        return None
+    return f"{expression.var}, {a_type(declared)}"

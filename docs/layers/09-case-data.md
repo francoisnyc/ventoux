@@ -1,0 +1,299 @@
+# Layer 9: case data
+
+Status: split into four parts and the eighteen choices agreed in the session, 2026-10-10 (all as
+proposed); 9a's note and its nine drafting points confirmed the same day; 9a built, slices 0–7;
+Promises checked against the tests, 2026-10-10; the tutor review's fix built test-first,
+2026-10-11.
+
+## What this layer is for
+
+Until now every field of a case file is plain data, seen by anyone and kept in Temporal's history
+for good. Layer 9 makes the case file what the brief says it is (brief, D8): **references** to
+records other systems own, typed by system; **decision facts**, each seen only by the roles that
+may see it; **sensitive facts**, encrypted with a key per case so they can be forgotten; and
+facts that know **when they were obtained**, so a step can refuse to run on stale ones.
+
+It lands as four pull requests, each with its section in this note, its own Promises table and its
+own tutor review:
+
+| PR | Builds | Dependency |
+|---|---|---|
+| **9a** | systems in the catalog; reference inputs on contracts, checked at runtime; resolvers; visibility by role and the filtered view; approvers who can't see a value | none |
+| **9b** | sensitive fields; the key provider; the payload codec; no sensitive value in plain text anywhere | `cryptography` |
+| **9c** | `forget`: proposed, approved by someone else, closes the case, destroys its key | none new |
+| **9d** | time as event data; when each fact was obtained; `max_age` and refreshing; ages on the approval sheet | none |
+
+The `chartering` prototype has nothing for case data (curriculum, layer 9); no file of it is drawn
+on.
+
+Agreed in the session, for the later parts (each is detailed in its own section when it starts):
+sensitive values are wrapped in the state (`Sensitive`, shown as `‹sensitive›`) and each travels
+in its own part of a payload, which the codec encrypts with the case's key, found from the
+workflow ID Temporal gives the codec; a key is made when the case starts and never made again;
+forgetting is its own small workflow, `<case ID>/forget`, needing a role registered to forget and
+two different people, closing an open case as `forgotten`, then destroying the key through a
+registered activity; time reaches `decide` as data on each event (whole seconds since the epoch;
+`datetime` stays banned in `core` and `case`), stamped on Temporal from `workflow.now()`; a stale
+fact is refreshed only from a read-only step, otherwise the case needs attention. The curriculum's
+"export" is read as Temporal's history export; the audit export comes after layer 15. The guide's
+sensitive example is a `national_id`, a text: D20 has no date type.
+
+---
+
+## 9a. References and who sees what
+
+User-facing description, written first: `docs/guides/case-data.md` ("The three kinds of field",
+"References", "Who sees what"); `docs/guides/activities.md` ("Reference inputs", "Systems and
+resolvers", new refusal rows, `letters.draft@3`); `docs/guides/cases.md` (approvers see what they
+approve, `view` and `shown` in tests and on Temporal). Decision: brief D30 (drafted with this note).
+
+### What this part is for
+
+A reference today is a text with a system name beside it, and nothing reads the name: an activity
+expecting a customer ID takes a policy ID without a word, and every field is seen by everyone. 9a
+makes the system name a promise contracts can ask for, shows referenced records through resolvers
+on behalf of the person looking, and filters the case file by role before anyone sees it.
+
+### Decided in the session
+
+1. **Systems are registered in the catalog,** like source labels: `register_system("crm")`. A
+   case field referencing a system nobody registered is refused when the case opens (`parse_case`
+   doesn't know the catalog; the opening does).
+2. **A contract input may require a reference by system:** `Annotated[str, reference("crm")]`,
+   written into the input's JSON Schema as `x-reference`, so only contracts that declare one
+   change their hash. At runtime, before a step is scheduled, that input takes only a reference
+   field of that system, read as it is (`{"var": "customer_id"}`); another system's reference, a
+   text field or a computed value fails the step. The static check is case validation's
+   (layer 10).
+3. **Resolvers live in `ventoux.tooling`:** a function per system, `resolve(reference, viewer)`,
+   registered by the platform team, called on the viewer's behalf. Showing a record on an open
+   case is recorded by a `shown` event, as a line without content: `ana was shown customer_id
+   (crm cus-7)`. A closed case has no workflow to record into: the API's own access log covers it
+   (deployment, after v1.0).
+4. **Visibility by role,** filtered on the server: anyone holding a role the case names sees a
+   field, unless its `visible_to` narrows it; outcomes and outputs follow the default. A pure
+   `case_view(definition, state, roles)` in `case`; on Temporal a `view` query takes the viewer's
+   roles and filters inside the worker.
+5. **Approvers who can't see a value the step reads are refused at their answer,** with what they
+   can't see. D16's static warning stays with case validation (layer 10); this check depends on
+   nothing it does.
+
+### Decided while drafting, confirmed in the session
+
+Each is a choice the agreed design left open, written as the rule we confirmed.
+
+1. **The development catalog gains systems and roles:** the systems `crm`, `documents`, `orders`
+   and `policies` (the quickstart's `order_id` names `orders`, so its opening needs it), and the
+   roles `adjuster` and `fraud` for the guide's claim. Tests with a catalog of their own register
+   the systems their cases name.
+2. **`letters.draft@3` is a new development contract,** the guide's, word for word: `customer`, a
+   trusted `crm` reference, and `template`. It fetches the address itself (brief, D8, "fetch close
+   to use"). `@2` stays: it takes an address, not a reference, so `@3` is a different input, not
+   `@2` made stricter, and the layer 4 injection tests read `@2`. A new entry in
+   `contracts.lock.json`; no existing hash changes.
+3. **The reference check lives in `core`** (`checked_inputs`), so a plan's activity state gets it
+   too: a plan field declared `"type": "reference", "system": "crm"` is a `crm` reference. The
+   check is given each field's system; a reference input fed anything but a plain `var` of a field
+   of that system is refused, with the field's type in the message.
+4. **A plan's reference fields are checked when its run starts,** as a case's are at its
+   opening: a system nobody registered refuses the run (`RunRefused`).
+5. **"A role the case names"** is every role in the definition: a task's `roles`, an approval's,
+   `proposed_by`, a close reason's, and every `visible_to`. Operating roles are registered, not
+   named by a case, so an operator sees the report, not the case file. *Corrected in the tutor
+   review:* the report then held values, quoted in refusals and failures; now it quotes none
+   (see "From the tutor review").
+   A viewer holding none of them sees every field hidden.
+6. **The view:** `CaseView` with `values` (only what the viewer may see: declared fields, outcomes
+   `assess.outcome` and outputs `lookup.status`), `sources` for each, `hidden` (each hidden
+   field, and the roles that would see it), and `lines`, one per declared field in the
+   definition's order: `Estimated damage: 1200, from system:opener`, `Fraud score: hidden (needs
+   fraud)`, `Estimated damage: not set`. A value is shown as the history shows one.
+7. **The approver's sight is checked for both outcomes,** after D23's checks (the entry is open,
+   the outcome is offered, the person has one of its roles, the role may approve the risk) and
+   before "someone else": a person who can't see the values can't judge them either way. The
+   refusal names the first field, in name order, they can't see, and every role that would see
+   it: `lee can't see approved_amount, which pay reads: it needs support`.
+8. **`shown` is an event,** `Shown(field, by, roles)`: a script's `shown(field, who)`, a signal on
+   Temporal. It is refused if the field isn't a reference, the person's roles can't see it, or
+   the case is closed; on Temporal a refusal is recorded and the case waits on, as every refusal
+   is (8c). It changes nothing but the history: no step starts because of it.
+9. **`Resolvers.show(view, field, viewer)`** reads the reference from the viewer's filtered view,
+   so a hidden field has nothing to resolve; refuses a field that isn't a reference, and a system
+   with no resolver; and returns what the resolver gives, unchanged. It doesn't record: the caller
+   sends `shown`. Ventoux hiding parts of what a resolver returns ("hide more", D16) is not built:
+   nothing yet says which parts. Resolvers are plain functions; the API, when it comes, decides
+   whether they become `async`.
+
+### How it works
+
+**References into inputs.** `checked_inputs` gains the case's (or plan's) field systems. For
+each input whose contract field carries `reference(system)`, the expression must be `{"var":
+name}`, and `name` a reference field of that system; otherwise `InputRefused` with D30's message.
+It runs before the input policies, so the step fails before anything else is read.
+
+**Visibility.** `case/visibility.py` answers one question, "may these roles see this field?": a
+field with `visible_to` is seen by those roles; any other field, outcome or output by any role
+the case names. `case_view` builds the view from it; `answers.py` asks it for every field the
+step reads (`fields_read` of its inputs, its `when` and the approval's `when`, as D11's
+exclusions read them) before an approval is accepted.
+
+**Shown.** `decide` handles `Shown`: checks it, appends the line, admits nothing new.
+
+### Where the code goes
+
+- `core/references.py`: `reference()`, the `x-reference` it writes, `references(contract)` (each
+  input's system).
+- `core/catalog.py`: `register_system`, `systems`; a contract's references name registered
+  systems, on `str` fields.
+- `core/before_activity.py`: the reference check, given each field's system.
+- `core/interpreter.py`: passes the plan's field systems; refuses a run whose reference names an
+  unregistered system.
+- `case/definition.py`: `visible_to` on `CaseField`; `roles_named(case)`.
+- `case/visibility.py` (new): `may_see`, `CaseView`, `case_view`.
+- `case/state.py`: `Shown`.
+- `case/runtime.py`: the opening's system check; `Shown`; field systems into `checked_inputs`.
+- `case/answers.py`: the approver's sight.
+- `testing.py`: `CaseRun.view`, the `shown` script item, the development catalog's systems and
+  roles, `letters.draft@3` and its fake.
+- `temporal/cases.py`: the `view` query and `shown` signal; the client's `view` and `shown`.
+- `tooling/resolvers.py` (new): `Viewer`, `Resolvers`.
+- `contracts.lock.json`: `letters.draft@3`.
+
+### Not in 9a
+
+- Sensitive fields, keys and the codec (9b); forgetting (9c); fresh facts (9d).
+- Reference outputs (an output field carrying `reference(...)`) and reference fields of a `plan`
+  step's inputs crossing into the plan with their system: nothing needs them yet.
+- The static checks: references reaching the right systems, approvers who can't see (layer 10).
+- Ventoux hiding parts of a resolver's answer; `async` resolvers and the API that calls them.
+- No new dependency.
+
+### Seams the tests use
+
+- `catalog.register_system`, `catalog.register`, `contract_hash` and the lock check.
+- `run_case(..., catalog=)` and what it reports, `CaseRun.view(roles=)`, the script's `shown`;
+  `run_plan` for a plan's reference input.
+- `Resolvers`, `Viewer`, `Resolvers.show`.
+- On Temporal's test server: `start_case`, `view`, `shown`, `answer`, `report`; the `Replayer`.
+- The guides' examples, run as written, and each new row of their refusal tables.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **Systems in the catalog.** Negative: `register_system("CRM")`; a contract referencing an
+   unregistered system; `reference()` on a `Decimal`. Then every recorded hash is unchanged,
+   declaring a reference changes the hash, and `letters.draft@3` is registered and recorded.
+1. **References at the opening.** Negative: a case, and a plan run, whose reference names an
+   unregistered system are refused. Then the quickstart and every existing test pass with the
+   development catalog's systems.
+2. **References into inputs.** Negative (the curriculum's): a `policies` reference given to
+   `letters.draft@3`'s `crm` input fails the step; so do a text field and a `cat`; and in a plan.
+   Then the guide's `deny` step runs.
+3. **The view.** Negative (the curriculum's): a field hidden from a role is absent from that
+   role's view; a viewer with no role on the case sees every field hidden. Then the guide's view,
+   lines as written; outcomes and outputs visible by default.
+4. **Approvers who can't see.** Negative: an approval, and a rejection, by someone who can't see
+   a value the step reads are refused. Then someone who sees it approves, and the step runs once.
+5. **Shown and resolvers.** Negative: `shown` of a hidden field, of a field that isn't a
+   reference, on a closed case; `Resolvers.show` of a hidden field, of a system with no
+   resolver; `Resolvers.register` of an unregistered system. Then the line is recorded, and the
+   resolver is called with the viewer.
+6. **On Temporal.** Negative: a refused `shown` and a refused approval are recorded, and the case
+   waits on. Then `view` gives the same view as in memory, and a case history with a `shown`
+   replays.
+7. **The guides and the promises.**
+
+### Decided while building
+
+- **The plans guide's `UNKNOWN_ROLE` message lists two more roles** (slice 0): the development
+  catalog's `adjuster` and `fraud` are in every list of registered roles. The guide and its test
+  changed with it.
+- **The first hash test passed for the wrong reason** (slice 0): its three input models had three
+  class names, which the hash covers, so they hashed apart with or without `x-reference`. They
+  now share one name, and the test failed until the reference reached the schema.
+- **Two workflow-step fixtures named a system `customers`** (slice 1), which nothing registers; a
+  customer's record is the CRM's, so they name `crm`.
+- **The reference refusal doesn't name the step** (slice 2): `checked_inputs` doesn't know it,
+  and the needs-attention line adds it: `deny#1: letters.draft@3 takes customer as a reference to
+  crm, and is given policy_id, a reference to policies`. Types are said as everywhere else (`a
+  reference to policies`, `a number`); an outcome or output `is not a reference`; a literal is `a
+  value written in the definition`, anything else `a computed value`. The guide says so.
+- **`start` and `schedule` take the case** (slice 2), to give `checked_inputs` its fields' types.
+- **The approver's check reads conditions by `is not None`** (slice 4, found rereading it): a
+  first version kept a condition only if it was truthy, which would have skipped a literal
+  `false`.
+- **`shown` is also refused for a field the case doesn't have, one not set, and a person not
+  written as an identifier** (slice 5), as every event from a person is; `Resolvers.show` refuses
+  an unset reference too.
+- **`CaseView` gains `systems`** (slice 5): the system of each reference field the viewer may see,
+  which `Resolvers.show` reads, so it needs nothing from the definition.
+- **A view's sources are sorted tuples, and its values `Any`** (slice 6): the exact converter has
+  no JSON form for a set, and Temporal reads a query's result back to its type hints, which it
+  can't do for `object`.
+- **The tests read the claim from the case data guide's JSON block** (slice 7), so the guide and
+  the tests can't drift.
+
+### From the tutor review
+
+- **Refusals and failures quoted values, so the history leaked hidden fields.** With
+  `approved_amount` seen only by `support`, Ana answering it as the text `4,812.50` was refused
+  with `approved_amount is a number, and the answer gives '4,812.50'`. On Temporal a refusal is a
+  history line, and `report` returns the history unfiltered, so Lee, who may not see the amount,
+  read it there. The same was true of the opening's type check, 8d's output check, a condition
+  that gives anything but true or false, and every expression error that showed a value
+  (`` `>` compares numbers, and it was given a string: '…' ``, `division by zero in amount /
+  items (250 / 0)`). In 9b, a national ID typed with spaces would have landed in the history in
+  plain text.
+- **The fix, added to D30:** a refusal or failure names the field and the kind of value it was
+  given, never the value: `approved_amount is a number, and the answer gives a string`.
+  `a_kind(value)` says it (`a number`, `a string`, `a boolean`, `a binary float`, `a list`), in
+  the field types' own words, which is why it says `a string` where the review's example said
+  `a text`. Division by zero names the fields only. The `shown` line keeps its reference, as D16
+  asks; a sensitive reference is 9b's to encrypt. Layer 2's promise that division by zero names
+  "the fields and the values" is replaced: its test now expects the fields alone. The guides,
+  and 34 tests that expected a quoted value, say the kind instead.
+- **Both negative tests were written first and seen failing:** the review's scenario (the
+  refusal quoted `'4,812.50'`), and a sweep over a condition giving a number and four expression
+  errors on a field only `fraud` may see (each quoted `4812.77` or the hidden note), with the
+  opening's refusal beside them.
+- **Carried to 9b:** an activity's own error message (`payments.refund@2 failed: <what it
+  said>`) is external text recorded as it came, and may carry sensitive data. 9b decides how it
+  is handled.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+Drafted before building, with the tests named in advance; checked against the real tests before
+the pull request is opened (every test named exists, and asserts what its row claims). `K` is
+`tests/test_catalog.py`, `I` `tests/test_interpreter.py`, `C` `tests/test_case.py`, `D`
+`tests/test_case_data.py` (new), `TD` `tests/test_temporal_case_data.py` (new).
+
+Seen failing before their code: every rule on a reference input and `register_system` (accepted,
+or no such method); the hash test, once its models shared a name; both openings with an unknown
+system (accepted); every wrong value into a reference input, in a case and in a plan (accepted,
+the activity called); the view (no `visible_to`, then no view); both of Lee's answers (accepted);
+every refused `shown`, and `Resolvers.show` of what the view doesn't show (recorded, crashed or
+resolved); the view on Temporal (a set refused by the converter); a refused `shown` on Temporal
+(the case hung on it). Passed when written, their code having come with an earlier test: the
+refused approval on Temporal (8c already recorded `AnswerRefused`), and the guides' examples and
+refusal rows (written after the code).
+
+| Promise | Test |
+|---|---|
+| A system is registered with a lowercase name | K `test_a_system_is_registered_by_name` |
+| A contract's reference names a registered system, also on a copy at registration; it is a text, of one system, also on a copy | K `test_a_reference_input_names_a_registered_system`, `test_every_rule_refuses_a_contract_that_breaks_it`, `test_every_rule_runs_again_when_a_copy_is_registered` (`a reference is a text`, `a reference names one system`) |
+| Declaring a reference changes a contract's hash; contracts without one hash as before, and every recorded hash is unchanged | K `test_declaring_a_reference_changes_the_hash`, `test_every_development_contract_matches_its_recorded_hash` |
+| The guide's letter is the development `letters.draft@3` | K `test_the_guides_letter_is_the_development_one` |
+| A case, or a plan run, whose reference names an unregistered system is refused | D `test_a_reference_to_an_unregistered_system_is_refused`; I `test_a_plan_reference_to_an_unregistered_system_is_refused` |
+| A reference input takes only a reference field of its system, read as it is: another system's reference, a field of another type, an outcome, a computed value or a literal fails the step before the activity is called, in a case and in a plan | D `test_a_reference_goes_only_where_its_system_is_expected`; I `test_a_plan_gives_a_reference_input_only_its_system` |
+| A reference of the right system goes in, and the guide's `deny` step runs | D `test_a_reference_of_its_system_goes_in`, `test_the_guides_examples_run_as_written` |
+| A field hidden from a role is absent from that role's view, and said hidden with the roles that would see it | D `test_a_hidden_field_is_absent_from_the_view` |
+| Fields, outcomes and outputs are visible to anyone with a role the case names; a viewer with none sees every field hidden | D `test_what_a_role_on_the_case_sees` |
+| The view's lines are the guide's, a field not given reads `not set` | D `test_the_view_reads_as_the_guide_says`, `test_the_guides_examples_run_as_written` |
+| An approval or a rejection by someone who can't see a value the step reads is refused, naming it; someone who sees it approves, and the step runs once | D `test_an_approver_must_see_what_they_approve`, `test_an_approver_who_sees_it_approves` |
+| `shown` records a line with the system and reference, never the record, and changes nothing else; it is refused for a hidden field, a field that isn't a reference or isn't the case's, and a closed case | D `test_showing_a_record_is_recorded_without_its_content`, `test_shown_is_refused_when_it_cannot_be_true` |
+| A resolver is called with the viewer, and only for a reference their view shows; a system with no resolver, or an unregistered one, is refused | D `test_a_resolver_is_asked_on_behalf_of_the_viewer`, `test_a_resolver_shows_only_what_the_view_shows`, `test_a_resolver_is_registered_for_a_registered_system`, `test_the_guides_resolver_example_runs_as_written` |
+| On Temporal the view is the same as in memory, filtered in the worker; a refused `shown` or approval is recorded and the case waits on; a history with `shown` replays | TD `test_the_view_on_temporal_is_the_view_in_memory`, `test_refusals_are_recorded_and_the_case_waits`, `test_a_case_history_with_shown_replays` |
+| A refusal or failure names the field and the kind of value given, never the value: in a form, the opening, a condition, an expression's error and an output (tutor review) | D `test_a_refusal_names_the_type_never_the_value`, `test_no_failure_quotes_a_hidden_value`, `test_no_opening_refusal_quotes_a_value`; C `test_an_output_the_case_file_cannot_hold_fails_the_step` |
+| The guides' refusal rows are what the engine says | K `test_the_guides_refusals_are_what_the_catalog_says` (its new rows); C `test_the_guides_refusals_are_what_the_engine_says` (its new row); D `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |

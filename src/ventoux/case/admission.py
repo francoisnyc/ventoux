@@ -9,7 +9,7 @@ from collections.abc import Mapping
 
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.state import CaseState, StepRun
-from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
+from ventoux.core.expressions import Expression, ExpressionError, a_kind, evaluate, render
 
 
 class ProposalRefused(Exception):
@@ -48,7 +48,7 @@ def holds(condition: Expression, values: Mapping[str, object], whose: str) -> bo
         raise StepStopped(f"{whose} {render(condition)} can't be evaluated: {error}") from None
     if not isinstance(decided, bool):
         raise StepStopped(
-            f"{whose} {render(condition)} gives {decided!r}: a condition gives true or false"
+            f"{whose} {render(condition)} gives {a_kind(decided)}: a condition gives true or false"
         )
     return decided
 

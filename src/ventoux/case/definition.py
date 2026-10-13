@@ -53,6 +53,8 @@ class CaseField(Shape):
     declared: DeclaredType  # its type, written beside `display` (`"type": "number"`)
     display: Display  # what people read
     source: Source | None = None  # `untrusted:<label>`, never trusted (brief, D12)
+    # Who may see it, narrowing the default: anyone holding a role the case names (brief, D30).
+    visible_to: Roles | None = None
 
     # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
     @model_validator(mode="before")
@@ -61,7 +63,7 @@ class CaseField(Shape):
         """The field's type (`type` and what goes with it) gathered under `declared`."""
         if not isinstance(data, dict):
             return data
-        around = ("display", "source")
+        around = ("display", "source", "visible_to")
         declared = {key: value for key, value in data.items() if key not in around}
         return {"declared": declared} | {key: data[key] for key in around if key in data}
 

@@ -23,7 +23,14 @@ from ventoux.core.approval import (
 )
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
-from ventoux.core.expressions import Expression, ExpressionError, evaluate, render
+from ventoux.core.expressions import (
+    Expression,
+    ExpressionError,
+    FieldType,
+    a_kind,
+    evaluate,
+    render,
+)
 from ventoux.core.form import form_problem
 from ventoux.core.history import (
     Answered,
@@ -52,6 +59,7 @@ from ventoux.core.plan import (
 )
 from ventoux.core.plan import Wait as Question
 from ventoux.core.provenance import CASE, Sourced, provenance
+from ventoux.core.references import unregistered
 from ventoux.core.roles import no_role, role_that_counts
 
 # How a run ends (docs/guides/plans.md, "Running a plan").
@@ -134,7 +142,7 @@ async def interpret(
     `excluded` names each person who approves nothing in this run, and why: when a case runs the
     plan as a step, its opener and the step's proposer (brief, D25).
     """
-    refuse_to_start(plan, fields)
+    refuse_to_start(plan, catalog, fields)
     run = PlanRun() if record is None else record
     run.history.append(Started(plan.plan, plan.version))
     # The run's fields: what the case gave, then what people's forms set (brief, D9).
@@ -172,7 +180,9 @@ async def interpret(
                 # The step's run: the run, the state, and how many times the run has entered it,
                 # so a retry reuses the key and another pass or another run never does (brief, D17).
                 key = f"{run_name}/{here}#{entries[here]}"
-                gave = await run_activity(state, values, sources, key, catalog, call, run)
+                gave = await run_activity(
+                    state, values, sources, key, catalog, call, run, plan.fields
+                )
                 run.history.append(gave)
                 here = choose(here, state.on, gave.event, values)
                 run.history.append(Moved(gave.event, here))
@@ -232,14 +242,16 @@ async def run_activity(
     catalog: Catalog,
     call: Call,
     run: PlanRun,
+    types: Mapping[str, FieldType],
 ) -> Gave:
-    """Call the state's activity with its inputs, and say what it gave."""
+    """Call the state's activity with its inputs, and say what it gave. `types` are the plan's
+    fields' declared types."""
     try:
         contract = catalog.get(state.activity)
     except NotInCatalog as missing:
         raise Stop(str(missing)) from None
     try:
-        inputs = checked_inputs(contract, state.inputs, values, sources, key)
+        inputs = checked_inputs(contract, state.inputs, values, sources, key, types)
     except InputRefused as refused:
         raise Stop(str(refused)) from None
     found = {name: provenance(expression, sources) for name, expression in state.inputs.items()}
@@ -451,19 +463,20 @@ def holds(when: Expression, event: str, values: Mapping[str, object]) -> bool:
     # Nothing is truthy: anything but true or false stops the step, never read as false.
     if not isinstance(decided, bool):
         raise Stop(
-            f"on {event}, the condition {render(when)} gives {decided!r}: a condition gives true "
+            f"on {event}, the condition {render(when)} gives {a_kind(decided)}: a condition gives true "
             "or false"
         )
     return decided
 
 
-def refuse_to_start(plan: Plan, fields: Mapping[str, Sourced]) -> None:
-    """Refuse a run not given exactly the plan's fields a person doesn't set, each saying where
-    its value came from."""
+def refuse_to_start(plan: Plan, catalog: Catalog, fields: Mapping[str, Sourced]) -> None:
+    """Refuse a plan whose references name systems nobody registered, and a run not given
+    exactly the plan's fields a person doesn't set, each saying where its value came from."""
     setters = set_by(plan)
     given_at_start = [name for name in plan.fields if name not in setters]
     declared = ", ".join(sorted(given_at_start))
-    problems = [
+    problems = unregistered(plan.fields, catalog.systems)
+    problems += [
         f"{name} is missing: give every field the plan declares ({declared})"
         for name in given_at_start
         if name not in fields

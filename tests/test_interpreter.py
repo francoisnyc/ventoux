@@ -339,7 +339,7 @@ def test_a_condition_that_cannot_be_evaluated_stops_instead_of_skipping_the_appr
     assert refunds == []  # the next transition, straight to pay, is never tried
     assert lines(run)[-1] == (
         "stopped at check_order: on done, amount > 100 can't be evaluated: `>` compares numbers, "
-        "and it was given a string: '250': the step needs attention, and nothing after it runs"
+        "and it was given a string: the step needs attention, and nothing after it runs"
     )
 
 
@@ -354,7 +354,7 @@ def test_a_condition_must_give_a_boolean() -> None:
     run = run_plan(text_as_condition, fields=ORDER, answers=[])
     assert run.status == "stopped"
     assert run.reason == (
-        "on done, the condition order_id gives 'A-1001': a condition gives true or false"
+        "on done, the condition order_id gives a string: a condition gives true or false"
     )
 
 
@@ -654,3 +654,63 @@ def test_a_loop_through_a_wait_does_not_count_against_the_bound() -> None:
     )
     assert lines(run).count("entered look") == 601
     assert run.status == "waiting"  # the script ran out; nothing was stopped
+
+
+# Layer 9a, slice 1: a plan's references name registered systems (brief, D30).
+
+
+def test_a_plan_reference_to_an_unregistered_system_is_refused() -> None:
+    plan = ending_at_once()
+    plan["fields"]["order_id"] = {"type": "reference", "system": "sail"}
+    with pytest.raises(RunRefused, match="order_id is a reference to sail, which is not a regist"):
+        run_plan(
+            plan,
+            fields={
+                "amount": sourced(Decimal(250), "system:opener"),
+                "order_id": sourced("ord-1", "system:opener"),
+            },
+            answers=[],
+        )
+
+
+def lettering(customer: str) -> dict[str, Any]:
+    """A plan drafting a letter to the reference in its field `customer`, of its system."""
+    return {
+        "plan": "write-to",
+        "version": 1,
+        "display": {"title": "Write to a customer"},
+        "fields": {
+            "customer_id": {"type": "reference", "system": "crm"},
+            "policy_id": {"type": "reference", "system": "policies"},
+        },
+        "initial": "draft",
+        "states": {
+            "draft": {
+                "activity": "letters.draft@3",
+                "inputs": {"customer": {"var": customer}, "template": "hello"},
+                "on": {"done": "done"},
+            },
+            "done": {"final": "succeeded"},
+        },
+    }
+
+
+def test_a_plan_gives_a_reference_input_only_its_system() -> None:
+    fields = {
+        "customer_id": sourced("cus-7", "system:opener"),
+        "policy_id": sourced("pol-3", "system:opener"),
+    }
+    calls: list[dict[str, Any]] = []
+    run = run_plan(
+        lettering("policy_id"),
+        fields=fields,
+        answers=[],
+        activities={"letters.draft@3": recording(calls)},
+    )
+    assert calls == []
+    assert run.status == "stopped"
+    assert run.reason == (
+        "letters.draft@3 takes customer as a reference to crm, and is given policy_id, a "
+        "reference to policies"
+    )
+    assert run_plan(lettering("customer_id"), fields=fields, answers=[]).status == "succeeded"

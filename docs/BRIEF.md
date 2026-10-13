@@ -752,6 +752,36 @@ be erased on request), has size limits, and a second copy of business records go
   server and reports a missing, extra or mistyped output, a timeout and a failure. Whether a
   declared source is true is for review (D6).
 
+### D30. References go where their system is expected; the case file is filtered by role
+
+*Decided 2026-10-10, in layer 9a.*
+
+- **Systems are registered,** by the platform team, like source labels (D12):
+  `register_system("crm")`. A reference naming a system nobody registered is refused: in a
+  contract when it is registered, in a case when it opens, in a plan when its run starts.
+- **A contract input may require a reference to one system:** `Annotated[str, reference("crm")]`,
+  part of the input's JSON Schema, so the hash covers it (D5). At runtime it takes only a
+  reference field of that system, read as it is; another system's reference, a text or a computed
+  value fails the step (fail closed), in cases and in plans. `ventoux check` refuses it first
+  (case validation, layer 10).
+- **Who sees a field:** anyone holding a role the case names, unless the field's `visible_to`
+  narrows it (D16); outcomes and outputs follow the same default. The view is filtered where the
+  case runs, before it is sent: a hidden field is absent, and said hidden with the roles that
+  would see it.
+- **An approver must see what they approve:** an answer to an approval, approve or reject, from a
+  person who can't see a value the step reads (its inputs, its `when`, the approval's `when`) is
+  refused, saying what they can't see. D16's validator warning is layer 10's; this refusal
+  depends on nothing it does.
+- **Resolvers** are functions registered per system in `tooling`, called with the viewer. They read
+  the reference from the viewer's filtered view, so nothing hidden can be resolved, and what they
+  return is never stored. That a record was shown is recorded on an open case by a `shown` event,
+  as a line naming the field, the system and the reference.
+- **A refusal or a failure names the field and the kind of value, never the value:**
+  `approved_amount is a number, and the answer gives a string`. The history, and every report
+  read from it, reaches people who may not see a field; a message quoting its value would show it
+  to them. Only a `shown` line names a reference, as D16 asks. *Added in the tutor review of 9a,
+  before D30 was merged.*
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step

@@ -110,8 +110,8 @@ def test_a_role_nobody_registered_is_an_issue() -> None:
             "states.confirm.wait.roles",
             "UNKNOWN_ROLE",
             (
-                "support-laed is a role nobody registered: the roles are operations, support, support-lead; "
-                "use one of them, or ask the platform team to register it"
+                "support-laed is a role nobody registered: the roles are adjuster, fraud, operations, "
+                "support, support-lead; use one of them, or ask the platform team to register it"
             ),
         )
     ]
@@ -206,9 +206,9 @@ def test_a_form_that_does_not_fit_its_outcome_is_refused() -> None:
         "refused ana's answer accept: accept sets approved_amount, and the answer doesn't give it",
         "refused ana's answer accept: accept sets approved_amount, and the answer doesn't give it",
         "refused ana's answer accept: the answer gives note, which accept doesn't set",
-        "refused ana's answer accept: approved_amount is a number, and the answer gives '40'",
-        "refused ana's answer accept: approved_amount is a number, and the answer gives 40.0",
-        "refused ana's answer accept: approved_amount is a number, and the answer gives True",
+        "refused ana's answer accept: approved_amount is a number, and the answer gives a string",
+        "refused ana's answer accept: approved_amount is a number, and the answer gives a binary float",
+        "refused ana's answer accept: approved_amount is a number, and the answer gives a boolean",
         "refused ana's answer reject: the answer gives approved_amount, which reject doesn't set",
     ]
     assert run.status == "waiting"  # every answer refused: the wait goes on

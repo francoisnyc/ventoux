@@ -3,9 +3,9 @@
 Every answer is judged the same way, in the same order, with `core`'s checks, as in a plan
 (brief, D23). The runtime checks the first two: the person is written as an identifier, and the
 entry is open. Then: the outcome is offered, the person has a role it names, the form fits. An
-approval adds its own checks last: the role may approve the activity's risk, and the person is
-someone else: not the opener, not the proposer, and not whoever's answer feeds the step
-(brief, D11).
+approval adds its own checks last: the role may approve the activity's risk, the person sees every
+value the step reads (brief, D30), and the person is someone else: not the opener, not the
+proposer, and not whoever's answer feeds the step (brief, D11).
 """
 
 from collections.abc import Mapping
@@ -13,10 +13,12 @@ from collections.abc import Mapping
 from ventoux.case.called import called
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
 from ventoux.case.state import Answered, CaseState
+from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.approval import approver_role, not_someone_else, risk_refusal
 from ventoux.core.catalog import Catalog
 from ventoux.core.form import form_problem
 from ventoux.core.plan import APPROVE, REJECT
+from ventoux.core.provenance import fields_read
 from ventoux.core.roles import no_role, role_that_counts
 
 
@@ -51,6 +53,7 @@ def judge_task(
 
 
 def judge_approval(
+    case: CaseDefinition,
     catalog: Catalog,
     state: CaseState,
     entry: str,
@@ -73,6 +76,9 @@ def judge_approval(
     approver = approver_role(roles, answer.roles, contract, catalog)
     if approver is None:
         raise AnswerRefused(risk_refusal(role, catalog, contract))
+    # An approver judges what they see: approve or reject, never values hidden from them
+    # (brief, D30).
+    refuse_unless(unseen(case, answer, name, step))
     # The person who opened the case approves none of its steps (brief, D11).
     if answer.by == state.opened_by:
         raise AnswerRefused(f"{answer.by} opened the case, so cannot approve its steps")
@@ -90,6 +96,22 @@ def someone_else(
     (brief, D11). None: they are someone else."""
     conditions = [step.when] if step.when is not None else []
     return not_someone_else(by, name, list(step.inputs.values()), conditions, sources)
+
+
+def unseen(case: CaseDefinition, answer: Answered, name: str, step: CallStep) -> str | None:
+    """Why `answer`'s person can't judge the step `name`: a value it reads (its inputs, its `when`,
+    its approval's `when`) is hidden from their roles. None: they see every one."""
+    read = list(step.inputs.values())
+    if step.when is not None:
+        read.append(step.when)
+    if step.approval is not None and step.approval.when is not None:
+        read.append(step.approval.when)
+    fields = {field for expression in read for field in fields_read(expression)}
+    for field in sorted(fields):
+        if not may_see(case, field, answer.roles):
+            needs = " or ".join(seen_by(case, field))
+            return f"{answer.by} can't see {field}, which {name} reads: it needs {needs}"
+    return None
 
 
 def offers(what: str, outcomes: tuple[str, ...], outcome: str) -> str:

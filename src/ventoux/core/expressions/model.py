@@ -330,6 +330,27 @@ class ExpressionError(Exception):
     """An expression that can't be evaluated against these values: the step stops."""
 
 
+def a_kind(value: object) -> str:
+    """What kind of value a message says was given, never the value itself: `a number`,
+    `a string`, `a binary float`. A message may reach a history read by people who may not see
+    the value (brief, D30)."""
+    if isinstance(value, bool):  # `bool` first: to Python, True is an int
+        return "a boolean"
+    if isinstance(value, str):
+        return "a string"
+    if isinstance(value, Decimal):
+        return "a number"
+    if isinstance(value, float):
+        return "a binary float"
+    if isinstance(value, int):
+        return "an int"
+    if isinstance(value, list):
+        return "a list"
+    if value is None:
+        return "nothing"
+    return f"a {type(value).__name__}"
+
+
 def kind(value: Value) -> str:
     """The name of a value's type, as the guide and the field declarations write it."""
     # `bool` first, as in the parser.

@@ -4,6 +4,7 @@ from ventoux.core.contract import ActivityContract, Contract, is_reference
 from ventoux.core.contract_hash import contract_hash
 from ventoux.core.output_sources import UNDECLARED_LABEL, declared_sources
 from ventoux.core.provenance import is_label
+from ventoux.core.references import references
 from ventoux.core.roles import checked_role
 from ventoux.core.workflow_contract import WorkflowContract
 
@@ -25,6 +26,7 @@ class Catalog:
         self._labels: set[str] = set()  # the labels a field may be declared untrusted with
         self._roles: dict[str, str | None] = {}  # each role, and the highest risk it may approve
         self._operators: set[str] = set()  # the roles that may act on a failed step (brief, D26)
+        self._systems: set[str] = set()  # the systems a reference may name (brief, D30)
 
     def register_label(self, label: str) -> None:
         """Let fields be declared `untrusted:<label>`. Registered by the platform team, like roles,
@@ -45,6 +47,22 @@ class Catalog:
     def labels(self) -> list[str]:
         """The registered labels, in order."""
         return sorted(self._labels)
+
+    def register_system(self, name: str) -> None:
+        """Let references name the system `name`, such as `crm`. Registered by the platform team,
+        like labels, so a typo in a case or a contract is caught (brief, D30)."""
+        # A system is written as a label is: `crm`, `claims-archive`.
+        if not is_label(name):
+            raise ValueError(
+                f"{name!r} is not a system name: a system is lowercase, such as crm or "
+                "claims-archive."
+            )
+        self._systems.add(name)
+
+    @property
+    def systems(self) -> list[str]:
+        """The registered systems, in order."""
+        return sorted(self._systems)
 
     def register_role(self, name: str, approves: str | None = None, operates: bool = False) -> None:
         """Let waits and approvals name the role `name`, which may approve activities up to the
@@ -74,6 +92,7 @@ class Catalog:
         # Checked as its own kind: a workflow contract by a workflow contract's rules.
         type(contract).model_validate(contract)
         self.check_output_labels(contract)
+        self.check_reference_systems(contract)
         # A reference stands for one promise for good: a changed promise needs a new version
         # (brief, D5).
         registered = self._contracts.get(contract.reference)
@@ -95,6 +114,17 @@ class Catalog:
                 raise ValueError(
                     f"{contract.reference}: output {name} is {declared}, and {label} is not a "
                     f"registered label. Register it first, or use one of: {registered}."
+                )
+
+    def check_reference_systems(self, contract: Contract) -> None:
+        """Every system an input's reference names is registered: a typo is caught, never a
+        system nobody runs (brief, D30)."""
+        for name, system in references(contract.input).items():
+            if system not in self._systems:
+                registered = ", ".join(self.systems) or "none yet"
+                raise ValueError(
+                    f"{contract.reference}: input {name} is a reference to {system}, which is not "
+                    f"a registered system. Register it first, or use one of: {registered}."
                 )
 
     def next_reference(self, name: str) -> str:

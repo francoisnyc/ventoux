@@ -26,6 +26,7 @@ from ventoux.case.state import (
     Opened,
     Proposed,
     Retried,
+    Shown,
     StartPlan,
 )
 from ventoux.core.before_activity import InputRefused
@@ -36,6 +37,7 @@ from ventoux.core.output_sources import source
 from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
+from ventoux.core.references import reference
 from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.contract_check import check_workflow_contract
@@ -61,6 +63,7 @@ __all__ = [
     "retry",
     "run_case",
     "run_plan",
+    "shown",
 ]
 
 
@@ -153,6 +156,35 @@ letters_draft = ActivityContract(
 )
 
 
+# The activities guide's letter, word for word: it takes the customer's reference, a crm record,
+# and fetches the address itself, so the address never enters the case (brief, D8) (brief, D30).
+class LetterInput(BaseModel):
+    customer: Annotated[str, trusted_only(), reference("crm")]  # the letter's addressee, by ID
+    template: str
+    idempotency_key: str
+
+
+# @3 takes a reference where @2 takes an address: a different input, not @2 made stricter, so @2
+# stays (docs/layers/09-case-data.md, 9a).
+letters_draft_3 = ActivityContract(
+    name="letters.draft",
+    version=3,
+    input=LetterInput,
+    output=DraftOutput,
+    risk="low",  # it only drafts: a person reviews and sends
+    effect="write",
+    timeouts=Timeouts(start_to_close=30, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=5, initial_interval=1, backoff_coefficient=2),
+    idempotency_key="idempotency_key",
+    outcomes=[],
+    display=Display(
+        title="Draft a letter to a customer",
+        description="Looks up the customer's address in the CRM and drafts a letter for a "
+        "person to review. Never sends.",
+    ),
+)
+
+
 # The activities guide's workflow contract, word for word: an existing Temporal workflow run as one
 # step (brief, D6). Its outputs say where each value comes from (brief, D29).
 class KycInput(BaseModel):
@@ -184,11 +216,17 @@ CATALOG = Catalog()
 # contract's outputs may name them.
 for label in ("customer", "document", "email", "llm", "web"):
     CATALOG.register_label(label)
-for contract in (payments_refund, orders_lookup, letters_draft, kyc_check):
+# The systems references may name, before the contracts whose inputs name them (brief, D30).
+for system in ("crm", "documents", "orders", "policies"):
+    CATALOG.register_system(system)
+for contract in (payments_refund, orders_lookup, letters_draft, letters_draft_3, kyc_check):
     CATALOG.register(contract)
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
 CATALOG.register_role("support")
 CATALOG.register_role("support-lead", approves="high")
+# The case data guide's claim: an adjuster assesses it, and only fraud sees its fraud score.
+CATALOG.register_role("adjuster")
+CATALOG.register_role("fraud")
 # Operations acts on a case's failed steps: retries them, or closes the case (brief, D26).
 CATALOG.register_role("operations", operates=True)
 
@@ -210,6 +248,7 @@ FAKES: dict[str, Activity] = {
     "payments.refund@2": fake_refund,
     "orders.lookup@1": fake_lookup,
     "letters.draft@2": fake_draft,
+    "letters.draft@3": fake_draft,
 }
 
 
@@ -292,6 +331,9 @@ def run_case(
             continue
         if isinstance(item, Retry):
             events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ()))))
+            continue
+        if isinstance(item, ShownTo):
+            events.append(Shown(item.field, item.by, frozenset(people.get(item.by, ()))))
             continue
         if isinstance(item, Close):
             events.append(CloseAsked(item.reason, item.by, frozenset(people.get(item.by, ()))))
@@ -407,6 +449,19 @@ def finish(entry: str) -> Finish:
 def close(reason: str, who: str) -> Close:
     """A script's close: `close("duplicate", "ana")` (brief, D10)."""
     return Close(reason, who)
+
+
+class ShownTo(NamedTuple):
+    """A scripted record shown: `who` was shown the record behind the reference `field`."""
+
+    field: str
+    by: str
+
+
+def shown(field: str, who: str) -> ShownTo:
+    """A script's record shown: `shown("customer_id", "ana")`, recorded in the case's history,
+    as the API records it after asking the system's resolver (brief, D16)."""
+    return ShownTo(field, who)
 
 
 def propose(step: str, who: str) -> Proposal:

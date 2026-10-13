@@ -159,6 +159,11 @@ asked pay.approval#2: approval of pay by support-lead
 Sam's *approve* for `pay.approval#1` is now refused: it was withdrawn. Approving 900 takes an
 answer to `pay.approval#2`, from someone who sees 900.
 
+**Approvers see what they approve** (brief, D16). A field may be hidden from some roles (the
+case data guide's `visible_to`). A person who can't see a value the step reads, in its inputs,
+its `when` or the approval's `when`, can't approve it: `lee can't see approved_amount, which pay
+reads: it needs support`.
+
 **A high-risk step has an approval.** A step calling a high-risk activity with no `approval`
 stops before it is scheduled, even in a definition nobody checked.
 
@@ -406,10 +411,12 @@ A workflow step never waits for people: put the human work in a task step before
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`
 (`open`, `closing` or `closed`), `closed`, `reached(step)`, `waiting_for`, `needs_attention`,
-`flags` and `history`. A script holds answers, `(step, outcome, who)` or `(step, outcome, who,
-form)`, and the other things people do: `propose(step, who)`, `retry(entry, who)` and
-`close(reason, who)`. An answer to a step answers its open entry; naming the entry
-(`"pay.approval#1"`) answers that one. `people` gives each person their roles, as the Ventoux API
+`flags` and `history`, and `view(roles=...)`, the case file as people with those roles see it
+(the case data guide). A script holds answers, `(step, outcome, who)` or `(step, outcome, who,
+form)`, and the other things people do: `propose(step, who)`, `retry(entry, who)`,
+`close(reason, who)` and `shown(field, who)`, which records that a referenced record was shown.
+An answer to a step answers its open entry; naming the entry (`"pay.approval#1"`) answers that
+one. `people` gives each person their roles, as the Ventoux API
 does (brief, D22); `opened_by` says who opened the case, when a person did. `activities` replaces
 the fake activities; an activity raises `Outcome("declined")` for a declared outcome. `workflows`
 replaces the fake workflows in the same way, a function from the inputs to the output, by
@@ -447,6 +454,7 @@ Anything the engine won't accept is refused, with the reason:
 | the close reason isn't declared | `refund has no close reason 'spam': its reasons are duplicate` |
 | the person closing has none of the reason's roles | `duplicate is closed by support, and eve has no role` |
 | the case is closing | `the case is closing: nothing waits for an answer` |
+| the approver can't see a value the step reads | `lee can't see approved_amount, which pay reads: it needs support` |
 
 ## Running a case on Temporal
 
@@ -506,7 +514,9 @@ assert (await case.result()).status == "closed"
 `propose(case, step, by, roles)`, `retry(case, entry, by, roles)` and `close(case, reason, by,
 roles)` do what a script's `propose`, `retry` and `close` do. `report` gives what `run_case`
 reports (`status`, `waiting_for`, `needs_attention`, `flags`, `history`), and `waiting_at`, the
-entries open for an answer, in the same order as `waiting_for`.
+entries open for an answer, in the same order as `waiting_for`. `view(case, roles)` gives the
+case file as people with those roles see it, filtered inside the worker, and `shown(case, field,
+by, roles)` records that a referenced record was shown.
 
 What changes from memory, and what doesn't:
 

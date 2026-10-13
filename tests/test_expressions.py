@@ -132,7 +132,7 @@ def test_a_value_an_expression_cannot_read_is_an_error() -> None:
     with pytest.raises(ExpressionError) as stopped:
         evaluate(Var(var="approved_amount"), {"approved_amount": 250.0})
     assert str(stopped.value) == (
-        "approved_amount holds 250.0, a float, and an expression reads only decimals, "
+        "approved_amount holds a binary float, and an expression reads only decimals, "
         "texts and booleans"
     )
 
@@ -154,7 +154,7 @@ def test_comparing_a_text_with_a_number_is_an_error() -> None:
     over_100 = parse_expression({">": [{"var": "approved_amount"}, 100]})
     with pytest.raises(ExpressionError) as stopped:
         evaluate(over_100, {"approved_amount": "250"})
-    assert str(stopped.value) == "`>` compares numbers, and it was given a string: '250'"
+    assert str(stopped.value) == "`>` compares numbers, and it was given a string"
 
 
 @pytest.mark.parametrize(
@@ -234,9 +234,9 @@ def test_and_or_evaluate_every_part_so_an_error_is_never_hidden(data: object) ->
 @pytest.mark.parametrize(
     ("data", "message"),
     [
-        ({"and": [True, 1]}, "`and` combines booleans, and it was given a number: 1"),
-        ({"or": [False, "yes"]}, "`or` combines booleans, and it was given a string: 'yes'"),
-        ({"!": [0]}, "`!` takes a boolean, and it was given a number: 0"),
+        ({"and": [True, 1]}, "`and` combines booleans, and it was given a number"),
+        ({"or": [False, "yes"]}, "`or` combines booleans, and it was given a string"),
+        ({"!": [0]}, "`!` takes a boolean, and it was given a number"),
     ],
 )
 def test_nothing_is_truthy(data: object, message: str) -> None:
@@ -298,16 +298,16 @@ def test_division_by_zero_is_an_error() -> None:
     with pytest.raises(ExpressionError) as stopped:
         evaluate(per_item, {"amount": Decimal(250), "items": Decimal(0)})
     # The fields tell a developer where to look; the values tell an operator what happened.
-    assert str(stopped.value) == "division by zero in amount / items (250 / 0)"
+    assert str(stopped.value) == "division by zero in amount / items"
 
 
 @pytest.mark.parametrize(
     ("data", "message"),
     [
-        ({"+": [1, "2"]}, "`+` adds numbers, and it was given a string: '2'"),
-        ({"-": [True, 1]}, "`-` subtracts numbers, and it was given a boolean: true"),
-        ({"*": [2, "3"]}, "`*` multiplies numbers, and it was given a string: '3'"),
-        ({"/": ["6", 2]}, "`/` divides numbers, and it was given a string: '6'"),
+        ({"+": [1, "2"]}, "`+` adds numbers, and it was given a string"),
+        ({"-": [True, 1]}, "`-` subtracts numbers, and it was given a boolean"),
+        ({"*": [2, "3"]}, "`*` multiplies numbers, and it was given a string"),
+        ({"/": ["6", 2]}, "`/` divides numbers, and it was given a string"),
     ],
 )
 def test_arithmetic_never_coerces(data: object, message: str) -> None:
@@ -350,8 +350,10 @@ def test_a_number_is_finite(special: Decimal) -> None:
     assert str(refused.value) == f"{special} is not a number an expression can use"
     with pytest.raises(ExpressionError) as stopped:
         evaluate(Var(var="amount"), {"amount": special})
+    # The kind, never the value: a message may reach people who may not see it (brief, D30).
     assert (
-        str(stopped.value) == f"amount holds {special}, which is not a number an expression can use"
+        str(stopped.value)
+        == "amount holds a number that isn't finite, which an expression can't use"
     )
 
 
@@ -415,7 +417,7 @@ def test_if_in_cat_string_exists_parse() -> None:
 def test_an_if_condition_is_a_boolean() -> None:
     with pytest.raises(ExpressionError) as stopped:
         evaluate(parse_expression({"if": [1, "yes", "no"]}), {})
-    assert str(stopped.value) == "`if` takes a boolean, and it was given a number: 1"
+    assert str(stopped.value) == "`if` takes a boolean, and it was given a number"
 
 
 def test_exists_says_whether_a_field_has_a_value() -> None:
@@ -462,7 +464,7 @@ def test_cat_joins_texts_only() -> None:
             parse_expression({"cat": ["Refund of ", {"var": "amount"}]}), {"amount": Decimal(250)}
         )
     assert str(stopped.value) == (
-        "`cat` joins texts, and it was given a number: 250; write string(…) to turn it into text"
+        "`cat` joins texts, and it was given a number; write string(…) to turn it into text"
     )
 
 
@@ -545,9 +547,9 @@ def test_item_names_one_field(name: object) -> None:
     ("held", "message"),
     [
         (None, "items has no value"),
-        (Decimal(3), "items holds Decimal('3'), and count reads a list of records"),
-        ("items", "items holds 'items', and count reads a list of records"),
-        ([Decimal(3)], "items holds [Decimal('3')], and count reads a list of records"),
+        (Decimal(3), "items holds a number, and count reads a list of records"),
+        ("items", "items holds a string, and count reads a list of records"),
+        ([Decimal(3)], "items holds a list, and count reads a list of records"),
     ],
 )
 def test_count_reads_a_list_of_records(held: object, message: str) -> None:
@@ -570,7 +572,7 @@ def test_sum_adds_numbers_only() -> None:
     total = parse_expression({"sum": {"over": {"var": "items"}, "value": {"item": "amount"}}})
     with pytest.raises(ExpressionError) as stopped:
         evaluate(total, {"items": items})
-    assert str(stopped.value) == "`sum` adds numbers, and it was given a string: '10'"
+    assert str(stopped.value) == "`sum` adds numbers, and it was given a string"
 
 
 def test_where_is_a_condition() -> None:
@@ -578,7 +580,7 @@ def test_where_is_a_condition() -> None:
     truthy = parse_expression({"count": {"over": {"var": "items"}, "where": {"item": "risk"}}})
     with pytest.raises(ExpressionError) as stopped:
         evaluate(truthy, {"items": items})
-    assert str(stopped.value) == "`where` takes a boolean, and it was given a string: 'high'"
+    assert str(stopped.value) == "`where` takes a boolean, and it was given a string"
 
 
 ITEMS = [
@@ -980,7 +982,7 @@ def test_a_case_file_value_outside_decimal128_is_an_error(number: Decimal) -> No
     with pytest.raises(ExpressionError) as stopped:
         evaluate(Var(var="amount"), {"amount": number})
     assert str(stopped.value) == (
-        f"amount holds {number}, which doesn't fit a decimal128 number "
+        "amount holds a number that doesn't fit a decimal128 number "
         "(34 digits, exponents within ±6144)"
     )
 

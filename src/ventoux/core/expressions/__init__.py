@@ -40,6 +40,7 @@ from ventoux.core.expressions.model import (
     Sum,
     Value,
     Var,
+    a_kind,
 )
 from ventoux.core.expressions.parse import parse_expression
 from ventoux.core.expressions.render import render
@@ -78,6 +79,7 @@ __all__ = [
     "Sum",
     "Value",
     "Var",
+    "a_kind",
     "check",
     "evaluate",
     "parse_expression",
