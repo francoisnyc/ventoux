@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Annotated, Any, NamedTuple
 
 from pydantic import BaseModel
 from temporalio import workflow
+from temporalio.converter import DataConverter
 
 from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
@@ -43,6 +45,13 @@ from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.contract_check import check_workflow_contract
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
+
+# Temporal: this module defines workflows, so the workflow sandbox imports it afresh for each run;
+# the converter and the key provider are passed through, imported once: `cryptography` is compiled
+# code, which can't be imported twice.
+with workflow.unsafe.imports_passed_through():
+    from ventoux.temporal.converter import data_converter
+    from ventoux.tooling.keys import FileKeys
 
 __all__ = [
     "Activity",
@@ -289,6 +298,13 @@ class DevelopmentCases(CaseWorkflow):
     @workflow.run
     async def run(self, start: CaseStart) -> CaseReport:
         return await self.drive(start)
+
+
+def development_converter() -> DataConverter:
+    """Ventoux's data converter with a fresh development key file, for one test server: tests
+    reuse workflow IDs, and a case's key is never made twice (brief, D31)."""
+    # Python: `mkdtemp` makes a new, empty directory under the system's temporary one.
+    return data_converter(FileKeys(Path(tempfile.mkdtemp()) / "keys.json"))
 
 
 def load_definition(path: Path) -> dict[str, Any]:

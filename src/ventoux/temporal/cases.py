@@ -59,7 +59,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.temporal.activities import OUTCOME
     from ventoux.temporal.bindings import Binding
     from ventoux.temporal.carried import state_as_data, state_from_data
-    from ventoux.temporal.converter import require_exact_numbers
+    from ventoux.temporal.converter import keys_of
     from ventoux.temporal.options import activity_options
     from ventoux.temporal.workflow import Given, PlanStart, RunReport
 
@@ -423,9 +423,24 @@ async def start_case(
     opened_by: str | None = None,
 ) -> WorkflowHandle[CaseWorkflow, CaseReport]:
     """Open a case of `definition` with `file`, as a run of `workflow`. `id` is the case
-    (`refund-A-1001`): a second case with the same ID is refused (brief, D27)."""
-    require_exact_numbers(client)
-    start = CaseStart(definition, dict(file), opened_by)
+    (`refund-A-1001`): a second case with the same ID is refused (brief, D27). The case's key is
+    made first, and never again: if starting then fails, the ID is spent (brief, D31)."""
+    keys = keys_of(client)
+    # The codec finds a key from the part of a workflow ID before its first `/` (brief, D31).
+    if "/" in id:
+        raise ValueError(f'{id} can\'t name a case: a case ID has no "/"')
+    keys.create(id)
+    # Each sensitive field's value wrapped: it crosses Temporal in its own part, sealed with the
+    # case's key (brief, D31). The workflow checks the definition; here a field marked anything
+    # but `false` counts as sensitive, so a malformed mark never sends a value in plain text.
+    fields = definition.get("fields", {})
+    sensitive = {
+        name for name, field in fields.items() if dict(field).get("sensitive", False) is not False
+    }
+    sealed = {
+        name: Sensitive(value) if name in sensitive else value for name, value in file.items()
+    }
+    start = CaseStart(definition, sealed, opened_by)
     await client.start_workflow(
         workflow.run,
         start,
@@ -453,8 +468,11 @@ async def answer(
 ) -> None:
     """Answer the open `entry` (`review#1`, as `report` shows it in `waiting_at`) with `outcome`,
     as the person `by`, who has `roles`. The caller vouches for who `by` is and their roles: only
-    the Ventoux API may send answers (brief, D19)."""
-    sent = CaseAnswer(entry, outcome, by, sorted(roles), None if form is None else dict(form))
+    the Ventoux API may send answers (brief, D19). Every value of `form` crosses sealed: the
+    client can't tell which fields are sensitive, and the case keeps sealed only those
+    (brief, D31)."""
+    sealed = None if form is None else {name: Sensitive(value) for name, value in form.items()}
+    sent = CaseAnswer(entry, outcome, by, sorted(roles), sealed)
     await case.signal(CaseWorkflow.answer, sent)
 
 

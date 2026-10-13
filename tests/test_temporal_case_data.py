@@ -11,13 +11,20 @@ from pathlib import Path
 from typing import Any
 
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
+from temporalio.converter import DataConverter
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
 
 from ventoux.temporal.cases import CaseReport, CaseWorkflow, answer, report, shown, start_case, view
-from ventoux.temporal.converter import DATA_CONVERTER
-from ventoux.temporal.worker import case_worker
-from ventoux.testing import FAKES, DevelopmentCases, DevelopmentPlans, load_definition, run_case
+from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.testing import (
+    FAKES,
+    DevelopmentCases,
+    DevelopmentPlans,
+    development_converter,
+    load_definition,
+    run_case,
+)
 
 ROOT = Path(__file__).parent.parent
 QUEUE = "cases"
@@ -46,12 +53,17 @@ EXACT_FILE = {
 Case = WorkflowHandle[CaseWorkflow, CaseReport]
 
 
-def on_temporal[T](scenario: Callable[[Client], Awaitable[T]]) -> T:
+def on_temporal[T](
+    scenario: Callable[[Client], Awaitable[T]], converter: DataConverter | None = None
+) -> T:
     """Run `scenario` against Temporal's time-skipping test server, with a worker serving the
-    development cases: nothing outside is reached."""
+    development cases: nothing outside is reached. `converter` holds the keys, for a test that
+    replays what it recorded; else fresh ones."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
+        environment = await WorkflowEnvironment.start_time_skipping(
+            data_converter=converter or development_converter()
+        )
         async with (
             environment,
             case_worker(environment.client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES),
@@ -134,6 +146,9 @@ def test_a_case_history_with_shown_replays() -> None:
         await case.result()
         return await case.fetch_history()
 
-    history = on_temporal(scenario)
-    replayer = Replayer(workflows=[DevelopmentCases], data_converter=DATA_CONVERTER)
+    converter = development_converter()
+    history = on_temporal(scenario, converter)
+    replayer = Replayer(
+        workflows=[DevelopmentCases], data_converter=converter, workflow_runner=SANDBOX
+    )
     asyncio.run(replayer.replay_workflow(history))

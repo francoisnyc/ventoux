@@ -17,6 +17,7 @@ from temporalio.exceptions import TimeoutError as TemporalTimeout  # not Python'
 from ventoux.core.before_activity import one_line
 from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.bindings import Binding
+from ventoux.temporal.codec import SensitiveCodec
 
 
 async def check_workflow_contract(
@@ -26,12 +27,18 @@ async def check_workflow_contract(
     keeps it. `input` must be one the contract accepts: the test checks the workflow, not you."""
     # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
     contract.input.model_validate(input)
+    run = f"contract-test-{contract.reference}-{uuid.uuid4()}"  # a test, never a case
+    codec = client.data_converter.payload_codec
+    if isinstance(codec, SensitiveCodec):
+        # A client sealing with Ventoux's codec seals the run's failures too: the run needs its
+        # key, as every run Ventoux starts has one; and no `/` in its ID (brief, D31).
+        codec.keys.create(run)
     try:
         # Temporal: waiting on the result lets the time-skipping test server skip to the timeout.
         output: dict[str, Any] = await client.execute_workflow(
             binding.workflow,
             input,
-            id=f"contract-test/{contract.reference}/{uuid.uuid4()}",  # a test, never a case
+            id=run,
             task_queue=binding.task_queue,
             execution_timeout=timedelta(seconds=contract.timeout),
             result_type=dict,

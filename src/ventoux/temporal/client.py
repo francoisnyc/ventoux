@@ -6,7 +6,8 @@ from typing import Any
 from temporalio.client import Client, WorkflowHandle
 
 from ventoux.core.provenance import Sourced
-from ventoux.temporal.converter import require_exact_numbers
+from ventoux.core.sensitive import Sensitive
+from ventoux.temporal.converter import keys_of
 from ventoux.temporal.workflow import Given, PlanStart, PlanWorkflow, RunReport, Sent
 
 
@@ -18,8 +19,13 @@ async def start_plan(
     id: str,
     task_queue: str,
 ) -> WorkflowHandle[PlanWorkflow, RunReport]:
-    """Start `plan` as a run of `workflow`, with `fields`; `id` names the run (`refund-A-1001`)."""
-    require_exact_numbers(client)
+    """Start `plan` as a run of `workflow`, with `fields`; `id` names the run (`refund-A-1001`).
+    The run's key is made first, as a case's is (brief, D31)."""
+    keys = keys_of(client)
+    # The codec finds a key from the part of a workflow ID before its first `/` (brief, D31).
+    if "/" in id:
+        raise ValueError(f"{id} can't name a run: a run's ID has no \"/\"")
+    keys.create(id)
     start = PlanStart(
         plan, {name: Given(given.value, sorted(given.sources)) for name, given in fields.items()}
     )
@@ -37,8 +43,10 @@ async def answer(
     """Answer the wait `wait` (`approve_refund#1`, as `report` shows it) with `outcome`, as the
     person `by`, who has `roles`, giving `form` when the outcome sets fields. The caller vouches
     for who `by` is and their roles: only the Ventoux API may send answers (brief, D19). An answer
-    the wait doesn't take is refused, and recorded."""
-    sent = Sent(wait, outcome, by, sorted(roles), None if form is None else dict(form))
+    the wait doesn't take is refused, and recorded. Every value of `form` crosses sealed, as a
+    case's answer does (brief, D31)."""
+    sealed = None if form is None else {name: Sensitive(value) for name, value in form.items()}
+    sent = Sent(wait, outcome, by, sorted(roles), sealed)
     await run.signal(PlanWorkflow.answer, sent)
 
 

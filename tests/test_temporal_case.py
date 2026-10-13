@@ -17,7 +17,8 @@ from typing import Any
 import pytest
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
-from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
+from temporalio.converter import DataConverter
+from temporalio.exceptions import ApplicationError
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
@@ -39,9 +40,10 @@ from ventoux.temporal.cases import (
     retry,
     start_case,
 )
-from ventoux.temporal.converter import DATA_CONVERTER
-from ventoux.temporal.worker import case_worker
+from ventoux.temporal.converter import ExactPayloadConverter
+from ventoux.temporal.worker import SANDBOX, case_worker
 from ventoux.temporal.workflow import PlanWorkflow, RunReport
+from ventoux.tooling.keys import KeyRefused
 
 # Temporal: this module defines a workflow (`CasesWithPlans`, below), so the workflow sandbox
 # imports it afresh. The development catalog is passed through, imported once and shared:
@@ -54,6 +56,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentCases,
         DevelopmentPlans,
         Outcome,
+        development_converter,
         load_definition,
         run_case,
     )
@@ -69,12 +72,16 @@ def on_temporal[T](
     activities: Mapping[str, Activity] = FAKES,
     cases: type[CaseWorkflow] = DevelopmentCases,
     queue: str = QUEUE,
+    converter: DataConverter | None = None,
 ) -> T:
     """Run `scenario` against Temporal's time-skipping test server, with a worker serving the
-    development cases, their plans and `activities`: nothing outside is reached."""
+    development cases, their plans and `activities`: nothing outside is reached. `converter`
+    holds the keys, for a test that replays what it recorded; else fresh ones."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
+        environment = await WorkflowEnvironment.start_time_skipping(
+            data_converter=converter or development_converter()
+        )
         async with (
             environment,
             case_worker(environment.client, queue, cases, DevelopmentPlans, activities),
@@ -126,7 +133,9 @@ def skipping[T](
     while a client waits on a workflow's result, and a case waiting for a person never ends."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
+        environment = await WorkflowEnvironment.start_time_skipping(
+            data_converter=development_converter()
+        )
         async with (
             environment,
             case_worker(environment.client, QUEUE, cases, DevelopmentPlans, activities),
@@ -176,7 +185,9 @@ def test_a_case_id_opens_one_case() -> None:
             case, "review#1", "approve", "ana", ["support"], {"approved_amount": Decimal(40)}
         )
         assert (await case.result()).status == "closed"
-        with pytest.raises(WorkflowAlreadyStartedError):
+        # Refused before Temporal is asked: the ID's key was made, and is never made again
+        # (brief, D31). Temporal would refuse it too (`REJECT_DUPLICATE`).
+        with pytest.raises(KeyRefused, match="^a key was already made for refund-1"):
             await start_case(client, DevelopmentCases, REFUND, SMALL, "refund-1", QUEUE)
 
     on_temporal(scenario)
@@ -616,8 +627,9 @@ def test_a_carried_state_reads_back_as_it_was() -> None:
     # else: an amount stays an exact Decimal, every value keeps its sources, and the order of
     # what waits on people, and of the history, is kept (brief, D27).
     state = case_state(REFUND, LARGE, [("review#1", REVIEW_FORM)])
-    payload = DATA_CONVERTER.payload_converter.to_payload(state_as_data(state))
-    back = state_from_data(DATA_CONVERTER.payload_converter.from_payload(payload, dict))
+    payload = ExactPayloadConverter().to_payload(state_as_data(state))
+    assert payload is not None
+    back = state_from_data(ExactPayloadConverter().from_payload(payload, dict))
     assert back == state
     assert back.values["approved_amount"] == Decimal(250)
     assert isinstance(back.values["approved_amount"], Decimal)
@@ -795,8 +807,9 @@ class ChangedCases(CaseWorkflow):
         return await self.drive(start)
 
 
-def finished_case() -> WorkflowHistory:
-    """The history of the guide's refund, reviewed, approved after a double click, and paid."""
+def finished_case(converter: DataConverter) -> WorkflowHistory:
+    """The history of the guide's refund, reviewed, approved after a double click, and paid, its
+    parts sealed by `converter`."""
 
     async def scenario(client: Client) -> WorkflowHistory:
         case = await start_case(client, DevelopmentCases, REFUND, LARGE, "refund-1", QUEUE)
@@ -807,12 +820,17 @@ def finished_case() -> WorkflowHistory:
         await case.result()
         return await case.fetch_history()
 
-    return on_temporal(scenario)
+    return on_temporal(scenario, converter=converter)
 
 
-def replay(history: WorkflowHistory, workflow_class: type[CaseWorkflow]) -> None:
-    """Replay `history` against `workflow_class`, as a worker would after a restart."""
-    replayer = Replayer(workflows=[workflow_class], data_converter=DATA_CONVERTER)
+def replay(
+    history: WorkflowHistory, workflow_class: type[CaseWorkflow], converter: DataConverter
+) -> None:
+    """Replay `history` against `workflow_class`, as a worker would after a restart, with the
+    converter that recorded it: its sealed parts open only with their keys (brief, D31)."""
+    replayer = Replayer(
+        workflows=[workflow_class], data_converter=converter, workflow_runner=SANDBOX
+    )
     asyncio.run(replayer.replay_workflow(history))
 
 
@@ -820,14 +838,16 @@ def test_a_case_history_replayed_with_changed_code_fails() -> None:
     # Temporal refuses rather than let the case go another way than it went: the case waits
     # until the code is fixed (brief, D17).
     with pytest.raises(NondeterminismError):
-        replay(finished_case(), ChangedCases)
+        converter = development_converter()
+        replay(finished_case(converter), ChangedCases, converter)
 
 
 def test_a_case_history_replays() -> None:
     # `decide` reads no clock, randomness or I/O, and the inbox decides events in the order
     # history records them: the same code asks for the same things, and the recorded answers,
     # refusals and results are read back, nothing done again.
-    replay(finished_case(), DevelopmentCases)
+    converter = development_converter()
+    replay(finished_case(converter), DevelopmentCases, converter)
 
     # A case that continued as new: its last run starts from the carried state, and replays.
     async def switched(client: Client) -> WorkflowHistory:
@@ -840,7 +860,10 @@ def test_a_case_history_replays() -> None:
         assert last != first
         return await case.fetch_history()  # the latest run's
 
-    replay(on_temporal(switched, cases=SwitchingCases), SwitchingCases)
+    converter = development_converter()
+    replay(
+        on_temporal(switched, cases=SwitchingCases, converter=converter), SwitchingCases, converter
+    )
 
     # A case whose plan step ran as a child workflow: the case's history records the child's
     # start and result, and replays.
@@ -854,7 +877,12 @@ def test_a_case_history_replays() -> None:
         await case.result()
         return await case.fetch_history()
 
-    replay(on_temporal(with_child, cases=CasesWithPlans), CasesWithPlans)
+    converter = development_converter()
+    replay(
+        on_temporal(with_child, cases=CasesWithPlans, converter=converter),
+        CasesWithPlans,
+        converter,
+    )
 
 
 # --- Slice 8: the guide, as the engine does it ---

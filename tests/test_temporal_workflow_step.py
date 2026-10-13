@@ -6,6 +6,7 @@ bound to the contract `kyc.check@1`. See docs/layers/08-case.md (8d) and docs/gu
 
 import asyncio
 import copy
+import functools
 from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -17,6 +18,7 @@ import pytest
 from temporalio import activity, workflow
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.common import RetryPolicy
+from temporalio.converter import DataConverter
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -34,8 +36,7 @@ from ventoux.temporal.cases import (
     start_case,
 )
 from ventoux.temporal.contract_check import check_workflow_contract
-from ventoux.temporal.converter import DATA_CONVERTER
-from ventoux.temporal.worker import case_worker
+from ventoux.temporal.worker import SANDBOX, case_worker
 
 # Temporal: this module defines workflows, so the workflow sandbox imports it afresh. The
 # development catalog is passed through, imported once and shared (as in 8c's tests).
@@ -45,6 +46,7 @@ with workflow.unsafe.imports_passed_through():
         FAKES,
         DevelopmentCases,
         DevelopmentPlans,
+        development_converter,
         kyc_check,
         load_definition,
         run_case,
@@ -148,12 +150,16 @@ def with_kyc(**steps: dict[str, Any]) -> dict[str, Any]:
 def on_temporal[T](
     scenario: Callable[[WorkflowEnvironment], Awaitable[T]],
     cases: type[CaseWorkflow] = CasesWithKyc,
+    converter: DataConverter | None = None,
 ) -> T:
     """Run `scenario` against Temporal's time-skipping test server: our worker serving `cases`,
-    and the KYC team's worker serving their workflow on their queue."""
+    and the KYC team's worker serving their workflow on their queue. `converter` holds the keys,
+    for a test that replays what it recorded; else fresh ones."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
+        environment = await WorkflowEnvironment.start_time_skipping(
+            data_converter=converter or development_converter()
+        )
         client = environment.client
         async with (
             environment,
@@ -164,6 +170,9 @@ def on_temporal[T](
                 workflows=[KycCheck],
                 activities=[read_documents],
                 activity_executor=ThreadPoolExecutor(),
+                # Their workflow lives in this test module, which imports Ventoux: the sandbox
+                # re-imports the module, so it passes Ventoux through as our worker does.
+                workflow_runner=SANDBOX,
             ),
         ):
             # Bounded: a case that hangs (a workflow task retried forever) fails the test.
@@ -447,11 +456,16 @@ def test_the_guides_contract_test_runs_as_written() -> None:
     # The guide's example, the fourth Python block of the activities guide, with the KYC team's
     # workflow above as its `KycCheck`.
     example = ACTIVITIES_GUIDE.read_text().split("```python\n")[4].split("```")[0]
-    namespace: dict[str, Any] = {"Worker": Worker, "KycCheck": KycCheck, "kyc_check": kyc_check}
+    # The guide's worker, given the runner that passes Ventoux through: here the KYC team's
+    # workflow lives in this test module, which imports Ventoux (see `on_temporal`).
+    worker = functools.partial(Worker, workflow_runner=SANDBOX)
+    namespace: dict[str, Any] = {"Worker": worker, "KycCheck": KycCheck, "kyc_check": kyc_check}
     exec(example, namespace)  # noqa: S102 -- our guide, run so it can't drift from the code
 
     async def go() -> None:
-        environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
+        environment = await WorkflowEnvironment.start_time_skipping(
+            data_converter=development_converter()
+        )
         async with environment:
             await namespace["test_kyc_check_keeps_its_contract"](environment)
 
@@ -461,14 +475,20 @@ def test_the_guides_contract_test_runs_as_written() -> None:
 # --- Slice 6: replay ---
 
 
-def replay(history: WorkflowHistory, workflow_class: type[CaseWorkflow]) -> None:
-    """Replay `history` against `workflow_class`, as a worker would after a restart."""
-    replayer = Replayer(workflows=[workflow_class], data_converter=DATA_CONVERTER)
+def replay(
+    history: WorkflowHistory, workflow_class: type[CaseWorkflow], converter: DataConverter
+) -> None:
+    """Replay `history` against `workflow_class`, as a worker would after a restart, with the
+    converter that recorded it: its sealed parts open only with their keys (brief, D31)."""
+    replayer = Replayer(
+        workflows=[workflow_class], data_converter=converter, workflow_runner=SANDBOX
+    )
     asyncio.run(replayer.replay_workflow(history))
 
 
-def checked_and_retried() -> WorkflowHistory:
-    """The history of a case whose check failed once, was retried by an operator, and closed."""
+def checked_and_retried(converter: DataConverter) -> WorkflowHistory:
+    """The history of a case whose check failed once, was retried by an operator, and closed,
+    its parts sealed by `converter`."""
     DOCUMENT_READS.clear()
 
     async def scenario(environment: WorkflowEnvironment) -> WorkflowHistory:
@@ -478,7 +498,7 @@ def checked_and_retried() -> WorkflowHistory:
         await case.result()
         return await case.fetch_history()
 
-    return on_temporal(scenario)
+    return on_temporal(scenario, converter=converter)
 
 
 @workflow.defn(name="ventoux.case")
@@ -513,14 +533,16 @@ def test_a_case_history_with_its_workflow_type_changed_fails_replay() -> None:
     # The type of each child a case started is in its history: bound to another type under a case
     # that started one, replay refuses, and the case waits until the binding is put back.
     with pytest.raises(NondeterminismError):
-        replay(checked_and_retried(), RetypedCases)
+        converter = development_converter()
+        replay(checked_and_retried(converter), RetypedCases, converter)
 
 
 def test_a_case_history_replays() -> None:
     # A failed child, an operator's retry, the child started again and its output: all read back
     # from the case's history, nothing done again.
-    history = checked_and_retried()
-    replay(history, CasesWithKyc)
+    converter = development_converter()
+    history = checked_and_retried(converter)
+    replay(history, CasesWithKyc, converter)
     # Moving the workflow to another task queue is an operations change (brief, D5): the case's
     # history still replays.
-    replay(history, RequeuedCases)
+    replay(history, RequeuedCases, converter)

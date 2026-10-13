@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
+from temporalio.converter import DataConverter
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
 from temporalio.workflow import NondeterminismError
@@ -30,22 +31,34 @@ from ventoux.core.catalog import NotInCatalog
 from ventoux.core.interpreter import Outcome
 from ventoux.core.provenance import sourced
 from ventoux.temporal.client import answer, report, start_plan
-from ventoux.temporal.converter import DATA_CONVERTER
-from ventoux.temporal.worker import plan_worker
+from ventoux.temporal.worker import SANDBOX, plan_worker
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
-from ventoux.testing import CATALOG, FAKES, Activity, DevelopmentPlans, fake_refund, run_plan
+from ventoux.testing import (
+    CATALOG,
+    FAKES,
+    Activity,
+    DevelopmentPlans,
+    development_converter,
+    fake_refund,
+    run_plan,
+)
 
 QUEUE = "plans"
 
 
 def on_temporal[T](
-    scenario: Callable[[Client], Awaitable[T]], activities: Mapping[str, Activity] = FAKES
+    scenario: Callable[[Client], Awaitable[T]],
+    activities: Mapping[str, Activity] = FAKES,
+    converter: DataConverter | None = None,
 ) -> T:
     """Run `scenario` against Temporal's time-skipping test server, with a worker serving the
-    development plans and `activities`: timers fire at once, and nothing outside is reached."""
+    development plans and `activities`: timers fire at once, and nothing outside is reached.
+    `converter` holds the keys, for a test that replays what it recorded; else fresh ones."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
+        environment = await WorkflowEnvironment.start_time_skipping(
+            data_converter=converter or development_converter()
+        )
         async with (
             environment,
             plan_worker(environment.client, QUEUE, DevelopmentPlans, activities),
@@ -105,8 +118,9 @@ def round_trip(value: Any) -> Any:
     """`value` written as Temporal writes a payload, and read back."""
 
     async def both_ways() -> Any:
-        payloads = await DATA_CONVERTER.encode([value])
-        return (await DATA_CONVERTER.decode(payloads, [Any]))[0]
+        converter = development_converter()
+        payloads = await converter.encode([value])
+        return (await converter.decode(payloads, [Any]))[0]
 
     return asyncio.run(both_ways())
 
@@ -245,7 +259,9 @@ def test_the_runtime_check_blocks_the_injection_on_temporal() -> None:
 def test_an_implementation_the_catalog_does_not_hold_is_refused() -> None:
     # A typo would register an activity no plan can call, and leave the real one unserved.
     async def go() -> None:
-        environment = await WorkflowEnvironment.start_time_skipping(data_converter=DATA_CONVERTER)
+        environment = await WorkflowEnvironment.start_time_skipping(
+            data_converter=development_converter()
+        )
         async with environment:
             with pytest.raises(NotInCatalog, match="payments.refnd@2"):
                 plan_worker(
@@ -454,8 +470,8 @@ class ChangedPlans(PlanWorkflow):
         return await self.interpret(start)
 
 
-def finished_history() -> WorkflowHistory:
-    """The history of the guide's run, answered and finished."""
+def finished_history(converter: DataConverter) -> WorkflowHistory:
+    """The history of the guide's run, answered and finished, its parts sealed by `converter`."""
 
     async def scenario(client: Client) -> WorkflowHistory:
         run = await start_plan(
@@ -466,12 +482,17 @@ def finished_history() -> WorkflowHistory:
         await run.result()
         return await run.fetch_history()
 
-    return on_temporal(scenario)
+    return on_temporal(scenario, converter=converter)
 
 
-def replay(history: WorkflowHistory, workflow_class: type[PlanWorkflow]) -> None:
-    """Replay `history` against `workflow_class`, as a worker would after a restart."""
-    replayer = Replayer(workflows=[workflow_class], data_converter=DATA_CONVERTER)
+def replay(
+    history: WorkflowHistory, workflow_class: type[PlanWorkflow], converter: DataConverter
+) -> None:
+    """Replay `history` against `workflow_class`, as a worker would after a restart, with the
+    converter that recorded it: its sealed parts open only with their keys (brief, D31)."""
+    replayer = Replayer(
+        workflows=[workflow_class], data_converter=converter, workflow_runner=SANDBOX
+    )
     asyncio.run(replayer.replay_workflow(history))
 
 
@@ -479,13 +500,15 @@ def test_a_history_replayed_with_changed_code_fails() -> None:
     # Temporal refuses rather than let the run go another way than it went: the run waits until
     # the code is fixed (brief, D17).
     with pytest.raises(NondeterminismError):
-        replay(finished_history(), ChangedPlans)
+        converter = development_converter()
+        replay(finished_history(converter), ChangedPlans, converter)
 
 
 def test_a_history_replays_with_the_same_code() -> None:
     # The interpreter reads no clock, randomness or I/O, so it asks for the same things in the
     # same order: the recorded results, answer and timer are read back, nothing is called again.
-    replay(finished_history(), DevelopmentPlans)
+    converter = development_converter()
+    replay(finished_history(converter), DevelopmentPlans, converter)
 
 
 def test_the_bound_on_a_loop_holds_on_temporal_and_replays() -> None:
@@ -499,7 +522,8 @@ def test_the_bound_on_a_loop_holds_on_temporal_and_replays() -> None:
         )
         return await run.result(), await run.fetch_history()
 
-    report, history = on_temporal(scenario)
+    converter = development_converter()
+    report, history = on_temporal(scenario, converter=converter)
     assert report.status == "stopped"
     assert report.reason == (
         "entered 1,000 states without waiting for anyone: a plan that loops needs a wait or an end"
@@ -507,7 +531,7 @@ def test_the_bound_on_a_loop_holds_on_temporal_and_replays() -> None:
     # Under Temporal's warning (about 10,000 events), far under its limit (51,200): no
     # continue-as-new is needed for a plan (design question 18).
     assert len(history.events) < 10_000
-    replay(history, DevelopmentPlans)
+    replay(history, DevelopmentPlans, converter)
 
 
 def declines_once(keys: list[str]) -> Activity:
@@ -641,10 +665,11 @@ def test_a_form_crosses_in_the_signal_and_the_history_replays() -> None:
         await answer(run, "approve_refund#1", "approve", by="sam", roles=PEOPLE["sam"])
         return await run.result(), run.result_run_id or "", await run.fetch_history()
 
-    report, run_id, history = on_temporal(scenario)
+    converter = development_converter()
+    report, run_id, history = on_temporal(scenario, converter=converter)
     assert report.status == in_memory.status == "succeeded"
     assert report.history == [
         str(event).replace("memory/", f"refund-1/{run_id}/") for event in in_memory.history
     ]
     assert "ana answered accept as support, setting approved_amount" in report.history
-    replay(history, DevelopmentPlans)
+    replay(history, DevelopmentPlans, converter)
