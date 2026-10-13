@@ -38,7 +38,7 @@ from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
 from ventoux.core.references import reference
-from ventoux.core.sensitive import Sensitive
+from ventoux.core.sensitive import Sensitive, unwrapped
 from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.contract_check import check_workflow_contract
@@ -228,6 +228,8 @@ CATALOG.register_role("support-lead", approves="high")
 # The case data guide's claim: an adjuster assesses it, and only fraud sees its fraud score.
 CATALOG.register_role("adjuster")
 CATALOG.register_role("fraud")
+# Only claims-sensitive sees the claim's national ID (layer 9b).
+CATALOG.register_role("claims-sensitive")
 # Operations acts on a case's failed steps: retries them, or closes the case (brief, D26).
 CATALOG.register_role("operations", operates=True)
 
@@ -367,7 +369,7 @@ def plan_runner(
     scripts = {step: list(answers) for step, answers in plan_answers.items()}
 
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
-        return activities[reference](inputs)
+        return activities[reference](unwrapped(inputs))  # plain values, as on Temporal
 
     def run(command: StartPlan) -> Completed | Failed | None:
         try:
@@ -415,7 +417,13 @@ def scripted(script: list[tuple[Any, ...]], people: Mapping[str, Iterable[str]])
                 script.remove(answer)
                 by = answer[2] if len(answer) > 2 else None
                 stated = frozenset(people.get(by, ())) if by else frozenset[str]()
-                return Answer(answer[1], by, stated, answer[3] if len(answer) > 3 else None)
+                # Every value of a form wrapped, as the client sends it (brief, D31).
+                form = (
+                    {name: Sensitive(v) for name, v in answer[3].items()}
+                    if len(answer) > 3
+                    else None
+                )
+                return Answer(answer[1], by, stated, form)
         return None
 
     return wait
@@ -514,7 +522,7 @@ def run_plan(
     wait = scripted(list(answers), people or {})  # the test plays the API, stating roles
 
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
-        return activities[reference](inputs)
+        return activities[reference](unwrapped(inputs))  # plain values, as on Temporal
 
     # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it to the end.
     return asyncio.run(interpret(parse_plan(data), fields, CATALOG, call, wait, run_name=run))

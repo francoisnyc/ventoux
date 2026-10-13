@@ -26,6 +26,7 @@ from ventoux.case.state import (
 from ventoux.case.visibility import CaseView, case_view
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome
+from ventoux.core.sensitive import unwrapped
 
 # An activity's code, or a workflow's in memory: its inputs in, its output back.
 Activity = Callable[[dict[str, Any]], dict[str, Any]]
@@ -151,7 +152,8 @@ def outcome_of(
     error is a failure after them (Temporal retries with the contract's policy, layer 8c)."""
     activity = activity_for(command)
     try:
-        return Completed(command.entry, activity(command.inputs))
+        # The activity's code gets plain values, as on Temporal (brief, D31).
+        return Completed(command.entry, activity(unwrapped(command.inputs)))
     except Outcome as outcome:
         # A business failure is an outcome; whether the contract declares it, `decide` checks.
         return Completed(command.entry, {}, outcome.name)

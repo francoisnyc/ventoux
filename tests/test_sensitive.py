@@ -13,9 +13,9 @@ import pytest
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import CaseRefused, decide
-from ventoux.case.state import Answered, CaseState, Opened
+from ventoux.case.state import Answered, CaseState, GivenApproval, Opened, StartPlan
 from ventoux.core.sensitive import Sensitive
-from ventoux.testing import CATALOG, as_json, run_case
+from ventoux.testing import CATALOG, as_json, run_case, shown
 
 GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "case-data.md").read_text()
 NATIONAL_ID = "1 85 05 78 006 084 36"
@@ -88,6 +88,11 @@ def claim_asking_the_id() -> dict[str, Any]:
     return definition
 
 
+def wrapped_file() -> dict[str, Any]:
+    """`FILE` as the client sends it: the national ID wrapped."""
+    return {**as_json(FILE), "national_id": Sensitive(NATIONAL_ID)}
+
+
 OPENING = {name: value for name, value in FILE.items() if name != "national_id"}
 
 
@@ -130,3 +135,154 @@ def test_a_form_keeps_wrapped_only_sensitive_values() -> None:
     assert run.state.values["national_id"] == Sensitive(NATIONAL_ID)
     assert run.state.values["notes"] == "checked by phone"
     assert "ana answered assess#1 accept as adjuster, setting national_id and notes" in run.history
+
+
+def with_steps(**steps: dict[str, Any]) -> dict[str, Any]:
+    """The claim, with more steps."""
+    definition = claim()
+    definition["steps"] |= steps
+    return definition
+
+
+def lookup(order_id: Any, **more: Any) -> dict[str, Any]:
+    """A step reading the orders system with `order_id`: a stand-in for any activity."""
+    return {
+        "kind": "activity",
+        "display": {"title": "Look it up"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": order_id},
+    } | more
+
+
+def test_a_workflow_step_is_never_given_a_sensitive_value() -> None:
+    # Its worker belongs to another team and doesn't hold the case's key (brief, D31).
+    kyc = {
+        "kind": "workflow",
+        "display": {"title": "Check the customer"},
+        "workflow": "kyc.check@1",
+        "inputs": {"customer_id": {"var": "national_id"}},
+    }
+    called: list[dict[str, Any]] = []
+
+    def kyc_check(inputs: dict[str, Any]) -> dict[str, Any]:
+        called.append(inputs)
+        return {}
+
+    run = run_case(
+        with_steps(kyc=kyc),
+        file=FILE,
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": kyc_check},
+    )
+    assert run.needs_attention == [
+        (
+            "kyc#1: kyc.check@1 is a workflow step and can't be given national_id, a sensitive "
+            "field: its worker doesn't hold the case's key"
+        )
+    ]
+    assert called == []
+
+
+def test_an_input_from_a_sensitive_value_stays_sensitive() -> None:
+    given: list[dict[str, Any]] = []
+
+    def check(inputs: dict[str, Any]) -> dict[str, Any]:
+        given.append(inputs)
+        return {"status": "known"}
+
+    steps = {
+        # Read as it is, and computed from it: both carry it.
+        "as_it_is": lookup({"var": "national_id"}),
+        "computed": lookup({"cat": ["id:", {"var": "national_id"}]}),
+        # A condition reads the real value inside the worker.
+        "only_this_id": lookup(
+            {"var": "policy_id"}, when={"==": [{"var": "national_id"}, NATIONAL_ID]}
+        ),
+    }
+    run = run_case(
+        with_steps(**steps),
+        file=FILE,
+        answers=[],
+        people=PEOPLE,
+        activities={"orders.lookup@1": check},
+    )
+    # The activity's code gets the plain value; the command carrying it, the wrapper.
+    assert given == [
+        {"order_id": NATIONAL_ID},
+        {"order_id": f"id:{NATIONAL_ID}"},
+        {"order_id": "pol-3"},
+    ]
+    assert {"as_it_is", "computed", "only_this_id"} <= run.steps_done
+    assert NATIONAL_ID not in "\n".join(run.history)
+
+
+def test_a_plan_step_carries_a_sensitive_value() -> None:
+    plan = {
+        "plan": "check-id",
+        "version": 1,
+        "display": {"title": "Check an ID"},
+        "fields": {"id": {"type": "string"}},
+        "initial": "check",
+        "states": {
+            "check": {
+                "activity": "orders.lookup@1",
+                "inputs": {"order_id": {"var": "id"}},
+                "on": {"done": "checked"},
+            },
+            "checked": {"final": "succeeded"},
+        },
+    }
+    step = {
+        "kind": "plan",
+        "display": {"title": "Check the ID"},
+        "plan": "check-id@1",
+        "inputs": {"id": {"var": "national_id"}},
+    }
+    # The plan's field carries the wrapper into the plan (brief, D28).
+    case = parse_case(with_steps(check_id=step))
+    _, commands = decide(case, CATALOG, CaseState("memory"), Opened(wrapped_file(), None))
+    [start] = [command for command in commands if isinstance(command, StartPlan)]
+    assert start.fields["id"].value == Sensitive(NATIONAL_ID)
+    given: list[dict[str, Any]] = []
+
+    def check(inputs: dict[str, Any]) -> dict[str, Any]:
+        given.append(inputs)
+        return {"status": "known"}
+
+    run = run_case(
+        with_steps(check_id=step),
+        file=FILE,
+        answers=[],
+        people=PEOPLE,
+        plans={"check-id@1": plan},
+        activities={"orders.lookup@1": check},
+    )
+    # Inside the plan, its activity's code gets the plain value.
+    assert given == [{"order_id": NATIONAL_ID}]
+    assert "check_id" in run.steps_done
+
+
+def test_an_approval_of_a_sensitive_input_keeps_its_digest_sensitive() -> None:
+    # A digest of a national ID is easy to reverse by trying every one: it is wrapped too.
+    approved = lookup(
+        {"var": "national_id"},
+        approval={"roles": ["support-lead"], "display": {"reason": "It reads the ID"}},
+    )
+    run = run_case(
+        with_steps(approved=approved),
+        file=FILE,
+        answers=[("approved.approval#1", "approve", "kim")],
+        people={**PEOPLE, "kim": ["claims-sensitive", "support-lead"]},
+    )
+    [ran] = [r for r in run.state.runs if r.step == "approved"]
+    assert ran.status == "done" and isinstance(ran.approved, GivenApproval)
+    assert isinstance(ran.approved.digest, Sensitive)
+
+
+def test_showing_a_sensitive_reference_writes_no_reference() -> None:
+    definition = claim()
+    definition["fields"]["customer_id"] |= {"sensitive": True, "visible_to": ["adjuster"]}
+    run = run_case(definition, file=FILE, answers=[shown("customer_id", "ana")], people=PEOPLE)
+    assert "ana was shown customer_id (crm ‹sensitive›)" in run.history
+    assert "cus-7" not in "\n".join(run.history)

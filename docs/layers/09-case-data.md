@@ -398,7 +398,8 @@ values, then wraps each input whose expression read a wrapped one; it is in `cor
 the same rule. A `workflow` step's input reading one fails the step. Conditions and approvals'
 `when` read unwrapped values. `case_view` writes values through `str`, so a sensitive line reads
 `‹sensitive›`; a `shown` line likewise. In a plan, a field given a sensitive value stays
-sensitive for the run: a form writing it is wrapped.
+sensitive for the run; a plan's form values are kept plain, since a field a form sets is never
+given at the start.
 
 **Crossing Temporal.** `ExactJSON` writes a `Sensitive` as `{"‹sensitive›": n}` and its value's
 exact JSON as the metadata entry `sensitive/<n>`; it reads them back the same way, and refuses an

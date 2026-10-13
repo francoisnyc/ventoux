@@ -61,6 +61,7 @@ from ventoux.core.plan import Wait as Question
 from ventoux.core.provenance import CASE, Sourced, provenance
 from ventoux.core.references import unregistered
 from ventoux.core.roles import no_role, role_that_counts
+from ventoux.core.sensitive import Sensitive, plain
 
 # How a run ends (docs/guides/plans.md, "Running a plan").
 Status = Literal["succeeded", "failed", "waiting", "stopped"]
@@ -213,7 +214,9 @@ async def interpret(
                 # A form's values land in the run's fields, tagged with who answered (brief, D9);
                 # the latest answer replaces an earlier pass's.
                 for name in setting:
-                    values[name] = (answer.form or {})[name]
+                    # Plain: the client wraps every form value (brief, D31), and a field a form
+                    # sets is never given at the start, so it never holds a sensitive value.
+                    values[name] = plain((answer.form or {})[name])
                     # The plan's mark stays, as on a field given at the start: a mark adds
                     # distrust, never removes it (non-negotiables; tutor review).
                     mark = {plan.sources[name]} if name in plan.sources else set()
@@ -309,7 +312,7 @@ class Approved:
     """An approval given and not yet spent: who gave it, and what they saw."""
 
     by: str  # who approved
-    digest: str  # the digest of the inputs they saw (brief, D11)
+    digest: str | Sensitive  # the digest of the inputs they saw (brief, D11)
 
 
 def approval_of(

@@ -76,6 +76,7 @@ from ventoux.core.provenance import NoSources, Sourced, provenance
 from ventoux.core.references import unregistered
 from ventoux.core.roles import role_that_counts
 from ventoux.core.sensitive import Sensitive, plain
+from ventoux.core.sensitive_inputs import kept_sensitive, reads_sensitive
 
 # Where the case file's first values came from when a system opened the case (brief, D12).
 OPENER = "system:opener"
@@ -641,6 +642,8 @@ def schedule(
     key = f"{state.case}/{entry}"
     types = {name: field.declared for name, field in case.fields.items()}
     inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key, types)
+    if isinstance(step, WorkflowStep):
+        refuse_sensitive_inputs(contract.reference, step.inputs, state.values)
     coming_run(state, name, "running").approved = approved
     state.proposers.pop(name, None)  # the proposed run has started
     if isinstance(step, WorkflowStep):
@@ -658,6 +661,19 @@ def schedule(
     commands.append(Schedule(entry, contract.reference, inputs))
 
 
+def refuse_sensitive_inputs(
+    reference: str, inputs: Mapping[str, Expression], values: Mapping[str, object]
+) -> None:
+    """A workflow step is never given a sensitive value: its worker belongs to another team and
+    doesn't hold the case's key (brief, D31)."""
+    for expression in inputs.values():
+        for field in reads_sensitive(expression, values):
+            raise InputRefused(
+                f"{reference} is a workflow step and can't be given {field}, a sensitive field: "
+                "its worker doesn't hold the case's key"
+            )
+
+
 def origins(inputs: Mapping[str, Expression], state: CaseState) -> str:
     """Where each input's value came from, as the history says it: `amount from person:ana`."""
     return "; ".join(
@@ -672,8 +688,10 @@ def start_plan(state: CaseState, name: str, step: PlanStep, commands: list[Comma
     fields: dict[str, Sourced] = {}
     for field, expression in step.inputs.items():
         try:
+            value = evaluate(expression, state.values)
             fields[field] = Sourced(
-                evaluate(expression, state.values), provenance(expression, state.sources)
+                kept_sensitive(expression, state.values, value),  # wrapped into the plan too
+                provenance(expression, state.sources),
             )
         except (ExpressionError, NoSources) as error:
             # Fail closed: a field that can't be read gets no default; the step fails.

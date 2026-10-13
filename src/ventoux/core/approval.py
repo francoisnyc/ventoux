@@ -15,6 +15,8 @@ from ventoux.core.expressions import Expression, evaluate
 from ventoux.core.plan import APPROVE, ActivityState, ApprovalState, Plan
 from ventoux.core.provenance import fields_read
 from ventoux.core.roles import may_approve, what_it_approves
+from ventoux.core.sensitive import Sensitive
+from ventoux.core.sensitive_inputs import reads_sensitive
 
 
 class Unapprovable(Exception):
@@ -95,13 +97,18 @@ def not_someone_else(
     return None
 
 
-def inputs_digest(inputs: Mapping[str, Expression], values: Mapping[str, object]) -> str:
+def inputs_digest(
+    inputs: Mapping[str, Expression], values: Mapping[str, object]
+) -> str | Sensitive:
     """The digest of the values an activity would be given now from `inputs`: what an approval
     saw, so a change, up or down, is noticed before the activity runs (brief, D11). Evaluating an
     input that can't be read raises `ExpressionError`. A plan's activity state and a case's step
-    both pass their `inputs`."""
+    both pass their `inputs`. A digest of a sensitive value is sensitive too: a national ID's is
+    reversed by trying every one (brief, D31)."""
     seen = {name: evaluate(expression, values) for name, expression in inputs.items()}
     # Canonical JSON: keys sorted, a number written as its exact text, marked apart from a text,
     # so `250` and `"250"` never share a digest.
     canonical = json.dumps(seen, sort_keys=True, default=lambda number: {"number": str(number)})
-    return hashlib.sha256(canonical.encode()).hexdigest()
+    digest = hashlib.sha256(canonical.encode()).hexdigest()
+    read = any(reads_sensitive(expression, values) for expression in inputs.values())
+    return Sensitive(digest) if read else digest
