@@ -45,7 +45,7 @@ with workflow.unsafe.imports_passed_through():
         development_converter,
         load_definition,
     )
-    from ventoux.tooling.keys import FileKeys
+    from ventoux.tooling.keys import FileKeys, KeyRefused, KeyState
 
 Case = WorkflowHandle[CaseWorkflow, CaseReport]
 QUEUE = "cases"
@@ -401,3 +401,110 @@ def test_the_key_goes_only_after_a_child_plan_has_ended() -> None:
     assert "settle#1 cancelled: the case is closing" in case.history
     assert case.history[-1] == "closed: forgotten"
     assert (ended.status, ended.history[-1]) == ("forgotten", "the key of refund-1 was destroyed")
+
+
+# --- Slice 6: closed cases and records ---
+
+
+def test_a_case_that_keeps_its_records() -> None:
+    # Books and records: the definition says whether the case may be forgotten (brief, D32).
+    # Refused before anyone answers, or once it is known the case closed first; nothing is
+    # destroyed.
+    async def proposed(client: Client, case: str) -> WorkflowHandle[Any, ForgetReport]:
+        return await propose_forget(client, DevelopmentForget, case, "pia", ["privacy"], QUEUE)
+
+    async def scenario(client: Client) -> tuple[list[ForgetReport], CaseReport, list[KeyState]]:
+        never = await start_case(
+            client,
+            DevelopmentCases,
+            {**claim(), "forgetting": "never"},
+            as_json(FILE),
+            "claim-7",
+            QUEUE,
+        )
+        kept = {**claim(), "forgetting": "while_open"}
+        closed = await start_case(client, DevelopmentCases, kept, as_json(FILE), "claim-8", QUEUE)
+        await answer(closed, "assess#1", "deny", "ana", ["adjuster"])
+        await closed.result()
+        # Open when proposed; closed by its own assessment before the approval reaches it.
+        closing = await start_case(client, DevelopmentCases, kept, as_json(FILE), "claim-9", QUEUE)
+        racing = await proposed(client, "claim-9")
+        await reported(
+            racing, lambda now: "pia proposed forgetting claim-9, as privacy" in now.history
+        )
+        await answer(closing, "assess#1", "deny", "ana", ["adjuster"])
+        await closing.result()
+        await answer_forget(racing, "approve", "olu", ["privacy"])
+        # A key made, but the case's start failed: the ID is spent, and nothing says what its
+        # definition kept (brief, D31).
+        keys_of(client).create("claim-6")
+        ended = [
+            await (await proposed(client, "claim-7")).result(),
+            await (await proposed(client, "claim-8")).result(),
+            await racing.result(),
+            await (await proposed(client, "claim-6")).result(),
+        ]
+        states = [
+            keys_of(client).state(case) for case in ("claim-7", "claim-8", "claim-9", "claim-6")
+        ]
+        return ended, await report(never), states
+
+    ended, never, states = on_temporal(scenario)
+    assert [each.status for each in ended] == ["refused"] * 4
+    assert [each.history[-1] for each in ended] == [
+        (
+            "refused pia's proposal: claim-7 keeps its records (forgetting: never): it can't be "
+            "forgotten"
+        ),
+        (
+            "refused pia's proposal: claim-8 is closed, and its definition keeps closed cases "
+            "(forgetting: while_open)"
+        ),
+        (
+            "refused: claim-9 closed before forgetting was approved, and its definition keeps "
+            "closed cases (forgetting: while_open)"
+        ),
+        (
+            "refused pia's proposal: claim-6's definition can't be read: Temporal holds no "
+            "history of it, so whether it keeps its records is unknown"
+        ),
+    ]
+    assert never.status == "open"
+    assert states == ["kept", "kept", "kept", "kept"]
+
+
+def test_forgetting_a_closed_case() -> None:
+    # Most requests come after the case closed: its key is destroyed without touching it, and it
+    # keeps its own close reason.
+    async def scenario(client: Client) -> tuple[ForgetReport, CaseReport, str]:
+        case = await closed_claim(client, "claim-7")
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        return await request.result(), await case.result(), keys_of(client).state("claim-7")
+
+    ended, case, key = on_temporal(scenario)
+    assert ended.status == "forgotten"
+    assert ended.history[-4:] == [
+        "approved by olu, as privacy",
+        "claim-7 was already closed",
+        "claim-7 ended: closed: nothing left to do",
+        "the key of claim-7 was destroyed",
+    ]
+    assert (case.history[-1], key) == ("closed: nothing left to do", "destroyed")
+
+
+def test_a_forgotten_id_opens_no_case() -> None:
+    # Its key is never made again (brief, D31), so the ID can't bring the case back.
+    async def scenario(client: Client) -> None:
+        await closed_claim(client, "claim-7")
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        await request.result()
+        with pytest.raises(KeyRefused, match="^a key was already made for claim-7: open the case"):
+            await start_case(client, DevelopmentCases, claim(), as_json(FILE), "claim-7", QUEUE)
+
+    on_temporal(scenario)

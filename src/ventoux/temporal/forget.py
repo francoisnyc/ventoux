@@ -16,16 +16,18 @@ from typing import Any, ClassVar
 from temporalio import activity, workflow
 from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
 from temporalio.common import WorkflowIDReusePolicy
+from temporalio.converter import WorkflowSerializationContext
 from temporalio.exceptions import ApplicationError
 from temporalio.service import RPCError, RPCStatusCode
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh; `case` and `core` are
 # deterministic and passed through, imported once and shared (as in `cases.py`).
 with workflow.unsafe.imports_passed_through():
+    from ventoux.case.definition import parse_case
     from ventoux.case.forgetting import approval_refusal, forgetting_role, role_refusal
     from ventoux.core.catalog import Catalog
     from ventoux.core.person import identifier_problem
-    from ventoux.temporal.cases import CaseForget, CaseReport
+    from ventoux.temporal.cases import CaseForget, CaseReport, CaseStart
     from ventoux.temporal.converter import keys_of
 
 # How long one call to the key provider may take; Temporal retries it until it answers, as a
@@ -56,11 +58,36 @@ class ForgetAnswer:
 
 
 OUTCOMES = ("approve", "reject")
-# Why a case without a kept key can't be forgotten, by its key's state.
-NO_KEY = {
-    "never made": "there is no case {case}: no key was ever made for it",
-    "destroyed": "{case} was already forgotten: its key was destroyed",
-}
+
+
+@dataclass
+class CaseLookup:
+    """What a request learns of its case before anyone answers."""
+
+    key: str  # its key's state: kept, destroyed, or never made
+    running: bool  # whether its workflow still runs
+    # What its definition says (brief, D32): allowed, while_open or never; empty if its
+    # definition can't be read any more.
+    forgetting: str
+
+
+def lookup_refusal(case: str, found: CaseLookup) -> str | None:
+    """Why a request to forget `case` is refused before anyone answers; None if it may go on."""
+    if found.key == "never made":
+        return f"there is no case {case}: no key was ever made for it"
+    if found.key == "destroyed":
+        return f"{case} was already forgotten: its key was destroyed"
+    if found.forgetting == "":
+        # Fail closed: a case whose definition can't be read might keep its records.
+        return (
+            f"{case}'s definition can't be read: Temporal holds no history of it, so whether "
+            "it keeps its records is unknown"
+        )
+    if found.forgetting == "never":
+        return f"{case} keeps its records (forgetting: never): it can't be forgotten"
+    if found.forgetting == "while_open" and not found.running:
+        return f"{case} is closed, and its definition keeps closed cases (forgetting: while_open)"
+    return None
 
 
 @dataclass
@@ -82,6 +109,7 @@ class ForgetWorkflow:
 
     def __init__(self) -> None:
         self.report = ForgetReport("waiting")
+        self.found = CaseLookup("never made", False, "")  # the case, once looked up
         self.inbox: list[ForgetAnswer] = []  # answers not yet judged, in the order they came
 
     # Temporal: a signal is a message into a running workflow, recorded in its history.
@@ -109,15 +137,14 @@ class ForgetWorkflow:
             self.report.history.append(f"refused {start.by}'s proposal: {refused}")
             return self.report
         # Before anyone answers: Temporal says the same of a case that ended and one that never
-        # was, so the key provider tells which it is, and whether it was forgotten already.
-        state = await workflow.execute_activity_method(
-            ForgetActivities.key_state, start.case, start_to_close_timeout=KEY_CALL
+        # was, so the key provider tells which it is; the case's definition says whether it
+        # keeps its records (brief, D32).
+        self.found = await workflow.execute_activity_method(
+            ForgetActivities.look_up, start.case, start_to_close_timeout=KEY_CALL
         )
-        if state != "kept":
+        if (refused := lookup_refusal(start.case, self.found)) is not None:
             self.report.status = "refused"
-            self.report.history.append(
-                f"refused {start.by}'s proposal: {NO_KEY[state].format(case=start.case)}"
-            )
+            self.report.history.append(f"refused {start.by}'s proposal: {refused}")
             return self.report
         role = forgetting_role(self.catalog, proposer)
         self.report.history.append(f"{start.by} proposed forgetting {start.case}, as {role}")
@@ -149,6 +176,14 @@ class ForgetWorkflow:
             self.report.history.append(f"{case} asked to close as forgotten")
         except ApplicationError:
             # Temporal found no running case: it has ended (the key says it existed).
+            if self.found.forgetting == "while_open":
+                # It closed before the approval reached it, and keeps closed cases (brief, D32).
+                self.report.status = "refused"
+                self.report.history.append(
+                    f"refused: {case} closed before forgetting was approved, and its definition "
+                    "keeps closed cases (forgetting: while_open)"
+                )
+                return
             self.report.history.append(f"{case} was already closed")
         ended = await workflow.execute_activity_method(
             ForgetActivities.case_ended,
@@ -185,10 +220,30 @@ class ForgetActivities:
         self.keys = keys_of(client)  # the key provider the client's codec seals with
 
     # Temporal: an activity runs outside the workflow, and its result is recorded in history.
-    @activity.defn(name="ventoux.forget.key_state")
-    async def key_state(self, case: str) -> str:
-        """Whether the case's key is kept, was destroyed, or was never made."""
-        return self.keys.state(case)
+    @activity.defn(name="ventoux.forget.look_up")
+    async def look_up(self, case: str) -> CaseLookup:
+        """The case's key state, whether its workflow runs, and what its definition says."""
+        key = self.keys.state(case)
+        if key != "kept":
+            return CaseLookup(key, False, "")
+        return CaseLookup(key, await self.still_running(case), await self.forgetting(case))
+
+    async def forgetting(self, case: str) -> str:
+        """What the case's definition says about forgetting, read from the start of its latest
+        run (each run carries the definition); empty if Temporal holds no history of it."""
+        try:
+            history = await self.client.get_workflow_handle(case).fetch_history()
+        except RPCError as error:
+            if error.status == RPCStatusCode.NOT_FOUND:
+                return ""
+            raise
+        started = history.events[0].workflow_execution_started_event_attributes
+        # Temporal: the start's payloads are decoded as the case's, with its key.
+        converter = self.client.data_converter.with_context(
+            WorkflowSerializationContext(self.client.namespace, case)
+        )
+        [opening] = await converter.decode(started.input.payloads, [CaseStart])
+        return parse_case(opening.definition).forgetting
 
     @activity.defn(name="ventoux.forget.case_ended")
     async def case_ended(self, case: str) -> CaseReport:
@@ -223,7 +278,7 @@ class ForgetActivities:
 
     def all(self) -> list[Any]:
         """Each activity, to register with a worker."""
-        return [self.key_state, self.case_ended, self.destroy_key]
+        return [self.look_up, self.case_ended, self.destroy_key]
 
 
 async def propose_forget(

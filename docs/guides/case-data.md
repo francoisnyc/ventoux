@@ -358,6 +358,8 @@ says so:
 | the case was already forgotten | `claim-7 was already forgotten: its key was destroyed` |
 | the case is closed and keeps its records | `claim-7 is closed, and its definition keeps closed cases (forgetting: while_open)` |
 | the case is never forgotten | `claim-7 keeps its records (forgetting: never): it can't be forgotten` |
+| the case closed before the approval reached it, and keeps closed cases | `claim-7 closed before forgetting was approved, and its definition keeps closed cases (forgetting: while_open)` |
+| the case's definition can't be read any more | `claim-7's definition can't be read: Temporal holds no history of it, so whether it keeps its records is unknown` |
 | the case's file is viewed after forgetting | `claim-7 was forgotten: its case file can't be read` |
 | a forgotten case's history is read or replayed | `the key of claim-7 was destroyed when it was forgotten: its sensitive values can't be read or written` |
 

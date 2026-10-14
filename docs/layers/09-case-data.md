@@ -866,6 +866,26 @@ Each starts with its negative test, seen failing for the right reason.
   gave `40` as a Python `int`, which the case refuses, so the payment never ran and the case had
   nothing in flight when it was forgotten. The test now asserts the payment ran before the
   request is made.
+- **The request reads the case's definition before anyone answers** (slice 6): one activity,
+  `look_up`, gives the key's state, whether the case's workflow runs, and its definition's
+  `forgetting`, read from the start of the case's latest run (each run carries the definition),
+  decoded as the case's with its key. It replaces slice 4's `key_state`.
+- **A definition that can't be read is refused** (slice 6), fail closed: `claim-6's definition
+  can't be read: Temporal holds no history of it, so whether it keeps its records is unknown`.
+  It happens when a case's start failed after its key was made (the ID is spent, brief, D31), or
+  once Temporal has dropped a closed case's history: Temporal's retention, not the records', then
+  decides. Erasing such a case needs the key provider's own tools, outside Ventoux.
+- **The race is refused after the approval** (slice 6): a `while_open` case open when proposed
+  and closed by itself before the approval reached it is refused once the signal finds it ended:
+  `refused: claim-9 closed before forgetting was approved, …`, and nothing is destroyed. The
+  guide's refusal table gains this row and the unreadable definition's.
+- **Slice 4's first gap closes** (slice 6): the request refuses `never` before anyone answers, so
+  the case never receives a request it refuses. Only a definition changed while the request
+  waits could still do it, and changing a running case's definition is layer 12's.
+- **Seen failing:** `never` first (the request waited for an answer, until the time-skipping
+  server timed it out); the other three refusals were written with it, so each was seen failing
+  by removing its check (two waited, the race forgot the case). A closed case being forgotten and
+  a forgotten ID opening no case passed when written: their code came with slices 4 and 1.
 
 ### Promises
 
@@ -888,7 +908,7 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 | A rejected request ends, and nothing is closed or destroyed | TF `test_a_rejected_request_changes_nothing` |
 | The key is destroyed only once the case's workflow has ended: never while an activity, child plan or workflow step of it runs; `destroy` refuses while it runs | TF `test_the_key_goes_only_after_the_case_has_ended`, `test_the_key_goes_only_after_a_child_plan_has_ended`, `test_destroy_refuses_while_the_case_runs`; WS `test_forgetting_waits_for_a_workflow_step` |
 | A case never made, and a case already forgotten, are refused before anyone answers | TF `test_forgetting_needs_a_case_with_a_key` |
-| A closed case can be forgotten and keeps its close reason, unless its definition says `while_open`; `never` is always refused; nothing is destroyed when refused | TF `test_forgetting_a_closed_case`, `test_a_case_that_keeps_its_records` |
+| A closed case can be forgotten and keeps its close reason, unless its definition says `while_open` (also when it closed before the approval); `never` is always refused; a definition that can't be read is refused; nothing is destroyed when refused | TF `test_forgetting_a_closed_case`, `test_a_case_that_keeps_its_records` |
 | A forgotten case's ID never opens a case again | TF `test_a_forgotten_id_opens_no_case` |
 | After forgetting, `report` reads the closing report, `view` is refused, and a query or replay fails with the forgotten message, never plain text; the worker carries on | TF `test_reading_a_forgotten_case` |
 | After forgetting, the history, its export and the reports keep every decision, who made it, the definition and flags; every sensitive value, form value in an answer and failure message is unreadable; the request's own history replays without a key | TF `test_what_the_audit_keeps_after_forgetting` |
