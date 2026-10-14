@@ -7,9 +7,12 @@ import json
 from pathlib import Path
 
 import pytest
+from test_case import SMALL, SMALL_REVIEW, closable
 from test_sensitive import claim
 
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.forgetting import ForgetRefused
+from ventoux.testing import close, finish, forget, run_case
 from ventoux.tooling.keys import FileKeys, KeyRefused
 
 NATIONAL_ID = "1 85 05 78 006 084 36"
@@ -66,3 +69,106 @@ def test_a_definition_says_whether_it_may_be_forgotten() -> None:
     assert parse_case(claim()).forgetting == "allowed"
     for kept in ("allowed", "while_open", "never"):
         assert parse_case({**claim(), "forgetting": kept}).forgetting == kept
+
+
+# Ana and Sam work the refund; Pia and Olu may forget a case; Lee may not.
+PEOPLE = {
+    "ana": ["support"],
+    "sam": ["support", "support-lead"],
+    "lee": ["support-lead"],
+    "pia": ["privacy"],
+    "olu": ["privacy"],
+}
+
+
+def test_the_proposer_cannot_approve_forgetting() -> None:
+    # The curriculum's negative test: erasure is a decision two people make (brief, D15, D32).
+    with pytest.raises(
+        ForgetRefused, match="^pia proposed forgetting memory, so cannot approve it$"
+    ):
+        run_case(closable(), file=SMALL, answers=[forget("pia", "pia")], people=PEOPLE)
+
+
+@pytest.mark.parametrize(
+    ("proposed_by", "approved_by", "message"),
+    [
+        ("lee", "olu", "forgetting memory is proposed by privacy, and lee has support-lead"),
+        ("pia", "lee", "forgetting memory is approved by privacy, and lee has support-lead"),
+        ("pia", "max", "forgetting memory is approved by privacy, and max has no role"),
+    ],
+)
+def test_forgetting_needs_a_role_registered_to_forget(
+    proposed_by: str, approved_by: str, message: str
+) -> None:
+    with pytest.raises(ForgetRefused, match=f"^{message}$"):
+        run_case(closable(), file=SMALL, answers=[forget(proposed_by, approved_by)], people=PEOPLE)
+
+
+def test_the_case_checks_forgetting_itself() -> None:
+    # The request checks the same things first (slice 4); the case depends on nothing it did.
+    # Each person is written as an identifier: `Pia` and `pia` would otherwise be two people.
+    with pytest.raises(ForgetRefused, match="^'Pia' is not written as a person's identifier"):
+        run_case(
+            closable(),
+            file=SMALL,
+            answers=[forget("pia", "Pia")],
+            people={**PEOPLE, "Pia": ["privacy"]},
+        )
+    # A case whose definition keeps its records is never forgotten (brief, D32).
+    with pytest.raises(
+        ForgetRefused,
+        match=r"^memory keeps its records \(forgetting: never\): it can't be forgotten$",
+    ):
+        run_case(
+            {**closable(), "forgetting": "never"},
+            file=SMALL,
+            answers=[forget("pia", "olu")],
+            people=PEOPLE,
+        )
+    # A closed case has nothing left to close: on Temporal the request destroys its key without
+    # it (slice 6); here the case refuses, as it refuses anything after it closed.
+    with pytest.raises(ForgetRefused, match="^the case is closed: nothing records it any more$"):
+        run_case(
+            closable(),
+            file=SMALL,
+            answers=[SMALL_REVIEW, forget("pia", "olu")],
+            people=PEOPLE,
+        )
+
+
+def test_forgetting_closes_an_open_case() -> None:
+    # Waiting for its review: the task is cancelled, saying why, and the case closes at once.
+    waiting = run_case(closable(), file=SMALL, answers=[forget("pia", "olu")], people=PEOPLE)
+    assert waiting.closed
+    assert waiting.waiting_for == []
+    assert waiting.history[-3:] == [
+        "forgetting approved by olu as privacy, proposed by pia as privacy",
+        "cancelled review#1: the case is being forgotten",
+        "closed: forgotten",
+    ]
+    # Paying: the payment can't be cut off halfway (brief, D10). It finishes, the case is
+    # flagged for a person, and only then is it closed; its key goes after that (slice 5).
+    paying = [SMALL_REVIEW, forget("pia", "olu")]
+    closing = run_case(closable(), file=SMALL, answers=paying, people=PEOPLE, held=["pay"])
+    assert closing.status == "closing"
+    run = run_case(
+        closable(), file=SMALL, answers=[*paying, finish("pay#1")], people=PEOPLE, held=["pay"]
+    )
+    assert run.flags == ["pay#1 completed after the close was requested"]
+    assert run.history[-4:] == [
+        "forgetting approved by olu as privacy, proposed by pia as privacy",
+        "pay#1 done, giving refund_id from untrusted:undeclared",
+        "flagged: pay#1 completed after the close was requested",
+        "closed: forgotten",
+    ]
+    # Already closing (Ana closed it as a duplicate): it closes with its own reason, and the
+    # request is recorded.
+    run = run_case(
+        closable(),
+        file=SMALL,
+        answers=[SMALL_REVIEW, close("duplicate", "ana"), forget("pia", "olu"), finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+    )
+    assert "forgetting approved by olu as privacy, proposed by pia as privacy" in run.history
+    assert run.history[-1] == "closed: duplicate, by ana"

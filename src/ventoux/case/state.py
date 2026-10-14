@@ -155,8 +155,29 @@ class Shown:
     roles: frozenset[str]  # their roles, stated with it (brief, D22)
 
 
+@dataclass(frozen=True)
+class ForgetApproved:
+    """A request to forget the case was approved: close it as `forgotten`, then its key is
+    destroyed outside it (brief, D15) (brief, D32). Both people and their roles come with it, so the
+    case checks the request itself."""
+
+    proposed_by: str  # who proposed forgetting it, as the trusted caller states (brief, D19)
+    proposer_roles: frozenset[str]  # their roles, stated with the proposal (brief, D22)
+    approved_by: str  # who approved it
+    approver_roles: frozenset[str]  # their roles, stated with the approval
+
+
 type Event = (
-    Opened | Answered | Proposed | Completed | Failed | Retried | CloseAsked | PlanCancelled | Shown
+    Opened
+    | Answered
+    | Proposed
+    | Completed
+    | Failed
+    | Retried
+    | CloseAsked
+    | PlanCancelled
+    | Shown
+    | ForgetApproved
 )
 
 

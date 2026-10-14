@@ -816,6 +816,19 @@ Each starts with its negative test, seen failing for the right reason.
   slice's planned negative ("`forgets` on a role that isn't registered") can't be written. The
   negatives are a catalog where no role forgets until one is registered to, and a role name that
   isn't a label. A forgetting role approves no risk by itself.
+- **The case's checks, in order** (slice 3): each person written as an identifier (`Pia` and
+  `pia` would otherwise be two people, and one person could approve their own request); the case
+  not closed; its definition not `never`; the proposer's role, then the approver's; then two
+  different people. Messages name the case by its ID, the part of the case's name before its
+  first run's (`memory` in memory). An approved request is recorded with the role that counted
+  for each: `forgetting approved by olu as privacy, proposed by pia as privacy`.
+- **A closed case refuses the event** (slice 3), as `shown` does: `the case is closed: nothing
+  records it any more`. On Temporal it never arrives (the case's workflow has ended); the
+  request handles a closed case itself (slice 6).
+- **The development catalog registers `privacy`** (slice 3), the guide's role; the plans guide's
+  `UNKNOWN_ROLE` list gains it, as it gained 9b's.
+- **Citations are written one by one** (slice 3): `(brief, D15) (brief, D32)`, as the decisions
+  test reads them; a first `(brief, D15, D32)` was refused by it.
 
 ### Promises
 
@@ -832,8 +845,8 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 | The provider says whether a case's key is kept, destroyed or never made, after Temporal has dropped the case; destroying it again does nothing | F `test_a_keys_state_tells_which_case_it_is` |
 | Forgetting approved by its proposer is refused (the curriculum's negative test), in memory and on Temporal, where it is recorded and the request waits on | F `test_the_proposer_cannot_approve_forgetting`; TF `test_refused_answers_are_recorded_and_the_request_waits` |
 | A proposer or approver without a role registered to forget is refused | F `test_forgetting_needs_a_role_registered_to_forget`; TF `test_a_proposal_without_the_role_is_refused`, `test_refused_answers_are_recorded_and_the_request_waits` |
-| The case checks the approval itself, depending on nothing the request checked | F `test_the_case_checks_forgetting_itself` |
-| An approved request closes an open case as `forgotten`: tasks and approvals cancelled, running work finishing, what completes after the close flagged | F `test_forgetting_closes_an_open_case`; TF `test_forgetting_an_open_case` |
+| The case checks the approval itself, depending on nothing the request checked: identifiers, a closed case, `never` | F `test_the_case_checks_forgetting_itself` |
+| An approved request closes an open case as `forgotten`: tasks and approvals cancelled, running work finishing, what completes after the close flagged; a case already closing keeps its reason | F `test_forgetting_closes_an_open_case`; TF `test_forgetting_an_open_case` |
 | A rejected request ends, and nothing is closed or destroyed | TF `test_a_rejected_request_changes_nothing` |
 | The key is destroyed only once the case's workflow has ended: never while an activity, child plan or workflow step of it runs; `destroy` refuses while it runs | TF `test_the_key_goes_only_after_the_case_has_ended`, `test_destroy_refuses_while_the_case_runs` |
 | A case never made, and a case already forgotten, are refused before anyone answers | TF `test_forgetting_needs_a_case_with_a_key` |

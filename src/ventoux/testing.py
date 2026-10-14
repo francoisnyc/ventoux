@@ -25,6 +25,7 @@ from ventoux.case.state import (
     Completed,
     Event,
     Failed,
+    ForgetApproved,
     Opened,
     Proposed,
     Retried,
@@ -241,6 +242,7 @@ CATALOG.register_role("fraud")
 CATALOG.register_role("claims-sensitive")
 # Operations acts on a case's failed steps: retries them, or closes the case (brief, D26).
 CATALOG.register_role("operations", operates=True)
+CATALOG.register_role("privacy", forgets=True)  # the guide's data protection role (layer 9c)
 
 
 # Fake implementations, against no real system: nothing is paid, read or sent.
@@ -356,6 +358,16 @@ def run_case(
             continue
         if isinstance(item, Close):
             events.append(CloseAsked(item.reason, item.by, frozenset(people.get(item.by, ()))))
+            continue
+        if isinstance(item, Forget):
+            events.append(
+                ForgetApproved(
+                    item.proposed_by,
+                    frozenset(people.get(item.proposed_by, ())),
+                    item.approved_by,
+                    frozenset(people.get(item.approved_by, ())),
+                )
+            )
             continue
         entry, outcome, who, *form = item
         # The test plays the API: it states who answered and their roles.
@@ -479,6 +491,19 @@ def finish(entry: str) -> Finish:
 def close(reason: str, who: str) -> Close:
     """A script's close: `close("duplicate", "ana")` (brief, D10)."""
     return Close(reason, who)
+
+
+class Forget(NamedTuple):
+    """A scripted request to forget the case, as approved: who proposed it, who approved it."""
+
+    proposed_by: str
+    approved_by: str
+
+
+def forget(proposed_by: str, approved_by: str) -> Forget:
+    """A script's approved request to forget the case: `forget("pia", "olu")` (brief, D32). On
+    Temporal it is its own workflow, `<case ID>/forget`; here it reaches the case as approved."""
+    return Forget(proposed_by, approved_by)
 
 
 class ShownTo(NamedTuple):

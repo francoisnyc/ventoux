@@ -32,6 +32,7 @@ from ventoux.case.definition import (
     TaskStep,
     WorkflowStep,
 )
+from ventoux.case.forgetting import forget
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     Answered,
@@ -41,6 +42,7 @@ from ventoux.case.state import (
     Completed,
     Event,
     Failed,
+    ForgetApproved,
     GivenApproval,
     OpenApproval,
     Opened,
@@ -119,6 +121,8 @@ def decide(
         retry(case, catalog, state, event)
     elif isinstance(event, Shown):
         record_shown(case, state, event)
+    elif isinstance(event, ForgetApproved):
+        forget(case, catalog, state, event)
     elif isinstance(event, CloseAsked):
         role = refuse_to_close(case, catalog, state, event)
         state.history.append(f"{event.by} closed the case as {event.reason}, as {role}")
