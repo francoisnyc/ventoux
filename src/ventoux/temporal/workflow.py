@@ -11,7 +11,7 @@ from datetime import timedelta
 from typing import Any, ClassVar
 
 from temporalio import workflow
-from temporalio.exceptions import ActivityError, ApplicationError, FailureError
+from temporalio.exceptions import ActivityError, ApplicationError, ChildWorkflowError, FailureError
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh for every run, to keep runs
 # apart; modules passed through are imported once and shared. `core` is deterministic (the
@@ -21,6 +21,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.core.history import Refused
     from ventoux.core.interpreter import (
         TIMEOUT,
+        ActivityFailed,
         Answer,
         Outcome,
         PlanRun,
@@ -92,10 +93,6 @@ class Sent:
     # replay decides as the first run did, whatever their roles are now (brief, D22).
     roles: list[str]
     form: dict[str, Any] | None = None  # the values the outcome sets, if any
-
-
-class ActivityFailed(Exception):
-    """An activity that still failed after the retries its contract allows."""
 
 
 # Why a plan stopped by its case ends, and why it starts nothing new (brief, D28).
@@ -230,8 +227,8 @@ class PlanWorkflow:
                 self.ended_after_stop(f"{reference} completed")
                 raise Outcome(cause.message) from None  # read as in memory: `declined`
             said = cause.message if isinstance(cause, FailureError) else str(error)
-            self.ended_after_stop(f"{reference} failed", said)
-            raise ActivityFailed(said) from None
+            self.ended_after_stop(f"{reference} failed with {raised(error)}", said)
+            raise ActivityFailed(raised(error)) from None
         self.ended_after_stop(f"{reference} completed")
         return output
 
@@ -274,3 +271,12 @@ class PlanWorkflow:
             return None
         sent = self.sent.pop(0)
         return Answer(sent.outcome, sent.by, frozenset(sent.roles), sent.form)
+
+
+def raised(error: ActivityError | ChildWorkflowError) -> str:
+    """The type of what a failed activity or child workflow raised, as Temporal carried it: an
+    application error keeps its type's name, any other failure is its own (`TimeoutError`)."""
+    cause = error.cause
+    if isinstance(cause, ApplicationError):
+        return cause.type or type(cause).__name__
+    return type(cause if cause is not None else error).__name__

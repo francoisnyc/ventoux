@@ -256,8 +256,14 @@ What to know:
 - **The client can't tell which form fields are sensitive,** so `answer` encrypts every value of
   a form; the case keeps encrypted only the sensitive ones.
 - **An activity's own error message is never shown.** Ventoux can't know what it says (a CRM
-  error may quote the customer's ID), so the history reads `pay#1: payments.refund@2 failed:
-  ‹sensitive›`, and the text stays only in Temporal's failure, encrypted with the case's key.
+  error may quote the customer's ID), so the history names only the type of what it raised,
+  `pay#1: payments.refund@2 failed with ConnectionError: ‹sensitive›`, and the text stays only in
+  Temporal's failure, encrypted with the case's key. The worker's log is filtered the same way:
+  a failed activity or workflow task is logged with its exception's type, never its message or
+  traceback.
+- **What your activity logs is yours.** Ventoux filters Temporal's own log lines, not your
+  code's: an activity that logs what it was given writes it in plain text. Log references and
+  outcomes, never sensitive values.
 - **A workflow step can't be given a sensitive value:** its worker belongs to another team and
   doesn't hold the case's key. The step fails before it starts.
 - **Replay needs the key,** so a worker replaying a case uses the same key provider, and

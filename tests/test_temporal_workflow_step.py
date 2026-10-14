@@ -225,7 +225,7 @@ def test_a_failing_workflow_needs_attention() -> None:
         return await reported(case, lambda now: bool(now.needs_attention))
 
     now = on_temporal(scenario)
-    assert now.needs_attention == ["kyc#1: kyc.check@1 failed: ‹sensitive›"]
+    assert now.needs_attention == ["kyc#1: kyc.check@1 failed with ApplicationError: ‹sensitive›"]
 
 
 def test_a_workflow_past_its_timeout_needs_attention() -> None:
@@ -309,7 +309,7 @@ def test_a_failed_child_workflow_is_retried_with_the_same_id_and_key() -> None:
     async def scenario(environment: WorkflowEnvironment) -> tuple[CaseReport, str]:
         case = await reviewed(environment.client, with_kyc(), customer="c-flaky")
         failed = await reported(case, lambda now: bool(now.needs_attention))
-        assert failed.needs_attention[0].startswith("kyc#1: kyc.check@1 failed: ")
+        assert failed.needs_attention[0].startswith("kyc#1: kyc.check@1 failed with ")
         await retry(case, "kyc#1", by="omar", roles=["operations"])
         return await case.result(), await first_run(environment.client, "refund-1")
 

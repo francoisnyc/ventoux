@@ -5,7 +5,7 @@ proposed); 9a's note and its nine drafting points confirmed the same day; 9a bui
 Promises checked against the tests, 2026-10-10; the tutor review's fix built test-first,
 2026-10-11. 9b's choices agreed in the session, 2026-10-13 (all as proposed, with the key
 provider sealing and opening); 9b built, slices 0–8; Promises checked against the tests,
-2026-10-13.
+2026-10-13; the tutor review's fix built test-first, 2026-10-14.
 
 ## What this layer is for
 
@@ -535,6 +535,27 @@ Each starts with its negative test, seen failing for the right reason.
 - **The guide's refusal rows about keys and clients are checked on Temporal** (slice 8), with the
   other rows, in `TS`.
 
+### From the tutor review
+
+- **The worker's log printed sensitive values.** The history was clean, but Temporal's SDK logs a
+  failed activity's exception and traceback (`Completing activity as failed … ApplicationError:
+  no record for 1 85 05 78 006 084 36`) before the failure converter seals it, and a failed
+  workflow task the same way. Worker logs go to a log pipeline many people read.
+- **The fix:** `case_worker` and `plan_worker` install a filter (`temporal/logs.py`) on each of
+  Temporal's worker loggers (`temporalio.activity`, `temporalio.workflow` and the three
+  `temporalio.worker` modules that log an exception; a logger's filter sees only its own
+  records, so each is named). It keeps the record, with the exception's type in place of the
+  exception: `Completing activity as failed (…) (ApplicationError)`. Added to D31, with the rule
+  that an activity's own logging is its author's, for the deployment guide.
+- **Both negative tests were written first and seen failing:** the curriculum's leak test now
+  also searches the captured log records, formatted with their tracebacks (it found the ID in
+  `Completing activity as failed`); and each of Temporal's worker loggers, given an exception
+  quoting the ID once a worker is made (seen failing with the filter's install removed).
+- **Optional, taken:** the case's line names the type of what the activity raised: `failed with
+  ConnectionError: ‹sensitive›`. `ActivityFailed` moved to `core` to carry it from the plan
+  workflow; a child workflow failing because its own activity did reads `ActivityError`. Seventeen
+  tests and three guides expect the type now.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
@@ -569,7 +590,7 @@ replay tests, and the guide's example and refusal rows.
 | An approval's digest of a sensitive input is itself sensitive | S `test_an_approval_of_a_sensitive_input_keeps_its_digest_sensitive` |
 | A sensitive value given to a workflow step fails the step before it starts | S `test_a_workflow_step_is_never_given_a_sensitive_value` |
 | A `shown` line for a sensitive reference reads `‹sensitive›` | S `test_showing_a_sensitive_reference_writes_no_reference` |
-| An activity's own message is never recorded, in a case or a plan | S `test_an_activitys_message_is_never_recorded`; I `test_a_plan_records_no_activity_message` |
+| An activity's own message is never recorded, in a case or a plan; the type of what it raised is (tutor review) | S `test_an_activitys_message_is_never_recorded`; I `test_a_plan_records_no_activity_message`, `test_an_activity_failure_stops_the_step` |
 | A key is made once per case and never leaves the provider; a case without one can't seal or open; a part opens only for its case and place; a second case under a used ID is refused | TS `test_a_key_is_made_once`, `test_a_part_opens_only_where_it_was_sealed`; TC `test_a_case_id_opens_one_case` |
 | A case or plan run ID with `/` is refused | TS `test_an_id_with_a_slash_is_refused` |
 | A client or worker without the codec is refused | TS `test_a_client_without_the_codec_is_refused` |
@@ -577,7 +598,8 @@ replay tests, and the guide's example and refusal rows.
 | A part the codec can't encrypt or decrypt (no key, no workflow ID, damaged, not decoded) is an error, never plain text; data can't forge the converter's marker | TS `test_the_codec_fails_closed` |
 | A payload without parts passes untouched, without a key | TS `test_a_payload_without_parts_needs_no_key` |
 | Every failure's message and stack trace crosses as sensitive parts | TS `test_a_failure_crosses_encrypted` |
-| No sensitive value is in plain text in a case's history or its export: opening, refused form, continue-as-new, child plan, activity failure | TS `test_no_sensitive_value_in_plain_text_in_history` |
+| No sensitive value is in plain text in a case's history or its export: opening, refused form, continue-as-new, child plan, activity failure; nor in the worker's log (tutor review) | TS `test_no_sensitive_value_in_plain_text_in_history` |
+| Each of Temporal's worker loggers keeps only a failed activity's or workflow task's exception type, never its message or traceback, once a worker is made (tutor review) | TS `test_the_workers_log_keeps_only_an_exceptions_type` |
 | On Temporal the view gives the value to the roles its field lists | TS `test_the_view_on_temporal_decrypts_for_who_may_see` |
 | A history replays with its key, fails without it, and one written before 9b replays with the codec | TS `test_replay_needs_the_key`, `test_a_history_from_before_9b_replays` |
 | The guides' refusal rows are what the engine says | TS `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |

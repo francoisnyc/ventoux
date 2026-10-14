@@ -811,6 +811,14 @@ be erased on request), has size limits, and a second copy of business records go
   An activity's own message is treated as sensitive in every case, since Ventoux can't know
   what it says: the case records `failed: ‹sensitive›`, and the text stays only in Temporal's
   failure, under the case's key.
+- **The worker's log keeps only an exception's type.** Temporal's SDK logs a failed activity, and
+  a failed workflow task, with its exception and traceback before the failure is sealed; worker
+  logs go where many people read them. So the workers install a filter on Temporal's loggers
+  that keeps the exception's type and drops its message and traceback. The case's line names the
+  type too (`failed with ConnectionError: ‹sensitive›`): a type is code, never data, and tells
+  an operator something. **An activity's own logging belongs to its author:** Ventoux can't
+  filter it, and the deployment guide (D19) must say so. *Added in the tutor review of 9b,
+  before D31 was merged.*
 - **The client can't tell which form fields are sensitive,** so every form value crosses
   encrypted, and the case keeps encrypted only the sensitive ones.
 - Rejected: encrypting whole payloads (the history would be unreadable wherever a sensitive value

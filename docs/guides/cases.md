@@ -250,7 +250,7 @@ def down_once(inputs):
 failed = run_case(refund, file={"order_id": "ord-1", "amount": 40},
                   answers=[("review", "approve", "ana", {"approved_amount": 40})],
                   people=PEOPLE, activities={"payments.refund@2": down_once})
-assert failed.needs_attention == ["pay#1: payments.refund@2 failed: ‹sensitive›"]
+assert failed.needs_attention == ["pay#1: payments.refund@2 failed with ConnectionError: ‹sensitive›"]
 assert not failed.closed
 ```
 
@@ -541,8 +541,9 @@ What changes from memory, and what doesn't:
 
 - **Activities are retried as their contract says.** Its retry policy and timeouts are the ones
   Temporal uses; a declared outcome is never retried. An activity still failing after its
-  retries fails the step, and the case needs attention (`pay#1: payments.refund@2 failed:
-  ‹sensitive›`: what it said stays encrypted in Temporal, the case data guide says why); every
+  retries fails the step, and the case needs attention (`pay#1: payments.refund@2 failed with
+  ConnectionError: ‹sensitive›`: the type of what it raised, never what it said, which stays
+  encrypted in Temporal; the case data guide says why); every
   attempt, and an operator's retry, sends the same key.
 - **A plan step is a child workflow,** with the ID `<case ID>/<entry>`: `refund-A-1001/settle#1`.
   Its waits are answered on the child, as the plans guide shows; the case's history shows

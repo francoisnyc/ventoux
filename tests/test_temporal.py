@@ -323,7 +323,7 @@ def test_an_activity_failing_past_its_retries_stops_the_step() -> None:
     report = on_temporal(scenario, activities={"letters.draft@2": always_down})
     assert len(keys) == 5  # the contract's maximum_attempts, then a person looks (brief, D17)
     assert report.status == "stopped"
-    assert report.reason == "letters.draft@2 failed: ‹sensitive›"
+    assert report.reason == "letters.draft@2 failed with ConnectionError: ‹sensitive›"
 
 
 def test_a_declared_outcome_is_never_retried_and_moves_the_plan_on() -> None:

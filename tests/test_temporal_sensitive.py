@@ -5,6 +5,7 @@ See docs/layers/09-case-data.md (9b) and docs/guides/case-data.md ("On Temporal"
 
 import asyncio
 import dataclasses
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
@@ -40,6 +41,7 @@ from ventoux.temporal.cases import (
 )
 from ventoux.temporal.client import start_plan
 from ventoux.temporal.converter import ExactPayloadConverter, data_converter
+from ventoux.temporal.logs import TEMPORAL_LOGGERS
 from ventoux.temporal.worker import SANDBOX, case_worker
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it
@@ -351,8 +353,11 @@ def as_stored(history: WorkflowHistory) -> tuple[bytes, str]:
     return History(events=history.events).SerializeToString(), history.to_json()
 
 
-def test_no_sensitive_value_in_plain_text_in_history() -> None:
+def test_no_sensitive_value_in_plain_text_in_history(caplog: pytest.LogCaptureFixture) -> None:
     planted = [NATIONAL_ID, TAX_ID, "1850578006"]
+    # The worker's log too: Temporal's SDK logs a failed activity or workflow task, with its
+    # exception, before the failure is sealed; logs go where many people read them (tutor review).
+    caplog.set_level(logging.DEBUG, logger="temporalio")
     LOOKED_UP.clear()
 
     async def scenario(client: Client) -> list[WorkflowHistory]:
@@ -368,8 +373,8 @@ def test_no_sensitive_value_in_plain_text_in_history() -> None:
             case, lambda now: len(now.needs_attention) == 2 and "assess#1 done" in now.history
         )
         assert sorted(ended.needs_attention) == [
-            "check_id#1: check-id@1 stopped: orders.lookup@1 failed: ‹sensitive›",
-            "lookup_id#1: orders.lookup@1 failed: ‹sensitive›",
+            "check_id#1: check-id@1 stopped: orders.lookup@1 failed with ApplicationError: ‹sensitive›",
+            "lookup_id#1: orders.lookup@1 failed with ApplicationError: ‹sensitive›",
         ]
         assert any(line.startswith("refused ana's answer accept") for line in ended.history)
         # The activity's code got the plain value, in the case and in its plan.
@@ -383,6 +388,11 @@ def test_no_sensitive_value_in_plain_text_in_history() -> None:
         for value in planted:
             assert value.encode() not in raw, (history.workflow_id, value)
             assert value not in exported, (history.workflow_id, value)
+    # Each record as a handler would write it, its exception and traceback included.
+    logged = [logging.Formatter().format(record) for record in caplog.records]
+    assert any("Completing activity as failed" in line for line in logged)  # it was logged
+    for value in planted:
+        assert not [line for line in logged if value in line], value
 
 
 def test_the_view_on_temporal_decrypts_for_who_may_see() -> None:
@@ -609,3 +619,23 @@ def test_the_guides_refusals_are_what_the_engine_says(tmp_path: Path) -> None:
         ]
 
     assert on_temporal(scenario) == [says for _, says in rows[3:]]
+
+
+def test_the_workers_log_keeps_only_an_exceptions_type(caplog: pytest.LogCaptureFixture) -> None:
+    # A failed workflow task is logged as a failed activity is, on another of Temporal's loggers:
+    # once a worker is made, each keeps the exception's type and drops its text (brief, D31).
+    async def go() -> None:
+        async with await WorkflowEnvironment.start_time_skipping(
+            data_converter=development_converter()
+        ) as environment:
+            case_worker(environment.client, QUEUE, SensitiveCases, DevelopmentPlans, FAKES)
+
+    asyncio.run(go())
+    caplog.set_level(logging.DEBUG, logger="temporalio")
+    for name in TEMPORAL_LOGGERS:
+        try:
+            raise LookupError(f"no customer {NATIONAL_ID}")
+        except LookupError:
+            logging.getLogger(name).warning("Failed activation on workflow", exc_info=True)
+    logged = [logging.Formatter().format(record) for record in caplog.records]
+    assert logged == ["Failed activation on workflow (LookupError)"] * len(TEMPORAL_LOGGERS)

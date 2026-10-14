@@ -105,7 +105,7 @@ def failing(inputs: dict[str, Any]) -> dict[str, Any]:
 def test_an_activity_failure_stops_the_step() -> None:
     run = run_plan(looking_up(), fields=ORDER, answers=[], activities={"orders.lookup@1": failing})
     assert run.status == "stopped"
-    assert run.reason == "orders.lookup@1 failed: ‹sensitive›"
+    assert run.reason == "orders.lookup@1 failed with ConnectionError: ‹sensitive›"
 
 
 def lines(run: PlanRun) -> list[str]:
@@ -790,5 +790,5 @@ def test_a_plan_records_no_activity_message() -> None:
         people={"ana": ["support"]},
     )
     assert run.status == "stopped"
-    assert run.reason == "orders.lookup@1 failed: ‹sensitive›"
+    assert run.reason == "orders.lookup@1 failed with RuntimeError: ‹sensitive›"
     assert "no order" not in "\n".join(map(str, run.history))

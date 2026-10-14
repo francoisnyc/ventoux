@@ -235,7 +235,9 @@ def test_a_failed_workflow_step_is_retried_with_the_same_key() -> None:
         catalog=with_accounts(),
         workflows={"accounts.open@1": down_once},
     )
-    assert failed.needs_attention == ["account#1: accounts.open@1 failed: ‹sensitive›"]
+    assert failed.needs_attention == [
+        "account#1: accounts.open@1 failed with ConnectionError: ‹sensitive›"
+    ]
     keys.clear()
     retried = run_case(
         with_kyc(account=open_account(approval=APPROVAL)),

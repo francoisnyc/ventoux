@@ -112,6 +112,21 @@ class Stop(Exception):
     """Raised inside a step the engine won't go on with; the loop records it as `Stopped`."""
 
 
+class ActivityFailed(Exception):
+    """An activity that still failed after its retries, as an adapter reports it: the type of
+    what the activity raised, such as `ConnectionError`. Its message is never kept (brief, D31)."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
+
+def failed_with(error: Exception) -> str:
+    """The type of error an activity failed with: a type is code, never data, so a message may
+    name it (`failed with ConnectionError`); what the error says, never (brief, D31)."""
+    return error.kind if isinstance(error, ActivityFailed) else type(error).__name__
+
+
 @dataclass
 class PlanRun:
     """How a run ended, and what happened on the way."""
@@ -273,7 +288,8 @@ async def run_activity(
     # at it (brief, D17). What it said is never recorded: it may quote a sensitive value, and
     # Ventoux can't tell (brief, D31). It reads `‹sensitive›`.
     except Exception as error:  # noqa: BLE001 (catching every kind is the rule here)
-        raise Stop(f"{contract.reference} failed: {Sensitive(str(error))}") from None
+        said = Sensitive(str(error))
+        raise Stop(f"{contract.reference} failed with {failed_with(error)}: {said}") from None
     try:
         # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
         contract.output.model_validate(output)

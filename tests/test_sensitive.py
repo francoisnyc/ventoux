@@ -301,7 +301,9 @@ def test_an_activitys_message_is_never_recorded() -> None:
             people=PEOPLE,
             activities={"orders.lookup@1": failing},
         )
-        assert run.needs_attention == ["check#1: orders.lookup@1 failed: ‹sensitive›"]
+        assert run.needs_attention == [
+            "check#1: orders.lookup@1 failed with RuntimeError: ‹sensitive›"
+        ]
         assert "no order" not in "\n".join(run.history)
 
 

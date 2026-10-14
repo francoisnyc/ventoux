@@ -460,9 +460,10 @@ What changes from memory, and what doesn't:
   comes back (`report.history`, one line per event).
 - **Activities are retried as their contract says.** Its retry policy and timeouts are the ones
   Temporal uses; a contract's declared outcome (`declined`) is never retried, it moves the plan on.
-  An activity still failing after its retries stops the step: `payments.refund@2 failed:
-  ‹sensitive›`. What the activity said may quote personal data, so it stays only in Temporal's
-  failure, encrypted with the run's key (the case data guide).
+  An activity still failing after its retries stops the step: `payments.refund@2 failed with
+  ConnectionError: ‹sensitive›`. The type of what it raised is named; what the activity said may
+  quote personal data, so it stays only in Temporal's failure, encrypted with the run's key (the
+  case data guide).
 - **Answers are signals, each naming the wait it answers:** its state and how many times the run
   has entered it, `approve_refund#1`, as `report(run).waiting_at` shows it. An answer counts only
   for the wait open when it comes. One for a wait that is closed or hasn't opened is refused, and

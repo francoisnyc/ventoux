@@ -61,7 +61,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.temporal.carried import state_as_data, state_from_data
     from ventoux.temporal.converter import keys_of
     from ventoux.temporal.options import activity_options
-    from ventoux.temporal.workflow import Given, PlanStart, RunReport
+    from ventoux.temporal.workflow import Given, PlanStart, RunReport, raised
 
 
 @dataclass
@@ -370,7 +370,10 @@ class CaseWorkflow:
             said = cause.message if isinstance(cause, FailureError) else str(error)
             # Never recorded: it may quote a sensitive value (brief, D31).
             self.inbox.append(
-                Failed(command.entry, f"{command.activity} failed: {Sensitive(said)}")
+                Failed(
+                    command.entry,
+                    f"{command.activity} failed with {raised(error)}: {Sensitive(said)}",
+                )
             )
             return
         self.inbox.append(Completed(command.entry, output))
@@ -382,7 +385,8 @@ def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWor
     if isinstance(cause, TemporalTimeout):
         return f"{reference} didn't finish within its timeout of {contract.timeout}s"
     said = cause.message if isinstance(cause, FailureError) else str(error)
-    return f"{reference} failed: {Sensitive(said)}"  # never recorded (brief, D31)
+    # Its type, never what it said (brief, D31).
+    return f"{reference} failed with {raised(error)}: {Sensitive(said)}"
 
 
 def names_its_entry(event: Event, state: CaseState) -> None:

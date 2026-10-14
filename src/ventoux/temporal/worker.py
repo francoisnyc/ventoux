@@ -11,6 +11,7 @@ from ventoux.case.memory import Activity
 from ventoux.temporal.activities import plan_activities
 from ventoux.temporal.cases import CaseWorkflow
 from ventoux.temporal.converter import require_ventoux_converter
+from ventoux.temporal.logs import keep_only_exception_types
 from ventoux.temporal.workflow import PlanWorkflow
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh for every run; a module passed
@@ -33,6 +34,7 @@ def plan_worker(
 ) -> Worker:
     """A worker on `task_queue` for `workflow`, and the code behind its catalog's contracts."""
     require_ventoux_converter(client)
+    keep_only_exception_types()  # a failure's text never reaches the log (brief, D31)
     return Worker(
         client,
         task_queue=task_queue,
@@ -54,6 +56,7 @@ def case_worker(
     """A worker on `task_queue` for `cases`, the plan workflow its plan steps run as, and the code
     behind its catalog's contracts."""
     require_ventoux_converter(client)
+    keep_only_exception_types()  # a failure's text never reaches the log (brief, D31)
     return Worker(
         client,
         task_queue=task_queue,
