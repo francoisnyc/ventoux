@@ -968,8 +968,10 @@ def test_a_failed_step_needs_attention_and_keeps_the_case_open() -> None:
         people=PEOPLE,
         activities={"payments.refund@2": unreachable},
     )
-    assert run.needs_attention == ["pay#1: payments.refund@2 failed: provider unreachable"]
-    assert "pay#1 failed: payments.refund@2 failed: provider unreachable" in run.history
+    assert run.needs_attention == [
+        "pay#1: payments.refund@2 failed with ConnectionError: ‹sensitive›"
+    ]
+    assert "pay#1 failed: payments.refund@2 failed with ConnectionError: ‹sensitive›" in run.history
     assert not run.reached("pay")
     assert not run.closed
     assert run.status == "open"
@@ -992,7 +994,9 @@ def test_other_steps_go_on_while_one_needs_attention() -> None:
         activities={"payments.refund@2": unreachable},
     )
     assert run.reached("check_documents")
-    assert run.needs_attention == ["pay#1: payments.refund@2 failed: provider unreachable"]
+    assert run.needs_attention == [
+        "pay#1: payments.refund@2 failed with ConnectionError: ‹sensitive›"
+    ]
     assert not run.closed
 
 
@@ -1292,7 +1296,7 @@ def test_an_activity_failing_while_closing_flags_the_case() -> None:
         activities={"payments.refund@2": unreachable},
     )
     assert run.flags == [
-        "pay#1 failed after the close was requested: payments.refund@2 failed: provider unreachable"
+        "pay#1 failed after the close was requested: payments.refund@2 failed with ConnectionError: ‹sensitive›"
     ]
     assert run.needs_attention == []
     assert run.closed
@@ -1407,7 +1411,9 @@ def test_closes_when_waits_while_a_step_needs_attention() -> None:
         definition, file=SMALL, answers=[SMALL_REVIEW], people=OPERATORS, activities=fakes
     )
     assert "reached paid" in waiting.history
-    assert waiting.needs_attention == ["notify#1: letters.draft@2 failed: provider unreachable"]
+    assert waiting.needs_attention == [
+        "notify#1: letters.draft@2 failed with ConnectionError: ‹sensitive›"
+    ]
     assert waiting.status == "open"
     calls.clear()
     retried = run_case(

@@ -61,6 +61,7 @@ from ventoux.core.plan import Wait as Question
 from ventoux.core.provenance import CASE, Sourced, provenance
 from ventoux.core.references import unregistered
 from ventoux.core.roles import no_role, role_that_counts
+from ventoux.core.sensitive import Sensitive, plain
 
 # How a run ends (docs/guides/plans.md, "Running a plan").
 Status = Literal["succeeded", "failed", "waiting", "stopped"]
@@ -109,6 +110,21 @@ class Outcome(Exception):
 
 class Stop(Exception):
     """Raised inside a step the engine won't go on with; the loop records it as `Stopped`."""
+
+
+class ActivityFailed(Exception):
+    """An activity that still failed after its retries, as an adapter reports it: the type of
+    what the activity raised, such as `ConnectionError`. Its message is never kept (brief, D31)."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
+
+def failed_with(error: Exception) -> str:
+    """The type of error an activity failed with: a type is code, never data, so a message may
+    name it (`failed with ConnectionError`); what the error says, never (brief, D31)."""
+    return error.kind if isinstance(error, ActivityFailed) else type(error).__name__
 
 
 @dataclass
@@ -213,7 +229,9 @@ async def interpret(
                 # A form's values land in the run's fields, tagged with who answered (brief, D9);
                 # the latest answer replaces an earlier pass's.
                 for name in setting:
-                    values[name] = (answer.form or {})[name]
+                    # Plain: the client wraps every form value (brief, D31), and a field a form
+                    # sets is never given at the start, so it never holds a sensitive value.
+                    values[name] = plain((answer.form or {})[name])
                     # The plan's mark stays, as on a field given at the start: a mark adds
                     # distrust, never removes it (non-negotiables; tutor review).
                     mark = {plan.sources[name]} if name in plan.sources else set()
@@ -267,9 +285,11 @@ async def run_activity(
             ) from None
         return Gave(contract.reference, outcome.name, None)
     # Every other failure, whatever its kind: none is read as an outcome or ignored; a person looks
-    # at it (brief, D17).
+    # at it (brief, D17). What it said is never recorded: it may quote a sensitive value, and
+    # Ventoux can't tell (brief, D31). It reads `‹sensitive›`.
     except Exception as error:  # noqa: BLE001 (catching every kind is the rule here)
-        raise Stop(f"{contract.reference} failed: {error}") from None
+        said = Sensitive(str(error))
+        raise Stop(f"{contract.reference} failed with {failed_with(error)}: {said}") from None
     try:
         # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
         contract.output.model_validate(output)
@@ -309,7 +329,7 @@ class Approved:
     """An approval given and not yet spent: who gave it, and what they saw."""
 
     by: str  # who approved
-    digest: str  # the digest of the inputs they saw (brief, D11)
+    digest: str | Sensitive  # the digest of the inputs they saw (brief, D11)
 
 
 def approval_of(

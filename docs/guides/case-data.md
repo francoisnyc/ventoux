@@ -1,8 +1,8 @@
 # Case data: what goes in the case file
 
 > **For workflow developers.** This guide describes layer 9 as if it already worked; the code that
-> makes it true is built test-first, in four parts. References and who sees what (9a) are
-> described as built. Sensitive fields (9b), forgetting a person (9c) and fresh facts (9d) are
+> makes it true is built test-first, in four parts. References and who sees what (9a) and
+> sensitive fields (9b) are described as built. Forgetting a person (9c) and fresh facts (9d) are
 > still design: their sections say so. The "Design notes" at the end list what writing it revealed.
 
 **The rule of thumb:** a case file holds the **facts your rules decide on**, and **references** to
@@ -183,22 +183,113 @@ person's answer.
                       "display": {"title": "Customer's own estimate"}}
 ```
 
-## Sensitive data and the right to be forgotten
+## Sensitive data
 
-> **Design, built in layers 9b and 9c.**
+A field marked `"sensitive": true` holds something personal a decision needs, such as a national
+ID. Add it to the claim:
 
-A field marked `"sensitive": true`, such as `"national_id": {"type": "string", "sensitive": true,
-"visible_to": ["claims-sensitive"], …}`:
-- is encrypted with a key that belongs to that case, so it never appears in plain text in history;
-- is shown only to the roles it lists in `visible_to`, which it must name; others see that it
-  exists and is hidden;
-- can be **erased**: forgetting a case is proposed by someone with the data protection role and
-  approved by someone else with it. Then the case closes (if it was open, running steps finish
-  first) and its key is destroyed. The history keeps every decision and who made it, but the
-  sensitive values become unreadable everywhere, including copies already exported.
+```json
+"national_id": {"type": "string", "sensitive": true, "visible_to": ["claims-sensitive"],
+                "display": {"title": "National ID"}}
+```
 
-Your platform team runs the key provider (for example Vault or a cloud KMS). In development, keys
-are kept in a local file.
+- **It is shown only to the roles its `visible_to` lists,** which it must name: a sensitive field
+  without `visible_to` is refused when the definition is read. Everyone else sees that it exists
+  and is hidden.
+- **It never appears in plain text.** Not in the history's lines, not in a refusal, not in a
+  failure: wherever a value would be written, you read `‹sensitive›`. Even a person allowed to
+  see it reads `‹sensitive›` in the view's lines; the value itself is in the view's `values`,
+  for the inbox to show.
+- **Rules, conditions and checks use it as usual.** Inside the worker the value is decrypted, so a
+  step's `when`, a form's type check and a contract's input check work on the real value. A
+  step's input computed from it (`{"var": "national_id"}`, or a `cat` that reads it) is sensitive
+  too, and travels encrypted to the activity, which receives the plain value.
+
+```python
+run = run_case(
+    claim,
+    file={"customer_id": "cus-7", "policy_id": "pol-3", "estimated_damage": 1200,
+          "fraud_score": 12, "national_id": "1 85 05 78 006 084 36"},
+    answers=[],
+    people=PEOPLE,
+)
+adjuster = run.view(roles=["adjuster"])
+assert adjuster.lines[-1] == "National ID: hidden (needs claims-sensitive)"
+assert "national_id" not in adjuster.values
+officer = run.view(roles=["claims-sensitive"])
+assert officer.lines[-1] == "National ID: ‹sensitive›, from system:opener"
+assert officer.values["national_id"].value == "1 85 05 78 006 084 36"
+```
+
+### On Temporal: encrypted with the case's key
+
+Each case has its own **key**, made when the case opens and never made again. Every sensitive
+value crosses Temporal in its own part of a payload, encrypted with that key by Ventoux's payload
+codec, outside workflow code; the rest of the payload stays readable in the Temporal UI. That
+covers everything a value can travel in: the case's opening, a form's answer, an activity's
+inputs, a plan step's fields, the state carried when a long case continues as new, and the
+answers to `view`. Failures are covered too: Temporal keeps a failure's message and stack trace
+beside the payloads, so Ventoux encrypts both, whoever raised it.
+
+Your platform team runs the **key provider** (Vault or a cloud KMS, after v1.0). It encrypts and
+decrypts for Ventoux, so a key never leaves it. In development, keys are kept in a local file. The client and the worker connect with a data converter that
+holds it:
+
+```python
+from temporalio.client import Client
+
+from ventoux.temporal.converter import data_converter
+from ventoux.tooling.keys import FileKeys
+
+keys = FileKeys("keys.json")  # development only: a key per case, in a local file
+client = await Client.connect("localhost:7233", data_converter=data_converter(keys))
+```
+
+A client or worker without it is refused: a sensitive value would cross in plain text.
+
+What to know:
+
+- **A case's ID has no `/`.** The codec finds a case's key from the workflow ID Temporal gives it,
+  and a plan step's child (`claim-7/collect#1`) uses its case's key, the part before the `/`.
+- **An ID is used once.** `start_case` makes the key, then starts the case; if starting fails
+  after the key was made, that ID is spent: open the case under a new one.
+- **The client can't tell which form fields are sensitive,** so `answer` encrypts every value of
+  a form; the case keeps encrypted only the sensitive ones.
+- **An activity's own error message is never shown.** Ventoux can't know what it says (a CRM
+  error may quote the customer's ID), so the history names only the type of what it raised,
+  `pay#1: payments.refund@2 failed with ConnectionError: ‹sensitive›`, and the text stays only in
+  Temporal's failure, encrypted with the case's key. The worker's log is filtered the same way:
+  a failed activity or workflow task is logged with its exception's type, never its message or
+  traceback.
+- **What your activity logs is yours.** Ventoux filters Temporal's own log lines, not your
+  code's: an activity that logs what it was given writes it in plain text. Log references and
+  outcomes, never sensitive values.
+- **A workflow step can't be given a sensitive value:** its worker belongs to another team and
+  doesn't hold the case's key. The step fails before it starts.
+- **Replay needs the key,** so a worker replaying a case uses the same key provider, and
+  Ventoux's workflow runner, `SANDBOX` from `ventoux.temporal.worker`, as `case_worker` does: it
+  keeps one copy of Ventoux's own code in Temporal's sandbox.
+
+### What the engine refuses
+
+| Refused when | Example |
+|---|---|
+| a sensitive field doesn't say who may see it | `national_id is sensitive, so it must say who may see it: add visible_to` |
+| a sensitive value arrives in plain text | `national_id is sensitive and was given in plain text: send it through ventoux.temporal.cases, which encrypts it` |
+| a sensitive value reaches a workflow step | `kyc.check@1 is a workflow step and can't be given national_id, a sensitive field: its worker doesn't hold the case's key` |
+| a case ID has a `/` | `claim/7 can't name a case: a case ID has no "/"` |
+| a case's key was already made | `a key was already made for claim-7: open the case under a new ID` |
+| a client or worker doesn't encrypt | `this client doesn't encrypt sensitive values: connect it with data_converter(keys) from ventoux.temporal.converter` |
+| a case has no key | `there is no key for claim-7, so its sensitive values can't be read or written` |
+
+## Forgetting a person
+
+> **Design, built in layer 9c.**
+
+Forgetting a case is proposed by someone with the data protection role and approved by someone
+else with it. Then the case closes (if it was open, running steps finish first) and its key is
+destroyed. The history keeps every decision and who made it, but the sensitive values become
+unreadable everywhere, including copies already exported.
 
 ## Fresh facts
 
@@ -229,6 +320,10 @@ the warehouse too.
   in your answer to the task).
 - **I hid a field with `visible_to`. Is it safe from the Temporal UI?** No: hiding is for the
   case view. Mark personal data `sensitive`, which encrypts it.
+- **Why can't I read why an activity failed?** Its message may quote personal data, so Ventoux
+  keeps it only in Temporal's failure, encrypted with the case's key. Reading it takes the key
+  (a codec server for the Temporal UI comes with the deployment guide, after v1.0); forgetting
+  the case makes it unreadable too.
 
 ---
 
@@ -256,3 +351,7 @@ the warehouse too.
    own. The sensitive example is a `national_id`, a text.
 9. **Hiding and encrypting are different promises** (layer 9a). `visible_to` filters the case view;
    only `sensitive` keeps a value out of Temporal's plain history.
+10. **Sensitive values are encrypted one by one, not whole payloads** (layer 9b). Each travels in
+    its own part of a payload, so the rest of the history stays readable (brief, D15). An
+    activity's own error message is treated as sensitive whatever the case declares: Ventoux
+    can't know what it says.

@@ -17,6 +17,7 @@ from ventoux.core.expressions import (
     a_kind,
 )
 from ventoux.core.expressions.check import a_type
+from ventoux.core.sensitive import plain
 
 
 def form_problem(
@@ -34,9 +35,11 @@ def form_problem(
         if field not in sets:
             return f"the answer gives {field}, which {outcome} doesn't set"
     for field in sets:
-        if not fits(given[field], types[field]):
+        # The value inside its wrapper, if the client wrapped it (brief, D31).
+        value = plain(given[field])
+        if not fits(value, types[field]):
             # The type, never the value: it may be hidden from whoever reads the history (brief, D30).
-            given_kind = a_kind(given[field])
+            given_kind = a_kind(value)
             return f"{field} is {a_type(types[field])}, and the answer gives {given_kind}"
     return None
 

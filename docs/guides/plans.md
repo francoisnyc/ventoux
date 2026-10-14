@@ -108,7 +108,7 @@ Every problem it finds:
 | `MISSING_EVENT` | an event the state can give isn't handled | `declined is not handled: say where the plan goes on declined` |
 | `RESERVED_OUTCOME` | a wait offers `timeout` as an outcome | `timeout is the event of a wait's timeout, not an outcome: name the outcome differently` |
 | `APPROVAL_TARGET` | an approval's `approve` leads somewhere other than its `of`, or `of` isn't an activity state | `approve_refund approves pay, and its approve goes to refund_fee: send approve to pay` |
-| `UNKNOWN_ROLE` | a wait or an approval names a role nobody registered | `support-laed is a role nobody registered: the roles are adjuster, fraud, operations, support, support-lead; use one of them, or ask the platform team to register it` |
+| `UNKNOWN_ROLE` | a wait or an approval names a role nobody registered | `support-laed is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, support, support-lead; use one of them, or ask the platform team to register it` |
 | `APPROVAL_ROLE` | an approval names a role that may not approve its activity's risk | `support may approve no risk, and payments.refund@2 is high risk: name a role that may approve high risk` |
 | `UNKNOWN_FIELD` | a wait's outcome sets a field the plan doesn't declare | `review's accept sets approved_amout, which is not a field: the fields are approved_amount, order_id` |
 | `EXPRESSION_INVALID` | an input or a condition fails the expression check | `amout is not a declared field` |
@@ -416,15 +416,17 @@ class RefundPlans(PlanWorkflow):
         return await self.interpret(start)
 ```
 
-Clients and workers connect with Ventoux's data converter, which keeps numbers exact; a client
-connected without it is refused:
+Clients and workers connect with Ventoux's data converter, which keeps numbers exact and
+encrypts sensitive values with each run's key, from the key provider it is given (the case data
+guide); a client connected without it is refused:
 
 ```python
 from temporalio.client import Client
 
-from ventoux.temporal.converter import DATA_CONVERTER
+from ventoux.temporal.converter import data_converter
+from ventoux.tooling.keys import FileKeys
 
-client = await Client.connect("localhost:7233", data_converter=DATA_CONVERTER)
+client = await Client.connect("localhost:7233", data_converter=data_converter(FileKeys("keys.json")))
 ```
 
 A worker serves that workflow and the code behind each contract, registered as Temporal
@@ -458,7 +460,10 @@ What changes from memory, and what doesn't:
   comes back (`report.history`, one line per event).
 - **Activities are retried as their contract says.** Its retry policy and timeouts are the ones
   Temporal uses; a contract's declared outcome (`declined`) is never retried, it moves the plan on.
-  An activity still failing after its retries stops the step.
+  An activity still failing after its retries stops the step: `payments.refund@2 failed with
+  ConnectionError: ‹sensitive›`. The type of what it raised is named; what the activity said may
+  quote personal data, so it stays only in Temporal's failure, encrypted with the run's key (the
+  case data guide).
 - **Answers are signals, each naming the wait it answers:** its state and how many times the run
   has entered it, `approve_refund#1`, as `report(run).waiting_at` shows it. An answer counts only
   for the wait open when it comes. One for a wait that is closed or hasn't opened is refused, and
@@ -473,6 +478,8 @@ What changes from memory, and what doesn't:
   history so far, its status `waiting`, and `waiting_at`, the wait open for an answer.
 - **Numbers stay exact.** Amounts cross Temporal as exact decimals, never binary floats (brief,
   D20); a float given to a run is refused.
+- **A run's ID has no `/`, and is used once.** `start_plan` makes the run's key, as `start_case`
+  makes a case's; a plan step's child uses its case's key.
 
 Temporal can stop a worker at any point and replay the run on another one: it runs the workflow
 again against its history, handing back each activity's recorded result instead of calling it

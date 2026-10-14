@@ -24,6 +24,8 @@ from ventoux.core.expressions.check import a_type
 from ventoux.core.policy import refusal
 from ventoux.core.provenance import NoSources, provenance
 from ventoux.core.references import references
+from ventoux.core.sensitive import unwrapped
+from ventoux.core.sensitive_inputs import kept_sensitive
 
 
 class InputRefused(Exception):
@@ -63,7 +65,10 @@ def checked_inputs(
         for policy in contract.policies(field):
             if policy.refuses(found) is not None:
                 raise InputRefused(refusal(contract.reference, field, policy, expression, sources))
-    given = {field: evaluated(field, expression, values) for field, expression in inputs.items()}
+    given = {
+        field: kept_sensitive(expression, values, evaluated(field, expression, values))
+        for field, expression in inputs.items()
+    }
     # The engine fills the key, never a definition: the same for a retry, new for each run of the
     # step (brief, D17).
     if contract.idempotency_key is not None:
@@ -77,7 +82,8 @@ def checked_inputs(
         )
     try:
         # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
-        contract.input.model_validate(given)
+        # On the plain values: the wrapper is for crossing Temporal, not for the contract.
+        contract.input.model_validate(unwrapped(given))
     except ValidationError as error:
         raise InputRefused(
             f"{contract.reference} doesn't take these inputs: {one_line(error)}"

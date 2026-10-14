@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
@@ -9,11 +10,12 @@ from typing import Annotated, Any, NamedTuple
 
 from pydantic import BaseModel
 from temporalio import workflow
+from temporalio.converter import DataConverter
 
 from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused
-from ventoux.case.definition import parse_case
+from ventoux.case.definition import CaseDefinition, parse_case
 from ventoux.case.memory import Activity, CaseRun, Finish, PlanRunner, run_case_in_memory
 from ventoux.case.plan_step import PlanNotSupplied, supplied
 from ventoux.case.runtime import CaseRefused
@@ -38,10 +40,18 @@ from ventoux.core.plan import parse_plan
 from ventoux.core.policy import trusted_only
 from ventoux.core.provenance import Sourced
 from ventoux.core.references import reference
+from ventoux.core.sensitive import Sensitive, unwrapped
 from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.contract_check import check_workflow_contract
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
+
+# Temporal: this module defines workflows, so the workflow sandbox imports it afresh for each run;
+# the converter and the key provider are passed through, imported once: `cryptography` is compiled
+# code, which can't be imported twice.
+with workflow.unsafe.imports_passed_through():
+    from ventoux.temporal.converter import data_converter
+    from ventoux.tooling.keys import FileKeys
 
 __all__ = [
     "Activity",
@@ -227,6 +237,8 @@ CATALOG.register_role("support-lead", approves="high")
 # The case data guide's claim: an adjuster assesses it, and only fraud sees its fraud score.
 CATALOG.register_role("adjuster")
 CATALOG.register_role("fraud")
+# Only claims-sensitive sees the claim's national ID (layer 9b).
+CATALOG.register_role("claims-sensitive")
 # Operations acts on a case's failed steps: retries them, or closes the case (brief, D26).
 CATALOG.register_role("operations", operates=True)
 
@@ -288,6 +300,13 @@ class DevelopmentCases(CaseWorkflow):
         return await self.drive(start)
 
 
+def development_converter() -> DataConverter:
+    """Ventoux's data converter with a fresh development key file, for one test server: tests
+    reuse workflow IDs, and a case's key is never made twice (brief, D31)."""
+    # Python: `mkdtemp` makes a new, empty directory under the system's temporary one.
+    return data_converter(FileKeys(Path(tempfile.mkdtemp()) / "keys.json"))
+
+
 def load_definition(path: Path) -> dict[str, Any]:
     """Read a case definition from its JSON file (I/O, so here and not in `case`)."""
     # Numbers as exact decimals, never binary floats (brief, D20). Its shape is checked when a
@@ -321,7 +340,7 @@ def run_case(
     workflow contract to a function from its inputs to its output, by reference, replacing the
     fake workflows; a workflow contract with none is not bound, and its step fails."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
-    events: list[Event | Finish] = [Opened(as_json(file), opened_by)]
+    events: list[Event | Finish] = [Opened(wrapped(case, as_json(file)), opened_by)]
     for item in answers:
         if isinstance(item, Finish):
             events.append(item)
@@ -341,7 +360,12 @@ def run_case(
         entry, outcome, who, *form = item
         # The test plays the API: it states who answered and their roles.
         roles = frozenset(people.get(who, ()))
-        events.append(Answered(entry, outcome, who, roles, as_json(form[0]) if form else None))
+        # Every value of a form wrapped, as the client sends it: it can't tell which fields are
+        # sensitive (brief, D31).
+        given = (
+            {name: Sensitive(value) for name, value in as_json(form[0]).items()} if form else None
+        )
+        events.append(Answered(entry, outcome, who, roles, given))
     implementations = {**FAKES, **activities}
     runner = plan_runner(plans or {}, plan_answers or {}, implementations, people)
     bound = {**WORKFLOW_FAKES, **workflows}
@@ -361,7 +385,7 @@ def plan_runner(
     scripts = {step: list(answers) for step, answers in plan_answers.items()}
 
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
-        return activities[reference](inputs)
+        return activities[reference](unwrapped(inputs))  # plain values, as on Temporal
 
     def run(command: StartPlan) -> Completed | Failed | None:
         try:
@@ -409,7 +433,13 @@ def scripted(script: list[tuple[Any, ...]], people: Mapping[str, Iterable[str]])
                 script.remove(answer)
                 by = answer[2] if len(answer) > 2 else None
                 stated = frozenset(people.get(by, ())) if by else frozenset[str]()
-                return Answer(answer[1], by, stated, answer[3] if len(answer) > 3 else None)
+                # Every value of a form wrapped, as the client sends it (brief, D31).
+                form = (
+                    {name: Sensitive(v) for name, v in answer[3].items()}
+                    if len(answer) > 3
+                    else None
+                )
+                return Answer(answer[1], by, stated, form)
         return None
 
     return wait
@@ -479,6 +509,14 @@ def as_json(values: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def wrapped(case: CaseDefinition, file: Mapping[str, Any]) -> dict[str, Any]:
+    """`file` as the client sends it: each sensitive field's value wrapped (brief, D31)."""
+    return {
+        name: Sensitive(value) if name in case.fields and case.fields[name].sensitive else value
+        for name, value in file.items()
+    }
+
+
 def run_plan(
     data: object,
     fields: Mapping[str, Sourced],
@@ -500,7 +538,7 @@ def run_plan(
     wait = scripted(list(answers), people or {})  # the test plays the API, stating roles
 
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
-        return activities[reference](inputs)
+        return activities[reference](unwrapped(inputs))  # plain values, as on Temporal
 
     # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it to the end.
     return asyncio.run(interpret(parse_plan(data), fields, CATALOG, call, wait, run_name=run))

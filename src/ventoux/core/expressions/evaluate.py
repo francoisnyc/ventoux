@@ -36,6 +36,7 @@ from ventoux.core.expressions.model import (
 from ventoux.core.expressions.render import (
     render,
 )
+from ventoux.core.sensitive import plain
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,9 @@ def matching(
 
 def readable(name: str, value: object, where: str = "") -> Value:
     """`value` of the field `name`, if an expression can read it, else `ExpressionError`."""
+    # A sensitive value is read inside the worker as it is: conditions and checks need it
+    # (brief, D31).
+    value = plain(value)
     if value is None:
         # Fail closed: a missing value is an error that stops the step, never `false` (brief, D20).
         raise ExpressionError(f"{name} has no value{where}")
@@ -163,7 +167,7 @@ def readable(name: str, value: object, where: str = "") -> Value:
 
 def records(operator: str, name: str, values: Mapping[str, object]) -> list[Mapping[str, object]]:
     """The list field `name` that `count` or `sum` reads: a list of records, each a mapping."""
-    held = values.get(name)
+    held = plain(values.get(name))
     if held is None:
         raise ExpressionError(f"{name} has no value")
     if not isinstance(held, list) or not all(isinstance(element, Mapping) for element in held):

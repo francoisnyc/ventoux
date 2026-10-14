@@ -13,9 +13,11 @@ from typing import Any
 
 import pytest
 
+from ventoux.core.history import Scheduled
 from ventoux.core.interpreter import Answer, Outcome, PlanRun, RunRefused, interpret
 from ventoux.core.plan import parse_plan
 from ventoux.core.provenance import sourced
+from ventoux.core.sensitive import Sensitive
 from ventoux.testing import CATALOG, FAKES, Activity, run_plan
 
 GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
@@ -103,7 +105,7 @@ def failing(inputs: dict[str, Any]) -> dict[str, Any]:
 def test_an_activity_failure_stops_the_step() -> None:
     run = run_plan(looking_up(), fields=ORDER, answers=[], activities={"orders.lookup@1": failing})
     assert run.status == "stopped"
-    assert run.reason == "orders.lookup@1 failed: the orders system is down"
+    assert run.reason == "orders.lookup@1 failed with ConnectionError: ‹sensitive›"
 
 
 def lines(run: PlanRun) -> list[str]:
@@ -714,3 +716,79 @@ def test_a_plan_gives_a_reference_input_only_its_system() -> None:
         "reference to policies"
     )
     assert run_plan(lettering("customer_id"), fields=fields, answers=[]).status == "succeeded"
+
+
+# Layer 9b: a plan field given a sensitive value stays sensitive for the run, its activity's
+# code gets the plain value, and its own message is never recorded (brief, D31).
+def checking_an_id() -> dict[str, Any]:
+    """A plan given a national ID: a person adds a note, then the ID is looked up."""
+    return {
+        "plan": "check-id",
+        "version": 1,
+        "display": {"title": "Check an ID"},
+        "fields": {"id": {"type": "string"}, "note": {"type": "string"}},
+        "initial": "confirm",
+        "states": {
+            "confirm": {
+                "wait": {
+                    "outcomes": ["confirm"],
+                    "roles": ["support"],
+                    "sets": {"confirm": ["note"]},
+                },
+                "on": {"confirm": "check"},
+            },
+            "check": {
+                "activity": "orders.lookup@1",
+                "inputs": {"order_id": {"cat": [{"var": "id"}, {"var": "note"}]}},
+                "on": {"done": "noted"},
+            },
+            "noted": {
+                "activity": "orders.lookup@1",
+                "inputs": {"order_id": {"var": "note"}},
+                "on": {"done": "checked"},
+            },
+            "checked": {"final": "succeeded"},
+        },
+    }
+
+
+NATIONAL_ID = "1 85 05 78 006 084 36"
+
+
+def test_a_plan_input_from_a_sensitive_value_stays_sensitive() -> None:
+    given: list[dict[str, Any]] = []
+
+    def check(inputs: dict[str, Any]) -> dict[str, Any]:
+        given.append(inputs)
+        return {"status": "known"}
+
+    run = run_plan(
+        checking_an_id(),
+        fields={"id": sourced(Sensitive(NATIONAL_ID), "system:opener")},
+        # The script wraps every form value, as the client does; the plan keeps the note plain.
+        answers=[("confirm", "confirm", "ana", {"note": "/2"})],
+        activities={**FAKES, "orders.lookup@1": check},
+        people={"ana": ["support"]},
+    )
+    assert run.status == "succeeded"
+    with_id, note_only = [event for event in run.history if isinstance(event, Scheduled)]
+    assert with_id.inputs["order_id"] == Sensitive(f"{NATIONAL_ID}/2")
+    assert note_only.inputs["order_id"] == "/2"
+    assert given == [{"order_id": f"{NATIONAL_ID}/2"}, {"order_id": "/2"}]
+    assert NATIONAL_ID not in "\n".join(map(str, run.history))
+
+
+def test_a_plan_records_no_activity_message() -> None:
+    def failing(inputs: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError(f"no order {inputs['order_id']}")
+
+    run = run_plan(
+        checking_an_id(),
+        fields={"id": sourced(Sensitive(NATIONAL_ID), "system:opener")},
+        answers=[("confirm", "confirm", "ana", {"note": "/2"})],
+        activities={**FAKES, "orders.lookup@1": failing},
+        people={"ana": ["support"]},
+    )
+    assert run.status == "stopped"
+    assert run.reason == "orders.lookup@1 failed with RuntimeError: ‹sensitive›"
+    assert "no order" not in "\n".join(map(str, run.history))

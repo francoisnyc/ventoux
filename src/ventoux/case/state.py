@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from ventoux.core.provenance import Sourced
+from ventoux.core.sensitive import Sensitive
 
 
 @dataclass
@@ -17,7 +18,7 @@ class GivenApproval:
 
     entry: str
     by: str
-    digest: str  # of the step's inputs (brief, D11)
+    digest: str | Sensitive  # of the step's inputs (brief, D11); sensitive if they are
 
 
 @dataclass

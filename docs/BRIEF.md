@@ -782,6 +782,50 @@ be erased on request), has size limits, and a second copy of business records go
   to them. Only a `shown` line names a reference, as D16 asks. *Added in the tutor review of 9a,
   before D30 was merged.*
 
+### D31. Sensitive values are wrapped, encrypted one by one, and never written out
+
+*Drafted 2026-10-13, in layer 9b.*
+
+- **A sensitive field names who may see it.** `"sensitive": true` needs `visible_to`; any field
+  type may be sensitive. Only those roles get its value in the view (D16); everyone reads
+  `‹sensitive›` wherever a value would be written: history lines, refusals, failures, the view's
+  lines, a `shown` line's reference.
+- **The value is wrapped wherever it goes.** In the state it is `Sensitive`, whose text is
+  `‹sensitive›`. An input computed from it is wrapped too, so it reaches an activity or a plan
+  encrypted, and the activity receives the plain value. Conditions and checks read the plain
+  value inside the worker. A sensitive value arriving unwrapped is refused: it has already been
+  seen. A workflow step can't be given one: its worker doesn't hold the key.
+- **Each value crosses Temporal in its own part of a payload,** which the payload codec has the
+  key provider seal with the case's key, found from the workflow ID Temporal gives it; a child
+  `<case ID>/<entry>` uses its case's. The provider seals and opens; it never hands out a key, so
+  a key never leaves it, as with Vault's transit engine or a cloud KMS. The development provider
+  seals with AES-256-GCM, from `cryptography`. So a case ID has no `/`. A payload with
+  no sensitive part passes untouched, needing no key: histories written before 9b replay as
+  they are. Anything the codec can't encrypt or decrypt (no key, no workflow ID, a damaged
+  part) is an error, never plain text.
+- **A key is made when a case (or a standalone plan run) starts, and never made again,** by the
+  client, through the key provider (D15), before the workflow starts. If the start then fails,
+  the ID is spent.
+- **Failures are encrypted whoever raised them.** Temporal keeps a failure's message and stack
+  trace outside payloads; Ventoux's failure converter moves both into one, as sensitive parts.
+  An activity's own message is treated as sensitive in every case, since Ventoux can't know
+  what it says: the case records `failed: ‹sensitive›`, and the text stays only in Temporal's
+  failure, under the case's key.
+- **The worker's log keeps only an exception's type.** Temporal's SDK logs a failed activity, and
+  a failed workflow task, with its exception and traceback before the failure is sealed; worker
+  logs go where many people read them. So the workers install a filter on Temporal's loggers
+  that keeps the exception's type and drops its message and traceback. The case's line names the
+  type too (`failed with ConnectionError: ‹sensitive›`): a type is code, never data, and tells
+  an operator something. **An activity's own logging belongs to its author:** Ventoux can't
+  filter it, and the deployment guide (D19) must say so. *Added in the tutor review of 9b,
+  before D31 was merged.*
+- **The client can't tell which form fields are sensitive,** so every form value crosses
+  encrypted, and the case keeps encrypted only the sensitive ones.
+- Rejected: encrypting whole payloads (the history would be unreadable wherever a sensitive value
+  appears, D15); sensitive outputs from contracts (a contract change of its own, nothing needs
+  it yet); keeping an activity's message readable to operators (operators aren't in
+  `visible_to`).
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
