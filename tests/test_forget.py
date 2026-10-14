@@ -7,7 +7,9 @@ import json
 from pathlib import Path
 
 import pytest
+from test_sensitive import claim
 
+from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.tooling.keys import FileKeys, KeyRefused
 
 NATIONAL_ID = "1 85 05 78 006 084 36"
@@ -51,3 +53,16 @@ def test_a_keys_state_tells_which_case_it_is(tmp_path: Path) -> None:
     # Destroying it again does nothing: a request retried after destroying it is safe.
     keys.destroy("claim-7")
     assert keys.state("claim-7") == "destroyed"
+
+
+def test_a_definition_says_whether_it_may_be_forgotten() -> None:
+    # Fail closed: a setting the engine doesn't know is refused, never read as a default.
+    for wrong in ("sometimes", True, None):
+        with pytest.raises(
+            CaseInvalid, match="^forgetting: Input should be 'allowed', 'while_open' or 'never'$"
+        ):
+            parse_case({**claim(), "forgetting": wrong})
+    # Unsaid, a case may be forgotten, open or closed; a definition keeping its records says so.
+    assert parse_case(claim()).forgetting == "allowed"
+    for kept in ("allowed", "while_open", "never"):
+        assert parse_case({**claim(), "forgetting": kept}).forgetting == kept

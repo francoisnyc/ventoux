@@ -809,6 +809,13 @@ Each starts with its negative test, seen failing for the right reason.
 - **`FileKeys` forgets by rewriting its file** (slice 1): the key's text is gone from it, but a
   copy of the old file (a backup, a disk block) may keep it. Development only, as it always was;
   a production provider's destruction is its own (deployment guide, after v1.0).
+- **`forgetting` is refused in Pydantic's words** (slice 2): `forgetting: Input should be
+  'allowed', 'while_open' or 'never'`, as a contract's `risk` already is (activities guide). A
+  missing setting is `allowed`; `true`, `null` or a misspelling is refused, never read as one.
+- **`forgets` is registered with the role, so it can't name an unregistered one** (slice 2): the
+  slice's planned negative ("`forgets` on a role that isn't registered") can't be written. The
+  negatives are a catalog where no role forgets until one is registered to, and a role name that
+  isn't a label. A forgetting role approves no risk by itself.
 
 ### Promises
 
@@ -819,7 +826,7 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 
 | Promise | Test |
 |---|---|
-| A role may be registered to forget, and only such a role may propose or approve forgetting | K `test_a_role_may_be_registered_to_forget` |
+| A role may be registered to forget; none forgets unless registered to; it approves no risk by that | K `test_a_role_may_be_registered_to_forget` |
 | `forgetting` is `allowed`, `while_open` or `never`, `allowed` by default; anything else is refused | F `test_a_definition_says_whether_it_may_be_forgotten` |
 | A key can be destroyed, and its text is gone from the provider; a destroyed key never seals, opens or is made again, saying the case was forgotten; a key never made can't be destroyed | F `test_a_destroyed_key_is_gone_for_good` |
 | The provider says whether a case's key is kept, destroyed or never made, after Temporal has dropped the case; destroying it again does nothing | F `test_a_keys_state_tells_which_case_it_is` |

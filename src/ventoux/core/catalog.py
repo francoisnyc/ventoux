@@ -26,6 +26,7 @@ class Catalog:
         self._labels: set[str] = set()  # the labels a field may be declared untrusted with
         self._roles: dict[str, str | None] = {}  # each role, and the highest risk it may approve
         self._operators: set[str] = set()  # the roles that may act on a failed step (brief, D26)
+        self._forgetters: set[str] = set()  # the roles that may forget a case (brief, D32)
         self._systems: set[str] = set()  # the systems a reference may name (brief, D30)
 
     def register_label(self, label: str) -> None:
@@ -64,20 +65,30 @@ class Catalog:
         """The registered systems, in order."""
         return sorted(self._systems)
 
-    def register_role(self, name: str, approves: str | None = None, operates: bool = False) -> None:
+    def register_role(
+        self, name: str, approves: str | None = None, operates: bool = False, forgets: bool = False
+    ) -> None:
         """Let waits and approvals name the role `name`, which may approve activities up to the
-        risk `approves` (none by default), and, if `operates`, act on a case's failed steps
-        (brief, D26). Registered by the platform team, like labels, so a typo is caught
-        (brief, D22)."""
+        risk `approves` (none by default); if `operates`, act on a case's failed steps
+        (brief, D26); if `forgets`, propose or approve forgetting a case (brief, D32). Registered
+        by the platform team, like labels, so a typo is caught (brief, D22)."""
         checked_role(name, approves)
         self._roles[name] = approves
         if operates:
             self._operators.add(name)
+        if forgets:
+            self._forgetters.add(name)
 
     @property
     def operators(self) -> list[str]:
         """The registered roles that may act on a failed step, in order (brief, D26)."""
         return sorted(self._operators)
+
+    @property
+    def forgetters(self) -> list[str]:
+        """The registered roles that may propose or approve forgetting a case, in order
+        (brief, D32)."""
+        return sorted(self._forgetters)
 
     @property
     def roles(self) -> dict[str, str | None]:

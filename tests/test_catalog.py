@@ -806,3 +806,15 @@ def test_the_guides_letter_is_the_development_one() -> None:
     for example in (blocks[1], blocks[5]):  # the refund's block (its imports), and the letter's
         exec(example.split("```")[0], namespace)  # noqa: S102 -- our guide, as above
     assert contract_hash(letter(namespace["LetterInput"])) == contract_hash(testing.letters_draft_3)
+
+
+def test_a_role_may_be_registered_to_forget() -> None:
+    catalog = Catalog()
+    catalog.register_role("support", approves="medium")
+    # Fail closed: no role forgets unless the platform team registered it to (brief, D32).
+    assert catalog.forgetters == []
+    with pytest.raises(ValueError, match="^'Privacy' is not a role"):
+        catalog.register_role("Privacy", forgets=True)
+    catalog.register_role("privacy", forgets=True)
+    assert catalog.forgetters == ["privacy"]
+    assert catalog.roles["privacy"] is None  # forgetting approves no risk by itself
