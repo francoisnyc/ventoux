@@ -3,20 +3,26 @@
 Each case's sensitive values are encrypted with its own key, so forgetting a person destroys one
 key and nothing else (brief, D15). The provider is the platform team's (Vault's transit engine or
 a cloud KMS, after v1.0): it seals and opens for Ventoux, and never hands a key out, so a key
-never leaves it. `FileKeys` is the development provider: keys in a local file.
-See docs/layers/09-case-data.md (9b).
+never leaves it. When a case is forgotten its key is destroyed, and never made again (layer 9c).
+`FileKeys` is the development provider: keys in a local file.
+See docs/layers/09-case-data.md (9b, 9c).
 """
 
 import base64
 import json
 import os
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 NONCE = 12  # bytes: AES-GCM's standard nonce, fresh for every seal
+DESTROYED = None  # what the key file holds for a case once its key is destroyed (JSON's null)
+
+# Where a case's key stands: made and usable, destroyed when the case was forgotten, or never made
+# (no case was opened with that ID).
+type KeyState = Literal["kept", "destroyed", "never made"]
 
 
 class KeyRefused(Exception):
@@ -24,14 +30,19 @@ class KeyRefused(Exception):
 
 
 class KeyProvider(Protocol):
-    """Makes a case's key once, and seals and opens with it. `part` names where the data sits in
-    its payload (`sensitive/0`), so sealed data moved to another place fails to open."""
+    """Makes a case's key once, seals and opens with it, and destroys it when the case is
+    forgotten (brief, D15). `part` names where the data sits in its payload (`sensitive/0`), so
+    sealed data moved to another place fails to open."""
 
     def create(self, case: str) -> None: ...
 
     def seal(self, case: str, data: bytes, part: str) -> bytes: ...
 
     def open(self, case: str, data: bytes, part: str) -> bytes: ...
+
+    def destroy(self, case: str) -> None: ...
+
+    def state(self, case: str) -> KeyState: ...
 
 
 class FileKeys:
@@ -48,6 +59,26 @@ class FileKeys:
             raise KeyRefused(f"a key was already made for {case}: open the case under a new ID")
         keys[case] = base64.b64encode(AESGCM.generate_key(bit_length=256)).decode()
         self.path.write_text(json.dumps(keys, indent=2, sort_keys=True))
+
+    def destroy(self, case: str) -> None:
+        """Destroy `case`'s key, so nothing sealed with it can be opened again (brief, D15)."""
+        keys = self._read()
+        if case not in keys:
+            # Fail closed: no key was made, so there is no case to forget.
+            raise KeyRefused(
+                f"there is no key for {case} to destroy: no case was opened with its ID"
+            )
+        # Its mark stays, holding no key, so `create` refuses the ID forever (brief, D31). A
+        # key destroyed already stays destroyed: a retried request does no harm.
+        keys[case] = DESTROYED
+        self.path.write_text(json.dumps(keys, indent=2, sort_keys=True))
+
+    def state(self, case: str) -> KeyState:
+        """Whether `case`'s key is kept, was destroyed, or was never made."""
+        keys = self._read()
+        if case not in keys:
+            return "never made"
+        return "destroyed" if keys[case] is DESTROYED else "kept"
 
     def seal(self, case: str, data: bytes, part: str) -> bytes:
         """`data` encrypted with `case`'s key: a fresh nonce, then the ciphertext and its tag."""
@@ -67,17 +98,24 @@ class FileKeys:
 
     def _key(self, case: str) -> bytes:
         """`case`'s key, read here and nowhere else: private, so it never leaves the provider."""
-        stored = self._read().get(case)
-        if stored is None:
+        keys = self._read()
+        if case not in keys:
             raise KeyRefused(
                 f"there is no key for {case}, so its sensitive values can't be read or written"
             )
+        stored = keys[case]
+        if stored is DESTROYED:
+            raise KeyRefused(
+                f"the key of {case} was destroyed when it was forgotten: its sensitive values "
+                "can't be read or written"
+            )
         return base64.b64decode(stored)
 
-    def _read(self) -> dict[str, str]:
+    def _read(self) -> dict[str, str | None]:
+        """Each case's key, by case: `DESTROYED` once it was destroyed."""
         if not self.path.exists():
             return {}
-        keys: dict[str, str] = json.loads(self.path.read_text())
+        keys: dict[str, str | None] = json.loads(self.path.read_text())
         return keys
 
 

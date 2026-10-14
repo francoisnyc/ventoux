@@ -359,7 +359,7 @@ says so:
 | the case is closed and keeps its records | `claim-7 is closed, and its definition keeps closed cases (forgetting: while_open)` |
 | the case is never forgotten | `claim-7 keeps its records (forgetting: never): it can't be forgotten` |
 | the case's file is viewed after forgetting | `claim-7 was forgotten: its case file can't be read` |
-| a forgotten case's history is read or replayed | `the key of claim-7 was destroyed when it was forgotten` |
+| a forgotten case's history is read or replayed | `the key of claim-7 was destroyed when it was forgotten: its sensitive values can't be read or written` |
 
 ## Fresh facts
 

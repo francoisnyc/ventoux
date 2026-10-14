@@ -641,7 +641,7 @@ open case as `forgotten`; it then destroys the key through a registered activity
    default for now.
 3. **`reject` is an answer,** ending the request; without it a request nobody approves waits
    forever.
-4. **The key provider gains `destroy(case)` and `key_state(case)`** (`kept`, `destroyed` or
+4. **The key provider gains `destroy(case)` and `state(case)`** (`kept`, `destroyed` or
    `never made`). `FileKeys` keeps a mark for a destroyed key, so `create` refuses the ID forever.
 5. **Destroying is a Temporal activity the worker registers,** not a catalog contract: no
    definition may call it, so no case author can forget.
@@ -721,7 +721,7 @@ an open case is layer 12's question.
 - `case/state.py`, `case/runtime.py`, `case/closing.py`: `ForgetApproved`, closing as `forgotten`.
 - `case/memory.py`, `testing.py`: a script's `forget(proposed_by, approved_by)`; `privacy` in the
   development catalog; a development forget workflow.
-- `tooling/keys.py`: `destroy`, `key_state`, the destroyed mark, the forgotten message.
+- `tooling/keys.py`: `destroy`, `state`, the destroyed mark, the forgotten message.
 - `temporal/forget.py` (new): `ForgetWorkflow`, its activities, `propose_forget`,
   `answer_forget`, `forget_report`.
 - `temporal/cases.py`: the `forget` signal; `report` and `view` of a forgotten case.
@@ -740,7 +740,7 @@ an open case is layer 12's question.
 
 - `catalog.register_role(..., forgets=True)`; `parse_case`.
 - `run_case(...)` with the script's `forget`, and what it reports; `FileKeys` (`create`, `seal`,
-  `open`, `destroy`, `key_state`).
+  `open`, `destroy`, `state`).
 - On Temporal's test server: `start_case`, `answer`, `close`, `report`, `view`; `propose_forget`,
   `answer_forget`, `forget_report`; the case handle's `fetch_history()` and `query`; the
   `Replayer`; captured log records.
@@ -755,7 +755,7 @@ Each starts with its negative test, seen failing for the right reason.
    worker running. Seen as it is first; what it shows decides the codec's part of slice 6. And a
    signal from one workflow to another that has ended: how it fails.
 1. **Keys.** Negative: `destroy` of a key never made; `seal`, `open` and `create` after
-   `destroy`. Then `key_state` reads each state, and `destroy` twice does nothing.
+   `destroy`. Then `state` reads each state, and `destroy` twice does nothing.
 2. **Roles and the definition.** Negative: `forgetting` given anything but its three values;
    `forgets` on a role that isn't registered. Then `allowed` by default.
 3. **In memory.** Negative (the curriculum's): forgetting approved by its proposer is refused;
@@ -796,8 +796,19 @@ Each starts with its negative test, seen failing for the right reason.
   key left in place (the query answered).
 - **Temporal can't tell a case that ended from one that never existed** (slice 0): a signal from
   the request to either fails with `Unable to signal external workflow because it was not found`.
-  So the key provider's `key_state`, looked up before anyone answers, is what tells them apart,
+  So the key provider's `state`, looked up before anyone answers, is what tells them apart,
   as step 2 planned.
+- **The provider's new method is `state`, not `key_state`** (slice 1). 9b's test that the key
+  never leaves the provider refuses any public method starting with `key` or `get`; that guard is
+  worth more than the name. `keys.state("claim-7")` gives `kept`, `destroyed` or `never made`.
+- **A destroyed key leaves a mark** (slice 1): the key file holds `null` for the case, so `create`
+  refuses the ID forever and `state` says `destroyed`. A missing key and a destroyed one say
+  different things: `there is no key for …` and `the key of … was destroyed when it was
+  forgotten: …`. The first version read both as `None` and said `destroyed` for a case with no
+  key; 9b's `test_a_key_is_made_once` caught it.
+- **`FileKeys` forgets by rewriting its file** (slice 1): the key's text is gone from it, but a
+  copy of the old file (a backup, a disk block) may keep it. Development only, as it always was;
+  a production provider's destruction is its own (deployment guide, after v1.0).
 
 ### Promises
 
@@ -810,7 +821,8 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 |---|---|
 | A role may be registered to forget, and only such a role may propose or approve forgetting | K `test_a_role_may_be_registered_to_forget` |
 | `forgetting` is `allowed`, `while_open` or `never`, `allowed` by default; anything else is refused | F `test_a_definition_says_whether_it_may_be_forgotten` |
-| A key can be destroyed; a destroyed key never seals, opens or is made again, saying the case was forgotten; destroying it again does nothing; a key never made can't be destroyed | F `test_a_destroyed_key_is_gone_for_good` |
+| A key can be destroyed, and its text is gone from the provider; a destroyed key never seals, opens or is made again, saying the case was forgotten; a key never made can't be destroyed | F `test_a_destroyed_key_is_gone_for_good` |
+| The provider says whether a case's key is kept, destroyed or never made, after Temporal has dropped the case; destroying it again does nothing | F `test_a_keys_state_tells_which_case_it_is` |
 | Forgetting approved by its proposer is refused (the curriculum's negative test), in memory and on Temporal, where it is recorded and the request waits on | F `test_the_proposer_cannot_approve_forgetting`; TF `test_refused_answers_are_recorded_and_the_request_waits` |
 | A proposer or approver without a role registered to forget is refused | F `test_forgetting_needs_a_role_registered_to_forget`; TF `test_a_proposal_without_the_role_is_refused`, `test_refused_answers_are_recorded_and_the_request_waits` |
 | The case checks the approval itself, depending on nothing the request checked | F `test_the_case_checks_forgetting_itself` |
