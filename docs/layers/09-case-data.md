@@ -5,7 +5,8 @@ proposed); 9a's note and its nine drafting points confirmed the same day; 9a bui
 Promises checked against the tests, 2026-10-10; the tutor review's fix built test-first,
 2026-10-11. 9b's choices agreed in the session, 2026-10-13 (all as proposed, with the key
 provider sealing and opening); 9b built, slices 0–8; Promises checked against the tests,
-2026-10-13; the tutor review's fix built test-first, 2026-10-14.
+2026-10-13; the tutor review's fix built test-first, 2026-10-14. 9c's choices agreed in the
+session, 2026-10-14 (all as proposed, with `forgetting` added: `while_open` and `never`).
 
 ## What this layer is for
 
@@ -603,3 +604,205 @@ replay tests, and the guide's example and refusal rows.
 | On Temporal the view gives the value to the roles its field lists | TS `test_the_view_on_temporal_decrypts_for_who_may_see` |
 | A history replays with its key, fails without it, and one written before 9b replays with the codec | TS `test_replay_needs_the_key`, `test_a_history_from_before_9b_replays` |
 | The guides' refusal rows are what the engine says | TS `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |
+
+---
+
+## 9c. Forgetting a case
+
+User-facing description, written first: `docs/guides/case-data.md` ("Forgetting a person", its
+refusal table, design note 4). Decision: brief D32 (drafted with this note).
+
+### What this part is for
+
+9b encrypted every sensitive value with a key per case so that a person could be forgotten by
+destroying one key (brief, D15). 9c destroys it: on a request two people agree, at the one moment
+it is safe, and leaving everything else readable for the audit.
+
+A small example. Claim `claim-7` is open; `pay#1` is running. Pia (`privacy`) proposes forgetting
+it; Olu (`privacy`) approves. The case begins closing as `forgotten`: the open review is
+cancelled, `pay#1` finishes and is flagged (`pay completed after the close was requested`), and
+the case closes. Only then is the key destroyed. Afterwards `report` reads the case's closing
+report, `view` is refused, and the history holds ciphertext where the national ID was.
+
+### Agreed earlier
+
+From the session that split layer 9 (top of this note): forgetting is its own small workflow,
+`<case ID>/forget`; it needs a role registered to forget, and two different people; it closes an
+open case as `forgotten`; it then destroys the key through a registered activity.
+
+### Decided in the session
+
+1. **Roles:** `register_role("privacy", forgets=True)`, like `operates=True` (brief, D26). The
+   proposer and the approver both hold a role registered to forget, and are different people;
+   the development catalog registers `privacy`.
+2. **A closed case can be forgotten,** keeping its own close reason, **unless its definition keeps
+   its records:** `"forgetting": "allowed" | "while_open" | "never"`, `allowed` by default. Both
+   stricter settings are available (books and records need `while_open`); no deployment-wide
+   default for now.
+3. **`reject` is an answer,** ending the request; without it a request nobody approves waits
+   forever.
+4. **The key provider gains `destroy(case)` and `key_state(case)`** (`kept`, `destroyed` or
+   `never made`). `FileKeys` keeps a mark for a destroyed key, so `create` refuses the ID forever.
+5. **Destroying is a Temporal activity the worker registers,** not a catalog contract: no
+   definition may call it, so no case author can forget.
+6. **Twice, and a case that never existed, are refused before anyone approves,** from the key
+   provider: it holds after Temporal has dropped old workflows, and a refused or rejected request
+   can be proposed again (the request's ID reuse policy allows a new run once one has ended).
+7. **9b's gap** (an exception nobody retrieves in a case workflow's task is logged with the task's
+   repr, which the log filter can't scrub) gets the last slice: shown first, closed if cheap,
+   otherwise noted here.
+
+### How it works
+
+**The request, `<case ID>/forget`.** A workflow of its own, so the key is destroyed outside the
+case: inside it, the case's next workflow task could need a replay, and replay needs the key
+(brief, D15). Its ID starts with the case's, so the codec reads it as the case's; none of its
+payloads has a sensitive part, so it never asks for the key, and its history stays readable after
+the key is gone. In order:
+
+1. **Proposed.** `propose_forget(client, case, by, roles)` starts it. The proposer is checked
+   (an identifier, a role registered to forget); refused, the request ends `refused`.
+2. **Looked up,** by an activity, before anyone approves: the key's state (`never made`:
+   `there is no case …`; `destroyed`: `… was already forgotten`), whether the case's workflow is
+   running or closed, and its definition's `forgetting` (read from the case's first event while
+   the key exists). `never` is refused here, and `while_open` if the case is already closed.
+3. **Answered.** `answer_forget(request, "approve" | "reject", by, roles)`, a signal. An approval
+   by the proposer, or by someone without a role to forget, is refused, recorded, and the request
+   waits on, as every refusal on Temporal is (8c). A rejection ends it `rejected`.
+4. **The case asked to close.** A signal to the case: `ForgetApproved(proposed_by, proposer_roles,
+   approved_by, approver_roles)`. The case's `decide` checks it again, depending on nothing the
+   request checked: both identifiers, two different people, both roles registered to forget, and
+   `forgetting` isn't `never`. An open case begins closing (brief, D10): `cancelled review#1: the
+   case is being forgotten`, then `closed: forgotten`. A case already closing (closed by a person)
+   records the request and closes with its own reason. If the signal finds the case's workflow
+   already ended, the request records `claim-7 was already closed`, and refuses if its
+   definition says `while_open` (it closed before the approval landed).
+5. **Waited for.** An activity waits until the case's workflow has *ended* and returns the report
+   it returned. A signal back from the case would not do: after sending it, the case still has a
+   workflow task to complete, which a replay would need the key for.
+6. **Destroyed.** An activity calls the key provider's `destroy`; it refuses while the case's
+   workflow is still running (fail closed, a second guard on the order) and is retried until it
+   succeeds, as a system being down is (brief, D17). Destroying a destroyed key does nothing, so a
+   retried attempt is safe.
+7. **Recorded.** The request ends `forgotten`; `forget_report(request)` gives its status and lines:
+   who proposed and approved, each refusal, the case's closing line and flags, the key destroyed.
+
+**Reading a forgotten case.** The client's `report` asks the key provider first and, for a
+destroyed key, returns the case's workflow result: the `CaseReport` it returned when it closed,
+which holds lines and placeholders, no sensitive part, so no key. `view` is refused (`… was
+forgotten: its case file can't be read`). Anything else that replays the history (a query sent
+another way, the `Replayer`) reaches the codec, whose provider refuses: `the key of claim-7 was
+destroyed when it was forgotten`. Not yet known: what the SDK does when the failure it sends back
+must itself be sealed with the destroyed key. Slice 0 shows it first; if it hangs or crashes, the
+failure converter sends that fixed message for a forgotten case instead of sealing, never the
+original text.
+
+**What stays readable** (the curriculum's "check yourself"). Without any key: the case's closing
+report; the forget request's whole history; in the case's history, every payload's data as
+stored (the definition, each answer's entry, outcome, person and roles, each activity's inputs
+and outputs that weren't sensitive), with `{"‹sensitive›": n}` where a sensitive value was.
+Unreadable for good: every sensitive value; every form value in an answer's signal (D31 seals
+them all, since the client can't tell which are sensitive); every failure's message and stack
+trace. Staff identifiers stay: they are what the audit is for; forgetting is about the case's
+subject, through its sensitive fields.
+
+**How it fits layer 12.** `forget` is the first change request: proposed, approved by someone
+else, applied. Layer 12 builds the general mechanism (case-file edits, migrations). 9c keeps the
+shape it will reuse: a small workflow per request, the rule "registered roles, two different
+people, the proposer doesn't approve" as a pure function in `case`, and an *apply* step, here
+"close, wait for the case to end, destroy the key". A release migration changing `forgetting` on
+an open case is layer 12's question.
+
+### Where the code goes
+
+- `core/catalog.py`, `core/roles.py`: `register_role(..., forgets=True)`, `forgetters`.
+- `case/definition.py`: `forgetting` on the definition.
+- `case/forgetting.py` (new): the checks on a proposal and an answer; the case's check of
+  `ForgetApproved`.
+- `case/state.py`, `case/runtime.py`, `case/closing.py`: `ForgetApproved`, closing as `forgotten`.
+- `case/memory.py`, `testing.py`: a script's `forget(proposed_by, approved_by)`; `privacy` in the
+  development catalog; a development forget workflow.
+- `tooling/keys.py`: `destroy`, `key_state`, the destroyed mark, the forgotten message.
+- `temporal/forget.py` (new): `ForgetWorkflow`, its activities, `propose_forget`,
+  `answer_forget`, `forget_report`.
+- `temporal/cases.py`: the `forget` signal; `report` and `view` of a forgotten case.
+- `temporal/worker.py`: `case_worker` registers the forget workflow and its activities.
+- `temporal/codec.py`: only if slice 0 shows the failure converter needs it.
+
+### Not in 9c
+
+- Forgetting a standalone plan run (it has its own key; nothing asks for it yet).
+- A production key provider's `destroy` (Vault, KMS: a KMS deletes a key after a waiting period;
+  the deployment guide says so, after v1.0); the audit export (after layer 15); a codec server.
+- A deployment-wide default for `forgetting`; forgetting a member of staff.
+- Change requests in general (layer 12).
+- No new dependency.
+
+### Seams the tests use
+
+- `catalog.register_role(..., forgets=True)`; `parse_case`.
+- `run_case(...)` with the script's `forget`, and what it reports; `FileKeys` (`create`, `seal`,
+  `open`, `destroy`, `key_state`).
+- On Temporal's test server: `start_case`, `answer`, `close`, `report`, `view`; `propose_forget`,
+  `answer_forget`, `forget_report`; the case handle's `fetch_history()` and `query`; the
+  `Replayer`; captured log records.
+- The guide's example, run as written, and each row of its refusal table.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **What Temporal does without a key, today.** A closed case whose key is removed by hand: a
+   query on it, and a replay, are expected to fail with the provider's message and leave the
+   worker running. Seen as it is first; what it shows decides the codec's part of slice 6. And a
+   signal from one workflow to another that has ended: how it fails.
+1. **Keys.** Negative: `destroy` of a key never made; `seal`, `open` and `create` after
+   `destroy`. Then `key_state` reads each state, and `destroy` twice does nothing.
+2. **Roles and the definition.** Negative: `forgetting` given anything but its three values;
+   `forgets` on a role that isn't registered. Then `allowed` by default.
+3. **In memory.** Negative (the curriculum's): forgetting approved by its proposer is refused;
+   so is a proposer or approver without a role to forget, and a case that says `never`. Then an
+   open case closes as `forgotten`, its tasks cancelled, a running activity finishing and flagged.
+4. **The request on Temporal.** Negative: a proposal by a role that can't forget ends `refused`;
+   the proposer's approval and one without the role are recorded, and the request waits on; a
+   case never made and one already forgotten are refused before anyone answers. Then `reject`
+   ends it, and an approval closes the case and destroys the key.
+5. **Order.** Negative: the key is still there while an activity, a child plan, or a workflow
+   step of the case runs, and `destroy` refuses while the case's workflow runs. Then it is
+   destroyed once the case's workflow has ended, and what finished after the close is flagged.
+6. **Closed cases and records.** Negative: a closed case that says `while_open`, and any case
+   that says `never`, are refused, nothing destroyed. Then a closed `allowed` case is forgotten
+   and keeps its close reason, and the ID can't open a case again.
+7. **Reading a forgotten case.** Negative: `view` is refused; a query and a replay fail with the
+   forgotten message, never plain text, and the worker answers the next case. Then `report`
+   reads the closing report.
+8. **The audit after forgetting** (the curriculum's "check yourself"). What stays and what goes,
+   as "How it works" lists it, sought in the fetched history, its JSON export and the reports.
+9. **9b's gap.** An exception raised in a case workflow's task, quoting a value: shown in the log
+   first; then closed if cheap, or noted.
+10. **The guides and the promises.**
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+Drafted before building, with the tests named in advance; checked against the real tests before
+the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
+`tests/test_temporal_forget.py` (new), `K` `tests/test_catalog.py`.
+
+| Promise | Test |
+|---|---|
+| A role may be registered to forget, and only such a role may propose or approve forgetting | K `test_a_role_may_be_registered_to_forget` |
+| `forgetting` is `allowed`, `while_open` or `never`, `allowed` by default; anything else is refused | F `test_a_definition_says_whether_it_may_be_forgotten` |
+| A key can be destroyed; a destroyed key never seals, opens or is made again, saying the case was forgotten; destroying it again does nothing; a key never made can't be destroyed | F `test_a_destroyed_key_is_gone_for_good` |
+| Forgetting approved by its proposer is refused (the curriculum's negative test), in memory and on Temporal, where it is recorded and the request waits on | F `test_the_proposer_cannot_approve_forgetting`; TF `test_refused_answers_are_recorded_and_the_request_waits` |
+| A proposer or approver without a role registered to forget is refused | F `test_forgetting_needs_a_role_registered_to_forget`; TF `test_a_proposal_without_the_role_is_refused`, `test_refused_answers_are_recorded_and_the_request_waits` |
+| The case checks the approval itself, depending on nothing the request checked | F `test_the_case_checks_forgetting_itself` |
+| An approved request closes an open case as `forgotten`: tasks and approvals cancelled, running work finishing, what completes after the close flagged | F `test_forgetting_closes_an_open_case`; TF `test_forgetting_an_open_case` |
+| A rejected request ends, and nothing is closed or destroyed | TF `test_a_rejected_request_changes_nothing` |
+| The key is destroyed only once the case's workflow has ended: never while an activity, child plan or workflow step of it runs; `destroy` refuses while it runs | TF `test_the_key_goes_only_after_the_case_has_ended`, `test_destroy_refuses_while_the_case_runs` |
+| A case never made, and a case already forgotten, are refused before anyone answers | TF `test_forgetting_needs_a_case_with_a_key` |
+| A closed case can be forgotten and keeps its close reason, unless its definition says `while_open`; `never` is always refused; nothing is destroyed when refused | TF `test_forgetting_a_closed_case`, `test_a_case_that_keeps_its_records` |
+| A forgotten case's ID never opens a case again | TF `test_a_forgotten_id_opens_no_case` |
+| After forgetting, `report` reads the closing report, `view` is refused, and a query or replay fails with the forgotten message, never plain text; the worker carries on | TF `test_reading_a_forgotten_case` |
+| After forgetting, the history, its export and the reports keep every decision, who made it, the definition and flags; every sensitive value, form value in an answer and failure message is unreadable; the request's own history replays without a key | TF `test_what_the_audit_keeps_after_forgetting` |
+| The guide's example runs as written, and its refusal rows are what the engine says | TF `test_the_guides_forget_example_runs_as_written`; F, TF `test_the_guides_refusals_are_what_the_engine_says` |

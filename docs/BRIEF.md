@@ -826,6 +826,37 @@ be erased on request), has size limits, and a second copy of business records go
   it yet); keeping an activity's message readable to operators (operators aren't in
   `visible_to`).
 
+### D32. Forgetting a case: a request, a close, then the key
+
+*Drafted 2026-10-14, in layer 9c.*
+
+- **Forgetting is its own small workflow, `<case ID>/forget`,** proposed by one person and
+  approved by another, both holding a role the platform team registered to forget
+  (`register_role("privacy", forgets=True)`, as operating roles are, D26). The proposer can't
+  approve it (D11, D25). A refused answer is recorded and the request waits on; a rejection ends
+  it. It is the first change request (D15); layer 12 makes the mechanism general.
+- **Destroying the key comes last.** The approved request asks the case to close as `forgotten`
+  (D10: tasks and approvals cancelled, running work finishes, anything completing after the
+  close is flagged). Only once the case's workflow has ended, with no activity, plan step or
+  workflow step of it still running, is the key destroyed, by an activity the worker registers,
+  never a contract a definition could call. Work still in flight can't decrypt its own values
+  without the key, and an open case's replay needs it (D15).
+- **A closed case can be forgotten,** keeping its own close reason, **unless its definition keeps
+  its records:** `"forgetting": "allowed"` (the default), `"while_open"` (refused once the case is
+  closed, for books and records) or `"never"`. It is a business decision about a kind of record,
+  so it lives in the definition and changes with a release (D5). No deployment-wide default yet.
+- **Twice, or a case that never existed, is refused before anyone approves,** from the key
+  provider, which remembers a destroyed key and never makes it again, so the check holds after
+  Temporal has dropped old workflows, and the ID can never open a case again.
+- **A forgotten case reads cleanly.** `report` reads the report the case returned when it closed,
+  which holds no sensitive part; `view` is refused; any other query or replay fails saying the
+  key was destroyed, and the worker carries on. Never plain text, never a crashed worker.
+- **What stays:** every decision, who made it and with which role, the definition, flags, every
+  value that wasn't sensitive where it was used, and the request's own history. **What goes:**
+  every sensitive value, every form value in the answers people sent (D31 encrypts them all),
+  and every failure's message and stack trace. Staff identifiers stay: forgetting is about the
+  case's subject, through its sensitive fields.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step

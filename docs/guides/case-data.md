@@ -284,12 +284,82 @@ What to know:
 
 ## Forgetting a person
 
-> **Design, built in layer 9c.**
+When a customer asks to be forgotten, you forget their case: its key is destroyed, so every
+sensitive value in it becomes unreadable for good, in Temporal's history and in every copy made
+of it. Everything else stays, for the audit.
 
-Forgetting a case is proposed by someone with the data protection role and approved by someone
-else with it. Then the case closes (if it was open, running steps finish first) and its key is
-destroyed. The history keeps every decision and who made it, but the sensitive values become
-unreadable everywhere, including copies already exported.
+**Who may forget.** Your platform team registers the roles that may, like operating roles:
+
+```python
+catalog.register_role("privacy", forgets=True)
+```
+
+Forgetting is proposed by one person with such a role and approved by **another**: erasure can
+conflict with keeping records, so it is a decision, made by two people. The proposer can't approve
+their own request.
+
+```python
+from ventoux.temporal.forget import answer_forget, forget_report, propose_forget
+
+request = await propose_forget(client, "claim-7", by="pia", roles=["privacy"])
+await answer_forget(request, "approve", by="olu", roles=["privacy"])
+```
+
+The request is a small workflow of its own, `claim-7/forget`. Then, in order:
+
+1. **The case closes as `forgotten`,** if it was open. Open tasks and approvals are cancelled;
+   steps already running (an activity, a plan step, a workflow step) finish, since a side effect
+   can't be cut off halfway. Anything that completes after the close is flagged, as with any
+   close: `pay completed after the close was requested`.
+2. **Once the case's workflow has ended,** and nothing of it still runs, **the key is destroyed.**
+   Work still running needs the key to read its own values, so the key goes last.
+3. **The request records it:** `forget_report(request)` reads `forgotten`, with who proposed,
+   who approved, and when the key was destroyed.
+
+A case that was already closed is forgotten the same way, keeping its own close reason, unless
+its definition keeps its records (below).
+
+**Keeping records.** Some cases must be kept: books and records, legal retention. The definition
+says so:
+
+```json
+"forgetting": "while_open"
+```
+
+| `forgetting` | A request to forget the case is |
+|---|---|
+| `"allowed"` (the default) | accepted, open or closed |
+| `"while_open"` | accepted while the case is open, refused once it is closed |
+| `"never"` | always refused |
+
+**After forgetting:**
+
+- `report(case)` still works: it reads the report the case made when it closed, which holds
+  every line of its history (with `‹sensitive›` where a value would be) and no value to decrypt.
+- `view(case, roles)` is refused: the case file can't be read any more.
+- A query sent to the case some other way, or a replay of its history, fails with `the key of
+  claim-7 was destroyed when it was forgotten`; the worker carries on.
+- Temporal's history and its export keep every decision, who made it and with which role, the
+  definition (its rules and release), and every value that wasn't sensitive where it was used.
+  Where a sensitive value was, there is ciphertext no one can open. So is every form value in
+  the answers people sent, and every failure's message: they crossed encrypted too.
+- People's identifiers (`ana`, `pia`) stay: forgetting is about the case's subject, whose
+  personal data is in its sensitive fields.
+- The case's ID can never open a case again: its key is never made twice.
+
+### What the engine refuses
+
+| Refused when | Example |
+|---|---|
+| the proposer's roles may not forget | `forgetting claim-7 is proposed by privacy, and lee has support` |
+| the approver's roles may not forget | `forgetting claim-7 is approved by privacy, and lee has support` |
+| the proposer approves their own request | `pia proposed forgetting claim-7, so cannot approve it` |
+| no case has that ID | `there is no case claim-9: no key was ever made for it` |
+| the case was already forgotten | `claim-7 was already forgotten: its key was destroyed` |
+| the case is closed and keeps its records | `claim-7 is closed, and its definition keeps closed cases (forgetting: while_open)` |
+| the case is never forgotten | `claim-7 keeps its records (forgetting: never): it can't be forgotten` |
+| the case's file is viewed after forgetting | `claim-7 was forgotten: its case file can't be read` |
+| a forgotten case's history is read or replayed | `the key of claim-7 was destroyed when it was forgotten` |
 
 ## Fresh facts
 
@@ -339,6 +409,8 @@ the warehouse too.
    D16: read-only, called on behalf of the viewer, never stored).
 4. **Erasure needs a key service** (decided: D15). Per-case keys through a key provider, in v1.0;
    forgetting is approved by someone else, and closes an open case first; exports carry ciphertext.
+   Since layer 9c, a definition may keep its records: `"forgetting": "while_open"` or `"never"`
+   (brief, D32).
 5. **Facts record when they were obtained** (decided: D18). Workflow time, an optional as-of time
    from the source, `max_age` where a step uses a fact, and stale facts refreshed by re-running a
    read-only lookup.
