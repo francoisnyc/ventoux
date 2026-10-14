@@ -692,10 +692,9 @@ destroyed key, returns the case's workflow result: the `CaseReport` it returned 
 which holds lines and placeholders, no sensitive part, so no key. `view` is refused (`… was
 forgotten: its case file can't be read`). Anything else that replays the history (a query sent
 another way, the `Replayer`) reaches the codec, whose provider refuses: `the key of claim-7 was
-destroyed when it was forgotten`. Not yet known: what the SDK does when the failure it sends back
-must itself be sealed with the destroyed key. Slice 0 shows it first; if it hangs or crashes, the
-failure converter sends that fixed message for a forgotten case instead of sealing, never the
-original text.
+destroyed when it was forgotten`. The failure sent back can't be sealed either; slice 0 found
+that the SDK then sends the codec's own error in its place (`Failed encoding completion: …`), so
+the operator reads the provider's message, which names only the case.
 
 **What stays readable** (the curriculum's "check yourself"). Without any key: the case's closing
 report; the forget request's whole history; in the case's history, every payload's data as
@@ -727,7 +726,6 @@ an open case is layer 12's question.
   `answer_forget`, `forget_report`.
 - `temporal/cases.py`: the `forget` signal; `report` and `view` of a forgotten case.
 - `temporal/worker.py`: `case_worker` registers the forget workflow and its activities.
-- `temporal/codec.py`: only if slice 0 shows the failure converter needs it.
 
 ### Not in 9c
 
@@ -781,6 +779,25 @@ Each starts with its negative test, seen failing for the right reason.
 9. **9b's gap.** An exception raised in a case workflow's task, quoting a value: shown in the log
    first; then closed if cheap, or noted.
 10. **The guides and the promises.**
+
+### Decided while building
+
+- **Reading a case without its key already fails cleanly** (slice 0). With a closed claim's key
+  taken out of the key file by hand: its workflow result (the closing report) reads without a
+  key; a `report` query fails at once with `Failed encoding completion: there is no key for
+  claim-7, so its sensitive values can't be read or written`. The workflow task fails on the
+  codec's refusal; the SDK then can't seal that failure (no key), and sends the codec's error in
+  its place, never what the failure said. The worker's log reads `Failed handling activation …
+  (KeyRefused)`, the type only, and the worker answers the next case; a `Replayer` fails with the
+  same message. So the codec needs no change for a forgotten case: slice 7 checks the message
+  once `destroy` gives its own. The SDK also retried the query's task once, with no workflow ID
+  given to the codec (`a sensitive part has no case …`): failed closed, no text, nothing to fix.
+  Both tests passed when written: they measure what Temporal does, and were seen failing with the
+  key left in place (the query answered).
+- **Temporal can't tell a case that ended from one that never existed** (slice 0): a signal from
+  the request to either fails with `Unable to signal external workflow because it was not found`.
+  So the key provider's `key_state`, looked up before anyone answers, is what tells them apart,
+  as step 2 planned.
 
 ### Promises
 
