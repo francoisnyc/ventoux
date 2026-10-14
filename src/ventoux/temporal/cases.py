@@ -32,6 +32,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.called import unbound
     from ventoux.case.closing import CloseRefused
     from ventoux.case.definition import CaseInvalid, parse_case
+    from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.plan_step import PlanNotSupplied, supplied
     from ventoux.case.runtime import CaseRefused, ShownRefused, decide
     from ventoux.case.state import (
@@ -42,6 +43,7 @@ with workflow.unsafe.imports_passed_through():
         Completed,
         Event,
         Failed,
+        ForgetApproved,
         Opened,
         PlanCancelled,
         Proposed,
@@ -102,6 +104,16 @@ class CaseAnswer:
 
 
 @dataclass
+class CaseForget:
+    """An approved request to forget the case, from `<case ID>/forget` (brief, D32)."""
+
+    proposed_by: str  # who proposed it
+    proposer_roles: list[str]  # their roles, stated with the proposal (brief, D22)
+    approved_by: str  # who approved it
+    approver_roles: list[str]  # their roles, stated with the approval
+
+
+@dataclass
 class CaseRequest:
     """A person's request to a case: propose a step, retry a failed run, or close it."""
 
@@ -155,6 +167,17 @@ class CaseWorkflow:
     @workflow.signal(name="close")
     def close(self, sent: CaseRequest) -> None:
         self.inbox.append(CloseAsked(sent.what, sent.by, frozenset(sent.roles)))
+
+    @workflow.signal(name="forget")
+    def forget(self, sent: CaseForget) -> None:
+        self.inbox.append(
+            ForgetApproved(
+                sent.proposed_by,
+                frozenset(sent.proposer_roles),
+                sent.approved_by,
+                frozenset(sent.approver_roles),
+            )
+        )
 
     @workflow.signal(name="shown")
     def shown(self, sent: CaseRequest) -> None:
@@ -214,6 +237,7 @@ class CaseWorkflow:
                 RetryRefused,
                 CloseRefused,
                 ShownRefused,
+                ForgetRefused,
             ) as refused:
                 # In memory a refusal raises to the test; here nobody is there to catch it. It is
                 # recorded, and the case waits on as if it hadn't come: `decide` changed nothing
@@ -414,6 +438,8 @@ def asked(event: Event) -> str:
         return f"{event.by}'s close as {event.reason}"
     if isinstance(event, Shown):
         return f"the record of {event.field} shown to {event.by}"
+    if isinstance(event, ForgetApproved):
+        return f"forgetting the case, approved by {event.approved_by}"
     return type(event).__name__  # only people's requests are refused; anything else is a bug
 
 

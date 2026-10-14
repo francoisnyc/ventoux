@@ -829,6 +829,27 @@ Each starts with its negative test, seen failing for the right reason.
   `UNKNOWN_ROLE` list gains it, as it gained 9b's.
 - **Citations are written one by one** (slice 3): `(brief, D15) (brief, D32)`, as the decisions
   test reads them; a first `(brief, D15, D32)` was refused by it.
+- **`case_worker` takes the request's workflow as `forget=`** (slice 4), optional: given it, the
+  worker also serves `<case ID>/forget` and its activities. A deployment subclasses
+  `ForgetWorkflow` to name its catalog, as it subclasses `CaseWorkflow`; `DevelopmentForget` is
+  the development one. The existing callers stay as they were.
+- **The request's activities are methods of `ForgetActivities(client)`** (slice 4): the key
+  provider comes from the client's codec (`keys_of`), and the case's workflow from the client.
+  `key_state` reads the key; `case_ended` waits for the case's workflow result, saying it is
+  alive every ten seconds, and returns the case's closing report; `destroy_key` destroys it.
+  The request records the case's last line and its flags from that report.
+- **A rejection needs a role registered to forget, and may come from the proposer** (slice 4): it
+  changes nothing, so withdrawing one's own request is allowed. An approval needs the role and
+  someone else. An answer other than `approve` or `reject` is refused and recorded.
+- **What the request records:** `pia proposed forgetting claim-7, as privacy`, `approved by olu,
+  as privacy`, `claim-7 asked to close as forgotten` (or `claim-7 was already closed`), `claim-7
+  ended: closed: forgotten`, each flag, `the key of claim-7 was destroyed`. A refused proposal
+  is one line, `refused pia's proposal: …`, and the request ends `refused`.
+- **Two ways a request could wait for ever, noted** (slice 4): a case that refuses the approved
+  request (`never`, checked by the request itself in slice 6) stays open, and the request waits
+  for it to end; a case whose workflow *failed* rather than closed makes `case_ended` fail, and
+  Temporal retries it. Both fail closed (nothing is destroyed). The second is a case that could
+  not open; it is left as it is, since such a case holds no decision to keep.
 
 ### Promises
 

@@ -18,6 +18,7 @@ from temporalio.worker import Replayer, Worker
 
 from ventoux.temporal.cases import CaseReport, CaseWorkflow, answer, report, start_case
 from ventoux.temporal.converter import keys_of
+from ventoux.temporal.forget import ForgetReport, answer_forget, forget_report, propose_forget
 from ventoux.temporal.worker import SANDBOX, case_worker
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it
@@ -28,6 +29,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.testing import (
         FAKES,
         DevelopmentCases,
+        DevelopmentForget,
         DevelopmentPlans,
         as_json,
         development_converter,
@@ -47,7 +49,14 @@ def on_temporal[T](scenario: Callable[[Client], Awaitable[T]]) -> T:
         )
         async with (
             environment,
-            case_worker(environment.client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES),
+            case_worker(
+                environment.client,
+                QUEUE,
+                DevelopmentCases,
+                DevelopmentPlans,
+                FAKES,
+                forget=DevelopmentForget,
+            ),
             Worker(environment.client, task_queue="signals", workflows=[SignalsAnEndedCase]),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=30)
@@ -136,3 +145,129 @@ def test_a_signal_to_an_ended_case() -> None:
     # ask the key provider which it is (9c, "How it works", step 2).
     not_found = "refused: Unable to signal external workflow because it was not found"
     assert on_temporal(scenario) == [not_found, not_found]
+
+
+# --- Slice 4: the request on Temporal ---
+
+
+async def open_claim(client: Client, id: str) -> Case:
+    """The guide's claim, holding a national ID, waiting for its assessment."""
+    return await start_case(client, DevelopmentCases, claim(), as_json(FILE), id, QUEUE)
+
+
+def test_a_proposal_without_the_role_is_refused() -> None:
+    async def scenario(client: Client) -> ForgetReport:
+        await open_claim(client, "claim-7")
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "lee", ["support-lead"], QUEUE
+        )
+        return await request.result()
+
+    ended = on_temporal(scenario)
+    assert ended.status == "refused"
+    assert ended.history == [
+        "refused lee's proposal: forgetting claim-7 is proposed by privacy, and lee has support-lead"
+    ]
+
+
+async def reported(
+    request: WorkflowHandle[Any, ForgetReport], holds: Callable[[ForgetReport], bool]
+) -> ForgetReport:
+    """The request's report once `holds` is true of it, asked a bounded number of times."""
+    for _ in range(200):
+        now = await forget_report(request)
+        if holds(now):
+            return now
+        await asyncio.sleep(0.05)
+    raise AssertionError("the request never got there")
+
+
+def test_refused_answers_are_recorded_and_the_request_waits() -> None:
+    async def scenario(client: Client) -> ForgetReport:
+        await open_claim(client, "claim-7")
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        # The curriculum's negative test, on Temporal: recorded, and the request waits on.
+        await answer_forget(request, "approve", "pia", ["privacy"])
+        await answer_forget(request, "approve", "lee", ["support-lead"])
+        await answer_forget(request, "forget", "olu", ["privacy"])
+        return await reported(request, lambda now: len(now.history) == 4)
+
+    now = on_temporal(scenario)
+    assert now.status == "waiting"
+    assert now.history == [
+        "pia proposed forgetting claim-7, as privacy",
+        "refused pia's answer approve: pia proposed forgetting claim-7, so cannot approve it",
+        (
+            "refused lee's answer approve: forgetting claim-7 is approved by privacy, and lee "
+            "has support-lead"
+        ),
+        "refused olu's answer forget: a request to forget is answered approve or reject",
+    ]
+
+
+def test_forgetting_needs_a_case_with_a_key() -> None:
+    # Temporal can't tell a case that ended from one that never was (slice 0); the key provider
+    # can, and remembers a destroyed key after Temporal has dropped its case.
+    async def scenario(client: Client) -> list[ForgetReport]:
+        await open_claim(client, "claim-8")
+        keys_of(client).destroy("claim-8")  # forgotten before
+        ended = []
+        for case in ("claim-9", "claim-8"):
+            request = await propose_forget(
+                client, DevelopmentForget, case, "pia", ["privacy"], QUEUE
+            )
+            ended.append(await request.result())
+        return ended
+
+    never, already = on_temporal(scenario)
+    assert (never.status, never.history) == (
+        "refused",
+        ["refused pia's proposal: there is no case claim-9: no key was ever made for it"],
+    )
+    assert (already.status, already.history) == (
+        "refused",
+        ["refused pia's proposal: claim-8 was already forgotten: its key was destroyed"],
+    )
+
+
+def test_a_rejected_request_changes_nothing() -> None:
+    async def scenario(client: Client) -> tuple[ForgetReport, CaseReport, str]:
+        case = await open_claim(client, "claim-7")
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "reject", "olu", ["privacy"])
+        return await request.result(), await report(case), keys_of(client).state("claim-7")
+
+    ended, case, key = on_temporal(scenario)
+    assert ended.status == "rejected"
+    assert ended.history == ["pia proposed forgetting claim-7, as privacy", "rejected by olu"]
+    assert (case.status, case.waiting_for, key) == ("open", ["assess by adjuster"], "kept")
+
+
+def test_forgetting_an_open_case() -> None:
+    async def scenario(client: Client) -> tuple[ForgetReport, CaseReport, str]:
+        case = await open_claim(client, "claim-7")
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        return await request.result(), await case.result(), keys_of(client).state("claim-7")
+
+    ended, case, key = on_temporal(scenario)
+    assert ended.status == "forgotten"
+    assert ended.history == [
+        "pia proposed forgetting claim-7, as privacy",
+        "approved by olu, as privacy",
+        "claim-7 asked to close as forgotten",
+        "claim-7 ended: closed: forgotten",
+        "the key of claim-7 was destroyed",
+    ]
+    assert case.history[-3:] == [
+        "forgetting approved by olu as privacy, proposed by pia as privacy",
+        "cancelled assess#1: the case is being forgotten",
+        "closed: forgotten",
+    ]
+    assert key == "destroyed"

@@ -45,6 +45,7 @@ from ventoux.core.sensitive import Sensitive, unwrapped
 from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.contract_check import check_workflow_contract
+from ventoux.temporal.forget import ForgetReport, ForgetStart, ForgetWorkflow
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 
 # Temporal: this module defines workflows, so the workflow sandbox imports it afresh for each run;
@@ -299,6 +300,17 @@ class DevelopmentCases(CaseWorkflow):
 
     @workflow.run
     async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+# Temporal: the development request to forget a case: the development catalog, whose `privacy`
+# role may forget (layer 9c).
+@workflow.defn(name="ventoux.forget")
+class DevelopmentForget(ForgetWorkflow):
+    catalog = CATALOG
+
+    @workflow.run
+    async def run(self, start: ForgetStart) -> ForgetReport:
         return await self.drive(start)
 
 
