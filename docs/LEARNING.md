@@ -286,7 +286,18 @@ and record the key points. A question is closed once you can explain the answer 
   approved_amount, which pay uses, so cannot approve it`). *The test:* `waiting_for == ["approval
   of pay by support-lead"]`, `not run.reached("pay")` and `not run.closed`; since layer 8a it runs
   on the real runtime.
-- Status: open, kept in the warm-up rotation until it comes from memory.
+- Retrieval (layer 9c warm-up): "Sam can approve, Ana can't since she set approved_amount." The
+  exclusion came back with its reason, from memory, for the second time in a row: provenance,
+  not rank (brief, D11). Three parts didn't come back, the same as in 8b:
+  - **The person who opened the case is excluded too** (brief, D11, D25). In the quickstart a
+    system opens it, so nobody is, but a refund opened by a support agent couldn't be approved by
+    them. And since 8a, whoever *proposed* a step's run can't approve it either: the rule 9c
+    reuses for forgetting (a forget request approved by its proposer is refused).
+  - **What the case waits for:** one piece of pending work, the approval of `pay` by a
+    `support-lead`. `pay` hasn't run, and the case stays open (brief, D10, D24).
+  - **The test:** `run.waiting_for == ["approval of pay by support-lead"]`, `not
+    run.reached("pay")` and `not run.closed`.
+- Status: open, until the opener, `waiting_for` and the test come back with the exclusion.
 
 ## 15. Case data
 
