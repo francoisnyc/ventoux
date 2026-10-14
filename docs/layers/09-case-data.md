@@ -850,13 +850,30 @@ Each starts with its negative test, seen failing for the right reason.
   for it to end; a case whose workflow *failed* rather than closed makes `case_ended` fail, and
   Temporal retries it. Both fail closed (nothing is destroyed). The second is a case that could
   not open; it is left as it is, since such a case holds no decision to keep.
+- **`destroy_key` refuses while the case's workflow runs** (slice 5), whoever asks: `claim-7 is
+  still running: its key is destroyed once its workflow has ended`, and Temporal retries it. It
+  asks Temporal for the case's latest run; a case Temporal no longer remembers counts as ended,
+  since nothing of it can still run.
+- **The order, tested three ways** (slice 5): forgotten while a payment runs, while a plan step's
+  lookup runs in its child, and while a workflow step (the KYC team's check) runs. Each time the
+  case is `closing`, the request `closing the case` and the key `kept`; once the work is
+  released, the case closes as `forgotten` (flagged for what finished after the close) and only
+  then is the key destroyed. The three tests passed when written, the order coming with
+  slice 4's wait for the case's workflow to end; each was seen failing with that wait and the
+  guard removed (the key destroyed while the work ran). The workflow step's test sits beside
+  8d's, in `tests/test_temporal_workflow_step.py` (`WS`), where the KYC team's worker runs.
+- **A first version of the payment test passed for the wrong reason** (slice 5): its review form
+  gave `40` as a Python `int`, which the case refuses, so the payment never ran and the case had
+  nothing in flight when it was forgotten. The test now asserts the payment ran before the
+  request is made.
 
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
 Drafted before building, with the tests named in advance; checked against the real tests before
 the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
-`tests/test_temporal_forget.py` (new), `K` `tests/test_catalog.py`.
+`tests/test_temporal_forget.py` (new), `K` `tests/test_catalog.py`, `WS`
+`tests/test_temporal_workflow_step.py`.
 
 | Promise | Test |
 |---|---|
@@ -869,7 +886,7 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 | The case checks the approval itself, depending on nothing the request checked: identifiers, a closed case, `never` | F `test_the_case_checks_forgetting_itself` |
 | An approved request closes an open case as `forgotten`: tasks and approvals cancelled, running work finishing, what completes after the close flagged; a case already closing keeps its reason | F `test_forgetting_closes_an_open_case`; TF `test_forgetting_an_open_case` |
 | A rejected request ends, and nothing is closed or destroyed | TF `test_a_rejected_request_changes_nothing` |
-| The key is destroyed only once the case's workflow has ended: never while an activity, child plan or workflow step of it runs; `destroy` refuses while it runs | TF `test_the_key_goes_only_after_the_case_has_ended`, `test_destroy_refuses_while_the_case_runs` |
+| The key is destroyed only once the case's workflow has ended: never while an activity, child plan or workflow step of it runs; `destroy` refuses while it runs | TF `test_the_key_goes_only_after_the_case_has_ended`, `test_the_key_goes_only_after_a_child_plan_has_ended`, `test_destroy_refuses_while_the_case_runs`; WS `test_forgetting_waits_for_a_workflow_step` |
 | A case never made, and a case already forgotten, are refused before anyone answers | TF `test_forgetting_needs_a_case_with_a_key` |
 | A closed case can be forgotten and keeps its close reason, unless its definition says `while_open`; `never` is always refused; nothing is destroyed when refused | TF `test_forgetting_a_closed_case`, `test_a_case_that_keeps_its_records` |
 | A forgotten case's ID never opens a case again | TF `test_a_forgotten_id_opens_no_case` |

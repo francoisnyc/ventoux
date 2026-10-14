@@ -6,7 +6,9 @@ See docs/layers/09-case-data.md (9c) and docs/guides/case-data.md ("Forgetting a
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable
+import threading
+from collections.abc import Awaitable, Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,10 +17,17 @@ from temporalio.client import Client, WorkflowHandle, WorkflowQueryFailedError
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
+from test_temporal_case import LARGE, REVIEW_FORM, CasesWithPlans, refund_with_plan
 
 from ventoux.temporal.cases import CaseReport, CaseWorkflow, answer, report, start_case
 from ventoux.temporal.converter import keys_of
-from ventoux.temporal.forget import ForgetReport, answer_forget, forget_report, propose_forget
+from ventoux.temporal.forget import (
+    ForgetActivities,
+    ForgetReport,
+    answer_forget,
+    forget_report,
+    propose_forget,
+)
 from ventoux.temporal.worker import SANDBOX, case_worker
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it
@@ -26,6 +35,7 @@ from ventoux.temporal.worker import SANDBOX, case_worker
 with workflow.unsafe.imports_passed_through():
     from test_sensitive import FILE, NATIONAL_ID, claim
 
+    from ventoux.case.memory import Activity
     from ventoux.testing import (
         FAKES,
         DevelopmentCases,
@@ -33,6 +43,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentPlans,
         as_json,
         development_converter,
+        load_definition,
     )
     from ventoux.tooling.keys import FileKeys
 
@@ -40,8 +51,13 @@ Case = WorkflowHandle[CaseWorkflow, CaseReport]
 QUEUE = "cases"
 
 
-def on_temporal[T](scenario: Callable[[Client], Awaitable[T]]) -> T:
-    """Run `scenario` against Temporal's time-skipping test server, with a case worker."""
+def on_temporal[T](
+    scenario: Callable[[Client], Awaitable[T]],
+    activities: Mapping[str, Activity] = FAKES,
+    cases: type[CaseWorkflow] = DevelopmentCases,
+) -> T:
+    """Run `scenario` against Temporal's time-skipping test server, with a case worker serving
+    `activities` and requests to forget."""
 
     async def go() -> T:
         environment = await WorkflowEnvironment.start_time_skipping(
@@ -52,9 +68,9 @@ def on_temporal[T](scenario: Callable[[Client], Awaitable[T]]) -> T:
             case_worker(
                 environment.client,
                 QUEUE,
-                DevelopmentCases,
+                cases,
                 DevelopmentPlans,
-                FAKES,
+                activities,
                 forget=DevelopmentForget,
             ),
             Worker(environment.client, task_queue="signals", workflows=[SignalsAnEndedCase]),
@@ -179,7 +195,7 @@ async def reported(
         if holds(now):
             return now
         await asyncio.sleep(0.05)
-    raise AssertionError("the request never got there")
+    raise AssertionError(f"the request never got there: {await forget_report(request)}")
 
 
 def test_refused_answers_are_recorded_and_the_request_waits() -> None:
@@ -271,3 +287,117 @@ def test_forgetting_an_open_case() -> None:
         "closed: forgotten",
     ]
     assert key == "destroyed"
+
+
+# --- Slice 5: the order ---
+
+
+def test_destroy_refuses_while_the_case_runs() -> None:
+    # A second guard on the order: whatever asks it, the key stays while the case's workflow
+    # runs, since its work in flight would no longer read its own values (brief, D32).
+    async def scenario(client: Client) -> str:
+        await open_claim(client, "claim-7")
+        with pytest.raises(
+            ApplicationError,
+            match="^claim-7 is still running: its key is destroyed once its workflow has ended$",
+        ):
+            await ForgetActivities(client).destroy_key("claim-7")
+        return keys_of(client).state("claim-7")
+
+    assert on_temporal(scenario) == "kept"
+
+
+REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
+
+
+def test_the_key_goes_only_after_the_case_has_ended() -> None:
+    # Pia and Olu forget the refund while its payment runs. The payment can't be cut off
+    # halfway (brief, D10), and while it runs it needs the key to read its own values: the key
+    # stays until the case's workflow has ended.
+    release = threading.Event()
+    paying: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paying.append(inputs["idempotency_key"])
+        release.wait(timeout=10)
+        return {"refund_id": "refund-ord-1"}
+
+    async def scenario(client: Client) -> tuple[str, str, ForgetReport, CaseReport, str]:
+        case = await start_case(
+            client,
+            DevelopmentCases,
+            REFUND,
+            as_json({"order_id": "ord-1", "amount": 40}),
+            "refund-1",
+            QUEUE,
+        )
+        form = as_json({"approved_amount": 40})
+        await answer(case, "review#1", "approve", "ana", ["support"], form)
+        for _ in range(100):  # until the payment runs
+            if paying:
+                break
+            await asyncio.sleep(0.05)
+        assert len(paying) == 1  # it runs, once
+        request = await propose_forget(
+            client, DevelopmentForget, "refund-1", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        waiting = await reported(request, lambda now: now.status == "closing the case")
+        assert "refund-1 asked to close as forgotten" in waiting.history
+        closing = (await report(case)).status
+        kept = keys_of(client).state("refund-1")
+        release.set()
+        ended = await request.result()
+        return closing, kept, ended, await case.result(), keys_of(client).state("refund-1")
+
+    activities = {**FAKES, "payments.refund@2": refund}
+    closing, kept, ended, case, key = on_temporal(scenario, activities)
+    assert (closing, kept) == ("closing", "kept")
+    assert case.history[-1] == "closed: forgotten"
+    assert case.flags == ["pay#1 completed after the close was requested"]
+    assert ended.history[-3:] == [
+        "refund-1 ended: closed: forgotten",
+        "refund-1 flagged: pay#1 completed after the close was requested",
+        "the key of refund-1 was destroyed",
+    ]
+    assert (ended.status, key) == ("forgotten", "destroyed")
+
+
+def test_the_key_goes_only_after_a_child_plan_has_ended() -> None:
+    # The same with a plan step: its child workflow, `refund-1/settle#1`, seals with the case's
+    # key. Forgotten while the plan's lookup runs, the case stops the plan, the lookup finishes,
+    # and only once the case's workflow has ended does the key go.
+    release = threading.Event()
+    looking_up: list[str] = []
+
+    def lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        looking_up.append(inputs["order_id"])
+        release.wait(timeout=10)
+        return {"status": "delivered"}
+
+    async def scenario(client: Client) -> tuple[str, str, ForgetReport, CaseReport]:
+        case = await start_case(
+            client, CasesWithPlans, refund_with_plan(), LARGE, "refund-1", QUEUE
+        )
+        await answer(case, "review#1", "approve", "ana", ["support"], REVIEW_FORM)
+        for _ in range(100):  # until the lookup runs inside the child
+            if looking_up:
+                break
+            await asyncio.sleep(0.05)
+        assert looking_up == ["ord-1"]
+        request = await propose_forget(
+            client, DevelopmentForget, "refund-1", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        await reported(request, lambda now: now.status == "closing the case")
+        closing = (await report(case)).status
+        kept = keys_of(client).state("refund-1")
+        release.set()
+        return closing, kept, await request.result(), await case.result()
+
+    activities = {**FAKES, "orders.lookup@1": lookup}
+    closing, kept, ended, case = on_temporal(scenario, activities, CasesWithPlans)
+    assert (closing, kept) == ("closing", "kept")
+    assert "settle#1 cancelled: the case is closing" in case.history
+    assert case.history[-1] == "closed: forgotten"
+    assert (ended.status, ended.history[-1]) == ("forgotten", "the key of refund-1 was destroyed")

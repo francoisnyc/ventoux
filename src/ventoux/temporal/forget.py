@@ -14,9 +14,10 @@ from datetime import timedelta
 from typing import Any, ClassVar
 
 from temporalio import activity, workflow
-from temporalio.client import Client, WorkflowHandle
+from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import ApplicationError
+from temporalio.service import RPCError, RPCStatusCode
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh; `case` and `core` are
 # deterministic and passed through, imported once and shared (as in `cases.py`).
@@ -202,8 +203,23 @@ class ForgetActivities:
 
     @activity.defn(name="ventoux.forget.destroy_key")
     async def destroy_key(self, case: str) -> None:
-        """Destroy the case's key (brief, D15)."""
+        """Destroy the case's key (brief, D15), never while its workflow runs: work in flight
+        would no longer read its own values. Refused then, and Temporal retries (brief, D32)."""
+        if await self.still_running(case):
+            raise ApplicationError(
+                f"{case} is still running: its key is destroyed once its workflow has ended"
+            )
         self.keys.destroy(case)
+
+    async def still_running(self, case: str) -> bool:
+        """Whether the case's workflow (its latest run) is still running."""
+        try:
+            described = await self.client.get_workflow_handle(case).describe()
+        except RPCError as error:
+            if error.status == RPCStatusCode.NOT_FOUND:
+                return False  # Temporal no longer remembers it: nothing of it runs
+            raise
+        return described.status == WorkflowExecutionStatus.RUNNING
 
     def all(self) -> list[Any]:
         """Each activity, to register with a worker."""
