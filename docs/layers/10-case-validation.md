@@ -235,6 +235,16 @@ Each starts with its negative test, seen failing for the right reason.
 6. **The guide and the promises:** the guide's examples and table run as written; this table
    checked against the tests.
 
+### Decided while building
+
+- **One pass gives a set that contradicts its own rule** (slice 1). Built first as one pass in
+  the written order, the claim with its steps reversed left `assess` out though everything it
+  requires (`checked`) was in by the end of the pass, and finding what it waits on crashed
+  (`StopIteration`). That is the fixpoint's defining property, missing: once a round adds
+  nothing, no step outside the set has all its requirements inside. `never_run` relies on it.
+- **Fail closed before it is refined** (slice 1): every dead step is reported from the start; a
+  cause slice 1 doesn't name yet gets a plain line, which slices 2 and 3 replace.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.

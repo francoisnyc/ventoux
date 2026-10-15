@@ -56,3 +56,43 @@ def test_the_guides_claim_has_no_issues() -> None:
 
 def test_the_quickstart_refund_has_no_issues() -> None:
     assert issues(REFUND) == []
+
+
+# --- Slice 1: steps that never run ---
+
+
+def claim_with(**steps: Any) -> dict[str, Any]:
+    """The guide's claim with some steps replaced (or added), and a `reviewed` milestone."""
+    claim = guide_json(0)
+    claim["milestones"]["reviewed"] = {"display": {"title": "Claim reviewed"}}
+    claim["steps"] |= steps
+    return claim
+
+
+APPROVE = {
+    "kind": "task",
+    "display": {"title": "Approve the assessment"},
+    "roles": ["adjuster"],
+    "requires": ["reviewed"],
+    "outcomes": {"ok": {"display": {"title": "Approved"}}},
+}
+
+
+def test_a_step_requiring_what_nothing_reaches_never_runs() -> None:
+    assert issues(claim_with(approve=APPROVE)) == [
+        Issue(
+            "steps.approve.requires",
+            "NEVER_RUNS",
+            "approve can never run: it requires reviewed, which no step reaches: reach reviewed "
+            "from a step, or remove the requirement",
+        )
+    ]
+
+
+def test_the_order_of_the_steps_does_not_matter() -> None:
+    # A case has no position: `pay` written before the steps it waits on can still run. One pass
+    # in the written order would find `pay` and `assess` not yet possible, and refuse them.
+    claim = guide_json(0)
+    claim["steps"] = dict(reversed(claim["steps"].items()))
+    assert list(claim["steps"]) == ["pay", "assess", "check"]
+    assert issues(claim) == []
