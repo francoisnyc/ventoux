@@ -2,6 +2,10 @@
 opens (layer 10). See docs/layers/10-case-validation.md and docs/guides/cases.md.
 """
 
+from collections.abc import Mapping
+from typing import Any
+
+from ventoux.case.calls import called_contracts, supplied_plans
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.reach import (
     Through,
@@ -19,8 +23,12 @@ from ventoux.core.catalog import Catalog
 from ventoux.core.validate import Issue
 
 
-def validate_case(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
-    """Every problem in `case`, a parsed case definition, read against `catalog`."""
+def validate_case(
+    case: CaseDefinition, catalog: Catalog, plans: Mapping[str, Any] | None = None
+) -> list[Issue]:
+    """Every problem in `case`, a parsed case definition, read against `catalog` and the `plans`
+    the deployment supplies, stored data by reference (`refund-order@1`), as the runtime is given
+    them. No plans means none: a plan step's plan is then missing (fail closed)."""
     # Fail closed: anything but a parsed definition is refused, never read as one with no problems.
     if not isinstance(case, CaseDefinition):
         raise TypeError(
@@ -42,6 +50,9 @@ def validate_case(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
             )
         )
     found += never_run(case, catalog, can) + never_closes(case, catalog, can)
+    _, unknown_contracts = called_contracts(case, catalog)
+    _, unknown_plans = supplied_plans(case, plans or {})
+    found += unknown_contracts + unknown_plans
     return found + close_unreachable(case, can) + unreachable_milestones(case)
 
 

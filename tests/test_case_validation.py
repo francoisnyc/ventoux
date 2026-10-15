@@ -4,6 +4,7 @@ Tests go through `parse_case`, then `validate_case`, and read the issues it give
 See docs/layers/10-case-validation.md and docs/guides/cases.md.
 """
 
+import copy
 import json
 from collections.abc import Callable
 from decimal import Decimal
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import parse_case
+from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
 from ventoux.core.validate import Issue
 from ventoux.testing import CATALOG, Outcome, load_definition, run_case
@@ -652,3 +654,109 @@ def test_a_milestone_a_waited_for_step_requires_is_said_so() -> None:
             "thank before notify, or remove paid and notified from closes_when",
         )
     ]
+
+
+# --- 10b, slice 1: the contract or the plan a step calls ---
+
+PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
+SMALL = {"order_id": "ord-1", "amount": 40}
+REVIEWED = ("review", "approve", "ana", {"approved_amount": 40})
+
+
+def refund_with(**pay: Any) -> dict[str, Any]:
+    """The quickstart's refund, with `pay`'s keys changed (or removed, given as None)."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["pay"] |= pay
+    refund["steps"]["pay"] = {k: v for k, v in refund["steps"]["pay"].items() if v is not None}
+    return refund
+
+
+def small_refund(definition: dict[str, Any], **given: Any) -> CaseRun:
+    """The quickstart's small refund, reviewed by Ana, run with `definition`."""
+    return run_case(definition, file=SMALL, answers=[REVIEWED], people=PEOPLE, **given)
+
+
+NOT_IN_CATALOG = (
+    "payments.refund@3 is not in the catalog. Registered: payments.refund@2. Use a registered "
+    "version, or register this one first."
+)
+
+
+def test_a_contract_nobody_registered_is_refused() -> None:
+    refund = refund_with(activity="payments.refund@3")
+    assert issues(refund) == [Issue("steps.pay.activity", "UNKNOWN_CONTRACT", NOT_IN_CATALOG)]
+    # The proof: run as it is, the step fails, and waits for a person.
+    assert small_refund(refund).needs_attention == [f"pay#1: {NOT_IN_CATALOG}"]
+
+
+def test_a_step_and_its_contract_are_the_same_kind() -> None:
+    wrong = "payments.refund@2 is an activity contract, not a workflow: run it as an activity step."
+    refund = refund_with(kind="workflow", workflow="payments.refund@2", activity=None)
+    assert issues(refund) == [Issue("steps.pay.workflow", "WRONG_KIND", wrong)]
+    assert small_refund(refund).needs_attention == [f"pay#1: {wrong}"]
+
+
+PLANS_GUIDE = ROOT / "docs" / "guides" / "plans.md"
+
+
+def refund_order(version: int = 1) -> dict[str, Any]:
+    """The plans guide's `refund-order` plan, its first JSON block, as stored data."""
+    example = PLANS_GUIDE.read_text().split("```json\n")[1].split("```")[0]
+    plan: dict[str, Any] = json.loads(example, parse_float=Decimal)
+    return plan | {"version": version}
+
+
+# The cases guide's plan step: the refund paid through the plans guide's `refund-order` plan.
+SETTLE: dict[str, Any] = {
+    "kind": "plan",
+    "display": {"title": "Settle the refund"},
+    "plan": "refund-order@1",
+    "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+    "requires": ["review"],
+    "when": {"==": [{"var": "review.outcome"}, "approve"]},
+}
+PLANS = {"refund-order@1": refund_order(), "refund-order@3": refund_order(version=1)}
+
+
+def settled(**settle: Any) -> dict[str, Any]:
+    """The quickstart's refund, `pay` replaced by the plan step, with `settle`'s keys changed."""
+    refund = copy.deepcopy(REFUND)
+    del refund["steps"]["pay"], refund["sequence"]
+    refund["steps"]["settle"] = {**copy.deepcopy(SETTLE), **settle}
+    return refund
+
+
+def checked_with(definition: dict[str, Any], plans: dict[str, Any]) -> list[Issue]:
+    return validate_case(parse_case(definition), CATALOG, plans=plans)
+
+
+def test_a_plan_nobody_supplied_is_refused() -> None:
+    # Fail closed: with no plans given, a plan step's plan isn't there.
+    missing = "no plan refund-order@1 is available"
+    expected = Issue(
+        "steps.settle.plan", "UNKNOWN_PLAN", f"{missing}: supply it with the deployment's plans"
+    )
+    assert issues(settled()) == [expected]
+    assert checked_with(settled(), {}) == [expected]
+    # Given as the runtime is given it, the plan is found.
+    assert checked_with(settled(), PLANS) == []
+    # The proof: run as it is, with no plans, the step fails.
+    run = run_case(settled(), file=SMALL, answers=[REVIEWED], people=PEOPLE, plans={})
+    assert run.needs_attention == [f"settle#1: {missing}"]
+
+
+def test_a_plan_the_runtime_would_not_run_is_refused() -> None:
+    # Read with the runtime's own reader: a plan supplied under another reference, or one that
+    # can't be read, never runs in its place.
+    misnamed = "refund-order@3 is supplied as refund-order@1: supply the plan it names"
+    assert checked_with(settled(plan="refund-order@3"), PLANS) == [
+        Issue("steps.settle.plan", "UNKNOWN_PLAN", misnamed)
+    ]
+    run = run_case(
+        settled(plan="refund-order@3"), file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS
+    )
+    assert run.needs_attention == [f"settle#1: {misnamed}"]
+    broken = {"refund-order@1": {"plan": "refund-order"}}
+    [unreadable] = checked_with(settled(), broken)
+    assert (unreadable.path, unreadable.code) == ("steps.settle.plan", "UNKNOWN_PLAN")
+    assert unreadable.message.startswith("refund-order@1 can't be read: ")

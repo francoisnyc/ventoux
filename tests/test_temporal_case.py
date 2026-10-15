@@ -27,6 +27,7 @@ from temporalio.workflow import NondeterminismError
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Obtained, Opened
+from ventoux.case.validate import validate_case
 from ventoux.temporal import client as plans
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import (
@@ -43,7 +44,7 @@ from ventoux.temporal.cases import (
 from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.temporal.worker import SANDBOX, case_worker
 from ventoux.temporal.workflow import PlanWorkflow, RunReport
-from ventoux.testing import START
+from ventoux.testing import CATALOG, START
 from ventoux.tooling.keys import KeyRefused
 
 # Temporal: this module defines a workflow (`CasesWithPlans`, below), so the workflow sandbox
@@ -524,6 +525,26 @@ def test_a_plan_that_cannot_run_fails_its_step() -> None:
     assert misnamed.needs_attention == [
         "settle#1: refund-order@3 is supplied as refund-order@1: supply the plan it names"
     ]
+
+
+def test_case_validation_says_what_the_driver_does_with_its_plans() -> None:
+    # The driver reads its deployment's plans itself: given the same plans, validation refuses
+    # exactly what fails the step on Temporal (brief, D35).
+    async def scenario(client: Client, plan: str) -> CaseReport:
+        definition = refund_with_plan(plan)
+        case = await start_case(client, CasesWithPlans, definition, LARGE, f"check-{plan}", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        return await reported(case, lambda now: now.needs_attention != [])
+
+    for plan in ("refund-order@3", "refund-order@9"):
+
+        def ran(client: Client, plan: str = plan) -> Awaitable[CaseReport]:
+            return scenario(client, plan)
+
+        run = on_temporal(ran, cases=CasesWithPlans)
+        [issue] = validate_case(parse_case(refund_with_plan(plan)), CATALOG, plans=TEST_PLANS)
+        assert issue.code == "UNKNOWN_PLAN"
+        assert run.needs_attention == [f"settle#1: {issue.message.split(': supply it with')[0]}"]
 
 
 async def child_waiting_at(client: Client, id: str, entry: str) -> PlanRun:
