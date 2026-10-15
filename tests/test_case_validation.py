@@ -6,6 +6,7 @@ See docs/layers/10-case-validation.md and docs/guides/cases.md.
 
 import copy
 import json
+import re
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
@@ -22,7 +23,11 @@ from ventoux.testing import (
     AnswerRefused,
     CaseRefused,
     Outcome,
+    ProposalRefused,
+    RetryRefused,
     load_definition,
+    propose,
+    retry,
     run_case,
 )
 
@@ -973,3 +978,181 @@ def test_a_system_nobody_registered_is_refused() -> None:
     # The proof: a case naming it doesn't open (brief, D30).
     with pytest.raises(CaseRefused, match="ordrs"):
         small_refund(refund)
+
+
+# --- 10b, slice 4: a case's expressions, type-checked over the case's values ---
+
+CLAIM_FILE = {"customer_id": "cus-7", "order_id": "ord-1"}
+CLAIM_PEOPLE = {"ana": ["adjuster"], "sam": ["support-lead"]}
+ACCEPTED = ("assess", "accept", "ana", {"payout": 50})
+
+
+def claim_paying_when(when: Any) -> dict[str, Any]:
+    claim = guide_json(0)
+    claim["steps"]["pay"]["when"] = when
+    return claim
+
+
+def test_a_misspelt_outcome_is_refused() -> None:
+    # The guide's example, word for word, line breaks aside.
+    claim = guide_json(0)
+    claim["steps"]["pay"] |= guide_json(2)
+    shown = guide_section().split("before any case opens:\n\n```\n")[2].split("```")[0]
+    assert printed(issues(claim)) == " ".join(shown.split())
+    # The proof: run as it is, the step fails, saying why, never reading the condition as false
+    # (brief, D35). Before 10b, the claim closed with nothing left to do, never paid.
+    run = run_case(claim, file=CLAIM_FILE, answers=[ACCEPTED], people=CLAIM_PEOPLE)
+    assert run.needs_attention == [
+        (
+            'pay#1: pay.when can\'t be read: ==[1]: assess.outcome has no outcome "acept"; its '
+            "outcomes are accept, deny"
+        )
+    ]
+    assert not run.closed
+
+
+def test_a_case_reads_only_its_values() -> None:
+    misspelt = claim_paying_when({">": [{"var": "payot"}, 0]})
+    assert issues(misspelt) == [
+        Issue("steps.pay.when", "EXPRESSION_INVALID", ">[0]: payot is not a declared field")
+    ]
+    run = run_case(misspelt, file=CLAIM_FILE, answers=[ACCEPTED], people=CLAIM_PEOPLE)
+    assert run.needs_attention == [
+        "pay#1: pay.when can't be read: >[0]: payot is not a declared field"
+    ]
+    # An approval nothing writes is not a value either (brief, D11's `pay.approval`).
+    approval = {
+        **guide_json(0)["steps"]["pay"]["approval"],
+        "when": {"==": [{"var": "pay.approval"}, "reject"]},
+    }
+    claim = claim_with(pay={**guide_json(0)["steps"]["pay"], "approval": approval})
+    assert issues(claim) == [
+        Issue(
+            "steps.pay.approval.when",
+            "EXPRESSION_INVALID",
+            "==[0]: pay.approval is not a declared field",
+        )
+    ]
+
+
+def test_outcomes_and_outputs_have_their_contracts_types() -> None:
+    def when(expression: Any) -> list[Issue]:
+        thank = {**NOTIFY, "display": {"title": "Thank the customer"}, "requires": ["check"]}
+        return issues(claim_with(thank={**thank, "when": expression}))
+
+    # An activity's outcome: done, or one its contract declares; a workflow's: done.
+    assert when({"in": [{"var": "pay.outcome"}, ["done", "declined"]]}) == []
+    assert when({"==": [{"var": "check.outcome"}, "done"]}) == []
+    [declined] = when({"==": [{"var": "pay.outcome"}, "decline"]})
+    assert declined.message == (
+        '==[1]: pay.outcome has no outcome "decline"; its outcomes are done, declined'
+    )
+    [failed] = when({"==": [{"var": "check.outcome"}, "failed"]})
+    assert failed.message == '==[1]: check.outcome has no outcome "failed"; its outcomes are done'
+    # Outputs, with their contracts' types: kyc.check@1's risk_score is a number, status a text.
+    assert when({">": [{"var": "check.risk_score"}, 50]}) == []
+    [compared] = when({"==": [{"var": "check.status"}, 1]})
+    assert (
+        compared.message
+        == "==[1]: `==` compares values of the same type, and this is a number, not a string"
+    )
+    [undeclared] = when({"exists": "check.score"})
+    assert undeclared.message == "check.score is not a declared field"
+
+
+def test_a_plan_steps_outcome_is_done_or_failed() -> None:
+    def when(expression: Any) -> list[Issue]:
+        refund = settled()
+        refund["steps"]["tell"] = {
+            "kind": "task",
+            "display": {"title": "Tell the customer"},
+            "roles": ["support"],
+            "requires": ["settle"],
+            "when": expression,
+            "outcomes": {"told": {"display": {"title": "Told"}}},
+        }
+        return checked_with(refund, PLANS)
+
+    assert when({"==": [{"var": "settle.outcome"}, "failed"]}) == []
+    [refused] = when({"==": [{"var": "settle.outcome"}, "stopped"]})
+    assert (
+        refused.message
+        == '==[1]: settle.outcome has no outcome "stopped"; its outcomes are done, failed'
+    )
+
+
+def test_a_condition_gives_true_or_false() -> None:
+    assert issues(claim_paying_when({"var": "payout"})) == [
+        Issue(
+            "steps.pay.when",
+            "EXPRESSION_INVALID",
+            "a condition gives a boolean, and this gives a number: write a comparison, such as "
+            "amount > 100",
+        )
+    ]
+    run = run_case(
+        claim_paying_when({"var": "payout"}),
+        file=CLAIM_FILE,
+        answers=[ACCEPTED],
+        people=CLAIM_PEOPLE,
+    )
+    [failed] = run.needs_attention
+    assert failed.startswith("pay#1: pay.when can't be read: a condition gives a boolean")
+
+
+def test_an_input_reads_only_the_cases_values() -> None:
+    refund = refund_with(
+        inputs={"order_id": {"var": "order_id"}, "amount": {"+": [{"var": "amount"}, "1"]}}
+    )
+    assert issues(refund) == [
+        Issue(
+            "steps.pay.inputs.amount",
+            "EXPRESSION_INVALID",
+            "+[1]: `+` adds numbers, and this is a string",
+        )
+    ]
+    assert small_refund(refund).needs_attention == [
+        "pay#1: pay.inputs.amount can't be read: +[1]: `+` adds numbers, and this is a string"
+    ]
+
+
+def test_what_a_missing_contract_would_give_is_said_once() -> None:
+    # One cause, one issue: pay's contract is missing, so neither its inputs nor what reads its
+    # outcome is said to be wrong.
+    claim = guide_json(0)
+    claim["steps"]["pay"] |= {
+        "activity": "payments.refund@3",
+        "inputs": {"amout": {"var": "nothing"}},
+    }
+    thank = {**NOTIFY, "display": {"title": "Thank the customer"}, "requires": ["check"]}
+    claim["steps"]["thank"] = {**thank, "when": {"==": [{"var": "pay.outcome"}, "done"]}}
+    assert [issue.code for issue in issues(claim)] == ["UNKNOWN_CONTRACT"]
+
+
+def test_a_proposal_or_a_retry_never_reads_a_misspelt_outcome() -> None:
+    # The runtime checks a step's expressions wherever it would read them: a proposal and a
+    # retry are refused, saying why, never decided on a condition read as false (brief, D35).
+    claim = guide_json(0)
+    claim["steps"]["recheck"] = {
+        **NOTIFY,
+        "display": {"title": "Check the customer again"},
+        "requires": ["checked"],
+        "automatic": False,
+        "proposed_by": ["adjuster"],
+        "when": {"==": [{"var": "assess.outcome"}, "acept"]},
+    }
+    misspelt = (
+        'recheck.when can\'t be read: ==[1]: assess.outcome has no outcome "acept"; its outcomes '
+        "are accept, deny"
+    )
+    with pytest.raises(ProposalRefused, match=re.escape(misspelt)):
+        run_case(claim, file=CLAIM_FILE, answers=[propose("recheck", "ana")], people=CLAIM_PEOPLE)
+    paying = guide_json(0)
+    paying["steps"]["pay"] |= guide_json(2)
+    with pytest.raises(RetryRefused, match=re.escape("pay#1 can't be retried: pay.when can't")):
+        run_case(
+            paying,
+            file=CLAIM_FILE,
+            answers=[ACCEPTED, retry("pay#1", "omar")],
+            people={**CLAIM_PEOPLE, "omar": ["operations"]},
+        )

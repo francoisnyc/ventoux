@@ -1600,8 +1600,10 @@ def test_only_declared_outputs_reach_the_case_file() -> None:
             people=PEOPLE,
             activities={"payments.refund@2": vouching},
         )
+        # Since 10b the step's expressions are checked over the case's values before it starts:
+        # what the contract doesn't declare is not a value (brief, D35).
         assert run.needs_attention == [
-            f"letter#1: to_customer can't be evaluated: {read} has no known sources"
+            f"letter#1: letter.inputs.to_customer can't be read: {read} is not a declared field"
         ]
     assert "pay#1 done, giving refund_id from untrusted:undeclared" in run.history
 

@@ -8,10 +8,11 @@ from typing import Any
 from ventoux.case.calls import (
     called_contracts,
     contract_input_issues,
+    expression_issues,
     plan_input_issues,
     supplied_plans,
 )
-from ventoux.case.definition import CaseDefinition
+from ventoux.case.definition import CaseDefinition, TaskStep
 from ventoux.case.reach import (
     Through,
     can_happen,
@@ -25,6 +26,7 @@ from ventoux.case.reach import (
 from ventoux.case.registered import role_issues_of, source_issues_of, system_issues_of
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
+from ventoux.case.types import case_types
 from ventoux.core.catalog import Catalog
 from ventoux.core.validate import Issue
 
@@ -61,6 +63,9 @@ def validate_case(
     supplied, unknown_plans = supplied_plans(case, plans or {})
     found += unknown_contracts + unknown_plans
     found += contract_input_issues(case, contracts) + plan_input_issues(case, supplied)
+    calling = {name for name, step in case.steps.items() if not isinstance(step, TaskStep)}
+    missing = calling - set(contracts) - set(supplied)
+    found += expression_issues(case, case_types(case, catalog), missing)
     found += role_issues_of(case, catalog, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     return found + close_unreachable(case, can) + unreachable_milestones(case)

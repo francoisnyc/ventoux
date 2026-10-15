@@ -65,6 +65,7 @@ from ventoux.case.state import (
     StepRun,
     StopPlan,
 )
+from ventoux.case.types import expression_problem
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
@@ -325,6 +326,9 @@ def propose(
     refusal = proposal_refusal(case, event.step, requirements(case)[event.step], state)
     if refusal is not None:
         raise ProposalRefused(refusal)
+    # Its expressions checked over the case's types before any is read (brief, D35).
+    if (problem := expression_problem(case, catalog, event.step)) is not None:
+        raise ProposalRefused(problem)
     if step.when is not None:
         try:
             decided = holds(step.when, state.values, f"{event.step}'s condition")
@@ -575,6 +579,8 @@ def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retri
                 f"{event.entry} can't be retried: {run.step} requires {requirement}, which "
                 "hasn't completed"
             )
+    if (problem := expression_problem(case, catalog, run.step)) is not None:
+        raise RetryRefused(f"{event.entry} can't be retried: {problem}")
     if step.when is not None:
         try:
             decided = holds(step.when, state.values, f"{run.step}'s condition")
@@ -622,6 +628,10 @@ def admit(
             if close_held(case, state) and (latest is None or latest.status != "retrying"):
                 continue
             try:
+                # Every expression it reads is checked over the case's types first, so a misspelt
+                # outcome fails the step instead of reading as false (brief, D35).
+                if (problem := expression_problem(case, catalog, name)) is not None:
+                    raise StepStopped(problem)
                 # Freshness first, before the condition, the approval and the start, so each
                 # reads fresh facts (brief, D18) (brief, D33).
                 if not isinstance(step, TaskStep):

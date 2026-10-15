@@ -8,9 +8,12 @@ from typing import Any
 from ventoux.case.called import called
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
 from ventoux.case.plan_step import PlanNotSupplied, supplied
+from ventoux.case.types import expressions_of, type_problem
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
+from ventoux.core.expressions import FieldType
 from ventoux.core.plan import Plan, set_by
+from ventoux.core.provenance import fields_read
 from ventoux.core.validate import Issue
 
 
@@ -126,4 +129,24 @@ def plan_input_issues(case: CaseDefinition, plans: Mapping[str, Plan]) -> list[I
             for field in takes
             if field not in step.inputs
         ]
+    return issues
+
+
+def expression_issues(
+    case: CaseDefinition, types: dict[str, FieldType], missing: set[str]
+) -> list[Issue]:
+    """Each expression a step reads, type-checked over the case's values. One that reads what a
+    step in `missing` would give (its contract or plan can't be found) isn't said again, nor are
+    such a step's own inputs: that step's issue says it (one cause, one issue)."""
+    issues: list[Issue] = []
+    for name, step in case.steps.items():
+        for where, expression, condition in expressions_of(step):
+            if name in missing and where.startswith("inputs."):
+                continue
+            read = fields_read(expression)
+            if any(field.split(".")[0] in missing and "." in field for field in read):
+                continue
+            problem = type_problem(expression, types, condition)
+            if problem is not None:
+                issues.append(Issue(f"steps.{name}.{where}", "EXPRESSION_INVALID", problem))
     return issues

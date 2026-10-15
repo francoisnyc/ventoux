@@ -69,7 +69,7 @@ def denying_with(customer: object) -> dict[str, Any]:
         ({"var": "policy_id"}, "policy_id, a reference to policies"),  # the curriculum's
         ({"var": "estimated_damage"}, "estimated_damage, a number"),
         ({"var": "assess.outcome"}, "assess.outcome, which is not a reference"),
-        ({"cat": [{"var": "customer_id"}, ""]}, "a computed value"),
+        ({"cat": [{"string": [{"var": "customer_id"}]}, ""]}, "a computed value"),
         ("cus-7", "a value written in the definition"),
     ],
 )
@@ -298,7 +298,7 @@ GUIDE_REFUSALS: dict[str, Any] = {
         denying_with({"var": "policy_id"})
     ),
     "a computed value reaches a reference input": lambda: needing_attention(
-        denying_with({"cat": [{"var": "customer_id"}, ""]})
+        denying_with({"cat": [{"string": [{"var": "customer_id"}]}, ""]})
     ),
     "an approver can't see a value the step reads": lambda: run_case(
         refund_seen_by_support(),
