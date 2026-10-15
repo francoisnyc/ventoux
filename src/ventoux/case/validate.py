@@ -7,6 +7,7 @@ from ventoux.case.reach import (
     can_happen,
     can_start,
     reachable,
+    reached_before,
     reached_by,
     shortest_circle,
     waited_on,
@@ -25,7 +26,7 @@ def validate_case(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
             f"validate_case takes a parsed case definition (see parse_case), not "
             f"{type(case).__name__}"
         )
-    can = can_happen(case, catalog.roles)
+    can = can_happen(case, catalog)
     found: list[Issue] = []
     # Steps the structure lets run are still kept out if the case closes when it opens. If every
     # step is dead anyway, their own issues say why: one cause, one issue.
@@ -149,7 +150,7 @@ def never_run(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Iss
             )
             continue
         if name not in first:
-            found.append(Issue(path, "NEVER_RUNS", after_close(case, name)))
+            found.append(Issue(path, "NEVER_RUNS", after_close(case, catalog, name)))
             continue
         circle = shortest_circle(name, waits)
         if circle is None:
@@ -186,17 +187,32 @@ def waiting(case: CaseDefinition, name: str, requirement: str) -> str:
     return f"{name} requires {requirement}, which only {listed(reachers)} {reach}"
 
 
-def after_close(case: CaseDefinition, name: str) -> str:
-    """Why a step whose requirements can all be met still never runs: it waits for every
-    milestone `closes_when` names, and the case is closing once they are reached."""
-    milestones = listed(list(case.closes_when))
-    if len(case.closes_when) == 1:
-        once, fix = f"{milestones} is", milestones
+def after_close(case: CaseDefinition, catalog: Catalog, name: str) -> str:
+    """Why a step whose requirements can all be met still never runs: before it can start, every
+    milestone `closes_when` names is reached, and nothing new starts once they are. Says which it
+    requires itself and which the steps it waits for reach, naming those steps."""
+    before = reached_before(case, catalog, name)
+    written = [m for m in case.closes_when if before[m] is None]
+    reached = [m for m in case.closes_when if before[m] is not None]
+    steps = list(dict.fromkeys(step for m in reached if (step := before[m]) is not None))
+    once = f"{case.closes_when[0]} is" if len(case.closes_when) == 1 else "they are"
+    waits = []
+    if written:
+        waits.append(f"requires {listed(written)}")
+    if steps:
+        reach = "reaches" if len(steps) == 1 else "reach"
+        waits.append(f"runs only after {listed(steps)}, which {reach} {listed(reached)}")
+    # A fix that names one thing to change only where changing it would let the step run.
+    if not steps:
+        one = written[0] if len(written) == 1 else "one of them"
+        fix = f"remove {one} from its requires, or from closes_when"
+    elif len(steps) == 1 and not written:
+        fix = f"run {name} before {steps[0]}, or remove {listed(reached)} from closes_when"
     else:
-        once, fix = "they are", "one of them"
+        fix = "change what it requires, or closes_when"
     return (
-        f"{name} can never run: it requires {milestones}, and {case.case} closes once {once} "
-        f"reached, before {name} could start: remove {fix} from its requires, or from closes_when"
+        f"{name} can never run: it {' and '.join(waits)}, and {case.case} closes once {once} "
+        f"reached, before {name} could start: {fix}"
     )
 
 

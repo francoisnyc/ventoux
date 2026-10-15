@@ -15,7 +15,7 @@ import pytest
 from ventoux.case.definition import parse_case
 from ventoux.case.validate import validate_case
 from ventoux.core.validate import Issue
-from ventoux.testing import CATALOG, load_definition, run_case
+from ventoux.testing import CATALOG, Outcome, load_definition, run_case
 
 ROOT = Path(__file__).parent.parent
 REFUND = load_definition(ROOT / "examples" / "refund" / "refund.json")
@@ -305,6 +305,112 @@ def test_a_case_nobody_can_close_is_refused() -> None:
     assert issues(without_close) == [NEVER_CLOSES]
     without_close["close_reasons"]["duplicate"]["roles"] = ["supprt", "adjuster"]
     assert issues(without_close) == []
+
+
+def letter_case(**thank: Any) -> dict[str, Any]:
+    """A welcome letter: draft it, which reaches `sent`, and the case closes on `sent`. Its
+    contract, `letters.draft@3`, declares no outcomes, so every completion reaches `sent`. Then
+    `thank`, with `thank`'s keys changed."""
+    return {
+        "case": "letter",
+        "display": {"title": "Welcome letter"},
+        "fields": {
+            "customer_id": {"type": "reference", "system": "crm", "display": {"title": "Customer"}}
+        },
+        "milestones": {"sent": {"display": {"title": "Letter drafted"}}},
+        "steps": {
+            "draft": {
+                "kind": "activity",
+                "display": {"title": "Draft the welcome letter"},
+                "activity": "letters.draft@3",
+                "inputs": {"customer": {"var": "customer_id"}, "template": "welcome"},
+                "reaches": ["sent"],
+            },
+            "thank": {
+                **NOTIFY,
+                "display": {"title": "Thank the customer"},
+                "requires": ["draft"],
+                **thank,
+            },
+        },
+        "closes_when": ["sent"],
+    }
+
+
+AFTER_DRAFT = Issue(
+    "steps.thank.requires",
+    "NEVER_RUNS",
+    "thank can never run: it runs only after draft, which reaches sent, and letter closes once "
+    "sent is reached, before thank could start: run thank before draft, or remove sent from "
+    "closes_when",
+)
+
+
+def test_a_step_after_the_close_through_a_step_it_requires_never_runs() -> None:
+    # The tutor review's probe: requiring draft, thank waits for sent, which closes the case.
+    assert issues(letter_case()) == [AFTER_DRAFT]
+    # The proof holds in a run: the case closes on sent, and thank never starts.
+    run = run_case(letter_case(), file={"customer_id": "cus-7"}, answers=[], people={})
+    assert run.history[-1] == "closed: sent reached"
+    assert not any(line.startswith("started thank") for line in run.history)
+
+
+def test_a_step_after_the_close_through_sequence_never_runs() -> None:
+    # `sequence: [draft, thank]` is the natural way to write it.
+    in_sequence = letter_case(requires=[])
+    in_sequence["sequence"] = ["draft", "thank"]
+    assert issues(in_sequence) == [AFTER_DRAFT]
+
+
+def test_what_a_step_waits_for_is_followed_through_the_steps_it_requires() -> None:
+    # review waits only for sent, so it runs; thank, requiring review, waits for sent too, through
+    # review's own requirement, and for reviewed: every closes_when milestone.
+    case = letter_case(requires=["review"])
+    case["milestones"]["reviewed"] = {"display": {"title": "Letter reviewed"}}
+    case["steps"]["review"] = {
+        **NOTIFY,
+        "display": {"title": "Review the letter"},
+        "requires": ["draft"],
+        "reaches": ["reviewed"],
+    }
+    case["closes_when"] = ["sent", "reviewed"]
+    assert issues(case) == [
+        Issue(
+            "steps.thank.requires",
+            "NEVER_RUNS",
+            "thank can never run: it runs only after draft and review, which reach sent and "
+            "reviewed, and letter closes once they are reached, before thank could start: change "
+            "what it requires, or closes_when",
+        )
+    ]
+    # Requiring reviewed itself, and waiting for draft: both parts said.
+    case["steps"]["thank"]["requires"] = ["reviewed", "draft"]
+    assert issues(case)[0].message == (
+        "thank can never run: it requires reviewed and runs only after draft, which reaches sent, "
+        "and letter closes once they are reached, before thank could start: change what it "
+        "requires, or closes_when"
+    )
+
+
+def test_a_step_after_a_step_that_may_end_otherwise_can_run() -> None:
+    # pay's contract declares `declined`: a declined run is done, which meets `requires: [pay]`,
+    # but reaches no milestone (layer 8b). So paid isn't sure, and thank does run then: an error
+    # here would not hold for every case (brief, D34).
+    thank = {**NOTIFY, "display": {"title": "Thank the customer"}, "requires": ["pay"]}
+    assert issues(claim_with(thank=thank)) == []
+    run = run_case(
+        claim_with(thank=thank),
+        file={"customer_id": "cus-7", "order_id": "ord-1"},
+        answers=[("assess", "accept", "ana", {"payout": 50}), ("pay", "approve", "sam")],
+        people={"ana": ["adjuster"], "sam": ["support-lead"]},
+        activities={"payments.refund@2": declines},
+    )
+    assert "pay#1 gave declined" in run.history
+    assert any(line.startswith("started thank#1") for line in run.history)
+
+
+def declines(inputs: dict[str, Any]) -> dict[str, Any]:
+    raise Outcome("declined")
 
 
 # --- Slice 4: warnings ---

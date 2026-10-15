@@ -7,13 +7,21 @@ never happen on any path (brief, D34).
 
 from collections.abc import Collection, Mapping
 
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
+from ventoux.case.definition import (
+    ActivityStep,
+    CallStep,
+    CaseDefinition,
+    PlanStep,
+    TaskStep,
+    WorkflowStep,
+)
 from ventoux.case.sequence import requirements
+from ventoux.core.catalog import Catalog, NotInCatalog
 
 
-def can_happen(case: CaseDefinition, roles: Collection[str]) -> set[str]:
-    """Every step that can complete and every milestone that can be reached in `case`, given the
-    `roles` the catalog registers.
+def can_happen(case: CaseDefinition, catalog: Catalog) -> set[str]:
+    """Every step that can complete and every milestone that can be reached in `case`, read
+    against `catalog` (its roles, and what each contract may give).
 
     A fixpoint: start from nothing, add every step whose requirements are all in the set, with what
     it reaches, and repeat until a round adds nothing. Steps have no order (a case has no
@@ -26,7 +34,7 @@ def can_happen(case: CaseDefinition, roles: Collection[str]) -> set[str]:
     while True:
         before = len(can)
         for name, step in case.steps.items():
-            if not can_start(step, roles) or after_the_close(case, required[name]):
+            if not can_start(step, catalog.roles) or after_the_close(case, catalog, name):
                 continue
             if name not in can and all(requirement in can for requirement in required[name]):
                 can |= {name, *step.reaches}
@@ -86,14 +94,54 @@ def shortest_circle(start: str, waits: Mapping[str, list[str]]) -> list[str] | N
     return None
 
 
-def after_the_close(case: CaseDefinition, required: tuple[str, ...]) -> bool:
-    """Whether a step requiring `required` waits for every milestone `closes_when` names. The case
-    is closing once they are all reached, and `closes_when` is checked before admission (layer
-    8b), so nothing new starts: such a step can never run."""
-    return bool(case.closes_when) and set(case.closes_when) <= set(required)
+def after_the_close(case: CaseDefinition, catalog: Catalog, name: str) -> bool:
+    """Whether the step `name` waits for every milestone `closes_when` names. The case is closing
+    once they are all reached, and nothing new starts once they are (layer 8b; brief, D34): such
+    a step can never run."""
+    before = reached_before(case, catalog, name)
+    return bool(case.closes_when) and set(case.closes_when) <= set(before)
+
+
+def reached_before(case: CaseDefinition, catalog: Catalog, name: str) -> dict[str, str | None]:
+    """Each milestone surely reached before the step `name` can start, and the step it waits for
+    that reaches it, or None for a milestone it requires itself. A required step is done before,
+    and so are the steps it required in turn; milestones are never undone."""
+    required = requirements(case)
+    found: dict[str, str | None] = {}
+    seen: set[str] = set()
+    waiting = [name]
+    while waiting:
+        here = waiting.pop(0)
+        for requirement in required[here]:
+            if requirement in case.milestones:
+                found.setdefault(requirement, None if here == name else here)
+            elif requirement not in seen:
+                seen.add(requirement)
+                waiting.append(requirement)
+                for milestone in surely_reached(case, catalog, requirement):
+                    found.setdefault(milestone, requirement)
+    return found
 
 
 def can_start(step: TaskStep | CallStep | PlanStep, roles: Collection[str]) -> bool:
     """Whether anyone can start the step: it starts by itself, or a registered role may propose
     it. A role nobody registered counts for nothing, as when the case runs (brief, D22)."""
     return step.automatic or any(role in roles for role in step.proposed_by)
+
+
+def surely_reached(case: CaseDefinition, catalog: Catalog, name: str) -> tuple[str, ...]:
+    """The milestones every completion of the step `name` reaches. A run done with a declared
+    outcome (`declined`) is done for `requires` but reaches nothing (layer 8b), and a plan may end
+    `failed`, so only a task's own `reaches`, a workflow step's (its contract declares no
+    outcomes), and an activity's whose contract declares none count. Anything the catalog can't
+    say counts for nothing: the check then claims less, never more."""
+    step = case.steps[name]
+    if isinstance(step, TaskStep | WorkflowStep):
+        return step.reaches
+    if isinstance(step, ActivityStep):
+        try:
+            contract = catalog.get(step.activity)
+        except NotInCatalog:
+            return ()
+        return () if contract.outcomes else step.reaches
+    return ()
