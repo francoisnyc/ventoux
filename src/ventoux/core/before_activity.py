@@ -46,6 +46,12 @@ def checked_inputs(
     `sources` are where each value really came from, never only what a definition declared;
     `types` are the declared fields' types, which say which system each reference names.
     """
+    # The engine fills the key, never a definition: one given is refused, never overwritten in
+    # silence (brief, D17) (brief, D35).
+    if contract.idempotency_key is not None and contract.idempotency_key in inputs:
+        raise InputRefused(
+            f"{contract.idempotency_key} is filled by the engine, never by a definition: remove it"
+        )
     # A reference input takes a reference of its system, before anything else is read: an ID from
     # the wrong system can look exactly like a right one (brief, D30).
     for field, system in references(contract.input).items():

@@ -760,3 +760,100 @@ def test_a_plan_the_runtime_would_not_run_is_refused() -> None:
     [unreadable] = checked_with(settled(), broken)
     assert (unreadable.path, unreadable.code) == ("steps.settle.plan", "UNKNOWN_PLAN")
     assert unreadable.message.startswith("refund-order@1 can't be read: ")
+
+
+# --- 10b, slice 2: inputs ---
+
+
+def test_an_input_the_contract_does_not_take_is_refused() -> None:
+    refund = refund_with(inputs={"order_id": {"var": "order_id"}, "amout": {"var": "amount"}})
+    assert issues(refund) == [
+        Issue(
+            "steps.pay.inputs.amout",
+            "UNKNOWN_INPUT",
+            "payments.refund@2 has no input amout: its inputs are amount, order_id",
+        ),
+        Issue(
+            "steps.pay.inputs",
+            "MISSING_INPUT",
+            "payments.refund@2 needs the input amount: add it to inputs",
+        ),
+    ]
+    [refused] = small_refund(refund).needs_attention
+    assert refused.startswith("pay#1: payments.refund@2 doesn't take these inputs: amout")
+
+
+def test_an_input_the_contract_needs_is_given() -> None:
+    refund = refund_with(inputs={"order_id": {"var": "order_id"}})
+    assert issues(refund) == [
+        Issue(
+            "steps.pay.inputs",
+            "MISSING_INPUT",
+            "payments.refund@2 needs the input amount: add it to inputs",
+        )
+    ]
+    [refused] = small_refund(refund).needs_attention
+    assert refused.startswith("pay#1: payments.refund@2 doesn't take these inputs: amount")
+
+
+ENGINE_KEY = "idempotency_key is filled by the engine, never by a definition: remove it"
+
+
+def test_the_engine_fills_the_key() -> None:
+    inputs = {**REFUND["steps"]["pay"]["inputs"], "idempotency_key": "mine"}
+    refund = refund_with(inputs=inputs)
+    assert issues(refund) == [Issue("steps.pay.inputs.idempotency_key", "ENGINE_INPUT", ENGINE_KEY)]
+    # The proof: the runtime refuses it too, never overwriting it in silence.
+    assert small_refund(refund).needs_attention == [f"pay#1: {ENGINE_KEY}"]
+
+
+def test_a_step_whose_contract_is_missing_has_one_issue() -> None:
+    # One cause, one issue: no input of a contract nobody registered is said to be wrong.
+    refund = refund_with(activity="payments.refund@3", inputs={"amout": {"var": "amount"}})
+    assert [issue.code for issue in issues(refund)] == ["UNKNOWN_CONTRACT"]
+
+
+def review_and_pay() -> dict[str, Any]:
+    """The plans guide's `review-and-pay` plan, whose review sets `approved_amount`."""
+    blocks = PLANS_GUIDE.read_text().split("```json\n")[1:]
+    example = next(block for block in blocks if '"review-and-pay"' in block).split("```")[0]
+    plan: dict[str, Any] = json.loads(example, parse_float=Decimal)
+    return plan
+
+
+def test_a_plan_step_gives_the_fields_its_plan_takes_at_its_start() -> None:
+    misspelt = settled(inputs={"order_id": {"var": "order_id"}, "amout": {"var": "amount"}})
+    assert checked_with(misspelt, PLANS) == [
+        Issue(
+            "steps.settle.inputs.amout",
+            "UNKNOWN_INPUT",
+            "refund-order@1 has no input amout: its inputs are amount, order_id",
+        ),
+        Issue(
+            "steps.settle.inputs",
+            "MISSING_INPUT",
+            "refund-order@1 needs the input amount: add it to inputs",
+        ),
+    ]
+    [refused] = run_case(
+        misspelt, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS
+    ).needs_attention
+    assert "amount is missing" in refused and "amout is not a field of refund-order" in refused
+    # A field a person sets in the plan is theirs: the case never gives it.
+    given = settled(
+        plan="review-and-pay@1",
+        inputs={"order_id": {"var": "order_id"}, "approved_amount": {"var": "amount"}},
+    )
+    plans = {"review-and-pay@1": review_and_pay()}
+    assert checked_with(given, plans) == [
+        Issue(
+            "steps.settle.inputs.approved_amount",
+            "UNKNOWN_INPUT",
+            "review-and-pay@1 takes no input approved_amount: its wait review sets it; its inputs "
+            "are order_id",
+        )
+    ]
+    [refused] = run_case(
+        given, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=plans
+    ).needs_attention
+    assert "approved_amount is set by a person in review, never given at the start" in refused

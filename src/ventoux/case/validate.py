@@ -5,7 +5,12 @@ opens (layer 10). See docs/layers/10-case-validation.md and docs/guides/cases.md
 from collections.abc import Mapping
 from typing import Any
 
-from ventoux.case.calls import called_contracts, supplied_plans
+from ventoux.case.calls import (
+    called_contracts,
+    contract_input_issues,
+    plan_input_issues,
+    supplied_plans,
+)
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.reach import (
     Through,
@@ -50,9 +55,10 @@ def validate_case(
             )
         )
     found += never_run(case, catalog, can) + never_closes(case, catalog, can)
-    _, unknown_contracts = called_contracts(case, catalog)
-    _, unknown_plans = supplied_plans(case, plans or {})
+    contracts, unknown_contracts = called_contracts(case, catalog)
+    supplied, unknown_plans = supplied_plans(case, plans or {})
     found += unknown_contracts + unknown_plans
+    found += contract_input_issues(case, contracts) + plan_input_issues(case, supplied)
     return found + close_unreachable(case, can) + unreachable_milestones(case)
 
 

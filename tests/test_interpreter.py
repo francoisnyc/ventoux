@@ -595,11 +595,13 @@ def test_a_value_its_policy_refuses_is_never_evaluated() -> None:
     assert run.reason.startswith("letters.draft@2 takes to_customer only from")
 
 
-def test_the_engines_key_replaces_any_a_plan_gives() -> None:
+def test_a_key_a_plan_gives_is_refused() -> None:
+    # The engine fills the key; one a plan gives is refused, never replaced in silence, so the
+    # plan's author hears of it (brief, D35). Until layer 10b the engine's key replaced it.
     calls: list[dict[str, Any]] = []
     keyed = drafting()
     keyed["states"]["draft"]["inputs"]["idempotency_key"] = "mine"  # validate: ENGINE_INPUT
-    run_plan(
+    run = run_plan(
         keyed,
         fields={
             "customer_email": sourced("ana@example.com", "system:crm"),
@@ -608,7 +610,8 @@ def test_the_engines_key_replaces_any_a_plan_gives() -> None:
         answers=[],
         activities={"letters.draft@2": recording(calls)},
     )
-    assert [call["idempotency_key"] for call in calls] == ["memory/draft#1"]
+    assert calls == []
+    assert run.reason == "idempotency_key is filled by the engine, never by a definition: remove it"
 
 
 def test_a_state_of_a_kind_the_engine_does_not_know_stops_the_step() -> None:

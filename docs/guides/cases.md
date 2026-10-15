@@ -747,7 +747,7 @@ Anything else is not a value: reading it is an error.
 | `UNKNOWN_PLAN` | error | a plan step names a plan that isn't supplied, or can't be read | `no plan refund-order@2 is available: supply it with the deployment's plans` |
 | `UNKNOWN_INPUT` | error | a step gives an input its contract or plan doesn't take | `payments.refund@2 has no input amout: its inputs are amount, order_id` |
 | `MISSING_INPUT` | error | a step doesn't give an input its contract or plan needs | `payments.refund@2 needs the input amount: add it to inputs` |
-| `ENGINE_INPUT` | error | a step gives the input the engine fills: the idempotency key | `idempotency_key is filled by the engine, never by a case: remove it` |
+| `ENGINE_INPUT` | error | a step gives the input the engine fills: the idempotency key | `idempotency_key is filled by the engine, never by a definition: remove it` |
 | `UNKNOWN_ROLE` | error | a role nobody registered: it counts for nothing when the case runs | `supprt is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead; use one of them, or ask the platform team to register it` |
 | `UNKNOWN_SOURCE` | error | a field is declared untrusted with a label nobody registered | `untrusted:custmer has a label nobody registered: the labels are customer, document, email, llm, web; use one of them, or ask the platform team to register it` |
 | `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are crm, documents, orders, policies; use one of them, or ask the platform team to register it` |
