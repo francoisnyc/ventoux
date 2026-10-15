@@ -15,7 +15,7 @@ from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import CaseRefused, decide
 from ventoux.case.state import Answered, CaseState, GivenApproval, Opened, StartPlan
 from ventoux.core.sensitive import Sensitive
-from ventoux.testing import CATALOG, as_json, run_case, shown
+from ventoux.testing import CATALOG, START, as_json, run_case, shown
 
 GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "case-data.md").read_text()
 NATIONAL_ID = "1 85 05 78 006 084 36"
@@ -101,11 +101,13 @@ def test_a_plain_sensitive_value_is_refused() -> None:
     case = parse_case(claim())
     plain_file = {**as_json(OPENING), "national_id": NATIONAL_ID}
     with pytest.raises(CaseRefused, match=f"^{PLAIN_TEXT}$"):
-        decide(case, CATALOG, CaseState("memory"), Opened(plain_file, None))
+        decide(case, CATALOG, CaseState("memory"), Opened(plain_file, None, at=START))
     asking = parse_case(claim_asking_the_id())
-    opened, _ = decide(asking, CATALOG, CaseState("memory"), Opened(as_json(OPENING), None))
+    opened, _ = decide(
+        asking, CATALOG, CaseState("memory"), Opened(as_json(OPENING), None, at=START)
+    )
     plain_answer = Answered(
-        "assess#1", "accept", "ana", frozenset({"adjuster"}), {"national_id": NATIONAL_ID}
+        "assess#1", "accept", "ana", frozenset({"adjuster"}), {"national_id": NATIONAL_ID}, at=START
     )
     with pytest.raises(AnswerRefused, match=f"^{PLAIN_TEXT}$"):
         decide(asking, CATALOG, opened, plain_answer)
@@ -241,7 +243,7 @@ def test_a_plan_step_carries_a_sensitive_value() -> None:
     }
     # The plan's field carries the wrapper into the plan (brief, D28).
     case = parse_case(with_steps(check_id=step))
-    _, commands = decide(case, CATALOG, CaseState("memory"), Opened(wrapped_file(), None))
+    _, commands = decide(case, CATALOG, CaseState("memory"), Opened(wrapped_file(), None, at=START))
     [start] = [command for command in commands if isinstance(command, StartPlan)]
     assert start.fields["id"].value == Sensitive(NATIONAL_ID)
     given: list[dict[str, Any]] = []

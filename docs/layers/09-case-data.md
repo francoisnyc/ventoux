@@ -9,7 +9,7 @@ provider sealing and opening); 9b built, slices 0–8; Promises checked against 
 session, 2026-10-14 (all as proposed, with `forgetting` added: `while_open` and `never`); 9c
 built, slices 0–10; Promises checked against the tests, 2026-10-15; the tutor review's two fixes
 built test-first, 2026-10-15. 9d's choices agreed in the session, 2026-10-15 (all as proposed);
-its note drafted the same day, with four points to confirm.
+its note drafted the same day, and its four drafting points confirmed.
 
 ## What this layer is for
 
@@ -1088,13 +1088,13 @@ All as proposed, 2026-10-15.
 10. **Not in 9d:** the source's own as-of time (a contract change, and nothing needs it yet);
     timers (layer 11); case validation of `max_age` (layer 10). No new dependency.
 
-### Decided while drafting, to confirm
+### Decided while drafting, confirmed in the session
 
 - **A workflow step whose contract is `read` (`kyc.check@1`) isn't refreshed.** Choice 5 was
   proposed on the belief that workflow contracts declare no effect; they do. D18's rule ("if that
   step is read-only") would allow it. Kept out as agreed: a workflow belongs to another team and
   may take minutes (its `timeout` is 600 s for `kyc.check@1`), so re-running it unasked is a
-  bigger step than a lookup. To confirm in review.
+  bigger step than a lookup.
 - **A running refresh doesn't undo its step's earlier run.** While `check_order#2` runs,
   `check_order` still counts as done for `requires`. Otherwise every refresh would withdraw the
   open approvals of every step requiring `check_order` ("check_order started again", brief, D25),

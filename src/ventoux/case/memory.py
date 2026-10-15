@@ -30,15 +30,15 @@ from ventoux.core.sensitive import Sensitive, unwrapped
 
 # An activity's code, or a workflow's in memory: its inputs in, its output back.
 Activity = Callable[[dict[str, Any]], dict[str, Any]]
-# Runs a plan step's plan to its end: what it gave, as an event; or None while it waits for an
-# answer nobody has given, and the step keeps running. Given by the caller: running a plan is
-# `async` (layer 5), and `case` doesn't import `asyncio` (layer 6's boundary test).
-PlanRunner = Callable[[StartPlan], Completed | Failed | None]
+# Runs a plan step's plan to its end: what it gave, as an event at the time given; or None while
+# it waits for an answer nobody has given, and the step keeps running. Given by the caller: running
+# a plan is `async` (layer 5), and `case` doesn't import `asyncio` (layer 6's boundary test).
+PlanRunner = Callable[[StartPlan, int], Completed | Failed | None]
 
 
-def no_plans(command: StartPlan) -> Failed:
+def no_plans(command: StartPlan, at: int) -> Failed:
     """A deployment that supplies no plans: a plan step fails, and a person looks at it."""
-    return Failed(command.entry, f"no plan {command.plan} is available")
+    return Failed(command.entry, f"no plan {command.plan} is available", at=at)
 
 
 @dataclass(frozen=True)
@@ -69,9 +69,11 @@ class CaseRun:
 
 @dataclass(frozen=True)
 class Finish:
-    """Let a held activity's run finish now: `Finish("pay#1")`. For the driver, not `decide`."""
+    """Let a held activity's run finish now: `Finish("pay#1", at=t)`. For the driver, not
+    `decide`."""
 
     entry: str
+    at: int  # when it finishes, in seconds since the epoch: its result arrives then
 
 
 def run_case_in_memory(
@@ -92,7 +94,8 @@ def run_case_in_memory(
     driver = Driver(case, catalog, implementations, frozenset(held), plans, workflows or {})
     for event in events:
         if isinstance(event, Finish):
-            state = driver.carry(state, outcome_of(driver.held.pop(event.entry), driver.activity))
+            finishing = driver.held.pop(event.entry)
+            state = driver.carry(state, outcome_of(finishing, driver.activity, event.at))
         else:
             state = driver.carry(state, event)
     done = frozenset(run.step for run in state.runs if run.status == "done")
@@ -123,7 +126,9 @@ class Driver:
         return self.implementations[command.activity]
 
     def carry(self, state: CaseState, event: Event) -> CaseState:
-        """Decide on `event`, then run each activity it asks for, feeding back what it gave."""
+        """Decide on `event`, then run each activity it asks for, feeding back what it gave. In
+        memory a run is instant: what it gives arrives at the time of the event that started it."""
+        at = event.at
         queue = [event]
         while queue:
             state, commands = decide(self.case, self.catalog, state, queue.pop(0))
@@ -131,35 +136,38 @@ class Driver:
                 if isinstance(command, StopPlan):
                     # In memory a running plan step waits for an answer (its plan runs at once to
                     # its end or its first unanswered wait): nothing runs in it, so it ends now.
-                    queue.append(PlanCancelled(command.entry))
+                    queue.append(PlanCancelled(command.entry, at=at))
                 elif isinstance(command, StartPlan):
-                    if (ended := self.plans(command)) is not None:
+                    if (ended := self.plans(command, at)) is not None:
                         queue.append(ended)  # else it waits for an answer: the step runs on
                 elif isinstance(command, StartWorkflow) and command.workflow not in self.workflows:
                     # Fail closed: nothing guesses where to run an unbound workflow (brief, D29).
-                    queue.append(Failed(command.entry, unbound(command.workflow)))
+                    queue.append(Failed(command.entry, unbound(command.workflow), at=at))
                 elif command.entry.split("#")[0] in self.holding:
                     self.held[command.entry] = command  # it keeps running until finished
                 else:
-                    queue.append(outcome_of(command, self.activity))
+                    queue.append(outcome_of(command, self.activity, at))
         return state
 
 
 def outcome_of(
-    command: Schedule | StartWorkflow, activity_for: Callable[[Schedule | StartWorkflow], Activity]
+    command: Schedule | StartWorkflow,
+    activity_for: Callable[[Schedule | StartWorkflow], Activity],
+    at: int,
 ) -> Completed | Failed:
-    """Run the activity, and say what happened as an event. In memory there are no retries: an
-    error is a failure after them (Temporal retries with the contract's policy, layer 8c)."""
+    """Run the activity, and say what happened as an event at `at`. In memory there are no
+    retries: an error is a failure after them (Temporal retries with the contract's policy, layer
+    8c)."""
     activity = activity_for(command)
     try:
         # The activity's code gets plain values, as on Temporal (brief, D31).
-        return Completed(command.entry, activity(unwrapped(command.inputs)))
+        return Completed(command.entry, activity(unwrapped(command.inputs)), at=at)
     except Outcome as outcome:
         # A business failure is an outcome; whether the contract declares it, `decide` checks.
-        return Completed(command.entry, {}, outcome.name)
+        return Completed(command.entry, {}, outcome.name, at=at)
     # Any error, whatever its kind: none is ignored; a person looks at it (brief, D17).
     except Exception as error:  # noqa: BLE001 (catching every kind is the rule here)
         called = command.workflow if isinstance(command, StartWorkflow) else command.activity
         # What it said is never recorded: it may quote a sensitive value (brief, D31).
         said = Sensitive(str(error))
-        return Failed(command.entry, f"{called} failed with {failed_with(error)}: {said}")
+        return Failed(command.entry, f"{called} failed with {failed_with(error)}: {said}", at=at)

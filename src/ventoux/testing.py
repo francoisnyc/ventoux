@@ -16,6 +16,7 @@ from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import CaseDefinition, parse_case
+from ventoux.case.freshness import seconds_in
 from ventoux.case.memory import Activity, CaseRun, Finish, PlanRunner, run_case_in_memory
 from ventoux.case.plan_step import PlanNotSupplied, supplied
 from ventoux.case.runtime import CaseRefused
@@ -329,10 +330,16 @@ def load_definition(path: Path) -> dict[str, Any]:
     return definition
 
 
+# When a test's case opens unless it says otherwise: 1 January 2026, 00:00 UTC, in seconds since the
+# epoch. Tests give the time; the engine never supplies one (brief, D33).
+START = 1_767_225_600
+DAY = 24 * 60 * 60  # a day, in seconds: `START + 3 * DAY`
+
+
 def run_case(
     definition: dict[str, Any],
     file: dict[str, Any],
-    answers: Sequence[tuple[Any, ...] | Finish],
+    answers: Sequence[Any],
     people: Mapping[str, Iterable[str]],
     opened_by: str | None = None,
     activities: Mapping[str, Activity] = FAKES,
@@ -341,6 +348,7 @@ def run_case(
     plan_answers: Mapping[str, Sequence[tuple[Any, ...]]] | None = None,
     catalog: Catalog = CATALOG,
     workflows: Mapping[str, Activity] = WORKFLOW_FAKES,
+    at: int = START,
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
@@ -352,24 +360,31 @@ def run_case(
     `plan_answers` answers each plan step's waits, in order, by state: `(state, outcome, who)`.
     `catalog` replaces the development catalog, for a test's own contracts. `workflows` binds each
     workflow contract to a function from its inputs to its output, by reference, replacing the
-    fake workflows; a workflow contract with none is not bound, and its step fails."""
+    fake workflows; a workflow contract with none is not bound, and its step fails. The case opens
+    at `at`, seconds since the epoch; `later("3d")` in the script moves time on, and every event
+    after it happens then."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
-    events: list[Event | Finish] = [Opened(wrapped(case, as_json(file)), opened_by)]
+    now = at
+    events: list[Event | Finish] = [Opened(wrapped(case, as_json(file)), opened_by, at=now)]
     for item in answers:
-        if isinstance(item, Finish):
-            events.append(item)
+        if isinstance(item, Later):
+            now += item.seconds
+            continue
+        if isinstance(item, Finishing):
+            events.append(Finish(item.entry, at=now))
             continue
         if isinstance(item, Proposal):
-            events.append(Proposed(item.step, item.by, frozenset(people.get(item.by, ()))))
+            events.append(Proposed(item.step, item.by, frozenset(people.get(item.by, ())), at=now))
             continue
         if isinstance(item, Retry):
-            events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ()))))
+            events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ())), at=now))
             continue
         if isinstance(item, ShownTo):
-            events.append(Shown(item.field, item.by, frozenset(people.get(item.by, ()))))
+            events.append(Shown(item.field, item.by, frozenset(people.get(item.by, ())), at=now))
             continue
         if isinstance(item, Close):
-            events.append(CloseAsked(item.reason, item.by, frozenset(people.get(item.by, ()))))
+            roles = frozenset(people.get(item.by, ()))
+            events.append(CloseAsked(item.reason, item.by, roles, at=now))
             continue
         if isinstance(item, Forget):
             events.append(
@@ -378,6 +393,7 @@ def run_case(
                     frozenset(people.get(item.proposed_by, ())),
                     item.approved_by,
                     frozenset(people.get(item.approved_by, ())),
+                    at=now,
                 )
             )
             continue
@@ -389,7 +405,7 @@ def run_case(
         given = (
             {name: Sensitive(value) for name, value in as_json(form[0]).items()} if form else None
         )
-        events.append(Answered(entry, outcome, who, roles, given))
+        events.append(Answered(entry, outcome, who, roles, given, at=now))
     implementations = {**FAKES, **activities}
     runner = plan_runner(plans or {}, plan_answers or {}, implementations, people)
     bound = {**WORKFLOW_FAKES, **workflows}
@@ -411,11 +427,11 @@ def plan_runner(
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
         return activities[reference](unwrapped(inputs))  # plain values, as on Temporal
 
-    def run(command: StartPlan) -> Completed | Failed | None:
+    def run(command: StartPlan, at: int) -> Completed | Failed | None:
         try:
             plan = supplied(plans, command.plan)
         except PlanNotSupplied as missing:
-            return Failed(command.entry, str(missing))
+            return Failed(command.entry, str(missing), at=at)
         script = scripts.setdefault(command.entry.split("#")[0], [])
         try:
             # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it.
@@ -431,13 +447,13 @@ def plan_runner(
                 )
             )
         except RunRefused as refused:
-            return Failed(command.entry, f"{command.plan} can't start: {refused}")
+            return Failed(command.entry, f"{command.plan} can't start: {refused}", at=at)
         if ran.status == "succeeded":
-            return Completed(command.entry, {})
+            return Completed(command.entry, {}, at=at)
         if ran.status == "failed":
-            return Completed(command.entry, {}, "failed")  # a failed final state: an outcome
+            return Completed(command.entry, {}, "failed", at=at)  # a failed final state: an outcome
         if ran.status == "stopped":
-            return Failed(command.entry, f"{command.plan} stopped: {ran.reason}")
+            return Failed(command.entry, f"{command.plan} stopped: {ran.reason}", at=at)
         return None  # waiting for an answer the script doesn't give: the step runs on
 
     return run
@@ -495,9 +511,26 @@ class Close(NamedTuple):
     by: str
 
 
-def finish(entry: str) -> Finish:
+class Finishing(NamedTuple):
+    """A scripted finish: the held run `entry` finishes, at the script's time."""
+
+    entry: str
+
+
+def finish(entry: str) -> Finishing:
     """A script's step: let the held activity run `entry` finish now: `finish("pay#1")`."""
-    return Finish(entry)
+    return Finishing(entry)
+
+
+class Later(NamedTuple):
+    """A scripted pause: time moves on by `seconds` before the next event."""
+
+    seconds: int
+
+
+def later(age: str) -> Later:
+    """A script's pause: `later("3d")`, so the next event happens three days on (brief, D33)."""
+    return Later(seconds_in(age))
 
 
 def close(reason: str, who: str) -> Close:

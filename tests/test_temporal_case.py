@@ -43,6 +43,7 @@ from ventoux.temporal.cases import (
 from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.temporal.worker import SANDBOX, case_worker
 from ventoux.temporal.workflow import PlanWorkflow, RunReport
+from ventoux.testing import START
 from ventoux.tooling.keys import KeyRefused
 
 # Temporal: this module defines a workflow (`CasesWithPlans`, below), so the workflow sandbox
@@ -645,9 +646,9 @@ def test_a_carried_state_reads_back_as_it_was() -> None:
 def case_state(definition: dict[str, Any], file: dict[str, Any], reviews: list[Any]) -> CaseState:
     """The state `decide` reaches after opening `definition` with `file` and Ana's `reviews`."""
     case = parse_case(definition)
-    state, _ = decide(case, CATALOG, CaseState("refund-1/run"), Opened(file, None))
+    state, _ = decide(case, CATALOG, CaseState("refund-1/run"), Opened(file, None, at=START))
     for entry, form in reviews:
-        answered = Answered(entry, "approve", "ana", frozenset({"support"}), form)
+        answered = Answered(entry, "approve", "ana", frozenset({"support"}), form, at=START)
         state, _ = decide(case, CATALOG, state, answered)
     return state
 

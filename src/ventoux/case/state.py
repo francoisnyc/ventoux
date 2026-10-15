@@ -4,6 +4,7 @@ Nothing here says where the case is (brief, idea 4): a case holds its case file,
 has reached and its step runs, and the runtime works out what may start from those.
 """
 
+import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
@@ -76,6 +77,10 @@ class Opened:
 
     file: Mapping[str, object]  # each value, read by its field's type
     by: str | None  # the person who opened it, as the trusted caller states; None: a system
+    # When it reached the case, in whole seconds since the epoch: the case reads no clock
+    # (brief, D33). Python: `kw_only` makes it a keyword with no default, `Opened(..., at=t)`, so
+    # no event is ever made without its time.
+    at: int = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -87,6 +92,7 @@ class Answered:
     by: str  # who answered, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with the answer (brief, D22)
     form: Mapping[str, object] | None = None  # the values the outcome sets
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -96,6 +102,7 @@ class Proposed:
     step: str
     by: str  # who proposed it, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with the proposal (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -106,6 +113,7 @@ class Completed:
     entry: str
     output: Mapping[str, object]
     outcome: str = "done"
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -114,6 +122,7 @@ class Failed:
 
     entry: str
     reason: str
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -123,6 +132,7 @@ class Retried:
     entry: str
     by: str  # who retried it, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with the retry (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -132,6 +142,7 @@ class CloseAsked:
     reason: str
     by: str  # who closes it, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with the request (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -143,6 +154,7 @@ class PlanCancelled:
     # Each activity in it that finished or failed after the close was requested, which the case
     # flags: `payments.refund@2 completed after the close was requested` (brief, D10).
     after_stop: tuple[str, ...] = ()
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -153,6 +165,9 @@ class Shown:
     field: str  # the reference field, such as `customer_id`
     by: str  # who was shown it, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with it (brief, D22)
+    # When it reached the case, in seconds since the epoch. `dataclasses.field` in full: this
+    # class has a field named `field`.
+    at: int = dataclasses.field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -165,6 +180,7 @@ class ForgetApproved:
     proposer_roles: frozenset[str]  # their roles, stated with the proposal (brief, D22)
     approved_by: str  # who approved it
     approver_roles: frozenset[str]  # their roles, stated with the approval
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 type Event = (

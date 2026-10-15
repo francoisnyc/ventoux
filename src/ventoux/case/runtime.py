@@ -33,6 +33,7 @@ from ventoux.case.definition import (
     WorkflowStep,
 )
 from ventoux.case.forgetting import forget
+from ventoux.case.freshness import refuse_unless_whole
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     Answered,
@@ -100,8 +101,9 @@ def decide(
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: Event
 ) -> tuple[CaseState, list[Command]]:
     """The case's state after `event`, and the activities to schedule. A refused event raises
-    (`AnswerRefused`, `ProposalRefused`, `CaseRefused`) and changes nothing; a step the engine
+    (`AnswerRefused`, `ProposalRefused`, `CaseRefused`, `TimeRefused`) and changes nothing; a step the engine
     can't run fails, and the case needs attention (brief, D17)."""
+    refuse_unless_whole(event.at)  # time is only ever event data, so it is checked first
     state = copy.deepcopy(state)  # the state passed in is never changed
     commands: list[Command] = []
     was_open = state.phase == "open"
@@ -382,7 +384,7 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
         contract = called(catalog, step)
         declares, problem = contract.reference, outcome_problem(contract, event)
     if problem is not None:
-        failed(state, Failed(event.entry, problem))
+        failed(state, Failed(event.entry, problem, at=event.at))
         return
     run.status = "done"
     state.values[f"{run.step}.outcome"] = event.outcome
