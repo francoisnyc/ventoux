@@ -1,5 +1,7 @@
 """What each step calls, read against the catalog and the deployment's plans (layer 10b): the
-contract or plan exists, and each step gives it what it takes. See docs/layers/10-case-validation.md (10b) and docs/guides/cases.md.
+contract or plan exists and is of the step's kind, the step gives it what it takes, its
+expressions read only the case's values, and a high-risk step has an approval its roles may give.
+See docs/layers/10-case-validation.md (10b) and docs/guides/cases.md.
 """
 
 from collections.abc import Mapping

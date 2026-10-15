@@ -756,5 +756,7 @@ Anything else is not a value: reading it is an error.
 | `APPROVAL_ROLE` | error | a role on an approval may not approve the step's risk | `adjuster may approve no risk, and payments.refund@2 is high risk: name a role that may approve high risk` |
 
 An approval with a `when` is fine on a high-risk step: the quickstart's refund asks a team lead
-only above 100. Each of these is refused when the case runs too, whether or not the definition
-was checked: the step fails, or the answer, or the opening, is refused.
+only above 100. Each of these is met when the case runs too, whether or not the definition was
+checked: the step fails, the answer, proposal or opening is refused, or the role counts for
+nothing (it answers, approves and sees nothing). A misspelt outcome fails the step that reads it,
+never reading as false.

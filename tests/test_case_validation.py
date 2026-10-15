@@ -543,10 +543,10 @@ GUIDE_EXAMPLES: dict[str, Callable[[], dict[str, Any]]] = {
 }
 
 
-def guide_table() -> list[tuple[str, str, str]]:
-    """The guide's table of codes, as (code, kind, example message); "as above" is the output
-    above it, which `test_the_deadlocked_claim_is_refused` checks word for word."""
-    table = guide_section().split("| Code | Kind |")[1].split("\n\n")[0]
+def guide_table(index: int = 1) -> list[tuple[str, str, str]]:
+    """The guide's table of codes `index` (1: structure, 2: what each step calls), as (code,
+    kind, example message); "as above" is the output above it, checked word for word."""
+    table = guide_section().split("| Code | Kind |")[index].split("\n\n")[0]
     rows = [line.split("|") for line in table.splitlines() if line.startswith("| `")]
     return [
         (code.strip().strip("`"), kind.strip(), says.strip().strip("`"))
@@ -1198,3 +1198,88 @@ def test_an_approvals_roles_may_approve_its_steps_risk() -> None:
     assert [i.code for i in issues(refund_with(approval=approval))] == ["UNKNOWN_ROLE"]
     missing = refund_with(approval=None, activity="payments.refund@3")
     assert [i.code for i in issues(missing)] == ["UNKNOWN_CONTRACT"]
+
+
+# --- 10b, slice 6: the guide and the promises ---
+
+
+def check_as_activity() -> dict[str, Any]:
+    claim = guide_json(0)
+    del claim["steps"]["check"]["workflow"]
+    claim["steps"]["check"] |= {"kind": "activity", "activity": "kyc.check@1"}
+    return claim
+
+
+def misspelt_acceptance() -> dict[str, Any]:
+    claim = guide_json(0)
+    claim["steps"]["pay"] |= guide_json(2)
+    return claim
+
+
+def with_field(name: str, **changed: Any) -> Callable[[], dict[str, Any]]:
+    def make() -> dict[str, Any]:
+        refund = copy.deepcopy(REFUND)
+        refund["fields"][name] |= changed
+        return refund
+
+    return make
+
+
+def misspelt_reviewer() -> dict[str, Any]:
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["review"]["roles"] = ["supprt"]
+    return refund
+
+
+# A definition that makes each of the guide's codes for what steps call happen, in its order.
+CALLS_EXAMPLES: dict[str, Callable[[], dict[str, Any]]] = {
+    "UNKNOWN_CONTRACT": lambda: refund_with(activity="payments.refund@3"),
+    "WRONG_KIND": check_as_activity,
+    "UNKNOWN_PLAN": lambda: settled(plan="refund-order@2"),
+    "UNKNOWN_INPUT": lambda: refund_with(
+        inputs={"order_id": {"var": "order_id"}, "amout": {"var": "amount"}}
+    ),
+    "MISSING_INPUT": lambda: refund_with(inputs={"order_id": {"var": "order_id"}}),
+    "ENGINE_INPUT": lambda: refund_with(
+        inputs={**REFUND["steps"]["pay"]["inputs"], "idempotency_key": "mine"}
+    ),
+    "UNKNOWN_ROLE": misspelt_reviewer,
+    "UNKNOWN_SOURCE": with_field("amount", source="untrusted:custmer"),
+    "UNKNOWN_SYSTEM": with_field("order_id", system="ordrs"),
+    "EXPRESSION_INVALID": misspelt_acceptance,
+    "APPROVAL_REQUIRED": lambda: refund_with(approval=None),
+    "APPROVAL_ROLE": lambda: refund_with(
+        approval={**REFUND["steps"]["pay"]["approval"], "roles": ["support-lead", "adjuster"]}
+    ),
+}
+
+
+def test_the_guide_lists_every_code_for_what_steps_call() -> None:
+    assert [code for code, _, _ in guide_table(2)] == list(CALLS_EXAMPLES)
+
+
+@pytest.mark.parametrize(("code", "kind", "says"), guide_table(2))
+def test_the_guides_table_of_calls_is_what_validate_case_says(
+    code: str, kind: str, says: str
+) -> None:
+    found = [i for i in checked_with(CALLS_EXAMPLES[code](), PLANS) if i.code == code]
+    assert [issue.severity for issue in found] == [kind]
+    if says != "as above":
+        assert [issue.message for issue in found] == [says]
+
+
+def test_a_message_quotes_only_the_literal_that_is_wrong() -> None:
+    # A literal the author wrote may be quoted when it is the mistake; titles, an approval's
+    # reason and any other literal never are (brief, D35).
+    for make in CALLS_EXAMPLES.values():
+        for issue in checked_with(marked(make()), PLANS):
+            assert "TITLE-" not in issue.message, issue
+    claim = guide_json(0)
+    claim["steps"]["pay"]["when"] = {
+        "and": [
+            {"==": [{"var": "assess.outcome"}, "acept"]},
+            {">": [{"var": "payout"}, 987654]},
+        ]
+    }
+    [issue] = issues(claim)
+    assert '"acept"' in issue.message and "987654" not in issue.message
