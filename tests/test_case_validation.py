@@ -5,6 +5,7 @@ See docs/layers/10-case-validation.md and docs/guides/cases.md.
 """
 
 import json
+from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -119,7 +120,23 @@ def errors(definition: dict[str, Any]) -> list[Issue]:
     return [issue for issue in issues(definition) if issue.severity == "error"]
 
 
+def guide_section() -> str:
+    return GUIDE.read_text().split(SECTION)[1]
+
+
+def printed(found: list[Issue]) -> str:
+    """Issues as the guide prints them, `path  CODE  message`, line breaks aside."""
+    lines = [
+        f"{i.path}  {i.code}{' (warning)' if i.severity == 'warning' else ''}  {i.message}"
+        for i in found
+    ]
+    return " ".join(" ".join(lines).split())
+
+
 def test_the_deadlocked_claim_is_refused() -> None:
+    # The guide's output, word for word, line breaks aside.
+    shown = guide_section().split("before any case opens:\n\n```\n")[1].split("```")[0]
+    assert printed(issues(deadlocked_claim())) == " ".join(shown.split())
     # One issue for the steps that wait on each other, none for each of them.
     assert errors(deadlocked_claim()) == [
         Issue(
@@ -354,3 +371,143 @@ def test_an_unchecked_deadlock_still_runs_safely() -> None:
     assert run.history[-1] == "closed: nothing left to do"
     assert any(line.startswith("check#1 done") for line in run.history)
     assert not any(line.startswith(("started assess", "scheduled pay")) for line in run.history)
+
+
+# --- Slice 6: the guide and the promises ---
+
+
+def closes_at_opening() -> dict[str, Any]:
+    claim = guide_json(0)
+    claim["steps"]["check"] |= {"automatic": False, "proposed_by": ["adjuster"]}
+    return claim
+
+
+def nobody_closes() -> dict[str, Any]:
+    claim = guide_json(0)
+    claim["stays_open"] = True
+    claim["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate claim"}, "roles": ["supprt"]}
+    }
+    return claim
+
+
+def approve_never_runs() -> dict[str, Any]:
+    return reviewed(claim_with(approve=APPROVE))
+
+
+def reviewed_unreached() -> dict[str, Any]:
+    return reviewed(guide_json(0))
+
+
+# A definition that makes each of the guide's codes happen, in the table's order.
+GUIDE_EXAMPLES: dict[str, Callable[[], dict[str, Any]]] = {
+    "DEADLOCK": deadlocked_claim,
+    "NEVER_RUNS": approve_never_runs,
+    "CLOSES_AT_OPENING": closes_at_opening,
+    "NEVER_CLOSES": nobody_closes,
+    "CLOSE_UNREACHABLE": deadlocked_claim,
+    "UNREACHABLE_MILESTONE": reviewed_unreached,
+}
+
+
+def guide_table() -> list[tuple[str, str, str]]:
+    """The guide's table of codes, as (code, kind, example message); "as above" is the output
+    above it, which `test_the_deadlocked_claim_is_refused` checks word for word."""
+    table = guide_section().split("| Code | Kind |")[1].split("\n\n")[0]
+    rows = [line.split("|") for line in table.splitlines() if line.startswith("| `")]
+    return [
+        (code.strip().strip("`"), kind.strip(), says.strip().strip("`"))
+        for _, code, kind, _, says, _ in rows
+    ]
+
+
+def test_the_guide_lists_every_code() -> None:
+    assert [code for code, _, _ in guide_table()] == list(GUIDE_EXAMPLES)
+
+
+@pytest.mark.parametrize(("code", "kind", "says"), guide_table())
+def test_the_guides_table_is_what_validate_case_says(code: str, kind: str, says: str) -> None:
+    found = [issue for issue in issues(GUIDE_EXAMPLES[code]()) if issue.code == code]
+    assert [issue.severity for issue in found] == [kind]
+    if says != "as above":
+        assert [issue.message for issue in found] == [says]
+
+
+def marked(data: Any) -> Any:
+    """`data` with every title and reason replaced by a marker, `TITLE-…`."""
+    if isinstance(data, dict):
+        return {
+            key: f"TITLE-{value}" if key in ("title", "reason") else marked(value)
+            for key, value in data.items()
+        }
+    if isinstance(data, list):
+        return [marked(item) for item in data]
+    return data
+
+
+def test_no_message_quotes_a_value() -> None:
+    # Messages read names, never what people read or what a condition compares: a definition's
+    # titles, its approval's reason, a literal in a `when` (brief, D30).
+    for make in GUIDE_EXAMPLES.values():
+        definition = marked(make())
+        definition["steps"]["pay"]["when"] = {">": [{"var": "payout"}, 987654]}
+        found = issues(definition)
+        assert found
+        for issue in found:
+            assert "TITLE-" not in issue.message and "987654" not in issue.message, issue
+
+
+def test_three_steps_can_wait_on_each_other() -> None:
+    claim = guide_json(0)
+    claim["steps"]["check"]["requires"] = ["paid"]
+    assert errors(claim) == [
+        Issue(
+            "steps.check.requires",
+            "DEADLOCK",
+            "check, pay and assess wait on each other: check requires paid, which only pay reaches; "
+            "pay requires assessed, which only assess reaches; assess requires checked, which only "
+            "check reaches: remove one of these requirements",
+        )
+    ]
+
+
+def test_a_milestone_two_dead_steps_reach_names_both() -> None:
+    claim = deadlocked_claim()
+    claim["steps"]["reassess"] = {
+        **NOTIFY,
+        "display": {"title": "Assess the claim again"},
+        "requires": ["paid"],
+        "reaches": ["assessed"],
+    }
+    claim["steps"]["notify"] = NOTIFY
+    assert errors(claim) == [
+        Issue(
+            "steps.assess.requires",
+            "DEADLOCK",
+            "assess and pay wait on each other: assess requires paid, which only pay reaches; "
+            "pay requires assessed, which only assess and reassess reach: remove one of these "
+            "requirements",
+        ),
+        Issue(
+            "steps.notify.requires",
+            "NEVER_RUNS",
+            "notify can never run: it requires assessed, which only assess and reassess reach, "
+            "and they can never run: fix assess first",
+        ),
+    ]
+
+
+def test_a_step_after_a_close_on_two_milestones_never_runs() -> None:
+    claim = guide_json(0)
+    claim["closes_when"] = ["assessed", "paid"]
+    thank = {**NOTIFY, "display": {"title": "Thank the customer"}, "requires": ["assessed", "paid"]}
+    claim["steps"]["thank"] = thank
+    assert errors(claim) == [
+        Issue(
+            "steps.thank.requires",
+            "NEVER_RUNS",
+            "thank can never run: it requires assessed and paid, and claim closes once they are "
+            "reached, before thank could start: remove one of them from its requires, or from "
+            "closes_when",
+        )
+    ]

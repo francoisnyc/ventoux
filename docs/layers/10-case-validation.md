@@ -1,7 +1,8 @@
 # Layer 10: case validation
 
 Status: the split into four parts and 10a's six choices agreed in the session, 2026-10-15 (all as
-proposed); 10a's note drafted the same day.
+proposed); 10a's note drafted the same day; 10a built, slices 0–6; Promises checked against the
+tests, 2026-10-15.
 
 ## What this layer is for
 
@@ -280,12 +281,23 @@ Each starts with its negative test, seen failing for the right reason.
   already does. It was seen failing when pointed at the sound claim, which runs on to the
   assessment instead of closing. No driver calls `validate_case` (only `case/validate.py` names
   it), and no earlier test changed in this layer.
+- **The Promises check found four branches written ahead of any test** (slice 6): a milestone two
+  dead steps reach ("which only assess and reassess reach", "they can never run"), a circle of
+  three, and `NEVER_RUNS` after a close on two milestones. Each got a test, passing at once, and
+  each was seen failing on a deliberate break of its branch.
+- **The guide's output, table and kinds are run** (slice 6): its printed output is compared word
+  for word, line breaks aside; each table row is made to happen, with its message and its kind.
+  Changing one word of the output or of a row, or one row's kind, fails a test.
+- **"No message quotes a value" is tested on what a definition writes** (slice 6): validation sees
+  no case file, so the values it could leak are titles, an approval's reason and literals in a
+  `when`. Every example definition is given marked ones, and no message repeats them; seen failing
+  with a message made to quote a milestone's title.
 
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
-`V` is `tests/test_case_validation.py`. Test names are planned; the table is checked against the
-tests before the pull request.
+`V` is `tests/test_case_validation.py`. Checked against the tests, 2026-10-15: every test named
+here exists, and every test in `V` is named here.
 
 | Promise | Test |
 |---|---|
@@ -293,10 +305,11 @@ tests before the pull request.
 | An issue that says no severity is an error | V `test_an_issue_is_an_error_unless_it_says_otherwise` |
 | A sound case has no issues: the guide's claim, the quickstart's refund | V `test_the_guides_claim_has_no_issues`, `test_the_quickstart_refund_has_no_issues` |
 | The order steps are written in changes nothing (the fixpoint, not one pass) | V `test_the_order_of_the_steps_does_not_matter` |
+| Any outcome of a task may happen: what any of them reaches can be reached | V `test_the_guides_claim_has_no_issues` (`pay` requires `assessed`, which only `accept` reaches) |
 | A step requiring a milestone nothing reaches never runs | V `test_a_step_requiring_what_nothing_reaches_never_runs` |
-| Steps that wait on each other are one `DEADLOCK`, naming the circle, with no other issue for them; the guide's message word for word | V `test_the_deadlocked_claim_is_refused`, `test_a_step_requiring_itself_is_deadlocked`, `test_sequence_and_requires_can_deadlock` |
-| A step waiting on a dead step never runs, saying which | V `test_a_step_waiting_on_a_deadlock_never_runs` |
-| A step requiring every `closes_when` milestone never runs | V `test_a_step_after_the_close_never_runs` |
+| Steps that wait on each other are one `DEADLOCK`, naming the circle, with no other issue for them; the guide's message word for word | V `test_the_deadlocked_claim_is_refused`, `test_a_step_requiring_itself_is_deadlocked`, `test_sequence_and_requires_can_deadlock`, `test_three_steps_can_wait_on_each_other` |
+| A step waiting on a dead step never runs, saying which, every dead step reaching its milestone named | V `test_a_step_waiting_on_a_deadlock_never_runs`, `test_a_milestone_two_dead_steps_reach_names_both` |
+| A step requiring every `closes_when` milestone never runs, however many there are | V `test_a_step_after_the_close_never_runs`, `test_a_step_after_a_close_on_two_milestones_never_runs` |
 | A case where nothing starts by itself is refused once; a step dead for its own reason keeps its own issue beside it | V `test_a_case_that_closes_at_opening_is_refused`, `test_closing_at_opening_is_said_beside_a_step_dead_for_its_own_reason` |
 | A case that stays open must be closable by a registered role, and is accepted when it is | V `test_a_case_nobody_can_close_is_refused` |
 | A step only roles nobody registered may propose never runs | V `test_a_step_nobody_may_propose_never_runs` |
@@ -304,5 +317,5 @@ tests before the pull request.
 | `CLOSE_UNREACHABLE` says how the case closes instead, and names every unreachable milestone | V `test_an_unreachable_close_says_how_the_case_closes_instead`, `test_every_unreachable_close_milestone_is_named` |
 | No message quotes a value | V `test_no_message_quotes_a_value` |
 | The runtime depends on nothing validation did: the deadlocked claim runs and closes, paying nothing | V `test_an_unchecked_deadlock_still_runs_safely`; every runtime test, unchanged |
-| The guide says what the code does: its claims and its table | V `test_the_guides_claim_has_no_issues`, `test_the_deadlocked_claim_is_refused`, `test_the_guides_table_is_what_validate_case_says` |
+| The guide says what the code does: its claims, its printed output, and its table (every code, each example's message and kind) | V `test_the_guides_claim_has_no_issues`, `test_the_deadlocked_claim_is_refused`, `test_the_guide_lists_every_code`, `test_the_guides_table_is_what_validate_case_says` |
 | `case` imports no Temporal or LLM code, in the new modules too | `tests/test_layers.py`, unchanged |
