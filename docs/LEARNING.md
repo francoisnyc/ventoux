@@ -42,6 +42,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 35 | Layer 6: what lives in workflow history | closed |
 | 36 | Layer 8: the model picks the step, never the values | open |
 | 37 | Layer 9c: what the audit keeps after forgetting | open |
+| 38 | Layer 9d: stale facts, and why replay decides the same way | open |
 
 ---
 
@@ -1002,3 +1003,30 @@ and record the key points. A question is closed once you can explain the answer 
 - Follow-up: a regulator asks why claim-7 was denied. After forgetting, which of their
   questions can you still answer, and which not?
 - Status: open.
+
+## 38. Layer 9d: stale facts, and why replay decides the same way
+
+> Sam approves a refund on day 3. Ana's review set `approved_amount` on day 0, and
+> `check_order.status` came from an order lookup on day 0. `pay` needs both at most a day old.
+> a) What happens to each fact, and why are they treated differently? b) On Temporal the worker
+> restarts and replays the case. Why does it decide the same way, given that "3 days old"
+> depends on time?
+
+- Your answer: a) "the person's answer needs attention, the lookup gets refreshed"; b) "because
+  it recalculates everything, it does not rely on time."
+- Discussion: a is right on both facts. The why: a read changes nothing in the world, so running
+  it again only fetches today's value; a person can't be asked again by the engine, so a person
+  decides (send the review back, then retry `pay`, or close the case) (brief, D18). Two details:
+  `pay#1` fails before it starts and Sam's approval goes with the failed run, for a retry
+  (brief, D26), which was slice 8's loop fix; and the refresh passes the same gate as any start,
+  its condition true and no approval needed, or it isn't run (the tutor review, brief, D33). The
+  facts are checked in `max_age`'s order: if `approved_amount` comes first, `pay` stops before
+  any lookup runs. b is half right: replay does run `decide` again on every event, in the order
+  history recorded them. But it does rely on time, only on the right one. Each event carries
+  `at`, stamped once from Temporal's workflow time, which history records; on replay
+  `workflow.now()` gives the recorded time, so Sam's approval is day 3 again and the fact is 3
+  days old again, even replayed on day 10. Had `decide` read the clock, a replay on day 10 would
+  see "10 days old", ask for what history never did, and stop on a non-determinism error. The
+  same lesson as question 32: time enters as data history recorded, never as a clock the case
+  reads.
+- Status: open, until "the recorded time, not the clock's" comes back from memory.
