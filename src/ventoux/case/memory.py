@@ -53,15 +53,16 @@ class CaseRun:
     steps_done: frozenset[str]
     definition: CaseDefinition  # what ran, so a view can be filtered by it
     state: CaseState  # where it ended
+    registered: tuple[str, ...]  # the catalog's roles: only these give sight (brief, D22)
 
     def view(self, roles: Iterable[str]) -> CaseView:
         """The case file as a person holding `roles` sees it (brief, D30)."""
-        return case_view(self.definition, self.state, roles)
+        return case_view(self.definition, self.state, roles, self.registered)
 
     def approval_sheet(self, entry: str, roles: Iterable[str], at: int) -> ApprovalSheet:
         """The open approval `entry`'s sheet as a person holding `roles` reads it at `at`, with
         the age of each fact it depends on (brief, D18)."""
-        return sheet_of(self.definition, self.state, entry, roles, at)
+        return sheet_of(self.definition, self.state, entry, roles, at, self.registered)
 
     @property
     def closed(self) -> bool:
@@ -106,7 +107,10 @@ def run_case_in_memory(
     done = frozenset(run.step for run in state.runs if run.status == "done")
     attention = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
     waiting = list(state.waiting.values())
-    return CaseRun(state.phase, waiting, attention, state.flags, state.history, done, case, state)
+    registered = tuple(catalog.roles)
+    return CaseRun(
+        state.phase, waiting, attention, state.flags, state.history, done, case, state, registered
+    )
 
 
 @dataclass

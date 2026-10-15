@@ -6,7 +6,7 @@ filtered here, where the case runs, before anything is sent: a hidden field is a
 See docs/layers/09-case-data.md and docs/guides/case-data.md.
 """
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -48,9 +48,14 @@ def seen_by(case: CaseDefinition, name: str) -> tuple[str, ...]:
     return roles_named(case)
 
 
-def may_see(case: CaseDefinition, name: str, roles: Iterable[str]) -> bool:
-    """Whether a person holding `roles` sees the field, outcome or output `name`."""
-    return not set(seen_by(case, name)).isdisjoint(roles)
+def may_see(
+    case: CaseDefinition, name: str, roles: Iterable[str], registered: Collection[str]
+) -> bool:
+    """Whether a person holding `roles` sees the field, outcome or output `name`. Only a role in
+    `registered`, the catalog's, counts: one the engine doesn't know gives sight of nothing, as it
+    answers nothing (brief, D22) (brief, D35)."""
+    counting = {role for role in roles if role in registered}
+    return not set(seen_by(case, name)).isdisjoint(counting)
 
 
 @dataclass(frozen=True)
@@ -71,11 +76,14 @@ class CaseView:
     obtained: dict[str, int]
 
 
-def case_view(case: CaseDefinition, state: CaseState, roles: Iterable[str]) -> CaseView:
-    """The case file of `state` as a person holding `roles` sees it."""
+def case_view(
+    case: CaseDefinition, state: CaseState, roles: Iterable[str], registered: Collection[str]
+) -> CaseView:
+    """The case file of `state` as a person holding `roles` sees it; only the `registered` roles
+    count."""
     held = frozenset(roles)
     names = [*case.fields, *(name for name in state.values if name not in case.fields)]
-    visible = [name for name in names if may_see(case, name, held)]
+    visible = [name for name in names if may_see(case, name, held, registered)]
     hidden = {name: seen_by(case, name) for name in names if name not in visible}
     values = {name: state.values[name] for name in visible if name in state.values}
     sources = {name: tuple(sorted(state.sources[name])) for name in values}
@@ -108,11 +116,16 @@ class ApprovalSheet:
 
 
 def sheet_of(
-    case: CaseDefinition, state: CaseState, entry: str, roles: Iterable[str], at: int
+    case: CaseDefinition,
+    state: CaseState,
+    entry: str,
+    roles: Iterable[str],
+    at: int,
+    registered: Collection[str],
 ) -> ApprovalSheet:
     """The sheet of the open approval `entry` as a person holding `roles` reads it at `at`, the
     reader's own time: a sheet is read, never decided on, so the case's history is untouched.
-    Or `SheetRefused` if no such approval is open."""
+    Only the `registered` roles count. Or `SheetRefused` if no such approval is open."""
     refuse_unless_whole(at)  # fail closed: an age is never told from a time that isn't one
     approval = next((a for a in state.approvals.values() if a.entry == entry), None)
     if approval is None:
@@ -121,17 +134,23 @@ def sheet_of(
     assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
     held = frozenset(roles)
     reads = sorted({field for expression in read_by(step) for field in fields_read(expression)})
-    return ApprovalSheet(entry, [fact_line(case, state, name, held, at) for name in reads])
+    lines = [fact_line(case, state, name, held, at, registered) for name in reads]
+    return ApprovalSheet(entry, lines)
 
 
 def fact_line(
-    case: CaseDefinition, state: CaseState, name: str, roles: frozenset[str], at: int
+    case: CaseDefinition,
+    state: CaseState,
+    name: str,
+    roles: frozenset[str],
+    at: int,
+    registered: Collection[str],
 ) -> str:
     """One fact as the sheet says it: its value as read and its age, or that it is hidden. A
     sensitive value reads `‹sensitive›`, as everywhere a value is written (brief, D31)."""
     declared = case.fields.get(name)
     title = declared.display.title if declared is not None else name
-    if not may_see(case, name, roles):
+    if not may_see(case, name, roles, registered):
         return f"{title}: hidden (needs {' or '.join(seen_by(case, name))})"
     if name not in state.values:
         return f"{title}: not set"

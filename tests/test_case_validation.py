@@ -17,7 +17,14 @@ from ventoux.case.definition import parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
 from ventoux.core.validate import Issue
-from ventoux.testing import CATALOG, Outcome, load_definition, run_case
+from ventoux.testing import (
+    CATALOG,
+    AnswerRefused,
+    CaseRefused,
+    Outcome,
+    load_definition,
+    run_case,
+)
 
 ROOT = Path(__file__).parent.parent
 REFUND = load_definition(ROOT / "examples" / "refund" / "refund.json")
@@ -291,22 +298,26 @@ def staying_open(claim: dict[str, Any]) -> dict[str, Any]:
 NEVER_CLOSES = Issue(
     "close_reasons",
     "NEVER_CLOSES",
-    "claim stays open, no close reason names a registered role, and closes_when never closes it, "
-    "so nobody could ever close it: name a registered role in a close reason",
+    "claim stays open, none of its close reasons' roles (supprt) is registered, and closes_when "
+    "never closes it, so nobody could ever close it: name a registered role in a close reason",
 )
 
 
 def test_a_case_nobody_can_close_is_refused() -> None:
     # The tutor review's probe: closes_when closes a case that stays open too (layer 8b), so
     # paid, which pay reaches, closes this one.
-    assert issues(staying_open(guide_json(0))) == []
-    # With paid unreachable, or no closes_when at all, nobody could ever close it.
+    # Since 10b, the role nobody registered is said: it can never close the case (brief, D35).
+    misspelt = unknown_role("close_reasons.duplicate.roles", "supprt")
+    assert issues(staying_open(guide_json(0))) == [misspelt]
+    # With paid unreachable, or no closes_when at all, nobody could ever close it. The issue
+    # names the roles, and no UNKNOWN_ROLE repeats them: one cause, one issue.
     assert NEVER_CLOSES in issues(staying_open(deadlocked_claim()))
+    assert misspelt not in issues(staying_open(deadlocked_claim()))
     without_close = staying_open(guide_json(0))
     del without_close["closes_when"]
     assert issues(without_close) == [NEVER_CLOSES]
     without_close["close_reasons"]["duplicate"]["roles"] = ["supprt", "adjuster"]
-    assert issues(without_close) == []
+    assert issues(without_close) == [misspelt]
 
 
 def letter_case(**thank: Any) -> dict[str, Any]:
@@ -857,3 +868,108 @@ def test_a_plan_step_gives_the_fields_its_plan_takes_at_its_start() -> None:
         given, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=plans
     ).needs_attention
     assert "approved_amount is set by a person in review, never given at the start" in refused
+
+
+# --- 10b, slice 3: roles, labels and systems nobody registered ---
+
+ROLES = "adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead"
+
+
+def unknown_role(path: str, role: str) -> Issue:
+    return Issue(
+        path,
+        "UNKNOWN_ROLE",
+        f"{role} is a role nobody registered: the roles are {ROLES}; use one of them, or ask the "
+        "platform team to register it",
+    )
+
+
+def test_a_role_nobody_registered_answers_nothing() -> None:
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["review"]["roles"] = ["supprt"]
+    assert issues(refund) == [unknown_role("steps.review.roles", "supprt")]
+    # The proof: a role the engine doesn't know counts for nothing, whoever states it (brief,
+    # D22).
+    with pytest.raises(AnswerRefused, match="supprt"):
+        run_case(refund, file=SMALL, answers=[REVIEWED], people={"ana": ["supprt"]})
+
+
+def test_a_role_nobody_registered_approves_nothing() -> None:
+    refund = refund_with(
+        approval={**REFUND["steps"]["pay"]["approval"], "roles": ["support-lead", "suport-lead"]}
+    )
+    assert issues(refund) == [unknown_role("steps.pay.approval.roles", "suport-lead")]
+    large = {"order_id": "ord-1", "amount": 250}
+    approved = ("pay", "approve", "lee")
+    with pytest.raises(AnswerRefused, match="suport-lead"):
+        run_case(
+            refund,
+            file=large,
+            answers=[("review", "approve", "ana", {"approved_amount": 250}), approved],
+            people={"ana": ["support"], "lee": ["suport-lead"]},
+        )
+
+
+def test_a_role_nobody_registered_is_said_once() -> None:
+    # One misspelt role among proposed_by is its own issue; if none is registered, the step can
+    # never run, and that issue names them (10a): one cause, one issue.
+    recheck = {
+        **NOTIFY,
+        "display": {"title": "Check the customer again"},
+        "requires": ["checked"],
+        "automatic": False,
+        "proposed_by": ["supprt", "adjuster"],
+    }
+    assert issues(claim_with(recheck=recheck)) == [
+        unknown_role("steps.recheck.proposed_by", "supprt")
+    ]
+    recheck["proposed_by"] = ["supprt"]
+    assert [i.code for i in issues(claim_with(recheck=recheck))] == ["NEVER_RUNS"]
+    # A close reason naming one: an issue, though another role may close the case.
+    claim = staying_open(guide_json(0))
+    claim["close_reasons"]["duplicate"]["roles"] = ["supprt", "adjuster"]
+    assert issues(claim) == [unknown_role("close_reasons.duplicate.roles", "supprt")]
+
+
+def test_a_role_nobody_registered_sees_nothing() -> None:
+    refund = copy.deepcopy(REFUND)
+    refund["fields"]["amount"]["visible_to"] = ["support", "suport-lead"]
+    assert issues(refund) == [unknown_role("fields.amount.visible_to", "suport-lead")]
+    # The proof: stated with a role nobody registered, a person sees nothing it would show
+    # (brief, D22) (brief, D35).
+    run = small_refund(refund)
+    assert "amount" not in run.view(roles=["suport-lead"]).values
+    assert "amount" in run.view(roles=["support"]).values
+
+
+def test_a_label_nobody_registered_is_refused() -> None:
+    refund = copy.deepcopy(REFUND)
+    refund["fields"]["amount"]["source"] = "untrusted:custmer"
+    assert issues(refund) == [
+        Issue(
+            "fields.amount.source",
+            "UNKNOWN_SOURCE",
+            "untrusted:custmer has a label nobody registered: the labels are customer, document, "
+            "email, llm, web; use one of them, or ask the platform team to register it",
+        )
+    ]
+    # The proof: a case declaring it doesn't open (brief, D12) (brief, D35).
+    with pytest.raises(CaseRefused, match="custmer"):
+        small_refund(refund)
+
+
+def test_a_system_nobody_registered_is_refused() -> None:
+    refund = copy.deepcopy(REFUND)
+    refund["fields"]["order_id"]["system"] = "ordrs"
+    assert issues(refund) == [
+        Issue(
+            "fields.order_id",
+            "UNKNOWN_SYSTEM",
+            "order_id is a reference to ordrs, which is not a registered system: the systems are "
+            "crm, documents, orders, policies; use one of them, or ask the platform team to "
+            "register it",
+        )
+    ]
+    # The proof: a case naming it doesn't open (brief, D30).
+    with pytest.raises(CaseRefused, match="ordrs"):
+        small_refund(refund)

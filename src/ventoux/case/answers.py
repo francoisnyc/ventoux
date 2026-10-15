@@ -78,7 +78,7 @@ def judge_approval(
         raise AnswerRefused(risk_refusal(role, catalog, contract))
     # An approver judges what they see: approve or reject, never values hidden from them
     # (brief, D30).
-    refuse_unless(unseen(case, answer, name, step))
+    refuse_unless(unseen(case, catalog, answer, name, step))
     # The person who opened the case approves none of its steps (brief, D11).
     if answer.by == state.opened_by:
         raise AnswerRefused(f"{answer.by} opened the case, so cannot approve its steps")
@@ -98,7 +98,9 @@ def someone_else(
     return not_someone_else(by, name, list(step.inputs.values()), conditions, sources)
 
 
-def unseen(case: CaseDefinition, answer: Answered, name: str, step: CallStep) -> str | None:
+def unseen(
+    case: CaseDefinition, catalog: Catalog, answer: Answered, name: str, step: CallStep
+) -> str | None:
     """Why `answer`'s person can't judge the step `name`: a value it reads (its inputs, its `when`,
     its approval's `when`) is hidden from their roles. None: they see every one."""
     read = list(step.inputs.values())
@@ -108,7 +110,7 @@ def unseen(case: CaseDefinition, answer: Answered, name: str, step: CallStep) ->
         read.append(step.approval.when)
     fields = {field for expression in read for field in fields_read(expression)}
     for field in sorted(fields):
-        if not may_see(case, field, answer.roles):
+        if not may_see(case, field, answer.roles, catalog.roles):
             needs = " or ".join(seen_by(case, field))
             return f"{answer.by} can't see {field}, which {name} reads: it needs {needs}"
     return None

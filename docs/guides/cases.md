@@ -695,7 +695,7 @@ what can *never* happen, and says nothing about what depends on values:
 | `DEADLOCK` | error | steps wait on each other, so none of them can run | as above |
 | `NEVER_RUNS` | error | a step's requirements can never all be met, or nobody may propose it | `approve can never run: it requires reviewed, which no step reaches: reach reviewed from a step, or remove the requirement` |
 | `CLOSES_AT_OPENING` | error | no step starts by itself when the case opens, so it closes at once and every proposal is refused | `nothing starts by itself when claim opens, so it closes at once and every proposal is refused: let a step start by itself with nothing required, or add stays_open` |
-| `NEVER_CLOSES` | error | the case stays open, no close reason names a registered role, and `closes_when` is empty or can never be met | `claim stays open, no close reason names a registered role, and closes_when never closes it, so nobody could ever close it: name a registered role in a close reason` |
+| `NEVER_CLOSES` | error | the case stays open, no close reason names a registered role, and `closes_when` is empty or can never be met | `claim stays open, none of its close reasons' roles (supprt) is registered, and closes_when never closes it, so nobody could ever close it: name a registered role in a close reason` |
 | `CLOSE_UNREACHABLE` | warning | a `closes_when` milestone can never be reached | as above |
 | `UNREACHABLE_MILESTONE` | warning | no step or outcome reaches a milestone, and nothing requires it | `no step reaches reviewed: reach it from a step or an outcome, or remove it` |
 

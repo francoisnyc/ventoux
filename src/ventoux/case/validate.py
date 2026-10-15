@@ -22,6 +22,7 @@ from ventoux.case.reach import (
     shortest_circle,
     waited_on,
 )
+from ventoux.case.registered import role_issues_of, source_issues_of, system_issues_of
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
 from ventoux.core.catalog import Catalog
@@ -54,11 +55,14 @@ def validate_case(
                 "stays_open",
             )
         )
-    found += never_run(case, catalog, can) + never_closes(case, catalog, can)
+    nobody_closes = never_closes(case, catalog, can)
+    found += never_run(case, catalog, can) + nobody_closes
     contracts, unknown_contracts = called_contracts(case, catalog)
     supplied, unknown_plans = supplied_plans(case, plans or {})
     found += unknown_contracts + unknown_plans
     found += contract_input_issues(case, contracts) + plan_input_issues(case, supplied)
+    found += role_issues_of(case, catalog, closing=not nobody_closes)
+    found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     return found + close_unreachable(case, can) + unreachable_milestones(case)
 
 
@@ -114,13 +118,15 @@ def never_closes(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[
         return []
     if case.closes_when and all(name in can for name in case.closes_when):
         return []  # closes_when closes it
+    # The roles are named here, so no UNKNOWN_ROLE repeats them: one cause, one issue.
+    roles = ", ".join(sorted(closers))
     return [
         Issue(
             "close_reasons",
             "NEVER_CLOSES",
-            f"{case.case} stays open, no close reason names a registered role, and closes_when "
-            "never closes it, so nobody could ever close it: name a registered role in a close "
-            "reason",
+            f"{case.case} stays open, none of its close reasons' roles ({roles}) is registered, "
+            "and closes_when never closes it, so nobody could ever close it: name a registered "
+            "role in a close reason",
         )
     ]
 

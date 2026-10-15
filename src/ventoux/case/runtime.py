@@ -130,7 +130,7 @@ def decide(
     elif isinstance(event, Retried):
         retry(case, catalog, state, event)
     elif isinstance(event, Shown):
-        record_shown(case, state, event)
+        record_shown(case, catalog, state, event)
     elif isinstance(event, ForgetApproved):
         forget(case, catalog, state, event)
     elif isinstance(event, CloseAsked):
@@ -149,7 +149,7 @@ def decide(
     return state, commands
 
 
-def record_shown(case: CaseDefinition, state: CaseState, event: Shown) -> None:
+def record_shown(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Shown) -> None:
     """Record that `event.by` was shown the record behind a reference: its system and reference,
     never its content (brief, D16). Refused if it couldn't have happened (brief, D30)."""
     if (wrong := identifier_problem(event.by)) is not None:
@@ -161,7 +161,7 @@ def record_shown(case: CaseDefinition, state: CaseState, event: Shown) -> None:
     declared = case.fields[event.field].declared
     if not isinstance(declared, ReferenceType):
         raise ShownRefused(f"{event.field} is not a reference: there is no record to show")
-    if not may_see(case, event.field, event.roles):
+    if not may_see(case, event.field, event.roles, catalog.roles):
         needs = " or ".join(seen_by(case, event.field))
         raise ShownRefused(f"{event.by} can't see {event.field}: it needs {needs}")
     if event.field not in state.values:
@@ -187,11 +187,20 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
 
 
 def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, object]) -> None:
-    """Refuse a case whose references name systems nobody registered, and first values that
-    aren't the case's fields, of their types, given at the opening."""
+    """Refuse a case whose references name systems nobody registered, or whose fields are
+    declared untrusted with labels nobody registered, and first values that aren't the case's
+    fields, of their types, given at the opening."""
     setters = set_by(case)
     declared_types = {name: field.declared for name, field in case.fields.items()}
     problems = unregistered(declared_types, catalog.systems)
+    # A label the engine doesn't know is refused, never taken as a new kind of untrusted
+    # (brief, D12) (brief, D35).
+    problems += [
+        f"{name} is declared {field.source}, a label nobody registered"
+        for name, field in case.fields.items()
+        if field.source is not None
+        and field.source.removeprefix("untrusted:") not in catalog.labels
+    ]
     for name, value in file.items():
         if name not in case.fields:
             fields = listed(sorted(case.fields))

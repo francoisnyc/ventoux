@@ -235,7 +235,7 @@ class CaseWorkflow:
     def view(self, roles: list[str]) -> CaseView:
         """The case file as a person holding `roles` sees it, filtered here, in the worker, so
         nothing hidden from them leaves it (brief, D30)."""
-        return case_view(self.case, self.state, roles)
+        return case_view(self.case, self.state, roles, self.catalog.roles)
 
     @workflow.query(name="approval_sheet")
     def approval_sheet(self, asked: SheetAsked) -> SheetAnswer:
@@ -244,7 +244,10 @@ class CaseWorkflow:
         nothing. A refusal comes back as data: a failure's message is sealed whoever raised it
         (brief, D31), and the reader must learn why; it names the entry, never a value."""
         try:
-            return SheetAnswer(sheet_of(self.case, self.state, asked.entry, asked.roles, asked.at))
+            sheet = sheet_of(
+                self.case, self.state, asked.entry, asked.roles, asked.at, self.catalog.roles
+            )
+            return SheetAnswer(sheet)
         except (SheetRefused, TimeRefused) as refused:
             return SheetAnswer(None, str(refused))
 
