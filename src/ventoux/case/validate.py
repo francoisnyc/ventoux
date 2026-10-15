@@ -4,6 +4,7 @@ opens (layer 10). See docs/layers/10-case-validation.md and docs/guides/cases.md
 
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.reach import (
+    Through,
     can_happen,
     can_start,
     reachable,
@@ -194,18 +195,22 @@ def after_close(case: CaseDefinition, catalog: Catalog, name: str) -> str:
     before = reached_before(case, catalog, name)
     written = [m for m in case.closes_when if before[m] is None]
     reached = [m for m in case.closes_when if before[m] is not None]
-    steps = list(dict.fromkeys(step for m in reached if (step := before[m]) is not None))
+    steps = list(dict.fromkeys(by[0] for m in reached if (by := before[m]) is not None))
     once = f"{case.closes_when[0]} is" if len(case.closes_when) == 1 else "they are"
     waits = []
     if written:
         waits.append(f"requires {listed(written)}")
     if steps:
-        reach = "reaches" if len(steps) == 1 else "reach"
-        waits.append(f"runs only after {listed(steps)}, which {reach} {listed(reached)}")
+        waits.append(
+            f"runs only after {joined([through(before, step, reached) for step in steps])}"
+        )
     # A fix that names one thing to change only where changing it would let the step run.
-    if not steps:
-        one = written[0] if len(written) == 1 else "one of them"
-        fix = f"remove {one} from its requires, or from closes_when"
+    if len(written) > 1 and not steps:
+        # Removing one from closes_when would leave the step requiring another, which still
+        # closes the case: only its requires can change.
+        fix = "remove one of them from its requires"
+    elif not steps:
+        fix = f"remove {written[0]} from its requires, or from closes_when"
     elif len(steps) == 1 and not written:
         fix = f"run {name} before {steps[0]}, or remove {listed(reached)} from closes_when"
     else:
@@ -214,6 +219,22 @@ def after_close(case: CaseDefinition, catalog: Catalog, name: str) -> str:
         f"{name} can never run: it {' and '.join(waits)}, and {case.case} closes once {once} "
         f"reached, before {name} could start: {fix}"
     )
+
+
+def through(before: dict[str, Through | None], step: str, milestones: list[str]) -> str:
+    """How the waited-for `step` makes some of `milestones` sure: `notify, which requires paid and
+    reaches notified`."""
+    required = [m for m in milestones if before[m] == (step, "requires")]
+    reached = [m for m in milestones if before[m] == (step, "reaches")]
+    parts = [f"requires {listed(required)}"] if required else []
+    if reached:
+        parts.append(f"reaches {listed(reached)}")
+    return f"{step}, which {' and '.join(parts)}"
+
+
+def joined(clauses: list[str]) -> str:
+    """Clauses that hold commas themselves, joined so each stays apart: `a, …, and b, …`."""
+    return clauses[0] if len(clauses) == 1 else f"{', '.join(clauses[:-1])}, and {clauses[-1]}"
 
 
 def why_never(case: CaseDefinition, name: str, waits_on: str) -> str:

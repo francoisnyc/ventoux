@@ -6,6 +6,7 @@ never happen on any path (brief, D34).
 """
 
 from collections.abc import Collection, Mapping
+from typing import Literal
 
 from ventoux.case.definition import (
     ActivityStep,
@@ -102,24 +103,28 @@ def after_the_close(case: CaseDefinition, catalog: Catalog, name: str) -> bool:
     return bool(case.closes_when) and set(case.closes_when) <= set(before)
 
 
-def reached_before(case: CaseDefinition, catalog: Catalog, name: str) -> dict[str, str | None]:
+# A step `name` waits for, and how it makes a milestone sure: it `requires` it, or `reaches` it.
+type Through = tuple[str, Literal["requires", "reaches"]]
+
+
+def reached_before(case: CaseDefinition, catalog: Catalog, name: str) -> dict[str, Through | None]:
     """Each milestone surely reached before the step `name` can start, and the step it waits for
-    that reaches it, or None for a milestone it requires itself. A required step is done before,
-    and so are the steps it required in turn; milestones are never undone."""
+    that requires or reaches it, or None for a milestone it requires itself. A required step is
+    done before, and so are the steps it required in turn; milestones are never undone."""
     required = requirements(case)
-    found: dict[str, str | None] = {}
+    found: dict[str, Through | None] = {}
     seen: set[str] = set()
     waiting = [name]
     while waiting:
         here = waiting.pop(0)
         for requirement in required[here]:
             if requirement in case.milestones:
-                found.setdefault(requirement, None if here == name else here)
+                found.setdefault(requirement, None if here == name else (here, "requires"))
             elif requirement not in seen:
                 seen.add(requirement)
                 waiting.append(requirement)
                 for milestone in surely_reached(case, catalog, requirement):
-                    found.setdefault(milestone, requirement)
+                    found.setdefault(milestone, (requirement, "reaches"))
     return found
 
 

@@ -378,9 +378,9 @@ def test_what_a_step_waits_for_is_followed_through_the_steps_it_requires() -> No
         Issue(
             "steps.thank.requires",
             "NEVER_RUNS",
-            "thank can never run: it runs only after draft and review, which reach sent and "
-            "reviewed, and letter closes once they are reached, before thank could start: change "
-            "what it requires, or closes_when",
+            "thank can never run: it runs only after draft, which reaches sent, and review, which "
+            "reaches reviewed, and letter closes once they are reached, before thank could start: "
+            "change what it requires, or closes_when",
         )
     ]
     # Requiring reviewed itself, and waiting for draft: both parts said.
@@ -622,7 +622,33 @@ def test_a_step_after_a_close_on_two_milestones_never_runs() -> None:
             "steps.thank.requires",
             "NEVER_RUNS",
             "thank can never run: it requires assessed and paid, and claim closes once they are "
-            "reached, before thank could start: remove one of them from its requires, or from "
-            "closes_when",
+            "reached, before thank could start: remove one of them from its requires",
+        )
+    ]
+    # Removing one from closes_when, as the advice once said, leaves thank requiring the other,
+    # on which the case still closes: still never run.
+    claim["closes_when"] = ["paid"]
+    assert [issue.code for issue in errors(claim)] == ["NEVER_RUNS"]
+
+
+def test_a_milestone_a_waited_for_step_requires_is_said_so() -> None:
+    # notify requires paid and reaches notified; thank, after notify, waits for both. notify
+    # doesn't reach paid: it requires it.
+    claim = guide_json(0)
+    claim["milestones"]["notified"] = {"display": {"title": "Customer told"}}
+    claim["closes_when"] = ["paid", "notified"]
+    claim["steps"]["notify"] = {**NOTIFY, "requires": ["paid"], "reaches": ["notified"]}
+    claim["steps"]["thank"] = {
+        **NOTIFY,
+        "display": {"title": "Thank the customer"},
+        "requires": ["notify"],
+    }
+    assert errors(claim) == [
+        Issue(
+            "steps.thank.requires",
+            "NEVER_RUNS",
+            "thank can never run: it runs only after notify, which requires paid and reaches "
+            "notified, and claim closes once they are reached, before thank could start: run "
+            "thank before notify, or remove paid and notified from closes_when",
         )
     ]
