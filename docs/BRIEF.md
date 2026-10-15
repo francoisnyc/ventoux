@@ -919,6 +919,14 @@ be erased on request), has size limits, and a second copy of business records go
   that don't depend on what it read (D9, D29), so a field's sources are the union of what its
   writers stamp. A fixpoint over sources is needed once a field is computed from other fields
   (rules updating the case file, layer 11; design question 17).
+- **Once every `closes_when` milestone is reached, nothing new starts,** even while a failed run
+  holds the close. Adds to D10 ("no step starts" once a case closes) and D26 (a failed run is
+  never cancelled by a milestone), between which admission went on: a step waiting for the
+  milestone started though the case was about to close. Now a proposal is refused, saying why; an
+  approval given meanwhile starts nothing; the failed run, retried, still runs, and its completion
+  closes the case. So a step requiring every `closes_when` milestone can never run, and case
+  validation's error for it is a proof. *Added in the tutor review of 10a, before D34 was
+  merged.*
 - **The runtime depends on nothing validation did.** No flag says a definition was checked; the
   drivers don't call `validate_case`; every runtime refusal stays. A case that skips validation is
   as safe as before.

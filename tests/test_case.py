@@ -24,6 +24,7 @@ from ventoux.core.policy import only_from
 from ventoux.testing import (
     CATALOG,
     START,
+    Activity,
     AnswerRefused,
     CaseRefused,
     CloseRefused,
@@ -1436,6 +1437,123 @@ def test_closes_when_waits_while_a_step_needs_attention() -> None:
     )
     assert retried.needs_attention == []
     assert retried.history[-1] == "closed: paid reached"
+
+
+# --- Layer 10a, tutor review: nothing new starts once closes_when is reached ---
+
+
+def held_close() -> tuple[dict[str, Any], dict[str, Activity]]:
+    """The refund closing on `paid`, with a letter that fails once, so its failed run holds the
+    close (brief, D26), and `thank`, a task requiring `paid`. Also the fakes."""
+    definition = refund(closes_when=["paid"])
+    definition["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter about the refund"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+    }
+    definition["steps"]["thank"] = {
+        "kind": "task",
+        "display": {"title": "Thank the customer"},
+        "roles": ["support"],
+        "requires": ["paid"],
+        "outcomes": {"thanked": {"display": {"title": "Thanked"}}},
+    }
+    calls: list[str] = []
+
+    def letter_down_once(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs["idempotency_key"])
+        if len(calls) == 1:
+            raise ConnectionError("provider unreachable")
+        return {"draft_id": "draft-refund"}
+
+    return definition, {"letters.draft@2": letter_down_once}
+
+
+def test_nothing_new_starts_while_a_failed_run_holds_the_close() -> None:
+    # The tutor review's probe. Once every closes_when milestone is reached, the case closes as
+    # soon as nothing needs attention; meanwhile no step starts (brief, D10, D26, D34).
+    definition, fakes = held_close()
+    run = run_case(
+        definition, file=SMALL, answers=[SMALL_REVIEW], people=OPERATORS, activities=fakes
+    )
+    assert "reached paid" in run.history
+    assert run.needs_attention == [
+        "notify#1: letters.draft@2 failed with ConnectionError: ‹sensitive›"
+    ]
+    assert not any(line.startswith("started thank") for line in run.history)
+    assert run.status == "open"
+
+
+def test_a_proposal_while_the_close_is_held_is_refused() -> None:
+    definition, fakes = held_close()
+    definition["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up again"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "automatic": False,
+        "proposed_by": ["support"],
+        "requires": ["review"],
+    }
+    refused = (
+        "^paid is reached, so the case closes once notify#1 is retried, or a person closes it: "
+        "nothing new starts$"
+    )
+    with pytest.raises(ProposalRefused, match=refused):
+        run_case(
+            definition,
+            file=SMALL,
+            answers=[SMALL_REVIEW, propose("check_order", "ana")],
+            people=OPERATORS,
+            activities=fakes,
+        )
+
+
+def test_the_failed_run_retried_closes_the_case() -> None:
+    definition, fakes = held_close()
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW, retry("notify#1", "omar")],
+        people=OPERATORS,
+        activities=fakes,
+    )
+    assert run.needs_attention == []
+    assert not any(line.startswith("started thank") for line in run.history)
+    assert run.history[-1] == "closed: paid reached"
+
+
+def test_an_approval_answered_while_the_close_is_held_starts_nothing() -> None:
+    # goodwill's approval is asked before paid is reached and answered after: it is given, and
+    # starts nothing; closing withdraws it once the letter is retried.
+    definition, fakes = held_close()
+    definition["steps"]["goodwill"] = {
+        "kind": "activity",
+        "display": {"title": "Refund a goodwill gesture"},
+        "activity": "payments.refund@2",
+        "requires": ["review"],
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+        "approval": {"roles": ["support-lead"], "display": {"reason": "Goodwill needs a lead"}},
+    }
+    answers = [SMALL_REVIEW, ("goodwill", "approve", "sam")]
+    run = run_case(definition, file=SMALL, answers=answers, people=OPERATORS, activities=fakes)
+    assert run.history.index("reached paid") < run.history.index(
+        "sam answered goodwill.approval#1 approve as support-lead"
+    )
+    assert not any(line.startswith("scheduled goodwill") for line in run.history)
+    _, fresh = held_close()  # the letter fails once again in this run
+    closed = run_case(
+        definition,
+        file=SMALL,
+        answers=[*answers, retry("notify#1", "omar")],
+        people=OPERATORS,
+        activities=fresh,
+    )
+    assert not any(line.startswith("scheduled goodwill") for line in closed.history)
+    assert closed.history[-1] == "closed: paid reached"
 
 
 # --- Layer 8d, slice 1: outputs into the case file ---

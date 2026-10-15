@@ -272,10 +272,14 @@ assert retried.closed
 
 A case closes by itself when nothing is left to do (brief, D10). Two definition keys change that:
 `"closes_when": ["paid"]` closes it as soon as the milestones are reached, and `"stays_open":
-true` keeps it open until a person closes it. A case whose steps all wait to be proposed needs
-`stays_open`: otherwise nothing is pending when it opens, and it closes at once. `closes_when`
-never cancels a step that needs attention: the case waits until an operator retries it, or a person
-closes the case with a reason.
+true` keeps it open when nothing is left to do, until a person closes it or `closes_when` does. A
+case whose steps all wait to be proposed needs `stays_open`: otherwise nothing is pending when it
+opens, and it closes at once. `closes_when` never cancels a step that needs attention: the case
+waits until an operator retries it, or a person closes the case with a reason. Meanwhile nothing
+new starts: a step waiting for `paid` doesn't start, a proposal is refused (`paid is reached, so
+the case closes once notify#1 is retried, or a person closes it: nothing new starts`), and an
+approval given meanwhile starts nothing; the retried run still runs, and closes the case when it
+completes.
 
 A person closes a case with a **close reason** the definition declares, with who may use it:
 
@@ -679,7 +683,7 @@ what can *never* happen, and says nothing about what depends on values:
 |---|---|
 | steps that wait on each other | a `when` that real data never makes true |
 | a step requiring a milestone nothing reaches | a review answered `deny`, so `paid` is never reached: that is a path, not a deadlock |
-| a step requiring every milestone `closes_when` names, which the case has closed on before the step could start | a rejected approval, or a failed step waiting for an operator |
+| a step requiring every milestone `closes_when` names, which the case closes on before the step could start: nothing new starts once they are reached, even while a failed step holds the close | a rejected approval, or whether an operator retries a failed step |
 | a case that closes the moment it opens | whether anyone eligible is there to answer or approve |
 | a case nobody could ever close | |
 

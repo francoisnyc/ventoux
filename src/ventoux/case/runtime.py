@@ -24,7 +24,13 @@ from ventoux.case.admission import (
 from ventoux.case.answers import AnswerRefused, judge_approval, judge_task
 from ventoux.case.approvals import ask, follow, lapsed, needs_approval
 from ventoux.case.called import called
-from ventoux.case.closing import begin_closing, close_when_reached, refuse_to_close, settle
+from ventoux.case.closing import (
+    begin_closing,
+    close_held,
+    close_when_reached,
+    refuse_to_close,
+    settle,
+)
 from ventoux.case.definition import (
     ActivityStep,
     CallStep,
@@ -292,6 +298,8 @@ def propose(
         raise ProposalRefused(wrong)
     if state.phase != "open":
         raise ProposalRefused(f"the case is {state.phase}: nothing starts")
+    if close_held(case, state):
+        raise ProposalRefused(held_close_refusal(case, state))
     if event.step not in case.steps:
         raise ProposalRefused(f"{event.step} is not a step of {case.case}")
     step = case.steps[event.step]
@@ -318,6 +326,19 @@ def propose(
     state.history.append(f"{event.by} proposed {event.step} as {role}")
     state.proposers[event.step] = event.by  # never its approver (brief, D25)
     start(case, catalog, state, event.step, step, commands)
+
+
+def held_close_refusal(case: CaseDefinition, state: CaseState) -> str:
+    """Why nothing starts while a failed run holds the close: what was reached, and what the case
+    waits for before it closes (brief, D34)."""
+    reached = listed(list(case.closes_when))
+    verb = "is" if len(case.closes_when) == 1 else "are"
+    failed = [run.entry for run in state.runs if run.status in ("failed", "retrying")]
+    retried = "is" if len(failed) == 1 else "are"
+    return (
+        f"{reached} {verb} reached, so the case closes once {listed(failed)} {retried} retried, "
+        "or a person closes it: nothing new starts"
+    )
 
 
 def answer_task(
@@ -585,6 +606,11 @@ def admit(
         follow(case, state)  # an open approval follows the case file (brief, D25)
         for name, step in case.steps.items():
             if not free_to_start(state, name, step) or not requirements_met(required[name], state):
+                continue
+            # Once the close is only held by a failed run, nothing new starts: only the run an
+            # operator retries (brief, D34).
+            latest = latest_run(state, name)
+            if close_held(case, state) and (latest is None or latest.status != "retrying"):
                 continue
             try:
                 # Freshness first, before the condition, the approval and the start, so each

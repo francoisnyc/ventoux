@@ -86,6 +86,17 @@ def close_when_reached(case: CaseDefinition, state: CaseState) -> None:
         begin_closing(state, f"the case closes when {names} {verb} reached", f"{names} reached")
 
 
+def close_held(case: CaseDefinition, state: CaseState) -> bool:
+    """Whether every `closes_when` milestone is reached while the case is still open: a failed
+    run holds the close until it is retried or a person closes the case (brief, D26). Nothing new
+    starts meanwhile, as in any close (brief, D10, D34)."""
+    return (
+        state.phase == "open"
+        and bool(case.closes_when)
+        and all(milestone in state.milestones for milestone in case.closes_when)
+    )
+
+
 def pending(state: CaseState) -> bool:
     """Whether anything is left to do (brief, D10): a task open, an activity running, an approval
     asked or given and not yet spent, or a step failed, which waits for a person (brief, D17)."""
