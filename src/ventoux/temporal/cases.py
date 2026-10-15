@@ -158,6 +158,8 @@ class CaseWorkflow:
         # Each child plan running, by its step run, to stop it if the case closes (brief, D28).
         self.children: dict[str, workflow.ChildWorkflowHandle[Any, RunReport]] = {}
         self.stopping: set[str] = set()  # step runs whose plans the case has stopped
+        # An engine bug raised in a task beside the loop, which the loop raises in its turn.
+        self.broken: Exception | None = None
 
     # Temporal: a signal is a message into a running workflow, recorded in its history, so replay
     # delivers it again at the same point.
@@ -234,7 +236,13 @@ class CaseWorkflow:
             kind = type(refused).__name__
             raise ApplicationError(str(refused), type=kind, non_retryable=True) from None
         while self.state.phase != "closed":
-            await workflow.wait_condition(lambda: bool(self.inbox) or self.time_to_switch())
+            await workflow.wait_condition(
+                lambda: bool(self.inbox) or self.time_to_switch() or self.broken is not None
+            )
+            if self.broken is not None:
+                # An engine bug is never lost: it fails the workflow task, which Temporal retries
+                # until fixed code is deployed (brief, D17); the log keeps its type (brief, D31).
+                raise self.broken
             if not self.inbox:
                 self.switch(start)
             event = self.inbox.pop(0)
@@ -281,17 +289,29 @@ class CaseWorkflow:
 
     def carry(self, command: Command) -> None:
         """Start the command; what it gives comes back to the inbox when it arrives."""
-        # asyncio: a task runs alongside the loop; Temporal's event loop runs it deterministically.
         if isinstance(command, StopPlan):
-            asyncio.create_task(self.stop_plan(command))
+            self.beside(self.stop_plan(command))
             return
         self.running += 1
         if isinstance(command, StartPlan):
-            asyncio.create_task(self.until_back(self.run_plan(command)))
+            self.beside(self.until_back(self.run_plan(command)))
         elif isinstance(command, StartWorkflow):
-            asyncio.create_task(self.until_back(self.run_workflow(command)))
+            self.beside(self.until_back(self.run_workflow(command)))
         else:
-            asyncio.create_task(self.until_back(self.run_activity(command)))
+            self.beside(self.until_back(self.run_activity(command)))
+
+    def beside(self, work: Coroutine[Any, Any, None]) -> None:
+        """Run `work` in a task beside the loop. An exception it raises is an engine bug: kept
+        for the loop to raise, never left in the task, where nobody would retrieve it and
+        Temporal's SDK would log the task's description, quoting it (layer 9c)."""
+        # asyncio: a task runs alongside the loop; Temporal's event loop runs it deterministically.
+        asyncio.create_task(self.watched(work))
+
+    async def watched(self, work: Coroutine[Any, Any, None]) -> None:
+        try:
+            await work
+        except Exception as bug:  # noqa: BLE001 (every kind of bug: none may vanish)
+            self.broken = bug
 
     async def until_back(self, carried: Coroutine[Any, Any, None]) -> None:
         """Run `carried`, which puts what happened in the inbox; then it no longer runs."""

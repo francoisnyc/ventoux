@@ -15,7 +15,12 @@ from typing import Any
 import pytest
 from temporalio import workflow
 from temporalio.api.common.v1 import Payload
-from temporalio.client import Client, WorkflowHandle, WorkflowQueryFailedError
+from temporalio.client import (
+    Client,
+    WorkflowExecutionStatus,
+    WorkflowHandle,
+    WorkflowQueryFailedError,
+)
 from temporalio.converter import WorkflowSerializationContext
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
@@ -34,6 +39,7 @@ from test_temporal_sensitive import reported as reported_case
 from ventoux.temporal.cases import (
     CaseForgotten,
     CaseReport,
+    CaseStart,
     CaseWorkflow,
     answer,
     report,
@@ -56,6 +62,7 @@ with workflow.unsafe.imports_passed_through():
     from test_sensitive import FILE, NATIONAL_ID, claim
 
     from ventoux.case.memory import Activity
+    from ventoux.case.state import Schedule
     from ventoux.testing import (
         FAKES,
         DevelopmentCases,
@@ -687,3 +694,45 @@ def await_now[T](awaitable: Awaitable[T]) -> T:
         return await awaitable
 
     return asyncio.run(go())
+
+
+# --- Slice 9: 9b's gap, an exception nobody retrieves in a case's task ---
+
+
+# Temporal: a case workflow with an engine bug where it runs an activity, quoting a value.
+@workflow.defn(name="ventoux.case")
+class BrokenCases(CaseWorkflow):
+    catalog = DevelopmentCases.catalog
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+    async def run_activity(self, command: Schedule) -> None:
+        raise ValueError(f"no record for {NATIONAL_ID}")
+
+
+def test_an_engine_bug_in_a_task_blocks_the_case(caplog: pytest.LogCaptureFixture) -> None:
+    # An engine bug never vanishes: the case's workflow task fails, and Temporal retries it until
+    # fixed code is deployed (brief, D17). The log keeps the exception's type, never its text,
+    # nor the task's description, which quotes it (brief, D31).
+    caplog.set_level(logging.DEBUG, logger="temporalio")
+
+    async def scenario(client: Client) -> bytes:
+        case = await start_case(client, BrokenCases, claim(), as_json(FILE), "claim-7", QUEUE)
+        await answer(case, "assess#1", "deny", "ana", ["adjuster"])
+        for _ in range(100):  # until the worker says the workflow task failed
+            if any("Failed activation" in record.getMessage() for record in caplog.records):
+                break
+            await asyncio.sleep(0.05)
+        history = await case.fetch_history()
+        # Held where the bug struck: the task deciding Ana's answer never completed.
+        assert history.events[-1].HasField("workflow_task_started_event_attributes")
+        assert (await case.describe()).status == WorkflowExecutionStatus.RUNNING
+        return as_stored(history)[0]
+
+    raw = on_temporal(scenario, cases=BrokenCases)
+    assert NATIONAL_ID.encode() not in raw  # the failure is sealed with the case's key
+    logged = [logging.Formatter().format(record) for record in caplog.records]
+    assert any("Failed activation" in line and line.endswith("(ValueError)") for line in logged)
+    assert not [line for line in logged if NATIONAL_ID in line]

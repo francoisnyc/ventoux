@@ -650,7 +650,7 @@ open case as `forgotten`; it then destroys the key through a registered activity
    can be proposed again (the request's ID reuse policy allows a new run once one has ended).
 7. **9b's gap** (an exception nobody retrieves in a case workflow's task is logged with the task's
    repr, which the log filter can't scrub) gets the last slice: shown first, closed if cheap,
-   otherwise noted here.
+   otherwise noted here. *Closed in slice 9.*
 
 ### How it works
 
@@ -916,6 +916,23 @@ Each starts with its negative test, seen failing for the right reason.
   closing report; and the request's history, which replays with a converter holding no key.
   Staff identifiers stay. It passed when written, measuring what 9b and slices 4–7 built; it was
   seen failing with `destroy_key` destroying nothing (the opening still opened).
+- **9b's gap was worse than a log line, and is closed** (slice 9). Shown first with a case
+  workflow whose `run_activity` raises a `ValueError` quoting the national ID, standing for an
+  engine bug: the exception stayed in its task, the case stayed `RUNNING` for ever with the
+  step scheduled and never back (an engine bug lost, where D17 says it must block), and at the
+  worker's shutdown Temporal's SDK logged `Task exception was never retrieved` with the task's
+  repr, quoting the exception's text, which the filter can't scrub (it keeps the message).
+  The fix, a few lines in `temporal/cases.py`: every task beside the loop runs through
+  `beside`, which keeps an exception it raises; the loop raises it, so the workflow task fails
+  (Temporal retries it until fixed code is deployed) and the log reads `Failed activation on
+  workflow ventoux.case … (ValueError)`, the type only. The test waits for that record, sees
+  the case held where the bug struck (its last event a started workflow task, still running),
+  and finds the ID in neither the log nor the history; it was seen failing on the old code (the
+  task completed and the case went on).
+- **Temporal doesn't write `WorkflowTaskFailed` at once** (slice 9): the first version of that
+  test waited for the event and never saw it, though the worker had failed the task; the history
+  ends with the task started. The test reads the worker's log record and the history's last
+  event instead.
 
 ### Promises
 
@@ -942,4 +959,5 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 | A forgotten case's ID never opens a case again | TF `test_a_forgotten_id_opens_no_case` |
 | After forgetting, `report` reads the closing report, `view` is refused, and a query or replay fails with the forgotten message, never plain text; the worker carries on | TF `test_reading_a_forgotten_case` |
 | After forgetting, the history, its export and the reports keep every decision, who made it and as what, the definition, the values that weren't sensitive where they were used, and the closing report; every sensitive value, form value in an answer and failure message is unreadable; the request's own history replays without a key | TF `test_what_the_audit_keeps_after_forgetting` |
+| An exception raised in a case workflow's task fails its workflow task, holding the case until fixed code is deployed; the log keeps its type, never its text (9b's gap) | TF `test_an_engine_bug_in_a_task_blocks_the_case` |
 | The guide's example runs as written, and its refusal rows are what the engine says | TF `test_the_guides_forget_example_runs_as_written`; F, TF `test_the_guides_refusals_are_what_the_engine_says` |
