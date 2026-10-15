@@ -868,7 +868,17 @@ and record the key points. A question is closed once you can explain the answer 
   In one line: the static check prevents, for authors, on every path; the runtime check enforces,
   for this value, on this path. Neither replaces the other. In 8d, output provenance gets only the
   runtime check; case validation (layer 10) will read the declared sources statically.
-- Status: open, until "every path" and "who hears of it" come back from memory.
+- Retrieval (layer 9d warm-up), the follow-up: "the static one catches problems on every path,
+  before release." **Every path** came back from memory, for the first time: the runtime check
+  sees only the path a run takes, so a bad flow on a rare branch may surface months later in a
+  live case. **Before release** carries the cost: an edit then, a new release and open cases on
+  the old one after. One part didn't come back: **who hears of it.** The static refusal reaches
+  the *author*, at `ventoux check` or in the pull request, who can change the definition; the
+  runtime one reaches an *operator*, with a case stuck and a customer waiting, who can't. 9d has
+  the same split: a `max_age` naming a field its step doesn't read is refused when the
+  definition is read (for the author), while a stale fact from a person is found at runtime and
+  the case needs attention (for an operator).
+- Status: open, until "who hears of it" comes back from memory.
 
 
 ## 35. Layer 6: what lives in workflow history
