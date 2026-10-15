@@ -53,7 +53,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
 
 
 def given_as_data(given: GivenApproval) -> dict[str, Any]:
-    return {"entry": given.entry, "by": given.by, "digest": given.digest}
+    return {"entry": given.entry, "by": given.by, "digest": given.digest, "seen": dict(given.seen)}
 
 
 def state_from_data(data: dict[str, Any]) -> CaseState:

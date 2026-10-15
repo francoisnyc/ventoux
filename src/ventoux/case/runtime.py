@@ -367,7 +367,7 @@ def answer_approval(
             # Fail closed: an approval of inputs nobody can read approves nothing.
             fail(state, approval.step, f"the inputs of {approval.step} can't be read: {error}")
             return
-        state.given[approval.step] = GivenApproval(approval.entry, event.by, digest)
+        state.given[approval.step] = GivenApproval(approval.entry, event.by, digest, approval.seen)
         return
     # A rejection is an outcome: the step doesn't run (brief, D23).
     entry = next_entry(state, approval.step)

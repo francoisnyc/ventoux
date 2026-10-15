@@ -20,6 +20,9 @@ class GivenApproval:
     entry: str
     by: str
     digest: str | Sensitive  # of the step's inputs (brief, D11); sensitive if they are
+    # The values its step read when it was asked, by field, as the open approval saw them: a
+    # refresh that changes one lapses it (brief, D33).
+    seen: dict[str, object] = field(default_factory=dict[str, object])
 
 
 @dataclass

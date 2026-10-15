@@ -1208,6 +1208,17 @@ Each starts with its negative test, seen failing for the right reason.
   out would vanish at every switch. Each time is written as a JSON integer and read back as an
   `int`, refused if it isn't whole (the converter reads numbers as decimals). Slice 8 still runs
   a real switch on Temporal.
+- **A given approval that can't be spent no longer holds the case open** (slice 6): before the
+  lapse, a refresh that made `pay`'s condition false left Sam's approval in `given` for ever,
+  and the case never closed. Now it lapses, and the case closes with nothing paid.
+- **A lapse says "when refreshed" only when it was** (slice 6): a given approval now waits while
+  its refresh runs, so a person's answer can also come between (Ana sends the review back and
+  approves 300). That lapses it too, and is asked again, but the line says only what changed:
+  `lapsed pay.approval#1: approved_amount changed`. Before 9d nothing could come between, as a
+  given approval was spent in the decision that gave it (brief, D25).
+- **Three of slice 6's tests passed at once** (slice 6): asking only on fresh facts follows from
+  slice 2's order, and an open approval was already withdrawn by layer 8's `follow`. Kept as
+  guards; the new wording's test was seen failing on the old wording.
 - **One refresh per need, remembered by fact** (slice 5): `state.refreshing` holds, for each
   fact being fetched again, the run fetching it. If that run has landed and the fact still
   isn't its, it gave nothing fresh: the step needs attention, saying what the run gave. The
@@ -1261,8 +1272,9 @@ the pull request is opened. `FF` is `tests/test_fresh_facts.py` (new), `TFF`
 | A refresh that gives no fresh value makes the step need attention; one that fails needs attention itself, a step requiring it waits and runs once it is retried, and a step only reading its fact needs attention: never a second refresh for the same need | FF `test_a_refresh_without_a_fresh_value_needs_attention`, `test_a_failed_refresh_needs_attention_and_is_retried`, `test_a_failed_refresh_is_never_made_again_for_the_same_need` |
 | A fact needed fresh with no time obtained stops the step (fail closed) | FF `test_a_fact_with_no_time_stops_the_step` |
 | A running refresh doesn't undo its step for `requires`; two steps needing the same fact share one refresh | FF `test_a_running_refresh_undoes_nothing_it_doesnt_change` |
-| A refresh that changes nothing leaves an open or a given approval standing | FF `test_an_unchanged_refresh_leaves_approvals_standing` |
-| A refresh that changes a value an open approval read withdraws it; one that changes a value a given approval saw lapses it, and the step is checked again, a new approval asked if still needed | FF `test_a_changed_refresh_withdraws_or_lapses_approvals` |
+| A refresh that changes nothing leaves an open or a given approval standing; an approval is asked only on fresh facts | FF `test_an_unchanged_refresh_leaves_approvals_standing`, `test_a_running_refresh_undoes_nothing_it_doesnt_change`, `test_an_approval_is_asked_only_on_fresh_facts` |
+| A refresh that changes a value an open approval read withdraws it; one that changes a value a given approval saw lapses it, and the step is checked again, a new approval asked if still needed, or none if the step no longer runs, and the case closes | FF `test_a_changed_refresh_withdraws_another_steps_open_approval`, `test_a_changed_refresh_lapses_a_given_approval`, `test_a_changed_refresh_that_stops_the_step_lapses_its_approval` |
+| A lapse says it came from a refresh only when every changed value did | FF `test_a_lapse_says_when_refreshed_only_when_it_was` |
 | A stale sensitive fact needs attention, and no line quotes it; a refresh's sensitive input stays wrapped; a time obtained isn't sensitive | FF `test_sensitive_facts_and_their_times` |
 | The view gives each visible value's time, a hidden field's not; the approval sheet gives each fact's age, read at the time the caller gives | FF `test_people_see_when_each_fact_was_obtained` |
 | No message quotes a value: refresh, staleness and lapse lines name fields and ages | FF `test_freshness_lines_quote_no_value` |

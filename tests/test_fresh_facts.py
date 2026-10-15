@@ -25,6 +25,7 @@ from ventoux.testing import (
     finish,
     later,
     load_definition,
+    propose,
     retry,
     run_case,
     shown,
@@ -557,3 +558,122 @@ def test_a_running_refresh_undoes_nothing_it_doesnt_change() -> None:
     )
     assert "approval of notice by support-lead" in finished.waiting_for  # same status: it stands
     assert finished.reached("pay") and finished.reached("letter")
+
+
+LARGE = {"order_id": "ord-1", "amount": 250}
+REVIEWED_LARGE = ("review", "approve", "ana", {"approved_amount": 250})
+
+
+def test_an_approval_is_asked_only_on_fresh_facts() -> None:
+    # Reviewed on day 3: the status is refreshed before Sam is asked, so his sheet reads the new
+    # value, never the old one.
+    run = run_case(
+        refund_fresh(),
+        file=LARGE,
+        answers=[later("3d"), REVIEWED_LARGE],
+        people=PEOPLE,
+        activities={"orders.lookup@1": answers_in_turn("delivered", "delivered")},
+    )
+    refreshing = run.history.index(
+        "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day"
+    )
+    assert run.history.index("asked pay.approval#1: approval of pay by support-lead") > refreshing
+    assert run.state.obtained["check_order.status"] == Obtained(START + 3 * DAY, "check_order#2")
+
+
+def test_an_unchanged_refresh_leaves_approvals_standing() -> None:
+    # Asked on day 0, given by Sam on day 3: the refresh gives the same status, so his approval
+    # stands and is spent on `pay`.
+    run = run_case(
+        refund_fresh(),
+        file=LARGE,
+        answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
+        people=PEOPLE,
+        activities={"orders.lookup@1": answers_in_turn("delivered", "delivered")},
+    )
+    assert "scheduled check_order#2: orders.lookup@1 (order_id from system:opener)" in run.history
+    assert not any(line.startswith(("lapsed", "withdrew")) for line in run.history)
+    assert run.reached("pay")
+
+
+def test_a_changed_refresh_lapses_a_given_approval() -> None:
+    # Sam approved a refund for a delivered order; the refresh says it was partly returned. His
+    # approval lapses (he never saw that), and `pay`, which may still run, asks again.
+    definition = refund_fresh()
+    definition["steps"]["pay"]["when"] = {
+        "in": [{"var": "check_order.status"}, ["delivered", "partly returned"]]
+    }
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
+        people=PEOPLE,
+        activities={"orders.lookup@1": answers_in_turn("delivered", "partly returned")},
+    )
+    lapsed = run.history.index("lapsed pay.approval#1: check_order.status changed when refreshed")
+    assert run.history.index("asked pay.approval#2: approval of pay by support-lead") > lapsed
+    assert run.waiting_for == ["approval of pay by support-lead"]
+    assert not run.reached("pay")
+    assert "pay" not in run.state.given
+
+
+def test_a_changed_refresh_that_stops_the_step_lapses_its_approval() -> None:
+    # The order was returned: `pay`'s condition is false now, and Sam's approval lapses with
+    # nothing to spend it on. The case closes; nothing is paid.
+    run = run_case(
+        refund_fresh(),
+        file=LARGE,
+        answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
+        people=PEOPLE,
+        activities={"orders.lookup@1": answers_in_turn("delivered", "returned")},
+    )
+    assert "lapsed pay.approval#1: check_order.status changed when refreshed" in run.history
+    assert not run.reached("pay")
+    assert run.closed
+
+
+def test_a_changed_refresh_withdraws_another_steps_open_approval() -> None:
+    # `notice` reads the status in its condition and waits for its approval; the refresh made for
+    # `pay` changes the status, so `notice`'s open approval is withdrawn (brief, D25).
+    definition = refund_fresh()
+    definition["steps"]["notice"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a notice"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "notice"},
+        "requires": ["check_order"],
+        "when": {"!=": [{"var": "check_order.status"}, "lost"]},
+        "approval": {"roles": ["support-lead"], "display": {"reason": "Notices need a lead"}},
+    }
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 80},
+        answers=REVIEWED_ON_DAY_3,
+        people=PEOPLE,
+        activities={"orders.lookup@1": answers_in_turn("delivered", "returned")},
+    )
+    assert "withdrew notice.approval#1: check_order.status changed" in run.history
+    assert "asked notice.approval#2: approval of notice by support-lead" in run.history
+
+
+def test_a_lapse_says_when_refreshed_only_when_it_was() -> None:
+    # While `check_order#2` runs for Sam's approval, Ana sends the review back and approves 300:
+    # the approval lapses because of her answer, not a refresh, and says only what changed.
+    definition = refund_fresh()
+    definition["steps"]["review"].update({"repeatable": True, "proposed_by": ["support"]})
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[
+            finish("check_order#1"),
+            REVIEWED_LARGE,
+            later("3d"),
+            ("pay", "approve", "sam"),
+            propose("review", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 300}),
+        ],
+        people=PEOPLE,
+        held=["check_order"],
+    )
+    assert "lapsed pay.approval#1: approved_amount changed" in run.history
+    assert not any(line.endswith("when refreshed") for line in run.history)
