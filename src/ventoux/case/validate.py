@@ -39,7 +39,7 @@ def validate_case(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
                 "stays_open",
             )
         )
-    found += never_run(case, catalog, can) + never_closes(case, catalog)
+    found += never_run(case, catalog, can) + never_closes(case, catalog, can)
     return found + close_unreachable(case, can) + unreachable_milestones(case)
 
 
@@ -85,19 +85,23 @@ def close_unreachable(case: CaseDefinition, can: set[str]) -> list[Issue]:
     ]
 
 
-def never_closes(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
-    """A case that stays open closes only when a person closes it with a reason; if no reason
-    names a registered role, nobody ever can (brief, D10). A role nobody registered counts for
-    nothing (brief, D22)."""
+def never_closes(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Issue]:
+    """A case that stays open closes when a person closes it with a reason, or by `closes_when`,
+    which closes it too (layer 8b). If no reason names a registered role and `closes_when` can
+    never be met, nobody ever can (brief, D10). A role nobody registered counts for nothing
+    (brief, D22)."""
     closers = {role for reason in case.close_reasons.values() for role in reason.roles}
     if not case.stays_open or closers & set(catalog.roles):
         return []
+    if case.closes_when and all(name in can for name in case.closes_when):
+        return []  # closes_when closes it
     return [
         Issue(
             "close_reasons",
             "NEVER_CLOSES",
-            f"{case.case} stays open, and no close reason names a registered role, so nobody "
-            "could ever close it: name a registered role in a close reason",
+            f"{case.case} stays open, no close reason names a registered role, and closes_when "
+            "never closes it, so nobody could ever close it: name a registered role in a close "
+            "reason",
         )
     ]
 

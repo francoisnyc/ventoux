@@ -277,22 +277,34 @@ def test_closing_at_opening_is_said_beside_a_step_dead_for_its_own_reason() -> N
     assert issues(claim)[1].path == "steps.approve.requires"
 
 
-def test_a_case_nobody_can_close_is_refused() -> None:
-    claim = guide_json(0)
+def staying_open(claim: dict[str, Any]) -> dict[str, Any]:
+    """`claim`, staying open, with one close reason for a role nobody registered."""
     claim["stays_open"] = True
     claim["close_reasons"] = {
         "duplicate": {"display": {"title": "Duplicate claim"}, "roles": ["supprt"]}
     }
-    assert issues(claim) == [
-        Issue(
-            "close_reasons",
-            "NEVER_CLOSES",
-            "claim stays open, and no close reason names a registered role, so nobody could ever "
-            "close it: name a registered role in a close reason",
-        )
-    ]
-    claim["close_reasons"]["duplicate"]["roles"] = ["supprt", "adjuster"]
-    assert issues(claim) == []
+    return claim
+
+
+NEVER_CLOSES = Issue(
+    "close_reasons",
+    "NEVER_CLOSES",
+    "claim stays open, no close reason names a registered role, and closes_when never closes it, "
+    "so nobody could ever close it: name a registered role in a close reason",
+)
+
+
+def test_a_case_nobody_can_close_is_refused() -> None:
+    # The tutor review's probe: closes_when closes a case that stays open too (layer 8b), so
+    # paid, which pay reaches, closes this one.
+    assert issues(staying_open(guide_json(0))) == []
+    # With paid unreachable, or no closes_when at all, nobody could ever close it.
+    assert NEVER_CLOSES in issues(staying_open(deadlocked_claim()))
+    without_close = staying_open(guide_json(0))
+    del without_close["closes_when"]
+    assert issues(without_close) == [NEVER_CLOSES]
+    without_close["close_reasons"]["duplicate"]["roles"] = ["supprt", "adjuster"]
+    assert issues(without_close) == []
 
 
 # --- Slice 4: warnings ---
@@ -383,11 +395,8 @@ def closes_at_opening() -> dict[str, Any]:
 
 
 def nobody_closes() -> dict[str, Any]:
-    claim = guide_json(0)
-    claim["stays_open"] = True
-    claim["close_reasons"] = {
-        "duplicate": {"display": {"title": "Duplicate claim"}, "roles": ["supprt"]}
-    }
+    claim = staying_open(guide_json(0))
+    del claim["closes_when"]
     return claim
 
 
