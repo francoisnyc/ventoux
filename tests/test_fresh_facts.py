@@ -13,11 +13,13 @@ import pytest
 from pydantic import BaseModel
 
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.case.freshness import TimeRefused
+from ventoux.case.freshness import TimeRefused, ago, as_said
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, CaseState, Completed, Obtained, Opened
+from ventoux.case.state import Answered, CaseState, Completed, Obtained, Opened, Schedule
+from ventoux.case.visibility import SheetRefused
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.interpreter import Outcome
+from ventoux.core.sensitive import Sensitive
 from ventoux.testing import (
     CATALOG,
     DAY,
@@ -677,3 +679,126 @@ def test_a_lapse_says_when_refreshed_only_when_it_was() -> None:
     )
     assert "lapsed pay.approval#1: approved_amount changed" in run.history
     assert not any(line.endswith("when refreshed") for line in run.history)
+
+
+SECRET = "ORD-7-SECRET"  # an order ID treated as personal data, to look for where it mustn't be
+
+
+def refund_with_a_sensitive_order() -> dict[str, Any]:
+    """The refund, its order ID sensitive: only support and team leads see it (brief, D31)."""
+    definition = refund_fresh()
+    definition["fields"]["order_id"].update(
+        {"sensitive": True, "visible_to": ["support", "support-lead"]}
+    )
+    return definition
+
+
+def test_a_stale_sensitive_fact_needs_attention_and_quotes_nothing() -> None:
+    definition = refund_with_a_sensitive_order()
+    definition["steps"]["pay"]["max_age"] = {"order_id": "1d"}
+    run = run_case(
+        definition,
+        file={"order_id": SECRET, "amount": 80},
+        answers=REVIEWED_ON_DAY_3,
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: order_id was obtained 3 days ago, and pay needs it at most 1 day old: it came "
+            "from the opening, so it can't be fetched again"
+        )
+    ]
+    assert not any(SECRET in line for line in [*run.history, *run.needs_attention])
+    # Its time obtained isn't sensitive: a plain number, never wrapped.
+    assert run.state.obtained["order_id"] == Obtained(START, None)
+
+
+def test_a_refresh_passes_a_sensitive_input_wrapped() -> None:
+    case = parse_case(refund_with_a_sensitive_order())
+    file = {"order_id": Sensitive(SECRET), "amount": Decimal(80)}  # as the client sends it
+    state, _ = decide(case, CATALOG, CaseState("t"), Opened(file, None, at=START))
+    looked_up = Completed("check_order#1", {"status": "delivered"}, at=START)
+    state, _ = decide(case, CATALOG, state, looked_up)
+    answer = Answered(
+        "review",
+        "approve",
+        "ana",
+        frozenset({"support"}),
+        {"approved_amount": Sensitive(Decimal(80))},
+        at=START + 3 * DAY,
+    )
+    state, commands = decide(case, CATALOG, state, answer)
+    [refresh] = commands
+    assert isinstance(refresh, Schedule) and refresh.entry == "check_order#2"
+    assert refresh.inputs["order_id"] == Sensitive(SECRET)  # wrapped through the refresh too
+    assert not any(SECRET in line for line in state.history)
+
+
+def test_people_see_when_each_fact_was_obtained() -> None:
+    # The guide's sheet, run as written: Sam reads it three days after the lookup.
+    namespace: dict[str, Any] = {
+        "run_case": run_case,
+        "refund_fresh": refund_fresh(),
+        "PEOPLE": PEOPLE,
+        "START": START,
+        "DAY": DAY,
+    }
+    exec(guide_example("### Approvals and fresh facts"), namespace)  # noqa: S102 -- our guide
+    run, sheet = namespace["run"], namespace["sheet"]
+    assert sheet.lines == [
+        "Amount approved: 250, obtained 3 days ago",
+        "check_order.status: delivered, obtained 3 days ago",
+        "Order: ord-1, obtained 3 days ago",
+    ]
+    # The view gives each value's time, in seconds since the epoch.
+    assert run.view(roles=["support"]).obtained["check_order.status"] == START
+    # A sheet is read at the reader's time, never decided on: in an hour, an hour older.
+    later_sheet = run.approval_sheet("pay.approval#1", roles=["support-lead"], at=START + HOUR)
+    assert later_sheet.lines[1] == "check_order.status: delivered, obtained 1 hour ago"
+
+
+def test_a_hidden_fact_shows_no_value_and_no_age() -> None:
+    definition = refund_with_a_sensitive_order()
+    definition["fields"]["approved_amount"]["visible_to"] = ["support"]
+    run = run_case(
+        definition,
+        file={"order_id": SECRET, "amount": 250},
+        answers=[REVIEWED_LARGE],
+        people=PEOPLE,
+    )
+    sheet = run.approval_sheet("pay.approval#1", roles=["support-lead"], at=START + DAY)
+    assert sheet.lines == [
+        "Amount approved: hidden (needs support)",
+        "check_order.status: delivered, obtained 1 day ago",
+        "Order: ‹sensitive›, obtained 1 day ago",  # seen, but never written out (brief, D31)
+    ]
+    assert "approved_amount" not in run.view(roles=["support-lead"]).obtained
+    assert "order_id" in run.view(roles=["support-lead"]).obtained  # its time isn't sensitive
+
+
+def test_a_sheet_is_read_only_for_an_open_approval_at_a_whole_time() -> None:
+    run = run_case(refund_fresh(), file=LARGE, answers=[REVIEWED_LARGE], people=PEOPLE)
+    with pytest.raises(SheetRefused) as refused:
+        run.approval_sheet("pay.approval#3", roles=["support-lead"], at=START)
+    assert str(refused.value) == "pay.approval#3 is not open: there is no sheet to read"
+    with pytest.raises(TimeRefused):
+        run.approval_sheet("pay.approval#1", roles=["support-lead"], at=1.5)  # type: ignore[arg-type]
+
+
+def test_an_age_is_said_in_its_largest_whole_unit() -> None:
+    # Rounded down, so an age is never said younger than it is.
+    assert [ago(s) for s in (0, 59, 60, 119, 2 * HOUR - 1, DAY, 13 * DAY, 21 * DAY + HOUR)] == [
+        "less than a minute",
+        "less than a minute",
+        "1 minute",
+        "1 minute",
+        "1 hour",
+        "1 day",
+        "1 week",
+        "3 weeks",
+    ]
+    assert [as_said(written) for written in ("1d", "36h", "30m")] == [
+        "1 day",
+        "36 hours",
+        "30 minutes",
+    ]

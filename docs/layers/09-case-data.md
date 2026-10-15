@@ -1208,6 +1208,16 @@ Each starts with its negative test, seen failing for the right reason.
   out would vanish at every switch. Each time is written as a JSON integer and read back as an
   `int`, refused if it isn't whole (the converter reads numbers as decimals). Slice 8 still runs
   a real switch on Temporal.
+- **The sheet lists every fact the step reads, by name, in order** (slice 7): its inputs, its
+  `when` and its approval's `when`, each with its value as read (`‹sensitive›` for a sensitive
+  one, even to a person who may see it, as in the view's lines) and its age; a hidden one says
+  only that it is hidden and who sees it, with no age. A refused sheet raises `SheetRefused`.
+- **The view on Temporal now differs from the view in memory by its times** (slice 7): 9a's test
+  compared them whole. It now compares them without the times, and checks that Temporal gives a
+  time for each visible value, the same for all values the opening gave.
+- **Both sensitive tests passed at once** (slice 7): 9b wraps every input computed from a
+  sensitive field, a refresh's included, and slice 4's lines name fields, never values. Kept as
+  guards.
 - **A given approval that can't be spent no longer holds the case open** (slice 6): before the
   lapse, a refresh that made `pay`'s condition false left Sam's approval in `given` for ever,
   and the case never closed. Now it lapses, and the case closes with nothing paid.
@@ -1275,8 +1285,8 @@ the pull request is opened. `FF` is `tests/test_fresh_facts.py` (new), `TFF`
 | A refresh that changes nothing leaves an open or a given approval standing; an approval is asked only on fresh facts | FF `test_an_unchanged_refresh_leaves_approvals_standing`, `test_a_running_refresh_undoes_nothing_it_doesnt_change`, `test_an_approval_is_asked_only_on_fresh_facts` |
 | A refresh that changes a value an open approval read withdraws it; one that changes a value a given approval saw lapses it, and the step is checked again, a new approval asked if still needed, or none if the step no longer runs, and the case closes | FF `test_a_changed_refresh_withdraws_another_steps_open_approval`, `test_a_changed_refresh_lapses_a_given_approval`, `test_a_changed_refresh_that_stops_the_step_lapses_its_approval` |
 | A lapse says it came from a refresh only when every changed value did | FF `test_a_lapse_says_when_refreshed_only_when_it_was` |
-| A stale sensitive fact needs attention, and no line quotes it; a refresh's sensitive input stays wrapped; a time obtained isn't sensitive | FF `test_sensitive_facts_and_their_times` |
-| The view gives each visible value's time, a hidden field's not; the approval sheet gives each fact's age, read at the time the caller gives | FF `test_people_see_when_each_fact_was_obtained` |
+| A stale sensitive fact needs attention, and no line quotes it; a refresh's sensitive input stays wrapped; a time obtained isn't sensitive | FF `test_a_stale_sensitive_fact_needs_attention_and_quotes_nothing`, `test_a_refresh_passes_a_sensitive_input_wrapped`, `test_a_hidden_fact_shows_no_value_and_no_age` |
+| The view gives each visible value's time, a hidden field's not; the approval sheet gives each fact's age, read at the time the caller gives, a hidden fact with no value or age; a sheet is refused for an approval that isn't open, or at a time that isn't whole; an age is said in its largest whole unit, rounded down | FF `test_people_see_when_each_fact_was_obtained`, `test_a_hidden_fact_shows_no_value_and_no_age`, `test_a_sheet_is_read_only_for_an_open_approval_at_a_whole_time`, `test_an_age_is_said_in_its_largest_whole_unit` |
 | No message quotes a value: refresh, staleness and lapse lines name fields and ages | FF `test_freshness_lines_quote_no_value` |
 | On Temporal time comes from workflow time: a case left three days refreshes before the step runs | TFF `test_a_case_left_waiting_refreshes_before_paying` |
 | A case's history replays to the same decisions, refreshes included | TFF `test_a_case_with_a_refresh_replays` |

@@ -23,7 +23,7 @@ from ventoux.case.state import (
     StartWorkflow,
     StopPlan,
 )
-from ventoux.case.visibility import CaseView, case_view
+from ventoux.case.visibility import ApprovalSheet, CaseView, approval_sheet, case_view
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome, failed_with
 from ventoux.core.sensitive import Sensitive, unwrapped
@@ -57,6 +57,11 @@ class CaseRun:
     def view(self, roles: Iterable[str]) -> CaseView:
         """The case file as a person holding `roles` sees it (brief, D30)."""
         return case_view(self.definition, self.state, roles)
+
+    def approval_sheet(self, entry: str, roles: Iterable[str], at: int) -> ApprovalSheet:
+        """The open approval `entry`'s sheet as a person holding `roles` reads it at `at`, with
+        the age of each fact it depends on (brief, D18)."""
+        return approval_sheet(self.definition, self.state, entry, roles, at)
 
     @property
     def closed(self) -> bool:
