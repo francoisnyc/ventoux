@@ -1,9 +1,9 @@
 # Case data: what goes in the case file
 
 > **For workflow developers.** This guide describes layer 9 as if it already worked; the code that
-> makes it true is built test-first, in four parts. References and who sees what (9a) and
-> sensitive fields (9b) are described as built. Forgetting a person (9c) and fresh facts (9d) are
-> still design: their sections say so. The "Design notes" at the end list what writing it revealed.
+> makes it true is built test-first, in four parts. References and who sees what (9a), sensitive
+> fields (9b) and forgetting a person (9c) are described as built. Fresh facts (9d) are still
+> design: its section says so. The "Design notes" at the end list what writing it revealed.
 
 **The rule of thumb:** a case file holds the **facts your rules decide on**, and **references** to
 everything else. Customers, orders, policies and documents stay in the systems that own them.
@@ -294,18 +294,43 @@ of it. Everything else stays, for the audit.
 catalog.register_role("privacy", forgets=True)
 ```
 
+They also name that catalog in a small workflow, the request to forget, and give it to the case
+worker, as they do with the case workflow:
+
+```python
+from temporalio import workflow
+
+from ventoux.temporal.forget import ForgetReport, ForgetStart, ForgetWorkflow
+
+
+@workflow.defn(name="ventoux.forget")
+class ClaimForget(ForgetWorkflow):
+    catalog = catalog
+
+    @workflow.run
+    async def run(self, start: ForgetStart) -> ForgetReport:
+        return await self.drive(start)
+```
+
+```python
+worker = case_worker(client, "claims", ClaimCases, ClaimPlans, implementations, forget=ClaimForget)
+```
+
 Forgetting is proposed by one person with such a role and approved by **another**: erasure can
 conflict with keeping records, so it is a decision, made by two people. The proposer can't approve
-their own request.
+their own request; anyone with the role may reject it, the proposer included, which changes
+nothing.
 
 ```python
 from ventoux.temporal.forget import answer_forget, forget_report, propose_forget
 
-request = await propose_forget(client, "claim-7", by="pia", roles=["privacy"])
-await answer_forget(request, "approve", by="olu", roles=["privacy"])
+request = await propose_forget(client, ClaimForget, "claim-7", "pia", ["privacy"], "claims")
+await answer_forget(request, "approve", "olu", ["privacy"])
+assert (await request.result()).status == "forgotten"
 ```
 
-The request is a small workflow of its own, `claim-7/forget`. Then, in order:
+The request is a small workflow of its own, `claim-7/forget`. Before anyone answers, it checks
+that the case exists, wasn't forgotten already, and may be forgotten (below). Then, in order:
 
 1. **The case closes as `forgotten`,** if it was open. Open tasks and approvals are cancelled;
    steps already running (an activity, a plan step, a workflow step) finish, since a side effect
@@ -314,7 +339,8 @@ The request is a small workflow of its own, `claim-7/forget`. Then, in order:
 2. **Once the case's workflow has ended,** and nothing of it still runs, **the key is destroyed.**
    Work still running needs the key to read its own values, so the key goes last.
 3. **The request records it:** `forget_report(request)` reads `forgotten`, with who proposed,
-   who approved, and when the key was destroyed.
+   who approved, how the case ended, what was flagged, and that the key was destroyed. A refused
+   or rejected request ends saying why, and a new one may be proposed.
 
 A case that was already closed is forgotten the same way, keeping its own close reason, unless
 its definition keeps its records (below).
@@ -338,7 +364,8 @@ says so:
   every line of its history (with `‹sensitive›` where a value would be) and no value to decrypt.
 - `view(case, roles)` is refused: the case file can't be read any more.
 - A query sent to the case some other way, or a replay of its history, fails with `the key of
-  claim-7 was destroyed when it was forgotten`; the worker carries on.
+  claim-7 was destroyed when it was forgotten`; the worker carries on, and its log names only
+  the kind of error.
 - Temporal's history and its export keep every decision, who made it and with which role, the
   definition (its rules and release), and every value that wasn't sensitive where it was used.
   Where a sensitive value was, there is ciphertext no one can open. So is every form value in

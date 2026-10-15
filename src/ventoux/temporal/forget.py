@@ -100,6 +100,15 @@ class ForgetReport:
     history: list[str] = field(default_factory=list[str])  # what happened, one line each
 
 
+def closed_first(case: str) -> str:
+    """Why a case that keeps closed cases, and closed before the approval reached it, isn't
+    forgotten (brief, D32)."""
+    return (
+        f"{case} closed before forgetting was approved, and its definition keeps closed cases "
+        "(forgetting: while_open)"
+    )
+
+
 class ForgetWorkflow:
     """The code of a request to forget a case. A deployment subclasses it to name its catalog,
     whose roles registered to forget may propose and approve, and registers the subclass with
@@ -179,10 +188,7 @@ class ForgetWorkflow:
             if self.found.forgetting == "while_open":
                 # It closed before the approval reached it, and keeps closed cases (brief, D32).
                 self.report.status = "refused"
-                self.report.history.append(
-                    f"refused: {case} closed before forgetting was approved, and its definition "
-                    "keeps closed cases (forgetting: while_open)"
-                )
+                self.report.history.append(f"refused: {closed_first(case)}")
                 return
             self.report.history.append(f"{case} was already closed")
         ended = await workflow.execute_activity_method(

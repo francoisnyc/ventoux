@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
-from test_case import SMALL, SMALL_REVIEW, closable
+from test_case import LARGE, REVIEWED, SMALL, SMALL_REVIEW, closable
 from test_sensitive import claim
 
 from ventoux.case.definition import CaseInvalid, parse_case
@@ -172,3 +172,11 @@ def test_forgetting_closes_an_open_case() -> None:
     )
     assert "forgetting approved by olu as privacy, proposed by pia as privacy" in run.history
     assert run.history[-1] == "closed: duplicate, by ana"
+    # Waiting for a team lead's approval of the payment: the approval is cancelled too.
+    approving = run_case(
+        closable(), file=LARGE, answers=[REVIEWED, forget("pia", "olu")], people=PEOPLE
+    )
+    assert approving.history[-2:] == [
+        "cancelled pay.approval#1: the case is being forgotten",
+        "closed: forgotten",
+    ]

@@ -6,6 +6,7 @@ See docs/layers/09-case-data.md (9c) and docs/guides/case-data.md ("Forgetting a
 import asyncio
 import json
 import logging
+import textwrap
 import threading
 from collections.abc import Awaitable, Callable, Mapping
 from decimal import Decimal
@@ -48,10 +49,14 @@ from ventoux.temporal.cases import (
 )
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import (
+    CaseLookup,
     ForgetActivities,
     ForgetReport,
+    ForgetWorkflow,
     answer_forget,
+    closed_first,
     forget_report,
+    lookup_refusal,
     propose_forget,
 )
 from ventoux.temporal.worker import SANDBOX, case_worker
@@ -61,9 +66,12 @@ from ventoux.temporal.worker import SANDBOX, case_worker
 with workflow.unsafe.imports_passed_through():
     from test_sensitive import FILE, NATIONAL_ID, claim
 
+    from ventoux.case.forgetting import approval_refusal, role_refusal
     from ventoux.case.memory import Activity
     from ventoux.case.state import Schedule
+    from ventoux.core.catalog import Catalog
     from ventoux.testing import (
+        CATALOG,
         FAKES,
         DevelopmentCases,
         DevelopmentForget,
@@ -276,18 +284,37 @@ def test_forgetting_needs_a_case_with_a_key() -> None:
 
 
 def test_a_rejected_request_changes_nothing() -> None:
-    async def scenario(client: Client) -> tuple[ForgetReport, CaseReport, str]:
+    # A rejection needs a role registered to forget; the proposer may withdraw their own request,
+    # which changes nothing. A new request may then be proposed.
+    async def scenario(client: Client) -> tuple[ForgetReport, CaseReport, str, ForgetReport]:
         case = await open_claim(client, "claim-7")
         request = await propose_forget(
             client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
         )
-        await answer_forget(request, "reject", "olu", ["privacy"])
-        return await request.result(), await report(case), keys_of(client).state("claim-7")
+        await answer_forget(request, "reject", "lee", ["support-lead"])
+        await answer_forget(request, "reject", "pia", ["privacy"])
+        ended = await request.result()
+        again = await propose_forget(
+            client, DevelopmentForget, "claim-7", "olu", ["privacy"], QUEUE
+        )
+        waiting = await reported(again, lambda now: bool(now.history))
+        return ended, await report(case), keys_of(client).state("claim-7"), waiting
 
-    ended, case, key = on_temporal(scenario)
+    ended, case, key, again = on_temporal(scenario)
     assert ended.status == "rejected"
-    assert ended.history == ["pia proposed forgetting claim-7, as privacy", "rejected by olu"]
+    assert ended.history == [
+        "pia proposed forgetting claim-7, as privacy",
+        (
+            "refused lee's answer reject: forgetting claim-7 is rejected by privacy, and lee "
+            "has support-lead"
+        ),
+        "rejected by pia",
+    ]
     assert (case.status, case.waiting_for, key) == ("open", ["assess by adjuster"], "kept")
+    assert (again.status, again.history) == (
+        "waiting",
+        ["olu proposed forgetting claim-7, as privacy"],
+    )
 
 
 def test_forgetting_an_open_case() -> None:
@@ -736,3 +763,139 @@ def test_an_engine_bug_in_a_task_blocks_the_case(caplog: pytest.LogCaptureFixtur
     logged = [logging.Formatter().format(record) for record in caplog.records]
     assert any("Failed activation" in line and line.endswith("(ValueError)") for line in logged)
     assert not [line for line in logged if NATIONAL_ID in line]
+
+
+# --- Slice 10: the guide ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "case-data.md").read_text()
+FORGETTING = GUIDE.split("## Forgetting a person")[1].split("\n## ")[0]
+
+
+def guide_blocks() -> list[str]:
+    """The Python blocks of the guide's section on forgetting, in order."""
+    return [block.split("```")[0] for block in FORGETTING.split("```python\n")[1:]]
+
+
+def test_the_guides_forget_example_runs_as_written() -> None:
+    registering, subclassing, serving, forgetting = guide_blocks()
+    # The platform team's part: a role registered to forget, and the request named after the
+    # catalog. Our guide, run so it can't drift from the code.
+    catalog = Catalog()
+    exec(registering, {"catalog": catalog})  # noqa: S102
+    assert catalog.forgetters == ["privacy"]
+    # Python: `exec` with a module's name, as the guide's code would have in its own module.
+    defined: dict[str, Any] = {"__name__": "claim_workflows", "catalog": CATALOG}
+    exec(subclassing, defined)  # noqa: S102
+    assert issubclass(defined["ClaimForget"], ForgetWorkflow)
+    assert defined["ClaimForget"].catalog is CATALOG
+
+    # The rest, with the development workflows in place of the guide's claim workflows.
+    async def scenario(client: Client) -> None:
+        names: dict[str, Any] = {
+            "client": client,
+            "case_worker": case_worker,
+            "ClaimCases": DevelopmentCases,
+            "ClaimPlans": DevelopmentPlans,
+            "ClaimForget": DevelopmentForget,
+            "implementations": FAKES,
+        }
+        exec(serving, names)  # noqa: S102
+        async with names["worker"]:  # the guide's own worker, on its queue
+            case = await start_case(
+                client, DevelopmentCases, claim(), as_json(FILE), "claim-7", "claims"
+            )
+            await answer(case, "assess#1", "deny", "ana", ["adjuster"])
+            await case.result()
+            # The guide's lines run inside a function: `await` is written as an API caller would.
+            exec("async def example():\n" + textwrap.indent(forgetting, "    "), names)  # noqa: S102
+            await names["example"]()
+
+    on_temporal(scenario)
+
+
+def guide_refusal_rows() -> list[tuple[str, str]]:
+    """The rows of the forgetting section's "What the engine refuses" table."""
+    table = FORGETTING.split("### What the engine refuses")[1]
+    rows = [line for line in table.splitlines() if line.startswith("| ")][1:]  # after the header
+    return [
+        (cells[1].strip(), cells[2].strip().strip("`")) for cells in (r.split("|") for r in rows)
+    ]
+
+
+def refusal(when: str, tmp: Path) -> str:
+    """What the engine says, for each of the guide's rows, from the code that says it."""
+    support = frozenset({"support"})
+    kept = CaseLookup("kept", False, "allowed")
+    said: dict[str, Callable[[], str | None]] = {
+        "the proposer's roles may not forget": lambda: role_refusal(
+            CATALOG, "claim-7", "proposed", "lee", support
+        ),
+        "the approver's roles may not forget": lambda: role_refusal(
+            CATALOG, "claim-7", "approved", "lee", support
+        ),
+        "the proposer approves their own request": lambda: approval_refusal(
+            CATALOG, "claim-7", "pia", "pia", frozenset({"privacy"})
+        ),
+        "no case has that ID": lambda: lookup_refusal(
+            "claim-9", CaseLookup("never made", False, "")
+        ),
+        "the case was already forgotten": lambda: lookup_refusal(
+            "claim-7", CaseLookup("destroyed", False, "")
+        ),
+        "the case is closed and keeps its records": lambda: lookup_refusal(
+            "claim-7", CaseLookup("kept", False, "while_open")
+        ),
+        "the case is never forgotten": lambda: lookup_refusal(
+            "claim-7", CaseLookup("kept", True, "never")
+        ),
+        "the case closed before the approval reached it, and keeps closed cases": lambda: (
+            closed_first("claim-7")
+        ),
+        "the case's definition can't be read any more": lambda: lookup_refusal(
+            "claim-7", CaseLookup("kept", False, "")
+        ),
+        "a forgotten case's history is read or replayed": lambda: destroyed_key(tmp),
+    }
+    assert lookup_refusal("claim-7", kept) is None  # a case that may be forgotten goes on
+    if when not in said:
+        raise LookupError(when)
+    message = said[when]()
+    assert message is not None
+    return message
+
+
+def destroyed_key(tmp: Path) -> str:
+    """What the key provider says when asked to open a part of a forgotten case."""
+    tmp.mkdir(exist_ok=True)
+    keys = FileKeys(tmp / "keys.json")
+    keys.create("claim-7")
+    keys.destroy("claim-7")
+    with pytest.raises(KeyRefused) as refused:
+        keys.open("claim-7", b"", "sensitive/0")
+    return str(refused.value)
+
+
+VIEWED = "the case's file is viewed after forgetting"
+
+
+def test_every_refusal_in_the_guide_is_tested(tmp_path: Path) -> None:
+    rows = [when for when, _ in guide_refusal_rows() if when != VIEWED]
+    for when in rows:
+        refusal(when, tmp_path / when.replace(" ", "-").replace("'", ""))
+    assert VIEWED in [when for when, _ in guide_refusal_rows()]  # on Temporal, below
+
+
+def test_the_guides_refusals_are_what_the_engine_says(tmp_path: Path) -> None:
+    rows = dict(guide_refusal_rows())
+    for when, example in rows.items():
+        if when != VIEWED:
+            folder = tmp_path / when.replace(" ", "-").replace("'", "")
+            assert refusal(when, folder) == example, when
+
+    async def viewed(client: Client) -> str:
+        case = await forgotten_claim(client, "claim-7")
+        with pytest.raises(CaseForgotten) as refused:
+            await view(case, ["claims-sensitive"])
+        return str(refused.value)
+
+    assert on_temporal(viewed) == rows[VIEWED]

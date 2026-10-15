@@ -6,7 +6,8 @@ Promises checked against the tests, 2026-10-10; the tutor review's fix built tes
 2026-10-11. 9b's choices agreed in the session, 2026-10-13 (all as proposed, with the key
 provider sealing and opening); 9b built, slices 0–8; Promises checked against the tests,
 2026-10-13; the tutor review's fix built test-first, 2026-10-14. 9c's choices agreed in the
-session, 2026-10-14 (all as proposed, with `forgetting` added: `while_open` and `never`).
+session, 2026-10-14 (all as proposed, with `forgetting` added: `while_open` and `never`); 9c
+built, slices 0–10; Promises checked against the tests, 2026-10-15.
 
 ## What this layer is for
 
@@ -933,6 +934,22 @@ Each starts with its negative test, seen failing for the right reason.
   test waited for the event and never saw it, though the worker had failed the task; the history
   ends with the task started. The test reads the worker's log record and the history's last
   event instead.
+- **The guide's example was written before the code, and was wrong in three places** (slice 10):
+  `propose_forget` takes the deployment's request workflow and a task queue; the guide didn't
+  show the request's subclass or the worker's `forget=`; and it didn't say who may reject. It
+  now shows each, and its example runs as written: the role registered on a fresh catalog, the
+  subclass checked, the guide's own `case_worker` line serving the `claims` queue, and its
+  request forgetting a closed claim. The subclass runs through `exec` given a module name:
+  without one, Temporal's check that `run` is defined on the class fails.
+- **The guide's refusal rows are compared with the code that says them** (slice 10): the role,
+  approval and lookup checks and `closed_first` (the race's message, moved into a function so
+  a test can read it) are pure; the destroyed key's message comes from `FileKeys`; the view's
+  refusal from Temporal. A row edited by a word was seen failing.
+- **Promises checked against the tests** (slice 10): every test named exists and asserts its
+  row. Four claims had no test and gained one: an open approval cancelled when the case is
+  forgotten; a rejection refused without the role, and accepted from the proposer; a new
+  request accepted after a rejection; an answer other than `approve` or `reject` (already
+  tested, now in the table). All passed when written: their code came with earlier slices.
 
 ### Promises
 
@@ -948,11 +965,11 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 | `forgetting` is `allowed`, `while_open` or `never`, `allowed` by default; anything else is refused | F `test_a_definition_says_whether_it_may_be_forgotten` |
 | A key can be destroyed, and its text is gone from the provider; a destroyed key never seals, opens or is made again, saying the case was forgotten; a key never made can't be destroyed | F `test_a_destroyed_key_is_gone_for_good` |
 | The provider says whether a case's key is kept, destroyed or never made, after Temporal has dropped the case; destroying it again does nothing | F `test_a_keys_state_tells_which_case_it_is` |
-| Forgetting approved by its proposer is refused (the curriculum's negative test), in memory and on Temporal, where it is recorded and the request waits on | F `test_the_proposer_cannot_approve_forgetting`; TF `test_refused_answers_are_recorded_and_the_request_waits` |
+| Forgetting approved by its proposer is refused (the curriculum's negative test), in memory and on Temporal, where it is recorded and the request waits on; so is an answer other than `approve` or `reject` | F `test_the_proposer_cannot_approve_forgetting`; TF `test_refused_answers_are_recorded_and_the_request_waits` |
 | A proposer or approver without a role registered to forget is refused | F `test_forgetting_needs_a_role_registered_to_forget`; TF `test_a_proposal_without_the_role_is_refused`, `test_refused_answers_are_recorded_and_the_request_waits` |
 | The case checks the approval itself, depending on nothing the request checked: identifiers, a closed case, `never` | F `test_the_case_checks_forgetting_itself` |
-| An approved request closes an open case as `forgotten`: tasks and approvals cancelled, running work finishing, what completes after the close flagged; a case already closing keeps its reason | F `test_forgetting_closes_an_open_case`; TF `test_forgetting_an_open_case` |
-| A rejected request ends, and nothing is closed or destroyed | TF `test_a_rejected_request_changes_nothing` |
+| An approved request closes an open case as `forgotten`: open tasks and approvals cancelled, running work finishing, what completes after the close flagged; a case already closing keeps its reason | F `test_forgetting_closes_an_open_case`; TF `test_forgetting_an_open_case` |
+| A rejection needs a role registered to forget and may come from the proposer; a rejected request ends, nothing is closed or destroyed, and a new request may be proposed | TF `test_a_rejected_request_changes_nothing` |
 | The key is destroyed only once the case's workflow has ended: never while an activity, child plan or workflow step of it runs; `destroy` refuses while it runs | TF `test_the_key_goes_only_after_the_case_has_ended`, `test_the_key_goes_only_after_a_child_plan_has_ended`, `test_destroy_refuses_while_the_case_runs`; WS `test_forgetting_waits_for_a_workflow_step` |
 | A case never made, and a case already forgotten, are refused before anyone answers | TF `test_forgetting_needs_a_case_with_a_key` |
 | A closed case can be forgotten and keeps its close reason, unless its definition says `while_open` (also when it closed before the approval); `never` is always refused; a definition that can't be read is refused; nothing is destroyed when refused | TF `test_forgetting_a_closed_case`, `test_a_case_that_keeps_its_records` |
@@ -960,4 +977,4 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 | After forgetting, `report` reads the closing report, `view` is refused, and a query or replay fails with the forgotten message, never plain text; the worker carries on | TF `test_reading_a_forgotten_case` |
 | After forgetting, the history, its export and the reports keep every decision, who made it and as what, the definition, the values that weren't sensitive where they were used, and the closing report; every sensitive value, form value in an answer and failure message is unreadable; the request's own history replays without a key | TF `test_what_the_audit_keeps_after_forgetting` |
 | An exception raised in a case workflow's task fails its workflow task, holding the case until fixed code is deployed; the log keeps its type, never its text (9b's gap) | TF `test_an_engine_bug_in_a_task_blocks_the_case` |
-| The guide's example runs as written, and its refusal rows are what the engine says | TF `test_the_guides_forget_example_runs_as_written`; F, TF `test_the_guides_refusals_are_what_the_engine_says` |
+| The guide's example runs as written, and its refusal rows are what the engine says | TF `test_the_guides_forget_example_runs_as_written`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |
