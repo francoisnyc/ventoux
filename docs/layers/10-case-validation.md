@@ -162,7 +162,8 @@ milestone it requires (every step reaching a milestone outside `can` is dead).
   a registered role, so nobody could ever close it. (`stays_open` with no close reason at all is
   already refused by `parse_case`.)
 - **`CLOSE_UNREACHABLE`** (warning), at `closes_when`: a milestone it names isn't in `can`. A
-  warning, as D10 asks: the case still closes when nothing is left to do.
+  warning, as D10 asks: the case still closes when nothing is left to do, or, if it stays open,
+  by a person, and the message says which. Every such milestone is named in one issue.
 - **`UNREACHABLE_MILESTONE`** (warning), at `milestones.<name>`: no step or outcome reaches it.
   Not given for a milestone a step requires (its `NEVER_RUNS` says it) or `closes_when` names
   (`CLOSE_UNREACHABLE` says it): one cause, one issue.
@@ -268,6 +269,13 @@ Each starts with its negative test, seen failing for the right reason.
   fixed. So it is given when a step the structure lets run is kept out by it, beside the other
   issues. Its second test passed at once (the rule was written first) and was seen failing with
   the rule broken to "only when every step could run".
+- **`CLOSE_UNREACHABLE` says how the case closes instead** (slice 4): "it closes when nothing is
+  left to do" is false for a case that stays open, where only a person closes it; and the first
+  version named only the first unreachable milestone, so an author would fix one and meet the
+  next. A negative test for each.
+- **"One cause, one issue" for milestones was seen failing on a deliberate break** (slice 4): its
+  assertions sat after the first, which failed first, so they never ran red; with the exclusions
+  removed, a milestone a step requires was warned about twice.
 
 ### Promises
 
@@ -289,6 +297,7 @@ tests before the pull request.
 | A case that stays open must be closable by a registered role, and is accepted when it is | V `test_a_case_nobody_can_close_is_refused` |
 | A step only roles nobody registered may propose never runs | V `test_a_step_nobody_may_propose_never_runs` |
 | An unreachable `closes_when` milestone and a milestone nothing reaches are warnings, never repeated beside another issue | V `test_an_unreachable_close_is_a_warning`, `test_a_milestone_nothing_reaches_is_a_warning` |
+| `CLOSE_UNREACHABLE` says how the case closes instead, and names every unreachable milestone | V `test_an_unreachable_close_says_how_the_case_closes_instead`, `test_every_unreachable_close_milestone_is_named` |
 | No message quotes a value | V `test_no_message_quotes_a_value` |
 | The runtime depends on nothing validation did: the deadlocked claim runs and closes, paying nothing | V `test_an_unchecked_deadlock_still_runs_safely`; every runtime test, unchanged |
 | The guide says what the code does: its claims and its table | V `test_the_guides_claim_has_no_issues`, `test_the_deadlocked_claim_is_refused`, `test_the_guides_table_is_what_validate_case_says` |

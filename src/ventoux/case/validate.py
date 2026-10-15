@@ -39,7 +39,50 @@ def validate_case(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
                 "stays_open",
             )
         )
-    return found + never_run(case, catalog, can) + never_closes(case, catalog)
+    found += never_run(case, catalog, can) + never_closes(case, catalog)
+    return found + close_unreachable(case, can) + unreachable_milestones(case)
+
+
+def unreachable_milestones(case: CaseDefinition) -> list[Issue]:
+    """A milestone no step or outcome reaches: a warning, since nothing waits for it. One a step
+    requires is said by that step's issue, one in `closes_when` by its own: one cause, one issue."""
+    required = {r for step_requires in requirements(case).values() for r in step_requires}
+    return [
+        Issue(
+            f"milestones.{name}",
+            "UNREACHABLE_MILESTONE",
+            f"no step reaches {name}: reach it from a step or an outcome, or remove it",
+            "warning",
+        )
+        for name in case.milestones
+        if not reached_by(case, name) and name not in required and name not in case.closes_when
+    ]
+
+
+def close_unreachable(case: CaseDefinition, can: set[str]) -> list[Issue]:
+    """A `closes_when` milestone that can never be reached: a warning, as the case still closes
+    another way (brief, D10)."""
+    unreached = [name for name in case.closes_when if name not in can]
+    if not unreached:
+        return []
+    if len(unreached) == 1:
+        fix = f"reach {unreached[0]} from a step that can run, or remove it from closes_when"
+    else:
+        fix = "reach them from steps that can run, or remove them from closes_when"
+    # How it closes instead: by a person only, if it stays open.
+    if case.stays_open:
+        instead = "only a person can close it"
+    else:
+        instead = "it closes when nothing is left to do"
+    return [
+        Issue(
+            "closes_when",
+            "CLOSE_UNREACHABLE",
+            f"{listed(unreached)} can never be reached, so closes_when never closes {case.case}, "
+            f"and {instead}: {fix}",
+            "warning",
+        )
+    ]
 
 
 def never_closes(case: CaseDefinition, catalog: Catalog) -> list[Issue]:

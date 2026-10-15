@@ -64,10 +64,15 @@ def test_the_quickstart_refund_has_no_issues() -> None:
 
 
 def claim_with(**steps: Any) -> dict[str, Any]:
-    """The guide's claim with some steps replaced (or added), and a `reviewed` milestone."""
+    """The guide's claim with some steps replaced (or added)."""
     claim = guide_json(0)
-    claim["milestones"]["reviewed"] = {"display": {"title": "Claim reviewed"}}
     claim["steps"] |= steps
+    return claim
+
+
+def reviewed(claim: dict[str, Any]) -> dict[str, Any]:
+    """`claim` with a `reviewed` milestone, which no step reaches."""
+    claim["milestones"]["reviewed"] = {"display": {"title": "Claim reviewed"}}
     return claim
 
 
@@ -81,7 +86,7 @@ APPROVE = {
 
 
 def test_a_step_requiring_what_nothing_reaches_never_runs() -> None:
-    assert issues(claim_with(approve=APPROVE)) == [
+    assert issues(reviewed(claim_with(approve=APPROVE))) == [
         Issue(
             "steps.approve.requires",
             "NEVER_RUNS",
@@ -249,7 +254,7 @@ def test_a_case_that_closes_at_opening_is_refused() -> None:
 def test_closing_at_opening_is_said_beside_a_step_dead_for_its_own_reason() -> None:
     # Two causes, two fixes: the case closes at once, and approve needs reviewed, which nothing
     # reaches. A step dead for its own reason keeps its own issue.
-    claim = claim_with(approve=APPROVE)
+    claim = reviewed(claim_with(approve=APPROVE))
     claim["steps"]["check"] |= {"automatic": False, "proposed_by": ["adjuster"]}
     assert [issue.code for issue in issues(claim)] == ["CLOSES_AT_OPENING", "NEVER_RUNS"]
     assert issues(claim)[1].path == "steps.approve.requires"
@@ -271,3 +276,62 @@ def test_a_case_nobody_can_close_is_refused() -> None:
     ]
     claim["close_reasons"]["duplicate"]["roles"] = ["supprt", "adjuster"]
     assert issues(claim) == []
+
+
+# --- Slice 4: warnings ---
+
+CLOSE_UNREACHABLE = Issue(
+    "closes_when",
+    "CLOSE_UNREACHABLE",
+    "paid can never be reached, so closes_when never closes claim, and it closes when nothing is "
+    "left to do: reach paid from a step that can run, or remove it from closes_when",
+    "warning",
+)
+
+
+def test_an_unreachable_close_is_a_warning() -> None:
+    # A warning, as D10 asks: the case still closes, when nothing is left to do.
+    found = issues(deadlocked_claim())
+    assert [issue.code for issue in found] == ["DEADLOCK", "CLOSE_UNREACHABLE"]
+    assert found[1] == CLOSE_UNREACHABLE
+
+
+def test_an_unreachable_close_says_how_the_case_closes_instead() -> None:
+    claim = deadlocked_claim()
+    claim["stays_open"] = True
+    claim["close_reasons"] = {
+        "withdrawn": {"display": {"title": "Claim withdrawn"}, "roles": ["adjuster"]}
+    }
+    assert issues(claim)[1].message == (
+        "paid can never be reached, so closes_when never closes claim, and only a person can "
+        "close it: reach paid from a step that can run, or remove it from closes_when"
+    )
+
+
+def test_every_unreachable_close_milestone_is_named() -> None:
+    claim = deadlocked_claim()
+    claim["closes_when"] = ["assessed", "paid"]
+    assert issues(claim)[1].message == (
+        "assessed and paid can never be reached, so closes_when never closes claim, and it closes "
+        "when nothing is left to do: reach them from steps that can run, or remove them from "
+        "closes_when"
+    )
+
+
+def test_a_milestone_nothing_reaches_is_a_warning() -> None:
+    assert issues(reviewed(guide_json(0))) == [
+        Issue(
+            "milestones.reviewed",
+            "UNREACHABLE_MILESTONE",
+            "no step reaches reviewed: reach it from a step or an outcome, or remove it",
+            "warning",
+        )
+    ]
+    # One cause, one issue: a milestone a step requires is said by that step's NEVER_RUNS, one in
+    # closes_when by CLOSE_UNREACHABLE, and one only dead steps reach by their own issues.
+    required = issues(reviewed(claim_with(approve=APPROVE)))
+    assert [issue.code for issue in required] == ["NEVER_RUNS"]
+    closing = reviewed(guide_json(0))
+    closing["closes_when"] = ["reviewed"]
+    assert [issue.code for issue in issues(closing)] == ["CLOSE_UNREACHABLE"]
+    assert [issue.code for issue in issues(deadlocked_claim())] == ["DEADLOCK", "CLOSE_UNREACHABLE"]
