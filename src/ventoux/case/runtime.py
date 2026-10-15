@@ -608,19 +608,18 @@ def refresh_stale(
     trusted: only one a read-only activity step obtained can be fetched again; any other stops
     the step, and a person decides (brief, D17) (brief, D18)."""
     for stale in stale_facts(step.max_age, state, at):
-        source = refreshable(case, catalog, state, stale)
+        age = "an unknown time" if stale.age is None else ago(stale.age)
+        source, why_not = refreshable(case, catalog, state, stale)
         if source is None:
-            age = "an unknown time" if stale.age is None else ago(stale.age)
             raise StepStopped(
                 f"{stale.field} was obtained {age} ago, and {name} needs it at most "
-                f"{as_said(stale.limit)} old: it can't be fetched again"
+                f"{as_said(stale.limit)} old: {why_not}"
             )
         latest = latest_run(state, source)
         if latest is not None and latest.status == "running":
             return "waiting"  # one refresh at a time: it is already being fetched
-        assert stale.age is not None  # a fact a run obtained always has its time
         state.history.append(
-            f"refreshing {stale.field} for {name}: obtained {ago(stale.age)} ago, at most "
+            f"refreshing {stale.field} for {name}: obtained {age} ago, at most "
             f"{as_said(stale.limit)}"
         )
         refreshing = case.steps[source]
@@ -632,16 +631,37 @@ def refresh_stale(
 
 def refreshable(
     case: CaseDefinition, catalog: Catalog, state: CaseState, stale: Stale
-) -> str | None:
-    """The step whose run obtained the stale fact, if running it again is safe: an activity
-    whose contract only reads (brief, D33). None for anything else."""
+) -> tuple[str | None, str]:
+    """The step whose run obtained the stale fact, if running it again is safe: an activity whose
+    contract only reads (brief, D33). Otherwise None, and why it can't be fetched again."""
     run = next((run for run in state.runs if run.entry == stale.run), None)
     if run is None:
-        return None  # the opening or a person: nothing to run again
+        # Not from a run: from a person (their answer, or the opening a person made), or from the
+        # system that opened the case. Nothing can ask either again.
+        came = "a person" if is_from_a_person(state, stale.field) else "the opening"
+        return None, f"it came from {came}, so it can't be fetched again"
     step = case.steps[run.step]
-    if not isinstance(step, ActivityStep) or called(catalog, step).effect != "read":
-        return None
-    return run.step
+    if isinstance(step, PlanStep):
+        return None, f"{run.step} is a plan step, so it isn't run again unasked"
+    if isinstance(step, WorkflowStep):
+        # Another team's workflow, which may run for minutes: never re-run unasked (brief, D33).
+        return None, f"{run.step} is a workflow step, so it isn't run again unasked"
+    assert isinstance(step, ActivityStep)  # only a task has no contract, and it gives no run's fact
+    effect = called(catalog, step).effect
+    if effect == "compute":
+        # The same inputs give the same answer: its age is its inputs' age (brief, D33).
+        return None, (
+            f"{run.step} computes it from its inputs (compute), so running it again gives "
+            "nothing new"
+        )
+    if effect != "read":
+        return None, f"{run.step} has side effects ({effect}), so it can't be run again"
+    return run.step, ""
+
+
+def is_from_a_person(state: CaseState, field: str) -> bool:
+    """Whether a person gave the field's value: their answer, or the case they opened."""
+    return any(source.startswith("person:") for source in state.sources.get(field, ()))
 
 
 def free_to_start(state: CaseState, name: str, step: TaskStep | CallStep | PlanStep) -> bool:

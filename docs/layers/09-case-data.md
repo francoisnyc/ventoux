@@ -1208,6 +1208,11 @@ Each starts with its negative test, seen failing for the right reason.
   out would vanish at every switch. Each time is written as a JSON integer and read back as an
   `int`, refused if it isn't whole (the converter reads numbers as decimals). Slice 8 still runs
   a real switch on Temporal.
+- **Each source says why it can't be fetched again** (slice 4): the opening and a person ("it came
+  from…, so it can't be fetched again"), a `write` or `notify` step ("has side effects"), a
+  `compute` step ("running it again gives nothing new"), a workflow or a plan step ("isn't run
+  again unasked"). A fact the case's opener gave counts as a person's. The plan case's test
+  answers the plan's own approval, or its step would still be running when the fact is read.
 - **Slice 3's test passed at once** (slice 3): slice 2's code already checks the condition again,
   since admission runs again after the refresh lands. So it was seen failing on a deliberate
   break instead: with the step not waiting for its refresh, `pay` is scheduled on the stale value

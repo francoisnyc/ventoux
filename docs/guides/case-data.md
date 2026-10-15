@@ -509,7 +509,10 @@ epoch. A hidden field's time is hidden with it; a sensitive field's time is not 
 | an age is zero | `steps.pay.max_age.check_order.status: an age is at least 1m` |
 | a step's `max_age` names a field it doesn't read | `steps.pay.max_age: pay doesn't read amount in its inputs, its when or its approval: name only what it reads` |
 | a stale fact came from a person (needs attention) | `approved_amount was obtained 3 days ago, and pay needs it at most 1 day old: it came from a person, so it can't be fetched again` |
+| a stale fact came from the opening (needs attention) | `order_id was obtained 3 days ago, and pay needs it at most 1 day old: it came from the opening, so it can't be fetched again` |
 | a stale fact came from a step with side effects (needs attention) | `pay_fee.outcome was obtained 3 days ago, and notify needs it at most 1 day old: pay_fee has side effects (write), so it can't be run again` |
+| a stale fact came from a step that computes (needs attention) | `fee.fee was obtained 3 days ago, and pay needs it at most 1 day old: fee computes it from its inputs (compute), so running it again gives nothing new` |
+| a stale fact came from a workflow or a plan step (needs attention) | `kyc.status was obtained 3 days ago, and pay needs it at most 1 day old: kyc is a workflow step, so it isn't run again unasked` |
 | a refresh gave no fresh value (needs attention) | `check_order#2 gave not_found, so check_order.status is still 3 days old, and pay needs it at most 1 day old` |
 | a fact's time is unknown (needs attention) | `check_order.status has no time obtained, so pay can't tell its age` |
 | a sheet is asked for an approval that isn't open | `pay.approval#3 is not open: there is no sheet to read` |

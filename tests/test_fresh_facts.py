@@ -17,7 +17,7 @@ from ventoux.case.freshness import TimeRefused
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Obtained, Opened
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
-from ventoux.testing import CATALOG, DAY, START, later, load_definition, run_case
+from ventoux.testing import CATALOG, DAY, START, later, load_definition, retry, run_case
 
 ROOT = Path(__file__).parent.parent
 REFUND = load_definition(ROOT / "examples" / "refund" / "refund.json")
@@ -233,3 +233,163 @@ def test_a_refresh_that_changes_the_condition_stops_the_step() -> None:
     assert run.state.values["check_order.status"] == "returned"
     assert not any(line.startswith("scheduled pay") for line in run.history)
     assert run.history[-1] == "closed: nothing left to do"
+
+
+class FeeInput(BaseModel):
+    amount: Decimal
+
+
+class FeeOutput(BaseModel):
+    fee: Decimal
+
+
+def with_fee() -> Any:
+    """The development catalog, and an activity that only computes: a fee from an amount."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(
+        ActivityContract(
+            name="fees.compute",
+            version=1,
+            input=FeeInput,
+            output=FeeOutput,
+            risk="low",
+            effect="compute",
+            timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+            idempotency_key=None,
+            outcomes=[],
+            display=Display(title="Compute a fee", description="Computes a fee from an amount."),
+        )
+    )
+    return catalog
+
+
+# Where a fact may come from, as a step giving it (None: the opening or a task), the fact, and why
+# it can't be fetched again.
+SOURCES: dict[str, tuple[dict[str, Any] | None, str, str]] = {
+    "the opening": (None, "order_id", "it came from the opening, so it can't be fetched again"),
+    "a person": (None, "review.outcome", "it came from a person, so it can't be fetched again"),
+    "a write": (
+        {
+            "kind": "activity",
+            "activity": "letters.draft@2",
+            "inputs": {"to_customer": {"var": "order_id"}, "template": "received"},
+        },
+        "source.outcome",
+        "source has side effects (write), so it can't be run again",
+    ),
+    "a compute": (
+        {"kind": "activity", "activity": "fees.compute@1", "inputs": {"amount": {"var": "amount"}}},
+        "source.fee",
+        "source computes it from its inputs (compute), so running it again gives nothing new",
+    ),
+    "a workflow": (
+        {
+            "kind": "workflow",
+            "workflow": "kyc.check@1",
+            "inputs": {"customer_id": {"var": "order_id"}},
+        },
+        "source.status",
+        "source is a workflow step, so it isn't run again unasked",
+    ),
+    "a plan": (
+        {
+            "kind": "plan",
+            "plan": "refund-order@1",
+            "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "amount"}},
+        },
+        "source.outcome",
+        "source is a plan step, so it isn't run again unasked",
+    ),
+}
+
+
+def needing(source: dict[str, Any] | None, fact: str) -> dict[str, Any]:
+    """A case whose `letter` reads `fact`, needing it at most a day old, and runs once `confirm`
+    is answered: on day 3, in the tests. `review` is answered on day 0."""
+    steps: dict[str, Any] = {
+        "review": {
+            "kind": "task",
+            "display": {"title": "Review"},
+            "roles": ["support"],
+            "outcomes": {"approve": {"display": {"title": "Approve"}}},
+        },
+        "confirm": {
+            "kind": "task",
+            "display": {"title": "Confirm"},
+            "roles": ["support"],
+            "outcomes": {"ok": {"display": {"title": "Confirmed"}}},
+        },
+        "letter": {
+            "kind": "activity",
+            "display": {"title": "Draft the letter"},
+            "activity": "letters.draft@2",
+            "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+            "requires": ["review", "confirm"],
+            "when": {"exists": fact},
+            "max_age": {fact: "1d"},
+        },
+    }
+    if source is not None:
+        steps["source"] = {"display": {"title": "Give the fact"}, **source}
+        steps["letter"]["requires"].append("source")
+    return {
+        "case": "fresh",
+        "display": {"title": "Fresh facts"},
+        "fields": {
+            "order_id": {"type": "string", "display": {"title": "Order"}},
+            "amount": {"type": "number", "display": {"title": "Amount"}},
+        },
+        "steps": steps,
+        "close_reasons": {"done": {"display": {"title": "Done"}, "roles": ["operations"]}},
+    }
+
+
+@pytest.mark.parametrize("where", list(SOURCES))
+def test_a_fact_that_cant_be_fetched_again_needs_attention(where: str) -> None:
+    source, fact, why = SOURCES[where]
+    plan = load_plan()
+    run = run_case(
+        needing(source, fact),
+        file={"order_id": "ord-1", "amount": 80},
+        answers=[("review", "approve", "ana"), later("3d"), ("confirm", "ok", "ana")],
+        people={**PEOPLE, "omar": ["operations"]},
+        catalog=with_fee(),
+        activities={"fees.compute@1": lambda inputs: {"fee": Decimal(2)}},
+        plans={"refund-order@1": plan},
+        plan_answers={"source": [("approve_refund", "approve", "sam")]},  # the plan's own wait
+    )
+    line = f"{fact} was obtained 3 days ago, and letter needs it at most 1 day old: {why}"
+    assert run.needs_attention == [f"letter#1: {line}"]
+    assert not any(line.startswith("refreshing") for line in run.history)
+    assert run.status == "open"  # a failed step is pending work (brief, D17)
+
+
+def test_a_retry_checks_freshness_again() -> None:
+    source, fact, why = SOURCES["a person"]
+    run = run_case(
+        needing(source, fact),
+        file={"order_id": "ord-1", "amount": 80},
+        answers=[
+            ("review", "approve", "ana"),
+            later("3d"),
+            ("confirm", "ok", "ana"),
+            later("1h"),
+            retry("letter#1", "omar"),
+        ],
+        people={**PEOPLE, "omar": ["operations"]},
+    )
+    assert "omar retried letter#1 as operations" in run.history
+    assert run.needs_attention == [
+        f"letter#1: {fact} was obtained 3 days ago, and letter needs it at most 1 day old: {why}"
+    ]
+    assert not run.reached("letter")
+
+
+def load_plan() -> dict[str, Any]:
+    """The plans guide's `refund-order` plan, its first JSON block, as stored data."""
+    guide = (ROOT / "docs" / "guides" / "plans.md").read_text()
+    plan: dict[str, Any] = json.loads(
+        guide.split("```json\n")[1].split("```")[0], parse_float=Decimal
+    )
+    return plan
