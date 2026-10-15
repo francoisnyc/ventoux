@@ -26,6 +26,7 @@ from ventoux.case.approvals import ask, follow, lapsed, needs_approval
 from ventoux.case.called import called
 from ventoux.case.closing import begin_closing, close_when_reached, refuse_to_close, settle
 from ventoux.case.definition import (
+    ActivityStep,
     CallStep,
     CaseDefinition,
     PlanStep,
@@ -33,6 +34,7 @@ from ventoux.case.definition import (
     WorkflowStep,
 )
 from ventoux.case.forgetting import forget
+from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     Answered,
@@ -44,6 +46,7 @@ from ventoux.case.state import (
     Failed,
     ForgetApproved,
     GivenApproval,
+    Obtained,
     OpenApproval,
     Opened,
     PlanCancelled,
@@ -100,8 +103,9 @@ def decide(
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: Event
 ) -> tuple[CaseState, list[Command]]:
     """The case's state after `event`, and the activities to schedule. A refused event raises
-    (`AnswerRefused`, `ProposalRefused`, `CaseRefused`) and changes nothing; a step the engine
+    (`AnswerRefused`, `ProposalRefused`, `CaseRefused`, `TimeRefused`) and changes nothing; a step the engine
     can't run fails, and the case needs attention (brief, D17)."""
+    refuse_unless_whole(event.at)  # time is only ever event data, so it is checked first
     state = copy.deepcopy(state)  # the state passed in is never changed
     commands: list[Command] = []
     was_open = state.phase == "open"
@@ -134,7 +138,7 @@ def decide(
     if was_open and state.phase == "closing":
         stop_plans(case, state, commands)
     if state.phase == "open":
-        admit(case, catalog, state, commands)  # nothing new starts once the case is closing
+        admit(case, catalog, state, commands, event.at)  # nothing new starts once closing
     settle(case, state)
     return state, commands
 
@@ -172,6 +176,7 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
     for name, value in event.file.items():
         state.values[name] = value
         state.sources[name] = marked(case, name, origin)
+        state.obtained[name] = Obtained(event.at, None)  # from the opening, by no step run
     state.history.append(f"opened by {event.by or OPENER}, with {listed(sorted(event.file))}")
 
 
@@ -329,10 +334,12 @@ def answer_task(
     # The latest answer is the outcome (brief, D9), and a form's values replace earlier ones.
     state.values[f"{run.step}.outcome"] = event.outcome
     state.sources[f"{run.step}.outcome"] = frozenset({who})
+    state.obtained[f"{run.step}.outcome"] = Obtained(event.at, None)  # from a person, not a run
     sets = step.outcomes[event.outcome].sets
     for name in sets:
         state.values[name] = kept(case, name, (event.form or {})[name])
         state.sources[name] = marked(case, name, who)
+        state.obtained[name] = Obtained(event.at, None)
     setting = f", setting {listed(list(sets))}" if sets else ""
     state.history.append(f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}")
     state.history.append(f"{run.entry} done")
@@ -360,7 +367,7 @@ def answer_approval(
             # Fail closed: an approval of inputs nobody can read approves nothing.
             fail(state, approval.step, f"the inputs of {approval.step} can't be read: {error}")
             return
-        state.given[approval.step] = GivenApproval(approval.entry, event.by, digest)
+        state.given[approval.step] = GivenApproval(approval.entry, event.by, digest, approval.seen)
         return
     # A rejection is an outcome: the step doesn't run (brief, D23).
     entry = next_entry(state, approval.step)
@@ -382,13 +389,14 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
         contract = called(catalog, step)
         declares, problem = contract.reference, outcome_problem(contract, event)
     if problem is not None:
-        failed(state, Failed(event.entry, problem))
+        failed(state, Failed(event.entry, problem, at=event.at))
         return
     run.status = "done"
     state.values[f"{run.step}.outcome"] = event.outcome
     # Trusted: the contract, owned by the platform team, or the reviewed plan, declares the
     # outcomes (brief, D12).
     state.sources[f"{run.step}.outcome"] = frozenset({f"system:{declares}"})
+    state.obtained[f"{run.step}.outcome"] = Obtained(event.at, run.entry)  # by this run
     if event.outcome != DONE:
         state.history.append(f"{run.entry} gave {event.outcome}")
         if state.phase == "closing":
@@ -415,6 +423,7 @@ def write_outputs(
     for name, source in sources.items():
         state.values[f"{step}.{name}"] = getattr(given, name)
         state.sources[f"{step}.{name}"] = frozenset({source})
+        state.obtained[f"{step}.{name}"] = Obtained(event.at, event.entry)  # by this run
     return sources
 
 
@@ -497,9 +506,14 @@ def flag(state: CaseState, why: str) -> None:
 
 
 def fail(state: CaseState, name: str, reason: str) -> None:
-    """The step's coming run fails before it is scheduled, with the reason (brief, D17)."""
+    """The step's coming run fails before it is scheduled, with the reason (brief, D17). An
+    approval given for it goes with the failed run, which a retry keeps (brief, D26): left
+    given, it would admit the step again in the same decision, and fail it for ever."""
     run = coming_run(state, name, "failed")
     run.reason = reason
+    given = state.given.pop(name, None)
+    if given is not None:
+        run.approved = given
     state.history.append(f"{run.entry} failed: {reason}")
 
 
@@ -540,6 +554,15 @@ def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retri
             raise RetryRefused(f"{event.entry} can't be retried: {render(step.when)} is false now")
     run.status, run.reason = "retrying", ""
     state.history.append(f"{event.by} retried {event.entry} as {counted[0]}")
+    # A person decided to try again: a fact the step needs fresh may be fetched again, unless a
+    # refresh of it is still on its way (brief, D33).
+    for field in step.max_age if not isinstance(step, TaskStep) else {}:
+        prior = state.refreshing.get(field)
+        if prior is not None and next(r for r in state.runs if r.entry == prior).status in (
+            "done",
+            "failed",
+        ):
+            del state.refreshing[field]
 
 
 def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
@@ -551,9 +574,10 @@ def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
 
 
 def admit(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command]
+    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command], at: int
 ) -> None:
-    """Start every step that may start now, until no more can: no position, only admission."""
+    """Start every step that may start now, until no more can: no position, only admission.
+    `at` is the time of the event being decided, against which facts' ages are measured."""
     required = requirements(case)
     started = True
     while started:
@@ -563,6 +587,14 @@ def admit(
             if not free_to_start(state, name, step) or not requirements_met(required[name], state):
                 continue
             try:
+                # Freshness first, before the condition, the approval and the start, so each
+                # reads fresh facts (brief, D18) (brief, D33).
+                if not isinstance(step, TaskStep):
+                    waits = refresh_stale(case, catalog, state, name, step, at, commands)
+                    if waits == "refreshing":
+                        started = True  # a refresh was scheduled: admission goes round again
+                    if waits != "fresh":
+                        continue
                 # Read only once `requires` are met: a field nobody has set fails the step.
                 if step.when is not None and not holds(
                     step.when, state.values, f"{name}'s condition"
@@ -574,6 +606,99 @@ def admit(
                 # other steps go on (brief, D17).
                 fail(state, name, str(error))
             started = True
+
+
+def refresh_stale(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    step: CallStep | PlanStep,
+    at: int,
+    commands: list[Command],
+) -> Literal["fresh", "refreshing", "waiting"]:
+    """Whether every fact the step needs fresh is: `fresh`; or one is being fetched again,
+    `refreshing` (scheduled now) or `waiting` (on its way). A stale fact is refreshed, never
+    trusted: only one a read-only activity step obtained can be fetched again, and only once for
+    the same need; any other stops the step, and a person decides (brief, D17) (brief, D33)."""
+    for stale in stale_facts(step.max_age, state, at):
+        if stale.age is None:  # fail closed: an age that can't be told is never fresh
+            raise StepStopped(f"{stale.field} has no time obtained, so {name} can't tell its age")
+        said = f"{stale.field} was obtained {ago(stale.age)} ago"
+        needed = f"{name} needs it at most {as_said(stale.limit)} old"
+        prior = state.refreshing.get(stale.field)
+        if prior is not None and prior != stale.run:  # fetched again, and still the old value
+            run = next(run for run in state.runs if run.entry == prior)
+            if run.status not in ("done", "failed"):
+                return "waiting"  # on its way: running, or retried by an operator
+            gave = (
+                f"gave {state.values[f'{run.step}.outcome']}" if run.status == "done" else "failed"
+            )
+            raise StepStopped(
+                f"{prior} {gave}, so {stale.field} is still {ago(stale.age)} old, and {needed}"
+            )
+        source, why_not = refreshable(case, catalog, state, stale)
+        if source is None:
+            raise StepStopped(f"{said}, and {needed}: {why_not}")
+        state.history.append(
+            f"refreshing {stale.field} for {name}: obtained {ago(stale.age)} ago, at most "
+            f"{as_said(stale.limit)}"
+        )
+        refreshing = case.steps[source]
+        assert isinstance(refreshing, ActivityStep)  # only a read-only activity is refreshed
+        schedule(case, catalog, state, source, refreshing, None, commands)  # a new run: its own key
+        run = state.runs[-1]
+        run.refresh = True
+        state.refreshing[stale.field] = run.entry
+        return "refreshing"
+    return "fresh"
+
+
+def refreshable(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, stale: Stale
+) -> tuple[str | None, str]:
+    """The step whose run obtained the stale fact, if running it again is safe: an activity whose
+    contract only reads (brief, D33). Otherwise None, and why it can't be fetched again."""
+    run = next((run for run in state.runs if run.entry == stale.run), None)
+    if run is None:
+        # Not from a run: from a person (their answer, or the opening a person made), or from the
+        # system that opened the case. Nothing can ask either again.
+        came = "a person" if is_from_a_person(state, stale.field) else "the opening"
+        return None, f"it came from {came}, so it can't be fetched again"
+    step = case.steps[run.step]
+    if isinstance(step, PlanStep):
+        return None, f"{run.step} is a plan step, so it isn't run again unasked"
+    if isinstance(step, WorkflowStep):
+        # Another team's workflow, which may run for minutes: never re-run unasked (brief, D33).
+        return None, f"{run.step} is a workflow step, so it isn't run again unasked"
+    assert isinstance(step, ActivityStep)  # only a task has no contract, and it gives no run's fact
+    effect = called(catalog, step).effect
+    if effect == "compute":
+        # The same inputs give the same answer: its age is its inputs' age (brief, D33).
+        return None, (
+            f"{run.step} computes it from its inputs (compute), so running it again gives "
+            "nothing new"
+        )
+    if effect != "read":
+        return None, f"{run.step} has side effects ({effect}), so it can't be run again"
+    # A refresh is a run like any other: it passes the same gate as a start, or doesn't run.
+    # Fail closed: it never asks for an approval itself, so a step that needs one now isn't run
+    # again, and a person decides (brief, D33).
+    for requirement in requirements(case)[run.step]:
+        if not requirements_met((requirement,), state):
+            return None, (
+                f"{run.step} requires {requirement}, which hasn't completed, so it isn't run again"
+            )
+    if step.when is not None and not holds(step.when, state.values, f"{run.step}'s condition"):
+        return None, f"{run.step}'s condition is false now, so it isn't run again"
+    if needs_approval(state, run.step, step):
+        return None, f"{run.step} needs an approval to run, so it isn't run again unasked"
+    return run.step, ""
+
+
+def is_from_a_person(state: CaseState, field: str) -> bool:
+    """Whether a person gave the field's value: their answer, or the case they opened."""
+    return any(source.startswith("person:") for source in state.sources.get(field, ()))
 
 
 def free_to_start(state: CaseState, name: str, step: TaskStep | CallStep | PlanStep) -> bool:

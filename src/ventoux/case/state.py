@@ -4,6 +4,7 @@ Nothing here says where the case is (brief, idea 4): a case holds its case file,
 has reached and its step runs, and the runtime works out what may start from those.
 """
 
+import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
@@ -19,6 +20,9 @@ class GivenApproval:
     entry: str
     by: str
     digest: str | Sensitive  # of the step's inputs (brief, D11); sensitive if they are
+    # The values its step read when it was asked, by field, as the open approval saw them: a
+    # refresh that changes one lapses it (brief, D33).
+    seen: dict[str, object] = field(default_factory=dict[str, object])
 
 
 @dataclass
@@ -33,6 +37,9 @@ class StepRun:
     status: Literal["open", "running", "done", "rejected", "failed", "retrying", "cancelled"]
     reason: str = ""  # why it failed
     approved: GivenApproval | None = None  # the approval spent on it, which a retry keeps
+    refresh: bool = (
+        False  # run to fetch a stale fact again, not because the case asked (brief, D33)
+    )
 
 
 @dataclass
@@ -44,6 +51,16 @@ class OpenApproval:
     seen: dict[str, object]  # the values its step read when it was asked, by field (brief, D25)
 
 
+@dataclass(frozen=True)
+class Obtained:
+    """When a value of the case file was obtained, and by which step run (brief, D33)."""
+
+    at: int  # in whole seconds since the epoch: the time of the event that brought it
+    run: (
+        str | None
+    )  # the step run that gave it, such as `check_order#1`; None: the opening, a person
+
+
 @dataclass
 class CaseState:
     """Everything a case knows: its case file, milestones and step runs, and its history."""
@@ -52,7 +69,12 @@ class CaseState:
     values: dict[str, object] = field(default_factory=dict[str, object])  # the case file
     # Where each value came from (brief, D12): `system:opener`, `person:ana`, `untrusted:llm`.
     sources: dict[str, frozenset[str]] = field(default_factory=dict[str, frozenset[str]])
+    # When each value was obtained, and by which run (brief, D18) (brief, D33).
+    obtained: dict[str, Obtained] = field(default_factory=dict[str, Obtained])
     milestones: list[str] = field(default_factory=list[str])  # reached, in order; never undone
+    # Each stale fact being fetched again, and the run fetching it: one refresh per need, never
+    # a second for the same one (brief, D33).
+    refreshing: dict[str, str] = field(default_factory=dict[str, str])
     runs: list[StepRun] = field(default_factory=list[StepRun])  # every step run, in order
     approvals: dict[str, OpenApproval] = field(default_factory=dict[str, OpenApproval])  # by step
     given: dict[str, GivenApproval] = field(default_factory=dict[str, GivenApproval])  # by step
@@ -76,6 +98,10 @@ class Opened:
 
     file: Mapping[str, object]  # each value, read by its field's type
     by: str | None  # the person who opened it, as the trusted caller states; None: a system
+    # When it reached the case, in whole seconds since the epoch: the case reads no clock
+    # (brief, D33). Python: `kw_only` makes it a keyword with no default, `Opened(..., at=t)`, so
+    # no event is ever made without its time.
+    at: int = field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -87,6 +113,7 @@ class Answered:
     by: str  # who answered, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with the answer (brief, D22)
     form: Mapping[str, object] | None = None  # the values the outcome sets
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -96,6 +123,7 @@ class Proposed:
     step: str
     by: str  # who proposed it, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with the proposal (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -106,6 +134,7 @@ class Completed:
     entry: str
     output: Mapping[str, object]
     outcome: str = "done"
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -114,6 +143,7 @@ class Failed:
 
     entry: str
     reason: str
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -123,6 +153,7 @@ class Retried:
     entry: str
     by: str  # who retried it, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with the retry (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -132,6 +163,7 @@ class CloseAsked:
     reason: str
     by: str  # who closes it, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with the request (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -143,6 +175,7 @@ class PlanCancelled:
     # Each activity in it that finished or failed after the close was requested, which the case
     # flags: `payments.refund@2 completed after the close was requested` (brief, D10).
     after_stop: tuple[str, ...] = ()
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 @dataclass(frozen=True)
@@ -153,6 +186,9 @@ class Shown:
     field: str  # the reference field, such as `customer_id`
     by: str  # who was shown it, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with it (brief, D22)
+    # When it reached the case, in seconds since the epoch. `dataclasses.field` in full: this
+    # class has a field named `field`.
+    at: int = dataclasses.field(kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -165,6 +201,7 @@ class ForgetApproved:
     proposer_roles: frozenset[str]  # their roles, stated with the proposal (brief, D22)
     approved_by: str  # who approved it
     approver_roles: frozenset[str]  # their roles, stated with the approval
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
 type Event = (

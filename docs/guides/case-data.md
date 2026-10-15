@@ -1,9 +1,9 @@
 # Case data: what goes in the case file
 
 > **For workflow developers.** This guide describes layer 9 as if it already worked; the code that
-> makes it true is built test-first, in four parts. References and who sees what (9a), sensitive
-> fields (9b) and forgetting a person (9c) are described as built. Fresh facts (9d) are still
-> design: its section says so. The "Design notes" at the end list what writing it revealed.
+> makes it true is built test-first, in four parts: references and who sees what (9a), sensitive
+> fields (9b), forgetting a person (9c) and fresh facts (9d). The "Design notes" at the end list
+> what writing it revealed.
 
 **The rule of thumb:** a case file holds the **facts your rules decide on**, and **references** to
 everything else. Customers, orders, policies and documents stay in the systems that own them.
@@ -392,13 +392,143 @@ says so:
 
 ## Fresh facts
 
-> **Design, built in layer 9d.**
+A case file is a snapshot: "the order is delivered" means *it was, when we looked*. So every
+fact records **when it was obtained**, and which step run obtained it: the opening, a person's
+answer, or a run such as `check_order#1`. Ventoux never reads a clock to decide anything; the
+time comes with each event the case receives, so a case replays the same way (brief, D18).
 
-Every fact records when it was obtained, and by which step. A step may say how fresh the facts it
-uses must be: `"max_age": {"lookup.status": "1d"}`. When one is older, Ventoux runs the read-only
-step that obtained it again first, then checks the step's condition again. A fact that came from
-a person, from the opening, or from a step with side effects can't be fetched again: the case
-needs attention instead.
+### Saying how fresh a step needs its facts
+
+Freshness belongs where a fact is **used**, not on the field: a week-old status is fine for a
+letter, not for a payment. A step says it with `max_age`, for any field it reads in its inputs,
+its `when` or its approval's `when`:
+
+```json
+"check_order": {
+  "kind": "activity",
+  "display": {"title": "Look the order up"},
+  "activity": "orders.lookup@1",
+  "inputs": {"order_id": {"var": "order_id"}}
+},
+"pay": {
+  "kind": "activity",
+  "display": {"title": "Refund the customer"},
+  "activity": "payments.refund@2",
+  "requires": ["review", "check_order"],
+  "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+  "max_age": {"check_order.status": "1d"},
+  "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+  "approval": {"when": {">": [{"var": "approved_amount"}, 100]}, "roles": ["support-lead"],
+               "display": {"reason": "Refunds above 100 need a team lead"}}
+}
+```
+
+An age is a whole number and a unit: `30m` (minutes), `12h` (hours) or `1d` (days).
+
+### What happens to a stale fact
+
+The age is checked **just before the step would run**: once its `requires` are met, and before
+its `when`, its approval's `when`, asking for its approval and starting it. If a fact is older
+than its `max_age`:
+
+- **It came from a read-only activity** (its contract's effect is `read`): Ventoux runs that step
+  again first. It is a new run, `check_order#2`, with its own key, checked as every run is. Its
+  output replaces the old one, with a fresh time, and then `pay` is checked again, its condition
+  included: an order returned since the first look now stops the refund. It runs again only if
+  it could start now: what it requires is done, its condition holds, and it needs no approval.
+  A refresh never asks for an approval itself, so a read behind one (a credit check) needs
+  attention instead.
+- **It came from anywhere else**, the step needs attention instead (brief, D17): a person's
+  answer, the opening, an activity with side effects (`write`, `notify`) or one that computes
+  (`compute`), a workflow step or a plan step. Ventoux can't fetch those again. A person decides:
+  answer the task again (propose it, if it is repeatable), then retry the step; or close the
+  case.
+
+A fact is fetched again **once for each need**, never in a loop:
+
+- **A refresh that fails** needs attention itself, like any failed run. A step that requires the
+  refreshed step waits for it, and once an operator retries the refresh and it succeeds, the
+  step runs on the fresh value. A step that only reads the fact needs attention too.
+- **A refresh that gives an outcome** such as `not_found` writes no output, so the fact is still
+  stale: the step that needed it needs attention.
+- **Retrying that step** is a person deciding to try again: the fact may then be fetched again.
+- **Two steps that need the same fact** share one refresh, and while it runs, the step it
+  refreshes still counts as done for `requires`: an approval waiting on it stays open, unless
+  the refresh changes a value it reads.
+
+```python
+looked_up = iter(["delivered", "returned"])  # the order was returned in the meantime
+run = run_case(
+    refund_fresh,
+    file={"order_id": "ord-1", "amount": 80},
+    answers=[later("3d"), ("review", "approve", "ana", {"approved_amount": 80})],
+    people=PEOPLE,
+    activities={"orders.lookup@1": lambda inputs: {"status": next(looked_up)}},
+)
+assert not run.reached("pay")
+assert "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day" in run.history
+```
+
+**When it is noticed.** Only when an event reaches the case (an answer, a result, a proposal):
+a case where nothing happens notices nothing. Timers that would notice sooner come with rules
+(layer 11).
+
+### Approvals and fresh facts
+
+- **An approval is asked on fresh facts,** since the age is checked before it is asked.
+- **A refresh that changes a value an approval reads** (the step's inputs, its `when`, the
+  approval's `when`) withdraws it if it is open, as any change does (brief, D25). If it was
+  already given, it **lapses**: `lapsed pay.approval#1: check_order.status changed when
+  refreshed`. The step is then checked again from the start: if it should still run and still
+  needs an approval, a new one is asked, on the new value.
+- **A refresh that changes nothing leaves the approval standing,** open or given.
+
+The **approval sheet** shows the age of every fact the approval depends on, so the approver can
+act before, and the audit can explain after. For a refund of 250, whose approval Sam reads three
+days after the order was looked up:
+
+```python
+run = run_case(
+    refund_fresh,
+    file={"order_id": "ord-1", "amount": 250},
+    answers=[("review", "approve", "ana", {"approved_amount": 250})],
+    people=PEOPLE,
+)
+sheet = run.approval_sheet("pay.approval#1", roles=["support-lead"], at=START + 3 * DAY)
+assert "check_order.status: delivered, obtained 3 days ago" in sheet.lines
+```
+
+`at` is the time the sheet is read: a sheet is read, never decided on, so the time is the
+reader's. On Temporal, `approval_sheet(case, entry, roles)` uses the API's clock unless you give
+one. The case view gives each value's time too, in `view.obtained`, as whole seconds since the
+epoch. A hidden field's time is hidden with it; a sensitive field's time is not sensitive.
+
+### In tests and on Temporal
+
+- **In tests, time is given.** `run_case` starts at `ventoux.testing.START` (1 January 2026,
+  UTC) unless you pass `at=`; `later("3d")` in the script moves time on, and `DAY` is a day in
+  seconds. A result arrives at the time of the event that started its run.
+- **On Temporal, time is the workflow's.** Each event is stamped as it reaches the case, from
+  Temporal's workflow time, which history records: a replay reads the same times, so the case
+  decides the same way. Times cross a continue-as-new exactly.
+
+### What the engine refuses
+
+| Refused or stopped when | Example |
+|---|---|
+| an age has an unknown unit | `steps.pay.max_age.check_order.status: an age looks like "30m", "12h" or "1d"` |
+| an age is zero | `steps.pay.max_age.check_order.status: an age is at least 1m` |
+| a step's `max_age` names a field it doesn't read | `steps.pay.max_age: pay doesn't read amount in its inputs, its when or its approval: name only what it reads` |
+| a stale fact came from a person (needs attention) | `approved_amount was obtained 3 days ago, and pay needs it at most 1 day old: it came from a person, so it can't be fetched again` |
+| a stale fact came from the opening (needs attention) | `order_id was obtained 3 days ago, and pay needs it at most 1 day old: it came from the opening, so it can't be fetched again` |
+| a stale fact came from a step with side effects (needs attention) | `pay_fee.outcome was obtained 3 days ago, and notify needs it at most 1 day old: pay_fee has side effects (write), so it can't be run again` |
+| a stale fact came from a step that computes (needs attention) | `fee.fee was obtained 3 days ago, and pay needs it at most 1 day old: fee computes it from its inputs (compute), so running it again gives nothing new` |
+| a stale fact came from a read that needs an approval to run (needs attention) | `check_order.status was obtained 3 days ago, and pay needs it at most 1 day old: check_order needs an approval to run, so it isn't run again unasked` |
+| a stale fact came from a workflow or a plan step (needs attention) | `kyc.status was obtained 3 days ago, and pay needs it at most 1 day old: kyc is a workflow step, so it isn't run again unasked` |
+| a refresh gave no fresh value (needs attention) | `check_order#2 gave not_found, so check_order.status is still 3 days old, and pay needs it at most 1 day old` |
+| a refresh failed, and the step only reads its fact (needs attention) | `check_order#2 failed, so check_order.status is still 3 days old, and pay needs it at most 1 day old` |
+| a fact's time is unknown (needs attention) | `check_order.status has no time obtained, so pay can't tell its age` |
+| a sheet is asked for an approval that isn't open | `pay.approval#3 is not open: there is no sheet to read` |
 
 ## Reports
 
@@ -411,8 +541,8 @@ the warehouse too.
 
 - **Can I store a document in a case?** No. Store it in your document system and keep its reference.
 - **The record changed after the case read it. Which value counts?** The fact in the case file, as
-  obtained at that time. If a step must not run on an old value, say so with `max_age` (layer 9d):
-  when it's older, Ventoux runs the lookup again first.
+  obtained at that time. If a step must not run on an old value, say so with `max_age`: when
+  it's older, Ventoux runs the lookup again first.
 - **Can I see the referenced record in the case view?** Yes: the inbox shows referenced records by
   asking their system, on your behalf: you see what that system lets you see. Nothing shown is
   stored in the case. If what you saw matters to your decision, record it as a fact (for example,
@@ -442,7 +572,8 @@ the warehouse too.
    (brief, D32).
 5. **Facts record when they were obtained** (decided: D18). Workflow time, an optional as-of time
    from the source, `max_age` where a step uses a fact, and stale facts refreshed by re-running a
-   read-only lookup.
+   read-only lookup. Since layer 9d, the time is data on each event, never a clock the case
+   reads; the as-of time from the source is still to come: nothing needs it yet (brief, D33).
 6. **Erasure and audit must coexist.** The audit trail keeps that a decision happened, by whom and
    on which rule, but not the erased values. The audit format must allow that.
 7. **The quickstart's `order_id` is a reference.** It uses `refund.reference("order_id",

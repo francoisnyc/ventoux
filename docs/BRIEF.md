@@ -857,6 +857,46 @@ be erased on request), has size limits, and a second copy of business records go
   and every failure's message and stack trace. Staff identifiers stay: forgetting is about the
   case's subject, through its sensitive fields.
 
+### D33. Fresh facts: time on events, refreshing a read, and a given approval's lapse
+
+*Drafted 2026-10-15, in layer 9d. Adds to D18 and D25.*
+
+- **Time is data on each event,** in whole seconds since the epoch: the case reads no clock, so
+  the same history decides the same way (D18's "workflow time"). On Temporal each event is
+  stamped as it reaches the case, from the workflow's time, which history records. Tests give
+  the time themselves.
+- **Every value written records when, and by which step run, it was obtained:** the opening, a
+  person's answer, or a run such as `check_order#1`.
+- **`max_age` is written where a fact is used** (D18): on an activity, workflow or plan step,
+  only for fields the step reads, as `30m`, `12h` or `1d`. It is checked once the step's
+  `requires` are met, before its `when`, its approval's `when`, asking for its approval and
+  starting it. A fact with no known time stops the step (fail closed).
+- **Only a read is fetched again:** an output or outcome of an activity step whose contract's
+  effect is `read`. Everything else (the opening, a person, a `write`, `notify` or `compute`
+  activity, a workflow or a plan step) needs attention (D17). A `compute` step run again on the
+  same inputs gains nothing; a workflow belongs to another team and is not re-run unasked.
+- **A refresh is a new run of the step,** with its own entry and key (D17), checked as every run
+  is; its output replaces the old one, with fresh sources and time. It doesn't undo its step for
+  `requires` while it runs: only what it changes counts. If it gives no fresh value, the step
+  that needed it needs attention: never a second refresh for the same need.
+- **A refresh passes the same gate as any start, and fails closed.** It runs only if its step
+  could start now: its requirements met, its condition true, and no approval needed. A refresh
+  never asks for an approval: a read behind one (a high-risk credit check) needs attention, and
+  a person decides, since one approval unlocks one run of one step (D11). Asking for a new
+  approval while the step that needs the fact waits was the other way; it needs more machinery
+  (an approved run marked as a refresh, a rejection's meaning for the waiting step) than any case
+  has asked for yet. *Added in the tutor review of 9d, before D33 was merged.*
+- **A given approval lapses on a refresh that changes what it saw** (D11): the step's inputs, its
+  `when` or the approval's `when`, which it now records as an open approval does (D25). The step
+  is then checked again, and a new approval asked if one is still needed, since a refresh is the
+  engine's routine, not a person's change. A lapse from a change request still stops the step
+  (D25). A refresh that changes nothing leaves an approval standing, open or given.
+- **People read ages at their own time:** the approval sheet shows each fact's age as of when it
+  is read, a time the reader gives, since a sheet is read, never decided on (D18).
+- **Staleness is noticed only when an event reaches the case.** Timers that would notice sooner
+  come with rules (layer 11). The source's own as-of time (D18) waits until something needs it:
+  it is a contract change.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step

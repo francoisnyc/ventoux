@@ -49,7 +49,8 @@ def what_it_reads(step: CallStep, values: dict[str, object]) -> dict[str, object
 
 
 def follow(case: CaseDefinition, state: CaseState) -> None:
-    """Withdraw each open approval whose step is no longer admitted, or whose values changed."""
+    """Withdraw each open approval whose step is no longer admitted, or whose values changed;
+    and lapse each given approval whose values a refresh changed."""
     required = requirements(case)
     for name, approval in list(state.approvals.items()):
         step = case.steps[name]
@@ -57,6 +58,15 @@ def follow(case: CaseDefinition, state: CaseState) -> None:
         reason = not_admitted(case, required[name], state) or changed(approval, step, state)
         if reason is not None:
             withdraw(state, approval, reason)
+    for name, given in list(state.given.items()):
+        step = case.steps[name]
+        assert isinstance(step, CallStep)  # only an activity or a workflow is approved
+        if different := changed_fields(given, step, state):
+            # The approver never saw the new value, so the approval lapses, and the step is
+            # checked again from the start: asked again if it still needs one (brief, D33).
+            del state.given[name]
+            how = " when refreshed" if all(refreshed(state, f) for f in different) else ""
+            state.history.append(f"lapsed {given.entry}: {', '.join(different)} changed{how}")
 
 
 def not_admitted(case: CaseDefinition, required: tuple[str, ...], state: CaseState) -> str | None:
@@ -69,14 +79,28 @@ def not_admitted(case: CaseDefinition, required: tuple[str, ...], state: CaseSta
     return None
 
 
-def changed(approval: OpenApproval, step: CallStep, state: CaseState) -> str | None:
+def changed(approval: OpenApproval | GivenApproval, step: CallStep, state: CaseState) -> str | None:
     """Which values the step reads changed since its approval was asked, or None."""
+    different = changed_fields(approval, step, state)
+    return f"{', '.join(different)} changed" if different else None
+
+
+def changed_fields(
+    approval: OpenApproval | GivenApproval, step: CallStep, state: CaseState
+) -> list[str]:
+    """The fields the step reads whose values changed since its approval was asked, in order."""
     now = what_it_reads(step, state.values)
     fields = sorted(set(approval.seen) | set(now))
-    different = [
+    return [
         f for f in fields if (f in now, now.get(f)) != (f in approval.seen, approval.seen.get(f))
     ]
-    return f"{', '.join(different)} changed" if different else None
+
+
+def refreshed(state: CaseState, field: str) -> bool:
+    """Whether the field's value was last given by a refresh run (brief, D33)."""
+    obtained = state.obtained.get(field)
+    run = next((r for r in state.runs if obtained and r.entry == obtained.run), None)
+    return run is not None and run.refresh
 
 
 def withdraw(state: CaseState, approval: OpenApproval, reason: str) -> None:

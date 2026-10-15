@@ -4,6 +4,7 @@ See docs/layers/09-case-data.md (9a) and docs/guides/cases.md, "Running a case o
 """
 
 import asyncio
+import dataclasses
 import json
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
@@ -92,7 +93,15 @@ def test_the_view_on_temporal_is_the_view_in_memory() -> None:
 
     in_memory = run_case(guide_claim(), file=FILE, answers=[], people=PEOPLE)
     expected = [in_memory.view(roles) for roles in (["adjuster"], ["fraud"], ["support"])]
-    assert on_temporal(scenario) == expected
+    seen = on_temporal(scenario)
+    # The same view, but for the times: on Temporal they are the workflow's, in memory the
+    # test's own (layer 9d). Each value has one, the same for all: they came with the opening.
+    assert [dataclasses.replace(v, obtained={}) for v in seen] == [
+        dataclasses.replace(v, obtained={}) for v in expected
+    ]
+    for got, wanted in zip(seen, expected, strict=True):
+        assert set(got.obtained) == set(wanted.obtained) == set(wanted.values)
+        assert len(set(got.obtained.values())) <= 1  # none for a role that sees nothing
 
 
 def test_refusals_are_recorded_and_the_case_waits() -> None:

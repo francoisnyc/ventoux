@@ -26,7 +26,7 @@ from temporalio.workflow import NondeterminismError
 
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, CaseState, Opened
+from ventoux.case.state import Answered, CaseState, Obtained, Opened
 from ventoux.temporal import client as plans
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import (
@@ -43,6 +43,7 @@ from ventoux.temporal.cases import (
 from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.temporal.worker import SANDBOX, case_worker
 from ventoux.temporal.workflow import PlanWorkflow, RunReport
+from ventoux.testing import START
 from ventoux.tooling.keys import KeyRefused
 
 # Temporal: this module defines a workflow (`CasesWithPlans`, below), so the workflow sandbox
@@ -637,17 +638,29 @@ def test_a_carried_state_reads_back_as_it_was() -> None:
     assert isinstance(back.values["approved_amount"], Decimal)
     assert back.sources["approved_amount"] == frozenset({"person:ana"})
     assert list(back.approvals) == ["pay"]
+    # A time crosses as the same whole number, not the exact decimal JSON numbers are read as
+    # (brief, D33).
+    assert back.obtained["approved_amount"] == Obtained(START, None)
+    assert type(back.obtained["approved_amount"].at) is int
     # Every field of the state crosses: one added later and forgotten here would vanish at every
     # switch, unnoticed.
     assert set(state_as_data(state)) == {field.name for field in dataclasses.fields(CaseState)}
 
 
+def test_a_carried_time_that_isnt_whole_is_refused() -> None:
+    # Fail closed: a damaged time is never rounded into one the case would decide on.
+    data = state_as_data(case_state(REFUND, LARGE, [("review#1", REVIEW_FORM)]))
+    data["obtained"]["amount"]["at"] = Decimal("1767225600.5")
+    with pytest.raises(ValueError, match="a carried time is a whole number of seconds"):
+        state_from_data(data)
+
+
 def case_state(definition: dict[str, Any], file: dict[str, Any], reviews: list[Any]) -> CaseState:
     """The state `decide` reaches after opening `definition` with `file` and Ana's `reviews`."""
     case = parse_case(definition)
-    state, _ = decide(case, CATALOG, CaseState("refund-1/run"), Opened(file, None))
+    state, _ = decide(case, CATALOG, CaseState("refund-1/run"), Opened(file, None, at=START))
     for entry, form in reviews:
-        answered = Answered(entry, "approve", "ana", frozenset({"support"}), form)
+        answered = Answered(entry, "approve", "ana", frozenset({"support"}), form, at=START)
         state, _ = decide(case, CATALOG, state, answered)
     return state
 

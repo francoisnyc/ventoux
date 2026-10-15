@@ -43,6 +43,7 @@ from ventoux.temporal.client import start_plan
 from ventoux.temporal.converter import ExactPayloadConverter, data_converter
 from ventoux.temporal.logs import TEMPORAL_LOGGERS
 from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.testing import START
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it
 # uses from the development setup is passed through, imported once and shared (as in 8c's tests).
@@ -552,7 +553,12 @@ def refusal_in_memory(when: str) -> str:
         return str(invalid.value)
     if when == "a sensitive value arrives in plain text":
         with pytest.raises(CaseRefused) as refused:
-            decide(parse_case(claim()), CATALOG, CaseState("memory"), Opened(as_json(FILE), None))
+            decide(
+                parse_case(claim()),
+                CATALOG,
+                CaseState("memory"),
+                Opened(as_json(FILE), None, at=START),
+            )
         return str(refused.value)
     if when == "a sensitive value reaches a workflow step":
         kyc = {

@@ -9,7 +9,7 @@ clock, randomness or I/O, so replay rebuilds the same case. See docs/layers/08-c
 import asyncio
 from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 from temporalio import workflow
@@ -39,6 +39,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.closing import CloseRefused
     from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.forgetting import ForgetRefused
+    from ventoux.case.freshness import TimeRefused
     from ventoux.case.plan_step import PlanNotSupplied, supplied
     from ventoux.case.runtime import CaseRefused, ShownRefused, decide
     from ventoux.case.state import (
@@ -60,7 +61,7 @@ with workflow.unsafe.imports_passed_through():
         StartWorkflow,
         StopPlan,
     )
-    from ventoux.case.visibility import CaseView, case_view
+    from ventoux.case.visibility import ApprovalSheet, CaseView, SheetRefused, case_view, sheet_of
     from ventoux.core.catalog import Catalog
     from ventoux.core.sensitive import Sensitive
     from ventoux.core.workflow_contract import WorkflowContract
@@ -133,6 +134,23 @@ class CaseRequest:
     roles: list[str]  # their roles, stated with the request (brief, D22)
 
 
+@dataclass
+class SheetAsked:
+    """A person reading an open approval's sheet: which, with which roles, at what time."""
+
+    entry: str  # the open approval, such as `pay.approval#1`
+    roles: list[str]  # the reader's roles, as the trusted caller states them (brief, D22)
+    at: int  # the reader's time, in seconds since the epoch, against which ages are told
+
+
+@dataclass
+class SheetAnswer:
+    """What a sheet query answers: the sheet, or why it can't be read."""
+
+    sheet: ApprovalSheet | None
+    refused: str = ""  # why not, naming the entry, never a value
+
+
 class CaseWorkflow:
     """The code of a case workflow. A deployment subclasses it to name its catalog and plans, and
     registers the subclass (Temporal's SDK wants `@workflow.run` on the class it registers), as
@@ -167,19 +185,21 @@ class CaseWorkflow:
     @workflow.signal(name="answer")
     def answer(self, sent: CaseAnswer) -> None:
         form = None if sent.form is None else dict(sent.form)
-        self.inbox.append(Answered(sent.entry, sent.outcome, sent.by, frozenset(sent.roles), form))
+        self.inbox.append(
+            Answered(sent.entry, sent.outcome, sent.by, frozenset(sent.roles), form, at=now())
+        )
 
     @workflow.signal(name="propose")
     def propose(self, sent: CaseRequest) -> None:
-        self.inbox.append(Proposed(sent.what, sent.by, frozenset(sent.roles)))
+        self.inbox.append(Proposed(sent.what, sent.by, frozenset(sent.roles), at=now()))
 
     @workflow.signal(name="retry")
     def retry(self, sent: CaseRequest) -> None:
-        self.inbox.append(Retried(sent.what, sent.by, frozenset(sent.roles)))
+        self.inbox.append(Retried(sent.what, sent.by, frozenset(sent.roles), at=now()))
 
     @workflow.signal(name="close")
     def close(self, sent: CaseRequest) -> None:
-        self.inbox.append(CloseAsked(sent.what, sent.by, frozenset(sent.roles)))
+        self.inbox.append(CloseAsked(sent.what, sent.by, frozenset(sent.roles), at=now()))
 
     @workflow.signal(name="forget")
     def forget(self, sent: CaseForget) -> None:
@@ -189,12 +209,13 @@ class CaseWorkflow:
                 frozenset(sent.proposer_roles),
                 sent.approved_by,
                 frozenset(sent.approver_roles),
+                at=now(),
             )
         )
 
     @workflow.signal(name="shown")
     def shown(self, sent: CaseRequest) -> None:
-        self.inbox.append(Shown(sent.what, sent.by, frozenset(sent.roles)))
+        self.inbox.append(Shown(sent.what, sent.by, frozenset(sent.roles), at=now()))
 
     # Temporal: a query reads a workflow's state without changing it, and isn't recorded.
     @workflow.query(name="report")
@@ -216,6 +237,17 @@ class CaseWorkflow:
         nothing hidden from them leaves it (brief, D30)."""
         return case_view(self.case, self.state, roles)
 
+    @workflow.query(name="approval_sheet")
+    def approval_sheet(self, asked: SheetAsked) -> SheetAnswer:
+        """An open approval's sheet, with each fact's age at the reader's time, filtered here as
+        the view is (brief, D18). A query changes nothing, so the time it is given decides
+        nothing. A refusal comes back as data: a failure's message is sealed whoever raised it
+        (brief, D31), and the reader must learn why; it names the entry, never a value."""
+        try:
+            return SheetAnswer(sheet_of(self.case, self.state, asked.entry, asked.roles, asked.at))
+        except (SheetRefused, TimeRefused) as refused:
+            return SheetAnswer(None, str(refused))
+
     async def run(self, start: CaseStart) -> CaseReport:
         return await self.drive(start)
 
@@ -228,7 +260,7 @@ class CaseWorkflow:
         try:
             case = self.case = parse_case(start.definition)
             if start.carried is None:
-                self.decide(case, Opened(start.file, start.opened_by))
+                self.decide(case, Opened(start.file, start.opened_by, at=now()))
             else:
                 self.state = state_from_data(start.carried)  # a case continued as new
         except (CaseInvalid, CaseRefused) as refused:
@@ -328,7 +360,7 @@ class CaseWorkflow:
         try:
             plan = supplied(self.plans, command.plan)
         except PlanNotSupplied as missing:
-            self.inbox.append(Failed(command.entry, str(missing)))  # fail closed
+            self.inbox.append(Failed(command.entry, str(missing), at=now()))  # fail closed
             return
         fields = {
             name: Given(given.value, sorted(given.sources))
@@ -354,20 +386,24 @@ class CaseWorkflow:
             cause = error.cause
             said = cause.message if isinstance(cause, FailureError) else str(error)
             self.inbox.append(
-                Failed(command.entry, f"{plan.plan}@{plan.version} can't start: {said}")
+                Failed(command.entry, f"{plan.plan}@{plan.version} can't start: {said}", at=now())
             )
             return
         finally:
             self.children.pop(command.entry, None)
         if ran.status == "cancelled":
             # Ended by the close, with what finished or failed in it after the close (brief, D28).
-            self.inbox.append(PlanCancelled(command.entry, tuple(ran.after_stop)))
+            self.inbox.append(PlanCancelled(command.entry, tuple(ran.after_stop), at=now()))
         elif ran.status == "succeeded":
-            self.inbox.append(Completed(command.entry, {}))
+            self.inbox.append(Completed(command.entry, {}, at=now()))
         elif ran.status == "failed":
-            self.inbox.append(Completed(command.entry, {}, "failed"))  # a failed final state
+            self.inbox.append(
+                Completed(command.entry, {}, "failed", at=now())
+            )  # a failed final state
         else:
-            self.inbox.append(Failed(command.entry, f"{command.plan} stopped: {ran.reason}"))
+            self.inbox.append(
+                Failed(command.entry, f"{command.plan} stopped: {ran.reason}", at=now())
+            )
 
     async def run_workflow(self, command: StartWorkflow) -> None:
         """Run the workflow step as a child workflow, `<case ID>/<entry>`, of the type and on the
@@ -375,7 +411,9 @@ class CaseWorkflow:
         inbox (brief, D6). Its output is checked and tagged by `decide`, from the contract."""
         binding = self.workflows.get(command.workflow)
         if binding is None:
-            self.inbox.append(Failed(command.entry, unbound(command.workflow)))  # fail closed
+            self.inbox.append(
+                Failed(command.entry, unbound(command.workflow), at=now())
+            )  # fail closed
             return
         contract = self.catalog.workflow(command.workflow)
         try:
@@ -392,10 +430,10 @@ class CaseWorkflow:
             )
         except ChildWorkflowError as error:
             self.inbox.append(
-                Failed(command.entry, workflow_failure(command.workflow, contract, error))
+                Failed(command.entry, workflow_failure(command.workflow, contract, error), at=now())
             )
             return
-        self.inbox.append(Completed(command.entry, output))
+        self.inbox.append(Completed(command.entry, output, at=now()))
 
     async def stop_plan(self, command: StopPlan) -> None:
         """Stop a child plan because the case is closing (brief, D28). A signal, not Temporal's
@@ -420,7 +458,7 @@ class CaseWorkflow:
         except ActivityError as error:
             cause = error.cause
             if isinstance(cause, ApplicationError) and cause.type == OUTCOME:
-                self.inbox.append(Completed(command.entry, {}, cause.message))
+                self.inbox.append(Completed(command.entry, {}, cause.message, at=now()))
                 return
             said = cause.message if isinstance(cause, FailureError) else str(error)
             # Never recorded: it may quote a sensitive value (brief, D31).
@@ -428,10 +466,11 @@ class CaseWorkflow:
                 Failed(
                     command.entry,
                     f"{command.activity} failed with {raised(error)}: {Sensitive(said)}",
+                    at=now(),
                 )
             )
             return
-        self.inbox.append(Completed(command.entry, output))
+        self.inbox.append(Completed(command.entry, output, at=now()))
 
 
 def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWorkflowError) -> str:
@@ -442,6 +481,13 @@ def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWor
     said = cause.message if isinstance(cause, FailureError) else str(error)
     # Its type, never what it said (brief, D31).
     return f"{reference} failed with {raised(error)}: {Sensitive(said)}"
+
+
+def now() -> int:
+    """The workflow's time as each event reaches the case, in whole seconds since the epoch.
+    Temporal's workflow time is recorded in history, so a replay stamps the same times; the case
+    itself reads no clock (brief, D33)."""
+    return int(workflow.now().timestamp())  # whole seconds, rounded down
 
 
 def names_its_entry(event: Event, state: CaseState) -> None:
@@ -612,3 +658,29 @@ async def report(case: WorkflowHandle[CaseWorkflow, CaseReport]) -> CaseReport:
     raise CaseUnanswered(
         f"{case.id} didn't answer in {ASKS} tries of {ASK.total_seconds():g}s: ask again later"
     )
+
+
+async def approval_sheet(
+    case: WorkflowHandle[CaseWorkflow, CaseReport],
+    entry: str,
+    roles: list[str],
+    at: int | None = None,
+) -> ApprovalSheet:
+    """The open approval `entry`'s sheet as a person holding `roles` reads it at `at`, seconds
+    since the epoch: by default the API's own clock, now. A sheet is a query, read and never
+    decided on, so the reader's time is safe here, outside the case (brief, D33). An approval
+    that isn't open is refused, saying so."""
+    if at is None:
+        at = int(datetime.now(UTC).timestamp())  # whole seconds, rounded down
+    try:
+        answered = await case.query(
+            CaseWorkflow.approval_sheet, SheetAsked(entry, sorted(roles), at)
+        )
+    except WorkflowQueryFailedError as failed:
+        # The worker replays the case to answer, and its key provider refuses a destroyed key.
+        if FORGOTTEN in str(failed):
+            raise CaseForgotten(f"{case.id} was forgotten: its case file can't be read") from None
+        raise
+    if answered.sheet is None:
+        raise SheetRefused(answered.refused)
+    return answered.sheet

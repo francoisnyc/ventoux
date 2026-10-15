@@ -23,6 +23,7 @@ from ventoux.core.output_sources import source
 from ventoux.core.policy import only_from
 from ventoux.testing import (
     CATALOG,
+    START,
     AnswerRefused,
     CaseRefused,
     CloseRefused,
@@ -937,16 +938,26 @@ def test_decide_never_changes_the_state_passed_in() -> None:
     # refused answer is recorded and the case runs on: `decide` works on its own copy.
     case = parse_case(REFUND)
     opened, _ = decide(
-        case, CATALOG, CaseState("t"), Opened({"order_id": "o", "amount": Decimal(250)}, None)
+        case,
+        CATALOG,
+        CaseState("t"),
+        Opened({"order_id": "o", "amount": Decimal(250)}, None, at=START),
     )
     before = copy.deepcopy(opened)
     answer = Answered(
-        "review", "approve", "ana", frozenset({"support"}), {"approved_amount": Decimal(250)}
+        "review",
+        "approve",
+        "ana",
+        frozenset({"support"}),
+        {"approved_amount": Decimal(250)},
+        at=START,
     )
     after, _ = decide(case, CATALOG, opened, answer)
     assert opened == before
     assert after != before
-    refused = Answered("review", "approve", "eve", frozenset(), {"approved_amount": Decimal(250)})
+    refused = Answered(
+        "review", "approve", "eve", frozenset(), {"approved_amount": Decimal(250)}, at=START
+    )
     with pytest.raises(AnswerRefused):
         decide(case, CATALOG, opened, refused)
     assert opened == before

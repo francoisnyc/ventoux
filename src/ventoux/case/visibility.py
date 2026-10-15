@@ -11,9 +11,16 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
+from ventoux.case.definition import CallStep, CaseDefinition, TaskStep, read_by
+from ventoux.case.freshness import ago, refuse_unless_whole
 from ventoux.case.state import CaseState
 from ventoux.core.expressions import ReferenceType
+from ventoux.core.provenance import fields_read
+from ventoux.core.sensitive import Sensitive
+
+
+class SheetRefused(Exception):
+    """An approval sheet that can't be read: why."""
 
 
 def roles_named(case: CaseDefinition) -> tuple[str, ...]:
@@ -59,6 +66,9 @@ class CaseView:
     hidden: dict[str, tuple[str, ...]]  # each field hidden from them, and the roles that see it
     lines: list[str]  # one per declared field, in the definition's order, as people read it
     systems: dict[str, str]  # each reference field they may see, and the system it names
+    # When each of those values was obtained, in seconds since the epoch (brief, D18). A hidden
+    # field's time is hidden with it; a sensitive one's isn't sensitive.
+    obtained: dict[str, int]
 
 
 def case_view(case: CaseDefinition, state: CaseState, roles: Iterable[str]) -> CaseView:
@@ -85,11 +95,53 @@ def case_view(case: CaseDefinition, state: CaseState, roles: Iterable[str]) -> C
         for name, declared in case.fields.items()
         if name in visible and isinstance(declared.declared, ReferenceType)
     }
-    return CaseView(values, sources, hidden, lines, systems)
+    obtained = {name: state.obtained[name].at for name in values if name in state.obtained}
+    return CaseView(values, sources, hidden, lines, systems, obtained)
+
+
+@dataclass(frozen=True)
+class ApprovalSheet:
+    """What an approver reads: each fact the approval depends on, with its age (brief, D18)."""
+
+    entry: str  # the open approval, such as `pay.approval#1`
+    lines: list[str]  # one per field its step reads, by name: `Order: ord-1, obtained 3 days ago`
+
+
+def sheet_of(
+    case: CaseDefinition, state: CaseState, entry: str, roles: Iterable[str], at: int
+) -> ApprovalSheet:
+    """The sheet of the open approval `entry` as a person holding `roles` reads it at `at`, the
+    reader's own time: a sheet is read, never decided on, so the case's history is untouched.
+    Or `SheetRefused` if no such approval is open."""
+    refuse_unless_whole(at)  # fail closed: an age is never told from a time that isn't one
+    approval = next((a for a in state.approvals.values() if a.entry == entry), None)
+    if approval is None:
+        raise SheetRefused(f"{entry} is not open: there is no sheet to read")
+    step = case.steps[approval.step]
+    assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
+    held = frozenset(roles)
+    reads = sorted({field for expression in read_by(step) for field in fields_read(expression)})
+    return ApprovalSheet(entry, [fact_line(case, state, name, held, at) for name in reads])
+
+
+def fact_line(
+    case: CaseDefinition, state: CaseState, name: str, roles: frozenset[str], at: int
+) -> str:
+    """One fact as the sheet says it: its value as read and its age, or that it is hidden. A
+    sensitive value reads `‹sensitive›`, as everywhere a value is written (brief, D31)."""
+    declared = case.fields.get(name)
+    title = declared.display.title if declared is not None else name
+    if not may_see(case, name, roles):
+        return f"{title}: hidden (needs {' or '.join(seen_by(case, name))})"
+    if name not in state.values:
+        return f"{title}: not set"
+    obtained = state.obtained.get(name)
+    age = "at an unknown time" if obtained is None else f"{ago(at - obtained.at)} ago"
+    return f"{title}: {as_read(state.values[name])}, obtained {age}"
 
 
 def as_read(value: object) -> str:
     """A value as people read it: `1200`, `cus-7`, `true`."""
     if isinstance(value, bool):
         return "true" if value else "false"
-    return str(value) if isinstance(value, Decimal | str) else repr(value)
+    return str(value) if isinstance(value, Decimal | str | Sensitive) else repr(value)

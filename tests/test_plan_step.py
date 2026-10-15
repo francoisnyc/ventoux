@@ -15,7 +15,7 @@ import pytest
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Completed, Opened, StartPlan
-from ventoux.testing import CATALOG, close, load_definition, propose, run_case
+from ventoux.testing import CATALOG, START, close, load_definition, propose, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 
@@ -237,12 +237,12 @@ def test_how_a_plan_ends_is_how_its_step_ends() -> None:
 def test_a_plan_ends_done_or_failed_and_nothing_else() -> None:
     # Fail closed: a plan step can't "complete" with an outcome no plan gives; it fails instead.
     case = parse_case(refund_with_plan())
-    state, _ = decide(case, CATALOG, CaseState("memory"), Opened(LARGE_EXACT, None))
+    state, _ = decide(case, CATALOG, CaseState("memory"), Opened(LARGE_EXACT, None, at=START))
     form = {"approved_amount": Decimal(250)}
-    review = Answered("review#1", "approve", "ana", frozenset({"support"}), form)
+    review = Answered("review#1", "approve", "ana", frozenset({"support"}), form, at=START)
     state, commands = decide(case, CATALOG, state, review)
     assert [type(command) for command in commands] == [StartPlan]
-    state, _ = decide(case, CATALOG, state, Completed("settle#1", {}, "declined"))
+    state, _ = decide(case, CATALOG, state, Completed("settle#1", {}, "declined", at=START))
     assert state.history[-1] == (
         "settle#1 failed: refund-order@1 ended with declined: a plan ends done or failed"
     )

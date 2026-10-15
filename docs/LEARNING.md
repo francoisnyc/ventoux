@@ -42,6 +42,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 35 | Layer 6: what lives in workflow history | closed |
 | 36 | Layer 8: the model picks the step, never the values | open |
 | 37 | Layer 9c: what the audit keeps after forgetting | open |
+| 38 | Layer 9d: stale facts, and why replay decides the same way | open |
 
 ---
 
@@ -868,7 +869,17 @@ and record the key points. A question is closed once you can explain the answer 
   In one line: the static check prevents, for authors, on every path; the runtime check enforces,
   for this value, on this path. Neither replaces the other. In 8d, output provenance gets only the
   runtime check; case validation (layer 10) will read the declared sources statically.
-- Status: open, until "every path" and "who hears of it" come back from memory.
+- Retrieval (layer 9d warm-up), the follow-up: "the static one catches problems on every path,
+  before release." **Every path** came back from memory, for the first time: the runtime check
+  sees only the path a run takes, so a bad flow on a rare branch may surface months later in a
+  live case. **Before release** carries the cost: an edit then, a new release and open cases on
+  the old one after. One part didn't come back: **who hears of it.** The static refusal reaches
+  the *author*, at `ventoux check` or in the pull request, who can change the definition; the
+  runtime one reaches an *operator*, with a case stuck and a customer waiting, who can't. 9d has
+  the same split: a `max_age` naming a field its step doesn't read is refused when the
+  definition is read (for the author), while a stale fact from a person is found at runtime and
+  the case needs attention (for an operator).
+- Status: open, until "who hears of it" comes back from memory.
 
 
 ## 35. Layer 6: what lives in workflow history
@@ -992,3 +1003,30 @@ and record the key points. A question is closed once you can explain the answer 
 - Follow-up: a regulator asks why claim-7 was denied. After forgetting, which of their
   questions can you still answer, and which not?
 - Status: open.
+
+## 38. Layer 9d: stale facts, and why replay decides the same way
+
+> Sam approves a refund on day 3. Ana's review set `approved_amount` on day 0, and
+> `check_order.status` came from an order lookup on day 0. `pay` needs both at most a day old.
+> a) What happens to each fact, and why are they treated differently? b) On Temporal the worker
+> restarts and replays the case. Why does it decide the same way, given that "3 days old"
+> depends on time?
+
+- Your answer: a) "the person's answer needs attention, the lookup gets refreshed"; b) "because
+  it recalculates everything, it does not rely on time."
+- Discussion: a is right on both facts. The why: a read changes nothing in the world, so running
+  it again only fetches today's value; a person can't be asked again by the engine, so a person
+  decides (send the review back, then retry `pay`, or close the case) (brief, D18). Two details:
+  `pay#1` fails before it starts and Sam's approval goes with the failed run, for a retry
+  (brief, D26), which was slice 8's loop fix; and the refresh passes the same gate as any start,
+  its condition true and no approval needed, or it isn't run (the tutor review, brief, D33). The
+  facts are checked in `max_age`'s order: if `approved_amount` comes first, `pay` stops before
+  any lookup runs. b is half right: replay does run `decide` again on every event, in the order
+  history recorded them. But it does rely on time, only on the right one. Each event carries
+  `at`, stamped once from Temporal's workflow time, which history records; on replay
+  `workflow.now()` gives the recorded time, so Sam's approval is day 3 again and the fact is 3
+  days old again, even replayed on day 10. Had `decide` read the clock, a replay on day 10 would
+  see "10 days old", ask for what history never did, and stop on a non-determinism error. The
+  same lesson as question 32: time enters as data history recorded, never as a clock the case
+  reads.
+- Status: open, until "the recorded time, not the clock's" comes back from memory.
