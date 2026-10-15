@@ -9,7 +9,7 @@ clock, randomness or I/O, so replay rebuilds the same case. See docs/layers/08-c
 import asyncio
 from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 from temporalio import workflow
@@ -39,6 +39,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.closing import CloseRefused
     from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.forgetting import ForgetRefused
+    from ventoux.case.freshness import TimeRefused
     from ventoux.case.plan_step import PlanNotSupplied, supplied
     from ventoux.case.runtime import CaseRefused, ShownRefused, decide
     from ventoux.case.state import (
@@ -60,7 +61,7 @@ with workflow.unsafe.imports_passed_through():
         StartWorkflow,
         StopPlan,
     )
-    from ventoux.case.visibility import CaseView, case_view
+    from ventoux.case.visibility import ApprovalSheet, CaseView, SheetRefused, case_view, sheet_of
     from ventoux.core.catalog import Catalog
     from ventoux.core.sensitive import Sensitive
     from ventoux.core.workflow_contract import WorkflowContract
@@ -131,6 +132,23 @@ class CaseRequest:
     what: str  # the step proposed, the run retried (`pay#1`), or the close reason
     by: str  # who asks, as the trusted caller states (brief, D19)
     roles: list[str]  # their roles, stated with the request (brief, D22)
+
+
+@dataclass
+class SheetAsked:
+    """A person reading an open approval's sheet: which, with which roles, at what time."""
+
+    entry: str  # the open approval, such as `pay.approval#1`
+    roles: list[str]  # the reader's roles, as the trusted caller states them (brief, D22)
+    at: int  # the reader's time, in seconds since the epoch, against which ages are told
+
+
+@dataclass
+class SheetAnswer:
+    """What a sheet query answers: the sheet, or why it can't be read."""
+
+    sheet: ApprovalSheet | None
+    refused: str = ""  # why not, naming the entry, never a value
 
 
 class CaseWorkflow:
@@ -218,6 +236,17 @@ class CaseWorkflow:
         """The case file as a person holding `roles` sees it, filtered here, in the worker, so
         nothing hidden from them leaves it (brief, D30)."""
         return case_view(self.case, self.state, roles)
+
+    @workflow.query(name="approval_sheet")
+    def approval_sheet(self, asked: SheetAsked) -> SheetAnswer:
+        """An open approval's sheet, with each fact's age at the reader's time, filtered here as
+        the view is (brief, D18). A query changes nothing, so the time it is given decides
+        nothing. A refusal comes back as data: a failure's message is sealed whoever raised it
+        (brief, D31), and the reader must learn why; it names the entry, never a value."""
+        try:
+            return SheetAnswer(sheet_of(self.case, self.state, asked.entry, asked.roles, asked.at))
+        except (SheetRefused, TimeRefused) as refused:
+            return SheetAnswer(None, str(refused))
 
     async def run(self, start: CaseStart) -> CaseReport:
         return await self.drive(start)
@@ -629,3 +658,29 @@ async def report(case: WorkflowHandle[CaseWorkflow, CaseReport]) -> CaseReport:
     raise CaseUnanswered(
         f"{case.id} didn't answer in {ASKS} tries of {ASK.total_seconds():g}s: ask again later"
     )
+
+
+async def approval_sheet(
+    case: WorkflowHandle[CaseWorkflow, CaseReport],
+    entry: str,
+    roles: list[str],
+    at: int | None = None,
+) -> ApprovalSheet:
+    """The open approval `entry`'s sheet as a person holding `roles` reads it at `at`, seconds
+    since the epoch: by default the API's own clock, now. A sheet is a query, read and never
+    decided on, so the reader's time is safe here, outside the case (brief, D33). An approval
+    that isn't open is refused, saying so."""
+    if at is None:
+        at = int(datetime.now(UTC).timestamp())  # whole seconds, rounded down
+    try:
+        answered = await case.query(
+            CaseWorkflow.approval_sheet, SheetAsked(entry, sorted(roles), at)
+        )
+    except WorkflowQueryFailedError as failed:
+        # The worker replays the case to answer, and its key provider refuses a destroyed key.
+        if FORGOTTEN in str(failed):
+            raise CaseForgotten(f"{case.id} was forgotten: its case file can't be read") from None
+        raise
+    if answered.sheet is None:
+        raise SheetRefused(answered.refused)
+    return answered.sheet

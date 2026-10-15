@@ -1208,6 +1208,17 @@ Each starts with its negative test, seen failing for the right reason.
   out would vanish at every switch. Each time is written as a JSON integer and read back as an
   `int`, refused if it isn't whole (the converter reads numbers as decimals). Slice 8 still runs
   a real switch on Temporal.
+- **An approved step that failed on a stale fact looped for ever** (slice 8): found on
+  Temporal, whose deadlock detector stopped the workflow task. Sam's approval stayed in
+  `given`, so admission took the step again in the same decision, and failed it again. A step
+  that fails before it starts now takes its given approval onto the failed run, as a retry
+  expects (brief, D26). Reproduced in memory first, where it hung, then fixed.
+- **A refused sheet comes back as data** (slice 8): a query's failure is sealed like every
+  failure (brief, D31), so the reader got only "Encoded failure". The query answers the sheet
+  or the refusal, which names the entry, never a value; the client raises `SheetRefused`.
+- **Two of slice 8's Temporal tests passed at once** (slice 8): the stamping from workflow time
+  was built in slice 0, and the case replays. The continue-as-new test now checks that the case
+  really switched runs.
 - **The sheet lists every fact the step reads, by name, in order** (slice 7): its inputs, its
   `when` and its approval's `when`, each with its value as read (`‹sensitive›` for a sensitive
   one, even to a person who may see it, as in the view's lines) and its age; a hidden one says
@@ -1291,6 +1302,7 @@ the pull request is opened. `FF` is `tests/test_fresh_facts.py` (new), `TFF`
 | On Temporal time comes from workflow time: a case left three days refreshes before the step runs | TFF `test_a_case_left_waiting_refreshes_before_paying` |
 | A case's history replays to the same decisions, refreshes included | TFF `test_a_case_with_a_refresh_replays` |
 | Times cross continue-as-new exactly, as whole numbers | TFF `test_times_cross_continue_as_new_exactly` |
-| On Temporal a stale fact that can't be fetched again is recorded, and the case waits for a person (needs attention); a sheet for an approval that isn't open is refused | TFF `test_a_stale_answer_on_temporal_needs_attention` |
+| On Temporal a stale fact that can't be fetched again is recorded, and the case waits for a person (needs attention); the sheet gives each fact's age; a sheet for an approval that isn't open is refused, saying why | TFF `test_a_stale_answer_on_temporal_needs_attention` |
+| An approved step that fails on a stale fact fails once, its approval kept on the failed run for a retry | FF `test_an_approved_step_that_fails_on_a_stale_fact_stops_once` |
 | The quickstart's acceptance tests stay green | Q (all) |
 | The guide's examples run as written, and its refusal rows are what the engine says | FF `test_the_guides_fresh_facts_examples_run_as_written`, `test_the_guides_freshness_refusals_are_what_the_engine_says` |

@@ -506,9 +506,14 @@ def flag(state: CaseState, why: str) -> None:
 
 
 def fail(state: CaseState, name: str, reason: str) -> None:
-    """The step's coming run fails before it is scheduled, with the reason (brief, D17)."""
+    """The step's coming run fails before it is scheduled, with the reason (brief, D17). An
+    approval given for it goes with the failed run, which a retry keeps (brief, D26): left
+    given, it would admit the step again in the same decision, and fail it for ever."""
     run = coming_run(state, name, "failed")
     run.reason = reason
+    given = state.given.pop(name, None)
+    if given is not None:
+        run.approved = given
     state.history.append(f"{run.entry} failed: {reason}")
 
 

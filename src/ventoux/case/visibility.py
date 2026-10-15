@@ -107,7 +107,7 @@ class ApprovalSheet:
     lines: list[str]  # one per field its step reads, by name: `Order: ord-1, obtained 3 days ago`
 
 
-def approval_sheet(
+def sheet_of(
     case: CaseDefinition, state: CaseState, entry: str, roles: Iterable[str], at: int
 ) -> ApprovalSheet:
     """The sheet of the open approval `entry` as a person holding `roles` reads it at `at`, the

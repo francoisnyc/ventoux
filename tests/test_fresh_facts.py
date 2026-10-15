@@ -802,3 +802,26 @@ def test_an_age_is_said_in_its_largest_whole_unit() -> None:
         "36 hours",
         "30 minutes",
     ]
+
+
+def test_an_approved_step_that_fails_on_a_stale_fact_stops_once() -> None:
+    # Found on Temporal, where it hung a workflow task: Sam approves three days after Ana's
+    # answer, which `pay` needs at most a day old. `pay` fails once, keeping Sam's approval on
+    # its failed run for a retry (brief, D26); it isn't admitted again in the same decision.
+    definition = refund_fresh()
+    definition["steps"]["pay"]["max_age"] = {"approved_amount": "1d"}
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: approved_amount was obtained 3 days ago, and pay needs it at most 1 day old: "
+            "it came from a person, so it can't be fetched again"
+        )
+    ]
+    [failed] = [r for r in run.state.runs if r.step == "pay"]
+    assert failed.approved is not None and failed.approved.by == "sam"
+    assert "pay" not in run.state.given
