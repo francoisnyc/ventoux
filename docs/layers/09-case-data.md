@@ -886,6 +886,23 @@ Each starts with its negative test, seen failing for the right reason.
   server timed it out); the other three refusals were written with it, so each was seen failing
   by removing its check (two waited, the race forgot the case). A closed case being forgotten and
   a forgotten ID opening no case passed when written: their code came with slices 4 and 1.
+- **`report` of a closed case reads its result** (slice 7), for every closed case, forgotten or
+  not: the report the case returned when it closed, which holds no sensitive part, so it needs
+  no key and no replay. A running case is asked by query, as before. The cases guide says so.
+  Slice 0's measuring test now sends its query directly (`case.query(...)`), since `report`
+  no longer queries a closed case.
+- **`view` tells a forgotten case by the provider's own words** (slice 7): a handle holds no key
+  provider the client can ask, so `view` reads the query's failure, and when it carries the
+  provider's `was destroyed when it was forgotten` (`FORGOTTEN`, in `tooling/keys.py`) it says
+  `claim-7 was forgotten: its case file can't be read` instead. Any other failure is raised as
+  it came.
+- **What an operator sees** (slice 7, tested with a key a request destroyed): `report` gives the
+  closing report; `view` is refused as above; a query sent another way fails at once with
+  `Failed encoding completion: the key of claim-7 was destroyed when it was forgotten: …`; a
+  replay fails with the same message; the worker answers the next case; no log record holds the
+  national ID. The view's refusal was seen failing first (Temporal's raw query failure came
+  through); `report` changed with it; the query, the replay and the worker passed when written,
+  as slice 0 had measured.
 
 ### Promises
 

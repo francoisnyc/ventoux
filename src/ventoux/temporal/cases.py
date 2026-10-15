@@ -13,7 +13,12 @@ from datetime import timedelta
 from typing import Any, ClassVar
 
 from temporalio import workflow
-from temporalio.client import Client, WorkflowHandle
+from temporalio.client import (
+    Client,
+    WorkflowExecutionStatus,
+    WorkflowHandle,
+    WorkflowQueryFailedError,
+)
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import (
     ActivityError,
@@ -64,6 +69,11 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.temporal.converter import keys_of
     from ventoux.temporal.options import activity_options
     from ventoux.temporal.workflow import Given, PlanStart, RunReport, raised
+    from ventoux.tooling.keys import FORGOTTEN
+
+
+class CaseForgotten(Exception):
+    """A forgotten case read for what it held: its key is gone (brief, D32)."""
 
 
 @dataclass
@@ -537,10 +547,22 @@ async def shown(
 
 
 async def view(case: WorkflowHandle[CaseWorkflow, CaseReport], roles: list[str]) -> CaseView:
-    """The case file as a person holding `roles` sees it, filtered in the worker (brief, D30)."""
-    return await case.query(CaseWorkflow.view, sorted(roles))
+    """The case file as a person holding `roles` sees it, filtered in the worker (brief, D30).
+    A forgotten case has no case file left to read: refused, saying so (brief, D32)."""
+    try:
+        return await case.query(CaseWorkflow.view, sorted(roles))
+    except WorkflowQueryFailedError as failed:
+        # The worker replays the case to answer, and its key provider refuses a destroyed key.
+        if FORGOTTEN in str(failed):
+            raise CaseForgotten(f"{case.id} was forgotten: its case file can't be read") from None
+        raise
 
 
 async def report(case: WorkflowHandle[CaseWorkflow, CaseReport]) -> CaseReport:
-    """How the case is going: what it waits for, and its history so far."""
+    """How the case is going: what it waits for, and its history so far. A case that has closed
+    gives the report it returned then: lines and placeholders, no sensitive part, so it reads
+    without a key, even once the case is forgotten (brief, D32)."""
+    described = await case.describe()
+    if described.status == WorkflowExecutionStatus.COMPLETED:
+        return await case.result()
     return await case.query(CaseWorkflow.report)

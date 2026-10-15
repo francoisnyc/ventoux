@@ -19,7 +19,15 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 from test_temporal_case import LARGE, REVIEW_FORM, CasesWithPlans, refund_with_plan
 
-from ventoux.temporal.cases import CaseReport, CaseWorkflow, answer, report, start_case
+from ventoux.temporal.cases import (
+    CaseForgotten,
+    CaseReport,
+    CaseWorkflow,
+    answer,
+    report,
+    start_case,
+    view,
+)
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import (
     ForgetActivities,
@@ -113,7 +121,7 @@ def test_a_closed_case_read_without_its_key(caplog: pytest.LogCaptureFixture) ->
         # SDK can't seal its failure either (no key), so it sends the codec's own error in its
         # place: the case's name, never what the failure said.
         with pytest.raises(WorkflowQueryFailedError) as failed:
-            await asyncio.wait_for(report(case), timeout=10)
+            await asyncio.wait_for(case.query(CaseWorkflow.report), timeout=10)
         assert str(failed.value) == (
             "Failed encoding completion: there is no key for claim-7, so its sensitive values "
             "can't be read or written"
@@ -508,3 +516,54 @@ def test_a_forgotten_id_opens_no_case() -> None:
             await start_case(client, DevelopmentCases, claim(), as_json(FILE), "claim-7", QUEUE)
 
     on_temporal(scenario)
+
+
+# --- Slice 7: reading a forgotten case ---
+
+
+async def forgotten_claim(client: Client, id: str) -> Case:
+    """The guide's claim, closed, then forgotten by Pia and Olu."""
+    case = await closed_claim(client, id)
+    request = await propose_forget(client, DevelopmentForget, id, "pia", ["privacy"], QUEUE)
+    await answer_forget(request, "approve", "olu", ["privacy"])
+    assert (await request.result()).status == "forgotten"
+    return case
+
+
+def test_reading_a_forgotten_case(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG, logger="temporalio")
+
+    async def scenario(client: Client) -> CaseReport:
+        case = await forgotten_claim(client, "claim-7")
+        # The view would hold the case file: refused, saying why.
+        with pytest.raises(
+            CaseForgotten, match="^claim-7 was forgotten: its case file can't be read$"
+        ):
+            await view(case, ["claims-sensitive"])
+        # Any query sent another way replays the history, which needs the key: it fails at once,
+        # with the provider's message, never what the case held.
+        forgotten = (
+            "the key of claim-7 was destroyed when it was forgotten: its sensitive values can't "
+            "be read or written"
+        )
+        with pytest.raises(WorkflowQueryFailedError) as failed:
+            await asyncio.wait_for(case.query(CaseWorkflow.report), timeout=10)
+        assert str(failed.value) == f"Failed encoding completion: {forgotten}"
+        # So does a replay, as CI's replay tests run one.
+        replayer = Replayer(
+            workflows=[DevelopmentCases, DevelopmentPlans],
+            data_converter=client.data_converter,
+            workflow_runner=SANDBOX,
+        )
+        with pytest.raises(Exception, match=forgotten):
+            await replayer.replay_workflow(await case.fetch_history())
+        # The worker carries on: the next case answers.
+        other = await open_claim(client, "claim-8")
+        assert (await report(other)).waiting_for == ["assess by adjuster"]
+        return await report(case)
+
+    closing = on_temporal(scenario)
+    # The report the case returned when it closed: lines and placeholders, read without a key.
+    assert (closing.status, closing.history[-1]) == ("closed", "closed: nothing left to do")
+    logged = [logging.Formatter().format(record) for record in caplog.records]
+    assert not [line for line in logged if NATIONAL_ID in line]

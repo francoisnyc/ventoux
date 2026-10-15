@@ -19,6 +19,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 NONCE = 12  # bytes: AES-GCM's standard nonce, fresh for every seal
 DESTROYED = None  # what the key file holds for a case once its key is destroyed (JSON's null)
+# What a provider says when asked to use a destroyed key, so a client can tell a forgotten case.
+FORGOTTEN = "was destroyed when it was forgotten"
 
 # Where a case's key stands: made and usable, destroyed when the case was forgotten, or never made
 # (no case was opened with that ID).
@@ -106,8 +108,7 @@ class FileKeys:
         stored = keys[case]
         if stored is DESTROYED:
             raise KeyRefused(
-                f"the key of {case} was destroyed when it was forgotten: its sensitive values "
-                "can't be read or written"
+                f"the key of {case} {FORGOTTEN}: its sensitive values can't be read or written"
             )
         return base64.b64decode(stored)
 

@@ -515,7 +515,8 @@ assert (await case.result()).status == "closed"
 `propose(case, step, by, roles)`, `retry(case, entry, by, roles)` and `close(case, reason, by,
 roles)` do what a script's `propose`, `retry` and `close` do. `report` gives what `run_case`
 reports (`status`, `waiting_for`, `needs_attention`, `flags`, `history`), and `waiting_at`, the
-entries open for an answer, in the same order as `waiting_for`. `view(case, roles)` gives the
+entries open for an answer, in the same order as `waiting_for`; once the case has closed, it is
+the report the case returned then, read without replaying it. `view(case, roles)` gives the
 case file as people with those roles see it, filtered inside the worker, and `shown(case, field,
 by, roles)` records that a referenced record was shown.
 
