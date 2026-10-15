@@ -23,10 +23,12 @@ SECTION = "## What `ventoux check` proves about a case"
 
 
 def guide_json(index: int) -> dict[str, Any]:
-    """The JSON block `index` of the guide's section on the check, as stored data."""
+    """The JSON block `index` of the guide's section on the check, as stored data; a fragment
+    (`"requires": [...]`) is read as an object."""
     section = GUIDE.read_text().split(SECTION)[1]
     block = section.split("```json\n")[index + 1].split("```")[0]
-    loaded: dict[str, Any] = json.loads(block, parse_float=Decimal)
+    fragment = block if block.lstrip().startswith("{") else "{" + block + "}"
+    loaded: dict[str, Any] = json.loads(fragment, parse_float=Decimal)
     return loaded
 
 
@@ -96,3 +98,98 @@ def test_the_order_of_the_steps_does_not_matter() -> None:
     claim["steps"] = dict(reversed(claim["steps"].items()))
     assert list(claim["steps"]) == ["pay", "assess", "check"]
     assert issues(claim) == []
+
+
+# --- Slice 2: the curriculum's negative test ---
+
+
+def deadlocked_claim() -> dict[str, Any]:
+    """The guide's claim with `assess` also requiring `paid`, as the guide shows it."""
+    claim = guide_json(0)
+    claim["steps"]["assess"] |= guide_json(1)
+    return claim
+
+
+def errors(definition: dict[str, Any]) -> list[Issue]:
+    return [issue for issue in issues(definition) if issue.severity == "error"]
+
+
+def test_the_deadlocked_claim_is_refused() -> None:
+    # One issue for the steps that wait on each other, none for each of them.
+    assert errors(deadlocked_claim()) == [
+        Issue(
+            "steps.assess.requires",
+            "DEADLOCK",
+            "assess and pay wait on each other: assess requires paid, which only pay reaches; "
+            "pay requires assessed, which only assess reaches: remove one of these requirements",
+        )
+    ]
+
+
+def test_a_step_requiring_itself_is_deadlocked() -> None:
+    claim = guide_json(0)
+    claim["steps"]["check"]["requires"] = ["check"]
+    assert errors(claim) == [
+        Issue(
+            "steps.check.requires",
+            "DEADLOCK",
+            "check waits on itself: check requires check: remove this requirement",
+        ),
+        Issue(
+            "steps.assess.requires",
+            "NEVER_RUNS",
+            "assess can never run: it requires checked, which only check reaches, and check can "
+            "never run: fix check first",
+        ),
+        Issue(
+            "steps.pay.requires",
+            "NEVER_RUNS",
+            "pay can never run: it requires assessed, which only assess reaches, and assess can "
+            "never run: fix assess first",
+        ),
+    ]
+
+
+def test_sequence_and_requires_can_deadlock() -> None:
+    # `sequence` makes pay require assess; assess requiring pay closes the circle. The message
+    # says where the requirement nobody wrote on pay comes from.
+    claim = guide_json(0)
+    claim["steps"]["assess"]["requires"] = ["checked", "pay"]
+    claim["steps"]["pay"]["requires"] = []
+    claim["sequence"] = ["assess", "pay"]
+    assert errors(claim) == [
+        Issue(
+            "steps.assess.requires",
+            "DEADLOCK",
+            "assess and pay wait on each other: assess requires pay; pay comes after assess in "
+            "sequence: remove one of these requirements",
+        )
+    ]
+
+
+NOTIFY = {
+    "kind": "task",
+    "display": {"title": "Tell the customer"},
+    "roles": ["adjuster"],
+    "requires": ["assessed"],
+    "outcomes": {"told": {"display": {"title": "Told"}}},
+}
+
+
+def test_a_step_waiting_on_a_deadlock_never_runs() -> None:
+    claim = deadlocked_claim()
+    claim["steps"]["notify"] = NOTIFY
+    claim["steps"]["remind"] = {**NOTIFY, "requires": ["assess"]}
+    assert errors(claim)[1:] == [
+        Issue(
+            "steps.notify.requires",
+            "NEVER_RUNS",
+            "notify can never run: it requires assessed, which only assess reaches, and assess can "
+            "never run: fix assess first",
+        ),
+        Issue(
+            "steps.remind.requires",
+            "NEVER_RUNS",
+            "remind can never run: it requires assess, which can never run: fix assess first",
+        ),
+    ]

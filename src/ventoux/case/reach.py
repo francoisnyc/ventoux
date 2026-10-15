@@ -5,6 +5,8 @@ Every `when` is taken as possibly true, and every outcome as possible, so whatev
 never happen on any path (brief, D34).
 """
 
+from collections.abc import Mapping
+
 from ventoux.case.definition import CaseDefinition, TaskStep
 from ventoux.case.sequence import requirements
 
@@ -43,3 +45,39 @@ def reached_by(case: CaseDefinition, milestone: str) -> list[str]:
             and any(milestone in outcome.reaches for outcome in step.outcomes.values())
         )
     ]
+
+
+def waited_on(case: CaseDefinition, requirement: str) -> list[str]:
+    """The steps a requirement waits on: the step it names, or the steps reaching its milestone."""
+    return [requirement] if requirement in case.steps else reached_by(case, requirement)
+
+
+def reachable(start: str, waits: Mapping[str, list[str]]) -> set[str]:
+    """Every step `start` waits on, directly or through others (not `start`, unless in a circle)."""
+    found: set[str] = set()
+    waiting = list(waits[start])
+    while waiting:
+        here = waiting.pop()
+        if here not in found:
+            found.add(here)
+            waiting += waits[here]
+    return found
+
+
+def shortest_circle(start: str, waits: Mapping[str, list[str]]) -> list[str] | None:
+    """The fewest steps from `start` back to itself along `waits`, `start` at both ends, or None
+    if it waits on no circle through itself. Searched breadth first: nearer steps first."""
+    came_from: dict[str, str] = {}
+    waiting = [start]
+    while waiting:
+        here = waiting.pop(0)
+        for there in waits[here]:
+            if there == start:
+                path = [here]
+                while path[-1] != start:
+                    path.append(came_from[path[-1]])
+                return [*reversed(path), start]
+            if there not in came_from:
+                came_from[there] = here
+                waiting.append(there)
+    return None

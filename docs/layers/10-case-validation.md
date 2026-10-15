@@ -244,6 +244,16 @@ Each starts with its negative test, seen failing for the right reason.
   nothing, no step outside the set has all its requirements inside. `never_run` relies on it.
 - **Fail closed before it is refined** (slice 1): every dead step is reported from the start; a
   cause slice 1 doesn't name yet gets a plain line, which slices 2 and 3 replace.
+- **A requirement `sequence` wrote is said so** (slice 2): `pay comes after assess in sequence`,
+  not `pay requires assess`, since nothing on `pay` says it. The circle search follows only each
+  dead step's first unmet requirement, the one its message names, so a step blocked first by a
+  milestone nothing reaches is `NEVER_RUNS` for that, even if a later requirement also closes a
+  circle: one cause, one issue.
+- **Two of slice 2's tests passed at once** (slice 2): a step requiring itself is a circle of one
+  for the same search, and the `sequence` wording was written with the deadlock code, ahead of its
+  test. Each was seen failing on a deliberate break (the one-step wording, the `sequence` branch),
+  then restored. The slice's plain fallback line is gone: every dead step now says which of three
+  causes it has (a step that can never run, a milestone nothing reaches, or only dead steps reach).
 
 ### Promises
 
