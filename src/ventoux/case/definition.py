@@ -19,6 +19,7 @@ from pydantic import (
     model_validator,
 )
 
+from ventoux.case.freshness import seconds_in
 from ventoux.core.plan import (
     ActivityReference,
     DeclaredType,
@@ -30,6 +31,19 @@ from ventoux.core.plan import (
     matching,
     some_roles,
 )
+from ventoux.core.provenance import fields_read
+
+
+def an_age(age: str) -> str:
+    """An age a step needs a fact within: a whole number and a unit, at least a minute
+    (brief, D33). Kept as written, so the definition reads back as it was stored."""
+    if seconds_in(age) == 0:  # `seconds_in` refuses anything that isn't `30m`, `12h` or `1d`
+        raise ValueError("an age is at least 1m")
+    return age
+
+
+# How old each fact a step reads may be when it runs: `{"check_order.status": "1d"}` (brief, D18).
+MaxAge = dict[str, Annotated[str, AfterValidator(an_age)]]
 
 CaseName = Annotated[str, matching(r"[a-z][a-z0-9-]*", 'a case name looks like "refund"')]
 # A field, step or milestone: no `.`, so `review.outcome` is never a field's name.
@@ -131,6 +145,7 @@ class CallStep(Step):
 
     inputs: dict[str, PlanExpression] = {}  # each input the contract takes, from the case file
     approval: Approval | None = None
+    max_age: MaxAge = {}  # how old each fact it reads may be when it runs (brief, D18)
 
     @property
     def called(self) -> str:
@@ -168,6 +183,7 @@ class PlanStep(Step):
     kind: Literal["plan"]
     plan: PlanReference
     inputs: dict[Name, PlanExpression] = {}  # each of the plan's fields, read from the case file
+    max_age: MaxAge = {}  # how old each fact it reads may be when it runs (brief, D18)
 
     # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
     @model_validator(mode="before")
@@ -271,6 +287,8 @@ def step_problems(
                 if name not in case.fields
             ]
             problems += reaching(f"{where}.reaches", outcome.reaches, case)
+    if not isinstance(step, TaskStep):
+        problems += stale_names(path, step)
     # A step nobody may propose and that doesn't start by itself could never run.
     if not step.automatic and not step.proposed_by:
         problems.append(
@@ -283,6 +301,29 @@ def step_problems(
             "propose it"
         )
     return problems
+
+
+def stale_names(path: str, step: CallStep | PlanStep) -> list[str]:
+    """Each field `max_age` names that the step doesn't read: freshness belongs where a fact is
+    used (brief, D18), so a step says it only of what it reads."""
+    name = path.removeprefix("steps.")
+    reads = {field for expression in read_by(step) for field in fields_read(expression)}
+    return [
+        f"{path}.max_age: {name} doesn't read {field} in its inputs, its when or its approval: "
+        "name only what it reads"
+        for field in step.max_age
+        if field not in reads
+    ]
+
+
+def read_by(step: CallStep | PlanStep) -> list[PlanExpression]:
+    """Every expression the step reads: its inputs, its `when` and its approval's `when`."""
+    expressions = [*step.inputs.values()]
+    if step.when is not None:
+        expressions.append(step.when)
+    if isinstance(step, CallStep) and step.approval is not None and step.approval.when is not None:
+        expressions.append(step.approval.when)
+    return expressions
 
 
 def reaching(path: str, names: tuple[str, ...], case: CaseDefinition) -> list[str]:

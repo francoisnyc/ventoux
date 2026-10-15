@@ -1208,6 +1208,11 @@ Each starts with its negative test, seen failing for the right reason.
   out would vanish at every switch. Each time is written as a JSON integer and read back as an
   `int`, refused if it isn't whole (the converter reads numbers as decimals). Slice 8 still runs
   a real switch on Temporal.
+- **An age is kept as written** (slice 1): `"1d"` stays a text in the definition, checked when it
+  is read, and turned into seconds where it is used, so a definition reads back as it was
+  stored. The runtime reads it again with the same function, on nothing parsing did.
+- **The guide's refusal row named the wrong field** (slice 1): `pay` reads `order_id` (an
+  input), so the example of a field it doesn't read is `amount`. The test caught it.
 - **The in-memory driver's `Finish` carries its time** (slice 0), and the script's `finish(entry)`
   is a script item like `later`: the driver makes the event at the script's time.
 
