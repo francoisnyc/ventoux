@@ -8,16 +8,28 @@ import json
 import logging
 import threading
 from collections.abc import Awaitable, Callable, Mapping
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 from temporalio import workflow
+from temporalio.api.common.v1 import Payload
 from temporalio.client import Client, WorkflowHandle, WorkflowQueryFailedError
+from temporalio.converter import WorkflowSerializationContext
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 from test_temporal_case import LARGE, REVIEW_FORM, CasesWithPlans, refund_with_plan
+from test_temporal_sensitive import (
+    TAX_ID,
+    SensitiveCases,
+    as_stored,
+    every_run,
+    quoting,
+    sensitive_claim,
+)
+from test_temporal_sensitive import reported as reported_case
 
 from ventoux.temporal.cases import (
     CaseForgotten,
@@ -567,3 +579,111 @@ def test_reading_a_forgotten_case(caplog: pytest.LogCaptureFixture) -> None:
     assert (closing.status, closing.history[-1]) == ("closed", "closed: nothing left to do")
     logged = [logging.Formatter().format(record) for record in caplog.records]
     assert not [line for line in logged if NATIONAL_ID in line]
+
+
+# --- Slice 8: the audit after forgetting (the curriculum's "check yourself") ---
+
+
+def stored(payload: Payload) -> Any:
+    """A payload's data as Temporal stores it, read as JSON with no converter and no key."""
+    return json.loads(payload.data, parse_float=Decimal)
+
+
+def test_what_the_audit_keeps_after_forgetting() -> None:
+    # The richest case 9b planted a national ID in: in the opening, a tax ID in Ana's form, a
+    # lookup failing with a message that quotes the ID, a child plan, and several runs. Pia and
+    # Olu forget it. What can the audit still show, and what can't it? (brief, D15)
+    async def scenario(client: Client) -> Any:
+        case = await start_case(
+            client, SensitiveCases, sensitive_claim(), as_json(FILE), "claim-7", QUEUE
+        )
+        await answer(case, "assess#1", "accept", "ana", ["adjuster"], {"tax_id": TAX_ID})
+        await reported_case(case, lambda now: len(now.needs_attention) == 2)
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        assert (await request.result()).status == "forgotten"
+        runs = await every_run(client, "claim-7")
+        child = await every_run(client, "claim-7/check_id#1")
+        forgetting = await client.get_workflow_handle("claim-7/forget").fetch_history()
+        return client.data_converter, runs, child, forgetting, await report(case)
+
+    converter, runs, child, forgetting, closing = on_temporal(
+        scenario, {**FAKES, "orders.lookup@1": quoting}, SensitiveCases
+    )
+    events = [event for history in runs for event in history.events]
+
+    # Gone for good: no sensitive value in plain text, in what Temporal stores or its export.
+    for history in [*runs, *child, forgetting]:
+        raw, exported = as_stored(history)
+        for value in (NATIONAL_ID, TAX_ID, "1 85 05"):
+            assert value.encode() not in raw and value not in exported
+    # And what was sealed can't be opened any more: the opening, Ana's form, the failure.
+    opening = events[0].workflow_execution_started_event_attributes.input.payloads
+    gone = "the key of claim-7 was destroyed when it was forgotten"
+    claim_7 = converter.with_context(WorkflowSerializationContext("default", "claim-7"))
+    with pytest.raises(KeyRefused, match=gone):
+        await_now(claim_7.decode(opening, [Any]))
+    [failed] = [
+        event.activity_task_failed_event_attributes.failure
+        for event in events
+        if event.HasField("activity_task_failed_event_attributes")
+    ]
+    assert failed.message == "Encoded failure"  # its text is only in the sealed part
+    with pytest.raises(KeyRefused, match=gone):
+        await_now(claim_7.decode_failure(failed))
+
+    # Kept, read with no key: the definition (its rules), each decision, who made it, and as what.
+    started = stored(opening[0])
+    assert started["definition"]["case"] == "claim"
+    assert started["file"]["national_id"] == {"‹sensitive›": 0}
+    answers = [
+        stored(event.workflow_execution_signaled_event_attributes.input.payloads[0])
+        for event in events
+        if event.workflow_execution_signaled_event_attributes.signal_name == "answer"
+    ]
+    assert [(each["entry"], each["outcome"], each["by"], each["roles"]) for each in answers] == [
+        ("assess#1", "accept", "ana", ["adjuster"])
+    ]
+    assert answers[0]["form"] == {"tax_id": {"‹sensitive›": 0}}  # the value sealed, and gone
+    [approved] = [
+        stored(event.workflow_execution_signaled_event_attributes.input.payloads[0])
+        for event in events
+        if event.workflow_execution_signaled_event_attributes.signal_name == "forget"
+    ]
+    assert approved == {
+        "proposed_by": "pia",
+        "proposer_roles": ["privacy"],
+        "approved_by": "olu",
+        "approver_roles": ["privacy"],
+    }
+    # A value that wasn't sensitive stays where the case carried it to its next run.
+    carried = stored(
+        runs[-1].events[0].workflow_execution_started_event_attributes.input.payloads[0]
+    )
+    assert carried["carried"]["values"]["estimated_damage"] == Decimal(1200)
+    # The case's closing report: its lines, with placeholders, read without a key.
+    assert "assess#1 done" in "\n".join(closing.history)
+    assert closing.history[-4:] == [
+        "forgetting approved by olu as privacy, proposed by pia as privacy",
+        "cancelled lookup_id#1: the case is being forgotten",
+        "cancelled check_id#1: the case is being forgotten",
+        "closed: forgotten",
+    ]
+    # The request's own history replays with no key at all: none of its payloads is sealed.
+    replayer = Replayer(
+        workflows=[DevelopmentForget],
+        data_converter=development_converter(),
+        workflow_runner=SANDBOX,
+    )
+    asyncio.run(replayer.replay_workflow(forgetting))
+
+
+def await_now[T](awaitable: Awaitable[T]) -> T:
+    """Run one awaitable to its end, outside the test server."""
+
+    async def go() -> T:
+        return await awaitable
+
+    return asyncio.run(go())

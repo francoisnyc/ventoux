@@ -903,6 +903,19 @@ Each starts with its negative test, seen failing for the right reason.
   national ID. The view's refusal was seen failing first (Temporal's raw query failure came
   through); `report` changed with it; the query, the replay and the worker passed when written,
   as slice 0 had measured.
+- **The audit after forgetting, read as Temporal stores it** (slice 8, the curriculum's "check
+  yourself"), on 9b's richest case (a national ID at the opening, a tax ID in Ana's form, a
+  lookup failing with a message quoting the ID, a child plan, several runs), forgotten by Pia and
+  Olu. *Gone:* neither ID in any history's raw bytes or JSON export (the case's runs, the child's,
+  the request's); the opening, and the lookup's failure (`Encoded failure`, its text only in the
+  sealed part), no longer open: `the key of claim-7 was destroyed when it was forgotten`.
+  *Kept, with no key:* the definition (`"case": "claim"`, its rules), each answer's entry,
+  outcome, person and roles (`assess#1`, `accept`, `ana`, `adjuster`), with the form's tax ID a
+  placeholder; the approved request, both people and their roles; a value that wasn't sensitive
+  where the case carried it (`estimated_damage` 1200, in the next run's start); the case's
+  closing report; and the request's history, which replays with a converter holding no key.
+  Staff identifiers stay. It passed when written, measuring what 9b and slices 4–7 built; it was
+  seen failing with `destroy_key` destroying nothing (the opening still opened).
 
 ### Promises
 
@@ -928,5 +941,5 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 | A closed case can be forgotten and keeps its close reason, unless its definition says `while_open` (also when it closed before the approval); `never` is always refused; a definition that can't be read is refused; nothing is destroyed when refused | TF `test_forgetting_a_closed_case`, `test_a_case_that_keeps_its_records` |
 | A forgotten case's ID never opens a case again | TF `test_a_forgotten_id_opens_no_case` |
 | After forgetting, `report` reads the closing report, `view` is refused, and a query or replay fails with the forgotten message, never plain text; the worker carries on | TF `test_reading_a_forgotten_case` |
-| After forgetting, the history, its export and the reports keep every decision, who made it, the definition and flags; every sensitive value, form value in an answer and failure message is unreadable; the request's own history replays without a key | TF `test_what_the_audit_keeps_after_forgetting` |
+| After forgetting, the history, its export and the reports keep every decision, who made it and as what, the definition, the values that weren't sensitive where they were used, and the closing report; every sensitive value, form value in an answer and failure message is unreadable; the request's own history replays without a key | TF `test_what_the_audit_keeps_after_forgetting` |
 | The guide's example runs as written, and its refusal rows are what the engine says | TF `test_the_guides_forget_example_runs_as_written`; F, TF `test_the_guides_refusals_are_what_the_engine_says` |
