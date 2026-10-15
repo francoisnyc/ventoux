@@ -23,6 +23,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
             for name, obtained in state.obtained.items()
         },
         "milestones": list(state.milestones),
+        "refreshing": dict(state.refreshing),
         "runs": [
             {
                 "entry": run.entry,
@@ -30,6 +31,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
                 "status": run.status,
                 "reason": run.reason,
                 "approved": None if run.approved is None else given_as_data(run.approved),
+                "refresh": run.refresh,
             }
             for run in state.runs
         ],
@@ -67,6 +69,7 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
             for name, obtained in data.get("obtained", {}).items()
         },
         milestones=list(data["milestones"]),
+        refreshing=dict(data.get("refreshing", {})),  # none in a state from before layer 9d
         runs=[
             StepRun(
                 run["entry"],
@@ -74,6 +77,7 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
                 run["status"],
                 run["reason"],
                 None if run["approved"] is None else GivenApproval(**run["approved"]),
+                run.get("refresh", False),  # none in a state from before layer 9d
             )
             for run in data["runs"]
         ],

@@ -34,6 +34,9 @@ class StepRun:
     status: Literal["open", "running", "done", "rejected", "failed", "retrying", "cancelled"]
     reason: str = ""  # why it failed
     approved: GivenApproval | None = None  # the approval spent on it, which a retry keeps
+    refresh: bool = (
+        False  # run to fetch a stale fact again, not because the case asked (brief, D33)
+    )
 
 
 @dataclass
@@ -66,6 +69,9 @@ class CaseState:
     # When each value was obtained, and by which run (brief, D18) (brief, D33).
     obtained: dict[str, Obtained] = field(default_factory=dict[str, Obtained])
     milestones: list[str] = field(default_factory=list[str])  # reached, in order; never undone
+    # Each stale fact being fetched again, and the run fetching it: one refresh per need, never
+    # a second for the same one (brief, D33).
+    refreshing: dict[str, str] = field(default_factory=dict[str, str])
     runs: list[StepRun] = field(default_factory=list[StepRun])  # every step run, in order
     approvals: dict[str, OpenApproval] = field(default_factory=dict[str, OpenApproval])  # by step
     given: dict[str, GivenApproval] = field(default_factory=dict[str, GivenApproval])  # by step

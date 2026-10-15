@@ -441,9 +441,17 @@ than its `max_age`:
   answer the task again (propose it, if it is repeatable), then retry the step; or close the
   case.
 
-A refresh that doesn't give a fresh value (its run fails, or gives an outcome such as
-`not_found`, so no output is written) leaves the fact stale: the step that needed it needs
-attention, rather than refreshing for ever.
+A fact is fetched again **once for each need**, never in a loop:
+
+- **A refresh that fails** needs attention itself, like any failed run. A step that requires the
+  refreshed step waits for it, and once an operator retries the refresh and it succeeds, the
+  step runs on the fresh value. A step that only reads the fact needs attention too.
+- **A refresh that gives an outcome** such as `not_found` writes no output, so the fact is still
+  stale: the step that needed it needs attention.
+- **Retrying that step** is a person deciding to try again: the fact may then be fetched again.
+- **Two steps that need the same fact** share one refresh, and while it runs, the step it
+  refreshes still counts as done for `requires`: an approval waiting on it stays open, unless
+  the refresh changes a value it reads.
 
 ```python
 looked_up = iter(["delivered", "returned"])  # the order was returned in the meantime
@@ -514,6 +522,7 @@ epoch. A hidden field's time is hidden with it; a sensitive field's time is not 
 | a stale fact came from a step that computes (needs attention) | `fee.fee was obtained 3 days ago, and pay needs it at most 1 day old: fee computes it from its inputs (compute), so running it again gives nothing new` |
 | a stale fact came from a workflow or a plan step (needs attention) | `kyc.status was obtained 3 days ago, and pay needs it at most 1 day old: kyc is a workflow step, so it isn't run again unasked` |
 | a refresh gave no fresh value (needs attention) | `check_order#2 gave not_found, so check_order.status is still 3 days old, and pay needs it at most 1 day old` |
+| a refresh failed, and the step only reads its fact (needs attention) | `check_order#2 failed, so check_order.status is still 3 days old, and pay needs it at most 1 day old` |
 | a fact's time is unknown (needs attention) | `check_order.status has no time obtained, so pay can't tell its age` |
 | a sheet is asked for an approval that isn't open | `pay.approval#3 is not open: there is no sheet to read` |
 

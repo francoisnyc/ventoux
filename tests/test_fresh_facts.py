@@ -15,9 +15,20 @@ from pydantic import BaseModel
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.freshness import TimeRefused
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, CaseState, Obtained, Opened
+from ventoux.case.state import Answered, CaseState, Completed, Obtained, Opened
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
-from ventoux.testing import CATALOG, DAY, START, later, load_definition, retry, run_case
+from ventoux.core.interpreter import Outcome
+from ventoux.testing import (
+    CATALOG,
+    DAY,
+    START,
+    finish,
+    later,
+    load_definition,
+    retry,
+    run_case,
+    shown,
+)
 
 ROOT = Path(__file__).parent.parent
 REFUND = load_definition(ROOT / "examples" / "refund" / "refund.json")
@@ -393,3 +404,156 @@ def load_plan() -> dict[str, Any]:
         guide.split("```json\n")[1].split("```")[0], parse_float=Decimal
     )
     return plan
+
+
+def answers_in_turn(*answers: Any) -> Any:
+    """A lookup giving each answer in turn: a status, or an exception it raises."""
+    queue = list(answers)
+
+    def lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        answer = queue.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return {"status": answer}
+
+    return lookup
+
+
+REVIEWED_ON_DAY_3 = [later("3d"), ("review", "approve", "ana", {"approved_amount": 80})]
+
+
+def test_a_refresh_without_a_fresh_value_needs_attention() -> None:
+    # It gives a declared outcome, so no output is written: the fact is still 3 days old, and
+    # `pay` needs attention rather than refreshing again.
+    run = run_case(
+        refund_fresh(),
+        file={"order_id": "ord-1", "amount": 80},
+        answers=REVIEWED_ON_DAY_3,
+        people=PEOPLE,
+        activities={"orders.lookup@1": answers_in_turn("delivered", Outcome("not_found"))},
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: check_order#2 gave not_found, so check_order.status is still 3 days old, and "
+            "pay needs it at most 1 day old"
+        )
+    ]
+    assert [r.entry for r in run.state.runs if r.step == "check_order"] == [
+        "check_order#1",
+        "check_order#2",
+    ]
+
+
+def test_a_failed_refresh_needs_attention_and_is_retried() -> None:
+    # The refresh fails after its retries: it needs attention itself, and `pay`, which requires
+    # `check_order`, waits for it. Retried and done, `pay` runs on the fresh value.
+    run = run_case(
+        refund_fresh(),
+        file={"order_id": "ord-1", "amount": 80},
+        answers=[*REVIEWED_ON_DAY_3, retry("check_order#2", "omar")],
+        people={**PEOPLE, "omar": ["operations"]},
+        activities={
+            "orders.lookup@1": answers_in_turn("delivered", ConnectionError("down"), "delivered")
+        },
+    )
+    failed = "check_order#2 failed: orders.lookup@1 failed with ConnectionError: ‹sensitive›"
+    assert run.history.index(failed) < run.history.index("omar retried check_order#2 as operations")
+    assert run.needs_attention == []
+    assert run.reached("pay")
+    assert [r.entry for r in run.state.runs if r.step == "check_order"] == [
+        "check_order#1",
+        "check_order#2",
+    ]
+
+
+def test_a_failed_refresh_is_never_made_again_for_the_same_need() -> None:
+    # `pay` reads `check_order.status` without requiring `check_order`: once the refresh has
+    # failed, `pay` is admitted again, and needs attention instead of refreshing again.
+    definition = refund_fresh()
+    definition["steps"]["pay"]["requires"] = ["review"]
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 80},
+        answers=[*REVIEWED_ON_DAY_3, later("1h"), shown("order_id", "ana")],
+        people=PEOPLE,
+        activities={"orders.lookup@1": answers_in_turn("delivered", ConnectionError("down"))},
+    )
+    assert (
+        "pay#1: check_order#2 failed, so check_order.status is still 3 days old, and pay "
+        "needs it at most 1 day old" in run.needs_attention
+    )
+    assert [r.entry for r in run.state.runs if r.step == "check_order"] == [
+        "check_order#1",
+        "check_order#2",
+    ]
+
+
+def test_a_fact_with_no_time_stops_the_step() -> None:
+    # A state carried from a run before 9d has no times: an age that can't be told is never
+    # read as fresh (fail closed).
+    case = parse_case(refund_fresh())
+    state, _ = decide(case, CATALOG, CaseState("t"), Opened(FILE, None, at=START))
+    state, _ = decide(
+        case, CATALOG, state, Completed("check_order#1", {"status": "delivered"}, at=START)
+    )
+    del state.obtained["check_order.status"]
+    answer = Answered(
+        "review",
+        "approve",
+        "ana",
+        frozenset({"support"}),
+        {"approved_amount": Decimal(80)},
+        at=START,
+    )
+    state, commands = decide(case, CATALOG, state, answer)
+    assert commands == []
+    [failed] = [run for run in state.runs if run.status == "failed"]
+    assert failed.reason == "check_order.status has no time obtained, so pay can't tell its age"
+
+
+def test_a_running_refresh_undoes_nothing_it_doesnt_change() -> None:
+    # `notice` requires `check_order` and waits for its approval. While `check_order#2` runs for
+    # `pay`, `check_order` still counts as done: `notice`'s approval stays open, and stays open
+    # once the refresh gives the same status. `letter` needs the same fact: one refresh serves
+    # both.
+    definition = refund_fresh()
+    definition["steps"]["notice"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a notice"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "notice"},
+        "requires": ["check_order"],
+        "approval": {"roles": ["support-lead"], "display": {"reason": "Notices need a lead"}},
+    }
+    definition["steps"]["letter"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "letter"},
+        "requires": ["review"],
+        "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+        "max_age": {"check_order.status": "1d"},
+    }
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 80},
+        answers=[finish("check_order#1"), *REVIEWED_ON_DAY_3],
+        people=PEOPLE,
+        held=["check_order"],
+    )
+    assert "approval of notice by support-lead" in run.waiting_for  # open while it runs
+    assert not any(line.startswith("withdrew") for line in run.history)
+    assert [r.entry for r in run.state.runs if r.step == "check_order"] == [
+        "check_order#1",
+        "check_order#2",
+    ]
+    assert sum(line.startswith("refreshing check_order.status") for line in run.history) == 1
+    finished = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 80},
+        answers=[finish("check_order#1"), *REVIEWED_ON_DAY_3, finish("check_order#2")],
+        people=PEOPLE,
+        held=["check_order"],
+    )
+    assert "approval of notice by support-lead" in finished.waiting_for  # same status: it stands
+    assert finished.reached("pay") and finished.reached("letter")

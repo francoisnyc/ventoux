@@ -1208,6 +1208,17 @@ Each starts with its negative test, seen failing for the right reason.
   out would vanish at every switch. Each time is written as a JSON integer and read back as an
   `int`, refused if it isn't whole (the converter reads numbers as decimals). Slice 8 still runs
   a real switch on Temporal.
+- **One refresh per need, remembered by fact** (slice 5): `state.refreshing` holds, for each
+  fact being fetched again, the run fetching it. If that run has landed and the fact still
+  isn't its, it gave nothing fresh: the step needs attention, saying what the run gave. The
+  first test hung for ever, the loop this prevents. A retry of the step that needed the fact
+  clears what has landed, so a person's retry may fetch it again; a refresh still on its way is
+  kept, and shared.
+- **A failed refresh is a failed run** (slice 5): it needs attention itself, and a step requiring
+  the refreshed step waits on it (its latest run failed), so one operator retry of the refresh
+  is all it takes. Only a step that reads the fact without requiring its step fails too.
+- **A refresh is marked on its run** (slice 5): `refresh` on the step run, so `requires` looks
+  past it while it runs, and both it and `state.refreshing` cross continue-as-new.
 - **Each source says why it can't be fetched again** (slice 4): the opening and a person ("it came
   from…, so it can't be fetched again"), a `write` or `notify` step ("has side effects"), a
   `compute` step ("running it again gives nothing new"), a workflow or a plan step ("isn't run
@@ -1247,9 +1258,9 @@ the pull request is opened. `FF` is `tests/test_fresh_facts.py` (new), `TFF`
 | After a refresh the step's condition is checked again: a changed value stops the step | FF `test_a_refresh_that_changes_the_condition_stops_the_step` |
 | The age is checked before the condition, the approval's condition, asking for the approval and starting | FF `test_freshness_is_checked_before_anything_else` |
 | A stale fact from a person, the opening, a `write`, `notify` or `compute` step, a workflow step or a plan step makes the step need attention, with where it came from; a retry checks again | FF `test_a_fact_that_cant_be_fetched_again_needs_attention` |
-| A refresh that fails or gives no fresh value makes the step need attention, without refreshing again | FF `test_a_refresh_without_a_fresh_value_needs_attention` |
+| A refresh that gives no fresh value makes the step need attention; one that fails needs attention itself, a step requiring it waits and runs once it is retried, and a step only reading its fact needs attention: never a second refresh for the same need | FF `test_a_refresh_without_a_fresh_value_needs_attention`, `test_a_failed_refresh_needs_attention_and_is_retried`, `test_a_failed_refresh_is_never_made_again_for_the_same_need` |
 | A fact needed fresh with no time obtained stops the step (fail closed) | FF `test_a_fact_with_no_time_stops_the_step` |
-| A running refresh doesn't undo its step for `requires`; two steps needing the same fact share one refresh | FF `test_a_refresh_undoes_nothing_it_doesnt_change` |
+| A running refresh doesn't undo its step for `requires`; two steps needing the same fact share one refresh | FF `test_a_running_refresh_undoes_nothing_it_doesnt_change` |
 | A refresh that changes nothing leaves an open or a given approval standing | FF `test_an_unchanged_refresh_leaves_approvals_standing` |
 | A refresh that changes a value an open approval read withdraws it; one that changes a value a given approval saw lapses it, and the step is checked again, a new approval asked if still needed | FF `test_a_changed_refresh_withdraws_or_lapses_approvals` |
 | A stale sensitive fact needs attention, and no line quotes it; a refresh's sensitive input stays wrapped; a time obtained isn't sensitive | FF `test_sensitive_facts_and_their_times` |

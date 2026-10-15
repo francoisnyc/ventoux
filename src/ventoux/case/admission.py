@@ -33,10 +33,19 @@ def latest_run(state: CaseState, step: str) -> StepRun | None:
 def requirements_met(required: tuple[str, ...], state: CaseState) -> bool:
     """Whether each name is a milestone reached, or a step whose latest run is done."""
     for name in required:
-        latest = latest_run(state, name)
+        latest = latest_counted(state, name)
         if name not in state.milestones and (latest is None or latest.status != "done"):
             return False
     return True
+
+
+def latest_counted(state: CaseState, step: str) -> StepRun | None:
+    """The step's latest run that counts for `requires`: a refresh still running doesn't undo
+    the run before it, so only what it changes counts once it lands (brief, D33)."""
+    runs = [run for run in state.runs if run.step == step]
+    while runs and runs[-1].refresh and runs[-1].status == "running":
+        runs.pop()
+    return runs[-1] if runs else None
 
 
 def holds(condition: Expression, values: Mapping[str, object], whose: str) -> bool:

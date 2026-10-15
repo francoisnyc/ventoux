@@ -549,6 +549,15 @@ def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retri
             raise RetryRefused(f"{event.entry} can't be retried: {render(step.when)} is false now")
     run.status, run.reason = "retrying", ""
     state.history.append(f"{event.by} retried {event.entry} as {counted[0]}")
+    # A person decided to try again: a fact the step needs fresh may be fetched again, unless a
+    # refresh of it is still on its way (brief, D33).
+    for field in step.max_age if not isinstance(step, TaskStep) else {}:
+        prior = state.refreshing.get(field)
+        if prior is not None and next(r for r in state.runs if r.entry == prior).status in (
+            "done",
+            "failed",
+        ):
+            del state.refreshing[field]
 
 
 def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
@@ -603,28 +612,39 @@ def refresh_stale(
     at: int,
     commands: list[Command],
 ) -> Literal["fresh", "refreshing", "waiting"]:
-    """Whether every fact the step needs fresh is: `fresh`; or one is being fetched again for it,
-    `refreshing` (scheduled now) or `waiting` (still running). A stale fact is refreshed, never
-    trusted: only one a read-only activity step obtained can be fetched again; any other stops
-    the step, and a person decides (brief, D17) (brief, D18)."""
+    """Whether every fact the step needs fresh is: `fresh`; or one is being fetched again,
+    `refreshing` (scheduled now) or `waiting` (on its way). A stale fact is refreshed, never
+    trusted: only one a read-only activity step obtained can be fetched again, and only once for
+    the same need; any other stops the step, and a person decides (brief, D17) (brief, D33)."""
     for stale in stale_facts(step.max_age, state, at):
-        age = "an unknown time" if stale.age is None else ago(stale.age)
+        if stale.age is None:  # fail closed: an age that can't be told is never fresh
+            raise StepStopped(f"{stale.field} has no time obtained, so {name} can't tell its age")
+        said = f"{stale.field} was obtained {ago(stale.age)} ago"
+        needed = f"{name} needs it at most {as_said(stale.limit)} old"
+        prior = state.refreshing.get(stale.field)
+        if prior is not None and prior != stale.run:  # fetched again, and still the old value
+            run = next(run for run in state.runs if run.entry == prior)
+            if run.status not in ("done", "failed"):
+                return "waiting"  # on its way: running, or retried by an operator
+            gave = (
+                f"gave {state.values[f'{run.step}.outcome']}" if run.status == "done" else "failed"
+            )
+            raise StepStopped(
+                f"{prior} {gave}, so {stale.field} is still {ago(stale.age)} old, and {needed}"
+            )
         source, why_not = refreshable(case, catalog, state, stale)
         if source is None:
-            raise StepStopped(
-                f"{stale.field} was obtained {age} ago, and {name} needs it at most "
-                f"{as_said(stale.limit)} old: {why_not}"
-            )
-        latest = latest_run(state, source)
-        if latest is not None and latest.status == "running":
-            return "waiting"  # one refresh at a time: it is already being fetched
+            raise StepStopped(f"{said}, and {needed}: {why_not}")
         state.history.append(
-            f"refreshing {stale.field} for {name}: obtained {age} ago, at most "
+            f"refreshing {stale.field} for {name}: obtained {ago(stale.age)} ago, at most "
             f"{as_said(stale.limit)}"
         )
         refreshing = case.steps[source]
         assert isinstance(refreshing, ActivityStep)  # only a read-only activity is refreshed
         schedule(case, catalog, state, source, refreshing, None, commands)  # a new run: its own key
+        run = state.runs[-1]
+        run.refresh = True
+        state.refreshing[stale.field] = run.entry
         return "refreshing"
     return "fresh"
 
