@@ -1208,6 +1208,10 @@ Each starts with its negative test, seen failing for the right reason.
   out would vanish at every switch. Each time is written as a JSON integer and read back as an
   `int`, refused if it isn't whole (the converter reads numbers as decimals). Slice 8 still runs
   a real switch on Temporal.
+- **Slice 3's test passed at once** (slice 3): slice 2's code already checks the condition again,
+  since admission runs again after the refresh lands. So it was seen failing on a deliberate
+  break instead: with the step not waiting for its refresh, `pay` is scheduled on the stale value
+  and the test fails. Code restored, test kept as the guide's example run as written.
 - **Fail closed before it is refined** (slice 2): a stale fact that can't be fetched again
   already stops its step, with one line for every source; slice 4 tests each source and gives
   each its own reason. Never a slice where a stale fact is trusted.

@@ -211,3 +211,25 @@ def test_a_fresh_fact_refreshes_nothing() -> None:
     assert run.reached("pay")
     assert not any(line.startswith("refreshing") for line in run.history)
     assert [r.entry for r in run.state.runs if r.step == "check_order"] == ["check_order#1"]
+
+
+def guide_example(heading: str) -> str:
+    """The first Python block after `heading` in the guide's "Fresh facts" section."""
+    section = GUIDE.split("## Fresh facts")[1].split(heading)[1]
+    return section.split("```python\n")[1].split("```")[0]
+
+
+def test_a_refresh_that_changes_the_condition_stops_the_step() -> None:
+    # The guide's example, run as written: the order was returned after the first look, so the
+    # refresh gives "returned", `pay`'s condition is checked again on it, and no refund runs.
+    namespace: dict[str, Any] = {
+        "run_case": run_case,
+        "later": later,
+        "refund_fresh": refund_fresh(),
+        "PEOPLE": PEOPLE,
+    }
+    exec(guide_example("### What happens to a stale fact"), namespace)  # noqa: S102 -- our guide
+    run = namespace["run"]
+    assert run.state.values["check_order.status"] == "returned"
+    assert not any(line.startswith("scheduled pay") for line in run.history)
+    assert run.history[-1] == "closed: nothing left to do"
