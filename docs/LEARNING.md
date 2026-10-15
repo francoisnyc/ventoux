@@ -1021,7 +1021,26 @@ and record the key points. A question is closed once you can explain the answer 
   as what; it loses every value it can't prove was safe to keep.
 - Follow-up: a regulator asks why claim-7 was denied. After forgetting, which of their
   questions can you still answer, and which not?
-- Status: open.
+- Retrieval (layer 10b warm-up), the follow-up: "I can answer who did what, but the values would
+  be gone." The core came back from memory: decisions and who made them stay; values go. Three
+  sharpenings:
+  - **More than who did what:** *under which rule* (the definition and release are in history, so
+    the condition that led to the denial can be shown), *as what* (each outcome, role and time),
+    *in what order* (which steps ran, which failed), and *on which facts, by name and source*
+    (`policy_status from system:policies`), even where the value is gone.
+  - **Not every value is gone:** a value that wasn't sensitive stays where it was used, such as
+    `estimated_damage` in a later step's start. What goes: the sensitive fields (national ID, tax
+    ID), every value in a form answer (the client seals them all, D31), and every failure's
+    message. So "the amount assessed" may still be answerable; "what Ana typed" is not.
+  - **The real answer is decided before forgetting.** If a regulator may ask for the values, the
+    case says so in its definition: `forgetting: "while_open"` or `"never"` (brief, D32, books and
+    records), and a request to forget it is refused. Forgetting is a retention choice made by the
+    definition's author, not a surprise for the auditor.
+  In one line: after forgetting, the audit explains the decision (rule, people, order, facts by
+  name) but can't show the personal values it rested on; if those must be shown, the definition
+  must never let the case be forgotten.
+- Status: open, until "the facts by name and source" and the retention choice (D32) come back
+  from memory.
 
 ## 38. Layer 9d: stale facts, and why replay decides the same way
 
