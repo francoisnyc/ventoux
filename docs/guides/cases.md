@@ -585,8 +585,9 @@ What changes from memory, and what doesn't:
 ## What `ventoux check` proves about a case
 
 `ventoux check` reads the whole definition before any case opens and lists every problem at once,
-each with its path, a code and a message saying what is wrong, then what to do. In code,
-`validate_case(case, catalog)` from `ventoux.case.validate` gives the same list. Nothing runs.
+each with its path, a code and a message saying what is wrong, then what to do. Nothing runs. The
+command arrives with the Python builder (layer 14); today, call `validate_case(case, catalog)`
+from `ventoux.case.validate`, which gives the same list.
 
 An **error** is something proven wrong for every case of the definition, or something the check
 can't read: the definition is refused. A **warning** may be what you meant, or depends on things
@@ -683,7 +684,7 @@ what can *never* happen, and says nothing about what depends on values:
 |---|---|
 | steps that wait on each other | a `when` that real data never makes true |
 | a step requiring a milestone nothing reaches | a review answered `deny`, so `paid` is never reached: that is a path, not a deadlock |
-| a step requiring every milestone `closes_when` names, which the case closes on before the step could start: nothing new starts once they are reached, even while a failed step holds the close | a rejected approval, or whether an operator retries a failed step |
+| a step that waits for every milestone `closes_when` names, which the case closes on before the step could start: nothing new starts once they are reached, even while a failed step holds the close. It may require them, or steps that surely reach them, or come after such a step in `sequence`: `thank can never run: it runs only after draft, which reaches sent, …` | a rejected approval, or whether an operator retries a failed step; a step that only *may* reach a milestone (an activity that can end `declined`, a plan that can fail) |
 | a case that closes the moment it opens | whether anyone eligible is there to answer or approve |
 | a case nobody could ever close | |
 

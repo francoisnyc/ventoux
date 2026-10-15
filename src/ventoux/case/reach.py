@@ -96,7 +96,7 @@ def shortest_circle(start: str, waits: Mapping[str, list[str]]) -> list[str] | N
 
 def after_the_close(case: CaseDefinition, catalog: Catalog, name: str) -> bool:
     """Whether the step `name` waits for every milestone `closes_when` names. The case is closing
-    once they are all reached, and nothing new starts once they are (layer 8b; brief, D34): such
+    once they are all reached, and nothing new starts once they are (layer 8b) (brief, D34): such
     a step can never run."""
     before = reached_before(case, catalog, name)
     return bool(case.closes_when) and set(case.closes_when) <= set(before)

@@ -89,7 +89,7 @@ def close_when_reached(case: CaseDefinition, state: CaseState) -> None:
 def close_held(case: CaseDefinition, state: CaseState) -> bool:
     """Whether every `closes_when` milestone is reached while the case is still open: a failed
     run holds the close until it is retried or a person closes the case (brief, D26). Nothing new
-    starts meanwhile, as in any close (brief, D10, D34)."""
+    starts meanwhile, as in any close (brief, D10) (brief, D34)."""
     return (
         state.phase == "open"
         and bool(case.closes_when)

@@ -2,7 +2,7 @@
 
 Status: the split into four parts and 10a's six choices agreed in the session, 2026-10-15 (all as
 proposed); 10a's note drafted the same day; 10a built, slices 0–6; Promises checked against the
-tests, 2026-10-15.
+tests, 2026-10-15; the tutor review's three fixes built test-first, 2026-10-15.
 
 ## What this layer is for
 
@@ -107,8 +107,13 @@ until a round adds nothing
   role nobody registered counts for nothing (brief, D22).
 - **Every `when` may be true, every outcome may happen,** so a task adds what each of its
   outcomes reaches. That only adds to `can`, so a step left out is left out on every path.
-- **`closes_when` is checked before admission** (8b), so once all its milestones are reached the
-  case is closing and nothing starts: a step requiring all of them can never run.
+- **Once every `closes_when` milestone is reached, nothing new starts** (8b, and since the tutor
+  review even while a failed run holds the close; brief, D34). So a step that waits for all of
+  them can never run: one requiring them, or requiring steps that surely reach them, directly or
+  through the steps those require, or coming after such a step in `sequence`. A step surely
+  reaches a milestone when every completion of it does: a task's own `reaches`, a workflow step's,
+  an activity's whose contract declares no outcomes. A run done with a declared outcome
+  (`declined`) is done for `requires` but reaches nothing, and a plan may end `failed`.
 
 **Why a fixpoint.** A step can run if what it requires can be reached, and running it reaches
 more. Steps have no order to follow (a case has no position), and requirements may point forward,
@@ -151,7 +156,10 @@ milestone it requires (every step reaching a milestone outside `can` is dead).
   - `notify can never run: it requires assessed, which only assess reaches, and assess can never
     run: fix assess first` (or `it requires assess, which can never run`);
   - `thank can never run: it requires paid, and claim closes once paid is reached, before thank
-    could start: remove paid from its requires, or from closes_when`;
+    could start: remove paid from its requires, or from closes_when`; through a step it waits
+    for, `thank can never run: it runs only after draft, which reaches sent, and letter closes
+    once sent is reached, before thank could start: run thank before draft, or remove sent from
+    closes_when`;
   - `recheck can never run: it starts only when proposed, and none of its proposed_by roles
     (supprt) is registered: name a registered role`.
 - **`CLOSES_AT_OPENING`** (error), at `steps`: the case doesn't stay open, and no step starts by
@@ -159,9 +167,10 @@ milestone it requires (every step reaching a milestone outside `can` is dead).
   proposal is refused. Given when some step the structure lets run is kept out by it; a step
   already dead for its own reason keeps its own issue, and if every step is, they say why
   (revised while building, slice 3).
-- **`NEVER_CLOSES`** (error), at `close_reasons`: the case stays open, and no close reason names
-  a registered role, so nobody could ever close it. (`stays_open` with no close reason at all is
-  already refused by `parse_case`.)
+- **`NEVER_CLOSES`** (error), at `close_reasons`: the case stays open, no close reason names a
+  registered role, and `closes_when`, which closes a case that stays open too (8b), is empty or
+  can never be met, so nobody could ever close it. (`stays_open` with no close reason at all is
+  already refused by `parse_case`.) An error, refining D10's "warns" (brief, D34).
 - **`CLOSE_UNREACHABLE`** (warning), at `closes_when`: a milestone it names isn't in `can`. A
   warning, as D10 asks: the case still closes when nothing is left to do, or, if it stays open,
   by a person, and the message says which. Every such milestone is named in one issue.
@@ -293,11 +302,43 @@ Each starts with its negative test, seen failing for the right reason.
   `when`. Every example definition is given marked ones, and no message repeats them; seen failing
   with a message made to quote a milestone's title.
 
+### From the tutor review
+
+Three checks disagreed with what `run_case` does; each was fixed test-first.
+
+- **`NEVER_CLOSES` refused a case that closes.** `closes_when` closes a case that stays open too,
+  so the probe (paid reachable, no registered close role) closed on `paid`. Now it is given only
+  when `closes_when` is empty or can never be met.
+- **A step after the close could run.** A failed run holds `closes_when` (brief, D26), and
+  admission went on: the probe's `thank`, requiring `paid`, started while `lookup#1` waited for an
+  operator, so its `NEVER_RUNS` wasn't a proof. Fixed in the engine, as agreed: once every
+  `closes_when` milestone is reached, admission starts only a retried run; a proposal is refused,
+  saying why; an approval given meanwhile starts nothing; the retry still closes the case.
+  Recorded in D34 as adding to D10 and D26.
+- **A step after the close through what it requires passed unseen.** `thank` requiring `draft`,
+  which reaches `sent`, or coming after it in `sequence`, never runs, and the check was silent.
+  Now a step's requirements imply what its required steps surely reach, transitively.
+- **The review's own probe for this was not a proof** (found while building the fix). The review
+  said a run that is done reaches its step's milestones "whatever its outcome", but `complete`
+  reaches them only on `done`: with `requires: ["pay"]` and a declined refund, `pay#1` is done,
+  `paid` isn't reached, and `thank` starts. Built as written, the check would have refused a case
+  that runs, item 1's flaw again. So only milestones every completion reaches count, the
+  `requires: [pay]` probe gets no issue (a test runs the declined refund and sees `thank`
+  start), and the letter case, whose `letters.draft@3` declares no outcomes, carries the
+  `requires` and `sequence` forms.
+- **Transitivity matters only with several `closes_when` milestones** (found while building): a
+  middle step that requires the closing step waits for the close itself, so it never runs and the
+  last step says it waits on it. Its test closes on two milestones, the middle step reaching one.
+  The message names every step it waits for, and gives a fix naming one change only when that
+  change would let the step run.
+- **Two suggestions taken:** D34 says it refines D10's "warns about cases that can never close";
+  the guide says `ventoux check` arrives with layer 14 and `validate_case` works now.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
-`V` is `tests/test_case_validation.py`. Checked against the tests, 2026-10-15: every test named
-here exists, and every test in `V` is named here.
+`V` is `tests/test_case_validation.py`, `C` is `tests/test_case.py`. Checked against the tests,
+2026-10-15: every test named here exists, and every test in `V` is named here.
 
 | Promise | Test |
 |---|---|
@@ -310,8 +351,12 @@ here exists, and every test in `V` is named here.
 | Steps that wait on each other are one `DEADLOCK`, naming the circle, with no other issue for them; the guide's message word for word | V `test_the_deadlocked_claim_is_refused`, `test_a_step_requiring_itself_is_deadlocked`, `test_sequence_and_requires_can_deadlock`, `test_three_steps_can_wait_on_each_other` |
 | A step waiting on a dead step never runs, saying which, every dead step reaching its milestone named | V `test_a_step_waiting_on_a_deadlock_never_runs`, `test_a_milestone_two_dead_steps_reach_names_both` |
 | A step requiring every `closes_when` milestone never runs, however many there are | V `test_a_step_after_the_close_never_runs`, `test_a_step_after_a_close_on_two_milestones_never_runs` |
+| A step waiting, through a step it requires or `sequence`, for every `closes_when` milestone never runs; the message names the step reaching the close; the run agrees | V `test_a_step_after_the_close_through_a_step_it_requires_never_runs`, `test_a_step_after_the_close_through_sequence_never_runs` |
+| What a step waits for is followed through the steps it requires; both the milestones it requires and the steps it waits for are said | V `test_what_a_step_waits_for_is_followed_through_the_steps_it_requires` |
+| A step after one that may end otherwise (a declared outcome) is not refused, since it can run | V `test_a_step_after_a_step_that_may_end_otherwise_can_run` |
+| The engine: once every `closes_when` milestone is reached, nothing new starts while a failed run holds the close; a proposal is refused saying why; an approval given meanwhile starts nothing; the retried run closes the case | C `test_nothing_new_starts_while_a_failed_run_holds_the_close`, `test_a_proposal_while_the_close_is_held_is_refused`, `test_an_approval_answered_while_the_close_is_held_starts_nothing`, `test_the_failed_run_retried_closes_the_case` |
 | A case where nothing starts by itself is refused once; a step dead for its own reason keeps its own issue beside it | V `test_a_case_that_closes_at_opening_is_refused`, `test_closing_at_opening_is_said_beside_a_step_dead_for_its_own_reason` |
-| A case that stays open must be closable by a registered role, and is accepted when it is | V `test_a_case_nobody_can_close_is_refused` |
+| A case that stays open is refused only if no registered role may close it and `closes_when` is empty or can never be met; accepted with a registered role, or a reachable `closes_when` | V `test_a_case_nobody_can_close_is_refused` |
 | A step only roles nobody registered may propose never runs | V `test_a_step_nobody_may_propose_never_runs` |
 | An unreachable `closes_when` milestone and a milestone nothing reaches are warnings, never repeated beside another issue | V `test_an_unreachable_close_is_a_warning`, `test_a_milestone_nothing_reaches_is_a_warning` |
 | `CLOSE_UNREACHABLE` says how the case closes instead, and names every unreachable milestone | V `test_an_unreachable_close_says_how_the_case_closes_instead`, `test_every_unreachable_close_milestone_is_named` |

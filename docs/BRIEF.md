@@ -927,6 +927,12 @@ be erased on request), has size limits, and a second copy of business records go
   closes the case. So a step requiring every `closes_when` milestone can never run, and case
   validation's error for it is a proof. *Added in the tutor review of 10a, before D34 was
   merged.*
+- **A case that can never close is an error, not a warning,** when it is proven: it stays open,
+  no close reason names a registered role, and `closes_when` is empty or can never be met. This
+  refines D10's "the validator warns about cases that can never close": what is proven for every
+  case refuses the definition; what may be meant warns (a `closes_when` milestone that can't be
+  reached, while the case still closes another way). *Added in the tutor review of 10a, before
+  D34 was merged.*
 - **The runtime depends on nothing validation did.** No flag says a definition was checked; the
   drivers don't call `validate_case`; every runtime refusal stays. A case that skips validation is
   as safe as before.

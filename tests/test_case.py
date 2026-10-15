@@ -1474,7 +1474,7 @@ def held_close() -> tuple[dict[str, Any], dict[str, Activity]]:
 
 def test_nothing_new_starts_while_a_failed_run_holds_the_close() -> None:
     # The tutor review's probe. Once every closes_when milestone is reached, the case closes as
-    # soon as nothing needs attention; meanwhile no step starts (brief, D10, D26, D34).
+    # soon as nothing needs attention; meanwhile no step starts (brief, D10) (brief, D26) (brief, D34).
     definition, fakes = held_close()
     run = run_case(
         definition, file=SMALL, answers=[SMALL_REVIEW], people=OPERATORS, activities=fakes
