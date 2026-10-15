@@ -45,6 +45,16 @@ class OpenApproval:
     seen: dict[str, object]  # the values its step read when it was asked, by field (brief, D25)
 
 
+@dataclass(frozen=True)
+class Obtained:
+    """When a value of the case file was obtained, and by which step run (brief, D33)."""
+
+    at: int  # in whole seconds since the epoch: the time of the event that brought it
+    run: (
+        str | None
+    )  # the step run that gave it, such as `check_order#1`; None: the opening, a person
+
+
 @dataclass
 class CaseState:
     """Everything a case knows: its case file, milestones and step runs, and its history."""
@@ -53,6 +63,8 @@ class CaseState:
     values: dict[str, object] = field(default_factory=dict[str, object])  # the case file
     # Where each value came from (brief, D12): `system:opener`, `person:ana`, `untrusted:llm`.
     sources: dict[str, frozenset[str]] = field(default_factory=dict[str, frozenset[str]])
+    # When each value was obtained, and by which run (brief, D18) (brief, D33).
+    obtained: dict[str, Obtained] = field(default_factory=dict[str, Obtained])
     milestones: list[str] = field(default_factory=list[str])  # reached, in order; never undone
     runs: list[StepRun] = field(default_factory=list[StepRun])  # every step run, in order
     approvals: dict[str, OpenApproval] = field(default_factory=dict[str, OpenApproval])  # by step

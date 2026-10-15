@@ -12,11 +12,13 @@ import pytest
 from ventoux.case.definition import parse_case
 from ventoux.case.freshness import TimeRefused
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, CaseState, Opened
-from ventoux.testing import CATALOG, START, load_definition
+from ventoux.case.state import Answered, CaseState, Obtained, Opened
+from ventoux.testing import CATALOG, START, later, load_definition, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 FILE = {"order_id": "ord-1", "amount": Decimal(80)}
+PEOPLE = {"ana": ["support"], "sam": ["support-lead"]}
+HOUR = 60 * 60
 
 
 def test_an_event_says_when_it_happened() -> None:
@@ -43,3 +45,24 @@ def test_an_event_says_when_it_happened() -> None:
     with pytest.raises(TimeRefused):
         decide(case, CATALOG, opened, answer)
     assert opened == before
+
+
+def test_every_fact_knows_when_it_was_obtained() -> None:
+    run = run_case(
+        REFUND,
+        file={"order_id": "ord-1", "amount": 80},
+        answers=[later("2h"), ("review", "approve", "ana", {"approved_amount": 80})],
+        people=PEOPLE,
+    )
+    assert run.reached("pay")
+    reviewed = START + 2 * HOUR
+    assert run.state.obtained == {
+        "order_id": Obtained(START, None),  # the opening
+        "amount": Obtained(START, None),
+        "review.outcome": Obtained(reviewed, None),  # a person's answer
+        "approved_amount": Obtained(reviewed, None),  # its form
+        "pay.outcome": Obtained(
+            reviewed, "pay#1"
+        ),  # a run, at the time of the event that started it
+        "pay.refund_id": Obtained(reviewed, "pay#1"),  # its output
+    }

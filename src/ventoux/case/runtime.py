@@ -45,6 +45,7 @@ from ventoux.case.state import (
     Failed,
     ForgetApproved,
     GivenApproval,
+    Obtained,
     OpenApproval,
     Opened,
     PlanCancelled,
@@ -174,6 +175,7 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
     for name, value in event.file.items():
         state.values[name] = value
         state.sources[name] = marked(case, name, origin)
+        state.obtained[name] = Obtained(event.at, None)  # from the opening, by no step run
     state.history.append(f"opened by {event.by or OPENER}, with {listed(sorted(event.file))}")
 
 
@@ -331,10 +333,12 @@ def answer_task(
     # The latest answer is the outcome (brief, D9), and a form's values replace earlier ones.
     state.values[f"{run.step}.outcome"] = event.outcome
     state.sources[f"{run.step}.outcome"] = frozenset({who})
+    state.obtained[f"{run.step}.outcome"] = Obtained(event.at, None)  # from a person, not a run
     sets = step.outcomes[event.outcome].sets
     for name in sets:
         state.values[name] = kept(case, name, (event.form or {})[name])
         state.sources[name] = marked(case, name, who)
+        state.obtained[name] = Obtained(event.at, None)
     setting = f", setting {listed(list(sets))}" if sets else ""
     state.history.append(f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}")
     state.history.append(f"{run.entry} done")
@@ -391,6 +395,7 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     # Trusted: the contract, owned by the platform team, or the reviewed plan, declares the
     # outcomes (brief, D12).
     state.sources[f"{run.step}.outcome"] = frozenset({f"system:{declares}"})
+    state.obtained[f"{run.step}.outcome"] = Obtained(event.at, run.entry)  # by this run
     if event.outcome != DONE:
         state.history.append(f"{run.entry} gave {event.outcome}")
         if state.phase == "closing":
@@ -417,6 +422,7 @@ def write_outputs(
     for name, source in sources.items():
         state.values[f"{step}.{name}"] = getattr(given, name)
         state.sources[f"{step}.{name}"] = frozenset({source})
+        state.obtained[f"{step}.{name}"] = Obtained(event.at, event.entry)  # by this run
     return sources
 
 

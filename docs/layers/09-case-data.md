@@ -1201,6 +1201,16 @@ Each starts with its negative test, seen failing for the right reason.
    query.
 9. **The guide and the promises:** the guide's examples and refusal rows run as written.
 
+### Decided while building
+
+- **Times cross continue-as-new from slice 0, not slice 8** (slice 0). 8c's test that every
+  field of the state crosses failed as soon as `obtained` existed, as it should: a field left
+  out would vanish at every switch. Each time is written as a JSON integer and read back as an
+  `int`, refused if it isn't whole (the converter reads numbers as decimals). Slice 8 still runs
+  a real switch on Temporal.
+- **The in-memory driver's `Finish` carries its time** (slice 0), and the script's `finish(entry)`
+  is a script item like `later`: the driver makes the event at the script's time.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.

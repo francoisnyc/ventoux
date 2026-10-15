@@ -6,9 +6,10 @@ written as the exact-number converter can carry it: sources, sets in the state, 
 lists, and are read back as sets.
 """
 
+from decimal import Decimal
 from typing import Any
 
-from ventoux.case.state import CaseState, GivenApproval, OpenApproval, StepRun
+from ventoux.case.state import CaseState, GivenApproval, Obtained, OpenApproval, StepRun
 
 
 def state_as_data(state: CaseState) -> dict[str, Any]:
@@ -17,6 +18,10 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "case": state.case,
         "values": dict(state.values),
         "sources": {name: sorted(sources) for name, sources in state.sources.items()},
+        "obtained": {
+            name: {"at": obtained.at, "run": obtained.run}
+            for name, obtained in state.obtained.items()
+        },
         "milestones": list(state.milestones),
         "runs": [
             {
@@ -55,6 +60,12 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         case=data["case"],
         values=dict(data["values"]),
         sources={name: frozenset(sources) for name, sources in data["sources"].items()},
+        # A state carried by a run from before layer 9d has no times: its facts' ages are unknown,
+        # so a step needing one fresh stops (docs/layers/09-case-data.md, 9d).
+        obtained={
+            name: Obtained(whole(obtained["at"]), obtained["run"])
+            for name, obtained in data.get("obtained", {}).items()
+        },
         milestones=list(data["milestones"]),
         runs=[
             StepRun(
@@ -81,3 +92,13 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         flags=list(data["flags"]),
         history=list(data["history"]),
     )
+
+
+def whole(number: object) -> int:
+    """A time read back as the whole number it was written as: the exact-number converter reads
+    every JSON number as a `Decimal` (brief, D20). Anything else is refused, never rounded."""
+    if isinstance(number, bool) or not isinstance(number, int | Decimal) or number % 1 != 0:
+        raise ValueError(
+            f"a carried time is a whole number of seconds, not a {type(number).__name__}"
+        )
+    return int(number)
