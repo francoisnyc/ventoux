@@ -1208,6 +1208,12 @@ Each starts with its negative test, seen failing for the right reason.
   out would vanish at every switch. Each time is written as a JSON integer and read back as an
   `int`, refused if it isn't whole (the converter reads numbers as decimals). Slice 8 still runs
   a real switch on Temporal.
+- **Fail closed before it is refined** (slice 2): a stale fact that can't be fetched again
+  already stops its step, with one line for every source; slice 4 tests each source and gives
+  each its own reason. Never a slice where a stale fact is trusted.
+- **A step waits while its refresh runs** (slice 2), without scheduling another: a step that
+  reads a fact without requiring the step that gave it would otherwise be admitted again in the
+  same decision and refresh it again. Slice 5 tests two steps sharing one refresh.
 - **An age is kept as written** (slice 1): `"1d"` stays a text in the definition, checked when it
   is read, and turned into seconds where it is used, so a definition reads back as it was
   stored. The runtime reads it again with the same function, on nothing parsing did.

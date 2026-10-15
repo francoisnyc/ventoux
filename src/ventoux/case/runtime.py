@@ -26,6 +26,7 @@ from ventoux.case.approvals import ask, follow, lapsed, needs_approval
 from ventoux.case.called import called
 from ventoux.case.closing import begin_closing, close_when_reached, refuse_to_close, settle
 from ventoux.case.definition import (
+    ActivityStep,
     CallStep,
     CaseDefinition,
     PlanStep,
@@ -33,7 +34,7 @@ from ventoux.case.definition import (
     WorkflowStep,
 )
 from ventoux.case.forgetting import forget
-from ventoux.case.freshness import refuse_unless_whole
+from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     Answered,
@@ -137,7 +138,7 @@ def decide(
     if was_open and state.phase == "closing":
         stop_plans(case, state, commands)
     if state.phase == "open":
-        admit(case, catalog, state, commands)  # nothing new starts once the case is closing
+        admit(case, catalog, state, commands, event.at)  # nothing new starts once closing
     settle(case, state)
     return state, commands
 
@@ -559,9 +560,10 @@ def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
 
 
 def admit(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command]
+    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command], at: int
 ) -> None:
-    """Start every step that may start now, until no more can: no position, only admission."""
+    """Start every step that may start now, until no more can: no position, only admission.
+    `at` is the time of the event being decided, against which facts' ages are measured."""
     required = requirements(case)
     started = True
     while started:
@@ -571,6 +573,14 @@ def admit(
             if not free_to_start(state, name, step) or not requirements_met(required[name], state):
                 continue
             try:
+                # Freshness first, before the condition, the approval and the start, so each
+                # reads fresh facts (brief, D18) (brief, D33).
+                if not isinstance(step, TaskStep):
+                    waits = refresh_stale(case, catalog, state, name, step, at, commands)
+                    if waits == "refreshing":
+                        started = True  # a refresh was scheduled: admission goes round again
+                    if waits != "fresh":
+                        continue
                 # Read only once `requires` are met: a field nobody has set fails the step.
                 if step.when is not None and not holds(
                     step.when, state.values, f"{name}'s condition"
@@ -582,6 +592,56 @@ def admit(
                 # other steps go on (brief, D17).
                 fail(state, name, str(error))
             started = True
+
+
+def refresh_stale(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    step: CallStep | PlanStep,
+    at: int,
+    commands: list[Command],
+) -> Literal["fresh", "refreshing", "waiting"]:
+    """Whether every fact the step needs fresh is: `fresh`; or one is being fetched again for it,
+    `refreshing` (scheduled now) or `waiting` (still running). A stale fact is refreshed, never
+    trusted: only one a read-only activity step obtained can be fetched again; any other stops
+    the step, and a person decides (brief, D17) (brief, D18)."""
+    for stale in stale_facts(step.max_age, state, at):
+        source = refreshable(case, catalog, state, stale)
+        if source is None:
+            age = "an unknown time" if stale.age is None else ago(stale.age)
+            raise StepStopped(
+                f"{stale.field} was obtained {age} ago, and {name} needs it at most "
+                f"{as_said(stale.limit)} old: it can't be fetched again"
+            )
+        latest = latest_run(state, source)
+        if latest is not None and latest.status == "running":
+            return "waiting"  # one refresh at a time: it is already being fetched
+        assert stale.age is not None  # a fact a run obtained always has its time
+        state.history.append(
+            f"refreshing {stale.field} for {name}: obtained {ago(stale.age)} ago, at most "
+            f"{as_said(stale.limit)}"
+        )
+        refreshing = case.steps[source]
+        assert isinstance(refreshing, ActivityStep)  # only a read-only activity is refreshed
+        schedule(case, catalog, state, source, refreshing, None, commands)  # a new run: its own key
+        return "refreshing"
+    return "fresh"
+
+
+def refreshable(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, stale: Stale
+) -> str | None:
+    """The step whose run obtained the stale fact, if running it again is safe: an activity
+    whose contract only reads (brief, D33). None for anything else."""
+    run = next((run for run in state.runs if run.entry == stale.run), None)
+    if run is None:
+        return None  # the opening or a person: nothing to run again
+    step = case.steps[run.step]
+    if not isinstance(step, ActivityStep) or called(catalog, step).effect != "read":
+        return None
+    return run.step
 
 
 def free_to_start(state: CaseState, name: str, step: TaskStep | CallStep | PlanStep) -> bool:

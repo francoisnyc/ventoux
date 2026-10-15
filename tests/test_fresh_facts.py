@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.freshness import TimeRefused
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Obtained, Opened
-from ventoux.testing import CATALOG, START, later, load_definition, run_case
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.testing import CATALOG, DAY, START, later, load_definition, run_case
 
 ROOT = Path(__file__).parent.parent
 REFUND = load_definition(ROOT / "examples" / "refund" / "refund.json")
@@ -126,3 +128,86 @@ def test_max_age_is_checked_when_the_definition_is_read() -> None:
     assert case.steps["pay"].max_age == {"check_order.status": "1d"}  # type: ignore[union-attr]
     assert case.steps["settle"].max_age == {"approved_amount": "12h"}  # type: ignore[union-attr]
     assert case.steps["kyc"].max_age == {"order_id": "30m"}  # type: ignore[union-attr]
+
+
+class TrackInput(BaseModel):
+    order_id: str
+    idempotency_key: str
+
+
+class TrackOutput(BaseModel):
+    status: str
+
+
+def with_keyed_lookup() -> Any:
+    """The development catalog, and a read-only lookup that takes a key, as some systems ask."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(
+        ActivityContract(
+            name="orders.track",
+            version=1,
+            input=TrackInput,
+            output=TrackOutput,
+            risk="low",
+            effect="read",
+            timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+            idempotency_key="idempotency_key",
+            outcomes=[],
+            display=Display(title="Track an order", description="Reads an order's status."),
+        )
+    )
+    return catalog
+
+
+def test_a_stale_fact_is_refreshed_before_the_step_runs() -> None:
+    # The curriculum's negative test: on day 3 `check_order.status` is 3 days old and `pay` needs
+    # it at most a day old, so `pay` doesn't run before `check_order` runs again.
+    definition = refund_fresh()
+    definition["steps"]["check_order"]["activity"] = "orders.track@1"
+    looked_up: list[dict[str, Any]] = []
+
+    def track(inputs: dict[str, Any]) -> dict[str, Any]:
+        looked_up.append(inputs)
+        return {"status": "delivered"}
+
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 80},
+        answers=[later("3d"), ("review", "approve", "ana", {"approved_amount": 80})],
+        people=PEOPLE,
+        activities={"orders.track@1": track},
+        catalog=with_keyed_lookup(),
+    )
+    refreshing = run.history.index(
+        "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day"
+    )
+    assert run.history[refreshing + 1].startswith("scheduled check_order#2: orders.track@1")
+    assert (
+        run.history.index(
+            "scheduled pay#1: payments.refund@2 (order_id from system:opener; "
+            "amount from person:ana), key memory/pay#1"
+        )
+        > refreshing + 1
+    )
+    # A new run of it, with its own entry and key (brief, D17).
+    assert [inputs["idempotency_key"] for inputs in looked_up] == [
+        "memory/check_order#1",
+        "memory/check_order#2",
+    ]
+    # Its output replaces the old one, with fresh sources and a fresh time.
+    assert run.state.obtained["check_order.status"] == Obtained(START + 3 * DAY, "check_order#2")
+    assert run.state.sources["check_order.status"] == frozenset({"untrusted:undeclared"})
+    assert run.reached("pay")
+
+
+def test_a_fresh_fact_refreshes_nothing() -> None:
+    run = run_case(
+        refund_fresh(),
+        file={"order_id": "ord-1", "amount": 80},
+        answers=[later("12h"), ("review", "approve", "ana", {"approved_amount": 80})],
+        people=PEOPLE,
+    )
+    assert run.reached("pay")
+    assert not any(line.startswith("refreshing") for line in run.history)
+    assert [r.entry for r in run.state.runs if r.step == "check_order"] == ["check_order#1"]
