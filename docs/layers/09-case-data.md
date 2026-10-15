@@ -8,7 +8,8 @@ provider sealing and opening); 9b built, slices 0–8; Promises checked against 
 2026-10-13; the tutor review's fix built test-first, 2026-10-14. 9c's choices agreed in the
 session, 2026-10-14 (all as proposed, with `forgetting` added: `while_open` and `never`); 9c
 built, slices 0–10; Promises checked against the tests, 2026-10-15; the tutor review's two fixes
-built test-first, 2026-10-15.
+built test-first, 2026-10-15. 9d's choices agreed in the session, 2026-10-15 (all as proposed);
+its note drafted the same day, with four points to confirm.
 
 ## What this layer is for
 
@@ -1008,3 +1009,225 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 | `report` never hangs: each question has a short timeout and is asked again a bounded number of times, then it says the case didn't answer (tutor review) | TF `test_a_report_never_hangs`; WS `test_a_switch_waits_while_a_workflow_runs` |
 | An exception raised in a case workflow's task fails its workflow task, holding the case until fixed code is deployed; the log keeps its type, never its text (9b's gap) | TF `test_an_engine_bug_in_a_task_blocks_the_case` |
 | The guide's example runs as written, and its refusal rows are what the engine says | TF `test_the_guides_forget_example_runs_as_written`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |
+
+---
+
+## 9d. Fresh facts
+
+User-facing description, written first: `docs/guides/case-data.md` ("Fresh facts", its refusal
+table, design note 5). Decision: brief D33 (drafted with this note), adding to D18 and D25.
+
+### What this part is for
+
+A case file is a snapshot: `check_order.status` is "delivered" *as of when the order was looked
+up*. Three weeks later a refund can go out on an order returned last week, and nothing in the
+case says the status is old. 9d gives every fact the time it was obtained, lets a step say how
+fresh the facts it uses must be, and refreshes a stale fact before the step runs, or asks a
+person when it can't (brief, D18).
+
+A small example. On day 0, `check_order#1` (`orders.lookup@1`, effect `read`) gives
+`check_order.status`, obtained at day 0 by `check_order#1`. `pay` reads it in its `when` and says
+`"max_age": {"check_order.status": "1d"}`. On day 3 the review is approved: that event is decided
+at day 3, so the fact is 3 days old. `pay` doesn't start; `check_order#2` runs, with its own
+entry and key, and gives "returned". `pay`'s condition is checked again on the new value, and
+the refund never runs.
+
+### Agreed earlier
+
+From the session that split layer 9 (top of this note): time reaches `decide` as data on each
+event, as whole seconds since the epoch, and `datetime` stays banned in `core` and `case`; on
+Temporal it is stamped from `workflow.now()`; a stale fact is refreshed only from a read-only
+step, otherwise the case needs attention; approval sheets show the age of each fact.
+
+### Decided in the session
+
+All as proposed, 2026-10-15.
+
+1. **Time on each event:** every event type gets a required `at: int`, seconds since the epoch,
+   with no default. The engine never supplies a time. In memory the script gives it: `run_case`
+   starts at `ventoux.testing.START` unless given `at=`, and `later("3d")` moves time on; a
+   result fed back by the driver carries the time of the event that started its run. On
+   Temporal each event is stamped as it enters the inbox, `int(workflow.now().timestamp())`.
+2. **Where it is kept:** `state.obtained[field] = Obtained(at, run)`, beside `state.sources`, for
+   every value written: the opening, a form's fields, a task's outcome, an activity's or a
+   workflow's outcome and outputs, a plan step's outcome. `run` is the step run that gave it
+   (`check_order#1`), or None for the opening and for people.
+3. **`max_age`'s shape:** on activity, workflow and plan steps, `{"<field>": "<age>"}`. An age is
+   a whole positive number and a unit, `m`, `h` or `d`, read by a small named function into
+   seconds. Refused when the definition is read: an unknown unit, zero, and a field the step
+   doesn't read (its inputs, its `when`, its approval's `when`).
+4. **When it is checked:** in admission, once `requires` are met, before the step's `when`, its
+   approval's `when`, asking for the approval and starting. Stale means `at − obtained > max_age`.
+   A fact the step needs fresh with no recorded time stops the step (fail closed).
+5. **What is refreshed:** only an output or outcome of an activity step whose contract's effect is
+   `read`. A fact from the opening, a person, an activity whose effect is `write`, `notify` or
+   `compute`, a workflow step or a plan step makes the step fail: the case needs attention
+   (brief, D17). `compute`: run again on the same inputs it gives the same answer, so its age is
+   its inputs' age, and re-running it gains nothing.
+6. **A refresh is a new run:** `check_order#2`, its own entry and key (brief, D17), checked as
+   every run is: its requirements, its inputs' sources, its own `max_age`. Its output and outcome
+   replace the old ones, with fresh sources and a fresh time. The step that needed the fact
+   waits (pending work, brief, D10). If the refresh fails, or gives an outcome other than `done`
+   (so no output is written, brief, D29), the fact is still stale and the step that needed it
+   fails, saying so: never a second refresh for the same need, so never a loop.
+7. **Approvals:** an open approval follows the case file as before (brief, D25): withdrawn if
+   the refresh changes what it saw, standing if not. A given approval not yet spent records what
+   it saw, as an open one does (`seen`, beside D11's digest); a refresh that changes any of it
+   lapses the approval, recorded with the reason, and the step goes through admission again: its
+   condition re-checked, a new approval asked if one is still needed. A lapse from a change
+   request (layer 12) still stops the step.
+8. **Ages for people:** `CaseView.obtained` gives each visible value's time; a hidden field's time
+   is absent with it. `approval_sheet(entry, roles, at)` lists each fact an open approval depends
+   on, `check_order.status: delivered, obtained 3 days ago`. The caller gives `at`: a sheet is
+   read, never decided on, so the reader's clock is safe; on Temporal the client reads the API's
+   clock when none is given, outside `core` and `case`.
+9. **Sensitive facts:** a contract has no sensitive output (brief, D31), so a refreshed value is
+   never sensitive; a stale sensitive fact came from the opening or a person, so the step needs
+   attention, and the message names the field, never the value. A refresh whose inputs read a
+   sensitive field gets it wrapped, as any run does. A time obtained is plain data.
+10. **Not in 9d:** the source's own as-of time (a contract change, and nothing needs it yet);
+    timers (layer 11); case validation of `max_age` (layer 10). No new dependency.
+
+### Decided while drafting, to confirm
+
+- **A workflow step whose contract is `read` (`kyc.check@1`) isn't refreshed.** Choice 5 was
+  proposed on the belief that workflow contracts declare no effect; they do. D18's rule ("if that
+  step is read-only") would allow it. Kept out as agreed: a workflow belongs to another team and
+  may take minutes (its `timeout` is 600 s for `kyc.check@1`), so re-running it unasked is a
+  bigger step than a lookup. To confirm in review.
+- **A running refresh doesn't undo its step's earlier run.** While `check_order#2` runs,
+  `check_order` still counts as done for `requires`. Otherwise every refresh would withdraw the
+  open approvals of every step requiring `check_order` ("check_order started again", brief, D25),
+  even when the new value turns out the same, breaking "a refresh that changes nothing leaves it
+  standing". Only what the refresh changes counts.
+- **One refresh at a time per step.** A step whose stale fact is already being refreshed waits
+  for it; two steps needing the same fact share one refresh.
+- **State carried from before 9d has no times.** A case that continues as new from a run built
+  before 9d carries no `obtained`; its facts have no known age, so a step needing one fresh stops
+  (choice 4). Replay is unaffected: stamping adds no command, so histories written before 9d
+  replay as they are.
+
+### How it works
+
+**Time.** `decide(case, catalog, state, event)` reads `event.at` and nothing else for time;
+an `at` that isn't a whole number (a float, a `Decimal`, a boolean) is refused before anything
+changes, on nothing a type checker did. Each value `decide` writes gets `Obtained(event.at,
+run)`. The in-memory driver passes the current time on to the events it feeds back; on Temporal
+the workflow stamps each event as it enters the inbox, so an answer decided later keeps the time
+it arrived. Temporal's workflow time comes from history, so a replay stamps the same times.
+
+**Freshness, in admission.** For each step whose `requires` are met, before anything else is
+read: each field in its `max_age` is looked up in `state.obtained`. All fresh: admission goes on
+as before. One stale:
+
+1. It came from a run of an activity step whose contract's effect is `read`, and no refresh of
+   it was made for this need yet: a new run of that step is scheduled, recorded as
+   `refreshing check_order.status for pay: obtained 3 days ago, at most 1 day`, and the step
+   waits.
+2. A refresh for it already ran and the fact is still stale: the step fails, saying why.
+3. Anything else: the step fails, saying where the fact came from and why it can't be fetched
+   again.
+
+When the refresh completes, its output lands as any output does (brief, D29), with
+`Obtained(at, "check_order#2")`; `follow` withdraws open approvals whose values changed, a given
+approval whose values changed lapses, and admission runs again with the new value.
+
+**Ages.** `ago(seconds)` gives the largest whole unit, rounded down: `less than a minute`,
+`12 minutes`, `5 hours`, `3 days`, `3 weeks`. The sheet's line for each fact the approval's step
+reads is `<title or name>: <value as read>, obtained <age> ago`, `‹sensitive›` for a sensitive
+value, `hidden (needs …)` for one the reader can't see. History lines say an age the same way;
+none quotes a value.
+
+**Continue-as-new.** `state.obtained` crosses with the rest of the state (brief, D27), each time
+written as a JSON integer and read back as an `int`: the exact-number converter reads JSON
+numbers as decimals, so the reader converts each one back, and a test checks the times come back
+equal and of type `int`.
+
+### Where the code goes
+
+- `case/definition.py`: `max_age` on activity, workflow and plan steps, and its checks.
+- `case/freshness.py` (new): an age read from `"1d"`; whether a step's facts are fresh; what to
+  do with a stale one; `ago`.
+- `case/state.py`: `at` on every event; `Obtained`; `state.obtained`; `seen` on `GivenApproval`;
+  a step run's `refreshes` (which step's need it serves).
+- `case/runtime.py`, `case/approvals.py`, `case/admission.py`: times written with each value;
+  the freshness check in admission; a given approval lapsing on a refresh; a refresh not undoing
+  `requires`.
+- `case/visibility.py`: `CaseView.obtained`; `approval_sheet`.
+- `case/memory.py`, `testing.py`: times in the driver; `START`, `DAY`, `later`, `run_case(at=)`,
+  `CaseRun.approval_sheet`.
+- `temporal/cases.py`, `temporal/carried.py`: stamping from `workflow.now()`; the `approval_sheet`
+  query and client function; `obtained` crossing continue-as-new.
+
+### Seams the tests use
+
+- `parse_case`; `decide` (for an event's time).
+- `run_case(..., at=)` with `later(...)`, and what it reports: `history`, `needs_attention`,
+  `waiting_for`, `reached`, `view(roles).obtained`, `approval_sheet(entry, roles, at)`.
+- On Temporal's time-skipping test server: `start_case`, `answer`, `report`, `view`,
+  `approval_sheet`; the environment's `sleep` to let time pass; `fetch_history()` and the
+  `Replayer`; a case made to continue as new.
+- The guide's examples, run as written, and each row of its refusal table.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **Time on events.** Negative: an event whose `at` isn't a whole number is refused and changes
+   nothing. Then each value written records its time and run: opening, form, outcome, output.
+   The quickstart's acceptance tests stay green.
+1. **`max_age`'s shape.** Negative: an unknown unit, zero, a field the step doesn't read, and
+   `max_age` on a task, each refused with its line. Then a well-formed one reads into seconds.
+2. **The curriculum's negative test.** A step whose `max_age` fact is stale doesn't run before
+   the fact is refreshed: `check_order#2` is scheduled, with its own key, and the step runs on
+   the fresh value. A fresh fact refreshes nothing.
+3. **A refresh that changes the condition:** the step no longer runs, and the case closes.
+4. **Facts that can't be refreshed.** From a person, from the opening, from a `write` step, from
+   `compute`, from a workflow step and from a plan step: each needs attention, with its line; a
+   retry checks again.
+5. **A refresh that refreshes nothing:** it fails, or gives `not_found`: the step needs
+   attention, and nothing loops. A fact with no time stops the step. A running refresh doesn't
+   undo `requires`, and two needs share one refresh.
+6. **Approvals.** An approval is asked only on fresh facts. A given approval: a refresh that
+   changes nothing leaves it standing and the step runs; one that changes a value it saw lapses
+   it, and a new one is asked. An open approval of another step: unchanged, it stands while the
+   refresh runs; changed, it is withdrawn.
+7. **Sensitive facts and ages.** A stale sensitive fact needs attention and its line quotes no
+   value; a refresh's sensitive input is wrapped; `view.obtained` and the approval sheet, hidden
+   facts absent, `ago`'s units.
+8. **On Temporal.** Times stamped from workflow time: a case left three days on the test server
+   refreshes before paying; its history replays with the same decisions; a case that continues
+   as new keeps its times exactly; a refusal is recorded and the case waits on; the sheet's
+   query.
+9. **The guide and the promises:** the guide's examples and refusal rows run as written.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+Drafted before building, with the tests named in advance; checked against the real tests before
+the pull request is opened. `FF` is `tests/test_fresh_facts.py` (new), `TFF`
+`tests/test_temporal_fresh_facts.py` (new), `Q` `tests/test_quickstart.py`.
+
+| Promise | Test |
+|---|---|
+| Time reaches `decide` only on events; an event whose time isn't a whole number of seconds is refused and changes nothing | FF `test_an_event_says_when_it_happened` |
+| Every value written records when it was obtained and which run obtained it: opening, form, outcome, output | FF `test_every_fact_knows_when_it_was_obtained` |
+| `max_age` takes `m`, `h` or `d`, a whole positive number, only on activity, workflow and plan steps, only for fields the step reads; anything else is refused when the definition is read | FF `test_max_age_is_checked_when_the_definition_is_read` |
+| A step whose `max_age` fact is stale doesn't run before the fact is refreshed (the curriculum's negative test); the refresh is a new run with its own entry and key, and its output replaces the old with fresh sources and time; a fresh fact refreshes nothing | FF `test_a_stale_fact_is_refreshed_before_the_step_runs` |
+| After a refresh the step's condition is checked again: a changed value stops the step | FF `test_a_refresh_that_changes_the_condition_stops_the_step` |
+| The age is checked before the condition, the approval's condition, asking for the approval and starting | FF `test_freshness_is_checked_before_anything_else` |
+| A stale fact from a person, the opening, a `write`, `notify` or `compute` step, a workflow step or a plan step makes the step need attention, with where it came from; a retry checks again | FF `test_a_fact_that_cant_be_fetched_again_needs_attention` |
+| A refresh that fails or gives no fresh value makes the step need attention, without refreshing again | FF `test_a_refresh_without_a_fresh_value_needs_attention` |
+| A fact needed fresh with no time obtained stops the step (fail closed) | FF `test_a_fact_with_no_time_stops_the_step` |
+| A running refresh doesn't undo its step for `requires`; two steps needing the same fact share one refresh | FF `test_a_refresh_undoes_nothing_it_doesnt_change` |
+| A refresh that changes nothing leaves an open or a given approval standing | FF `test_an_unchanged_refresh_leaves_approvals_standing` |
+| A refresh that changes a value an open approval read withdraws it; one that changes a value a given approval saw lapses it, and the step is checked again, a new approval asked if still needed | FF `test_a_changed_refresh_withdraws_or_lapses_approvals` |
+| A stale sensitive fact needs attention, and no line quotes it; a refresh's sensitive input stays wrapped; a time obtained isn't sensitive | FF `test_sensitive_facts_and_their_times` |
+| The view gives each visible value's time, a hidden field's not; the approval sheet gives each fact's age, read at the time the caller gives | FF `test_people_see_when_each_fact_was_obtained` |
+| No message quotes a value: refresh, staleness and lapse lines name fields and ages | FF `test_freshness_lines_quote_no_value` |
+| On Temporal time comes from workflow time: a case left three days refreshes before the step runs | TFF `test_a_case_left_waiting_refreshes_before_paying` |
+| A case's history replays to the same decisions, refreshes included | TFF `test_a_case_with_a_refresh_replays` |
+| Times cross continue-as-new exactly, as whole numbers | TFF `test_times_cross_continue_as_new_exactly` |
+| On Temporal a stale fact that can't be fetched again is recorded, and the case waits for a person (needs attention); a sheet for an approval that isn't open is refused | TFF `test_a_stale_answer_on_temporal_needs_attention` |
+| The quickstart's acceptance tests stay green | Q (all) |
+| The guide's examples run as written, and its refusal rows are what the engine says | FF `test_the_guides_fresh_facts_examples_run_as_written`, `test_the_guides_freshness_refusals_are_what_the_engine_says` |
