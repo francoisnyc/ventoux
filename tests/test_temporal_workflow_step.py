@@ -36,6 +36,8 @@ from ventoux.temporal.cases import (
     start_case,
 )
 from ventoux.temporal.contract_check import check_workflow_contract
+from ventoux.temporal.converter import keys_of
+from ventoux.temporal.forget import answer_forget, forget_report, propose_forget
 from ventoux.temporal.worker import SANDBOX, case_worker
 
 # Temporal: this module defines workflows, so the workflow sandbox imports it afresh. The
@@ -45,6 +47,7 @@ with workflow.unsafe.imports_passed_through():
         CATALOG,
         FAKES,
         DevelopmentCases,
+        DevelopmentForget,
         DevelopmentPlans,
         development_converter,
         kyc_check,
@@ -163,7 +166,7 @@ def on_temporal[T](
         client = environment.client
         async with (
             environment,
-            case_worker(client, CASES, cases, DevelopmentPlans, FAKES),
+            case_worker(client, CASES, cases, DevelopmentPlans, FAKES, forget=DevelopmentForget),
             Worker(
                 client,
                 task_queue=KYC,
@@ -356,6 +359,34 @@ def test_closing_lets_a_workflow_step_finish() -> None:
     assert DONE in ended.history
     assert ended.flags == ["kyc#1 completed after the close was requested"]
     assert ended.status == "closed"
+
+
+def test_forgetting_waits_for_a_workflow_step() -> None:
+    # Layer 9c: forgotten while the KYC team's check runs. The check isn't cut off; the key stays
+    # until the case's workflow has ended, then goes (brief, D32).
+    async def scenario(environment: WorkflowEnvironment) -> tuple[str, str, CaseReport, str]:
+        client = environment.client
+        case = await reviewed(client, with_kyc(), customer="c-waits")
+        await started(case)
+        request = await propose_forget(
+            client, DevelopmentForget, "refund-1", "pia", ["privacy"], CASES
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        await reported(case, lambda now: now.status == "closing")
+        for _ in range(100):
+            if (await forget_report(request)).status == "closing the case":
+                break
+            await asyncio.sleep(0.05)
+        while_checking = (await forget_report(request)).status, keys_of(client).state("refund-1")
+        await client.get_workflow_handle("refund-1/kyc#1").signal("reviewed")
+        ended = await case.result()
+        await request.result()
+        return *while_checking, ended, keys_of(client).state("refund-1")
+
+    status, kept, ended, key = on_temporal(scenario)
+    assert (status, kept) == ("closing the case", "kept")
+    assert ended.flags == ["kyc#1 completed after the close was requested"]
+    assert (ended.history[-1], key) == ("closed: forgotten", "destroyed")
 
 
 @workflow.defn(name="ventoux.case")

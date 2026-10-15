@@ -208,6 +208,9 @@ class CaseDefinition(Shape):
     close_reasons: dict[Name, CloseReason] = {}  # how a person may close it, and who (brief, D10)
     closes_when: tuple[Name, ...] = ()  # milestones that close it once all are reached
     stays_open: bool = False  # True: it never closes by itself; a person closes it
+    # Whether a request may forget it (brief, D32): `allowed` open or closed; `while_open`, refused
+    # once it is closed (books and records); `never`, always refused.
+    forgetting: Literal["allowed", "while_open", "never"] = "allowed"
 
     # Pydantic: a validator with `mode="after"` runs on the whole object, once its fields passed.
     @model_validator(mode="after")

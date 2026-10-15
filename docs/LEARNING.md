@@ -41,6 +41,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 34 | Layer 5: why check input policies twice | open |
 | 35 | Layer 6: what lives in workflow history | closed |
 | 36 | Layer 8: the model picks the step, never the values | open |
+| 37 | Layer 9c: what the audit keeps after forgetting | open |
 
 ---
 
@@ -286,7 +287,18 @@ and record the key points. A question is closed once you can explain the answer 
   approved_amount, which pay uses, so cannot approve it`). *The test:* `waiting_for == ["approval
   of pay by support-lead"]`, `not run.reached("pay")` and `not run.closed`; since layer 8a it runs
   on the real runtime.
-- Status: open, kept in the warm-up rotation until it comes from memory.
+- Retrieval (layer 9c warm-up): "Sam can approve, Ana can't since she set approved_amount." The
+  exclusion came back with its reason, from memory, for the second time in a row: provenance,
+  not rank (brief, D11). Three parts didn't come back, the same as in 8b:
+  - **The person who opened the case is excluded too** (brief, D11, D25). In the quickstart a
+    system opens it, so nobody is, but a refund opened by a support agent couldn't be approved by
+    them. And since 8a, whoever *proposed* a step's run can't approve it either: the rule 9c
+    reuses for forgetting (a forget request approved by its proposer is refused).
+  - **What the case waits for:** one piece of pending work, the approval of `pay` by a
+    `support-lead`. `pay` hasn't run, and the case stays open (brief, D10, D24).
+  - **The test:** `run.waiting_for == ["approval of pay by support-lead"]`, `not
+    run.reached("pay")` and `not run.closed`.
+- Status: open, until the opener, `waiting_for` and the test come back with the exclusion.
 
 ## 15. Case data
 
@@ -948,3 +960,35 @@ and record the key points. A question is closed once you can explain the answer 
   In one line: the advisor can make a step run only through a proposal that admission and
   someone else's approval check, and it can never choose the values.
 - Status: open, until the proposer's checks and the exclusions come back from memory.
+
+
+## 37. Layer 9c: what the audit keeps after forgetting
+
+> After a customer is forgotten, what can the audit still show, and what can't it? (Claim-7:
+> opened with a national ID, Ana typed a tax ID into her form, a lookup failed quoting the ID,
+> Pia proposed forgetting it and Olu approved.) a) What stays readable, and where? b) What is
+> gone, and why can't it come back, in history and in an earlier export? c) What is lost that
+> wasn't a sensitive field?
+
+- Your answer: "decisions and who made them stay; sensitive values are gone."
+- Discussion: the core is right, and it is D15's last line. Three parts didn't come back.
+  - **Where, and with no key at all:** the case's closing report (`report`), every line with
+    `‹sensitive›` in place of a value; Temporal's history read as stored: the definition (the
+    rules and release), each answer's entry, outcome, person and role, the approved request;
+    values that weren't sensitive where they were used (`estimated_damage` in the next run's
+    start); the forget request's own history, which replays with no key. Staff identifiers stay:
+    forgetting is about the case's subject, through its sensitive fields.
+  - **Why it can't come back:** sensitive values were never stored in plain text (9b), only as
+    `encrypted/n` parts under the case's key; the key is destroyed and never made again, so no
+    one can open them, in Temporal's history or in an export, which carries the same ciphertext
+    (question 21's trap). A replay fails with `the key of claim-7 was destroyed when it was
+    forgotten`.
+  - **The surprise:** every form value in an answer event (the client seals them all, since it
+    can't tell which are sensitive, D31), and every failure's message and stack trace (always
+    sealed: Ventoux can't know what an activity's error says). After forgetting, an operator
+    sees that a step failed and with which type, never what it said.
+  In one line: the audit keeps that each decision happened, who made it, under which rule and
+  as what; it loses every value it can't prove was safe to keep.
+- Follow-up: a regulator asks why claim-7 was denied. After forgetting, which of their
+  questions can you still answer, and which not?
+- Status: open.

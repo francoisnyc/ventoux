@@ -11,6 +11,7 @@ from ventoux.case.memory import Activity
 from ventoux.temporal.activities import plan_activities
 from ventoux.temporal.cases import CaseWorkflow
 from ventoux.temporal.converter import require_ventoux_converter
+from ventoux.temporal.forget import ForgetActivities, ForgetWorkflow
 from ventoux.temporal.logs import keep_only_exception_types
 from ventoux.temporal.workflow import PlanWorkflow
 
@@ -52,16 +53,19 @@ def case_worker(
     cases: type[CaseWorkflow],
     plans: type[PlanWorkflow],
     implementations: Mapping[str, Activity],
+    forget: type[ForgetWorkflow] | None = None,
 ) -> Worker:
     """A worker on `task_queue` for `cases`, the plan workflow its plan steps run as, and the code
-    behind its catalog's contracts."""
+    behind its catalog's contracts; and, given `forget`, the requests to forget a case
+    (brief, D32)."""
     require_ventoux_converter(client)
     keep_only_exception_types()  # a failure's text never reaches the log (brief, D31)
+    forgetting = [] if forget is None else ForgetActivities(client).all()
     return Worker(
         client,
         task_queue=task_queue,
-        workflows=[cases, plans],
-        activities=plan_activities(cases.catalog, implementations),
+        workflows=[cases, plans] if forget is None else [cases, plans, forget],
+        activities=[*plan_activities(cases.catalog, implementations), *forgetting],
         # Temporal: activities that are plain functions (not `async`) run on these threads.
         activity_executor=ThreadPoolExecutor(),
         workflow_runner=SANDBOX,

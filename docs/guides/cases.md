@@ -515,7 +515,8 @@ assert (await case.result()).status == "closed"
 `propose(case, step, by, roles)`, `retry(case, entry, by, roles)` and `close(case, reason, by,
 roles)` do what a script's `propose`, `retry` and `close` do. `report` gives what `run_case`
 reports (`status`, `waiting_for`, `needs_attention`, `flags`, `history`), and `waiting_at`, the
-entries open for an answer, in the same order as `waiting_for`. `view(case, roles)` gives the
+entries open for an answer, in the same order as `waiting_for`; once the case has closed, it is
+the report the case returned then, read without replaying it. `view(case, roles)` gives the
 case file as people with those roles see it, filtered inside the worker, and `shown(case, field,
 by, roles)` records that a referenced record was shown.
 
@@ -569,8 +570,10 @@ What changes from memory, and what doesn't:
   changes for you: the case keeps its ID, its keys and its open entries (`review#1` is still
   answered as `review#1`), and the client always reaches its latest run. An answer sent during
   the switch is decided by one run or the other, never lost and never kept for later. A
-  `report` asked at the very moment of a switch can go unanswered, reaching the run that is
-  ending: ask again, and it reaches the new one.
+  query asked at the very moment of a switch can go unanswered, reaching the run that is
+  ending; asked again, it reaches the new one. `report` does so itself: it waits a short while
+  for each answer, asks again up to ten times, then raises `CaseUnanswered`. A query of your
+  own (`view`, or one you send) should do the same.
 - **Replay holds the case to its history.** A worker can stop at any point and another replays
   the case from its history; code changed to ask for something else fails the replay,
   and Temporal holds the case until the code is fixed (brief, D17).

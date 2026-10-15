@@ -13,7 +13,12 @@ from datetime import timedelta
 from typing import Any, ClassVar
 
 from temporalio import workflow
-from temporalio.client import Client, WorkflowHandle
+from temporalio.client import (
+    Client,
+    WorkflowExecutionStatus,
+    WorkflowHandle,
+    WorkflowQueryFailedError,
+)
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import (
     ActivityError,
@@ -22,6 +27,7 @@ from temporalio.exceptions import (
     FailureError,
 )
 from temporalio.exceptions import TimeoutError as TemporalTimeout  # not Python's own TimeoutError
+from temporalio.service import RPCError, RPCStatusCode
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh for every run; modules passed
 # through are imported once and shared. `core` and `case` are deterministic (the boundary test
@@ -32,6 +38,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.called import unbound
     from ventoux.case.closing import CloseRefused
     from ventoux.case.definition import CaseInvalid, parse_case
+    from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.plan_step import PlanNotSupplied, supplied
     from ventoux.case.runtime import CaseRefused, ShownRefused, decide
     from ventoux.case.state import (
@@ -42,6 +49,7 @@ with workflow.unsafe.imports_passed_through():
         Completed,
         Event,
         Failed,
+        ForgetApproved,
         Opened,
         PlanCancelled,
         Proposed,
@@ -62,6 +70,11 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.temporal.converter import keys_of
     from ventoux.temporal.options import activity_options
     from ventoux.temporal.workflow import Given, PlanStart, RunReport, raised
+    from ventoux.tooling.keys import FORGOTTEN
+
+
+class CaseForgotten(Exception):
+    """A forgotten case read for what it held: its key is gone (brief, D32)."""
 
 
 @dataclass
@@ -102,6 +115,16 @@ class CaseAnswer:
 
 
 @dataclass
+class CaseForget:
+    """An approved request to forget the case, from `<case ID>/forget` (brief, D32)."""
+
+    proposed_by: str  # who proposed it
+    proposer_roles: list[str]  # their roles, stated with the proposal (brief, D22)
+    approved_by: str  # who approved it
+    approver_roles: list[str]  # their roles, stated with the approval
+
+
+@dataclass
 class CaseRequest:
     """A person's request to a case: propose a step, retry a failed run, or close it."""
 
@@ -136,6 +159,8 @@ class CaseWorkflow:
         # Each child plan running, by its step run, to stop it if the case closes (brief, D28).
         self.children: dict[str, workflow.ChildWorkflowHandle[Any, RunReport]] = {}
         self.stopping: set[str] = set()  # step runs whose plans the case has stopped
+        # An engine bug raised in a task beside the loop, which the loop raises in its turn.
+        self.broken: Exception | None = None
 
     # Temporal: a signal is a message into a running workflow, recorded in its history, so replay
     # delivers it again at the same point.
@@ -155,6 +180,17 @@ class CaseWorkflow:
     @workflow.signal(name="close")
     def close(self, sent: CaseRequest) -> None:
         self.inbox.append(CloseAsked(sent.what, sent.by, frozenset(sent.roles)))
+
+    @workflow.signal(name="forget")
+    def forget(self, sent: CaseForget) -> None:
+        self.inbox.append(
+            ForgetApproved(
+                sent.proposed_by,
+                frozenset(sent.proposer_roles),
+                sent.approved_by,
+                frozenset(sent.approver_roles),
+            )
+        )
 
     @workflow.signal(name="shown")
     def shown(self, sent: CaseRequest) -> None:
@@ -201,7 +237,13 @@ class CaseWorkflow:
             kind = type(refused).__name__
             raise ApplicationError(str(refused), type=kind, non_retryable=True) from None
         while self.state.phase != "closed":
-            await workflow.wait_condition(lambda: bool(self.inbox) or self.time_to_switch())
+            await workflow.wait_condition(
+                lambda: bool(self.inbox) or self.time_to_switch() or self.broken is not None
+            )
+            if self.broken is not None:
+                # An engine bug is never lost: it fails the workflow task, which Temporal retries
+                # until fixed code is deployed (brief, D17); the log keeps its type (brief, D31).
+                raise self.broken
             if not self.inbox:
                 self.switch(start)
             event = self.inbox.pop(0)
@@ -214,6 +256,7 @@ class CaseWorkflow:
                 RetryRefused,
                 CloseRefused,
                 ShownRefused,
+                ForgetRefused,
             ) as refused:
                 # In memory a refusal raises to the test; here nobody is there to catch it. It is
                 # recorded, and the case waits on as if it hadn't come: `decide` changed nothing
@@ -247,17 +290,29 @@ class CaseWorkflow:
 
     def carry(self, command: Command) -> None:
         """Start the command; what it gives comes back to the inbox when it arrives."""
-        # asyncio: a task runs alongside the loop; Temporal's event loop runs it deterministically.
         if isinstance(command, StopPlan):
-            asyncio.create_task(self.stop_plan(command))
+            self.beside(self.stop_plan(command))
             return
         self.running += 1
         if isinstance(command, StartPlan):
-            asyncio.create_task(self.until_back(self.run_plan(command)))
+            self.beside(self.until_back(self.run_plan(command)))
         elif isinstance(command, StartWorkflow):
-            asyncio.create_task(self.until_back(self.run_workflow(command)))
+            self.beside(self.until_back(self.run_workflow(command)))
         else:
-            asyncio.create_task(self.until_back(self.run_activity(command)))
+            self.beside(self.until_back(self.run_activity(command)))
+
+    def beside(self, work: Coroutine[Any, Any, None]) -> None:
+        """Run `work` in a task beside the loop. An exception it raises is an engine bug: kept
+        for the loop to raise, never left in the task, where nobody would retrieve it and
+        Temporal's SDK would log the task's description, quoting it (layer 9c)."""
+        # asyncio: a task runs alongside the loop; Temporal's event loop runs it deterministically.
+        asyncio.create_task(self.watched(work))
+
+    async def watched(self, work: Coroutine[Any, Any, None]) -> None:
+        try:
+            await work
+        except Exception as bug:  # noqa: BLE001 (every kind of bug: none may vanish)
+            self.broken = bug
 
     async def until_back(self, carried: Coroutine[Any, Any, None]) -> None:
         """Run `carried`, which puts what happened in the inbox; then it no longer runs."""
@@ -414,6 +469,8 @@ def asked(event: Event) -> str:
         return f"{event.by}'s close as {event.reason}"
     if isinstance(event, Shown):
         return f"the record of {event.field} shown to {event.by}"
+    if isinstance(event, ForgetApproved):
+        return f"forgetting the case, approved by {event.approved_by}"
     return type(event).__name__  # only people's requests are refused; anything else is a bug
 
 
@@ -511,10 +568,47 @@ async def shown(
 
 
 async def view(case: WorkflowHandle[CaseWorkflow, CaseReport], roles: list[str]) -> CaseView:
-    """The case file as a person holding `roles` sees it, filtered in the worker (brief, D30)."""
-    return await case.query(CaseWorkflow.view, sorted(roles))
+    """The case file as a person holding `roles` sees it, filtered in the worker (brief, D30).
+    A forgotten case has no case file left to read: refused, saying so (brief, D32)."""
+    try:
+        return await case.query(CaseWorkflow.view, sorted(roles))
+    except WorkflowQueryFailedError as failed:
+        # The worker replays the case to answer, and its key provider refuses a destroyed key.
+        if FORGOTTEN in str(failed):
+            raise CaseForgotten(f"{case.id} was forgotten: its case file can't be read") from None
+        raise
+
+
+# A report asked at the moment the case continues as new can reach the run that is ending, which
+# no longer answers; asked again, it reaches the new run (layer 8c). So each question waits a
+# little, and is asked again a few times.
+ASK = timedelta(seconds=2)
+ASKS = 10
+UNANSWERED = (RPCStatusCode.CANCELLED, RPCStatusCode.DEADLINE_EXCEEDED)
+
+
+class CaseUnanswered(Exception):
+    """A case that didn't answer, however many times it was asked."""
 
 
 async def report(case: WorkflowHandle[CaseWorkflow, CaseReport]) -> CaseReport:
-    """How the case is going: what it waits for, and its history so far."""
-    return await case.query(CaseWorkflow.report)
+    """How the case is going: what it waits for, and its history so far. A case that has closed
+    gives the report it returned then: lines and placeholders, no sensitive part, so it reads
+    without a key, even once the case is forgotten (brief, D32). Asked with a short timeout, and
+    again a bounded number of times, so it never hangs while the case continues as new
+    (brief, D27)."""
+    for _ in range(ASKS):
+        try:
+            described = await case.describe(rpc_timeout=ASK)
+            if described.status == WorkflowExecutionStatus.COMPLETED:
+                return await case.result(rpc_timeout=ASK)
+            return await case.query(CaseWorkflow.report, rpc_timeout=ASK)
+        except RPCError as error:
+            # Temporal: no answer in time, as when the query reached a run that was ending. The
+            # SDK says so as `CANCELLED` ("Timeout expired") when the client's own timeout ends
+            # the call, and as `DEADLINE_EXCEEDED` when the server's does.
+            if error.status not in UNANSWERED:
+                raise
+    raise CaseUnanswered(
+        f"{case.id} didn't answer in {ASKS} tries of {ASK.total_seconds():g}s: ask again later"
+    )
