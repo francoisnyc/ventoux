@@ -276,6 +276,10 @@ Each starts with its negative test, seen failing for the right reason.
 - **"One cause, one issue" for milestones was seen failing on a deliberate break** (slice 4): its
   assertions sat after the first, which failed first, so they never ran red; with the exclusions
   removed, a milestone a step requires was warned about twice.
+- **The runtime on its own passed at once** (slice 5), as expected: it describes what the runtime
+  already does. It was seen failing when pointed at the sound claim, which runs on to the
+  assessment instead of closing. No driver calls `validate_case` (only `case/validate.py` names
+  it), and no earlier test changed in this layer.
 
 ### Promises
 

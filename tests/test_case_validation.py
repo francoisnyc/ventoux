@@ -14,7 +14,7 @@ import pytest
 from ventoux.case.definition import parse_case
 from ventoux.case.validate import validate_case
 from ventoux.core.validate import Issue
-from ventoux.testing import CATALOG, load_definition
+from ventoux.testing import CATALOG, load_definition, run_case
 
 ROOT = Path(__file__).parent.parent
 REFUND = load_definition(ROOT / "examples" / "refund" / "refund.json")
@@ -335,3 +335,22 @@ def test_a_milestone_nothing_reaches_is_a_warning() -> None:
     closing["closes_when"] = ["reviewed"]
     assert [issue.code for issue in issues(closing)] == ["CLOSE_UNREACHABLE"]
     assert [issue.code for issue in issues(deadlocked_claim())] == ["DEADLOCK", "CLOSE_UNREACHABLE"]
+
+
+# --- Slice 5: the runtime on its own ---
+
+
+def test_an_unchecked_deadlock_still_runs_safely() -> None:
+    # The runtime depends on nothing validation did (brief, D34): run without ever being checked,
+    # the deadlocked claim checks the customer, starts nothing more, and closes with nothing paid,
+    # as the guide says.
+    run = run_case(
+        deadlocked_claim(),
+        file={"customer_id": "cus-7", "order_id": "ord-1"},
+        answers=[],
+        people={"ana": ["adjuster"]},
+    )
+    assert run.closed
+    assert run.history[-1] == "closed: nothing left to do"
+    assert any(line.startswith("check#1 done") for line in run.history)
+    assert not any(line.startswith(("started assess", "scheduled pay")) for line in run.history)
