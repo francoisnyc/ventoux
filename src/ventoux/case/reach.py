@@ -5,14 +5,15 @@ Every `when` is taken as possibly true, and every outcome as possible, so whatev
 never happen on any path (brief, D34).
 """
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
-from ventoux.case.definition import CaseDefinition, TaskStep
+from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
 from ventoux.case.sequence import requirements
 
 
-def can_happen(case: CaseDefinition) -> set[str]:
-    """Every step that can complete and every milestone that can be reached in `case`.
+def can_happen(case: CaseDefinition, roles: Collection[str]) -> set[str]:
+    """Every step that can complete and every milestone that can be reached in `case`, given the
+    `roles` the catalog registers.
 
     A fixpoint: start from nothing, add every step whose requirements are all in the set, with what
     it reaches, and repeat until a round adds nothing. Steps have no order (a case has no
@@ -25,6 +26,8 @@ def can_happen(case: CaseDefinition) -> set[str]:
     while True:
         before = len(can)
         for name, step in case.steps.items():
+            if not can_start(step, roles) or after_the_close(case, required[name]):
+                continue
             if name not in can and all(requirement in can for requirement in required[name]):
                 can |= {name, *step.reaches}
                 if isinstance(step, TaskStep):  # any of its outcomes may be the answer
@@ -81,3 +84,16 @@ def shortest_circle(start: str, waits: Mapping[str, list[str]]) -> list[str] | N
                 came_from[there] = here
                 waiting.append(there)
     return None
+
+
+def after_the_close(case: CaseDefinition, required: tuple[str, ...]) -> bool:
+    """Whether a step requiring `required` waits for every milestone `closes_when` names. The case
+    is closing once they are all reached, and `closes_when` is checked before admission (layer
+    8b), so nothing new starts: such a step can never run."""
+    return bool(case.closes_when) and set(case.closes_when) <= set(required)
+
+
+def can_start(step: TaskStep | CallStep | PlanStep, roles: Collection[str]) -> bool:
+    """Whether anyone can start the step: it starts by itself, or a registered role may propose
+    it. A role nobody registered counts for nothing, as when the case runs (brief, D22)."""
+    return step.automatic or any(role in roles for role in step.proposed_by)

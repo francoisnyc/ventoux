@@ -193,3 +193,81 @@ def test_a_step_waiting_on_a_deadlock_never_runs() -> None:
             "remind can never run: it requires assess, which can never run: fix assess first",
         ),
     ]
+
+
+# --- Slice 3: closing ---
+
+
+def test_a_step_after_the_close_never_runs() -> None:
+    # `closes_when` is checked before admission (layer 8b): once paid is reached the case is
+    # closing, and nothing starts.
+    thank = {**NOTIFY, "display": {"title": "Thank the customer"}, "requires": ["paid"]}
+    assert issues(claim_with(thank=thank)) == [
+        Issue(
+            "steps.thank.requires",
+            "NEVER_RUNS",
+            "thank can never run: it requires paid, and claim closes once paid is reached, before "
+            "thank could start: remove paid from its requires, or from closes_when",
+        )
+    ]
+
+
+def test_a_step_nobody_may_propose_never_runs() -> None:
+    # A role nobody registered counts for nothing, as when the case runs (brief, D22).
+    recheck = {
+        **NOTIFY,
+        "display": {"title": "Check the customer again"},
+        "requires": ["checked"],
+        "automatic": False,
+        "proposed_by": ["supprt"],
+    }
+    assert issues(claim_with(recheck=recheck)) == [
+        Issue(
+            "steps.recheck.proposed_by",
+            "NEVER_RUNS",
+            "recheck can never run: it starts only when proposed, and none of its proposed_by "
+            "roles (supprt) is registered: name a registered role",
+        )
+    ]
+
+
+def test_a_case_that_closes_at_opening_is_refused() -> None:
+    # Nothing is pending when it opens, so it closes at once, and every proposal after is refused.
+    # Here it is the only cause, so the only issue.
+    claim = guide_json(0)
+    claim["steps"]["check"] |= {"automatic": False, "proposed_by": ["adjuster"]}
+    assert issues(claim) == [
+        Issue(
+            "steps",
+            "CLOSES_AT_OPENING",
+            "nothing starts by itself when claim opens, so it closes at once and every proposal "
+            "is refused: let a step start by itself with nothing required, or add stays_open",
+        )
+    ]
+
+
+def test_closing_at_opening_is_said_beside_a_step_dead_for_its_own_reason() -> None:
+    # Two causes, two fixes: the case closes at once, and approve needs reviewed, which nothing
+    # reaches. A step dead for its own reason keeps its own issue.
+    claim = claim_with(approve=APPROVE)
+    claim["steps"]["check"] |= {"automatic": False, "proposed_by": ["adjuster"]}
+    assert [issue.code for issue in issues(claim)] == ["CLOSES_AT_OPENING", "NEVER_RUNS"]
+    assert issues(claim)[1].path == "steps.approve.requires"
+
+
+def test_a_case_nobody_can_close_is_refused() -> None:
+    claim = guide_json(0)
+    claim["stays_open"] = True
+    claim["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate claim"}, "roles": ["supprt"]}
+    }
+    assert issues(claim) == [
+        Issue(
+            "close_reasons",
+            "NEVER_CLOSES",
+            "claim stays open, and no close reason names a registered role, so nobody could ever "
+            "close it: name a registered role in a close reason",
+        )
+    ]
+    claim["close_reasons"]["duplicate"]["roles"] = ["supprt", "adjuster"]
+    assert issues(claim) == []

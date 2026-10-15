@@ -155,8 +155,9 @@ milestone it requires (every step reaching a milestone outside `can` is dead).
     (supprt) is registered: name a registered role`.
 - **`CLOSES_AT_OPENING`** (error), at `steps`: the case doesn't stay open, and no step starts by
   itself with nothing required. When it opens nothing is pending, so it closes at once and every
-  proposal is refused. Every step is then dead for that one reason, so this is the only issue
-  given (one cause, one issue).
+  proposal is refused. Given when some step the structure lets run is kept out by it; a step
+  already dead for its own reason keeps its own issue, and if every step is, they say why
+  (revised while building, slice 3).
 - **`NEVER_CLOSES`** (error), at `close_reasons`: the case stays open, and no close reason names
   a registered role, so nobody could ever close it. (`stays_open` with no close reason at all is
   already refused by `parse_case`.)
@@ -225,9 +226,10 @@ Each starts with its negative test, seen failing for the right reason.
 2. **The curriculum's negative test.** Negative: the deadlocked claim gives the guide's
    `DEADLOCK`, once, for both steps. Then a step requiring itself; a circle made by `sequence`
    and a `requires` pointing back; a step waiting on a deadlocked one gets `NEVER_RUNS` naming it.
-3. **Closing.** Negative: a step requiring every `closes_when` milestone; a case where nothing
-   starts by itself (`CLOSES_AT_OPENING`, and nothing else); a case that stays open with no close
-   reason naming a registered role; a proposed step none of whose roles is registered.
+3. **Closing.** Negative: a step requiring every `closes_when` milestone; a proposed step none of
+   whose roles is registered; a case where nothing starts by itself (`CLOSES_AT_OPENING`), alone
+   and beside a step dead for its own reason; a case that stays open with no close reason naming
+   a registered role.
 4. **Warnings.** Negative: an unreachable `closes_when` milestone, a milestone nothing reaches,
    each a warning; neither given for a milestone already named by another issue.
 5. **The runtime on its own.** The deadlocked claim, run without validation, closes with nothing
@@ -254,6 +256,18 @@ Each starts with its negative test, seen failing for the right reason.
   test. Each was seen failing on a deliberate break (the one-step wording, the `sequence` branch),
   then restored. The slice's plain fallback line is gone: every dead step now says which of three
   causes it has (a step that can never run, a milestone nothing reaches, or only dead steps reach).
+- **A dead step may have every requirement met** (slice 3): kept out by the close (it requires
+  every `closes_when` milestone) or because nobody may propose it. Built against slice 2's code,
+  the `closes_when` test crashed where `never_run` assumed an unmet requirement; now each dead step
+  is asked its cause in order: nobody may start it (at `proposed_by`), a requirement that can't be
+  met, then the close. Such a step waits on no other step, so it is never in a circle.
+- **`CLOSES_AT_OPENING` alone would have hidden causes** (slice 3). The note said it would be the
+  only issue. But slice 2's step requiring itself also leaves nothing to start at opening, where
+  `DEADLOCK` is the cause and closing at once its consequence; and a case with one proposed step
+  and one automatic step requiring what nothing reaches closes at once *and* needs the second
+  fixed. So it is given when a step the structure lets run is kept out by it, beside the other
+  issues. Its second test passed at once (the rule was written first) and was seen failing with
+  the rule broken to "only when every step could run".
 
 ### Promises
 
@@ -271,8 +285,8 @@ tests before the pull request.
 | Steps that wait on each other are one `DEADLOCK`, naming the circle, with no other issue for them; the guide's message word for word | V `test_the_deadlocked_claim_is_refused`, `test_a_step_requiring_itself_is_deadlocked`, `test_sequence_and_requires_can_deadlock` |
 | A step waiting on a dead step never runs, saying which | V `test_a_step_waiting_on_a_deadlock_never_runs` |
 | A step requiring every `closes_when` milestone never runs | V `test_a_step_after_the_close_never_runs` |
-| A case where nothing starts by itself is refused once, with nothing else | V `test_a_case_that_closes_at_opening_is_refused` |
-| A case that stays open must be closable by a registered role | V `test_a_case_nobody_can_close_is_refused` |
+| A case where nothing starts by itself is refused once; a step dead for its own reason keeps its own issue beside it | V `test_a_case_that_closes_at_opening_is_refused`, `test_closing_at_opening_is_said_beside_a_step_dead_for_its_own_reason` |
+| A case that stays open must be closable by a registered role, and is accepted when it is | V `test_a_case_nobody_can_close_is_refused` |
 | A step only roles nobody registered may propose never runs | V `test_a_step_nobody_may_propose_never_runs` |
 | An unreachable `closes_when` milestone and a milestone nothing reaches are warnings, never repeated beside another issue | V `test_an_unreachable_close_is_a_warning`, `test_a_milestone_nothing_reaches_is_a_warning` |
 | No message quotes a value | V `test_no_message_quotes_a_value` |

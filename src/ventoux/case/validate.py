@@ -3,7 +3,14 @@ opens (layer 10). See docs/layers/10-case-validation.md and docs/guides/cases.md
 """
 
 from ventoux.case.definition import CaseDefinition
-from ventoux.case.reach import can_happen, reachable, reached_by, shortest_circle, waited_on
+from ventoux.case.reach import (
+    can_happen,
+    can_start,
+    reachable,
+    reached_by,
+    shortest_circle,
+    waited_on,
+)
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
 from ventoux.core.catalog import Catalog
@@ -18,26 +25,86 @@ def validate_case(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
             f"validate_case takes a parsed case definition (see parse_case), not "
             f"{type(case).__name__}"
         )
-    return never_run(case)
+    can = can_happen(case, catalog.roles)
+    found: list[Issue] = []
+    # Steps the structure lets run are still kept out if the case closes when it opens. If every
+    # step is dead anyway, their own issues say why: one cause, one issue.
+    if closes_at_opening(case) and any(name in can for name in case.steps):
+        found.append(
+            Issue(
+                "steps",
+                "CLOSES_AT_OPENING",
+                f"nothing starts by itself when {case.case} opens, so it closes at once and every "
+                "proposal is refused: let a step start by itself with nothing required, or add "
+                "stays_open",
+            )
+        )
+    return found + never_run(case, catalog, can) + never_closes(case, catalog)
 
 
-def never_run(case: CaseDefinition) -> list[Issue]:
-    """A step left out of what the case can ever reach can never run, on any path: one
+def never_closes(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
+    """A case that stays open closes only when a person closes it with a reason; if no reason
+    names a registered role, nobody ever can (brief, D10). A role nobody registered counts for
+    nothing (brief, D22)."""
+    closers = {role for reason in case.close_reasons.values() for role in reason.roles}
+    if not case.stays_open or closers & set(catalog.roles):
+        return []
+    return [
+        Issue(
+            "close_reasons",
+            "NEVER_CLOSES",
+            f"{case.case} stays open, and no close reason names a registered role, so nobody "
+            "could ever close it: name a registered role in a close reason",
+        )
+    ]
+
+
+def closes_at_opening(case: CaseDefinition) -> bool:
+    """Whether the case closes the moment it opens: nothing is reached yet, so only a step that
+    starts by itself with nothing required can start, and with none, nothing is pending
+    (brief, D10). A case that stays open waits for a person instead."""
+    required = requirements(case)
+    return not case.stays_open and not any(
+        step.automatic and not required[name] for name, step in case.steps.items()
+    )
+
+
+def never_run(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Issue]:
+    """A step left out of `can`, what the case can ever reach, can never run, on any path: one
     `DEADLOCK` for each group of steps that wait on each other, a `NEVER_RUNS` for any other."""
-    can = can_happen(case)
     required = requirements(case)
     dead = [name for name in case.steps if name not in can]
-    # The fixpoint leaves no step out whose requirements are all in: one of them isn't. Each dead
-    # step waits on the first, and on the dead steps that could meet it.
-    first = {name: next(r for r in required[name] if r not in can) for name in dead}
-    waits = {name: waited_on(case, first[name]) for name in dead}
+    # A dead step with a requirement that can't be met waits on the first such, and on the dead
+    # steps that could meet it. One whose requirements can all be met was kept out by the close.
+    # A step nobody can start waits on nothing: its roles are the cause.
+    first = {
+        name: unmet[0]
+        for name in dead
+        if can_start(case.steps[name], catalog.roles)
+        and (unmet := [r for r in required[name] if r not in can])
+    }
+    waits = {name: waited_on(case, first[name]) if name in first else [] for name in dead}
     found: list[Issue] = []
     in_a_circle: set[str] = set()
     for name in dead:
         if name in in_a_circle:
             continue  # one cause, one issue: its group's DEADLOCK names it
-        circle = shortest_circle(name, waits)
         path = f"steps.{name}.requires"
+        if not can_start(step := case.steps[name], catalog.roles):
+            roles = ", ".join(step.proposed_by)
+            found.append(
+                Issue(
+                    f"steps.{name}.proposed_by",
+                    "NEVER_RUNS",
+                    f"{name} can never run: it starts only when proposed, and none of its "
+                    f"proposed_by roles ({roles}) is registered: name a registered role",
+                )
+            )
+            continue
+        if name not in first:
+            found.append(Issue(path, "NEVER_RUNS", after_close(case, name)))
+            continue
+        circle = shortest_circle(name, waits)
         if circle is None:
             found.append(Issue(path, "NEVER_RUNS", why_never(case, name, first[name])))
             continue
@@ -70,6 +137,20 @@ def waiting(case: CaseDefinition, name: str, requirement: str) -> str:
     reachers = reached_by(case, requirement)
     reach = "reaches" if len(reachers) == 1 else "reach"
     return f"{name} requires {requirement}, which only {listed(reachers)} {reach}"
+
+
+def after_close(case: CaseDefinition, name: str) -> str:
+    """Why a step whose requirements can all be met still never runs: it waits for every
+    milestone `closes_when` names, and the case is closing once they are reached."""
+    milestones = listed(list(case.closes_when))
+    if len(case.closes_when) == 1:
+        once, fix = f"{milestones} is", milestones
+    else:
+        once, fix = "they are", "one of them"
+    return (
+        f"{name} can never run: it requires {milestones}, and {case.case} closes once {once} "
+        f"reached, before {name} could start: remove {fix} from its requires, or from closes_when"
+    )
 
 
 def why_never(case: CaseDefinition, name: str, waits_on: str) -> str:
