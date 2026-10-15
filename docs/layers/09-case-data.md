@@ -9,7 +9,8 @@ provider sealing and opening); 9b built, slices 0–8; Promises checked against 
 session, 2026-10-14 (all as proposed, with `forgetting` added: `while_open` and `never`); 9c
 built, slices 0–10; Promises checked against the tests, 2026-10-15; the tutor review's two fixes
 built test-first, 2026-10-15. 9d's choices agreed in the session, 2026-10-15 (all as proposed);
-its note drafted the same day, and its four drafting points confirmed.
+its note drafted the same day, and its four drafting points confirmed; 9d built, slices 0–9;
+Promises checked against the tests, 2026-10-15.
 
 ## What this layer is for
 
@@ -1149,15 +1150,17 @@ equal and of type `int`.
 - `case/freshness.py` (new): an age read from `"1d"`; whether a step's facts are fresh; what to
   do with a stale one; `ago`.
 - `case/state.py`: `at` on every event; `Obtained`; `state.obtained`; `seen` on `GivenApproval`;
-  a step run's `refreshes` (which step's need it serves).
+  `refresh` on a step run; `state.refreshing`, the run fetching each stale fact again.
 - `case/runtime.py`, `case/approvals.py`, `case/admission.py`: times written with each value;
   the freshness check in admission; a given approval lapsing on a refresh; a refresh not undoing
   `requires`.
-- `case/visibility.py`: `CaseView.obtained`; `approval_sheet`.
+- `case/visibility.py`: `CaseView.obtained`; `ApprovalSheet` and `sheet_of`, the sheet itself;
+  `SheetRefused`.
 - `case/memory.py`, `testing.py`: times in the driver; `START`, `DAY`, `later`, `run_case(at=)`,
   `CaseRun.approval_sheet`.
 - `temporal/cases.py`, `temporal/carried.py`: stamping from `workflow.now()`; the `approval_sheet`
-  query and client function; `obtained` crossing continue-as-new.
+  query, answering the sheet or its refusal as data, and client function; `obtained`,
+  `refreshing` and each run's `refresh` crossing continue-as-new.
 
 ### Seams the tests use
 
@@ -1208,6 +1211,13 @@ Each starts with its negative test, seen failing for the right reason.
   out would vanish at every switch. Each time is written as a JSON integer and read back as an
   `int`, refused if it isn't whole (the converter reads numbers as decimals). Slice 8 still runs
   a real switch on Temporal.
+- **The Promises check found three promises with no test** (slice 9): the order of the checks,
+  "no line quotes a value", and the guide's examples, whose tests carried other names. The first
+  two got tests (the order's seen failing with the condition read first); the third row names
+  the real tests. Two tests missing from the table were added to their rows.
+- **The guide's refusal table is run row by row** (slice 9): each of its twelve examples is made
+  to happen and found word for word among what the engine said; changing one word of a row
+  fails the test.
 - **An approved step that failed on a stale fact looped for ever** (slice 8): found on
   Temporal, whose deadlock detector stopped the workflow task. Sam's approval stayed in
   `given`, so admission took the step again in the same decision, and failed it again. A step
@@ -1286,10 +1296,10 @@ the pull request is opened. `FF` is `tests/test_fresh_facts.py` (new), `TFF`
 | Time reaches `decide` only on events; an event whose time isn't a whole number of seconds is refused and changes nothing | FF `test_an_event_says_when_it_happened` |
 | Every value written records when it was obtained and which run obtained it: opening, form, outcome, output | FF `test_every_fact_knows_when_it_was_obtained` |
 | `max_age` takes `m`, `h` or `d`, a whole positive number, only on activity, workflow and plan steps, only for fields the step reads; anything else is refused when the definition is read | FF `test_max_age_is_checked_when_the_definition_is_read` |
-| A step whose `max_age` fact is stale doesn't run before the fact is refreshed (the curriculum's negative test); the refresh is a new run with its own entry and key, and its output replaces the old with fresh sources and time; a fresh fact refreshes nothing | FF `test_a_stale_fact_is_refreshed_before_the_step_runs` |
+| A step whose `max_age` fact is stale doesn't run before the fact is refreshed (the curriculum's negative test); the refresh is a new run with its own entry and key, and its output replaces the old with fresh sources and time; a fresh fact refreshes nothing | FF `test_a_stale_fact_is_refreshed_before_the_step_runs`, `test_a_fresh_fact_refreshes_nothing` |
 | After a refresh the step's condition is checked again: a changed value stops the step | FF `test_a_refresh_that_changes_the_condition_stops_the_step` |
 | The age is checked before the condition, the approval's condition, asking for the approval and starting | FF `test_freshness_is_checked_before_anything_else` |
-| A stale fact from a person, the opening, a `write`, `notify` or `compute` step, a workflow step or a plan step makes the step need attention, with where it came from; a retry checks again | FF `test_a_fact_that_cant_be_fetched_again_needs_attention` |
+| A stale fact from a person, the opening, a `write`, `notify` or `compute` step, a workflow step or a plan step makes the step need attention, with where it came from; a retry checks again | FF `test_a_fact_that_cant_be_fetched_again_needs_attention`, `test_a_retry_checks_freshness_again` |
 | A refresh that gives no fresh value makes the step need attention; one that fails needs attention itself, a step requiring it waits and runs once it is retried, and a step only reading its fact needs attention: never a second refresh for the same need | FF `test_a_refresh_without_a_fresh_value_needs_attention`, `test_a_failed_refresh_needs_attention_and_is_retried`, `test_a_failed_refresh_is_never_made_again_for_the_same_need` |
 | A fact needed fresh with no time obtained stops the step (fail closed) | FF `test_a_fact_with_no_time_stops_the_step` |
 | A running refresh doesn't undo its step for `requires`; two steps needing the same fact share one refresh | FF `test_a_running_refresh_undoes_nothing_it_doesnt_change` |
@@ -1305,4 +1315,4 @@ the pull request is opened. `FF` is `tests/test_fresh_facts.py` (new), `TFF`
 | On Temporal a stale fact that can't be fetched again is recorded, and the case waits for a person (needs attention); the sheet gives each fact's age; a sheet for an approval that isn't open is refused, saying why | TFF `test_a_stale_answer_on_temporal_needs_attention` |
 | An approved step that fails on a stale fact fails once, its approval kept on the failed run for a retry | FF `test_an_approved_step_that_fails_on_a_stale_fact_stops_once` |
 | The quickstart's acceptance tests stay green | Q (all) |
-| The guide's examples run as written, and its refusal rows are what the engine says | FF `test_the_guides_fresh_facts_examples_run_as_written`, `test_the_guides_freshness_refusals_are_what_the_engine_says` |
+| The guide's examples run as written, and its refusal rows are what the engine says | FF `test_a_refresh_that_changes_the_condition_stops_the_step`, `test_people_see_when_each_fact_was_obtained`, `test_the_guides_freshness_refusals_are_what_the_engine_says` |

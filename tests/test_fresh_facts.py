@@ -318,9 +318,12 @@ SOURCES: dict[str, tuple[dict[str, Any] | None, str, str]] = {
 }
 
 
-def needing(source: dict[str, Any] | None, fact: str) -> dict[str, Any]:
-    """A case whose `letter` reads `fact`, needing it at most a day old, and runs once `confirm`
-    is answered: on day 3, in the tests. `review` is answered on day 0."""
+def needing(
+    source: dict[str, Any] | None, fact: str, giver: str = "source", needer: str = "letter"
+) -> dict[str, Any]:
+    """A case whose step `needer` reads `fact`, needing it at most a day old, and runs once
+    `confirm` is answered: on day 3, in the tests. `review` is answered on day 0; `giver`, if
+    any, gives the fact."""
     steps: dict[str, Any] = {
         "review": {
             "kind": "task",
@@ -345,8 +348,9 @@ def needing(source: dict[str, Any] | None, fact: str) -> dict[str, Any]:
         },
     }
     if source is not None:
-        steps["source"] = {"display": {"title": "Give the fact"}, **source}
-        steps["letter"]["requires"].append("source")
+        steps[giver] = {"display": {"title": "Give the fact"}, **source}
+        steps["letter"]["requires"].append(giver)
+    steps[needer] = steps.pop("letter")
     return {
         "case": "fresh",
         "display": {"title": "Fresh facts"},
@@ -825,3 +829,143 @@ def test_an_approved_step_that_fails_on_a_stale_fact_stops_once() -> None:
     [failed] = [r for r in run.state.runs if r.step == "pay"]
     assert failed.approved is not None and failed.approved.by == "sam"
     assert "pay" not in run.state.given
+
+
+def refusal_rows() -> list[str]:
+    """Each example of the guide's "What the engine refuses" table under "Fresh facts"."""
+    section = GUIDE.split("## Fresh facts")[1].split("## Reports")[0]
+    table = section.split("### What the engine refuses")[1]
+    rows = [line for line in table.splitlines() if line.startswith("| ")][1:]  # past the header
+    return [row.rsplit("| `", 1)[1].removesuffix("` |") for row in rows]
+
+
+def test_the_guides_freshness_refusals_are_what_the_engine_says() -> None:
+    # Every row of the guide's table, made to happen, in the guide's own words.
+    said: list[str] = []
+
+    def refused(change: Any) -> None:
+        definition = refund_fresh()
+        change(definition["steps"])
+        with pytest.raises(CaseInvalid) as error:
+            parse_case(definition)
+        said.extend(str(error.value).splitlines())
+
+    refused(lambda steps: steps["pay"]["max_age"].update({"check_order.status": "1w"}))
+    refused(lambda steps: steps["pay"]["max_age"].update({"check_order.status": "0m"}))
+    refused(lambda steps: steps["pay"]["max_age"].update({"amount": "1d"}))
+
+    def attention(definition: dict[str, Any], answers: list[Any], **more: Any) -> None:
+        run = run_case(
+            definition,
+            file={"order_id": "ord-1", "amount": 80},
+            answers=answers,
+            people=PEOPLE,
+            **more,
+        )
+        said.extend(line.split(": ", 1)[1] for line in run.needs_attention)
+
+    person = refund_fresh()
+    person["steps"]["pay"]["max_age"] = {"approved_amount": "1d"}
+    attention(
+        person,
+        [
+            ("review", "approve", "ana", {"approved_amount": 250}),
+            later("3d"),
+            ("pay", "approve", "sam"),
+        ],
+    )
+    opening = refund_fresh()
+    opening["steps"]["pay"]["max_age"] = {"order_id": "1d"}
+    attention(opening, REVIEWED_ON_DAY_3)
+    three_days_on = [("review", "approve", "ana"), later("3d"), ("confirm", "ok", "ana")]
+    for (source, _, _), fact, giver, needer in (
+        (SOURCES["a write"], "pay_fee.outcome", "pay_fee", "notify"),
+        (SOURCES["a compute"], "fee.fee", "fee", "pay"),
+        (SOURCES["a workflow"], "kyc.status", "kyc", "pay"),
+    ):
+        attention(
+            needing(source, fact, giver, needer),
+            three_days_on,
+            catalog=with_fee(),
+            activities={"fees.compute@1": lambda inputs: {"fee": Decimal(2)}},
+        )
+    attention(
+        refund_fresh(),
+        REVIEWED_ON_DAY_3,
+        activities={"orders.lookup@1": answers_in_turn("delivered", Outcome("not_found"))},
+    )
+    reads_only = refund_fresh()
+    reads_only["steps"]["pay"]["requires"] = ["review"]
+    attention(
+        reads_only,
+        REVIEWED_ON_DAY_3,
+        activities={"orders.lookup@1": answers_in_turn("delivered", ConnectionError("x"))},
+    )
+
+    case = parse_case(refund_fresh())
+    state, _ = decide(case, CATALOG, CaseState("t"), Opened(FILE, None, at=START))
+    looked_up = Completed("check_order#1", {"status": "delivered"}, at=START)
+    state, _ = decide(case, CATALOG, state, looked_up)
+    del state.obtained["check_order.status"]  # as in a state carried from before 9d
+    answered = Answered(
+        "review",
+        "approve",
+        "ana",
+        frozenset({"support"}),
+        {"approved_amount": Decimal(80)},
+        at=START,
+    )
+    state, _ = decide(case, CATALOG, state, answered)
+    said.extend(run.reason for run in state.runs if run.status == "failed")
+
+    run = run_case(refund_fresh(), file=LARGE, answers=[REVIEWED_LARGE], people=PEOPLE)
+    with pytest.raises(SheetRefused) as sheet:
+        run.approval_sheet("pay.approval#3", roles=["support-lead"], at=START)
+    said.append(str(sheet.value))
+
+    rows = refusal_rows()
+    assert len(rows) == 12
+    for row in rows:
+        assert row in said, row
+
+
+def test_freshness_is_checked_before_anything_else() -> None:
+    # The first look said "returned", so read first, `pay`'s condition would be false and the
+    # case would close unpaid. The age comes first: the refresh says "delivered", and the
+    # condition is read on that.
+    run = run_case(
+        refund_fresh(),
+        file={"order_id": "ord-1", "amount": 80},
+        answers=REVIEWED_ON_DAY_3,
+        people=PEOPLE,
+        activities={"orders.lookup@1": answers_in_turn("returned", "delivered")},
+    )
+    assert run.reached("pay")
+
+
+def test_freshness_lines_quote_no_value() -> None:
+    # A refresh, a lapse and a step stopped on a stale fact: their lines name fields and ages,
+    # never what the fields hold (brief, D30).
+    first, second = "status-XJ41", "status-QP07"
+    definition = refund_fresh()
+    definition["steps"]["pay"]["when"] = {"in": [{"var": "check_order.status"}, [first, second]]}
+    lapsed = run_case(
+        definition,
+        file=LARGE,
+        answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
+        people=PEOPLE,
+        activities={"orders.lookup@1": answers_in_turn(first, second)},
+    )
+    assert any(line.startswith("lapsed pay.approval#1") for line in lapsed.history)
+    stopped = copy.deepcopy(definition)
+    stopped["steps"]["pay"]["max_age"] = {"approved_amount": "1d"}
+    attention = run_case(
+        stopped,
+        file=LARGE,
+        answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
+        people=PEOPLE,
+        activities={"orders.lookup@1": answers_in_turn(first, second)},
+    )
+    assert attention.needs_attention
+    for line in [*lapsed.history, *attention.history, *attention.needs_attention]:
+        assert first not in line and second not in line, line
