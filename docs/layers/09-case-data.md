@@ -7,7 +7,8 @@ Promises checked against the tests, 2026-10-10; the tutor review's fix built tes
 provider sealing and opening); 9b built, slices 0–8; Promises checked against the tests,
 2026-10-13; the tutor review's fix built test-first, 2026-10-14. 9c's choices agreed in the
 session, 2026-10-14 (all as proposed, with `forgetting` added: `while_open` and `never`); 9c
-built, slices 0–10; Promises checked against the tests, 2026-10-15.
+built, slices 0–10; Promises checked against the tests, 2026-10-15; the tutor review's two fixes
+built test-first, 2026-10-15.
 
 ## What this layer is for
 
@@ -850,7 +851,9 @@ Each starts with its negative test, seen failing for the right reason.
   request (`never`, checked by the request itself in slice 6) stays open, and the request waits
   for it to end; a case whose workflow *failed* rather than closed makes `case_ended` fail, and
   Temporal retries it. Both fail closed (nothing is destroyed). The second is a case that could
-  not open; it is left as it is, since such a case holds no decision to keep.
+  not open; it is left as it is, since such a case holds no decision to keep. *Corrected in the
+  tutor review:* that case still holds the national ID its opening sent, sealed with its key; it
+  is forgotten now (see "From the tutor review").
 - **`destroy_key` refuses while the case's workflow runs** (slice 5), whoever asks: `claim-7 is
   still running: its key is destroyed once its workflow has ended`, and Temporal retries it. It
   asks Temporal for the case's latest run; a case Temporal no longer remembers counts as ended,
@@ -951,6 +954,31 @@ Each starts with its negative test, seen failing for the right reason.
   request accepted after a rejection; an answer other than `approve` or `reject` (already
   tested, now in the table). All passed when written: their code came with earlier slices.
 
+### From the tutor review
+
+- **A case that ended without a result kept its key.** `case_ended` waited on the case's
+  workflow result, which a case refused at its opening, terminated by an operator (brief, D19),
+  failed or timed out doesn't have: the activity failed, Temporal retried it for ever, and the
+  request sat at `closing the case` with the key kept. A refused opening had already sent its
+  national ID, sealed with that key. Slice 4 had noted the failed case and left it, wrongly.
+- **The fix:** `case_ended` asks Temporal until the case's latest run no longer runs, however it
+  ended (`describe`, as `destroy_key`'s guard does, a little less often each time, saying it is
+  alive), reads the returned report only if the case completed, and otherwise records how it
+  ended: `claim-7 ended: failed`, `claim-8 ended: terminated`. Then the key goes.
+- **`report()` could hang while a case continued as new,** which turned CI red
+  (`test_a_switch_waits_while_a_workflow_runs`, 3 in 30 runs here). 8c's note told API writers
+  to ask with a short timeout and again; `report()` itself didn't, and slice 7's `describe`
+  before the query shifted the timing onto the switch.
+- **The fix:** `report()` asks each question with a two-second `rpc_timeout`, asks again up to ten
+  times, then raises `CaseUnanswered`. The SDK says a client's own timeout as `CANCELLED`
+  ("Timeout expired"), not `DEADLINE_EXCEEDED`: a first version caught only the second and
+  still failed 1 run in 30. The cases guide says `report` asks again, and that a query of one's
+  own should too.
+- **All negative tests were written first and seen failing:** both endings (the request never
+  reached `destroy_key`, and the test timed out); the switch test, 3 failures in 30 runs before
+  the fix, 60 passes in 60 after; and a new test where nothing serves the case's queue, which
+  hung on the old `report()` and now raises `CaseUnanswered` after its tries.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
@@ -976,5 +1004,7 @@ the pull request is opened. `F` is `tests/test_forget.py` (new), `TF`
 | A forgotten case's ID never opens a case again | TF `test_a_forgotten_id_opens_no_case` |
 | After forgetting, `report` reads the closing report, `view` is refused, and a query or replay fails with the forgotten message, never plain text; the worker carries on | TF `test_reading_a_forgotten_case` |
 | After forgetting, the history, its export and the reports keep every decision, who made it and as what, the definition, the values that weren't sensitive where they were used, and the closing report; every sensitive value, form value in an answer and failure message is unreadable; the request's own history replays without a key | TF `test_what_the_audit_keeps_after_forgetting` |
+| A case that ended without a result (refused at its opening, terminated by an operator) is forgotten all the same: the request records how it ended, and the key is destroyed (tutor review) | TF `test_forgetting_a_case_that_ended_without_a_result` |
+| `report` never hangs: each question has a short timeout and is asked again a bounded number of times, then it says the case didn't answer (tutor review) | TF `test_a_report_never_hangs`; WS `test_a_switch_waits_while_a_workflow_runs` |
 | An exception raised in a case workflow's task fails its workflow task, holding the case until fixed code is deployed; the log keeps its type, never its text (9b's gap) | TF `test_an_engine_bug_in_a_task_blocks_the_case` |
 | The guide's example runs as written, and its refusal rows are what the engine says | TF `test_the_guides_forget_example_runs_as_written`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |

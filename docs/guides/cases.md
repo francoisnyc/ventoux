@@ -570,8 +570,10 @@ What changes from memory, and what doesn't:
   changes for you: the case keeps its ID, its keys and its open entries (`review#1` is still
   answered as `review#1`), and the client always reaches its latest run. An answer sent during
   the switch is decided by one run or the other, never lost and never kept for later. A
-  `report` asked at the very moment of a switch can go unanswered, reaching the run that is
-  ending: ask again, and it reaches the new one.
+  query asked at the very moment of a switch can go unanswered, reaching the run that is
+  ending; asked again, it reaches the new one. `report` does so itself: it waits a short while
+  for each answer, asks again up to ten times, then raises `CaseUnanswered`. A query of your
+  own (`view`, or one you send) should do the same.
 - **Replay holds the case to its history.** A worker can stop at any point and another replays
   the case from its history; code changed to ask for something else fails the replay,
   and Temporal holds the case until the code is fixed (brief, D17).

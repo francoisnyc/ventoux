@@ -37,6 +37,8 @@ KEY_CALL = timedelta(seconds=30)
 # seconds; if a worker dies, Temporal starts the wait again on another.
 CASE_WAIT = timedelta(days=30)
 ALIVE = timedelta(seconds=30)
+FIRST_PAUSE = timedelta(milliseconds=100)  # between two questions to Temporal, at first
+LONGEST_PAUSE = timedelta(seconds=10)  # and at most, well within ALIVE
 
 
 @dataclass
@@ -88,6 +90,16 @@ def lookup_refusal(case: str, found: CaseLookup) -> str | None:
     if found.forgetting == "while_open" and not found.running:
         return f"{case} is closed, and its definition keeps closed cases (forgetting: while_open)"
     return None
+
+
+@dataclass
+class CaseEnded:
+    """How a case ended, as the request records it."""
+
+    # Its closing line (`closed: forgotten`) if it completed; else how it ended: `failed`,
+    # `terminated`, `timed out`, `canceled`.
+    last: str
+    flags: list[str]  # what completed after its close was requested, if it completed
 
 
 @dataclass
@@ -197,7 +209,7 @@ class ForgetWorkflow:
             start_to_close_timeout=CASE_WAIT,
             heartbeat_timeout=ALIVE,
         )
-        self.report.history.append(f"{case} ended: {ended.history[-1]}")
+        self.report.history.append(f"{case} ended: {ended.last}")
         self.report.history += [f"{case} flagged: {flag}" for flag in ended.flags]
         await workflow.execute_activity_method(
             ForgetActivities.destroy_key, case, start_to_close_timeout=KEY_CALL
@@ -252,15 +264,33 @@ class ForgetActivities:
         return parse_case(opening.definition).forgetting
 
     @activity.defn(name="ventoux.forget.case_ended")
-    async def case_ended(self, case: str) -> CaseReport:
-        """The report the case returned once its workflow ended: lines and placeholders, no
-        sensitive part, so it reads without a key. Waits as long as the case runs."""
-        handle = self.client.get_workflow_handle(case, result_type=CaseReport)
-        while True:
-            try:
-                return await asyncio.wait_for(handle.result(), ALIVE.total_seconds() / 3)
-            except TimeoutError:
-                activity.heartbeat()  # still running: the wait goes on
+    async def case_ended(self, case: str) -> CaseEnded:
+        """How the case ended, once its latest run no longer runs, however it ended. Only a
+        case that completed returned a report (lines and placeholders, no sensitive part, so it
+        reads without a key); one refused at its opening, terminated by an operator, failed or
+        timed out returned none, and its key goes all the same (tutor review). Waits as long
+        as the case runs, asking Temporal again a little less often each time."""
+        pause = FIRST_PAUSE
+        while (status := await self.ended_as(case)) == WorkflowExecutionStatus.RUNNING:
+            activity.heartbeat()  # still running: the wait goes on
+            await asyncio.sleep(pause.total_seconds())
+            pause = min(pause * 2, LONGEST_PAUSE)
+        if status == WorkflowExecutionStatus.COMPLETED:
+            handle = self.client.get_workflow_handle(case, result_type=CaseReport)
+            returned = await handle.result()
+            return CaseEnded(returned.history[-1], list(returned.flags))
+        how = "no longer held by Temporal" if status is None else status.name.lower()
+        return CaseEnded(how.replace("_", " "), [])
+
+    async def ended_as(self, case: str) -> WorkflowExecutionStatus | None:
+        """The status of the case's latest run; None if Temporal no longer remembers it."""
+        try:
+            described = await self.client.get_workflow_handle(case).describe()
+        except RPCError as error:
+            if error.status == RPCStatusCode.NOT_FOUND:
+                return None  # nothing of it runs
+            raise
+        return described.status
 
     @activity.defn(name="ventoux.forget.destroy_key")
     async def destroy_key(self, case: str) -> None:
@@ -274,13 +304,7 @@ class ForgetActivities:
 
     async def still_running(self, case: str) -> bool:
         """Whether the case's workflow (its latest run) is still running."""
-        try:
-            described = await self.client.get_workflow_handle(case).describe()
-        except RPCError as error:
-            if error.status == RPCStatusCode.NOT_FOUND:
-                return False  # Temporal no longer remembers it: nothing of it runs
-            raise
-        return described.status == WorkflowExecutionStatus.RUNNING
+        return await self.ended_as(case) == WorkflowExecutionStatus.RUNNING
 
     def all(self) -> list[Any]:
         """Each activity, to register with a worker."""

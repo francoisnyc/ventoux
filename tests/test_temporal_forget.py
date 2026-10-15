@@ -9,6 +9,7 @@ import logging
 import textwrap
 import threading
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -37,10 +38,12 @@ from test_temporal_sensitive import (
 )
 from test_temporal_sensitive import reported as reported_case
 
+from ventoux.temporal import cases
 from ventoux.temporal.cases import (
     CaseForgotten,
     CaseReport,
     CaseStart,
+    CaseUnanswered,
     CaseWorkflow,
     answer,
     report,
@@ -899,3 +902,52 @@ def test_the_guides_refusals_are_what_the_engine_says(tmp_path: Path) -> None:
         return str(refused.value)
 
     assert on_temporal(viewed) == rows[VIEWED]
+
+
+# --- Tutor review: a case that ended without a result ---
+
+
+def test_forgetting_a_case_that_ended_without_a_result() -> None:
+    # A case refused at its opening, and one an operator terminated (brief, D19), have no result
+    # to read; their keys still seal the national ID sent at the start. Forgetting waits until
+    # the case's latest run no longer runs, however it ended, records how, then destroys the key.
+    async def scenario(client: Client) -> list[tuple[ForgetReport, KeyState]]:
+        refused = {**as_json(FILE), "colour": "red"}  # a field the claim doesn't declare
+        await start_case(client, DevelopmentCases, claim(), refused, "claim-7", QUEUE)
+        terminated = await open_claim(client, "claim-8")
+        await terminated.terminate(reason="opened twice by mistake")
+        ended: list[tuple[ForgetReport, KeyState]] = []
+        for case in ("claim-7", "claim-8"):
+            request = await propose_forget(
+                client, DevelopmentForget, case, "pia", ["privacy"], QUEUE
+            )
+            await answer_forget(request, "approve", "olu", ["privacy"])
+            ended.append((await request.result(), keys_of(client).state(case)))
+        return ended
+
+    (refused, refused_key), (terminated, terminated_key) = on_temporal(scenario)
+    assert (refused.status, refused_key) == ("forgotten", "destroyed")
+    assert refused.history[-2:] == ["claim-7 ended: failed", "the key of claim-7 was destroyed"]
+    assert (terminated.status, terminated_key) == ("forgotten", "destroyed")
+    assert terminated.history[-2:] == [
+        "claim-8 ended: terminated",
+        "the key of claim-8 was destroyed",
+    ]
+
+
+def test_a_report_never_hangs(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A query that gets no answer, as at the moment a case continues as new (layer 8c), is asked
+    # again a bounded number of times, then said so; never a wait without end. Here no worker
+    # serves the case's queue, so nothing ever answers.
+    monkeypatch.setattr(cases, "ASK", timedelta(milliseconds=200))
+
+    async def scenario(client: Client) -> None:
+        case = await start_case(
+            client, DevelopmentCases, claim(), as_json(FILE), "claim-7", "nobody"
+        )
+        with pytest.raises(
+            CaseUnanswered, match=r"^claim-7 didn't answer in 10 tries of 0\.2s: ask again later$"
+        ):
+            await asyncio.wait_for(report(case), timeout=10)
+
+    on_temporal(scenario)

@@ -27,6 +27,7 @@ from temporalio.exceptions import (
     FailureError,
 )
 from temporalio.exceptions import TimeoutError as TemporalTimeout  # not Python's own TimeoutError
+from temporalio.service import RPCError, RPCStatusCode
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh for every run; modules passed
 # through are imported once and shared. `core` and `case` are deterministic (the boundary test
@@ -578,11 +579,36 @@ async def view(case: WorkflowHandle[CaseWorkflow, CaseReport], roles: list[str])
         raise
 
 
+# A report asked at the moment the case continues as new can reach the run that is ending, which
+# no longer answers; asked again, it reaches the new run (layer 8c). So each question waits a
+# little, and is asked again a few times.
+ASK = timedelta(seconds=2)
+ASKS = 10
+UNANSWERED = (RPCStatusCode.CANCELLED, RPCStatusCode.DEADLINE_EXCEEDED)
+
+
+class CaseUnanswered(Exception):
+    """A case that didn't answer, however many times it was asked."""
+
+
 async def report(case: WorkflowHandle[CaseWorkflow, CaseReport]) -> CaseReport:
     """How the case is going: what it waits for, and its history so far. A case that has closed
     gives the report it returned then: lines and placeholders, no sensitive part, so it reads
-    without a key, even once the case is forgotten (brief, D32)."""
-    described = await case.describe()
-    if described.status == WorkflowExecutionStatus.COMPLETED:
-        return await case.result()
-    return await case.query(CaseWorkflow.report)
+    without a key, even once the case is forgotten (brief, D32). Asked with a short timeout, and
+    again a bounded number of times, so it never hangs while the case continues as new
+    (brief, D27)."""
+    for _ in range(ASKS):
+        try:
+            described = await case.describe(rpc_timeout=ASK)
+            if described.status == WorkflowExecutionStatus.COMPLETED:
+                return await case.result(rpc_timeout=ASK)
+            return await case.query(CaseWorkflow.report, rpc_timeout=ASK)
+        except RPCError as error:
+            # Temporal: no answer in time, as when the query reached a run that was ending. The
+            # SDK says so as `CANCELLED` ("Timeout expired") when the client's own timeout ends
+            # the call, and as `DEADLINE_EXCEEDED` when the server's does.
+            if error.status not in UNANSWERED:
+                raise
+    raise CaseUnanswered(
+        f"{case.id} didn't answer in {ASKS} tries of {ASK.total_seconds():g}s: ask again later"
+    )
