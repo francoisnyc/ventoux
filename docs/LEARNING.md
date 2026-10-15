@@ -819,6 +819,25 @@ and record the key points. A question is closed once you can explain the answer 
   activity, follow every arrow except an approval's `approve`; reaching a high-risk activity
   again, itself included, means a run without its own approval. The fix routes the loop through
   an approval, so each pass is approved.
+- Retrieval (layer 10a warm-up), the follow-up: (a) "don't know"; (b) "not sure". Neither came
+  back, so in full again, with a trace:
+  - **(a) Why `reach` finishes.** `reach` keeps two things: `seen`, every state found so far, and
+    `waiting`, the states still to look out of. A state goes into `waiting` only when it is first
+    added to `seen`, so each state is looked out of at most once. Slice 8's plan: from `initial`,
+    `check_order`, then `approve_refund`, then `pay`, then `declined`; out of `declined`, the
+    arrow back to `pay` finds `pay` already in `seen`, so nothing is added, and the search moves
+    on. A plan has finitely many states, so `waiting` empties after at most that many turns. A
+    cycle can't make it spin: the second time round, every state on the cycle is already seen.
+  - **(b) Why the loop is unsafe.** `pay` → `declined` → `pay` runs the high-risk refund a second
+    time on the approval already spent before the first run. One approval unlocks one run of one
+    step (brief, D11), and the second run has its own idempotency key (`pay#2`), so the payment
+    system treats it as a new refund: money may move twice, with nobody approving the second.
+    `validate` refuses it as `APPROVAL_REUSED`: from each high-risk activity, follow every arrow
+    except an approval's `approve`; reaching a high-risk activity again, itself included, means a
+    run without its own approval. The fix sends the loop back through the approval.
+  - **Why it came up now.** Layer 10's fixpoint ends for the same reason as `reach`: the set of
+    what a case can reach only grows, and there are finitely many steps and milestones to put in
+    it.
 - Status: open, until the follow-up comes from memory.
 
 

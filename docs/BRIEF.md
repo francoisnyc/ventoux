@@ -897,6 +897,48 @@ be erased on request), has size limits, and a second copy of business records go
   come with rules (layer 11). The source's own as-of time (D18) waits until something needs it:
   it is a contract change.
 
+### D34. Case validation: errors and warnings, structure proven, the runtime on its own
+
+*Drafted 2026-10-15, in layer 10a.*
+
+- **A case definition is checked against the catalog before any case opens,** by
+  `validate_case(case, catalog)`, which lists every problem as an issue (`path`, `code`,
+  `message`: what is wrong, then what to do), as plan validation does. It lands in four parts
+  (layer 10a–10d).
+- **An error or a warning, said on each issue.** An error is proven wrong for every case of the
+  definition, or can't be read, and refuses it. A warning may be meant, or depends on what the
+  check can't know (who holds which roles, the data), and is shown. A warning lets a definition
+  through, never a run. An issue that says neither is an error (fail closed).
+- **Structure is proven; values are not.** What a case can ever reach is the least set closed
+  under "a step whose requirements can all be met can run, and reaches its milestones", grown from
+  nothing until a round adds nothing; it ends because it only grows, over the definition's finite
+  steps and milestones. Every `when` is taken as possibly true and every outcome as possible, so a
+  step left out can never run on any path, and is an error. A step only data keeps from running
+  isn't seen, and runs nothing unsafe.
+- **Case-file provenance is computed in one pass:** each writer tags what it writes with sources
+  that don't depend on what it read (D9, D29), so a field's sources are the union of what its
+  writers stamp. A fixpoint over sources is needed once a field is computed from other fields
+  (rules updating the case file, layer 11; design question 17).
+- **Once every `closes_when` milestone is reached, nothing new starts,** even while a failed run
+  holds the close. Adds to D10 ("no step starts" once a case closes) and D26 (a failed run is
+  never cancelled by a milestone), between which admission went on: a step waiting for the
+  milestone started though the case was about to close. Now a proposal is refused, saying why; an
+  approval given meanwhile starts nothing; the failed run, retried, still runs, and its completion
+  closes the case. So a step requiring every `closes_when` milestone can never run, and case
+  validation's error for it is a proof. *Added in the tutor review of 10a, before D34 was
+  merged.*
+- **A case that can never close is an error, not a warning,** when it is proven: it stays open,
+  no close reason names a registered role, and `closes_when` is empty or can never be met. This
+  refines D10's "the validator warns about cases that can never close": what is proven for every
+  case refuses the definition; what may be meant warns (a `closes_when` milestone that can't be
+  reached, while the case still closes another way). *Added in the tutor review of 10a, before
+  D34 was merged.*
+- **The runtime depends on nothing validation did.** No flag says a definition was checked; the
+  drivers don't call `validate_case`; every runtime refusal stays. A case that skips validation is
+  as safe as before.
+- **`ventoux check` comes with the builder** (layer 14), which reads the Python file and maps
+  errors to source lines; `validate_case` is its engine.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step

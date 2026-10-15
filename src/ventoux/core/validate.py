@@ -7,6 +7,7 @@ docs/guides/plans.md.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from ventoux.core.approval import Unapprovable, approved, risk_refusal
 from ventoux.core.catalog import Catalog, NotInCatalog
@@ -40,11 +41,16 @@ TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcom
 
 @dataclass(frozen=True)
 class Issue:
-    """One problem in a plan: where it is, which kind it is, and what to do about it."""
+    """One problem in a plan or a case definition: where it is, which kind it is, what to do
+    about it, and whether it refuses the definition."""
 
-    path: str  # where in the plan, as layer 2 writes it: `states.pay.on.done[1]`
+    path: str  # where in the definition, as layer 2 writes it: `states.pay.on.done[1]`
     code: str  # which rule it breaks, such as `UNKNOWN_TARGET`
     message: str  # what is wrong, then what to do
+    # An error refuses the definition; a warning is shown and lets it through, never a run. An
+    # issue that says neither is an error, so a check that forgets to say fails closed
+    # (brief, D34).
+    severity: Literal["error", "warning"] = "error"
 
 
 def validate(plan: Plan, catalog: Catalog) -> list[Issue]:

@@ -272,10 +272,14 @@ assert retried.closed
 
 A case closes by itself when nothing is left to do (brief, D10). Two definition keys change that:
 `"closes_when": ["paid"]` closes it as soon as the milestones are reached, and `"stays_open":
-true` keeps it open until a person closes it. A case whose steps all wait to be proposed needs
-`stays_open`: otherwise nothing is pending when it opens, and it closes at once. `closes_when`
-never cancels a step that needs attention: the case waits until an operator retries it, or a person
-closes the case with a reason.
+true` keeps it open when nothing is left to do, until a person closes it or `closes_when` does. A
+case whose steps all wait to be proposed needs `stays_open`: otherwise nothing is pending when it
+opens, and it closes at once. `closes_when` never cancels a step that needs attention: the case
+waits until an operator retries it, or a person closes the case with a reason. Meanwhile nothing
+new starts: a step waiting for `paid` doesn't start, a proposal is refused (`paid is reached, so
+the case closes once notify#1 is retried, or a person closes it: nothing new starts`), and an
+approval given meanwhile starts nothing; the retried run still runs, and closes the case when it
+completes.
 
 A person closes a case with a **close reason** the definition declares, with who may use it:
 
@@ -577,3 +581,123 @@ What changes from memory, and what doesn't:
 - **Replay holds the case to its history.** A worker can stop at any point and another replays
   the case from its history; code changed to ask for something else fails the replay,
   and Temporal holds the case until the code is fixed (brief, D17).
+
+## What `ventoux check` proves about a case
+
+`ventoux check` reads the whole definition before any case opens and lists every problem at once,
+each with its path, a code and a message saying what is wrong, then what to do. Nothing runs. The
+command arrives with the Python builder (layer 14); today, call `validate_case(case, catalog)`
+from `ventoux.case.validate`, which gives the same list.
+
+An **error** is something proven wrong for every case of the definition, or something the check
+can't read: the definition is refused. A **warning** may be what you meant, or depends on things
+the check can't know: the definition is accepted, and you are told. A warning lets a definition
+through, never a run: the engine still checks every event as the case runs, whether or not the
+definition was ever checked.
+
+### Steps that can never run
+
+Here is a claim: check the customer, then an adjuster assesses the claim, then it is paid,
+behind a team lead's approval.
+
+```json
+{
+  "case": "claim",
+  "display": {"title": "Insurance claim"},
+  "fields": {
+    "customer_id": {"type": "reference", "system": "crm", "display": {"title": "Customer"}},
+    "order_id": {"type": "reference", "system": "orders", "display": {"title": "Insured order"}},
+    "payout": {"type": "number", "display": {"title": "Payout"}}
+  },
+  "milestones": {
+    "checked": {"display": {"title": "Customer checked"}},
+    "assessed": {"display": {"title": "Claim assessed"}},
+    "paid": {"display": {"title": "Claim paid"}}
+  },
+  "steps": {
+    "check": {
+      "kind": "workflow",
+      "display": {"title": "Check the customer"},
+      "workflow": "kyc.check@1",
+      "inputs": {"customer_id": {"var": "customer_id"}},
+      "reaches": ["checked"]
+    },
+    "assess": {
+      "kind": "task",
+      "display": {"title": "Assess the claim"},
+      "roles": ["adjuster"],
+      "requires": ["checked"],
+      "outcomes": {
+        "accept": {
+          "display": {"title": "Accept the claim"},
+          "sets": ["payout"],
+          "reaches": ["assessed"]
+        },
+        "deny": {"display": {"title": "Deny the claim"}}
+      }
+    },
+    "pay": {
+      "kind": "activity",
+      "display": {"title": "Pay the claim"},
+      "activity": "payments.refund@2",
+      "requires": ["assessed"],
+      "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "payout"}},
+      "approval": {"roles": ["support-lead"], "display": {"reason": "Every payout needs a team lead"}},
+      "reaches": ["paid"]
+    }
+  },
+  "closes_when": ["paid"]
+}
+```
+
+Change `assess` to also require `paid`:
+
+```json
+"requires": ["checked", "paid"]
+```
+
+Run as it is, the case checks the customer, and then nothing can start: `assess` waits for `paid`,
+which only `pay` reaches, and `pay` waits for `assessed`, which only `assess` reaches. Nothing is
+left to do, so the case closes, `closed: nothing left to do`, and nobody hears why. The check says
+so before any case opens:
+
+```
+steps.assess.requires  DEADLOCK  assess and pay wait on each other: assess requires paid, which
+only pay reaches; pay requires assessed, which only assess reaches: remove one of these
+requirements
+closes_when  CLOSE_UNREACHABLE (warning)  paid can never be reached, so closes_when never
+closes claim, and it closes when nothing is left to do: reach paid from a step that can run, or
+remove it from closes_when
+```
+
+**How it knows.** The check works out everything the case could ever reach. It starts from
+nothing, and adds every step whose `requires` (the `sequence` included) could all be met, with
+every milestone that step, or any of its outcomes, could reach; then again, until a round adds
+nothing. Whatever is left out can never happen. The order steps are written in doesn't matter: a
+case has no position.
+
+**What it can't see.** The check reads `requires`, `reaches`, who may propose a step and how the
+case closes. It treats every `when` as possibly true, and every outcome as possible. So it proves
+what can *never* happen, and says nothing about what depends on values:
+
+| The check proves | It can't tell, since it depends on values or people |
+|---|---|
+| steps that wait on each other | a `when` that real data never makes true |
+| a step requiring a milestone nothing reaches | a review answered `deny`, so `paid` is never reached: that is a path, not a deadlock |
+| a step that waits for every milestone `closes_when` names, which the case closes on before the step could start: nothing new starts once they are reached, even while a failed step holds the close. It may require them, or steps that surely reach them, or come after such a step in `sequence`: `thank can never run: it runs only after draft, which reaches sent, …` | a rejected approval, or whether an operator retries a failed step; a step that only *may* reach a milestone (an activity that can end `declined`, a plan that can fail) |
+| a case that closes the moment it opens | whether anyone eligible is there to answer or approve |
+| a case nobody could ever close | |
+
+### What the check says about structure
+
+| Code | Kind | What is wrong | Example message |
+|---|---|---|---|
+| `DEADLOCK` | error | steps wait on each other, so none of them can run | as above |
+| `NEVER_RUNS` | error | a step's requirements can never all be met, or nobody may propose it | `approve can never run: it requires reviewed, which no step reaches: reach reviewed from a step, or remove the requirement` |
+| `CLOSES_AT_OPENING` | error | no step starts by itself when the case opens, so it closes at once and every proposal is refused | `nothing starts by itself when claim opens, so it closes at once and every proposal is refused: let a step start by itself with nothing required, or add stays_open` |
+| `NEVER_CLOSES` | error | the case stays open, no close reason names a registered role, and `closes_when` is empty or can never be met | `claim stays open, no close reason names a registered role, and closes_when never closes it, so nobody could ever close it: name a registered role in a close reason` |
+| `CLOSE_UNREACHABLE` | warning | a `closes_when` milestone can never be reached | as above |
+| `UNREACHABLE_MILESTONE` | warning | no step or outcome reaches a milestone, and nothing requires it | `no step reaches reviewed: reach it from a step or an outcome, or remove it` |
+
+A role nobody registered counts for nothing, as when the case runs (brief, D22): a step that
+starts only when proposed, by roles none of which is registered, can never run.
