@@ -701,3 +701,60 @@ what can *never* happen, and says nothing about what depends on values:
 
 A role nobody registered counts for nothing, as when the case runs (brief, D22): a step that
 starts only when proposed, by roles none of which is registered, can never run.
+
+### What each step calls
+
+The check also reads each step against what it calls: the contract in the catalog, or the plan
+your deployment supplies. Give it the plans as you give them to `run_case` and to your case
+workflow, by reference: `validate_case(case, catalog, plans={"refund-order@1": refund_order})`.
+A plan step whose plan isn't given is an error, as it would fail when the case runs.
+
+Change the claim's `pay` to run only once the claim is accepted, with one letter wrong:
+
+```json
+"when": {"==": [{"var": "assess.outcome"}, "acept"]}
+```
+
+Run as it is, the adjuster accepts, the condition is false, and the claim is never paid. The check
+reads every expression against the values the case can hold, each with its type, so it says so
+before any case opens:
+
+```
+steps.pay.when  EXPRESSION_INVALID  ==[1]: assess.outcome has no outcome "acept"; its outcomes
+are accept, deny
+```
+
+A message quotes a value only when it is what you wrote wrong, as here: never a title, an
+approval's reason or anything from a case file.
+
+**The values a case's expressions read**, and their types:
+
+| Value | Type |
+|---|---|
+| a field of the case file | its declared type |
+| a task's outcome, `assess.outcome` | one of its outcomes |
+| an activity step's outcome, `pay.outcome` | `done`, or one of its contract's outcomes (`declined`) |
+| a workflow step's outcome | `done` |
+| a plan step's outcome, `settle.outcome` | `done` or `failed` |
+| an output, `check.status` | the type its contract declares |
+
+Anything else is not a value: reading it is an error.
+
+| Code | Kind | What is wrong | Example message |
+|---|---|---|---|
+| `UNKNOWN_CONTRACT` | error | a step calls a contract the catalog doesn't hold | `payments.refund@3 is not in the catalog. Registered: payments.refund@2. Use a registered version, or register this one first.` |
+| `WRONG_KIND` | error | an activity step calls a workflow contract, or a workflow step an activity | `kyc.check@1 is a workflow contract, not an activity: run it as a workflow step.` |
+| `UNKNOWN_PLAN` | error | a plan step names a plan that isn't supplied, or can't be read | `no plan refund-order@2 is available: supply it with the deployment's plans` |
+| `UNKNOWN_INPUT` | error | a step gives an input its contract or plan doesn't take | `payments.refund@2 has no input amout: its inputs are amount, order_id` |
+| `MISSING_INPUT` | error | a step doesn't give an input its contract or plan needs | `payments.refund@2 needs the input amount: add it to inputs` |
+| `ENGINE_INPUT` | error | a step gives the input the engine fills: the idempotency key | `idempotency_key is filled by the engine, never by a case: remove it` |
+| `UNKNOWN_ROLE` | error | a role nobody registered: it counts for nothing when the case runs | `supprt is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead; use one of them, or ask the platform team to register it` |
+| `UNKNOWN_SOURCE` | error | a field is declared untrusted with a label nobody registered | `untrusted:custmer has a label nobody registered: the labels are customer, document, email, llm, web; use one of them, or ask the platform team to register it` |
+| `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are crm, documents, orders, policies; use one of them, or ask the platform team to register it` |
+| `EXPRESSION_INVALID` | error | an expression reads something that isn't a value, mixes types, or names an outcome that can't happen | as above |
+| `APPROVAL_REQUIRED` | error | a high-risk step has no approval | `payments.refund@2 is high risk, and pay has no approval: add one` |
+| `APPROVAL_ROLE` | error | a role on an approval may not approve the step's risk | `adjuster may approve no risk, and payments.refund@2 is high risk: name a role that may approve high risk` |
+
+An approval with a `when` is fine on a high-risk step: the quickstart's refund asks a team lead
+only above 100. Each of these is refused when the case runs too, whether or not the definition
+was checked: the step fails, or the answer, or the opening, is refused.

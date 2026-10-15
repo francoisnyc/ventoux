@@ -2,7 +2,9 @@
 
 Status: the split into four parts and 10a's six choices agreed in the session, 2026-10-15 (all as
 proposed); 10a's note drafted the same day; 10a built, slices 0–6; Promises checked against the
-tests, 2026-10-15; the tutor review's three fixes built test-first, 2026-10-15.
+tests, 2026-10-15; the tutor review's three fixes built test-first, 2026-10-15. 10b's choices and
+its four runtime fixes agreed in the session, 2026-10-15 (all as proposed); 10b's note drafted the
+same day.
 
 ## What this layer is for
 
@@ -364,3 +366,155 @@ Each claim this section makes about behaviour, and the test that would fail if i
 | The runtime depends on nothing validation did: the deadlocked claim runs and closes, paying nothing | V `test_an_unchecked_deadlock_still_runs_safely`; every runtime test, unchanged |
 | The guide says what the code does: its claims, its printed output, and its table (every code, each example's message and kind) | V `test_the_guides_claim_has_no_issues`, `test_the_deadlocked_claim_is_refused`, `test_the_guide_lists_every_code`, `test_the_guides_table_is_what_validate_case_says` |
 | `case` imports no Temporal or LLM code, in the new modules too | `tests/test_layers.py`, unchanged |
+
+---
+
+## 10b. What each step calls
+
+User-facing description, written first: `docs/guides/cases.md`, "What each step calls". Decision:
+brief D35 (drafted with this note).
+
+### What this part is for
+
+10a reads a case's structure. 10b reads what each step calls, against the catalog and the plans
+the deployment supplies: today every such mistake is found only when the step is reached, with a
+customer waiting, and one isn't found at all. The quickstart's refund with `"aprove"` in `pay`'s
+`when`: Ana approves, the condition is false, and the case closes, `closed: nothing left to do`,
+the refund never paid and nobody told.
+
+### The checks
+
+| Code | At | Given when |
+|---|---|---|
+| `UNKNOWN_CONTRACT` | `steps.<s>.activity` or `.workflow` | the catalog holds no contract under the reference (the catalog's own message) |
+| `WRONG_KIND` | the same | the contract is of the other kind (the catalog's own message) |
+| `UNKNOWN_PLAN` | `steps.<s>.plan` | the plan isn't among the plans given, can't be read, or is supplied under another reference (`supplied`, the runtime's reader) |
+| `UNKNOWN_INPUT` | `steps.<s>.inputs.<i>` | the contract takes no such input (the key aside); a plan takes no such field, or a wait of the plan sets it |
+| `MISSING_INPUT` | `steps.<s>.inputs` | a required input of the contract (the key aside), or a field the plan takes at its start, isn't given |
+| `ENGINE_INPUT` | `steps.<s>.inputs.<key>` | the step gives the contract's idempotency key |
+| `UNKNOWN_ROLE` | `steps.<s>.roles`, `.approval.roles`, `.proposed_by`, `close_reasons.<r>.roles`, `fields.<f>.visible_to` | a role the catalog doesn't hold |
+| `UNKNOWN_SOURCE` | `fields.<f>.source` | `untrusted:<label>` with a label nobody registered |
+| `UNKNOWN_SYSTEM` | `fields.<f>` | a reference, or a reference in a list's records, names a system nobody registered |
+| `EXPRESSION_INVALID` | `steps.<s>.when`, `.approval.when`, `.inputs.<i>` | layer 3's `check` refuses it over the case's types; a condition doesn't give a boolean |
+| `APPROVAL_REQUIRED` | `steps.<s>` | the contract is high risk and the step has no approval |
+| `APPROVAL_ROLE` | `steps.<s>.approval.roles` | a registered role on the approval may not approve the contract's risk |
+
+**The case's types**, what `check` is given: each field with its declared type; `<task>.outcome`
+as the task's outcomes; `<activity>.outcome` as `done` and its contract's outcomes;
+`<workflow>.outcome` as `done`; `<plan>.outcome` as `done` or `failed`; `<step>.<output>` for
+each output its contract declares, a decimal as a number, a text as a string (a reference to its
+system when it says so), a boolean as a boolean. Registration refuses any other output type
+(brief, D29); one that got through anyway is left out, so reading it is an error (fail closed).
+Nothing writes `pay.approval` (D11's example), so reading it is an error too.
+
+### An error is a proof
+
+Each code was read against what `run_case` does with the same definition (10a's review: two
+errors didn't hold for every case). A test for each code runs it and sees the refusal:
+
+| Code | The runtime |
+|---|---|
+| `UNKNOWN_CONTRACT`, `WRONG_KIND` | `called` raises `NotInCatalog`: the step fails |
+| `UNKNOWN_PLAN` | `supplied` refuses it: the step fails, in memory and on Temporal |
+| `UNKNOWN_INPUT`, `MISSING_INPUT` | `checked_inputs` (activity, workflow) or the plan's `refuse_to_start` refuses: the step fails |
+| `UNKNOWN_ROLE` | the role counts for nothing (`role_that_counts`): an answer, a proposal or a close relying on it is refused |
+| `UNKNOWN_SYSTEM` | `refuse_to_open` refuses the case |
+| `EXPRESSION_INVALID`, a field nobody declared, a wrong type, a condition that isn't a boolean | evaluating it fails the step |
+| `APPROVAL_REQUIRED` | `schedule` stops the step: `is high risk, and pay has no approval` |
+| `APPROVAL_ROLE` | the approval answered with that role is refused (`risk_refusal`) |
+
+**Four gaps, closed in the runtime** (agreed in the session; brief, D35). Probes with `run_case`
+showed the runtime letting each through:
+
+- **G1, a misspelt outcome reads as false.** The runtime now type-checks a step's expressions
+  (its `when`, its approval's `when`, its inputs) over the same types before reading them, in
+  admission, a proposal and a retry; one that doesn't check fails the step (or refuses the
+  proposal or retry) with the check's message. The types are computed by one function both use,
+  `case/types.py`, from the definition and the catalog: the runtime depends on nothing
+  validation did (brief, D34).
+- **G2, an input named after the idempotency key was overwritten,** and the history said
+  `idempotency_key from the case`. `checked_inputs` now refuses it, for plans too.
+- **G3, a field declared with an unregistered label opened and ran.** `refuse_to_open` now
+  refuses it, beside an unregistered system (brief, D12, D30).
+- **G5, an unregistered role saw a field.** `may_see` counted any role a case names, registered
+  or not, so a person stated with `supprt` saw a field `visible_to: [supprt]`. Now only a
+  registered role gives sight, as only a registered role answers (brief, D22).
+
+Found while probing, left to 10c: `"amount": "40"` (a text) paid a refund of 40, since the
+contract's Pydantic model turns a text into a decimal. Checking an input's type against its
+contract belongs with 10c's reference inputs; the lax conversion goes with it.
+
+### Plan steps
+
+A case references a plan, never defines one (brief, D28). `validate_case(case, catalog,
+plans=…)` takes the deployment's plans exactly as `run_case(plans=…)` and
+`CaseWorkflow.plans` do, stored data by reference, and reads each with `supplied`, the runtime's
+reader, so the check and the runtime can't disagree about which plan a step runs. No `plans`
+means none: a plan step then gets `UNKNOWN_PLAN`. What it checks of a plan step: the plan is
+supplied and readable; each input names a field the plan takes at its start (a field a wait sets
+is the person's, never given); every such field is given; each input's expression checks over the
+case's types. Not checked: the plan itself (layer 3's `validate`, where plans are published), and
+an input's type against the plan field's (10c, with activity inputs').
+
+### Values in messages
+
+10a: no message quotes a value. A misspelt outcome is easier to fix if the message names it, and
+layer 3's `check` already does (`has no outcome "aprove"`). Decided: a message may quote a
+literal of the definition when that literal is what is wrong. It is text the author wrote,
+already in the definition. Titles, an approval's reason and anything from a case file are never
+quoted (brief, D35).
+
+### One cause, one issue
+
+- A step whose contract or plan is missing or of the wrong kind gets that one issue: no input,
+  approval or approval-role issues for it, and no `EXPRESSION_INVALID` for an expression reading
+  its outcome or outputs. Safe, because the error already refuses the definition.
+- An input whose expression is refused isn't checked further.
+- An unregistered role a structural issue already names isn't repeated: a step only roles nobody
+  registered may propose (`NEVER_RUNS`), and close reasons none of whose roles is registered
+  (`NEVER_CLOSES`, whose message now names them too).
+
+### Two message fixes carried from 10a
+
+- **Two `closes_when` milestones, both required:** the advice was "remove one of them from its
+  requires, or from closes_when", but removing one from `closes_when` leaves the step requiring
+  the other, which still closes the case. Now: "remove one of them from its requires".
+- **A milestone a waited-for step requires was said to be reached by it:** `notify`, requiring
+  `paid` and reaching `notified`, was "notify, which reaches paid and notified". What a step waits
+  for now keeps whether each milestone is required or reached by the step it comes through.
+
+### Where the code goes
+
+- `case/types.py` (new): the case's types, for validation and the runtime.
+- `case/calls.py` (new): 10b's checks, one function per row of the table.
+- `case/validate.py`: `validate_case` takes `plans`, and adds `calls`' issues.
+- Runtime fixes: `case/admission.py` or `case/runtime.py` (G1), `core/before_activity.py` (G2),
+  `case/runtime.py` (G3), `case/visibility.py` and its callers (G5).
+- Tests: `tests/test_case_validation.py`; each runtime fix beside its earlier tests.
+
+### Seams the tests use
+
+- `parse_case(data)`, then `validate_case(case, catalog, plans=…)`; an issue's `path`, `code`,
+  `message` and `severity`.
+- `run_case(..., plans=…, catalog=…, activities=…)` for every proof; the Temporal test driver for
+  `UNKNOWN_PLAN`, where the driver reads the plans itself.
+- The guide: its example output and its table of 10b's codes are what `validate_case` says.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **The two message fixes** (10a's, first commit).
+1. **The contract or plan:** `UNKNOWN_CONTRACT`, `WRONG_KIND`, `UNKNOWN_PLAN`, each with its run.
+2. **Inputs:** `UNKNOWN_INPUT`, `MISSING_INPUT`, `ENGINE_INPUT`, for activity, workflow and plan
+   steps; G2.
+3. **Registered names:** `UNKNOWN_ROLE`, `UNKNOWN_SOURCE`, `UNKNOWN_SYSTEM`; G3, G5.
+4. **Expressions:** the case's types, `EXPRESSION_INVALID`; G1.
+5. **Approvals:** `APPROVAL_REQUIRED`, `APPROVAL_ROLE`.
+6. **The guide and the promises.**
+
+### Not in 10b
+
+- Input types against the contract or the plan's fields, and the lax conversion (10c).
+- Input policies, references and sensitive values (10c); teaching warnings (10d).
+- No new dependency.
