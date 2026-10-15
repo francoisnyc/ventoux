@@ -434,7 +434,10 @@ than its `max_age`:
 - **It came from a read-only activity** (its contract's effect is `read`): Ventoux runs that step
   again first. It is a new run, `check_order#2`, with its own key, checked as every run is. Its
   output replaces the old one, with a fresh time, and then `pay` is checked again, its condition
-  included: an order returned since the first look now stops the refund.
+  included: an order returned since the first look now stops the refund. It runs again only if
+  it could start now: what it requires is done, its condition holds, and it needs no approval.
+  A refresh never asks for an approval itself, so a read behind one (a credit check) needs
+  attention instead.
 - **It came from anywhere else**, the step needs attention instead (brief, D17): a person's
   answer, the opening, an activity with side effects (`write`, `notify`) or one that computes
   (`compute`), a workflow step or a plan step. Ventoux can't fetch those again. A person decides:
@@ -520,6 +523,7 @@ epoch. A hidden field's time is hidden with it; a sensitive field's time is not 
 | a stale fact came from the opening (needs attention) | `order_id was obtained 3 days ago, and pay needs it at most 1 day old: it came from the opening, so it can't be fetched again` |
 | a stale fact came from a step with side effects (needs attention) | `pay_fee.outcome was obtained 3 days ago, and notify needs it at most 1 day old: pay_fee has side effects (write), so it can't be run again` |
 | a stale fact came from a step that computes (needs attention) | `fee.fee was obtained 3 days ago, and pay needs it at most 1 day old: fee computes it from its inputs (compute), so running it again gives nothing new` |
+| a stale fact came from a read that needs an approval to run (needs attention) | `check_order.status was obtained 3 days ago, and pay needs it at most 1 day old: check_order needs an approval to run, so it isn't run again unasked` |
 | a stale fact came from a workflow or a plan step (needs attention) | `kyc.status was obtained 3 days ago, and pay needs it at most 1 day old: kyc is a workflow step, so it isn't run again unasked` |
 | a refresh gave no fresh value (needs attention) | `check_order#2 gave not_found, so check_order.status is still 3 days old, and pay needs it at most 1 day old` |
 | a refresh failed, and the step only reads its fact (needs attention) | `check_order#2 failed, so check_order.status is still 3 days old, and pay needs it at most 1 day old` |

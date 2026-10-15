@@ -681,6 +681,18 @@ def refreshable(
         )
     if effect != "read":
         return None, f"{run.step} has side effects ({effect}), so it can't be run again"
+    # A refresh is a run like any other: it passes the same gate as a start, or doesn't run.
+    # Fail closed: it never asks for an approval itself, so a step that needs one now isn't run
+    # again, and a person decides (brief, D33).
+    for requirement in requirements(case)[run.step]:
+        if not requirements_met((requirement,), state):
+            return None, (
+                f"{run.step} requires {requirement}, which hasn't completed, so it isn't run again"
+            )
+    if step.when is not None and not holds(step.when, state.values, f"{run.step}'s condition"):
+        return None, f"{run.step}'s condition is false now, so it isn't run again"
+    if needs_approval(state, run.step, step):
+        return None, f"{run.step} needs an approval to run, so it isn't run again unasked"
     return run.step, ""
 
 

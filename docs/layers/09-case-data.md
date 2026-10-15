@@ -10,7 +10,8 @@ session, 2026-10-14 (all as proposed, with `forgetting` added: `while_open` and 
 built, slices 0–10; Promises checked against the tests, 2026-10-15; the tutor review's two fixes
 built test-first, 2026-10-15. 9d's choices agreed in the session, 2026-10-15 (all as proposed);
 its note drafted the same day, and its four drafting points confirmed; 9d built, slices 0–9;
-Promises checked against the tests, 2026-10-15.
+Promises checked against the tests, 2026-10-15; the tutor review's two fixes built test-first,
+2026-10-15.
 
 ## What this layer is for
 
@@ -1284,6 +1285,26 @@ Each starts with its negative test, seen failing for the right reason.
 - **The in-memory driver's `Finish` carries its time** (slice 0), and the script's `finish(entry)`
   is a script item like `later`: the driver makes the event at the script's time.
 
+### From the tutor review
+
+- **A refresh skipped the approval, and the condition, of the step it ran again.**
+  `refresh_stale` called `schedule()` directly, past the gate `start()` and admission keep. The
+  probe: `check_order` on a high-risk read (`credit.check@1`) behind an approval by
+  `support-lead`; Sam approved `check_order#1`, and `check_order#2` ran three days later with
+  nobody approving it, against "one approval unlocks one run of one step" (brief, D11).
+- **The fix, failing closed** (recorded in D33): a refresh runs only if its step could start now,
+  its requirements met, its condition true and no approval needed; otherwise the step that needs
+  the fact needs attention, saying which. The note's "checked as every run is" had promised the
+  requirements too, untested: the test covers all three. Asking for a new approval mid-refresh
+  was the other way, set aside: it needs an approved run marked as a refresh, and a meaning for
+  a rejection.
+- **A new Temporal test was flaky** (1 run in 14 in the review): Sam's sheet was read three days
+  after the earliest time the view gave, but the approved amount was obtained a few seconds
+  later, so its age rounded down to "2 days". The sheet is now read three days after the
+  amount's own recorded time; 30 runs in 30 pass.
+- **All negative tests were written first and seen failing:** the probe's `check_order#2` ran
+  before the fix.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
@@ -1314,5 +1335,6 @@ the pull request is opened. `FF` is `tests/test_fresh_facts.py` (new), `TFF`
 | Times cross continue-as-new exactly, as whole numbers | TFF `test_times_cross_continue_as_new_exactly` |
 | On Temporal a stale fact that can't be fetched again is recorded, and the case waits for a person (needs attention); the sheet gives each fact's age; a sheet for an approval that isn't open is refused, saying why | TFF `test_a_stale_answer_on_temporal_needs_attention` |
 | An approved step that fails on a stale fact fails once, its approval kept on the failed run for a retry | FF `test_an_approved_step_that_fails_on_a_stale_fact_stops_once` |
+| A refresh runs only if its step could start now: requirements met, condition true, no approval needed; otherwise the step needing the fact needs attention, saying which (tutor review) | FF `test_a_refresh_needs_what_any_run_of_its_step_needs` |
 | The quickstart's acceptance tests stay green | Q (all) |
 | The guide's examples run as written, and its refusal rows are what the engine says | FF `test_a_refresh_that_changes_the_condition_stops_the_step`, `test_people_see_when_each_fact_was_obtained`, `test_the_guides_freshness_refusals_are_what_the_engine_says` |

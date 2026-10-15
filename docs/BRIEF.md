@@ -876,7 +876,13 @@ be erased on request), has size limits, and a second copy of business records go
   activity, a workflow or a plan step) needs attention (D17). A `compute` step run again on the
   same inputs gains nothing; a workflow belongs to another team and is not re-run unasked.
 - **A refresh is a new run of the step,** with its own entry and key (D17), checked as every run
-  is; its output replaces the old one, with fresh sources and time. It doesn't undo its step for
+  is; its output replaces the old one, with fresh sources and time. It runs only if its step
+  could start now: its requirements met, its condition true, and no approval needed. A refresh
+  never asks for an approval: a read behind one (a high-risk credit check) needs attention, and
+  a person decides, since one approval unlocks one run of one step (D11). Asking for a new
+  approval while the step that needs the fact waits was the other way; it needs more machinery
+  (an approved run marked as a refresh, a rejection's meaning for the waiting step) than any case
+  has asked for yet. *Added in the tutor review of 9d, before D33 was merged.* It doesn't undo its step for
   `requires` while it runs: only what it changes counts. If it gives no fresh value, the step
   that needed it needs attention: never a second refresh for the same need.
 - **A given approval lapses on a refresh that changes what it saw** (D11): the step's inputs, its

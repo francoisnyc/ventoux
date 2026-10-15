@@ -902,6 +902,24 @@ def test_the_guides_freshness_refusals_are_what_the_engine_says() -> None:
         activities={"orders.lookup@1": answers_in_turn("delivered", ConnectionError("x"))},
     )
 
+    credit = refund_fresh()
+    credit["steps"]["check_order"].update(
+        {
+            "activity": "credit.check@1",
+            "approval": {"roles": ["support-lead"], "display": {"reason": "Credit checks"}},
+        }
+    )
+    attention(
+        credit,
+        [
+            ("check_order.approval#1", "approve", "sam"),
+            later("3d"),
+            ("review", "approve", "ana", {"approved_amount": 80}),
+        ],
+        catalog=with_credit_check(),
+        activities={"credit.check@1": lambda inputs: {"status": "delivered"}},
+    )
+
     case = parse_case(refund_fresh())
     state, _ = decide(case, CATALOG, CaseState("t"), Opened(FILE, None, at=START))
     looked_up = Completed("check_order#1", {"status": "delivered"}, at=START)
@@ -924,7 +942,7 @@ def test_the_guides_freshness_refusals_are_what_the_engine_says() -> None:
     said.append(str(sheet.value))
 
     rows = refusal_rows()
-    assert len(rows) == 12
+    assert len(rows) == 13
     for row in rows:
         assert row in said, row
 
@@ -969,3 +987,109 @@ def test_freshness_lines_quote_no_value() -> None:
     assert attention.needs_attention
     for line in [*lapsed.history, *attention.history, *attention.needs_attention]:
         assert first not in line and second not in line, line
+
+
+class CreditInput(BaseModel):
+    order_id: str
+
+
+class CreditOutput(BaseModel):
+    status: str
+
+
+def with_credit_check() -> Any:
+    """The development catalog, and a high-risk read: a credit check, which needs an approval."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(
+        ActivityContract(
+            name="credit.check",
+            version=1,
+            input=CreditInput,
+            output=CreditOutput,
+            risk="high",
+            effect="read",
+            timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+            idempotency_key=None,
+            outcomes=[],
+            display=Display(title="Check credit", description="Reads a credit status."),
+        )
+    )
+    return catalog
+
+
+def refused_refresh(definition: dict[str, Any], answers: list[Any], **more: Any) -> Any:
+    """`pay` reviewed on day 3, its fact from `check_order` stale; what the case did."""
+    return run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 80},
+        answers=answers,
+        people={**PEOPLE, "omar": ["operations"]},
+        activities={"credit.check@1": lambda inputs: {"status": "delivered"}},
+        **more,
+    )
+
+
+def test_a_refresh_needs_what_any_run_of_its_step_needs() -> None:
+    # Tutor review: a refresh ran a high-risk credit check that nobody approved. A refresh goes
+    # through the same gate as any start: if its step needs an approval, a condition that holds
+    # or requirements that are met, and they aren't there now, it isn't run, and a person
+    # decides (fail closed, brief, D33).
+    stale = "check_order.status was obtained 3 days ago, and pay needs it at most 1 day old"
+    needing_approval = refund_fresh()
+    needing_approval["steps"]["check_order"].update(
+        {
+            "activity": "credit.check@1",
+            "approval": {"roles": ["support-lead"], "display": {"reason": "Credit checks"}},
+        }
+    )
+    run = refused_refresh(
+        needing_approval,
+        [
+            ("check_order.approval#1", "approve", "sam"),
+            later("3d"),
+            ("review", "approve", "ana", {"approved_amount": 80}),
+        ],
+        catalog=with_credit_check(),
+    )
+    assert run.needs_attention == [
+        f"pay#1: {stale}: check_order needs an approval to run, so it isn't run again unasked"
+    ]
+    assert [r.entry for r in run.state.runs if r.step == "check_order"] == ["check_order#1"]
+
+    # Its condition is false now: it isn't run again.
+    unless_reviewed = refund_fresh()
+    unless_reviewed["steps"]["check_order"]["when"] = {"!": [{"exists": "approved_amount"}]}
+    run = refused_refresh(
+        unless_reviewed, [later("3d"), ("review", "approve", "ana", {"approved_amount": 80})]
+    )
+    assert run.needs_attention == [
+        f"pay#1: {stale}: check_order's condition is false now, so it isn't run again"
+    ]
+
+    # It requires a step that has started again: it isn't run again either.
+    after_intake = refund_fresh()
+    after_intake["steps"]["intake"] = {
+        "kind": "task",
+        "display": {"title": "Take the request in"},
+        "roles": ["support"],
+        "outcomes": {"done": {"display": {"title": "Taken in"}}},
+        "repeatable": True,
+        "proposed_by": ["support"],
+    }
+    after_intake["steps"]["check_order"]["requires"] = ["intake"]
+    run = refused_refresh(
+        after_intake,
+        [
+            ("intake", "done", "ana"),
+            later("3d"),
+            propose("intake", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 80}),
+        ],
+    )
+    assert run.needs_attention == [
+        (
+            f"pay#1: {stale}: check_order requires intake, which hasn't completed, so it isn't "
+            "run again"
+        )
+    ]

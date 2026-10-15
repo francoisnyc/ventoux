@@ -198,7 +198,10 @@ def test_a_stale_answer_on_temporal_needs_attention() -> None:
             case, "review#1", "approve", "ana", PEOPLE["ana"], {"approved_amount": Decimal(250)}
         )
         await settled(case, lambda now: now.waiting_at == ["pay.approval#1"])
-        asked_at = min((await view(case, ["support-lead"])).obtained.values())
+        # The sheet is read exactly three days after the approved amount was obtained, by the
+        # times the case recorded: an age is rounded down, so a few seconds short of three days
+        # would read "2 days" (the tutor review found it 1 run in 14).
+        asked_at = (await view(case, ["support-lead"])).obtained["approved_amount"]
         await environment.sleep(DAYS_3)
         sheet = await approval_sheet(
             case, "pay.approval#1", ["support-lead"], at=asked_at + 3 * 86400
