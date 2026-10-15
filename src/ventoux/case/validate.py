@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ventoux.case.calls import (
+    approval_issues,
     called_contracts,
     contract_input_issues,
     expression_issues,
@@ -66,6 +67,7 @@ def validate_case(
     calling = {name for name, step in case.steps.items() if not isinstance(step, TaskStep)}
     missing = calling - set(contracts) - set(supplied)
     found += expression_issues(case, case_types(case, catalog), missing)
+    found += approval_issues(case, catalog, contracts)
     found += role_issues_of(case, catalog, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     return found + close_unreachable(case, can) + unreachable_milestones(case)

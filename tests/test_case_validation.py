@@ -1156,3 +1156,45 @@ def test_a_proposal_or_a_retry_never_reads_a_misspelt_outcome() -> None:
             answers=[ACCEPTED, retry("pay#1", "omar")],
             people={**CLAIM_PEOPLE, "omar": ["operations"]},
         )
+
+
+# --- 10b, slice 5: approvals ---
+
+LARGE = {"order_id": "ord-1", "amount": 250}
+LARGE_REVIEW = ("review", "approve", "ana", {"approved_amount": 250})
+
+
+def test_a_high_risk_step_has_an_approval() -> None:
+    refund = refund_with(approval=None)
+    no_approval = "payments.refund@2 is high risk, and pay has no approval"
+    assert issues(refund) == [Issue("steps.pay", "APPROVAL_REQUIRED", f"{no_approval}: add one")]
+    # The proof: the runtime stops it before it is scheduled (brief, D11).
+    assert small_refund(refund).needs_attention == [f"pay#1: {no_approval}"]
+    # An approval with a `when` is enough: the quickstart's refund asks only above 100.
+    assert issues(REFUND) == []
+
+
+def test_an_approvals_roles_may_approve_its_steps_risk() -> None:
+    approval = {**REFUND["steps"]["pay"]["approval"], "roles": ["support-lead", "adjuster"]}
+    refund = refund_with(approval=approval)
+    refused = "adjuster may approve no risk, and payments.refund@2 is high risk"
+    assert issues(refund) == [
+        Issue(
+            "steps.pay.approval.roles",
+            "APPROVAL_ROLE",
+            f"{refused}: name a role that may approve high risk",
+        )
+    ]
+    with pytest.raises(AnswerRefused, match=re.escape(refused)):
+        run_case(
+            refund,
+            file=LARGE,
+            answers=[LARGE_REVIEW, ("pay", "approve", "lee")],
+            people={"ana": ["support"], "lee": ["adjuster"]},
+        )
+    # A role nobody registered is said once, as UNKNOWN_ROLE; a missing contract once, as
+    # UNKNOWN_CONTRACT: one cause, one issue.
+    approval["roles"] = ["suport-lead"]
+    assert [i.code for i in issues(refund_with(approval=approval))] == ["UNKNOWN_ROLE"]
+    missing = refund_with(approval=None, activity="payments.refund@3")
+    assert [i.code for i in issues(missing)] == ["UNKNOWN_CONTRACT"]

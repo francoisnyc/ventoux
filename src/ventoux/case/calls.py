@@ -9,11 +9,13 @@ from ventoux.case.called import called
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
 from ventoux.case.plan_step import PlanNotSupplied, supplied
 from ventoux.case.types import expressions_of, type_problem
+from ventoux.core.approval import risk_refusal
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
 from ventoux.core.expressions import FieldType
 from ventoux.core.plan import Plan, set_by
 from ventoux.core.provenance import fields_read
+from ventoux.core.roles import may_approve
 from ventoux.core.validate import Issue
 
 
@@ -149,4 +151,37 @@ def expression_issues(
             problem = type_problem(expression, types, condition)
             if problem is not None:
                 issues.append(Issue(f"steps.{name}.{where}", "EXPRESSION_INVALID", problem))
+    return issues
+
+
+def approval_issues(
+    case: CaseDefinition, catalog: Catalog, contracts: Mapping[str, Contract]
+) -> list[Issue]:
+    """A high-risk step has an approval, and every registered role on an approval may approve its
+    step's risk (brief, D11) (brief, D22). An approval with a `when` is enough: whether it is
+    asked depends on values, which the runtime reads. A role nobody registered is UNKNOWN_ROLE's."""
+    issues: list[Issue] = []
+    for name, contract in contracts.items():
+        step = case.steps[name]
+        assert isinstance(step, CallStep)  # only a call step has a contract
+        if step.approval is None:
+            if contract.risk == "high":
+                issues.append(
+                    Issue(
+                        f"steps.{name}",
+                        "APPROVAL_REQUIRED",
+                        f"{contract.reference} is high risk, and {name} has no approval: add one",
+                    )
+                )
+            continue
+        issues += [
+            Issue(
+                f"steps.{name}.approval.roles",
+                "APPROVAL_ROLE",
+                f"{risk_refusal(role, catalog, contract)}: name a role that may approve "
+                f"{contract.risk} risk",
+            )
+            for role in step.approval.roles
+            if role in catalog.roles and not may_approve(catalog.roles[role], contract.risk)
+        ]
     return issues
