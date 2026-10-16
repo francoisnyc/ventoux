@@ -700,7 +700,7 @@ policy check gains a seam that takes the fields' sources.
 | `INPUT_TYPE` | `steps.<s>.inputs.<i>` | the expression's type isn't the input's: a number for `Decimal`, a string, outcome or reference for `str`, a boolean for `bool`; a plan field's own type. A contract input of any other type is never given exactly by a case (it holds decimals, texts and booleans) | strict validation (G6), or the plan's start (G7): the step fails |
 | `NO_SOURCES` | `steps.<s>.inputs.<i>` | a plan field is given an expression reading no field | the plan's start: the step fails |
 | `SENSITIVE_TO_WORKFLOW` | `steps.<s>.inputs.<i>` | a workflow step's input reads a field declared sensitive | `refuse_sensitive_inputs`: the step fails |
-| `APPROVER_CANT_SEE` (warning) | `steps.<s>.approval.roles` | a registered role on the approval, held alone, can't see a value the step reads (its inputs, its `when`, the approval's `when`); one issue per role, naming every such value | an answer from a person who can't see one is refused (`unseen`) |
+| `APPROVER_CANT_SEE` (warning) | `steps.<s>.approval.roles` | a registered role on the approval, held alone, can't see a value the step reads (its inputs, its `when`, the approval's `when`); one issue per role and value (revised while building, slice 5) | an answer from a person who can't see one is refused (`unseen`) |
 
 **References follow the runtime:** an output is never a reference field, even one its contract
 types as a reference (`not_a_reference_to` reads the case's declared fields). In practice
@@ -799,6 +799,11 @@ Each starts with its negative test, seen failing for the right reason.
   needs them.
 - **An `int` input passed at once** (slice 4), its branch written with the first; seen failing
   with `int` read as a number.
+
+- **`APPROVER_CANT_SEE` is one issue per role and value, not per role** (slice 5). One value may
+  be seen through either of two roles (`fraud or audit`), and two values may need two different
+  roles: one message naming several values could say neither exactly. Its proof runs both ways:
+  Lee holding `support-lead` alone is refused; holding `fraud` too, the claim is paid.
 
 ### Not in 10c
 

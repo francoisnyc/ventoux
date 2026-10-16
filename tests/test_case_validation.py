@@ -1620,3 +1620,79 @@ def test_a_plan_field_given_only_literals_has_no_sources() -> None:
             "value came from, such as system:opener"
         )
     ]
+
+
+# --- 10c, slice 5: sensitive values and approvers ---
+
+
+def claim_checking_national_id() -> dict[str, Any]:
+    """The guide's claim, its workflow step given the customer's national ID, a sensitive field."""
+    claim = guide_json(0)
+    claim["fields"]["national_id"] = {
+        "type": "string",
+        "sensitive": True,
+        "visible_to": ["claims-sensitive"],
+        "display": {"title": "National ID"},
+    }
+    claim["steps"]["check"]["inputs"] = {"customer_id": {"var": "national_id"}}
+    return claim
+
+
+def test_a_workflow_step_is_never_given_a_sensitive_value() -> None:
+    reason = (
+        "kyc.check@1 is a workflow step and can't be given national_id, a sensitive field: its "
+        "worker doesn't hold the case's key"
+    )
+    assert issues(claim_checking_national_id()) == [
+        Issue(
+            "steps.check.inputs.customer_id",
+            "SENSITIVE_TO_WORKFLOW",
+            f"{reason}; give it a value that isn't sensitive",
+        )
+    ]
+    # The proof: run as it is, the step fails before the workflow starts (brief, D31).
+    run = run_case(
+        claim_checking_national_id(),
+        file=CLAIM_FILE | {"national_id": "1850775123456"},
+        answers=[],
+        people=CLAIM_PEOPLE,
+    )
+    assert run.needs_attention == [f"check#1: {reason}"]
+
+
+def claim_paying_below_a_fraud_score() -> dict[str, Any]:
+    """The guide's claim, paid only below a fraud score only the fraud team sees."""
+    claim = guide_json(0)
+    claim["fields"]["fraud_score"] = {
+        "type": "number",
+        "visible_to": ["fraud"],
+        "display": {"title": "Fraud score"},
+    }
+    claim["steps"]["pay"]["when"] = {"<": [{"var": "fraud_score"}, 50]}
+    return claim
+
+
+def test_an_approver_who_cannot_see_is_warned() -> None:
+    assert issues(claim_paying_below_a_fraud_score()) == [
+        Issue(
+            "steps.pay.approval.roles",
+            "APPROVER_CANT_SEE",
+            "support-lead can't see fraud_score, which pay reads: a person approving pay needs "
+            "fraud as well; let support-lead see fraud_score, or approve with a role that does",
+            "warning",
+        )
+    ]
+
+    # A warning, not an error: who holds which roles is what the check can't know (brief, D34).
+    # Sam holds support-lead only, and is refused; Lee holds fraud too, and the claim is paid.
+    def paid(roles: list[str]) -> CaseRun:
+        return run_case(
+            claim_paying_below_a_fraud_score(),
+            file=CLAIM_FILE | {"fraud_score": 10},
+            answers=[ACCEPTED, ("pay", "approve", "lee")],
+            people={**CLAIM_PEOPLE, "lee": roles},
+        )
+
+    with pytest.raises(AnswerRefused, match="^lee can't see fraud_score, which pay reads"):
+        paid(["support-lead"])
+    assert paid(["support-lead", "fraud"]).reached("pay")

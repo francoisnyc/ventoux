@@ -12,8 +12,9 @@ from typing import Union, get_args, get_origin
 
 from pydantic.fields import FieldInfo
 
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
+from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep, WorkflowStep
 from ventoux.case.types import case_types
+from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.before_activity import not_a_reference_to
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract
@@ -239,6 +240,69 @@ def type_issues(
                     f"{a_type(given)}: give it {a_type(wanted_type)}",
                 )
             )
+    return issues
+
+
+def sensitive_issues(
+    case: CaseDefinition, contracts: Mapping[str, Contract], said: Collection[str]
+) -> list[Issue]:
+    """Each workflow step's input reading a sensitive field: its worker belongs to another team
+    and doesn't hold the case's key, so the step fails whenever it runs (brief, D31). A sensitive
+    field's value always arrives wrapped, so reading the definition proves it."""
+    issues: list[Issue] = []
+    for name, contract in contracts.items():
+        step = case.steps[name]
+        if not isinstance(step, WorkflowStep):
+            continue
+        for field, expression in step.inputs.items():
+            path = f"steps.{name}.inputs.{field}"
+            read = [f for f in fields_read(expression) if f in case.fields]
+            sensitive = [f for f in read if case.fields[f].sensitive]
+            if path not in said and sensitive:
+                issues.append(
+                    Issue(
+                        path,
+                        "SENSITIVE_TO_WORKFLOW",
+                        f"{contract.reference} is a workflow step and can't be given "
+                        f"{sensitive[0]}, a sensitive field: its worker doesn't hold the case's "
+                        "key; give it a value that isn't sensitive",
+                    )
+                )
+    return issues
+
+
+def approver_issues(
+    case: CaseDefinition, catalog: Catalog, contracts: Mapping[str, Contract]
+) -> list[Issue]:
+    """An approval role that, held alone, can't see a value its step reads: its inputs, its
+    `when`, its approval's `when`. A warning: a person approving holds all their roles, so one who
+    also holds a role that sees it may approve, and the check can't know who holds which roles
+    (brief, D16) (brief, D34). One issue per role and value; a role nobody registered is
+    `UNKNOWN_ROLE`'s. When the case runs, an approval from anyone who can't see it is refused."""
+    issues: list[Issue] = []
+    for name in contracts:
+        step = case.steps[name]
+        assert isinstance(step, CallStep)  # only a call step has a contract
+        if step.approval is None:
+            continue
+        read = list(step.inputs.values())
+        read += [when for when in (step.when, step.approval.when) if when is not None]
+        fields = sorted({field for expression in read for field in fields_read(expression)})
+        for role in step.approval.roles:
+            if role not in catalog.roles:
+                continue
+            issues += [
+                Issue(
+                    f"steps.{name}.approval.roles",
+                    "APPROVER_CANT_SEE",
+                    f"{role} can't see {field}, which {name} reads: a person approving {name} "
+                    f"needs {' or '.join(seen_by(case, field))} as well; let {role} see {field}, "
+                    "or approve with a role that does",
+                    "warning",
+                )
+                for field in fields
+                if not may_see(case, field, [role], catalog.roles)
+            ]
     return issues
 
 
