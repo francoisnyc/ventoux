@@ -316,7 +316,8 @@ A **plan step** runs a plan (see the plans guide) as one step of the case: sever
 waits that belong together, written as data (brief, D13). The case references the plan by name
 and version; your deployment supplies its plans, as it supplies its catalog, and a case never
 defines one (brief, D28). Here the refund's payment is the plans guide's `refund-order` plan,
-which looks the order up, asks a team lead, and pays:
+which looks the order up, asks a team lead, and pays. `settle` takes `pay`'s place, and
+`call_customer` then requires `settle` and runs when `settle.outcome` is `failed`:
 
 ```json
 "settle": {

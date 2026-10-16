@@ -121,11 +121,18 @@ def test_the_order_of_the_steps_does_not_matter() -> None:
     # in the written order would find `pay` and `assess` not yet possible, and refuse them.
     claim = guide_json(0)
     claim["steps"] = dict(reversed(claim["steps"].items()))
-    assert list(claim["steps"]) == ["pay", "assess", "check"]
+    assert list(claim["steps"]) == ["call_customer", "pay", "assess", "check"]
     assert issues(claim) == []
 
 
 # --- Slice 2: the curriculum's negative test ---
+
+# The claim's `call_customer` waits for `pay`: wherever `pay` can never run, neither can it.
+CALL_CUSTOMER_NEVER_RUNS = Issue(
+    "steps.call_customer.requires",
+    "NEVER_RUNS",
+    "call_customer can never run: it requires pay, which can never run: fix pay first",
+)
 
 
 def deadlocked_claim() -> dict[str, Any]:
@@ -163,7 +170,8 @@ def test_the_deadlocked_claim_is_refused() -> None:
             "DEADLOCK",
             "assess and pay wait on each other: assess requires paid, which only pay reaches; "
             "pay requires assessed, which only assess reaches: remove one of these requirements",
-        )
+        ),
+        CALL_CUSTOMER_NEVER_RUNS,
     ]
 
 
@@ -188,6 +196,7 @@ def test_a_step_requiring_itself_is_deadlocked() -> None:
             "pay can never run: it requires assessed, which only assess reaches, and assess can "
             "never run: fix assess first",
         ),
+        CALL_CUSTOMER_NEVER_RUNS,
     ]
 
 
@@ -204,7 +213,8 @@ def test_sequence_and_requires_can_deadlock() -> None:
             "DEADLOCK",
             "assess and pay wait on each other: assess requires pay; pay comes after assess in "
             "sequence: remove one of these requirements",
-        )
+        ),
+        CALL_CUSTOMER_NEVER_RUNS,
     ]
 
 
@@ -222,6 +232,7 @@ def test_a_step_waiting_on_a_deadlock_never_runs() -> None:
     claim["steps"]["notify"] = NOTIFY
     claim["steps"]["remind"] = {**NOTIFY, "requires": ["assess"]}
     assert errors(claim)[1:] == [
+        CALL_CUSTOMER_NEVER_RUNS,
         Issue(
             "steps.notify.requires",
             "NEVER_RUNS",
@@ -450,8 +461,8 @@ CLOSE_UNREACHABLE = Issue(
 def test_an_unreachable_close_is_a_warning() -> None:
     # A warning, as D10 asks: the case still closes, when nothing is left to do.
     found = issues(deadlocked_claim())
-    assert [issue.code for issue in found] == ["DEADLOCK", "CLOSE_UNREACHABLE"]
-    assert found[1] == CLOSE_UNREACHABLE
+    assert [issue.code for issue in found] == ["DEADLOCK", "NEVER_RUNS", "CLOSE_UNREACHABLE"]
+    assert found[2] == CLOSE_UNREACHABLE
 
 
 def test_an_unreachable_close_says_how_the_case_closes_instead() -> None:
@@ -460,7 +471,7 @@ def test_an_unreachable_close_says_how_the_case_closes_instead() -> None:
     claim["close_reasons"] = {
         "withdrawn": {"display": {"title": "Claim withdrawn"}, "roles": ["adjuster"]}
     }
-    assert issues(claim)[1].message == (
+    assert issues(claim)[2].message == (
         "paid can never be reached, so closes_when never closes claim, and only a person can "
         "close it: reach paid from a step that can run, or remove it from closes_when"
     )
@@ -469,7 +480,7 @@ def test_an_unreachable_close_says_how_the_case_closes_instead() -> None:
 def test_every_unreachable_close_milestone_is_named() -> None:
     claim = deadlocked_claim()
     claim["closes_when"] = ["assessed", "paid"]
-    assert issues(claim)[1].message == (
+    assert issues(claim)[2].message == (
         "assessed and paid can never be reached, so closes_when never closes claim, and it closes "
         "when nothing is left to do: reach them from steps that can run, or remove them from "
         "closes_when"
@@ -492,7 +503,11 @@ def test_a_milestone_nothing_reaches_is_a_warning() -> None:
     closing = reviewed(guide_json(0))
     closing["closes_when"] = ["reviewed"]
     assert [issue.code for issue in issues(closing)] == ["CLOSE_UNREACHABLE"]
-    assert [issue.code for issue in issues(deadlocked_claim())] == ["DEADLOCK", "CLOSE_UNREACHABLE"]
+    assert [issue.code for issue in issues(deadlocked_claim())] == [
+        "DEADLOCK",
+        "NEVER_RUNS",
+        "CLOSE_UNREACHABLE",
+    ]
 
 
 # --- Slice 5: the runtime on its own ---
@@ -605,7 +620,8 @@ def test_three_steps_can_wait_on_each_other() -> None:
             "check, pay and assess wait on each other: check requires paid, which only pay reaches; "
             "pay requires assessed, which only assess reaches; assess requires checked, which only "
             "check reaches: remove one of these requirements",
-        )
+        ),
+        CALL_CUSTOMER_NEVER_RUNS,
     ]
 
 
@@ -626,6 +642,7 @@ def test_a_milestone_two_dead_steps_reach_names_both() -> None:
             "pay requires assessed, which only assess and reassess reach: remove one of these "
             "requirements",
         ),
+        CALL_CUSTOMER_NEVER_RUNS,
         Issue(
             "steps.notify.requires",
             "NEVER_RUNS",
@@ -740,9 +757,9 @@ PLANS = {"refund-order@1": refund_order(), "refund-order@3": refund_order(versio
 
 
 def settled(**settle: Any) -> dict[str, Any]:
-    """The quickstart's refund, `pay` replaced by the plan step, with `settle`'s keys changed."""
+    """The quickstart's refund, `pay` and `call_customer` replaced by the plan step, with `settle`'s keys changed."""
     refund = copy.deepcopy(REFUND)
-    del refund["steps"]["pay"], refund["sequence"]
+    del refund["steps"]["pay"], refund["steps"]["call_customer"], refund["sequence"]
     refund["steps"]["settle"] = {**copy.deepcopy(SETTLE), **settle}
     return refund
 

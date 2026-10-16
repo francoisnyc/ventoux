@@ -999,6 +999,25 @@ Each starts with its negative test, seen failing for the right reason.
 5. **`APPROVAL_ELSEWHERE`.** Negative: the approval on `amount`, and 5000 paid unasked.
 6. **One cause, one issue; every example; the guide and the promises.**
 
+### Decided while building
+
+- **Slice 0's negative test was seen failing on the old refund** (written after the docs, which
+  had already changed `refund.json`): with the old file the declined refund closed, `waiting_for`
+  empty; with the new one it waits for `call_customer by support`.
+- **Fixtures built from the refund that replace `pay` with a plan step leave `call_customer`
+  out** (`test_plan_step`, `test_temporal_case`, `test_case_validation`'s `settled`): they test
+  plan mechanics. The guide's plan step is an example, so `call_customer` moves with it, said in
+  the guide's prose (its blocks are found by position): it requires `settle` and runs when
+  `settle.outcome` is `failed`.
+- **The claim's `call_customer` is a real extra issue wherever `pay` can never run:** 10a's
+  tests now expect its `NEVER_RUNS` (`call_customer can never run: it requires pay, which can
+  never run: fix pay first`), and the guide's deadlock output shows it. No message changed.
+- **The guarded `refund_fresh` changes the approval sheet:** it lists every fact the approval
+  depends on, and `pay`'s `when` now reads `check_order.outcome` and `review.outcome` too, so
+  two lines more. Right: Sam approves on those facts as well.
+- **On Temporal the declined refund now waits for `call_customer`,** so its test answers it,
+  after waiting for the entry (an answer sent before the decline lands names no open entry).
+
 ### Not in 10d
 
 - A guard the check doesn't recognise is warned about, never proven (data decides).

@@ -63,7 +63,7 @@ def without(definition: dict[str, Any], *path: str) -> dict[str, Any]:
 
 def test_the_quickstarts_refund_is_read() -> None:
     case = parse_case(REFUND)
-    assert list(case.steps) == ["review", "pay"]
+    assert list(case.steps) == ["review", "pay", "call_customer"]
     assert case.display.title == "Customer refund"
 
 
@@ -747,10 +747,14 @@ def refund_order() -> dict[str, Any]:
 
 
 def guide_refund_with_plan() -> dict[str, Any]:
-    """The guide's refund, its payment made by the guide's plan step (JSON block 5)."""
+    """The guide's refund, its payment made by the guide's plan step (JSON block 5), and
+    `call_customer` reacting to the plan failing, as the guide says."""
     definition = guide_json(0)
     del definition["steps"]["pay"], definition["sequence"]
     definition["steps"].update(guide_json(5))
+    call_customer = definition["steps"]["call_customer"]
+    call_customer["requires"] = ["settle"]
+    call_customer["when"] = {"==": [{"var": "settle.outcome"}, "failed"]}
     return definition
 
 

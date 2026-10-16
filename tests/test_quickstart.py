@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from ventoux.case.definition import CaseInvalid
-from ventoux.testing import AnswerRefused, CaseRefused, load_definition, run_case
+from ventoux.testing import AnswerRefused, CaseRefused, Outcome, load_definition, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 
@@ -50,6 +50,25 @@ def test_large_refund_waits_for_a_team_lead() -> None:
     )
     assert run.waiting_for == ["approval of pay by support-lead"]
     assert not run.reached("pay")
+    assert not run.closed
+
+
+def decline(inputs: dict[str, object]) -> dict[str, object]:
+    """A payment provider that declines every refund: an outcome its contract declares."""
+    raise Outcome("declined")
+
+
+def test_a_declined_refund_asks_support_to_call_the_customer() -> None:
+    # A declined refund never closes the case with nobody told (layer 10d, brief, D37).
+    run = run_case(
+        REFUND,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+        activities={"payments.refund@2": decline},
+    )
+    assert "pay#1 gave declined" in run.history
+    assert run.waiting_for == ["call_customer by support"]
     assert not run.closed
 
 

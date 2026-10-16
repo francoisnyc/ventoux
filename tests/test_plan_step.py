@@ -46,9 +46,9 @@ SETTLE: dict[str, Any] = {
 
 
 def refund_with_plan(**settle: Any) -> dict[str, Any]:
-    """The quickstart's refund, `pay` replaced by the guide's plan step, with `settle` changed."""
+    """The quickstart's refund, `pay` and `call_customer` replaced by the guide's plan step, with `settle` changed."""
     definition = copy.deepcopy(REFUND)
-    del definition["steps"]["pay"], definition["sequence"]
+    del definition["steps"]["pay"], definition["steps"]["call_customer"], definition["sequence"]
     definition["steps"]["settle"] = {**copy.deepcopy(SETTLE), **settle}
     return definition
 

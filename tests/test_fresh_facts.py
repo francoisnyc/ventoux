@@ -750,16 +750,19 @@ def test_people_see_when_each_fact_was_obtained() -> None:
     }
     exec(guide_example("### Approvals and fresh facts"), namespace)  # noqa: S102 -- our guide
     run, sheet = namespace["run"], namespace["sheet"]
+    # Every fact the approval depends on: what pay's when reads too, its guards included.
     assert sheet.lines == [
         "Amount approved: 250, obtained 3 days ago",
+        "check_order.outcome: done, obtained 3 days ago",
         "check_order.status: delivered, obtained 3 days ago",
         "Order: ord-1, obtained 3 days ago",
+        "review.outcome: approve, obtained 3 days ago",
     ]
     # The view gives each value's time, in seconds since the epoch.
     assert run.view(roles=["support"]).obtained["check_order.status"] == START
     # A sheet is read at the reader's time, never decided on: in an hour, an hour older.
     later_sheet = run.approval_sheet("pay.approval#1", roles=["support-lead"], at=START + HOUR)
-    assert later_sheet.lines[1] == "check_order.status: delivered, obtained 1 hour ago"
+    assert later_sheet.lines[2] == "check_order.status: delivered, obtained 1 hour ago"
 
 
 def test_a_hidden_fact_shows_no_value_and_no_age() -> None:
@@ -774,8 +777,10 @@ def test_a_hidden_fact_shows_no_value_and_no_age() -> None:
     sheet = run.approval_sheet("pay.approval#1", roles=["support-lead"], at=START + DAY)
     assert sheet.lines == [
         "Amount approved: hidden (needs support)",
+        "check_order.outcome: done, obtained 1 day ago",
         "check_order.status: delivered, obtained 1 day ago",
         "Order: ‹sensitive›, obtained 1 day ago",  # seen, but never written out (brief, D31)
+        "review.outcome: approve, obtained 1 day ago",
     ]
     assert "approved_amount" not in run.view(roles=["support-lead"]).obtained
     assert "order_id" in run.view(roles=["support-lead"]).obtained  # its time isn't sensitive
