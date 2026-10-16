@@ -6,7 +6,9 @@ tests, 2026-10-15; the tutor review's three fixes built test-first, 2026-10-15. 
 its four runtime fixes agreed in the session, 2026-10-15 (all as proposed); 10b's note drafted the
 same day; 10b built, slices 0–6; Promises checked against the tests, 2026-10-15. 10c's choices and
 its two runtime fixes agreed in the session, 2026-10-16 (all as proposed); 10c's note drafted the
-same day; 10c built, slices 1–6; Promises checked against the tests, 2026-10-16.
+same day; 10c built, slices 1–6; Promises checked against the tests, 2026-10-16. 10d's choices
+agreed in the session, 2026-10-16 (all as proposed; the quickstart's choice, a); 10d's note
+drafted the same day.
 
 ## What this layer is for
 
@@ -879,3 +881,147 @@ Each claim this section makes about behaviour, and the test that would fail if i
 | No message quotes a value: no title, no literal; sources are stand-ins, never who opens the case | V `test_no_data_flow_message_quotes_a_value` |
 | The guide says what the code does: its example output and its third table | V `test_the_guide_lists_every_code_for_data_flow`, `test_the_guides_table_of_data_flow_is_what_validate_case_says` |
 | `case` imports no Temporal or LLM code, and reads no clock or I/O, in the new module too | `tests/test_layers.py`, unchanged |
+
+---
+
+## 10d. Teaching warnings
+
+User-facing description, written first: `docs/guides/cases.md`, "What the check warns about".
+Decision: brief D37 (drafted with this note).
+
+### What this part is for
+
+10a–10c report errors, proven for every case. 10d reports what a definition may mean but that
+surprises its author when a case runs. Each warning describes something `run_case` really does
+with the same definition; probed 2026-10-16:
+
+| Definition | The runtime today |
+|---|---|
+| the quickstart, the provider declines | `pay#1 gave declined`, `closed: nothing left to do`: nobody is told |
+| the case-data guide's `refund_fresh`, review rejected | `pay#1 failed: pay's approval condition … approved_amount has no value`: needs attention instead of closing |
+| `refund_fresh`, the lookup gives `not_found` | `pay#1 failed: pay's condition … check_order.status has no value` |
+
+The last two are a guide example called correct: the third warning found it before it was built.
+
+### Decided in the session
+
+Agreed 2026-10-16, all as proposed.
+
+1. **The codes:** `OUTCOME_UNREAD`, `MAY_BE_UNSET`, `NEVER_REFRESHED`, `APPROVAL_ELSEWHERE`
+   (warnings); `SET_AFTER` (an error: the part of `MAY_BE_UNSET` that holds for every case,
+   brief, D34). New beside the split's table, which said only "warnings".
+2. **An unread outcome is checked one outcome at a time,** on activity steps (each outcome the
+   contract declares) and plan steps (`failed`). It is read when a condition can tell it from
+   `done`: it compares the step's outcome with it or with `done` (`==`, `!=`, `in`); reading the
+   outcome any other way reads them all, so the check never guesses. One issue per step names
+   every unread outcome. **Tasks get none:** a `reject` that does nothing is how a "no" is
+   written, and the person who chose it knows; D17's surprise is a system's answer nobody hears.
+   Workflow steps end only `done`. An unread outcome that leaves an output another step reads is
+   said by that step's `MAY_BE_UNSET` instead: then the step fails, and someone hears.
+3. **The quickstart changes (choice a):** the refund gains the cases guide's `call_customer`
+   (`when pay.outcome == "declined"`, for `support`), and the guide's claim the same (for
+   `adjuster`), so neither warns. The quickstart's "closes after the payment, or after a rejected
+   review" gains its third case.
+4. **How a guard is seen** (design question 14). A value is surely set where a step reads it if
+   it is given at the opening (assumed: otherwise every case would warn); or the step waits for
+   its writer (its requirements, through the steps it requires and `sequence`) and every way the
+   writer ends sets it (a task all of whose outcomes set the field; an activity declaring no
+   outcomes, for its outputs; any step, for its outcome); or the step requires a milestone only
+   setting completions reach; or a guard says so. The step's `when` is read first (`admit`), so
+   what it implies guards the approval's `when` and the inputs: an `and`'s parts, an `if`'s
+   condition and branch when its other branch is `false`, an outcome compared `==` or `in` with
+   outcomes that set the field, the writer's outcome `== "done"` for its outputs, `exists`.
+   Inside one expression only an `if` guards its branch: `and` and `or` evaluate every part on
+   purpose (brief, D20), so `{"and": [review approved, approved_amount > 100]}` still fails on a
+   rejected review. A read the check can't see guarded warns: a warning errs towards saying.
+5. **`SET_AFTER` is an error, kept narrow:** every writer of the value waits for the reading
+   step, the read isn't guarded, and the step can't be proposed. Then it fails every time it
+   starts, and a retry too: its writers wait for it to be *done*. A step that can be proposed gets
+   `MAY_BE_UNSET`: a later run may read the value.
+6. **`NEVER_REFRESHED`:** a `max_age` fact from the opening, a person, a `write`, `notify` or
+   `compute` activity, a workflow or a plan step, or a read whose step's approval has no `when`
+   (a refresh never asks for one, brief, D33). A conditional approval or a `when` depends on
+   data: no warning. A warning, not an error: the step needs attention only when the fact is
+   stale, which depends on time.
+7. **`APPROVAL_ELSEWHERE`:** an approval with a `when` that reads none of the fields its step's
+   inputs read (brief, D9). An approval with no `when` guards everything.
+8. **No runtime change.** The warnings describe what the runtime does; `refund_fresh` is fixed in
+   the guide (`pay`'s `when` guarded with an `if`), and its tests read it from there. No new
+   dependency. D37, drafted with this note.
+
+### The checks
+
+| Code | At | Given when | The runtime |
+|---|---|---|---|
+| `OUTCOME_UNREAD` (warning) | `steps.<s>` | an activity's declared outcome, or a plan step's `failed`, that no condition tells from `done` | the step is done with it, reaches nothing, and the case goes on; with nothing else to do it closes |
+| `MAY_BE_UNSET` (warning) | `steps.<s>.when`, `.approval.when`, `.inputs.<i>`: where it is first read, in the runtime's order | a value read that isn't surely set there | reading a value nobody set fails the step: it needs attention |
+| `SET_AFTER` | the same | every writer waits for the step, unguarded, and the step can't be proposed | the step fails every time it starts |
+| `NEVER_REFRESHED` (warning) | `steps.<s>.max_age.<f>` | the fact can never be fetched again | when stale, the step needs attention (`refresh_stale`) |
+| `APPROVAL_ELSEWHERE` (warning) | `steps.<s>.approval.when` | the approval's `when` reads none of the fields the step's inputs read | the approval isn't asked when the neighbouring value is low, whatever the step sends |
+
+One value read in several places of a step gets one issue. A step already refused by an error
+gets no 10d issue, nor does a value whose writer has one: one cause, one issue. No message quotes
+a value from a case file, nor a literal of the definition (no literal is ever the mistake here);
+they name steps, fields, outcomes and effects (brief, D35).
+
+### Where the code goes
+
+- `case/warnings.py` (new): what surely sets a value, and 10d's checks, one function per code.
+- `case/validate.py`: adds them, after every error, skipping steps and values an error names.
+- Tests: `tests/test_case_validation.py`; the quickstart's `call_customer` in `test_quickstart.py`.
+- Examples: `examples/refund/refund.json`, the quickstart, the cases guide's refund and claim, the
+  case-data guide's `refund_fresh`.
+
+### Seams the tests use
+
+- `parse_case`, then `validate_case(case, catalog, plans=…)`; an issue's `path`, `code`,
+  `message`, `severity`.
+- `run_case(…)` for each warning's surprise, on the same definition.
+- The guides: their examples give the issues shown, their table is what `validate_case` says, and
+  every example definition in the repository and the guides is run through `validate_case`.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **The examples.** The quickstart and the guide's claim gain `call_customer`; fixtures built
+   from the refund that replace `pay` leave it out; `refund_fresh` guarded; the guide's deadlock
+   output names `call_customer`. Negative: the quickstart's declined refund now calls the
+   customer instead of closing.
+1. **`OUTCOME_UNREAD`.** Negative: the quickstart without `call_customer`, and its run closing with
+   nobody told. Then one outcome at a time, `!=` and `in`, `done`, a plan's `failed`, no task.
+2. **`MAY_BE_UNSET`.** Negative: `pay` without its `when`, and the run failing. Then each way a
+   value is surely set, `and` that doesn't guard, an output whose writer may end otherwise, a
+   writer not waited for; the old `refund_fresh` gives two, its runs fail.
+3. **`SET_AFTER`.** Negative: `notify` before `pay`, failing every time; proposed, a warning.
+4. **`NEVER_REFRESHED`.** Negative: `max_age` on `approved_amount`, and the run needing attention;
+   then each source, and the read behind an approval.
+5. **`APPROVAL_ELSEWHERE`.** Negative: the approval on `amount`, and 5000 paid unasked.
+6. **One cause, one issue; every example; the guide and the promises.**
+
+### Not in 10d
+
+- A guard the check doesn't recognise is warned about, never proven (data decides).
+- Rules and timers (layer 11), `ventoux check` (layer 14).
+- No runtime change, no new dependency.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`V` is `tests/test_case_validation.py`, `Q` `tests/test_quickstart.py`. Drafted with the note; each
+test is named as it is written, and the table checked against the tests before the pull request.
+
+| Promise | Test |
+|---|---|
+| The quickstart and the guides' examples give no 10d issue; the quickstart's declined refund calls the customer | to be named in slice 0 and 6 |
+| A declared outcome no condition tells from `done` is `OUTCOME_UNREAD`; run, the case closes with nobody told | slice 1 |
+| Outcomes are checked one at a time; `==`, `!=` and `in` with the outcome or `done` read it; a plan's `failed` too; a task's never | slice 1 |
+| A value read before it is surely set is `MAY_BE_UNSET`; run, the step fails | slice 2 |
+| Requirements, milestones, the `when`, `if` and `exists` guard; `and` and `or` don't | slice 2 |
+| A value only a later step sets, read unguarded by a step that can't be proposed, is `SET_AFTER`; run, it fails every time; proposed, it is a warning | slice 3 |
+| A `max_age` on a fact that can't be fetched again is `NEVER_REFRESHED`; run stale, the step needs attention; a read behind an unconditional approval too | slice 4 |
+| An approval reading none of its step's input fields is `APPROVAL_ELSEWHERE`; run, the neighbouring value lets a large refund through unasked | slice 5 |
+| One cause, one issue: no 10d issue beside an error on the step or the value's writer; one per value per step | slice 6 |
+| No message quotes a value or a literal | slice 6 |
+| The guide says what the code does: its outputs and its table | slice 6 |
+| `case` imports no Temporal or LLM code, and reads no clock or I/O | `tests/test_layers.py`, unchanged |

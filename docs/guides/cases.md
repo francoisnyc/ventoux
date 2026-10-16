@@ -39,6 +39,14 @@ The quickstart's refund, as `ventoux check` writes it to `build/refund.json`:
         "roles": ["support-lead"],
         "display": {"reason": "Refunds over 100 need a team lead"}
       }
+    },
+    "call_customer": {
+      "kind": "task",
+      "display": {"title": "Call the customer about the declined refund"},
+      "roles": ["support"],
+      "requires": ["pay"],
+      "when": {"==": [{"var": "pay.outcome"}, "declined"]},
+      "outcomes": {"called": {"display": {"title": "Customer called"}}}
     }
   },
   "sequence": ["review", "pay"]
@@ -48,7 +56,8 @@ The quickstart's refund, as `ventoux check` writes it to `build/refund.json`:
 Read aloud: a refund's case file holds the order, the amount asked for, and the amount approved.
 Someone in support reviews the request and approves it, saying how much, or rejects it. Then, if
 the review approved it, the customer is refunded the approved amount; above 100, a team lead
-approves the payment first. Review first, then pay.
+approves the payment first. Review first, then pay. If the payment provider declines the refund,
+someone in support calls the customer.
 
 Every step, field and outcome has a business title, in its `display` block: what people read,
 apart from what the engine does (brief, D5). A step without a title is refused when the
@@ -187,7 +196,7 @@ assert not run.closed
 A business failure is an answer, not an error (brief, D17). `payments.refund@2` declares the
 outcome `declined`; when the provider declines, `pay` is done with that outcome, and
 `pay.outcome` reads `"declined"`, tagged with the contract that declares it
-(`system:payments.refund@2`). A step can react to it:
+(`system:payments.refund@2`). The refund reacts to it with its third step:
 
 ```json
 "call_customer": {
@@ -207,7 +216,9 @@ started call_customer#1: waiting for called by support
 ```
 
 A step's milestones are reached only when it is done with `done`: a declined refund doesn't reach
-`paid`. An outcome the contract doesn't declare is never read as one: it is a failure.
+`paid`. An outcome the contract doesn't declare is never read as one: it is a failure. Without
+`call_customer`, a declined refund would close the case, `closed: nothing left to do`, with
+nobody told; `ventoux check` warns about an outcome no condition reads (`OUTCOME_UNREAD`, below).
 
 ## What a step gives: outputs in the case file
 
@@ -598,7 +609,7 @@ definition was ever checked.
 ### Steps that can never run
 
 Here is a claim: check the customer, then an adjuster assesses the claim, then it is paid,
-behind a team lead's approval.
+behind a team lead's approval. If the payment is declined, the adjuster calls the customer.
 
 ```json
 {
@@ -644,6 +655,14 @@ behind a team lead's approval.
       "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "payout"}},
       "approval": {"roles": ["support-lead"], "display": {"reason": "Every payout needs a team lead"}},
       "reaches": ["paid"]
+    },
+    "call_customer": {
+      "kind": "task",
+      "display": {"title": "Call the customer about the declined payout"},
+      "roles": ["adjuster"],
+      "requires": ["pay"],
+      "when": {"==": [{"var": "pay.outcome"}, "declined"]},
+      "outcomes": {"called": {"display": {"title": "Customer called"}}}
     }
   },
   "closes_when": ["paid"]
@@ -657,14 +676,16 @@ Change `assess` to also require `paid`:
 ```
 
 Run as it is, the case checks the customer, and then nothing can start: `assess` waits for `paid`,
-which only `pay` reaches, and `pay` waits for `assessed`, which only `assess` reaches. Nothing is
-left to do, so the case closes, `closed: nothing left to do`, and nobody hears why. The check says
-so before any case opens:
+which only `pay` reaches, and `pay` waits for `assessed`, which only `assess` reaches; and
+`call_customer` waits for `pay`. Nothing is left to do, so the case closes, `closed: nothing left
+to do`, and nobody hears why. The check says so before any case opens:
 
 ```
 steps.assess.requires  DEADLOCK  assess and pay wait on each other: assess requires paid, which
 only pay reaches; pay requires assessed, which only assess reaches: remove one of these
 requirements
+steps.call_customer.requires  NEVER_RUNS  call_customer can never run: it requires pay, which can
+never run: fix pay first
 closes_when  CLOSE_UNREACHABLE (warning)  paid can never be reached, so closes_when never
 closes claim, and it closes when nothing is left to do: reach paid from a step that can run, or
 remove it from closes_when
@@ -823,3 +844,99 @@ anyone to approve a payment it could never make.
 who also holds `fraud` may approve, and the check can't know who holds which roles. When the case
 runs, an approval from anyone who can't see every value the step reads is refused (brief, D30).
 An input gets one of these issues at most: the first the runtime would meet when the step runs.
+
+### What the check warns about
+
+Some definitions do what they say, and still surprise their author when a case runs. The check
+warns about four, each of them something `run_case` really does with the definition. A warning
+lets the definition through: it may be what you meant.
+
+**An outcome nobody reads.** Take `call_customer` out of the quickstart's refund. When the
+provider declines, `pay#1 gave declined`, nothing else starts, and the case closes, `closed:
+nothing left to do`, with nobody told:
+
+```
+steps.pay  OUTCOME_UNREAD (warning)  pay may end declined, and no condition tells that from done,
+so the case goes on and nobody is told: add a step that runs when pay.outcome is declined
+```
+
+Each outcome a contract declares is checked on its own, and so is a plan step's `failed`. An
+outcome is read when some condition can tell it from `done`: it compares the step's outcome with
+it, or with `done` (`==`, `!=`, `in`). A task's outcomes get no warning: a `reject` that does
+nothing is how a "no" is written, and the person who chose it knows.
+
+**A value read before it is surely set.** Leave `pay`'s `when` out. When the review is rejected,
+`pay` still starts, reads `approved_amount`, which only `approve` sets, and fails: the case needs
+attention instead of closing:
+
+```
+steps.pay.approval.when  MAY_BE_UNSET (warning)  pay reads approved_amount, which only review's
+approve sets, and pay may run after review is answered otherwise: then pay fails and needs
+attention: run pay only when review.outcome is approve
+```
+
+A value is surely set where a step reads it when:
+
+- it is given at the opening;
+- the step waits for the step that sets it (`requires`, directly or through the steps it
+  requires, or `sequence`), and every way that step can end sets it: a task all of whose outcomes
+  set the field; an activity whose contract declares no outcomes, for its outputs; any step, for
+  its outcome;
+- the step requires a milestone that only setting it reaches: the claim's `pay` requires
+  `assessed`, which only `accept` reaches, and `accept` sets `payout`;
+- or a guard says so. The step's `when` is read first, so it guards the approval's `when` and the
+  inputs: a `when` that is, or holds in an `and` or an `if`'s condition, `review.outcome ==
+  "approve"` (an outcome that sets the field), `in` a list of such outcomes, `exists`, or the
+  writer's outcome `== "done"` for its outputs. Inside one expression only an `if` guards its
+  branch: `and` and `or` read all their parts (brief, D20).
+
+If the step that sets the value can only run after the step that reads it, and the read isn't
+guarded, the step fails every time it starts. That is an error:
+
+```
+steps.notify.inputs.refund  SET_AFTER  notify reads pay.refund_id, which only pay gives, and pay
+runs only after notify: notify fails every time it starts: read it in a step that comes after
+pay, or run notify after pay
+```
+
+A step that can be proposed again gets the warning instead: a later run may read the value.
+
+**A `max_age` that can only end in attention.** Only a read is fetched again (brief, D33). A
+`max_age` on any other fact means a person decides each time it is stale:
+
+```
+steps.pay.max_age.approved_amount  NEVER_REFRESHED (warning)  approved_amount comes from a
+person, in review, and can't be fetched again: whenever it is older than pay's max_age allows,
+pay needs attention: keep it only if a person should decide each time
+```
+
+The same for a fact from the opening, from an activity that writes, notifies or computes, from a
+workflow step or a plan step, and from a read whose step always needs an approval: a refresh
+never asks for one.
+
+**An approval that guards a neighbouring value.** An approval guards the values its step uses
+(brief, D9). Write the refund's approval on the amount asked for:
+
+```json
+"when": {">": [{"var": "amount"}, 100]}
+```
+
+A customer asks for 50 and the reviewer approves 5000: no approval is needed, and 5000 is paid.
+
+```
+steps.pay.approval.when  APPROVAL_ELSEWHERE (warning)  pay's approval reads amount, and pay is
+given only order_id and approved_amount: it guards a value pay doesn't use: read what pay is
+given, such as approved_amount
+```
+
+| Code | Kind | What is wrong | Example message |
+|---|---|---|---|
+| `OUTCOME_UNREAD` | warning | an activity or plan step may end with an outcome no condition tells from `done` | as above |
+| `MAY_BE_UNSET` | warning | a step reads a value that may not be set yet when it runs | as above |
+| `SET_AFTER` | error | a step reads a value only a step after it sets, unguarded, and can't run again later | as above |
+| `NEVER_REFRESHED` | warning | a `max_age` names a fact that can never be fetched again | as above |
+| `APPROVAL_ELSEWHERE` | warning | an approval's `when` reads none of the fields its step is given | as above |
+
+A step already refused by an error gets none of these, and neither does a value whose step has
+one: one cause, one issue. No message quotes a value from a case file, or a literal of the
+definition.
