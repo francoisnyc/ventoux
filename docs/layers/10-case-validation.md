@@ -758,6 +758,15 @@ Each starts with its negative test, seen failing for the right reason.
 - **One pass gave what the run records at once** (slice 1): the first test's code already stamped
   outputs. Seen failing with every output stamped `system:kyc`, then restored.
 
+- **A case step's `only_from` refusal had a plan's advice** (slice 1): `core.validate`'s
+  `what_to_do` tells a plan's author to give the input in a case step. A case's check has its
+  own: `use a value opener gave`. Found reading the code, fixed test-first.
+- **A plan step's check is `validate`'s policy check with the case's sources** (slice 2):
+  `core.validate.refused_inputs(plan, catalog, sources)` is the new seam, `validate` unchanged.
+  A person opening refuses whatever a system opening does, and more, so the check walks the
+  refusals when a person opens it and asks which also hold when a system does. "The plan's own
+  mark is the plan's issue" passed at once; seen failing with the marks added back.
+
 ### Not in 10c
 
 - Teaching warnings (10d), among them D9's approval whose condition reads none of its step's
@@ -775,7 +784,7 @@ Drafted with the note; checked against the tests in slice 6.
 | A value from a source an input's policy refuses is `INPUT_POLICY`, the guide's message word for word; run, the step fails with the same reason | V `test_an_untrusted_value_is_refused_where_only_trusted_ones_go` |
 | One pass gives what the runtime records: a value computed from several fields, an output with its contract's source or `untrusted:undeclared`, an outcome from its contract | V `test_one_pass_gives_the_sources_the_run_records` |
 | A refusal that depends on who opens the case is a warning, `OPENER_DECIDES`; one that holds for any opener is an error | V `test_who_opens_the_case_decides_only_a_warning` |
-| A plan step's fields carry the case's sources into the plan: refused at the case's input before the plan runs; run, the plan stops; the plan's own marks are the plan's issue | V `test_a_plan_step_carries_the_cases_sources_into_its_plan` |
+| A plan step's fields carry the case's sources into the plan: refused at the case's input before the plan runs; run, the plan stops; the plan's own marks are the plan's issue; a field a wait sets is a person's | V `test_a_plan_step_carries_the_cases_sources_into_its_plan`, `test_a_plans_own_mark_is_the_plans_issue` |
 | A reference input given another system's reference, a text or a computed value is `REFERENCE`, in activity and plan steps; run, the step fails (G7: the fabricated order ID is no longer paid) | V `test_a_reference_goes_only_where_its_system_is_expected`; I `test_a_plan_field_takes_only_a_reference_to_its_system` |
 | An input of another type than it takes is `INPUT_TYPE`; run, it is refused, never converted (G6), in a case and in a plan | V `test_an_input_is_given_the_type_it_takes`; I `test_an_input_is_never_converted` |
 | A plan's fields are checked against their types when it starts (G7) | I `test_a_plan_field_takes_a_value_of_its_type` |

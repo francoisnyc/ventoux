@@ -1436,3 +1436,53 @@ def test_who_opens_the_case_decides_only_a_warning() -> None:
         "ledger.record@1 takes amount only from opener, and this value comes from "
         "approved_amount (person:answering review): use a value opener gave",
     )
+
+
+# --- 10c, slice 2: into plan steps ---
+
+
+def settled_from_the_estimate() -> dict[str, Any]:
+    """The refund through `refund-order@1`, its amount the customer's, declared untrusted."""
+    refund = settled(inputs={"order_id": {"var": "order_id"}, "amount": {"var": "amount"}})
+    refund["fields"]["amount"]["source"] = "untrusted:customer"
+    return refund
+
+
+def test_a_plan_step_carries_the_cases_sources_into_its_plan() -> None:
+    # Refused at the case's input, before the plan runs, naming the plan's state (brief, D36).
+    assert checked_with(settled_from_the_estimate(), PLANS) == [
+        Issue(
+            "steps.settle.inputs.amount",
+            "INPUT_POLICY",
+            "refund-order@1, in its state pay: payments.refund@2 takes amount only from a system "
+            "or a person, never from untrusted data, and this value comes from amount (the "
+            "opener, untrusted:customer): use a value a system or a person gave",
+        )
+    ]
+    # The proof: run as it is, the plan starts, asks for its approval, and stops at `pay`.
+    run = run_case(
+        settled_from_the_estimate(),
+        file=SMALL,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        plans=PLANS,
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+    )
+    assert run.needs_attention == [
+        (
+            "settle#1: refund-order@1 stopped: payments.refund@2 takes amount only from a system "
+            "or a person, never from untrusted data, and this value comes from amount "
+            "(system:opener, untrusted:customer)"
+        )
+    ]
+
+
+def test_a_plans_own_mark_is_the_plans_issue() -> None:
+    # A plan declaring its own field untrusted refuses it wherever it is published (layer 3's
+    # `validate`): the case's check doesn't say it again, since the case can't change it.
+    marked_plan = refund_order()
+    marked_plan["fields"]["amount"]["source"] = "untrusted:customer"
+    assert checked_with(settled(), {"refund-order@1": marked_plan}) == []
+    # A field a person sets in the plan comes from them: trusted, the case's input or not.
+    given = settled(plan="review-and-pay@1", inputs={"order_id": {"var": "order_id"}})
+    assert checked_with(given, {"review-and-pay@1": review_and_pay()}) == []

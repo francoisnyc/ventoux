@@ -8,11 +8,13 @@ sources are known in one pass (brief, D34) (brief, D36). See docs/layers/10-case
 from collections.abc import Collection, Mapping
 
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
+from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract
 from ventoux.core.output_sources import output_sources
+from ventoux.core.plan import Plan, set_by
 from ventoux.core.policy import OnlyFrom, Policy, refusal
-from ventoux.core.provenance import answering, provenance
-from ventoux.core.validate import Issue
+from ventoux.core.provenance import answering, fields_read, provenance
+from ventoux.core.validate import Issue, refused_inputs
 
 # Who opens a case is the one writer the check can't know: a system, recorded as `system:opener`,
 # or a person, recorded as `person:<who>`. The check reads the case both ways.
@@ -65,12 +67,31 @@ def case_sources(
     return sources
 
 
+def policy_issue(
+    path: str, message: str, policy: Policy, field: str, refused: tuple[bool, bool]
+) -> Issue | None:
+    """The issue for an input whose value `policy` refuses (`message`) when a system, then a
+    person, opens the case: an error if refused both times, a warning if only who opens it
+    decides, which the check can't know (brief, D34) (brief, D36)."""
+    if all(refused):
+        return Issue(path, "INPUT_POLICY", f"{message}: {what_to_do(policy)}")
+    if any(refused):
+        return Issue(
+            path,
+            "OPENER_DECIDES",
+            f"{message}, which is refused when a person opens the case: open it only from a "
+            f"system, or give {field} a value a system gave",
+            "warning",
+        )
+    return None
+
+
 def policy_issues(
     case: CaseDefinition, contracts: Mapping[str, Contract], said: Collection[str]
 ) -> list[Issue]:
-    """Each activity and workflow step's input against its contract's input policies: refused
-    whoever opens the case, an error; refused only when a person opens it, a warning (brief, D21).
-    An input at a path in `said` already has its issue (one cause, one issue)."""
+    """Each activity and workflow step's input against its contract's input policies, which say
+    where it may come from (brief, D21). An input at a path in `said` already has its issue (one
+    cause, one issue)."""
     by_a_system = case_sources(case, contracts, BY_A_SYSTEM)
     by_a_person = case_sources(case, contracts, BY_A_PERSON)
     issues: list[Issue] = []
@@ -82,26 +103,79 @@ def policy_issues(
             if path in said:
                 continue
             for policy in contract.policies(field):
-                refused = [
-                    policy.refuses(provenance(expression, sources)) is not None
-                    for sources in (by_a_system, by_a_person)
-                ]
-                if not any(refused):
-                    continue
+                refused = (
+                    policy.refuses(provenance(expression, by_a_system)) is not None,
+                    policy.refuses(provenance(expression, by_a_person)) is not None,
+                )
                 message = refusal(contract.reference, field, policy, expression, by_a_person, named)
-                if all(refused):
-                    issues.append(Issue(path, "INPUT_POLICY", f"{message}: {what_to_do(policy)}"))
-                else:
-                    # Only who opens the case decides, which the check can't know: a warning
-                    # (brief, D34) (brief, D36).
-                    issues.append(
-                        Issue(
-                            path,
-                            "OPENER_DECIDES",
-                            f"{message}, which is refused when a person opens the case: open it "
-                            f"only from a system, or give {field} a value a system gave",
-                            "warning",
-                        )
-                    )
-                break  # one issue per input: the first the runtime meets
+                issue = policy_issue(path, message, policy, field, refused)
+                if issue is not None:
+                    issues.append(issue)
+                    break  # one issue per input: the first the runtime meets
+    return issues
+
+
+def plan_fields_sources(
+    step: PlanStep, plan: Plan, sources: Mapping[str, frozenset[str]]
+) -> dict[str, frozenset[str]]:
+    """Where each of the plan's fields comes from: what the case gives it, with the sources of
+    what it read (brief, D28), or whoever answers the wait that sets it. The plan's own marks are
+    left out: a plan refusing its own field is the plan's issue (layer 3)."""
+    setters = set_by(plan)
+    return {
+        field: frozenset({answering(setters[field])})
+        if field in setters
+        else provenance(step.inputs[field], sources)
+        for field in plan.fields
+    }
+
+
+def plan_policy_issues(
+    case: CaseDefinition,
+    catalog: Catalog,
+    contracts: Mapping[str, Contract],
+    plans: Mapping[str, Plan],
+    said: Collection[str],
+) -> list[Issue]:
+    """Each plan step's inputs carried into its plan: each activity in the plan checked with the
+    sources the case gives its fields, at the case's input, before the plan runs (brief, D36). A
+    step with an input issue already is left out (one cause, one issue)."""
+    by_a_system = case_sources(case, contracts, BY_A_SYSTEM)
+    by_a_person = case_sources(case, contracts, BY_A_PERSON)
+    issues: list[Issue] = []
+    for name, plan in plans.items():
+        step = case.steps[name]
+        assert isinstance(step, PlanStep)  # only a plan step runs a plan
+        if any(path.startswith(f"steps.{name}.inputs") for path in said):
+            continue
+        when_a_system_opens = plan_fields_sources(step, plan, by_a_system)
+        when_a_person_opens = plan_fields_sources(step, plan, by_a_person)
+        refused_anyway = {
+            (r.state, r.field) for r in refused_inputs(plan, catalog, when_a_system_opens)
+        }
+        given: set[str] = set()
+        # A person opening refuses whatever a system opening does, and more.
+        for refused in refused_inputs(plan, catalog, when_a_person_opens):
+            reference, field, policy = refused.contract.reference, refused.field, refused.policy
+            message = refusal(
+                reference, field, policy, refused.expression, when_a_person_opens, named
+            )
+            refused_when = ((refused.state, field) in refused_anyway, True)  # system, person
+            # At each case input that feeds a refused field of the plan, once.
+            for plan_field in fields_read(refused.expression):
+                path = f"steps.{name}.inputs.{plan_field}"
+                if plan_field not in step.inputs or plan_field in given:
+                    continue
+                if policy.refuses(when_a_person_opens[plan_field]) is None:
+                    continue
+                issue = policy_issue(
+                    path,
+                    f"{step.plan}, in its state {refused.state}: {message}",
+                    policy,
+                    plan_field,
+                    refused_when,
+                )
+                if issue is not None:
+                    given.add(plan_field)
+                    issues.append(issue)
     return issues

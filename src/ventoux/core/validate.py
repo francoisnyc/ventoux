@@ -210,6 +210,42 @@ def policy_issues(
     return issues
 
 
+@dataclass(frozen=True)
+class Refused:
+    """An activity's input in a plan that an input policy refuses."""
+
+    state: str  # the plan's activity state
+    contract: ActivityContract  # the activity it calls
+    field: str  # the input
+    policy: Policy  # the first of its policies that refuses the value
+    expression: Expression  # what the plan gives it
+
+
+def refused_inputs(
+    plan: Plan, catalog: Catalog, sources: Mapping[str, frozenset[str]]
+) -> list[Refused]:
+    """Each activity input of `plan` an input policy refuses when its fields come from
+    `sources`, not from `case`: case validation's view of a plan step, where the case says where
+    each field comes from (brief, D36). An input whose activity is missing, or whose expression is
+    refused, is left out: `validate` says so where the plan is published."""
+    found: list[Refused] = []
+    for name, state in plan.states.items():
+        if not isinstance(state, ActivityState):
+            continue
+        try:
+            contract = catalog.get(state.activity)
+        except NotInCatalog:
+            continue
+        for field, expression in state.inputs.items():
+            if expression_issues("", expression, plan.fields):
+                continue
+            given = provenance(expression, sources)
+            refusing = [p for p in contract.policies(field) if p.refuses(given) is not None]
+            if refusing:
+                found.append(Refused(name, contract, field, refusing[0], expression))
+    return found
+
+
 def declared(plan: Plan, name: str) -> set[str]:
     """The source the plan declares on the field `name`, such as `untrusted:customer`, if any."""
     return {plan.sources[name]} if name in plan.sources else set()

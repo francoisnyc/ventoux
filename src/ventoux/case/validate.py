@@ -14,7 +14,7 @@ from ventoux.case.calls import (
     supplied_plans,
 )
 from ventoux.case.definition import CaseDefinition, TaskStep
-from ventoux.case.flow import policy_issues
+from ventoux.case.flow import plan_policy_issues, policy_issues
 from ventoux.case.reach import (
     Through,
     can_happen,
@@ -72,6 +72,7 @@ def validate_case(
     # Where each value comes from (10c): an input already refused isn't asked again.
     said = {issue.path for issue in found}
     found += policy_issues(case, contracts, said)
+    found += plan_policy_issues(case, catalog, contracts, supplied, said)
     found += role_issues_of(case, catalog, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     return found + close_unreachable(case, can) + unreachable_milestones(case)
