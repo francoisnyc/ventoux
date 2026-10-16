@@ -14,7 +14,13 @@ from ventoux.case.calls import (
     supplied_plans,
 )
 from ventoux.case.definition import CaseDefinition, TaskStep
-from ventoux.case.flow import plan_policy_issues, policy_issues, reference_issues
+from ventoux.case.flow import (
+    no_sources_issues,
+    plan_policy_issues,
+    policy_issues,
+    reference_issues,
+    type_issues,
+)
 from ventoux.case.reach import (
     Through,
     can_happen,
@@ -73,8 +79,9 @@ def validate_case(
     # refused isn't asked again (one cause, one issue).
     found += reference_issues(case, contracts, supplied, {issue.path for issue in found})
     said = {issue.path for issue in found}
-    found += policy_issues(case, contracts, said)
-    found += plan_policy_issues(case, catalog, contracts, supplied, said)
+    found += policy_issues(case, contracts, said) + no_sources_issues(case, supplied, said)
+    found += type_issues(case, catalog, contracts, supplied, {issue.path for issue in found})
+    found += plan_policy_issues(case, catalog, contracts, supplied, {i.path for i in found})
     found += role_issues_of(case, catalog, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     return found + close_unreachable(case, can) + unreachable_milestones(case)

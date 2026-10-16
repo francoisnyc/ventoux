@@ -1369,14 +1369,15 @@ class RecordOutput(BaseModel):
     entry_id: str
 
 
-def with_ledger() -> Catalog:
-    """The development catalog, and `ledger.record@1`, taking only an amount the opener gave."""
+def with_ledger(taking: type[BaseModel] | None = None) -> Catalog:
+    """The development catalog, and `ledger.record@1`, taking only an amount the opener gave, or
+    what `taking` says."""
     catalog = copy.deepcopy(CATALOG)
     catalog.register(
         ActivityContract(
             name="ledger.record",
             version=1,
-            input=RecordInput,
+            input=taking or RecordInput,
             output=RecordOutput,
             risk="low",
             effect="compute",
@@ -1540,3 +1541,82 @@ def test_a_plan_steps_reference_field_takes_a_reference_of_its_system() -> None:
     # The proof: run as it is, the step fails before the plan starts (G7).
     run = run_case(settle, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS)
     assert run.needs_attention == [f"settle#1: {reason}"]
+
+
+# --- 10c, slice 4: types ---
+
+
+def test_an_input_is_given_the_type_it_takes() -> None:
+    text = refund_with(inputs={"order_id": {"var": "order_id"}, "amount": "40"})
+    assert issues(text) == [
+        Issue(
+            "steps.pay.inputs.amount",
+            "INPUT_TYPE",
+            "payments.refund@2 takes amount as a number, and is given a string: give it a number",
+        )
+    ]
+    # The proof: run as it is, the text is refused, never paid as 40 (G6). Before 10c, it was.
+    assert small_refund(text).needs_attention == [
+        (
+            "pay#1: payments.refund@2 doesn't take these inputs: amount: Input should be an "
+            "instance of Decimal"
+        )
+    ]
+    # A plan's field too: the plan doesn't start (G7).
+    as_text = {"string": [{"var": "approved_amount"}]}
+    settle = settled(inputs={"order_id": {"var": "order_id"}, "amount": as_text})
+    assert checked_with(settle, PLANS) == [
+        Issue(
+            "steps.settle.inputs.amount",
+            "INPUT_TYPE",
+            "refund-order@1 takes amount as a number, and is given a string: give it a number",
+        )
+    ]
+    run = run_case(settle, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS)
+    assert run.needs_attention == [
+        "settle#1: refund-order@1 can't start: amount is a number, and is given a string"
+    ]
+
+
+class CountInput(BaseModel):
+    amount: int  # a whole number: no value of a case is one
+
+
+def test_an_input_no_value_of_a_case_fits_is_refused() -> None:
+    ledger = with_ledger(taking=CountInput)
+    counted = refund_recording({"var": "amount"})
+    assert validate_case(parse_case(counted), ledger) == [
+        Issue(
+            "steps.record.inputs.amount",
+            "INPUT_TYPE",
+            "ledger.record@1 takes amount as int, which no value of a case ever is: a case holds "
+            "numbers, strings and booleans; ask the platform team for a contract taking a "
+            "Decimal, a str or a bool",
+        )
+    ]
+    # The proof: a whole number held as a decimal is refused, never converted (G6).
+    record = {"ledger.record@1": lambda inputs: {"entry_id": "led-1"}}
+    [refused] = small_refund(counted, catalog=ledger, activities=record).needs_attention
+    assert refused == (
+        "record#1: ledger.record@1 doesn't take these inputs: amount: Input should be a valid "
+        "integer"
+    )
+
+
+def test_a_plan_field_given_only_literals_has_no_sources() -> None:
+    literal = settled(inputs={"order_id": {"var": "order_id"}, "amount": Decimal(40)})
+    assert checked_with(literal, PLANS) == [
+        Issue(
+            "steps.settle.inputs.amount",
+            "NO_SOURCES",
+            "refund-order@1 takes amount from the case, and is given only values written in the "
+            "definition, which come from nobody: give it a field of the case file",
+        )
+    ]
+    run = run_case(literal, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS)
+    assert run.needs_attention == [
+        (
+            "settle#1: refund-order@1 can't start: amount comes with no sources: say where its "
+            "value came from, such as system:opener"
+        )
+    ]

@@ -781,6 +781,25 @@ Each starts with its negative test, seen failing for the right reason.
 - **The Temporal comparison passed at once** (slice 3), the driver's check written first; seen
   failing with it removed (the child started).
 
+- **G7's type half met five earlier tests** (slice 4), all in `tests/test_interpreter.py`.
+  Three gave a plan's number field an `int` (`sourced(250, …)`), now `Decimal(250)`, as the case
+  file holds numbers. One gave a reference field a number to reach the contract's refusal; it now
+  writes the number in the plan's input, which still reaches it. Two (one of them the plans
+  guide's example) gave the text `"250"` to a number field so a condition couldn't be read; the
+  plan now doesn't start. Their subject, a condition that can't be evaluated stops the run, still
+  matters for a plan run unchecked, so they declare `amount` a text, which `validate` refuses and
+  the runtime meets on its own (learning question 34); the plans guide says so, and lists the
+  type among what refuses a run's start. No assertion was loosened.
+- **G7 found a bug of its own making** (slice 4): the new branch named its type `declared`, which
+  `refuse_to_start` already used for the list of fields, so an undeclared field's message listed
+  `type='number'`. Caught by layer 5's test; renamed.
+- **A list can't be given to a plan,** as it can't be given at a case's opening: `fits` fails
+  closed on a type it doesn't know (a list, for now). No plan in the repository has a list field;
+  `INPUT_TYPE` says the same, as a proof. Lists given across the boundary wait for a layer that
+  needs them.
+- **An `int` input passed at once** (slice 4), its branch written with the first; seen failing
+  with `int` read as a number.
+
 ### Not in 10c
 
 - Teaching warnings (10d), among them D9's approval whose condition reads none of its step's
@@ -802,7 +821,7 @@ against the tests in slice 6.
 | A refusal that depends on who opens the case is a warning, `OPENER_DECIDES`; one that holds for any opener is an error | V `test_who_opens_the_case_decides_only_a_warning` |
 | A plan step's fields carry the case's sources into the plan: refused at the case's input before the plan runs; run, the plan stops; the plan's own marks are the plan's issue; a field a wait sets is a person's | V `test_a_plan_step_carries_the_cases_sources_into_its_plan`, `test_a_plans_own_mark_is_the_plans_issue` |
 | A reference input given another system's reference, a text or a computed value is `REFERENCE`, in activity and plan steps; run, the step fails, in memory and on Temporal (G7: the made-up order ID is no longer paid) | V `test_a_reference_goes_only_where_its_system_is_expected`, `test_a_plan_steps_reference_field_takes_a_reference_of_its_system`; P `test_a_plan_field_takes_only_a_reference_to_its_system`; T `test_a_plan_field_takes_only_a_reference_of_its_system_on_temporal` |
-| An input of another type than it takes is `INPUT_TYPE`; run, it is refused, never converted (G6), in a case and in a plan | V `test_an_input_is_given_the_type_it_takes`; I `test_an_input_is_never_converted` |
+| An input of another type than it takes is `INPUT_TYPE`; run, it is refused, never converted (G6), in a case and in a plan; a contract input no case value fits (an `int`) is refused, and so is a whole number held as a decimal | V `test_an_input_is_given_the_type_it_takes`, `test_an_input_no_value_of_a_case_fits_is_refused`; I `test_an_input_is_never_converted` |
 | A plan's fields are checked against their types when it starts (G7) | I `test_a_plan_field_takes_a_value_of_its_type` |
 | A plan field given only literals is `NO_SOURCES`; run, the plan doesn't start | V `test_a_plan_field_given_only_literals_has_no_sources` |
 | A sensitive value given to a workflow step is `SENSITIVE_TO_WORKFLOW`; run, the step fails | V `test_a_workflow_step_is_never_given_a_sensitive_value` |

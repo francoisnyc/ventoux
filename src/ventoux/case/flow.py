@@ -6,12 +6,27 @@ sources are known in one pass (brief, D34) (brief, D36). See docs/layers/10-case
 """
 
 from collections.abc import Collection, Mapping
+from decimal import Decimal
+from types import UnionType
+from typing import Union, get_args, get_origin
+
+from pydantic.fields import FieldInfo
 
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
+from ventoux.case.types import case_types
 from ventoux.core.before_activity import not_a_reference_to
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract
-from ventoux.core.expressions import ReferenceType
+from ventoux.core.expressions import (
+    BooleanType,
+    FieldType,
+    NumberType,
+    OutcomeType,
+    ReferenceType,
+    StringType,
+    check,
+)
+from ventoux.core.expressions.check import a_type
 from ventoux.core.output_sources import output_sources
 from ventoux.core.plan import Plan, set_by
 from ventoux.core.policy import OnlyFrom, Policy, refusal
@@ -108,6 +123,120 @@ def reference_issues(
                     "REFERENCE",
                     f"{reference} takes {field} as a reference to {system}, and is given {wrong}: "
                     f"give it a reference to {system}, read as it is",
+                )
+            )
+    return issues
+
+
+def no_sources_issues(
+    case: CaseDefinition, plans: Mapping[str, Plan], said: Collection[str]
+) -> list[Issue]:
+    """Each plan field given only values written in the definition: they come from nobody, so the
+    plan refuses to start (brief, D28) (brief, D36). A contract's input takes a literal: no
+    sources pass `trusted_only`, and `only_from` refuses them as its own refusal."""
+    issues: list[Issue] = []
+    for name, plan in plans.items():
+        step = case.steps[name]
+        assert isinstance(step, PlanStep)  # only a plan step runs a plan
+        for field, expression in step.inputs.items():
+            path = f"steps.{name}.inputs.{field}"
+            if path not in said and field in plan.fields and not fields_read(expression):
+                issues.append(
+                    Issue(
+                        path,
+                        "NO_SOURCES",
+                        f"{step.plan} takes {field} from the case, and is given only values "
+                        "written in the definition, which come from nobody: give it a field of "
+                        "the case file",
+                    )
+                )
+    return issues
+
+
+def taken(info: FieldInfo) -> FieldType | None:
+    """The type a contract's input takes, as a case's value has it: a `Decimal` is a number, a
+    `str` a string, a `bool` a boolean, each possibly optional. None for any other: no value of a
+    case is ever exactly one, and inputs are validated strictly (brief, D36)."""
+    annotation = info.annotation
+    # typing: `Decimal | None` is a union; its other member is what a value must be.
+    members = get_args(annotation) if get_origin(annotation) in (Union, UnionType) else ()
+    exact = [member for member in members if member is not type(None)] if members else [annotation]
+    if len(exact) != 1:
+        return None
+    if exact[0] is Decimal:
+        return NumberType()
+    if exact[0] is str:
+        return StringType()
+    if exact[0] is bool:
+        return BooleanType()
+    return None
+
+
+def fits_type(given: FieldType, wanted: FieldType) -> bool | None:
+    """Whether a value of the type `given` always fits `wanted` (True), never does (False), or
+    only depends on the value (None), as the runtime's `fits` and strict validation read it."""
+    if isinstance(wanted, StringType):
+        # A string, an outcome and a reference are all texts.
+        return isinstance(given, StringType | OutcomeType | ReferenceType)
+    if isinstance(wanted, OutcomeType):
+        if isinstance(given, OutcomeType):
+            # Every outcome it may give is one the field takes, or some aren't.
+            return True if set(given.outcomes) <= set(wanted.outcomes) else None
+        return None if isinstance(given, StringType) else False
+    if isinstance(wanted, NumberType | BooleanType):
+        return type(given) is type(wanted)
+    # Fail closed: a type the runtime's `fits` doesn't know (a list, for now) fits nothing.
+    return False
+
+
+def type_issues(
+    case: CaseDefinition,
+    catalog: Catalog,
+    contracts: Mapping[str, Contract],
+    plans: Mapping[str, Plan],
+    said: Collection[str],
+) -> list[Issue]:
+    """Each input given a value of another type than it takes: a contract's (strict validation,
+    G6) or a plan's field (the plan's start, G7). Never converted (brief, D36). A reference is
+    `REFERENCE`'s, an input already refused isn't asked again (one cause, one issue)."""
+    types = case_types(case, catalog)
+    wanted: list[tuple[str, str, str, FieldType | None, str]] = []
+    for name, contract in contracts.items():
+        refs = references(contract.input)
+        for field, info in contract.input.model_fields.items():
+            if field != contract.idempotency_key and field not in refs:
+                kind = getattr(info.annotation, "__name__", str(info.annotation))
+                wanted.append((name, contract.reference, field, taken(info), kind))
+    for name, plan in plans.items():
+        for field, declared in plan.fields.items():
+            if not isinstance(declared, ReferenceType):
+                wanted.append((name, f"{plan.plan}@{plan.version}", field, declared, ""))
+    issues: list[Issue] = []
+    for name, reference, field, wanted_type, kind in wanted:
+        step = case.steps[name]
+        assert isinstance(step, CallStep | PlanStep)  # only these call a contract or a plan
+        path = f"steps.{name}.inputs.{field}"
+        if field not in step.inputs or path in said:
+            continue
+        if wanted_type is None:
+            issues.append(
+                Issue(
+                    path,
+                    "INPUT_TYPE",
+                    f"{reference} takes {field} as {kind}, which no value of a case ever is: a "
+                    "case holds numbers, strings and booleans; ask the platform team for a "
+                    "contract taking a Decimal, a str or a bool",
+                )
+            )
+            continue
+        given = check(step.inputs[field], types)
+        if fits_type(given, wanted_type) is False:
+            issues.append(
+                Issue(
+                    path,
+                    "INPUT_TYPE",
+                    f"{reference} takes {field} as {a_type(wanted_type)}, and is given "
+                    f"{a_type(given)}: give it {a_type(wanted_type)}",
                 )
             )
     return issues

@@ -53,13 +53,18 @@ def test_a_run_needs_exactly_the_declared_fields() -> None:
     with pytest.raises(RunRefused, match="amout is not a field of at-once: its fields are amount"):
         run_plan(
             ending_at_once(),
-            fields={"amount": sourced(250, "system:opener"), "amout": sourced(1, "system:opener")},
+            fields={
+                "amount": sourced(Decimal(250), "system:opener"),
+                "amout": sourced(Decimal(1), "system:opener"),
+            },
             answers=[],
         )
 
 
 def test_a_run_ends_as_its_final_state_says() -> None:
-    run = run_plan(ending_at_once(), fields={"amount": sourced(250, "system:opener")}, answers=[])
+    run = run_plan(
+        ending_at_once(), fields={"amount": sourced(Decimal(250), "system:opener")}, answers=[]
+    )
     assert run.status == "succeeded"
     assert [str(event) for event in run.history] == [
         "started at-once@1",
@@ -261,9 +266,11 @@ def test_a_mark_adds_distrust_never_removes_it() -> None:
 
 def test_an_input_that_does_not_fit_the_contract_stops_the_step() -> None:
     calls: list[dict[str, Any]] = []
+    # A number where the contract takes a text: written in the plan, since a field of another
+    # type than declared is refused before the run starts (brief, D36).
     run = run_plan(
-        looking_up(),
-        fields={"order_id": sourced(Decimal(1001), "system:orders")},  # a number, not a text
+        looking_up(inputs={"order_id": Decimal(1001)}),
+        fields={"order_id": sourced("A-1001", "system:orders")},
         answers=[],
         activities={"orders.lookup@1": recording(calls)},
     )
@@ -329,11 +336,15 @@ def guide_fork() -> dict[str, Any]:
 
 def test_a_condition_that_cannot_be_evaluated_stops_instead_of_skipping_the_approval() -> None:
     refunds: list[dict[str, Any]] = []
+    # `amount` declared a text, so `amount > 100` can't be read. `validate` refuses the plan; the
+    # runtime depends on nothing it did (learning question 34).
+    text_amount = guide_fork()
+    text_amount["fields"]["amount"] = {"type": "string"}
     run = run_plan(
-        guide_fork(),
+        text_amount,
         fields={
             "order_id": sourced("A-1001", "system:orders"),
-            "amount": sourced("250", "system:opener"),  # a text, so `amount > 100` can't be read
+            "amount": sourced("250", "system:opener"),
         },
         answers=[],
         activities={**FAKES, "payments.refund@2": recording(refunds)},
@@ -569,8 +580,11 @@ def test_the_guides_stopped_messages() -> None:
     )
     assert lines(run)[-1] == one_line(guide_block("is ever called:"))
 
+    # `amount` declared a text, which `validate` refuses: the runtime checks on its own.
+    text_amount = guide_fork()
+    text_amount["fields"]["amount"] = {"type": "string"}
     run = run_plan(
-        guide_fork(),
+        text_amount,
         fields={**GUIDE_FIELDS, "amount": sourced("250", "system:opener")},
         answers=[],
     )
@@ -630,7 +644,12 @@ def test_a_state_of_a_kind_the_engine_does_not_know_stops_the_step() -> None:
 
     run = asyncio.run(
         interpret(
-            odd, {"amount": sourced(250, "system:opener")}, CATALOG, call, wait, run_name="memory"
+            odd,
+            {"amount": sourced(Decimal(250), "system:opener")},
+            CATALOG,
+            call,
+            wait,
+            run_name="memory",
         )
     )
     assert run.status == "stopped"
@@ -795,3 +814,47 @@ def test_a_plan_records_no_activity_message() -> None:
     assert run.status == "stopped"
     assert run.reason == "orders.lookup@1 failed with RuntimeError: ‹sensitive›"
     assert "no order" not in "\n".join(map(str, run.history))
+
+
+# Layer 10c, G6: an input is never converted (brief, D36).
+
+
+def test_an_input_is_never_converted() -> None:
+    # Pydantic's lax mode turned the text "40" into the decimal 40, and the refund was paid. An
+    # input is validated strictly: a value of another type is refused, never converted.
+    plan = guide_plan()
+    plan["fields"]["amount"] = {"type": "string"}
+    calls: list[dict[str, Any]] = []
+    run = run_plan(
+        plan,
+        fields={
+            "order_id": sourced("ord-1", "system:opener"),
+            "amount": sourced("40", "system:opener"),
+        },
+        answers=[("approve_refund", "approve", "sam")],
+        activities={**FAKES, "payments.refund@2": recording(calls)},
+        people={"sam": ["support-lead"]},
+    )
+    assert calls == []
+    assert run.status == "stopped"
+    assert run.reason == (
+        "payments.refund@2 doesn't take these inputs: amount: Input should be an instance of "
+        "Decimal"
+    )
+
+
+# Layer 10c, G7: a plan's field takes a value of its type (brief, D36).
+
+
+def test_a_plan_field_takes_a_value_of_its_type() -> None:
+    # A plan read its fields as given: the text "40" reached its number field. Now it doesn't
+    # start; the refusal says the types, never the value (brief, D30).
+    with pytest.raises(RunRefused, match=r"^amount is a number, and is given a string$"):
+        run_plan(
+            guide_plan(),
+            fields={
+                "order_id": sourced("ord-1", "system:opener"),
+                "amount": sourced("40", "system:opener"),
+            },
+            answers=[],
+        )

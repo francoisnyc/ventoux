@@ -87,9 +87,11 @@ def checked_inputs(
             + "; ".join(f"{name}: not an input it takes" for name in unknown)
         )
     try:
-        # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
-        # On the plain values: the wrapper is for crossing Temporal, not for the contract.
-        contract.input.model_validate(unwrapped(given))
+        # Pydantic: `model_validate` checks a dict against the model's fields, or raises; with
+        # `strict=True` it converts nothing, so the text "40" is refused where a decimal is taken,
+        # never paid as 40 (brief, D36). On the plain values: the wrapper is for crossing Temporal,
+        # not for the contract.
+        contract.input.model_validate(unwrapped(given), strict=True)
     except ValidationError as error:
         raise InputRefused(
             f"{contract.reference} doesn't take these inputs: {one_line(error)}"
