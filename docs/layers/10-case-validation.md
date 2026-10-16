@@ -966,7 +966,10 @@ they name steps, fields, outcomes and effects (brief, D35).
 
 ### Where the code goes
 
-- `case/warnings.py` (new): what surely sets a value, and 10d's checks, one function per code.
+- `case/warnings.py` (new): 10d's checks, one function per code, and `warning_issues`, which
+  puts them together.
+- `case/known.py` (new, while building slice 2): what is surely known where a step reads a
+  value: which steps have surely ended, and how (`Known`, `both`, `either`, `Reading`).
 - `case/validate.py`: adds them, after every error, skipping steps and values an error names.
 - Tests: `tests/test_case_validation.py`; the quickstart's `call_customer` in `test_quickstart.py`.
 - Examples: `examples/refund/refund.json`, the quickstart, the cases guide's refund and claim, the
@@ -1035,6 +1038,30 @@ Each starts with its negative test, seen failing for the right reason.
 - **A task's and a workflow's outcomes are never unread** (slice 1): the claim's `deny` reaches
   nothing and nothing reads it, and it gives no issue; seen failing with tasks and workflows
   checked too.
+
+- **What a step knows is its own file, `case/known.py`** (slice 2): one idea, read as two small
+  operations, `both` (requirements all met: what each says) and `either` (a milestone several
+  things may reach: only what they agree on), over which steps have surely ended and how. The
+  `when` adds what it holds once true; an `if` adds its condition to its first branch.
+- **One cause, one issue was needed in slice 2, not 6:** three earlier tests met the new warning
+  where an error already spoke. `pay.approval`, not a value, is `EXPRESSION_INVALID`; a step
+  whose contract is missing gets nothing for what it would give (brief, D35); and the ledger's
+  `record`, reading `approved_amount` after the review only, has `INPUT_POLICY` at the same
+  input. So an expression an error names, and a value a missing contract or plan would give, get
+  no `MAY_BE_UNSET`.
+- **One earlier fixture was really wrong:** 10b's type test gives `thank`, which requires only
+  `check`, a `when` on `pay.outcome`, so `thank` may run before `pay` and fail. The test is about
+  types; it now reads the errors only, saying why.
+- **An unread outcome said by a read** (slice 2): the old `refund_fresh` gave `OUTCOME_UNREAD`
+  for `check_order`'s `not_found` beside `pay`'s `MAY_BE_UNSET` on its status, one cause twice.
+  `warning_issues` now leaves out the outcome of a writer whose output a read may miss.
+- **Tests that passed at once, each seen failing on a deliberate break:** every guard (`and`'s
+  parts, `if` with `false`, `exists`, `!=`, `in`, an `if`'s branch), each requirement rule
+  (through the steps required, a milestone, a task all of whose outcomes set the value, an
+  output only when done), `either` (read as `both`) and the outcome left to the read.
+- **A value reached another way reads as not waited for:** with a fast track reaching `assessed`
+  too, `pay reads payout, and doesn't wait for assess, which sets it`: `pay` may run before
+  `assess` answers, on the fast track. Accepted as said.
 
 ### Not in 10d
 

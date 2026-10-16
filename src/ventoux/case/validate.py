@@ -37,7 +37,7 @@ from ventoux.case.registered import role_issues_of, source_issues_of, system_iss
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
 from ventoux.case.types import case_types
-from ventoux.case.warnings import outcome_issues
+from ventoux.case.warnings import warning_issues
 from ventoux.core.catalog import Catalog
 from ventoux.core.validate import Issue
 
@@ -91,7 +91,7 @@ def validate_case(
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     found += close_unreachable(case, can) + unreachable_milestones(case)
     # What a definition may mean but surprises its author when a case runs (10d).
-    return found + outcome_issues(case, contracts, supplied)
+    return found + warning_issues(case, contracts, supplied, {i.path for i in found}, missing)
 
 
 def unreachable_milestones(case: CaseDefinition) -> list[Issue]:
