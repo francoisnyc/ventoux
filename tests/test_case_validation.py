@@ -31,6 +31,7 @@ from ventoux.testing import (
     Outcome,
     ProposalRefused,
     RetryRefused,
+    later,
     load_definition,
     payments_refund,
     propose,
@@ -2453,3 +2454,171 @@ def test_an_input_reads_every_value_it_names() -> None:
         assert rejected.needs_attention == [
             "notify#1: refund can't be evaluated: pay.refund_id has no known sources"
         ], refund
+
+
+# --- 10d, slice 4: a max_age that can only end in attention ---
+
+
+def refund_needing_fresh(field: str) -> dict[str, Any]:
+    """The quickstart's refund, `pay` needing `field` at most a day old."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["pay"]["max_age"] = {field: "1d"}
+    return refund
+
+
+def test_a_max_age_nothing_can_fetch_again_is_a_warning() -> None:
+    # The guide's output, word for word, line breaks aside.
+    assert printed(issues(refund_needing_fresh("approved_amount"))) == warning_output(3)
+    # The surprise: Sam approves three days after the review, and pay needs attention.
+    run = run_case(
+        refund_needing_fresh("approved_amount"),
+        file=LARGE,
+        answers=[LARGE_REVIEW, later("3d"), ("pay", "approve", "sam")],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: approved_amount was obtained 3 days ago, and pay needs it at most 1 day old: "
+            "it came from a person, so it can't be fetched again"
+        )
+    ]
+
+
+def paying_fresh(value: str, **steps: Any) -> dict[str, Any]:
+    """The quickstart's refund with `steps` added, `pay` reading `value` and needing it at most
+    a day old."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"].update(copy.deepcopy(steps))
+    refund["steps"]["pay"]["when"] = {"and": [APPROVED, {"exists": value}]}
+    refund["steps"]["pay"]["max_age"] = {value: "1d"}
+    return refund
+
+
+LOOKUP = {
+    "kind": "activity",
+    "display": {"title": "Look the order up"},
+    "activity": "orders.lookup@1",
+    "inputs": {"order_id": {"var": "order_id"}},
+}
+TEAM_LEAD = {"roles": ["support-lead"], "display": {"reason": "Look-ups need a team lead"}}
+
+
+def never_refreshed(definition: dict[str, Any], catalog: Catalog = CATALOG) -> list[str]:
+    found = validate_case(parse_case(definition), catalog)
+    assert [issue for issue in found if issue.severity == "error"] == []
+    return [issue.message for issue in found if issue.code == "NEVER_REFRESHED"]
+
+
+def test_only_a_read_needing_no_approval_is_fetched_again() -> None:
+    def why(value: str) -> list[str]:
+        return [
+            f"{value} comes from {source}: whenever it is older than pay's max_age allows, pay "
+            "needs attention: keep it only if a person should decide each time"
+            for source in WHY[value]
+        ]
+
+    WHY = {
+        "amount": ["the opening, and can't be fetched again"],
+        "review.outcome": ["a person, in review, and can't be fetched again"],
+        "draft.draft_id": ["draft, which has side effects (write), and can't be run again"],
+        "note.entry_id": [
+            "note, which computes it (compute), so running it again gives nothing new"
+        ],
+        "check_order.status": [
+            "check_order, a read that always needs an approval, which a refresh never asks for"
+        ],
+    }
+    draft = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+    }
+    note = {
+        "kind": "activity",
+        "display": {"title": "Note the order"},
+        "activity": "refunds.note@1",
+        "inputs": {"refund": {"var": "order_id"}},
+    }
+    assert never_refreshed(paying_fresh("amount")) == why("amount")
+    assert never_refreshed(paying_fresh("review.outcome")) == why("review.outcome")
+    assert never_refreshed(paying_fresh("draft.draft_id", draft=draft)) == why("draft.draft_id")
+    noted = paying_fresh("note.entry_id", note=note)
+    assert never_refreshed(noted, noting()) == why("note.entry_id")
+    # A read is fetched again; behind an approval only if the approval may not be needed.
+    assert never_refreshed(paying_fresh("check_order.status", check_order=LOOKUP)) == []
+    asked = {**LOOKUP, "approval": TEAM_LEAD}
+    behind = paying_fresh("check_order.status", check_order=asked)
+    assert never_refreshed(behind) == why("check_order.status")
+    sometimes = {**LOOKUP, "approval": {**TEAM_LEAD, "when": {">": [{"var": "amount"}, 100]}}}
+    assert never_refreshed(paying_fresh("check_order.status", check_order=sometimes)) == []
+
+
+def test_a_workflow_or_a_plan_step_is_never_run_again_unasked() -> None:
+    check = {
+        "kind": "workflow",
+        "display": {"title": "Check the customer"},
+        "workflow": "kyc.check@1",
+        "inputs": {"customer_id": {"var": "customer_id"}},
+    }
+    checked = paying_fresh("check.status", check=check)
+    checked["fields"]["customer_id"] = {
+        "type": "reference",
+        "system": "crm",
+        "display": {"title": "Customer"},
+    }
+    assert never_refreshed(checked) == [
+        (
+            "check.status comes from check, a workflow step, which isn't run again unasked: whenever "
+            "it is older than pay's max_age allows, pay needs attention: keep it only if a person "
+            "should decide each time"
+        )
+    ]
+    # A plan step's outcome, read by a step after it.
+    settled_then = settled()
+    settled_then["steps"]["note"] = {
+        "kind": "activity",
+        "display": {"title": "Note the order"},
+        "activity": "refunds.note@1",
+        "requires": ["settle"],
+        "when": {"==": [{"var": "settle.outcome"}, "done"]},
+        "max_age": {"settle.outcome": "1d"},
+        "inputs": {"refund": {"var": "order_id"}},
+    }
+    found = validate_case(parse_case(settled_then), noting(), plans=PLANS)
+    assert [issue.message for issue in found if issue.code == "NEVER_REFRESHED"] == [
+        (
+            "settle.outcome comes from settle, a plan step, which isn't run again unasked: whenever it "
+            "is older than note's max_age allows, note needs attention: keep it only if a person "
+            "should decide each time"
+        )
+    ]
+
+
+def test_a_read_behind_an_approval_needs_attention_when_stale() -> None:
+    # The refresh gate (brief, D33): a refresh never asks for an approval, so a read that always
+    # needs one is never fetched again, and the step that needs it fresh needs attention.
+    behind = paying_fresh("check_order.status", check_order={**LOOKUP, "approval": TEAM_LEAD})
+    run = run_case(
+        behind,
+        file=SMALL,
+        answers=[("check_order", "approve", "sam"), later("3d"), REVIEWED],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: check_order.status was obtained 3 days ago, and pay needs it at most 1 day "
+            "old: check_order needs an approval to run, so it isn't run again unasked"
+        )
+    ]
+    # An approval asked only above 100: for a small refund the read is fetched again, so no
+    # warning, and the run refreshes it.
+    when = {">": [{"var": "amount"}, 100]}
+    sometimes = paying_fresh(
+        "check_order.status", check_order={**LOOKUP, "approval": {**TEAM_LEAD, "when": when}}
+    )
+    fetched = run_case(sometimes, file=SMALL, answers=[later("3d"), REVIEWED], people=PEOPLE)
+    assert "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day" in (
+        fetched.history
+    )
+    assert fetched.reached("pay")

@@ -7,7 +7,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
-from ventoux.case.definition import ActivityStep, CaseDefinition, PlanStep
+from ventoux.case.definition import ActivityStep, CaseDefinition, PlanStep, TaskStep, WorkflowStep
 from ventoux.case.known import DONE, Known, Read, Reading, reads, set_by_outcomes
 from ventoux.case.types import expressions_of
 from ventoux.core.contract import ActivityContract, Contract
@@ -53,9 +53,9 @@ def warning_issues(
     # An outcome that leaves an output another step reads is said by that read: the reading step
     # fails, and someone hears of it.
     failing = {read.value.partition(".")[0] for read in unset if read.ended_otherwise(reading)}
-    return outcome_issues(case, contracts, plans, failing) + [
-        unset_issue(reading, read) for read in unset
-    ]
+    found = outcome_issues(case, contracts, plans, failing)
+    found += [unset_issue(reading, read) for read in unset]
+    return found + refresh_issues(case, contracts, missing)
 
 
 def outcome_issues(
@@ -276,3 +276,62 @@ def not_waited(name: str, value: str, writers: str, gives: str) -> str:
         f"{name} reads {value}, and doesn't wait for {writers}, which {gives}: if {name} runs "
         f"first, it fails and needs attention: require {writers}"
     )
+
+
+def refresh_issues(
+    case: CaseDefinition, contracts: Mapping[str, Contract], refused: Collection[str]
+) -> list[Issue]:
+    """A `max_age` on a fact that can never be fetched again: each time it is stale, the step
+    needs attention and a person decides (brief, D33) (brief, D37). Only a read is fetched
+    again, and only if it needs no approval: a refresh never asks for one. Not for a step, or a
+    fact from a step, that an error already refuses."""
+    found: list[Issue] = []
+    for name, step in case.steps.items():
+        if name in refused or isinstance(step, TaskStep):
+            continue
+        for value in step.max_age:
+            writer = value.partition(".")[0]
+            if writer in refused:
+                continue
+            why = never_fetched(case, contracts, value)
+            if why is not None:
+                found.append(
+                    Issue(
+                        f"steps.{name}.max_age.{value}",
+                        "NEVER_REFRESHED",
+                        f"{value} comes from {why}: whenever it is older than {name}'s max_age "
+                        f"allows, {name} needs attention: keep it only if a person should decide "
+                        "each time",
+                        "warning",
+                    )
+                )
+    return found
+
+
+def never_fetched(
+    case: CaseDefinition, contracts: Mapping[str, Contract], value: str
+) -> str | None:
+    """Why `value` can never be fetched again, as the runtime's `refreshable` says; None if it
+    is a read that can be."""
+    writer = value.partition(".")[0]
+    step = case.steps.get(writer)
+    if step is None:
+        setters = set_by_outcomes(case).get(value)
+        if setters is not None:
+            return f"a person, in {' or '.join(setters)}, and can't be fetched again"
+        return "the opening, and can't be fetched again"
+    if isinstance(step, TaskStep):
+        return f"a person, in {writer}, and can't be fetched again"
+    if isinstance(step, PlanStep):
+        return f"{writer}, a plan step, which isn't run again unasked"
+    if isinstance(step, WorkflowStep):
+        return f"{writer}, a workflow step, which isn't run again unasked"
+    contract = contracts[writer]
+    if contract.effect == "compute":
+        return f"{writer}, which computes it (compute), so running it again gives nothing new"
+    if contract.effect != "read":
+        return f"{writer}, which has side effects ({contract.effect}), and can't be run again"
+    if step.approval is not None and step.approval.when is None:
+        # A refresh passes the same gate as any start, and never asks for an approval.
+        return f"{writer}, a read that always needs an approval, which a refresh never asks for"
+    return None

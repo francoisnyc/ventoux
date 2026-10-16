@@ -1086,6 +1086,16 @@ Each starts with its negative test, seen failing for the right reason.
   circle. Every step outside `can`, and every step an error names, gets no 10d issue, nor does
   what it would give.
 
+- **`NEVER_REFRESHED` gives the runtime's reasons, in `refreshable`'s order** (slice 4): a
+  person, the opening, a plan or a workflow step, `compute`, a side effect, then a read that
+  always needs an approval. Its negative test runs the person's case (Sam approves three days
+  after the review: `it came from a person, so it can't be fetched again`), and the refresh
+  gate both ways: a look-up behind an approval with no `when` needs attention when stale
+  (`check_order needs an approval to run, so it isn't run again unasked`); behind one asked only
+  above 100, a small refund refreshes it, and no warning is given. Each source's test passed
+  at once, and each branch was seen failing on a deliberate break, `any approval blocks a
+  refresh` among them.
+
 ### Not in 10d
 
 - A guard the check doesn't recognise is warned about, never proven (data decides).
