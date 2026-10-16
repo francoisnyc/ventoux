@@ -31,6 +31,7 @@ from ventoux.testing import (
     ProposalRefused,
     RetryRefused,
     load_definition,
+    payments_refund,
     propose,
     retry,
     run_case,
@@ -757,10 +758,13 @@ PLANS = {"refund-order@1": refund_order(), "refund-order@3": refund_order(versio
 
 
 def settled(**settle: Any) -> dict[str, Any]:
-    """The quickstart's refund, `pay` and `call_customer` replaced by the plan step, with `settle`'s keys changed."""
+    """The quickstart's refund, `pay` replaced by the plan step, with `settle`'s keys changed, and
+    `call_customer` reacting to the plan failing, as the cases guide writes it."""
     refund = copy.deepcopy(REFUND)
-    del refund["steps"]["pay"], refund["steps"]["call_customer"], refund["sequence"]
+    del refund["steps"]["pay"], refund["sequence"]
     refund["steps"]["settle"] = {**copy.deepcopy(SETTLE), **settle}
+    refund["steps"]["call_customer"]["requires"] = ["settle"]
+    refund["steps"]["call_customer"]["when"] = {"==": [{"var": "settle.outcome"}, "failed"]}
     return refund
 
 
@@ -1920,3 +1924,174 @@ def test_an_outcome_or_a_boolean_given_to_a_literal_input() -> None:
     run = small_refund(as_boolean, catalog=ledger, activities=record)
     [refused] = run.needs_attention
     assert refused.startswith("record#1: ledger.record@1 doesn't take these inputs: priority:")
+
+
+# --- Layer 10d: teaching warnings ---
+
+WARNINGS = "### What the check warns about"
+
+
+def warning_output(index: int) -> str:
+    """The plain-text block `index` of the guide's warnings, its line breaks aside."""
+    section = GUIDE.read_text().split(WARNINGS)[1]
+    return " ".join(section.split("```\n")[2 * index + 1].split("```")[0].split())
+
+
+def without_call_customer() -> dict[str, Any]:
+    """The quickstart's refund, with nothing reacting to a declined refund."""
+    refund = copy.deepcopy(REFUND)
+    del refund["steps"]["call_customer"]
+    return refund
+
+
+PAY_UNREAD = Issue(
+    "steps.pay",
+    "OUTCOME_UNREAD",
+    "pay may end declined, and no condition tells that from done, so the case goes on and nobody "
+    "is told: add a step that runs when pay.outcome is declined",
+    "warning",
+)
+
+
+def test_an_outcome_nobody_reads_is_a_warning() -> None:
+    # The guide's output, word for word, line breaks aside.
+    assert printed(issues(without_call_customer())) == warning_output(0)
+    assert issues(without_call_customer()) == [PAY_UNREAD]
+    # The surprise it warns about: declined, the case closes, and nobody is told.
+    run = run_case(
+        without_call_customer(),
+        file=SMALL,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        activities={"payments.refund@2": declines},
+    )
+    assert run.history[-2:] == ["pay#1 gave declined", "closed: nothing left to do"]
+    assert run.waiting_for == [] and run.needs_attention == []
+
+
+def holding() -> Catalog:
+    """The development catalog, and `payments.refund@3`: `@2`, able to end `held` as well."""
+    catalog = copy.deepcopy(CATALOG)
+    refund = dict(payments_refund)
+    refund["version"] = 3
+    refund["outcomes"] = ["declined", "held"]
+    refund["display"] = ContractDisplay(
+        title="Refund a customer",
+        description="Refunds an order through the payment provider.",
+        outcomes={"declined": "Declined by the provider", "held": "Held for review"},
+    )
+    catalog.register(ActivityContract(**refund))
+    return catalog
+
+
+def paying_with_held(definition: dict[str, Any]) -> dict[str, Any]:
+    definition["steps"]["pay"]["activity"] = "payments.refund@3"
+    return definition
+
+
+def test_each_outcome_is_read_on_its_own() -> None:
+    # call_customer tells declined from done, and nothing tells held: held is unread.
+    catalog = holding()
+    refund = paying_with_held(copy.deepcopy(REFUND))
+    assert validate_case(parse_case(refund), catalog) == [
+        Issue(
+            "steps.pay",
+            "OUTCOME_UNREAD",
+            "pay may end held, and no condition tells that from done, so the case goes on and "
+            "nobody is told: add a step that runs when pay.outcome is held",
+            "warning",
+        )
+    ]
+    # Neither read: one issue for the step, naming both.
+    assert validate_case(parse_case(paying_with_held(without_call_customer())), catalog) == [
+        Issue(
+            "steps.pay",
+            "OUTCOME_UNREAD",
+            "pay may end declined or held, and no condition tells them from done, so the case goes "
+            "on and nobody is told: add a step that runs when pay.outcome is one of them",
+            "warning",
+        )
+    ]
+
+
+def reacting_when(when: Any) -> dict[str, Any]:
+    """The quickstart's refund, `call_customer` running on `when`."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["call_customer"]["when"] = when
+    return refund
+
+
+def test_a_condition_reads_an_outcome_when_it_tells_it_from_done() -> None:
+    outcome = {"var": "pay.outcome"}
+    read = [
+        {"!=": [outcome, "declined"]},  # true for done, false for declined
+        {"!=": [outcome, "done"]},  # done compared: every outcome told from it
+        {"==": ["done", outcome]},  # either side
+        {"in": [outcome, ["declined"]]},
+        {"in": [outcome, ["done"]]},
+        {"==": [{"cat": [outcome]}, "declined"]},  # read as a value: the check doesn't guess
+    ]
+    for reading in read:
+        assert issues(reacting_when(reading)) == [], reading
+    # Reading another step's outcome, or only whether pay ended, tells nothing about pay's.
+    unread = [
+        {"==": [{"var": "review.outcome"}, "approve"]},
+        {"exists": "pay.outcome"},
+    ]
+    for not_reading in unread:
+        assert issues(reacting_when(not_reading)) == [PAY_UNREAD], not_reading
+    # `in` reads only the outcomes it lists: held stays unread.
+    listing = paying_with_held(reacting_when({"in": [{"var": "pay.outcome"}, ["declined"]]}))
+    assert [issue.message for issue in validate_case(parse_case(listing), holding())] == [
+        (
+            "pay may end held, and no condition tells that from done, so the case goes on and "
+            "nobody is told: add a step that runs when pay.outcome is held"
+        )
+    ]
+    # So does `!=`, and a comparison written either way round: each tells declined, not held.
+    for when in (
+        {"!=": [{"var": "pay.outcome"}, "declined"]},
+        {"==": ["declined", {"var": "pay.outcome"}]},
+    ):
+        told = paying_with_held(reacting_when(when))
+        assert [issue.code for issue in validate_case(parse_case(told), holding())] == [
+            "OUTCOME_UNREAD"
+        ], when
+
+
+def unread_settle() -> dict[str, Any]:
+    """The refund with its plan step, and nothing reacting to the plan failing."""
+    refund = settled()
+    del refund["steps"]["call_customer"]
+    return refund
+
+
+def test_a_plan_that_fails_unread_is_a_warning() -> None:
+    assert checked_with(unread_settle(), PLANS) == [
+        Issue(
+            "steps.settle",
+            "OUTCOME_UNREAD",
+            "settle may end failed, and no condition tells that from done, so the case goes on "
+            "and nobody is told: add a step that runs when settle.outcome is failed",
+            "warning",
+        )
+    ]
+    # The surprise: Sam rejects the refund inside the plan, and the case closes, nobody told.
+    run = run_case(
+        unread_settle(),
+        file=LARGE,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        plans=PLANS,
+        plan_answers={"settle": [("approve_refund", "reject", "sam")]},
+    )
+    assert run.history[-2:] == ["settle#1 gave failed", "closed: nothing left to do"]
+    assert run.needs_attention == []
+
+
+def test_an_outcome_a_person_chose_is_never_unread() -> None:
+    # The claim's deny reaches nothing and no condition reads it: that is how a "no" is written,
+    # and the adjuster who chose it knows. Its check, a workflow step, ends only done.
+    claim = guide_json(0)
+    assert "reaches" not in claim["steps"]["assess"]["outcomes"]["deny"]
+    assert issues(claim) == []

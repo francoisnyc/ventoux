@@ -564,7 +564,9 @@ def test_a_plan_field_takes_only_a_reference_of_its_system_on_temporal() -> None
         return await reported(case, lambda now: now.needs_attention != [])
 
     run = on_temporal(scenario, cases=CasesWithPlans)
-    [issue] = validate_case(parse_case(refund_with_plan(inputs=inputs)), CATALOG, plans=TEST_PLANS)
+    found = validate_case(parse_case(refund_with_plan(inputs=inputs)), CATALOG, plans=TEST_PLANS)
+    # The error the driver meets; nothing here reacts to the plan failing, which only warns.
+    [issue] = [issue for issue in found if issue.severity == "error"]
     assert issue.code == "REFERENCE"
     assert run.needs_attention == [f"settle#1: {issue.message.split(': give it')[0]}"]
 

@@ -1005,8 +1005,8 @@ Each starts with its negative test, seen failing for the right reason.
   had already changed `refund.json`): with the old file the declined refund closed, `waiting_for`
   empty; with the new one it waits for `call_customer by support`.
 - **Fixtures built from the refund that replace `pay` with a plan step leave `call_customer`
-  out** (`test_plan_step`, `test_temporal_case`, `test_case_validation`'s `settled`): they test
-  plan mechanics. The guide's plan step is an example, so `call_customer` moves with it, said in
+  out** (`test_plan_step`, `test_temporal_case`): they test plan mechanics. (`test_case_validation`'s
+  `settled` did too, until slice 1: see below.) The guide's plan step is an example, so `call_customer` moves with it, said in
   the guide's prose (its blocks are found by position): it requires `settle` and runs when
   `settle.outcome` is `failed`.
 - **The claim's `call_customer` is a real extra issue wherever `pay` can never run:** 10a's
@@ -1017,6 +1017,24 @@ Each starts with its negative test, seen failing for the right reason.
   two lines more. Right: Sam approves on those facts as well.
 - **On Temporal the declined refund now waits for `call_customer`,** so its test answers it,
   after waiting for the entry (an answer sent before the decline lands names no open entry).
+
+- **Slice 1's message for several outcomes came from its test:** the first code gave one issue
+  per outcome; the note promises one per step, naming them all (`declined or held`), and the
+  test with a contract ending either way failed on it first.
+- **A bare read of an outcome hides an unrecognised comparison** (slice 1). Reading
+  `pay.outcome` any way the walk doesn't recognise counts as reading every outcome, so with
+  `payments.refund@2`, which declares only `declined`, breaking the `!=` branch or the
+  literal-on-the-left case changed nothing and the test stayed green. Each is now tested with a
+  test contract ending `declined` or `held` (`payments.refund@3`, registered by the test), where
+  `!=` and `==` tell only `declined`: both breaks then fail, as does the `in` branch's.
+- **`settled` keeps `call_customer`, reacting to the plan failing** (slice 1), as the cases guide
+  writes it: ten 10b and 10c tests read it and expect no warning. The plan's own test removes it
+  (`unread_settle`), and the run proves the surprise: Sam rejects inside the plan, `settle#1 gave
+  failed`, `closed: nothing left to do`. One Temporal test that unpacks the single `REFERENCE`
+  error now takes the errors: its fixture, for plan mechanics, reacts to nothing, which only warns.
+- **A task's and a workflow's outcomes are never unread** (slice 1): the claim's `deny` reaches
+  nothing and nothing reads it, and it gives no issue; seen failing with tasks and workflows
+  checked too.
 
 ### Not in 10d
 
