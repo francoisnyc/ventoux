@@ -14,6 +14,8 @@ from typing import Annotated, Any, Literal
 
 import pytest
 from pydantic import BaseModel
+from test_case import guide_refund_with_plan  # the cases guide's plan step, as it runs
+from test_fresh_facts import refund_fresh  # the case-data guide's fresh refund
 
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import CaseRun
@@ -2691,3 +2693,121 @@ def test_an_approval_reading_any_value_its_step_is_given_guards_it() -> None:
             "approved_amount: it guards a value pay doesn't use: read one of those in its when"
         )
     ]
+
+
+# --- 10d, slice 6: every example, one cause, no quoted value, the guide's table ---
+
+
+def test_every_example_definition_gives_no_issue() -> None:
+    # No noise: a warning that fires on what the guides call correct teaches people to ignore
+    # warnings. Each whole definition the quickstart and the guides show, as they show it.
+    case_data = (ROOT / "docs" / "guides" / "case-data.md").read_text()
+    read_aloud = GUIDE.read_text().split("```json\n")[1].split("```")[0]
+    examples = {
+        "the quickstart's refund": (REFUND, {}),
+        "the cases guide's refund, read aloud": (json.loads(read_aloud, parse_float=Decimal), {}),
+        "the cases guide's claim": (guide_json(0), {}),
+        "the cases guide's plan step": (guide_refund_with_plan(), PLANS),
+        "the case data guide's claim": (
+            json.loads(case_data.split("```json\n")[1].split("```")[0], parse_float=Decimal),
+            {},
+        ),
+        "the case data guide's fresh refund": (refund_fresh(), {}),
+    }
+    for name, (definition, plans) in examples.items():
+        assert validate_case(parse_case(definition), CATALOG, plans=plans) == [], name
+
+
+# Each 10d issue, and the same definition with an error on its step, or on the step whose value
+# it reads: the error alone is said.
+def unknown_contract(definition: dict[str, Any], step: str = "pay") -> dict[str, Any]:
+    definition["steps"][step]["activity"] = "payments.refund@9"
+    return definition
+
+
+def note_reading_pay_outcome() -> dict[str, Any]:
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["note"] = {
+        **NOTED,
+        "requires": ["review"],
+        "when": {"==": [{"var": "pay.outcome"}, "done"]},
+    }
+    return refund
+
+
+ONE_CAUSE: dict[str, tuple[Callable[[], dict[str, Any]], Callable[[dict[str, Any]], Any]]] = {
+    "OUTCOME_UNREAD": (without_call_customer, unknown_contract),
+    "MAY_BE_UNSET": (refund_without_when, unknown_contract),
+    "MAY_BE_UNSET from a refused writer": (note_reading_pay_outcome, unknown_contract),
+    "NEVER_REFRESHED": (lambda: refund_needing_fresh("approved_amount"), unknown_contract),
+    "APPROVAL_ELSEWHERE": (lambda: approving_on(ON_THE_REQUEST), unknown_contract),
+}
+
+
+def misspelt_role(definition: dict[str, Any], step: str = "pay") -> dict[str, Any]:
+    definition["steps"][step]["approval"]["roles"] = ["suport-lead"]
+    return definition
+
+
+@pytest.mark.parametrize("code", list(ONE_CAUSE))
+def test_a_step_an_error_refuses_gets_no_warning(code: str) -> None:
+    make, refuse = ONE_CAUSE[code]
+    assert code.split()[0] in [issue.code for issue in issues(make())]
+    # Its contract missing, or any other error on the step: that error alone.
+    assert [issue.code for issue in issues(refuse(make()))] == ["UNKNOWN_CONTRACT"]
+    assert [issue.code for issue in issues(misspelt_role(make()))] == ["UNKNOWN_ROLE"]
+
+
+def test_a_step_that_fails_every_time_gets_its_error_alone() -> None:
+    # SET_AFTER replaces MAY_BE_UNSET for its read; and an error on its step replaces it.
+    catalog = noting()
+    found = validate_case(parse_case(noting_before_paying()), catalog)
+    assert [issue.code for issue in found] == ["SET_AFTER"]
+    refused = noting_before_paying(activity="refunds.note@9")
+    assert [issue.code for issue in validate_case(parse_case(refused), catalog)] == [
+        "UNKNOWN_CONTRACT"
+    ]
+
+
+TEN_D: dict[str, Callable[[], dict[str, Any]]] = {
+    "OUTCOME_UNREAD": without_call_customer,
+    "MAY_BE_UNSET": refund_without_when,
+    "NEVER_REFRESHED": lambda: refund_needing_fresh("approved_amount"),
+    "APPROVAL_ELSEWHERE": lambda: approving_on({">": [{"var": "amount"}, 987654]}),
+}
+
+
+def test_no_10d_message_quotes_a_value() -> None:
+    # Names only: no title, no reason, no literal the definition compares (brief, D35).
+    for code, make in TEN_D.items():
+        definition = make()
+        if code != "APPROVAL_ELSEWHERE":  # its own approval compares the marked literal already
+            definition["steps"]["pay"]["approval"]["when"] = {
+                ">": [{"var": "approved_amount"}, 987654]
+            }
+        found = [issue for issue in issues(marked(definition)) if issue.code == code]
+        assert found, code
+        for issue in found:
+            assert "TITLE-" not in issue.message and "987654" not in issue.message, issue
+    set_after = validate_case(parse_case(marked(noting_before_paying())), noting())
+    assert set_after and all("TITLE-" not in issue.message for issue in set_after)
+
+
+def test_the_guides_table_of_warnings_is_what_validate_case_says() -> None:
+    # Each row's code and kind is what the code gives for its example; its message is the
+    # output above it, compared word for word by each slice's first test.
+    table = GUIDE.read_text().split(WARNINGS)[1].split("| Code | Kind |")[1].split("\n\n")[0]
+    rows = [line.split("|") for line in table.splitlines() if line.startswith("| `")]
+    kinds = {code.strip().strip("`"): kind.strip() for _, code, kind, *_ in rows}
+    given = {code: issues(make()) for code, make in TEN_D.items()}
+    given["SET_AFTER"] = validate_case(parse_case(noting_before_paying()), noting())
+    assert list(kinds) == [
+        "OUTCOME_UNREAD",
+        "MAY_BE_UNSET",
+        "SET_AFTER",
+        "NEVER_REFRESHED",
+        "APPROVAL_ELSEWHERE",
+    ]
+    for code, kind in kinds.items():
+        [issue] = [issue for issue in given[code] if issue.code == code]
+        assert issue.severity == kind, code

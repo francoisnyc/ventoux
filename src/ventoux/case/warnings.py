@@ -61,7 +61,7 @@ def warning_issues(
     # An outcome that leaves an output another step reads is said by that read: the reading step
     # fails, and someone hears of it.
     failing = {read.value.partition(".")[0] for read in unset if read.ended_otherwise(reading)}
-    found = outcome_issues(case, contracts, plans, failing)
+    found = outcome_issues(case, contracts, plans, failing | set(missing))
     found += [unset_issue(reading, read) for read in unset]
     return found + refresh_issues(case, contracts, missing) + elsewhere_issues(case, missing)
 
@@ -70,15 +70,15 @@ def outcome_issues(
     case: CaseDefinition,
     contracts: Mapping[str, Contract],
     plans: Mapping[str, Plan],
-    failing: Collection[str] = (),
+    skipped: Collection[str] = (),
 ) -> list[Issue]:
     """An activity step that may end with an outcome its contract declares, or a plan step that
     may end `failed`, which no condition tells from `done`: the step is done with it, reaches
     nothing, and the case goes on, with nobody told (brief, D17) (brief, D37). Not for a step in
-    `failing`, whose outcome a read already says."""
+    `skipped`: refused by an error, or whose outcome a read already says."""
     found: list[Issue] = []
     for name, step in case.steps.items():
-        if name in failing:
+        if name in skipped:
             continue
         contract = contracts.get(name)
         if isinstance(step, ActivityStep) and isinstance(contract, ActivityContract):

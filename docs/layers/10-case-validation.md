@@ -1106,6 +1106,19 @@ Each starts with its negative test, seen failing for the right reason.
   JSON block, whose closing fence shifted the test's count of plain blocks; `warning_output`
   takes the blocks whose fence names no language.
 
+- **Every example the quickstart and the guides show gives no issue** (slice 6): the quickstart's
+  refund, the cases guide's refund read aloud, its claim and its plan step, the case data
+  guide's claim and its fresh refund, each run through `validate_case` by one test.
+  (`docs/layers/tracer-refund.md` shows the tracer's old shape, which `parse_case` refuses, as
+  before.)
+- **The one-cause test first refused steps only by a missing contract, and a break went unseen**
+  (slice 6): with the refused steps left out, it still passed, since the older `missing` rule
+  covers a missing contract. With a second error, a misspelt approval role, it found a real gap:
+  `OUTCOME_UNREAD` was still given for a step `UNKNOWN_ROLE` refuses. Fixed: every 10d check
+  skips a step an error refuses.
+- **No quoted value and the table's kinds passed at once,** each seen failing on a deliberate
+  break (an approval's reason in the message; `OUTCOME_UNREAD` made an error).
+
 ### Not in 10d
 
 - A guard the check doesn't recognise is warned about, never proven (data decides).
@@ -1115,20 +1128,35 @@ Each starts with its negative test, seen failing for the right reason.
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
-`V` is `tests/test_case_validation.py`, `Q` `tests/test_quickstart.py`. Drafted with the note; each
-test is named as it is written, and the table checked against the tests before the pull request.
+`V` is `tests/test_case_validation.py`, `Q` `tests/test_quickstart.py`, `T`
+`tests/test_temporal_case.py`. Checked against the tests, 2026-10-16: every test named here
+exists, and every test 10d added is named here.
 
 | Promise | Test |
 |---|---|
-| The quickstart and the guides' examples give no 10d issue; the quickstart's declined refund calls the customer | to be named in slice 0 and 6 |
-| A declared outcome no condition tells from `done` is `OUTCOME_UNREAD`; run, the case closes with nobody told | slice 1 |
-| Outcomes are checked one at a time; `==`, `!=` and `in` with the outcome or `done` read it; a plan's `failed` too; a task's never | slice 1 |
-| A value read before it is surely set is `MAY_BE_UNSET`; run, the step fails | slice 2 |
-| Requirements, milestones, the `when`, `if` and `exists` guard; `and` and `or` don't | slice 2 |
-| A value only a later step sets, read unguarded by a step that can't be proposed, is `SET_AFTER`; run, it fails every time; proposed, it is a warning | slice 3 |
-| A `max_age` on a fact that can't be fetched again is `NEVER_REFRESHED`; run stale, the step needs attention; a read behind an unconditional approval too | slice 4 |
-| An approval reading none of its step's input fields is `APPROVAL_ELSEWHERE`; run, the neighbouring value lets a large refund through unasked | slice 5 |
-| One cause, one issue: no 10d issue beside an error on the step or the value's writer; one per value per step | slice 6 |
-| No message quotes a value or a literal | slice 6 |
-| The guide says what the code does: its outputs and its table | slice 6 |
-| `case` imports no Temporal or LLM code, and reads no clock or I/O | `tests/test_layers.py`, unchanged |
+| Every example the quickstart and the guides show gives no issue | V `test_every_example_definition_gives_no_issue` |
+| The quickstart's declined refund asks support to call the customer, in memory and on Temporal | Q `test_a_declined_refund_asks_support_to_call_the_customer`; T `test_a_declared_outcome_is_never_retried` |
+| An outcome no condition tells from `done` is `OUTCOME_UNREAD`, the guide's output word for word; run, the case closes and nobody is told | V `test_an_outcome_nobody_reads_is_a_warning` |
+| Outcomes are checked one at a time, one issue per step naming every unread one | V `test_each_outcome_is_read_on_its_own` |
+| `==`, `!=` and `in` read the outcomes they name, either side; naming `done` or reading the outcome as a value reads them all; `exists` reads none | V `test_a_condition_reads_an_outcome_when_it_tells_it_from_done` |
+| A plan step's `failed` is checked too, and its run closes the case unheard | V `test_a_plan_that_fails_unread_is_a_warning` |
+| A task's outcomes and a workflow's are never unread | V `test_an_outcome_a_person_chose_is_never_unread` |
+| A value read before it is surely set is `MAY_BE_UNSET`, the guide's output word for word; run, the step fails | V `test_a_value_read_before_it_is_surely_set_is_a_warning` |
+| The `when` guards the approval's `when` and the inputs: `==`, `!=`, `in`, `exists`, a part of an `and`, an `if` whose other branch is `false`; a condition on another value guards nothing | V `test_a_guard_in_the_when_makes_a_value_surely_set` |
+| Inside a condition, `and` reads every part, and the run fails; an `if` reads one branch, and the run closes | V `test_and_reads_every_part_so_a_part_guards_nothing_beside_it`, `test_a_condition_reads_only_the_branch_of_an_if_it_takes` |
+| An input reads every value it names, both branches of an `if` and an `exists` included; run, it fails either way | V `test_an_input_reads_every_value_it_names` |
+| A step's requirements say what is set: a step waited for, through the steps it requires; a task all of whose outcomes set it; a value from a step not waited for warns | V `test_what_a_step_waits_for_says_what_is_set` |
+| A milestone only setting outcomes reach says the value is set; reached another way as well, it doesn't | V `test_a_milestone_only_setting_outcomes_reach_says_the_value_is_set` |
+| An output is set only when its step is done: the old `refund_fresh` gives two warnings, each run fails, and the unread `not_found` is said once, by the read; as the guide now writes it, none | V `test_the_old_refund_fresh_reads_two_values_that_may_be_unset` |
+| A value only a later step sets, read every time the step starts, is `SET_AFTER`, an error, the guide's output word for word; run, it fails, and so does a retry | V `test_a_value_only_a_later_step_sets_is_refused` |
+| Proposing the step changes nothing: still `SET_AFTER`, and the proposal is refused | V `test_a_step_that_can_be_proposed_still_fails_every_time` |
+| A `max_age` on a fact that can't be fetched again is `NEVER_REFRESHED`, the guide's output word for word; run stale, the step needs attention | V `test_a_max_age_nothing_can_fetch_again_is_a_warning` |
+| Only a read needing no approval is fetched again: the opening, a person, a write, a compute step, a read behind an approval with no `when` each warn; a read, or one behind a conditional approval, doesn't | V `test_only_a_read_needing_no_approval_is_fetched_again`, `test_a_workflow_or_a_plan_step_is_never_run_again_unasked` |
+| The refresh gate, run: a read behind an approval needs attention when stale; behind a conditional one, it is refreshed | V `test_a_read_behind_an_approval_needs_attention_when_stale` |
+| An approval reading none of its step's input fields is `APPROVAL_ELSEWHERE`, the guide's output word for word; run, 5000 is paid unasked on a request of 50 | V `test_an_approval_that_guards_a_neighbouring_value_is_a_warning` |
+| An approval reading any field its step is given, through an expression too, or with no `when`, gets none; two neighbours are both named | V `test_an_approval_reading_any_value_its_step_is_given_guards_it` |
+| One cause, one issue: a step an error refuses (a missing contract, a misspelt role) gets no 10d issue, nor does a value from such a step; `SET_AFTER` alone for its read | V `test_a_step_an_error_refuses_gets_no_warning`, `test_a_step_that_fails_every_time_gets_its_error_alone` |
+| A step that can never run gets no 10d issue, though its group's `DEADLOCK` names another | V `test_sequence_and_requires_can_deadlock`, `test_a_milestone_two_dead_steps_reach_names_both` |
+| No 10d message quotes a title, a reason or a literal | V `test_no_10d_message_quotes_a_value` |
+| The guide's table: every 10d code, in order, each with its kind | V `test_the_guides_table_of_warnings_is_what_validate_case_says` |
+| `case` imports no Temporal or LLM code, and reads no clock or I/O, in the new modules too | `tests/test_layers.py`, unchanged |
