@@ -270,3 +270,35 @@ def test_closing_a_case_ends_its_waiting_plan_step() -> None:
         "settle#1 cancelled: the case is closing",
         "closed: duplicate, by ana",
     ]
+
+
+# Layer 10c, G7: a plan's reference field takes only a reference to its system (brief, D36).
+
+
+def test_a_plan_field_takes_only_a_reference_to_its_system() -> None:
+    # Before 10c, the plan trusted its field's declared type: an order ID the case made up was
+    # looked up and paid. Only the case sees the expression, so the case refuses it, before the
+    # plan starts, as `checked_inputs` does for a contract's reference input (brief, D30).
+    paid: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paid.append(inputs["order_id"])
+        return {"refund_id": "ref-1"}
+
+    made_up = {"cat": ["ord-", {"string": [{"var": "amount"}]}]}
+    run = run_case(
+        refund_with_plan(inputs={"order_id": made_up, "amount": {"var": "approved_amount"}}),
+        file=LARGE,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        activities={"payments.refund@2": refund},
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+    )
+    assert paid == []
+    assert run.needs_attention == [
+        (
+            "settle#1: refund-order@1 takes order_id as a reference to orders, and is given a "
+            "computed value"
+        )
+    ]

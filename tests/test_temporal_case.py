@@ -547,6 +547,24 @@ def test_case_validation_says_what_the_driver_does_with_its_plans() -> None:
         assert run.needs_attention == [f"settle#1: {issue.message.split(': supply it with')[0]}"]
 
 
+def test_a_plan_field_takes_only_a_reference_of_its_system_on_temporal() -> None:
+    # G7, as in memory: the driver refuses a made-up order ID before the child starts, and case
+    # validation says the same (brief, D30) (brief, D36).
+    made_up = {"cat": ["ord-", {"string": [{"var": "amount"}]}]}
+    inputs = {"order_id": made_up, "amount": {"var": "approved_amount"}}
+
+    async def scenario(client: Client) -> CaseReport:
+        definition = refund_with_plan(inputs=inputs)
+        case = await start_case(client, CasesWithPlans, definition, LARGE, "made-up", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        return await reported(case, lambda now: now.needs_attention != [])
+
+    run = on_temporal(scenario, cases=CasesWithPlans)
+    [issue] = validate_case(parse_case(refund_with_plan(inputs=inputs)), CATALOG, plans=TEST_PLANS)
+    assert issue.code == "REFERENCE"
+    assert run.needs_attention == [f"settle#1: {issue.message.split(': give it')[0]}"]
+
+
 async def child_waiting_at(client: Client, id: str, entry: str) -> PlanRun:
     """The child plan `id` once it waits at `entry`. The case starts it in its own time: until
     then, Temporal says it is not found. Asked a bounded number of times."""

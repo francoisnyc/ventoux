@@ -7,6 +7,8 @@ on Temporal, so a plan is looked up the same way in both.
 from collections.abc import Mapping
 from typing import Any
 
+from ventoux.case.state import StartPlan
+from ventoux.core.expressions import ReferenceType
 from ventoux.core.plan import Plan, PlanInvalid, parse_plan
 
 
@@ -27,3 +29,17 @@ def supplied(plans: Mapping[str, Any], reference: str) -> Plan:
     if (named := f"{plan.plan}@{plan.version}") != reference:
         raise PlanNotSupplied(f"{reference} is supplied as {named}: supply the plan it names")
     return plan
+
+
+def wrong_references(plan: Plan, command: StartPlan) -> str | None:
+    """Why the case can't start `plan` with what it gives, or None: a reference field takes only a
+    reference field of its system, read as it is, never another system's, a text or a computed
+    value, as a contract's reference input does (brief, D30) (brief, D36)."""
+    problems = [
+        f"{command.plan} takes {name} as a reference to {declared.system}, and is given {said}"
+        for name, declared in plan.fields.items()
+        if isinstance(declared, ReferenceType) and name in command.references
+        for system, said in [command.references[name]]
+        if system != declared.system
+    ]
+    return "\n".join(problems) or None

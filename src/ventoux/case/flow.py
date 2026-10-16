@@ -8,12 +8,15 @@ sources are known in one pass (brief, D34) (brief, D36). See docs/layers/10-case
 from collections.abc import Collection, Mapping
 
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
+from ventoux.core.before_activity import not_a_reference_to
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract
+from ventoux.core.expressions import ReferenceType
 from ventoux.core.output_sources import output_sources
 from ventoux.core.plan import Plan, set_by
 from ventoux.core.policy import OnlyFrom, Policy, refusal
 from ventoux.core.provenance import answering, fields_read, provenance
+from ventoux.core.references import references
 from ventoux.core.validate import Issue, refused_inputs
 
 # Who opens a case is the one writer the check can't know: a system, recorded as `system:opener`,
@@ -65,6 +68,49 @@ def case_sources(
                 sources[f"{name}.{output}"] = frozenset({source})
         # A step whose contract is missing gives nothing: reading it is already an issue (10b).
     return sources
+
+
+def reference_issues(
+    case: CaseDefinition,
+    contracts: Mapping[str, Contract],
+    plans: Mapping[str, Plan],
+    said: Collection[str],
+) -> list[Issue]:
+    """Each reference a step gives, to a contract's reference input or a plan's reference field:
+    only a reference field of its system, read as it is, never another system's, a text or a
+    computed value (brief, D30). Read with the runtime's own `not_a_reference_to`, over the
+    case's declared fields, so the two can't disagree: an output is never a reference field."""
+    types = {name: field.declared for name, field in case.fields.items()}
+    expected: list[tuple[str, str, str, str]] = []  # step, what it calls, the input, its system
+    for name, contract in contracts.items():
+        expected += [
+            (name, contract.reference, field, system)
+            for field, system in references(contract.input).items()
+        ]
+    for name, plan in plans.items():
+        expected += [
+            (name, f"{plan.plan}@{plan.version}", field, declared.system)
+            for field, declared in plan.fields.items()
+            if isinstance(declared, ReferenceType)
+        ]
+    issues: list[Issue] = []
+    for name, reference, field, system in expected:
+        step = case.steps[name]
+        assert isinstance(step, CallStep | PlanStep)  # only these call a contract or a plan
+        path = f"steps.{name}.inputs.{field}"
+        if field not in step.inputs or path in said:
+            continue
+        wrong = not_a_reference_to(system, step.inputs[field], types)
+        if wrong is not None:
+            issues.append(
+                Issue(
+                    path,
+                    "REFERENCE",
+                    f"{reference} takes {field} as a reference to {system}, and is given {wrong}: "
+                    f"give it a reference to {system}, read as it is",
+                )
+            )
+    return issues
 
 
 def policy_issue(

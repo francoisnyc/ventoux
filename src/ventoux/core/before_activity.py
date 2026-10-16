@@ -116,15 +116,23 @@ def not_a_reference_to(
     system: str, expression: Expression, types: Mapping[str, FieldType]
 ) -> str | None:
     """What `expression` gives instead of a reference to `system`, or None if it gives one."""
+    found, said = given_as_reference(expression, types)
+    return None if found == system else said
+
+
+def given_as_reference(
+    expression: Expression, types: Mapping[str, FieldType]
+) -> tuple[str | None, str]:
+    """The system of the reference `expression` gives, read as it is, or None; and how a message
+    says what it gives: `order_id, a reference to orders`, `a computed value`."""
     # Only a field read as it is: a computed value has no system, whatever it looks like.
     if not isinstance(expression, Var):
         if isinstance(expression, Decimal | str | bool):
-            return "a value written in the definition"
-        return "a computed value"
+            return None, "a value written in the definition"
+        return None, "a computed value"
     declared = types.get(expression.var)
     if declared is None:
         # An outcome or an output (`assess.outcome`, `pay.refund_id`): never a reference.
-        return f"{expression.var}, which is not a reference"
-    if isinstance(declared, ReferenceType) and declared.system == system:
-        return None
-    return f"{expression.var}, {a_type(declared)}"
+        return None, f"{expression.var}, which is not a reference"
+    said = f"{expression.var}, {a_type(declared)}"
+    return (declared.system if isinstance(declared, ReferenceType) else None), said

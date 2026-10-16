@@ -14,7 +14,7 @@ from ventoux.case.calls import (
     supplied_plans,
 )
 from ventoux.case.definition import CaseDefinition, TaskStep
-from ventoux.case.flow import plan_policy_issues, policy_issues
+from ventoux.case.flow import plan_policy_issues, policy_issues, reference_issues
 from ventoux.case.reach import (
     Through,
     can_happen,
@@ -69,7 +69,9 @@ def validate_case(
     missing = calling - set(contracts) - set(supplied)
     found += expression_issues(case, case_types(case, catalog), missing)
     found += approval_issues(case, catalog, contracts)
-    # Where each value comes from (10c): an input already refused isn't asked again.
+    # Where each value comes from (10c), in the order the runtime meets it: an input already
+    # refused isn't asked again (one cause, one issue).
+    found += reference_issues(case, contracts, supplied, {issue.path for issue in found})
     said = {issue.path for issue in found}
     found += policy_issues(case, contracts, said)
     found += plan_policy_issues(case, catalog, contracts, supplied, said)

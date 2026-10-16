@@ -1486,3 +1486,57 @@ def test_a_plans_own_mark_is_the_plans_issue() -> None:
     # A field a person sets in the plan comes from them: trusted, the case's input or not.
     given = settled(plan="review-and-pay@1", inputs={"order_id": {"var": "order_id"}})
     assert checked_with(given, {"review-and-pay@1": review_and_pay()}) == []
+
+
+# --- 10c, slice 3: references ---
+
+
+def claim_lettering(customer: Any) -> dict[str, Any]:
+    """The guide's claim, drafting a letter through `letters.draft@3` to `customer`."""
+    claim = claim_writing_to("unused")
+    claim["steps"]["write"] |= {
+        "activity": "letters.draft@3",
+        "inputs": {"customer": customer, "template": "claim-received"},
+    }
+    return claim
+
+
+def test_a_reference_goes_only_where_its_system_is_expected() -> None:
+    reason = (
+        "letters.draft@3 takes customer as a reference to crm, and is given order_id, a "
+        "reference to orders"
+    )
+    wrong_system = claim_lettering({"var": "order_id"})
+    assert issues(wrong_system) == [
+        Issue(
+            "steps.write.inputs.customer",
+            "REFERENCE",
+            f"{reason}: give it a reference to crm, read as it is",
+        )
+    ]
+    # The proof: run as it is, the step fails before the letter is drafted (brief, D30).
+    run = run_case(wrong_system, file=CLAIM_FILE, answers=[], people=CLAIM_PEOPLE)
+    assert run.needs_attention == [f"write#1: {reason}"]
+    # A computed value has no system, whatever it looks like.
+    computed = claim_lettering({"cat": ["cus-", {"string": [{"var": "order_id"}]}]})
+    [refused] = issues(computed)
+    assert refused.message == (
+        "letters.draft@3 takes customer as a reference to crm, and is given a computed value: "
+        "give it a reference to crm, read as it is"
+    )
+
+
+def test_a_plan_steps_reference_field_takes_a_reference_of_its_system() -> None:
+    made_up = {"cat": ["ord-", {"string": [{"var": "amount"}]}]}
+    settle = settled(inputs={"order_id": made_up, "amount": {"var": "approved_amount"}})
+    reason = "refund-order@1 takes order_id as a reference to orders, and is given a computed value"
+    assert checked_with(settle, PLANS) == [
+        Issue(
+            "steps.settle.inputs.order_id",
+            "REFERENCE",
+            f"{reason}: give it a reference to orders, read as it is",
+        )
+    ]
+    # The proof: run as it is, the step fails before the plan starts (G7).
+    run = run_case(settle, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS)
+    assert run.needs_attention == [f"settle#1: {reason}"]

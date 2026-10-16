@@ -250,6 +250,9 @@ class StartPlan:
     # Each person who approves nothing in the plan, and why: the case's opener and the step's
     # proposer cross into it (brief, D25).
     excluded: dict[str, str]
+    # What each field is given, as a reference: the system of a reference field read as it is, or
+    # None; and how a message says it. Only the case sees the expression, so it says (brief, D30).
+    references: dict[str, tuple[str | None, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -767,6 +767,20 @@ Each starts with its negative test, seen failing for the right reason.
   refusals when a person opens it and asks which also hold when a system does. "The plan's own
   mark is the plan's issue" passed at once; seen failing with the marks added back.
 
+- **G7's reference half is checked by the case, not the plan** (slice 3). A plan's field
+  arrives as `Sourced(value, sources)`: the plan can't tell a `crm` reference from a text, and
+  `decide` doesn't hold the plans (the drivers read them). So `start_plan` says, for each field,
+  what it gives (`given_as_reference`, split out of `not_a_reference_to`, which now uses it), on
+  `StartPlan.references`; both drivers ask `plan_step.wrong_references` before the plan starts,
+  as they ask `supplied`. Validation reads the same function. The type half stays the plan's
+  (`refuse_to_start`, slice 4): a value's type is in the value.
+- **G7 met an earlier test's fixture** (slice 3): `test_fresh_facts.needing` gave
+  `refund-order@1`'s `orders` reference a case field declared as a text. The fixture now declares
+  it a reference to orders, as an order ID is; the test's subject (a plan step's outcome isn't
+  fetched again) is unchanged.
+- **The Temporal comparison passed at once** (slice 3), the driver's check written first; seen
+  failing with it removed (the child started).
+
 ### Not in 10c
 
 - Teaching warnings (10d), among them D9's approval whose condition reads none of its step's
@@ -777,7 +791,9 @@ Each starts with its negative test, seen failing for the right reason.
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
-Drafted with the note; checked against the tests in slice 6.
+`V` is `tests/test_case_validation.py`, `P` `tests/test_plan_step.py`, `T`
+`tests/test_temporal_case.py`, `I` `tests/test_interpreter.py`. Drafted with the note; checked
+against the tests in slice 6.
 
 | Promise | Test |
 |---|---|
@@ -785,7 +801,7 @@ Drafted with the note; checked against the tests in slice 6.
 | One pass gives what the runtime records: a value computed from several fields, an output with its contract's source or `untrusted:undeclared`, an outcome from its contract | V `test_one_pass_gives_the_sources_the_run_records` |
 | A refusal that depends on who opens the case is a warning, `OPENER_DECIDES`; one that holds for any opener is an error | V `test_who_opens_the_case_decides_only_a_warning` |
 | A plan step's fields carry the case's sources into the plan: refused at the case's input before the plan runs; run, the plan stops; the plan's own marks are the plan's issue; a field a wait sets is a person's | V `test_a_plan_step_carries_the_cases_sources_into_its_plan`, `test_a_plans_own_mark_is_the_plans_issue` |
-| A reference input given another system's reference, a text or a computed value is `REFERENCE`, in activity and plan steps; run, the step fails (G7: the fabricated order ID is no longer paid) | V `test_a_reference_goes_only_where_its_system_is_expected`; I `test_a_plan_field_takes_only_a_reference_to_its_system` |
+| A reference input given another system's reference, a text or a computed value is `REFERENCE`, in activity and plan steps; run, the step fails, in memory and on Temporal (G7: the made-up order ID is no longer paid) | V `test_a_reference_goes_only_where_its_system_is_expected`, `test_a_plan_steps_reference_field_takes_a_reference_of_its_system`; P `test_a_plan_field_takes_only_a_reference_to_its_system`; T `test_a_plan_field_takes_only_a_reference_of_its_system_on_temporal` |
 | An input of another type than it takes is `INPUT_TYPE`; run, it is refused, never converted (G6), in a case and in a plan | V `test_an_input_is_given_the_type_it_takes`; I `test_an_input_is_never_converted` |
 | A plan's fields are checked against their types when it starts (G7) | I `test_a_plan_field_takes_a_value_of_its_type` |
 | A plan field given only literals is `NO_SOURCES`; run, the plan doesn't start | V `test_a_plan_field_given_only_literals_has_no_sources` |

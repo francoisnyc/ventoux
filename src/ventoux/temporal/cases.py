@@ -40,7 +40,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.freshness import TimeRefused
-    from ventoux.case.plan_step import PlanNotSupplied, supplied
+    from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
     from ventoux.case.runtime import CaseRefused, ShownRefused, decide
     from ventoux.case.state import (
         Answered,
@@ -364,6 +364,9 @@ class CaseWorkflow:
             plan = supplied(self.plans, command.plan)
         except PlanNotSupplied as missing:
             self.inbox.append(Failed(command.entry, str(missing), at=now()))  # fail closed
+            return
+        if (wrong := wrong_references(plan, command)) is not None:
+            self.inbox.append(Failed(command.entry, wrong, at=now()))  # fail closed
             return
         fields = {
             name: Given(given.value, sorted(given.sources))

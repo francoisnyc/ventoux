@@ -68,7 +68,12 @@ from ventoux.case.state import (
 from ventoux.case.types import expression_problem
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.approval import inputs_digest
-from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
+from ventoux.core.before_activity import (
+    InputRefused,
+    checked_inputs,
+    given_as_reference,
+    one_line,
+)
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions import (
@@ -771,7 +776,7 @@ def start(
     """Open a task's run; start a plan; ask for an activity's or a workflow's approval, or start
     it."""
     if isinstance(step, PlanStep):
-        start_plan(state, name, step, commands)
+        start_plan(case, state, name, step, commands)
         return
     if isinstance(step, TaskStep):
         entry = coming_run(state, name, "open").entry
@@ -856,7 +861,9 @@ def origins(inputs: Mapping[str, Expression], state: CaseState) -> str:
     )
 
 
-def start_plan(state: CaseState, name: str, step: PlanStep, commands: list[Command]) -> None:
+def start_plan(
+    case: CaseDefinition, state: CaseState, name: str, step: PlanStep, commands: list[Command]
+) -> None:
     """Start the step's plan with its fields, each with where its value came from, so the plan's
     own checks see the real sources (brief, D28). The plan checks its fields when it starts."""
     fields: dict[str, Sourced] = {}
@@ -885,7 +892,11 @@ def start_plan(state: CaseState, name: str, step: PlanStep, commands: list[Comma
     state.history.append(
         f"started {run.entry}: plan {step.plan} ({origins(step.inputs, state)}), run {plan_run}"
     )
-    commands.append(StartPlan(run.entry, step.plan, fields, plan_run, excluded))
+    types = {field: declared.declared for field, declared in case.fields.items()}
+    references = {
+        field: given_as_reference(expression, types) for field, expression in step.inputs.items()
+    }
+    commands.append(StartPlan(run.entry, step.plan, fields, plan_run, excluded, references))
 
 
 def coming_run(
