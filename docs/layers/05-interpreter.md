@@ -254,7 +254,7 @@ broken; the positive ones that passed at once were not.
 | An answer the wait doesn't offer, a `timeout` it doesn't declare or that a person sends, and an answer naming nobody are refused, and the wait goes on | I `test_an_answer_the_wait_does_not_offer_is_refused`, `test_a_wait_takes_only_answers_it_can_be_given` |
 | A declared timeout moves on by its `timeout` transition | I `test_a_declared_timeout_moves_on` |
 | A run with no answer left is `waiting`, not ended | I `test_a_run_without_its_answer_waits` |
-| The key is the state and its entry count, and replaces any value a plan gives it | I `test_trusted_values_pass_with_the_key_the_engine_fills`, `test_the_key_is_the_state_and_its_run`, `test_a_key_a_plan_gives_is_refused` (since 10b: refused, not replaced) |
+| The key is the state and its entry count; a key a plan gives is refused since 10b, not replaced (brief, D35) | I `test_trusted_values_pass_with_the_key_the_engine_fills`, `test_the_key_is_the_state_and_its_run`, `test_a_key_a_plan_gives_is_refused` |
 | `core` and `case` read no clock, randomness or I/O: no such import, no call to `open` | L `test_pure_layers_may_not_read_the_clock_randomness_or_io`, `test_pure_layers_may_not_open_a_file`, `test_pure_layers_import_nothing_forbidden` |
 | A run that enters 1,000 states without a wait taking an answer stops; a loop through a wait doesn't | I `test_a_loop_that_never_waits_is_stopped`, `test_a_loop_through_a_wait_does_not_count_against_the_bound` |
 | The same plan, fields and answers give the same history | I `test_a_run_is_the_same_every_time` |

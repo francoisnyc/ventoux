@@ -519,6 +519,10 @@ Each starts with its negative test, seen failing for the right reason.
 
 - Input types against the contract or the plan's fields, and the lax conversion (10c).
 - Input policies, references and sensitive values (10c); teaching warnings (10d).
+- Two notes carried to layer 12 (from the tutor review): a case failed by G1 can't be retried
+  (the same check refuses the retry) and, without a close reason an operator holds, waits for a
+  change request; and on Temporal, a running case that skipped such a step under the old code
+  (its `when` read as false) would replay differently under the new code.
 - No new dependency.
 
 ### Decided while building
