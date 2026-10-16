@@ -1935,9 +1935,19 @@ WARNINGS = "### What the check warns about"
 
 
 def warning_output(index: int) -> str:
-    """The plain-text block `index` of the guide's warnings, its line breaks aside."""
-    section = GUIDE.read_text().split(WARNINGS)[1]
-    return " ".join(section.split("```\n")[2 * index + 1].split("```")[0].split())
+    """The plain-text block `index` of the guide's warnings (one whose fence names no language,
+    as the guide prints output), its line breaks aside."""
+    blocks: list[tuple[str, list[str]]] = []  # each block's language, and its lines
+    inside = False
+    for line in GUIDE.read_text().split(WARNINGS)[1].splitlines():
+        if line.startswith("```"):
+            if not inside:
+                blocks.append((line[3:], []))
+            inside = not inside
+        elif inside:
+            blocks[-1][1].append(line)
+    plain = [lines for language, lines in blocks if language == ""]
+    return " ".join(" ".join(plain[index]).split())
 
 
 def without_call_customer() -> dict[str, Any]:
@@ -2622,3 +2632,62 @@ def test_a_read_behind_an_approval_needs_attention_when_stale() -> None:
         fetched.history
     )
     assert fetched.reached("pay")
+
+
+# --- 10d, slice 5: an approval that guards a neighbouring value ---
+
+
+def approving_on(when: Any) -> dict[str, Any]:
+    """The quickstart's refund, its approval asked when `when` holds."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["pay"]["approval"]["when"] = when
+    return refund
+
+
+ON_THE_REQUEST = {">": [{"var": "amount"}, 100]}
+
+
+def test_an_approval_that_guards_a_neighbouring_value_is_a_warning() -> None:
+    # The guide's output, word for word, line breaks aside.
+    assert printed(issues(approving_on(ON_THE_REQUEST))) == warning_output(4)
+    # The surprise: a customer asks for 50, the reviewer approves 5000, and 5000 is paid with
+    # no team lead asked.
+    run = run_case(
+        approving_on(ON_THE_REQUEST),
+        file={"order_id": "ord-1", "amount": 50},
+        answers=[("review", "approve", "ana", {"approved_amount": 5000})],
+        people=PEOPLE,
+    )
+    assert not any(line.startswith("asked pay.approval") for line in run.history)
+    assert "pay#1 done, giving refund_id from untrusted:undeclared" in run.history
+    assert run.closed
+
+
+def test_an_approval_reading_any_value_its_step_is_given_guards_it() -> None:
+    amount, approved = {"var": "amount"}, {"var": "approved_amount"}
+    for when in (
+        {">": [approved, 100]},  # the quickstart's
+        {"or": [{">": [amount, 100]}, {">": [approved, 100]}]},  # a neighbour beside it
+        {">": [{"-": [approved, amount]}, 0]},  # more approved than asked
+    ):
+        assert issues(approving_on(when)) == [], when
+    # An approval with no `when` guards every run.
+    always = copy.deepcopy(REFUND)
+    del always["steps"]["pay"]["approval"]["when"]
+    assert issues(always) == []
+    # A field the step is given through an expression counts: the amount is the lesser of two.
+    lesser = approving_on(ON_THE_REQUEST)
+    lesser["steps"]["pay"]["inputs"]["amount"] = {
+        "if": [{"<": [amount, approved]}, amount, approved]
+    }
+    assert issues(lesser) == []
+    # Two neighbouring values, both named.
+    neighbours = approving_on(
+        {"and": [ON_THE_REQUEST, {"==": [{"var": "review.outcome"}, "approve"]}]}
+    )
+    assert [issue.message for issue in issues(neighbours)] == [
+        (
+            "pay's approval reads amount and review.outcome, and pay is given only order_id and "
+            "approved_amount: it guards a value pay doesn't use: read one of those in its when"
+        )
+    ]

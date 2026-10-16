@@ -7,8 +7,16 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
-from ventoux.case.definition import ActivityStep, CaseDefinition, PlanStep, TaskStep, WorkflowStep
+from ventoux.case.definition import (
+    ActivityStep,
+    CallStep,
+    CaseDefinition,
+    PlanStep,
+    TaskStep,
+    WorkflowStep,
+)
 from ventoux.case.known import DONE, Known, Read, Reading, reads, set_by_outcomes
+from ventoux.case.runtime import listed
 from ventoux.case.types import expressions_of
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions.model import (
@@ -55,7 +63,7 @@ def warning_issues(
     failing = {read.value.partition(".")[0] for read in unset if read.ended_otherwise(reading)}
     found = outcome_issues(case, contracts, plans, failing)
     found += [unset_issue(reading, read) for read in unset]
-    return found + refresh_issues(case, contracts, missing)
+    return found + refresh_issues(case, contracts, missing) + elsewhere_issues(case, missing)
 
 
 def outcome_issues(
@@ -335,3 +343,29 @@ def never_fetched(
         # A refresh passes the same gate as any start, and never asks for an approval.
         return f"{writer}, a read that always needs an approval, which a refresh never asks for"
     return None
+
+
+def elsewhere_issues(case: CaseDefinition, refused: Collection[str]) -> list[Issue]:
+    """An approval whose `when` reads none of the fields its step's inputs read: it guards a
+    neighbouring value, not the one the step sends (brief, D9) (brief, D37). An approval with no
+    `when` guards every run; a step given nothing has nothing to guard."""
+    found: list[Issue] = []
+    for name, step in case.steps.items():
+        if name in refused or not isinstance(step, CallStep) or step.approval is None:
+            continue
+        if step.approval.when is None:
+            continue
+        given = list(dict.fromkeys(f for e in step.inputs.values() for f in fields_read(e)))
+        read = list(dict.fromkeys(fields_read(step.approval.when)))
+        if given and not set(read) & set(given):
+            found.append(
+                Issue(
+                    f"steps.{name}.approval.when",
+                    "APPROVAL_ELSEWHERE",
+                    f"{name}'s approval reads {listed(read)}, and {name} is given only "
+                    f"{listed(given)}: it guards a value {name} doesn't use: read one of those in "
+                    "its when",
+                    "warning",
+                )
+            )
+    return found

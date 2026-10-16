@@ -1096,6 +1096,16 @@ Each starts with its negative test, seen failing for the right reason.
   at once, and each branch was seen failing on a deliberate break, `any approval blocks a
   refresh` among them.
 
+- **`APPROVAL_ELSEWHERE`'s fix names no field** (slice 5). The guide's draft ended "read what pay
+  is given, such as approved_amount", but choosing `approved_amount` over `order_id` needs a rule
+  nobody decided; it now ends "read one of those in its when", the fields it was just given
+  listed. Its proof pays 5000 on a request of 50, with no approval asked. A field the step is
+  given through an expression counts (the lesser of two amounts), and an approval reading a
+  neighbour beside a given field is not warned: it guards that field too.
+- **The guide's outputs are read by their fences** (slice 5): its warnings section now holds a
+  JSON block, whose closing fence shifted the test's count of plain blocks; `warning_output`
+  takes the blocks whose fence names no language.
+
 ### Not in 10d
 
 - A guard the check doesn't recognise is warned about, never proven (data decides).

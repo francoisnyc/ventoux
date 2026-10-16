@@ -933,8 +933,8 @@ A customer asks for 50 and the reviewer approves 5000: no approval is needed, an
 
 ```
 steps.pay.approval.when  APPROVAL_ELSEWHERE (warning)  pay's approval reads amount, and pay is
-given only order_id and approved_amount: it guards a value pay doesn't use: read what pay is
-given, such as approved_amount
+given only order_id and approved_amount: it guards a value pay doesn't use: read one of those
+in its when
 ```
 
 | Code | Kind | What is wrong | Example message |
