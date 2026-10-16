@@ -198,7 +198,9 @@ keeps naming layer 6. The quickstart's tests stay green.
   refused, never defaulted), the key is filled, an input the contract doesn't declare is refused
   (Pydantic would ignore it: found in slice 3, failing open), and the schema is checked.
 - **The engine's key replaces any value a plan gives it.** `validate` refuses a plan setting the
-  key (`ENGINE_INPUT`); at runtime the engine's value is what the activity gets.
+  key (`ENGINE_INPUT`); at runtime the engine's value is what the activity gets. *Changed in
+  layer 10b (brief, D35): at runtime a key a plan gives is now refused, never replaced in silence;
+  the test is now `test_a_key_a_plan_gives_is_refused`.*
 - **A wait refuses three more answers than the note first said,** in this order: a `timeout`
   sent by a person (a timeout comes from the wait's timer), a `timeout` from a wait that declares
   none, and an outcome that names no person. Each is recorded as `Refused`; the wait goes on.
@@ -252,7 +254,7 @@ broken; the positive ones that passed at once were not.
 | An answer the wait doesn't offer, a `timeout` it doesn't declare or that a person sends, and an answer naming nobody are refused, and the wait goes on | I `test_an_answer_the_wait_does_not_offer_is_refused`, `test_a_wait_takes_only_answers_it_can_be_given` |
 | A declared timeout moves on by its `timeout` transition | I `test_a_declared_timeout_moves_on` |
 | A run with no answer left is `waiting`, not ended | I `test_a_run_without_its_answer_waits` |
-| The key is the state and its entry count, and replaces any value a plan gives it | I `test_trusted_values_pass_with_the_key_the_engine_fills`, `test_the_key_is_the_state_and_its_run`, `test_the_engines_key_replaces_any_a_plan_gives` |
+| The key is the state and its entry count; a key a plan gives is refused since 10b, not replaced (brief, D35) | I `test_trusted_values_pass_with_the_key_the_engine_fills`, `test_the_key_is_the_state_and_its_run`, `test_a_key_a_plan_gives_is_refused` |
 | `core` and `case` read no clock, randomness or I/O: no such import, no call to `open` | L `test_pure_layers_may_not_read_the_clock_randomness_or_io`, `test_pure_layers_may_not_open_a_file`, `test_pure_layers_import_nothing_forbidden` |
 | A run that enters 1,000 states without a wait taking an answer stops; a loop through a wait doesn't | I `test_a_loop_that_never_waits_is_stopped`, `test_a_loop_through_a_wait_does_not_count_against_the_bound` |
 | The same plan, fields and answers give the same history | I `test_a_run_is_the_same_every_time` |

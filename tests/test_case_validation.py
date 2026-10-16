@@ -4,7 +4,9 @@ Tests go through `parse_case`, then `validate_case`, and read the issues it give
 See docs/layers/10-case-validation.md and docs/guides/cases.md.
 """
 
+import copy
 import json
+import re
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
@@ -13,9 +15,21 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import parse_case
+from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
 from ventoux.core.validate import Issue
-from ventoux.testing import CATALOG, Outcome, load_definition, run_case
+from ventoux.testing import (
+    CATALOG,
+    AnswerRefused,
+    CaseRefused,
+    Outcome,
+    ProposalRefused,
+    RetryRefused,
+    load_definition,
+    propose,
+    retry,
+    run_case,
+)
 
 ROOT = Path(__file__).parent.parent
 REFUND = load_definition(ROOT / "examples" / "refund" / "refund.json")
@@ -289,22 +303,26 @@ def staying_open(claim: dict[str, Any]) -> dict[str, Any]:
 NEVER_CLOSES = Issue(
     "close_reasons",
     "NEVER_CLOSES",
-    "claim stays open, no close reason names a registered role, and closes_when never closes it, "
-    "so nobody could ever close it: name a registered role in a close reason",
+    "claim stays open, none of its close reasons' roles (supprt) is registered, and closes_when "
+    "never closes it, so nobody could ever close it: name a registered role in a close reason",
 )
 
 
 def test_a_case_nobody_can_close_is_refused() -> None:
     # The tutor review's probe: closes_when closes a case that stays open too (layer 8b), so
     # paid, which pay reaches, closes this one.
-    assert issues(staying_open(guide_json(0))) == []
-    # With paid unreachable, or no closes_when at all, nobody could ever close it.
+    # Since 10b, the role nobody registered is said: it can never close the case (brief, D35).
+    misspelt = unknown_role("close_reasons.duplicate.roles", "supprt")
+    assert issues(staying_open(guide_json(0))) == [misspelt]
+    # With paid unreachable, or no closes_when at all, nobody could ever close it. The issue
+    # names the roles, and no UNKNOWN_ROLE repeats them: one cause, one issue.
     assert NEVER_CLOSES in issues(staying_open(deadlocked_claim()))
+    assert misspelt not in issues(staying_open(deadlocked_claim()))
     without_close = staying_open(guide_json(0))
     del without_close["closes_when"]
     assert issues(without_close) == [NEVER_CLOSES]
     without_close["close_reasons"]["duplicate"]["roles"] = ["supprt", "adjuster"]
-    assert issues(without_close) == []
+    assert issues(without_close) == [misspelt]
 
 
 def letter_case(**thank: Any) -> dict[str, Any]:
@@ -378,9 +396,9 @@ def test_what_a_step_waits_for_is_followed_through_the_steps_it_requires() -> No
         Issue(
             "steps.thank.requires",
             "NEVER_RUNS",
-            "thank can never run: it runs only after draft and review, which reach sent and "
-            "reviewed, and letter closes once they are reached, before thank could start: change "
-            "what it requires, or closes_when",
+            "thank can never run: it runs only after draft, which reaches sent, and review, which "
+            "reaches reviewed, and letter closes once they are reached, before thank could start: "
+            "change what it requires, or closes_when",
         )
     ]
     # Requiring reviewed itself, and waiting for draft: both parts said.
@@ -525,10 +543,10 @@ GUIDE_EXAMPLES: dict[str, Callable[[], dict[str, Any]]] = {
 }
 
 
-def guide_table() -> list[tuple[str, str, str]]:
-    """The guide's table of codes, as (code, kind, example message); "as above" is the output
-    above it, which `test_the_deadlocked_claim_is_refused` checks word for word."""
-    table = guide_section().split("| Code | Kind |")[1].split("\n\n")[0]
+def guide_table(index: int = 1) -> list[tuple[str, str, str]]:
+    """The guide's table of codes `index` (1: structure, 2: what each step calls), as (code,
+    kind, example message); "as above" is the output above it, checked word for word."""
+    table = guide_section().split("| Code | Kind |")[index].split("\n\n")[0]
     rows = [line.split("|") for line in table.splitlines() if line.startswith("| `")]
     return [
         (code.strip().strip("`"), kind.strip(), says.strip().strip("`"))
@@ -622,7 +640,646 @@ def test_a_step_after_a_close_on_two_milestones_never_runs() -> None:
             "steps.thank.requires",
             "NEVER_RUNS",
             "thank can never run: it requires assessed and paid, and claim closes once they are "
-            "reached, before thank could start: remove one of them from its requires, or from "
-            "closes_when",
+            "reached, before thank could start: remove one of them from its requires",
         )
     ]
+    # Removing one from closes_when, as the advice once said, leaves thank requiring the other,
+    # on which the case still closes: still never run.
+    claim["closes_when"] = ["paid"]
+    assert [issue.code for issue in errors(claim)] == ["NEVER_RUNS"]
+
+
+def test_a_milestone_a_waited_for_step_requires_is_said_so() -> None:
+    # notify requires paid and reaches notified; thank, after notify, waits for both. notify
+    # doesn't reach paid: it requires it.
+    claim = guide_json(0)
+    claim["milestones"]["notified"] = {"display": {"title": "Customer told"}}
+    claim["closes_when"] = ["paid", "notified"]
+    claim["steps"]["notify"] = {**NOTIFY, "requires": ["paid"], "reaches": ["notified"]}
+    claim["steps"]["thank"] = {
+        **NOTIFY,
+        "display": {"title": "Thank the customer"},
+        "requires": ["notify"],
+    }
+    assert errors(claim) == [
+        Issue(
+            "steps.thank.requires",
+            "NEVER_RUNS",
+            "thank can never run: it runs only after notify, which requires paid and reaches "
+            "notified, and claim closes once they are reached, before thank could start: run "
+            "thank before notify, or remove paid and notified from closes_when",
+        )
+    ]
+
+
+# --- 10b, slice 1: the contract or the plan a step calls ---
+
+PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
+SMALL = {"order_id": "ord-1", "amount": 40}
+REVIEWED = ("review", "approve", "ana", {"approved_amount": 40})
+
+
+def refund_with(**pay: Any) -> dict[str, Any]:
+    """The quickstart's refund, with `pay`'s keys changed (or removed, given as None)."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["pay"] |= pay
+    refund["steps"]["pay"] = {k: v for k, v in refund["steps"]["pay"].items() if v is not None}
+    return refund
+
+
+def small_refund(definition: dict[str, Any], **given: Any) -> CaseRun:
+    """The quickstart's small refund, reviewed by Ana, run with `definition`."""
+    return run_case(definition, file=SMALL, answers=[REVIEWED], people=PEOPLE, **given)
+
+
+NOT_IN_CATALOG = (
+    "payments.refund@3 is not in the catalog. Registered: payments.refund@2. Use a registered "
+    "version, or register this one first."
+)
+
+
+def test_a_contract_nobody_registered_is_refused() -> None:
+    refund = refund_with(activity="payments.refund@3")
+    assert issues(refund) == [Issue("steps.pay.activity", "UNKNOWN_CONTRACT", NOT_IN_CATALOG)]
+    # The proof: run as it is, the step fails, and waits for a person.
+    assert small_refund(refund).needs_attention == [f"pay#1: {NOT_IN_CATALOG}"]
+
+
+def test_a_step_and_its_contract_are_the_same_kind() -> None:
+    wrong = "payments.refund@2 is an activity contract, not a workflow: run it as an activity step."
+    refund = refund_with(kind="workflow", workflow="payments.refund@2", activity=None)
+    assert issues(refund) == [Issue("steps.pay.workflow", "WRONG_KIND", wrong)]
+    assert small_refund(refund).needs_attention == [f"pay#1: {wrong}"]
+
+
+PLANS_GUIDE = ROOT / "docs" / "guides" / "plans.md"
+
+
+def refund_order(version: int = 1) -> dict[str, Any]:
+    """The plans guide's `refund-order` plan, its first JSON block, as stored data."""
+    example = PLANS_GUIDE.read_text().split("```json\n")[1].split("```")[0]
+    plan: dict[str, Any] = json.loads(example, parse_float=Decimal)
+    return plan | {"version": version}
+
+
+# The cases guide's plan step: the refund paid through the plans guide's `refund-order` plan.
+SETTLE: dict[str, Any] = {
+    "kind": "plan",
+    "display": {"title": "Settle the refund"},
+    "plan": "refund-order@1",
+    "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+    "requires": ["review"],
+    "when": {"==": [{"var": "review.outcome"}, "approve"]},
+}
+PLANS = {"refund-order@1": refund_order(), "refund-order@3": refund_order(version=1)}
+
+
+def settled(**settle: Any) -> dict[str, Any]:
+    """The quickstart's refund, `pay` replaced by the plan step, with `settle`'s keys changed."""
+    refund = copy.deepcopy(REFUND)
+    del refund["steps"]["pay"], refund["sequence"]
+    refund["steps"]["settle"] = {**copy.deepcopy(SETTLE), **settle}
+    return refund
+
+
+def checked_with(definition: dict[str, Any], plans: dict[str, Any]) -> list[Issue]:
+    return validate_case(parse_case(definition), CATALOG, plans=plans)
+
+
+def test_a_plan_nobody_supplied_is_refused() -> None:
+    # Fail closed: with no plans given, a plan step's plan isn't there.
+    missing = "no plan refund-order@1 is available"
+    expected = Issue(
+        "steps.settle.plan", "UNKNOWN_PLAN", f"{missing}: supply it with the deployment's plans"
+    )
+    assert issues(settled()) == [expected]
+    assert checked_with(settled(), {}) == [expected]
+    # Given as the runtime is given it, the plan is found.
+    assert checked_with(settled(), PLANS) == []
+    # The proof: run as it is, with no plans, the step fails.
+    run = run_case(settled(), file=SMALL, answers=[REVIEWED], people=PEOPLE, plans={})
+    assert run.needs_attention == [f"settle#1: {missing}"]
+
+
+def test_a_plan_the_runtime_would_not_run_is_refused() -> None:
+    # Read with the runtime's own reader: a plan supplied under another reference, or one that
+    # can't be read, never runs in its place.
+    misnamed = "refund-order@3 is supplied as refund-order@1: supply the plan it names"
+    assert checked_with(settled(plan="refund-order@3"), PLANS) == [
+        Issue("steps.settle.plan", "UNKNOWN_PLAN", misnamed)
+    ]
+    run = run_case(
+        settled(plan="refund-order@3"), file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS
+    )
+    assert run.needs_attention == [f"settle#1: {misnamed}"]
+    broken = {"refund-order@1": {"plan": "refund-order"}}
+    [unreadable] = checked_with(settled(), broken)
+    assert (unreadable.path, unreadable.code) == ("steps.settle.plan", "UNKNOWN_PLAN")
+    assert unreadable.message.startswith("refund-order@1 can't be read: ")
+
+
+# --- 10b, slice 2: inputs ---
+
+
+def test_an_input_the_contract_does_not_take_is_refused() -> None:
+    refund = refund_with(inputs={"order_id": {"var": "order_id"}, "amout": {"var": "amount"}})
+    assert issues(refund) == [
+        Issue(
+            "steps.pay.inputs.amout",
+            "UNKNOWN_INPUT",
+            "payments.refund@2 has no input amout: its inputs are amount, order_id",
+        ),
+        Issue(
+            "steps.pay.inputs",
+            "MISSING_INPUT",
+            "payments.refund@2 needs the input amount: add it to inputs",
+        ),
+    ]
+    [refused] = small_refund(refund).needs_attention
+    assert refused.startswith("pay#1: payments.refund@2 doesn't take these inputs: amout")
+
+
+def test_an_input_the_contract_needs_is_given() -> None:
+    refund = refund_with(inputs={"order_id": {"var": "order_id"}})
+    assert issues(refund) == [
+        Issue(
+            "steps.pay.inputs",
+            "MISSING_INPUT",
+            "payments.refund@2 needs the input amount: add it to inputs",
+        )
+    ]
+    [refused] = small_refund(refund).needs_attention
+    assert refused.startswith("pay#1: payments.refund@2 doesn't take these inputs: amount")
+
+
+ENGINE_KEY = "idempotency_key is filled by the engine, never by a definition: remove it"
+
+
+def test_the_engine_fills_the_key() -> None:
+    inputs = {**REFUND["steps"]["pay"]["inputs"], "idempotency_key": "mine"}
+    refund = refund_with(inputs=inputs)
+    assert issues(refund) == [Issue("steps.pay.inputs.idempotency_key", "ENGINE_INPUT", ENGINE_KEY)]
+    # The proof: the runtime refuses it too, never overwriting it in silence.
+    assert small_refund(refund).needs_attention == [f"pay#1: {ENGINE_KEY}"]
+
+
+def test_a_step_whose_contract_is_missing_has_one_issue() -> None:
+    # One cause, one issue: no input of a contract nobody registered is said to be wrong.
+    refund = refund_with(activity="payments.refund@3", inputs={"amout": {"var": "amount"}})
+    assert [issue.code for issue in issues(refund)] == ["UNKNOWN_CONTRACT"]
+
+
+def review_and_pay() -> dict[str, Any]:
+    """The plans guide's `review-and-pay` plan, whose review sets `approved_amount`."""
+    blocks = PLANS_GUIDE.read_text().split("```json\n")[1:]
+    example = next(block for block in blocks if '"review-and-pay"' in block).split("```")[0]
+    plan: dict[str, Any] = json.loads(example, parse_float=Decimal)
+    return plan
+
+
+def test_a_plan_step_gives_the_fields_its_plan_takes_at_its_start() -> None:
+    misspelt = settled(inputs={"order_id": {"var": "order_id"}, "amout": {"var": "amount"}})
+    assert checked_with(misspelt, PLANS) == [
+        Issue(
+            "steps.settle.inputs.amout",
+            "UNKNOWN_INPUT",
+            "refund-order@1 has no input amout: its inputs are amount, order_id",
+        ),
+        Issue(
+            "steps.settle.inputs",
+            "MISSING_INPUT",
+            "refund-order@1 needs the input amount: add it to inputs",
+        ),
+    ]
+    [refused] = run_case(
+        misspelt, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS
+    ).needs_attention
+    assert "amount is missing" in refused and "amout is not a field of refund-order" in refused
+    # A field a person sets in the plan is theirs: the case never gives it.
+    given = settled(
+        plan="review-and-pay@1",
+        inputs={"order_id": {"var": "order_id"}, "approved_amount": {"var": "amount"}},
+    )
+    plans = {"review-and-pay@1": review_and_pay()}
+    assert checked_with(given, plans) == [
+        Issue(
+            "steps.settle.inputs.approved_amount",
+            "UNKNOWN_INPUT",
+            "review-and-pay@1 takes no input approved_amount: its wait review sets it; its inputs "
+            "are order_id",
+        )
+    ]
+    [refused] = run_case(
+        given, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=plans
+    ).needs_attention
+    assert "approved_amount is set by a person in review, never given at the start" in refused
+
+
+# --- 10b, slice 3: roles, labels and systems nobody registered ---
+
+ROLES = "adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead"
+
+
+def unknown_role(path: str, role: str) -> Issue:
+    return Issue(
+        path,
+        "UNKNOWN_ROLE",
+        f"{role} is a role nobody registered: the roles are {ROLES}; use one of them, or ask the "
+        "platform team to register it",
+    )
+
+
+def test_a_role_nobody_registered_answers_nothing() -> None:
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["review"]["roles"] = ["supprt"]
+    assert issues(refund) == [unknown_role("steps.review.roles", "supprt")]
+    # The proof: a role the engine doesn't know counts for nothing, whoever states it (brief,
+    # D22).
+    with pytest.raises(AnswerRefused, match="supprt"):
+        run_case(refund, file=SMALL, answers=[REVIEWED], people={"ana": ["supprt"]})
+
+
+def test_a_role_nobody_registered_approves_nothing() -> None:
+    refund = refund_with(
+        approval={**REFUND["steps"]["pay"]["approval"], "roles": ["support-lead", "suport-lead"]}
+    )
+    assert issues(refund) == [unknown_role("steps.pay.approval.roles", "suport-lead")]
+    large = {"order_id": "ord-1", "amount": 250}
+    approved = ("pay", "approve", "lee")
+    with pytest.raises(AnswerRefused, match="suport-lead"):
+        run_case(
+            refund,
+            file=large,
+            answers=[("review", "approve", "ana", {"approved_amount": 250}), approved],
+            people={"ana": ["support"], "lee": ["suport-lead"]},
+        )
+
+
+def test_a_role_nobody_registered_is_said_once() -> None:
+    # One misspelt role among proposed_by is its own issue; if none is registered, the step can
+    # never run, and that issue names them (10a): one cause, one issue.
+    recheck = {
+        **NOTIFY,
+        "display": {"title": "Check the customer again"},
+        "requires": ["checked"],
+        "automatic": False,
+        "proposed_by": ["supprt", "adjuster"],
+    }
+    assert issues(claim_with(recheck=recheck)) == [
+        unknown_role("steps.recheck.proposed_by", "supprt")
+    ]
+    recheck["proposed_by"] = ["supprt"]
+    assert [i.code for i in issues(claim_with(recheck=recheck))] == ["NEVER_RUNS"]
+    # A close reason naming one: an issue, though another role may close the case.
+    claim = staying_open(guide_json(0))
+    claim["close_reasons"]["duplicate"]["roles"] = ["supprt", "adjuster"]
+    assert issues(claim) == [unknown_role("close_reasons.duplicate.roles", "supprt")]
+
+
+def test_a_role_nobody_registered_sees_nothing() -> None:
+    refund = copy.deepcopy(REFUND)
+    refund["fields"]["amount"]["visible_to"] = ["support", "suport-lead"]
+    assert issues(refund) == [unknown_role("fields.amount.visible_to", "suport-lead")]
+    # The proof: stated with a role nobody registered, a person sees nothing it would show
+    # (brief, D22) (brief, D35).
+    run = small_refund(refund)
+    assert "amount" not in run.view(roles=["suport-lead"]).values
+    assert "amount" in run.view(roles=["support"]).values
+
+
+def test_a_label_nobody_registered_is_refused() -> None:
+    refund = copy.deepcopy(REFUND)
+    refund["fields"]["amount"]["source"] = "untrusted:custmer"
+    assert issues(refund) == [
+        Issue(
+            "fields.amount.source",
+            "UNKNOWN_SOURCE",
+            "untrusted:custmer has a label nobody registered: the labels are customer, document, "
+            "email, llm, web; use one of them, or ask the platform team to register it",
+        )
+    ]
+    # The proof: a case declaring it doesn't open (brief, D12) (brief, D35).
+    with pytest.raises(CaseRefused, match="custmer"):
+        small_refund(refund)
+
+
+def test_a_system_nobody_registered_is_refused() -> None:
+    refund = copy.deepcopy(REFUND)
+    refund["fields"]["order_id"]["system"] = "ordrs"
+    assert issues(refund) == [
+        Issue(
+            "fields.order_id",
+            "UNKNOWN_SYSTEM",
+            "order_id is a reference to ordrs, which is not a registered system: the systems are "
+            "crm, documents, orders, policies; use one of them, or ask the platform team to "
+            "register it",
+        )
+    ]
+    # The proof: a case naming it doesn't open (brief, D30).
+    with pytest.raises(CaseRefused, match="ordrs"):
+        small_refund(refund)
+
+
+# --- 10b, slice 4: a case's expressions, type-checked over the case's values ---
+
+CLAIM_FILE = {"customer_id": "cus-7", "order_id": "ord-1"}
+CLAIM_PEOPLE = {"ana": ["adjuster"], "sam": ["support-lead"]}
+ACCEPTED = ("assess", "accept", "ana", {"payout": 50})
+
+
+def claim_paying_when(when: Any) -> dict[str, Any]:
+    claim = guide_json(0)
+    claim["steps"]["pay"]["when"] = when
+    return claim
+
+
+def test_a_misspelt_outcome_is_refused() -> None:
+    # The guide's example, word for word, line breaks aside.
+    claim = guide_json(0)
+    claim["steps"]["pay"] |= guide_json(2)
+    shown = guide_section().split("before any case opens:\n\n```\n")[2].split("```")[0]
+    assert printed(issues(claim)) == " ".join(shown.split())
+    # The proof: run as it is, the step fails, saying why, never reading the condition as false
+    # (brief, D35). Before 10b, the claim closed with nothing left to do, never paid.
+    run = run_case(claim, file=CLAIM_FILE, answers=[ACCEPTED], people=CLAIM_PEOPLE)
+    assert run.needs_attention == [
+        (
+            'pay#1: pay.when can\'t be read: ==[1]: assess.outcome has no outcome "acept"; its '
+            "outcomes are accept, deny"
+        )
+    ]
+    assert not run.closed
+
+
+def test_a_case_reads_only_its_values() -> None:
+    misspelt = claim_paying_when({">": [{"var": "payot"}, 0]})
+    assert issues(misspelt) == [
+        Issue("steps.pay.when", "EXPRESSION_INVALID", ">[0]: payot is not a declared field")
+    ]
+    run = run_case(misspelt, file=CLAIM_FILE, answers=[ACCEPTED], people=CLAIM_PEOPLE)
+    assert run.needs_attention == [
+        "pay#1: pay.when can't be read: >[0]: payot is not a declared field"
+    ]
+    # An approval nothing writes is not a value either (brief, D11's `pay.approval`).
+    approval = {
+        **guide_json(0)["steps"]["pay"]["approval"],
+        "when": {"==": [{"var": "pay.approval"}, "reject"]},
+    }
+    claim = claim_with(pay={**guide_json(0)["steps"]["pay"], "approval": approval})
+    assert issues(claim) == [
+        Issue(
+            "steps.pay.approval.when",
+            "EXPRESSION_INVALID",
+            "==[0]: pay.approval is not a declared field",
+        )
+    ]
+
+
+def test_outcomes_and_outputs_have_their_contracts_types() -> None:
+    def when(expression: Any) -> list[Issue]:
+        thank = {**NOTIFY, "display": {"title": "Thank the customer"}, "requires": ["check"]}
+        return issues(claim_with(thank={**thank, "when": expression}))
+
+    # An activity's outcome: done, or one its contract declares; a workflow's: done.
+    assert when({"in": [{"var": "pay.outcome"}, ["done", "declined"]]}) == []
+    assert when({"==": [{"var": "check.outcome"}, "done"]}) == []
+    [declined] = when({"==": [{"var": "pay.outcome"}, "decline"]})
+    assert declined.message == (
+        '==[1]: pay.outcome has no outcome "decline"; its outcomes are done, declined'
+    )
+    [failed] = when({"==": [{"var": "check.outcome"}, "failed"]})
+    assert failed.message == '==[1]: check.outcome has no outcome "failed"; its outcomes are done'
+    # Outputs, with their contracts' types: kyc.check@1's risk_score is a number, status a text.
+    assert when({">": [{"var": "check.risk_score"}, 50]}) == []
+    [compared] = when({"==": [{"var": "check.status"}, 1]})
+    assert (
+        compared.message
+        == "==[1]: `==` compares values of the same type, and this is a number, not a string"
+    )
+    [undeclared] = when({"exists": "check.score"})
+    assert undeclared.message == "check.score is not a declared field"
+
+
+def test_a_plan_steps_outcome_is_done_or_failed() -> None:
+    def when(expression: Any) -> list[Issue]:
+        refund = settled()
+        refund["steps"]["tell"] = {
+            "kind": "task",
+            "display": {"title": "Tell the customer"},
+            "roles": ["support"],
+            "requires": ["settle"],
+            "when": expression,
+            "outcomes": {"told": {"display": {"title": "Told"}}},
+        }
+        return checked_with(refund, PLANS)
+
+    assert when({"==": [{"var": "settle.outcome"}, "failed"]}) == []
+    [refused] = when({"==": [{"var": "settle.outcome"}, "stopped"]})
+    assert (
+        refused.message
+        == '==[1]: settle.outcome has no outcome "stopped"; its outcomes are done, failed'
+    )
+
+
+def test_a_condition_gives_true_or_false() -> None:
+    assert issues(claim_paying_when({"var": "payout"})) == [
+        Issue(
+            "steps.pay.when",
+            "EXPRESSION_INVALID",
+            "a condition gives a boolean, and this gives a number: write a comparison, such as "
+            "amount > 100",
+        )
+    ]
+    run = run_case(
+        claim_paying_when({"var": "payout"}),
+        file=CLAIM_FILE,
+        answers=[ACCEPTED],
+        people=CLAIM_PEOPLE,
+    )
+    [failed] = run.needs_attention
+    assert failed.startswith("pay#1: pay.when can't be read: a condition gives a boolean")
+
+
+def test_an_input_reads_only_the_cases_values() -> None:
+    refund = refund_with(
+        inputs={"order_id": {"var": "order_id"}, "amount": {"+": [{"var": "amount"}, "1"]}}
+    )
+    assert issues(refund) == [
+        Issue(
+            "steps.pay.inputs.amount",
+            "EXPRESSION_INVALID",
+            "+[1]: `+` adds numbers, and this is a string",
+        )
+    ]
+    assert small_refund(refund).needs_attention == [
+        "pay#1: pay.inputs.amount can't be read: +[1]: `+` adds numbers, and this is a string"
+    ]
+
+
+def test_what_a_missing_contract_would_give_is_said_once() -> None:
+    # One cause, one issue: pay's contract is missing, so neither its inputs nor what reads its
+    # outcome is said to be wrong.
+    claim = guide_json(0)
+    claim["steps"]["pay"] |= {
+        "activity": "payments.refund@3",
+        "inputs": {"amout": {"var": "nothing"}},
+    }
+    thank = {**NOTIFY, "display": {"title": "Thank the customer"}, "requires": ["check"]}
+    claim["steps"]["thank"] = {**thank, "when": {"==": [{"var": "pay.outcome"}, "done"]}}
+    assert [issue.code for issue in issues(claim)] == ["UNKNOWN_CONTRACT"]
+
+
+def test_a_proposal_or_a_retry_never_reads_a_misspelt_outcome() -> None:
+    # The runtime checks a step's expressions wherever it would read them: a proposal and a
+    # retry are refused, saying why, never decided on a condition read as false (brief, D35).
+    claim = guide_json(0)
+    claim["steps"]["recheck"] = {
+        **NOTIFY,
+        "display": {"title": "Check the customer again"},
+        "requires": ["checked"],
+        "automatic": False,
+        "proposed_by": ["adjuster"],
+        "when": {"==": [{"var": "assess.outcome"}, "acept"]},
+    }
+    misspelt = (
+        'recheck.when can\'t be read: ==[1]: assess.outcome has no outcome "acept"; its outcomes '
+        "are accept, deny"
+    )
+    with pytest.raises(ProposalRefused, match=re.escape(misspelt)):
+        run_case(claim, file=CLAIM_FILE, answers=[propose("recheck", "ana")], people=CLAIM_PEOPLE)
+    paying = guide_json(0)
+    paying["steps"]["pay"] |= guide_json(2)
+    with pytest.raises(RetryRefused, match=re.escape("pay#1 can't be retried: pay.when can't")):
+        run_case(
+            paying,
+            file=CLAIM_FILE,
+            answers=[ACCEPTED, retry("pay#1", "omar")],
+            people={**CLAIM_PEOPLE, "omar": ["operations"]},
+        )
+
+
+# --- 10b, slice 5: approvals ---
+
+LARGE = {"order_id": "ord-1", "amount": 250}
+LARGE_REVIEW = ("review", "approve", "ana", {"approved_amount": 250})
+
+
+def test_a_high_risk_step_has_an_approval() -> None:
+    refund = refund_with(approval=None)
+    no_approval = "payments.refund@2 is high risk, and pay has no approval"
+    assert issues(refund) == [Issue("steps.pay", "APPROVAL_REQUIRED", f"{no_approval}: add one")]
+    # The proof: the runtime stops it before it is scheduled (brief, D11).
+    assert small_refund(refund).needs_attention == [f"pay#1: {no_approval}"]
+    # An approval with a `when` is enough: the quickstart's refund asks only above 100.
+    assert issues(REFUND) == []
+
+
+def test_an_approvals_roles_may_approve_its_steps_risk() -> None:
+    approval = {**REFUND["steps"]["pay"]["approval"], "roles": ["support-lead", "adjuster"]}
+    refund = refund_with(approval=approval)
+    refused = "adjuster may approve no risk, and payments.refund@2 is high risk"
+    assert issues(refund) == [
+        Issue(
+            "steps.pay.approval.roles",
+            "APPROVAL_ROLE",
+            f"{refused}: name a role that may approve high risk",
+        )
+    ]
+    with pytest.raises(AnswerRefused, match=re.escape(refused)):
+        run_case(
+            refund,
+            file=LARGE,
+            answers=[LARGE_REVIEW, ("pay", "approve", "lee")],
+            people={"ana": ["support"], "lee": ["adjuster"]},
+        )
+    # A role nobody registered is said once, as UNKNOWN_ROLE; a missing contract once, as
+    # UNKNOWN_CONTRACT: one cause, one issue.
+    approval["roles"] = ["suport-lead"]
+    assert [i.code for i in issues(refund_with(approval=approval))] == ["UNKNOWN_ROLE"]
+    missing = refund_with(approval=None, activity="payments.refund@3")
+    assert [i.code for i in issues(missing)] == ["UNKNOWN_CONTRACT"]
+
+
+# --- 10b, slice 6: the guide and the promises ---
+
+
+def check_as_activity() -> dict[str, Any]:
+    claim = guide_json(0)
+    del claim["steps"]["check"]["workflow"]
+    claim["steps"]["check"] |= {"kind": "activity", "activity": "kyc.check@1"}
+    return claim
+
+
+def misspelt_acceptance() -> dict[str, Any]:
+    claim = guide_json(0)
+    claim["steps"]["pay"] |= guide_json(2)
+    return claim
+
+
+def with_field(name: str, **changed: Any) -> Callable[[], dict[str, Any]]:
+    def make() -> dict[str, Any]:
+        refund = copy.deepcopy(REFUND)
+        refund["fields"][name] |= changed
+        return refund
+
+    return make
+
+
+def misspelt_reviewer() -> dict[str, Any]:
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["review"]["roles"] = ["supprt"]
+    return refund
+
+
+# A definition that makes each of the guide's codes for what steps call happen, in its order.
+CALLS_EXAMPLES: dict[str, Callable[[], dict[str, Any]]] = {
+    "UNKNOWN_CONTRACT": lambda: refund_with(activity="payments.refund@3"),
+    "WRONG_KIND": check_as_activity,
+    "UNKNOWN_PLAN": lambda: settled(plan="refund-order@2"),
+    "UNKNOWN_INPUT": lambda: refund_with(
+        inputs={"order_id": {"var": "order_id"}, "amout": {"var": "amount"}}
+    ),
+    "MISSING_INPUT": lambda: refund_with(inputs={"order_id": {"var": "order_id"}}),
+    "ENGINE_INPUT": lambda: refund_with(
+        inputs={**REFUND["steps"]["pay"]["inputs"], "idempotency_key": "mine"}
+    ),
+    "UNKNOWN_ROLE": misspelt_reviewer,
+    "UNKNOWN_SOURCE": with_field("amount", source="untrusted:custmer"),
+    "UNKNOWN_SYSTEM": with_field("order_id", system="ordrs"),
+    "EXPRESSION_INVALID": misspelt_acceptance,
+    "APPROVAL_REQUIRED": lambda: refund_with(approval=None),
+    "APPROVAL_ROLE": lambda: refund_with(
+        approval={**REFUND["steps"]["pay"]["approval"], "roles": ["support-lead", "adjuster"]}
+    ),
+}
+
+
+def test_the_guide_lists_every_code_for_what_steps_call() -> None:
+    assert [code for code, _, _ in guide_table(2)] == list(CALLS_EXAMPLES)
+
+
+@pytest.mark.parametrize(("code", "kind", "says"), guide_table(2))
+def test_the_guides_table_of_calls_is_what_validate_case_says(
+    code: str, kind: str, says: str
+) -> None:
+    found = [i for i in checked_with(CALLS_EXAMPLES[code](), PLANS) if i.code == code]
+    assert [issue.severity for issue in found] == [kind]
+    if says != "as above":
+        assert [issue.message for issue in found] == [says]
+
+
+def test_a_message_quotes_only_the_literal_that_is_wrong() -> None:
+    # A literal the author wrote may be quoted when it is the mistake; titles, an approval's
+    # reason and any other literal never are (brief, D35).
+    for make in CALLS_EXAMPLES.values():
+        for issue in checked_with(marked(make()), PLANS):
+            assert "TITLE-" not in issue.message, issue
+    claim = guide_json(0)
+    claim["steps"]["pay"]["when"] = {
+        "and": [
+            {"==": [{"var": "assess.outcome"}, "acept"]},
+            {">": [{"var": "payout"}, 987654]},
+        ]
+    }
+    [issue] = issues(claim)
+    assert '"acept"' in issue.message and "987654" not in issue.message

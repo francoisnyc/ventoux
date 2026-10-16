@@ -1,0 +1,114 @@
+"""The values a case's expressions may read, each with its type, and the check of a step's
+expressions against them (layer 10b). Used by case validation and by the runtime alike, each on its
+own: the runtime depends on nothing validation did (brief, D34). See
+docs/layers/10-case-validation.md (10b).
+"""
+
+from decimal import Decimal
+
+from pydantic.fields import FieldInfo
+
+from ventoux.case.called import called
+from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
+from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.contract import ActivityContract
+from ventoux.core.expressions import (
+    BooleanType,
+    Expression,
+    ExpressionInvalid,
+    FieldType,
+    NumberType,
+    OutcomeType,
+    ReferenceType,
+    StringType,
+    check,
+)
+from ventoux.core.expressions.check import a_type
+from ventoux.core.references import references
+
+DONE = "done"  # how every run that succeeds ends
+FAILED = "failed"  # how a plan ending in a failed final state ends (brief, D28)
+
+
+def case_types(case: CaseDefinition, catalog: Catalog) -> dict[str, FieldType]:
+    """Every value `case` holds, by the name an expression reads it with, and its type: each field;
+    each step's outcome, a closed list (brief, D9); each output its contract declares (brief, D29).
+    A step whose contract the catalog can't give has no values here, so reading one is an error
+    (fail closed)."""
+    types: dict[str, FieldType] = {name: field.declared for name, field in case.fields.items()}
+    for name, step in case.steps.items():
+        if isinstance(step, TaskStep):
+            types[f"{name}.outcome"] = OutcomeType(outcomes=tuple(step.outcomes))
+        elif isinstance(step, PlanStep):
+            types[f"{name}.outcome"] = OutcomeType(outcomes=(DONE, FAILED))
+        else:
+            try:
+                contract = called(catalog, step)
+            except NotInCatalog:
+                continue
+            # An activity may end with a business outcome its contract declares; a workflow
+            # declares none (brief, D17) (brief, D29).
+            declared = contract.outcomes if isinstance(contract, ActivityContract) else ()
+            types[f"{name}.outcome"] = OutcomeType(outcomes=(DONE, *declared))
+            systems = references(contract.output)
+            for field, info in contract.output.model_fields.items():
+                found = output_type(info, systems.get(field))
+                if found is not None:
+                    types[f"{name}.{field}"] = found
+    return types
+
+
+def output_type(info: FieldInfo, system: str | None) -> FieldType | None:
+    """An output's type as an expression reads it: a decimal is a number, a text a string (a
+    reference to `system` if it names one), a bool a boolean. None for any other: registration
+    refuses those (brief, D29), so one that got through is left out, and reading it is an error."""
+    if info.annotation is Decimal:
+        return NumberType()
+    if info.annotation is str:
+        return StringType() if system is None else ReferenceType(system=system)
+    if info.annotation is bool:
+        return BooleanType()
+    return None
+
+
+def expressions_of(step: TaskStep | CallStep | PlanStep) -> list[tuple[str, Expression, bool]]:
+    """Each expression the step reads, where it is in the step, and whether it is a condition:
+    its `when`, its approval's `when`, its inputs."""
+    found: list[tuple[str, Expression, bool]] = []
+    if step.when is not None:
+        found.append(("when", step.when, True))
+    if isinstance(step, CallStep) and step.approval is not None and step.approval.when is not None:
+        found.append(("approval.when", step.approval.when, True))
+    if not isinstance(step, TaskStep):
+        found += [(f"inputs.{name}", expression, False) for name, expression in step.inputs.items()]
+    return found
+
+
+def type_problem(
+    expression: Expression, types: dict[str, FieldType], condition: bool
+) -> str | None:
+    """Why `expression` can't be read over `types`, or None: layer 2's check, and a condition gives
+    a boolean (brief, D20)."""
+    try:
+        found = check(expression, types)
+    except ExpressionInvalid as refused:
+        return str(refused)  # starts with where it is inside the expression: `==[1]: …`
+    if condition and not isinstance(found, BooleanType):
+        # Nothing is truthy: a condition gives true or false, never a number read as one.
+        return (
+            f"a condition gives a boolean, and this gives {a_type(found)}: write a comparison, "
+            "such as amount > 100"
+        )
+    return None
+
+
+def expression_problem(case: CaseDefinition, catalog: Catalog, name: str) -> str | None:
+    """Why the step `name` can't read its expressions, or None: the first that doesn't check,
+    said as `pay.when can't be read: …`. The runtime asks before reading them, so a misspelt
+    outcome fails the step instead of reading as false (brief, D35)."""
+    types = case_types(case, catalog)
+    for where, expression, condition in expressions_of(case.steps[name]):
+        problem = type_problem(expression, types, condition)
+        if problem is not None:
+            return f"{name}.{where} can't be read: {problem}"
+    return None

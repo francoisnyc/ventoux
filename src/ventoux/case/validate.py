@@ -2,8 +2,20 @@
 opens (layer 10). See docs/layers/10-case-validation.md and docs/guides/cases.md.
 """
 
-from ventoux.case.definition import CaseDefinition
+from collections.abc import Mapping
+from typing import Any
+
+from ventoux.case.calls import (
+    approval_issues,
+    called_contracts,
+    contract_input_issues,
+    expression_issues,
+    plan_input_issues,
+    supplied_plans,
+)
+from ventoux.case.definition import CaseDefinition, TaskStep
 from ventoux.case.reach import (
+    Through,
     can_happen,
     can_start,
     reachable,
@@ -12,14 +24,20 @@ from ventoux.case.reach import (
     shortest_circle,
     waited_on,
 )
+from ventoux.case.registered import role_issues_of, source_issues_of, system_issues_of
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
+from ventoux.case.types import case_types
 from ventoux.core.catalog import Catalog
 from ventoux.core.validate import Issue
 
 
-def validate_case(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
-    """Every problem in `case`, a parsed case definition, read against `catalog`."""
+def validate_case(
+    case: CaseDefinition, catalog: Catalog, plans: Mapping[str, Any] | None = None
+) -> list[Issue]:
+    """Every problem in `case`, a parsed case definition, read against `catalog` and the `plans`
+    the deployment supplies, stored data by reference (`refund-order@1`), as the runtime is given
+    them. No plans means none: a plan step's plan is then missing (fail closed)."""
     # Fail closed: anything but a parsed definition is refused, never read as one with no problems.
     if not isinstance(case, CaseDefinition):
         raise TypeError(
@@ -40,7 +58,18 @@ def validate_case(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
                 "stays_open",
             )
         )
-    found += never_run(case, catalog, can) + never_closes(case, catalog, can)
+    nobody_closes = never_closes(case, catalog, can)
+    found += never_run(case, catalog, can) + nobody_closes
+    contracts, unknown_contracts = called_contracts(case, catalog)
+    supplied, unknown_plans = supplied_plans(case, plans or {})
+    found += unknown_contracts + unknown_plans
+    found += contract_input_issues(case, contracts) + plan_input_issues(case, supplied)
+    calling = {name for name, step in case.steps.items() if not isinstance(step, TaskStep)}
+    missing = calling - set(contracts) - set(supplied)
+    found += expression_issues(case, case_types(case, catalog), missing)
+    found += approval_issues(case, catalog, contracts)
+    found += role_issues_of(case, catalog, closing=not nobody_closes)
+    found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     return found + close_unreachable(case, can) + unreachable_milestones(case)
 
 
@@ -96,13 +125,15 @@ def never_closes(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[
         return []
     if case.closes_when and all(name in can for name in case.closes_when):
         return []  # closes_when closes it
+    # The roles are named here, so no UNKNOWN_ROLE repeats them: one cause, one issue.
+    roles = ", ".join(sorted(closers))
     return [
         Issue(
             "close_reasons",
             "NEVER_CLOSES",
-            f"{case.case} stays open, no close reason names a registered role, and closes_when "
-            "never closes it, so nobody could ever close it: name a registered role in a close "
-            "reason",
+            f"{case.case} stays open, none of its close reasons' roles ({roles}) is registered, "
+            "and closes_when never closes it, so nobody could ever close it: name a registered "
+            "role in a close reason",
         )
     ]
 
@@ -194,18 +225,22 @@ def after_close(case: CaseDefinition, catalog: Catalog, name: str) -> str:
     before = reached_before(case, catalog, name)
     written = [m for m in case.closes_when if before[m] is None]
     reached = [m for m in case.closes_when if before[m] is not None]
-    steps = list(dict.fromkeys(step for m in reached if (step := before[m]) is not None))
+    steps = list(dict.fromkeys(by[0] for m in reached if (by := before[m]) is not None))
     once = f"{case.closes_when[0]} is" if len(case.closes_when) == 1 else "they are"
     waits = []
     if written:
         waits.append(f"requires {listed(written)}")
     if steps:
-        reach = "reaches" if len(steps) == 1 else "reach"
-        waits.append(f"runs only after {listed(steps)}, which {reach} {listed(reached)}")
+        waits.append(
+            f"runs only after {joined([through(before, step, reached) for step in steps])}"
+        )
     # A fix that names one thing to change only where changing it would let the step run.
-    if not steps:
-        one = written[0] if len(written) == 1 else "one of them"
-        fix = f"remove {one} from its requires, or from closes_when"
+    if len(written) > 1 and not steps:
+        # Removing one from closes_when would leave the step requiring another, which still
+        # closes the case: only its requires can change.
+        fix = "remove one of them from its requires"
+    elif not steps:
+        fix = f"remove {written[0]} from its requires, or from closes_when"
     elif len(steps) == 1 and not written:
         fix = f"run {name} before {steps[0]}, or remove {listed(reached)} from closes_when"
     else:
@@ -214,6 +249,22 @@ def after_close(case: CaseDefinition, catalog: Catalog, name: str) -> str:
         f"{name} can never run: it {' and '.join(waits)}, and {case.case} closes once {once} "
         f"reached, before {name} could start: {fix}"
     )
+
+
+def through(before: dict[str, Through | None], step: str, milestones: list[str]) -> str:
+    """How the waited-for `step` makes some of `milestones` sure: `notify, which requires paid and
+    reaches notified`."""
+    required = [m for m in milestones if before[m] == (step, "requires")]
+    reached = [m for m in milestones if before[m] == (step, "reaches")]
+    parts = [f"requires {listed(required)}"] if required else []
+    if reached:
+        parts.append(f"reaches {listed(reached)}")
+    return f"{step}, which {' and '.join(parts)}"
+
+
+def joined(clauses: list[str]) -> str:
+    """Clauses that hold commas themselves, joined so each stays apart: `a, …, and b, …`."""
+    return clauses[0] if len(clauses) == 1 else f"{', '.join(clauses[:-1])}, and {clauses[-1]}"
 
 
 def why_never(case: CaseDefinition, name: str, waits_on: str) -> str:

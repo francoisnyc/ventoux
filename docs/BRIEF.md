@@ -939,6 +939,36 @@ be erased on request), has size limits, and a second copy of business records go
 - **`ventoux check` comes with the builder** (layer 14), which reads the Python file and maps
   errors to source lines; `validate_case` is its engine.
 
+### D35. Case validation reads each step against what it calls; the runtime refuses the same
+
+*Decided 2026-10-15, in layer 10b.*
+
+- **What a step calls is read against the catalog and the deployment's plans:** its contract
+  exists and is of the step's kind; its inputs are the ones its contract or plan takes, all of the
+  needed ones, never the idempotency key the engine fills (D17); a high-risk step has an approval,
+  and every role on it may approve that risk (D11, D22); every role, source label and system it
+  names is registered (D12, D22, D30).
+- **The plans are given as the runtime is given them:** `validate_case(case, catalog, plans=…)`
+  takes the stored plans by reference, as `run_case` and the case workflow do (D28), and reads
+  each with the runtime's own reader. A plan step whose plan isn't given is an error (fail
+  closed). The plan's own checks stay its own (layer 3).
+- **A case's expressions are type-checked as a plan's are** (D20), over the values a case holds:
+  its fields; a task's outcome, as the closed list of its outcomes (D9); an activity step's as
+  `done` and its contract's outcomes (D17); a workflow step's as `done` (D29); a plan step's as
+  `done` or `failed` (D28); each output with its contract's type (D29). Nothing else is a value.
+- **Every error is one the runtime would meet too.** Where a check found something the runtime let
+  through, the runtime now refuses it, on nothing validation did (D34): a case expression that
+  doesn't type-check fails its step, so a misspelt outcome is no longer silently false; an input
+  named after the idempotency key is refused, never overwritten; a case declaring a field
+  untrusted with a label nobody registered doesn't open; and a role nobody registered gives sight
+  of nothing, as it answers nothing (D22, D30).
+- **A message may quote a literal of the definition when that literal is what is wrong**
+  (`assess.outcome has no outcome "acept"`): it is text the author wrote, already in the
+  definition. Titles, an approval's reason and every value from a case file are never quoted.
+- **One cause, one issue:** a step whose contract or plan is missing gets one issue, and nothing
+  that reads what it would give is reported again; a role already named by a structural issue
+  (D34) isn't repeated.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
