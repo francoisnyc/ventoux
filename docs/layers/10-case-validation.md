@@ -1125,6 +1125,19 @@ Each starts with its negative test, seen failing for the right reason.
 - Rules and timers (layer 11), `ventoux check` (layer 14).
 - No runtime change, no new dependency.
 
+### From the tutor review
+
+One finding, fixed test-first.
+
+- **A guard written with `or` got a needless `MAY_BE_UNSET`.** With `review` also answerable
+  `partial`, which sets `approved_amount` too, `pay`'s `when` written `approve or partial` was
+  warned with advice it already followed, while the same guard as `in` or `!= reject` was not;
+  run, both a rejected and a partial review close with nothing needing attention. Now a `when`
+  that is an `or` holds what all its parts agree on (`either`, as for a milestone several steps
+  reach). An `or` whose parts don't all set the value (`approve or escalate`, escalate setting
+  nothing) still warns, and its run on `escalate` fails. Seen failing without the `or` branch,
+  and with `both` in place of `either`. The runtime is unchanged.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
@@ -1145,6 +1158,7 @@ exists, and every test 10d added is named here.
 | The `when` guards the approval's `when` and the inputs: `==`, `!=`, `in`, `exists`, a part of an `and`, an `if` whose other branch is `false`; a condition on another value guards nothing | V `test_a_guard_in_the_when_makes_a_value_surely_set` |
 | Inside a condition, `and` reads every part, and the run fails; an `if` reads one branch, and the run closes | V `test_and_reads_every_part_so_a_part_guards_nothing_beside_it`, `test_a_condition_reads_only_the_branch_of_an_if_it_takes` |
 | An input reads every value it names, both branches of an `if` and an `exists` included; run, it fails either way | V `test_an_input_reads_every_value_it_names` |
+| An `or` guards what all its parts agree on: `approve or partial`, both setting the value, gives no issue and both runs close; `approve or escalate` warns, and its run fails | V `test_an_or_guards_what_all_its_parts_agree_on` |
 | A step's requirements say what is set: a step waited for, through the steps it requires; a task all of whose outcomes set it; a value from a step not waited for warns | V `test_what_a_step_waits_for_says_what_is_set` |
 | A milestone only setting outcomes reach says the value is set; reached another way as well, it doesn't | V `test_a_milestone_only_setting_outcomes_reach_says_the_value_is_set` |
 | An output is set only when its step is done: the old `refund_fresh` gives two warnings, each run fails, and the unread `not_found` is said once, by the read; as the guide now writes it, none | V `test_the_old_refund_fresh_reads_two_values_that_may_be_unset` |

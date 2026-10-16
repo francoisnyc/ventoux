@@ -888,7 +888,8 @@ A value is surely set where a step reads it when:
 - or a guard says so. The step's `when` is read first, so it guards the approval's `when` and the
   inputs: a `when` that is, or holds in an `and` or an `if`'s condition, `review.outcome ==
   "approve"` (an outcome that sets the field), `in` a list of such outcomes, `exists`, or the
-  writer's outcome `== "done"` for its outputs. Inside a condition only an `if` guards its
+  writer's outcome `== "done"` for its outputs. An `or` guards what all its parts guard:
+  `approve` or `partial`, if both set the field. Inside a condition only an `if` guards its
   branch: `and` and `or` read all their parts (brief, D20). An input reads every value it names,
   both branches of an `if` and an `exists` included, since where its value comes from is worked
   out from all of them (brief, D36): only the step's `when` guards an input.

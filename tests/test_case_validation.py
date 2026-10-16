@@ -2811,3 +2811,41 @@ def test_the_guides_table_of_warnings_is_what_validate_case_says() -> None:
     for code, kind in kinds.items():
         [issue] = [issue for issue in given[code] if issue.code == code]
         assert issue.severity == kind, code
+
+
+# --- 10d, from the tutor review: a guard written with `or` ---
+
+
+def reviewed_also(outcome: str, sets: bool) -> dict[str, Any]:
+    """The quickstart's refund, its review also answerable `outcome` (setting the approved amount
+    if `sets`), and `pay` running on approve or `outcome`, the guard written with `or`."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["review"]["outcomes"][outcome] = {
+        "display": {"title": f"Answer {outcome}"},
+        "sets": ["approved_amount"] if sets else [],
+    }
+    refund["steps"]["pay"]["when"] = {
+        "or": [APPROVED, {"==": [{"var": "review.outcome"}, outcome]}]
+    }
+    return refund
+
+
+def test_an_or_guards_what_all_its_parts_agree_on() -> None:
+    # approve or partial: both set the approved amount, so pay reads it set.
+    partial = reviewed_also("partial", sets=True)
+    assert issues(partial) == []
+    rejected = run_case(partial, file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE)
+    assert rejected.closed and rejected.needs_attention == []
+    answered = ("review", "partial", "ana", {"approved_amount": 20})
+    paid = run_case(partial, file=SMALL, answers=[answered], people=PEOPLE)
+    assert paid.closed and paid.needs_attention == [] and paid.reached("pay")
+    # approve or escalate: escalate sets nothing, so the amount may be unset, and is.
+    escalate = reviewed_also("escalate", sets=False)
+    assert issues(escalate) == [
+        Issue("steps.pay.approval.when", "MAY_BE_UNSET", AMOUNT_UNSET, "warning")
+    ]
+    escalated = run_case(
+        escalate, file=SMALL, answers=[("review", "escalate", "ana")], people=PEOPLE
+    )
+    [failed] = escalated.needs_attention
+    assert failed.endswith("approved_amount has no value")

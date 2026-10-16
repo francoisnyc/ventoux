@@ -128,6 +128,10 @@ class Reading:
         """What is known once `condition` was read as true: the guards it holds."""
         if isinstance(condition, And):
             return reduce(lambda now, part: self.holds(part, now), condition.args, known)
+        if isinstance(condition, Or):
+            # True through any one of its parts: only what they all agree on, as for a milestone
+            # several steps reach.
+            return reduce(either, [self.holds(part, known) for part in condition.args])
         if isinstance(condition, If) and condition.args[2] is False:
             # True only through its first branch: its condition held, and so did the branch.
             return self.holds(condition.args[1], self.holds(condition.args[0], known))
