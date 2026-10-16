@@ -6,18 +6,13 @@ sources are known in one pass (brief, D34) (brief, D36). See docs/layers/10-case
 """
 
 from collections.abc import Collection, Mapping
-from decimal import Decimal
-from types import UnionType
-from typing import Union, get_args, get_origin
-
-from pydantic.fields import FieldInfo
 
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep, WorkflowStep
 from ventoux.case.types import case_types
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.before_activity import not_a_reference_to
 from ventoux.core.catalog import Catalog
-from ventoux.core.contract import Contract
+from ventoux.core.contract import Contract, held_input
 from ventoux.core.expressions import (
     BooleanType,
     FieldType,
@@ -154,23 +149,11 @@ def no_sources_issues(
     return issues
 
 
-def taken(info: FieldInfo) -> FieldType | None:
-    """The type a contract's input takes, as a case's value has it: a `Decimal` is a number, a
-    `str` a string, a `bool` a boolean, each possibly optional. None for any other: no value of a
-    case is ever exactly one, and inputs are validated strictly (brief, D36)."""
-    annotation = info.annotation
-    # typing: `Decimal | None` is a union; its other member is what a value must be.
-    members = get_args(annotation) if get_origin(annotation) in (Union, UnionType) else ()
-    exact = [member for member in members if member is not type(None)] if members else [annotation]
-    if len(exact) != 1:
-        return None
-    if exact[0] is Decimal:
-        return NumberType()
-    if exact[0] is str:
-        return StringType()
-    if exact[0] is bool:
-        return BooleanType()
-    return None
+def as_said(wanted: FieldType) -> str:
+    """The type an input takes, as a message says it: `a number`, `one of low or high`."""
+    if isinstance(wanted, OutcomeType):
+        return f"one of {' or '.join(wanted.outcomes)}"
+    return a_type(wanted)
 
 
 def fits_type(given: FieldType, wanted: FieldType) -> bool | None:
@@ -183,7 +166,8 @@ def fits_type(given: FieldType, wanted: FieldType) -> bool | None:
         if isinstance(given, OutcomeType):
             # Every outcome it may give is one the field takes, or some aren't.
             return True if set(given.outcomes) <= set(wanted.outcomes) else None
-        return None if isinstance(given, StringType) else False
+        # A text, or a reference, may be one of them or not: that depends on the value.
+        return None if isinstance(given, StringType | ReferenceType) else False
     if isinstance(wanted, NumberType | BooleanType):
         return type(given) is type(wanted)
     # Fail closed: a type the runtime's `fits` doesn't know (a list, for now) fits nothing.
@@ -207,7 +191,7 @@ def type_issues(
         for field, info in contract.input.model_fields.items():
             if field != contract.idempotency_key and field not in refs:
                 kind = getattr(info.annotation, "__name__", str(info.annotation))
-                wanted.append((name, contract.reference, field, taken(info), kind))
+                wanted.append((name, contract.reference, field, held_input(info.annotation), kind))
     for name, plan in plans.items():
         for field, declared in plan.fields.items():
             if not isinstance(declared, ReferenceType):
@@ -220,24 +204,35 @@ def type_issues(
         if field not in step.inputs or path in said:
             continue
         if wanted_type is None:
+            # Fail closed: registration refuses such an input, and checks every contract again
+            # when it is registered (learning question 31), so this can't come from a catalog
+            # used as it is meant to be; if it does, it is an error, never a pass.
             issues.append(
                 Issue(
                     path,
                     "INPUT_TYPE",
-                    f"{reference} takes {field} as {kind}, which no value of a case ever is: a "
-                    "case holds numbers, strings and booleans; ask the platform team for a "
-                    "contract taking a Decimal, a str or a bool",
+                    f"{reference} takes {field} as {kind}, which no value of a case is, and which "
+                    "registration refuses: register the contract through the catalog",
                 )
             )
             continue
-        given = check(step.inputs[field], types)
-        if fits_type(given, wanted_type) is False:
+        expression = step.inputs[field]
+        given = check(expression, types)
+        if isinstance(wanted_type, OutcomeType) and isinstance(expression, str):
+            # A text written in the definition is one of them or not: if not, it is the mistake,
+            # so the message names it (brief, D35).
+            fits = expression in wanted_type.outcomes
+            said_given = f'"{expression}"'
+        else:
+            fits = fits_type(given, wanted_type) is not False
+            said_given = a_type(given)
+        if not fits:
             issues.append(
                 Issue(
                     path,
                     "INPUT_TYPE",
-                    f"{reference} takes {field} as {a_type(wanted_type)}, and is given "
-                    f"{a_type(given)}: give it {a_type(wanted_type)}",
+                    f"{reference} takes {field} as {as_said(wanted_type)}, and is given "
+                    f"{said_given}: give it {as_said(wanted_type)}",
                 )
             )
     return issues

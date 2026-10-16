@@ -10,7 +10,7 @@ import re
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import pytest
 from pydantic import BaseModel
@@ -1582,25 +1582,12 @@ class CountInput(BaseModel):
     amount: int  # a whole number: no value of a case is one
 
 
-def test_an_input_no_value_of_a_case_fits_is_refused() -> None:
-    ledger = with_ledger(taking=CountInput)
-    counted = refund_recording({"var": "amount"})
-    assert validate_case(parse_case(counted), ledger) == [
-        Issue(
-            "steps.record.inputs.amount",
-            "INPUT_TYPE",
-            "ledger.record@1 takes amount as int, which no value of a case ever is: a case holds "
-            "numbers, strings and booleans; ask the platform team for a contract taking a "
-            "Decimal, a str or a bool",
-        )
-    ]
-    # The proof: a whole number held as a decimal is refused, never converted (G6).
-    record = {"ledger.record@1": lambda inputs: {"entry_id": "led-1"}}
-    [refused] = small_refund(counted, catalog=ledger, activities=record).needs_attention
-    assert refused == (
-        "record#1: ledger.record@1 doesn't take these inputs: amount: Input should be a valid "
-        "integer"
-    )
+def test_an_input_no_value_of_a_case_fits_is_refused_at_registration() -> None:
+    # A whole number: strict validation refuses a decimal for it, so no case could ever give it
+    # one. Registration refuses the contract, as it refuses a float output (brief, D29) (brief,
+    # D36), so no case can call it.
+    with pytest.raises(ValueError, match="input amount is int, which no value of a case is"):
+        with_ledger(taking=CountInput)
 
 
 def test_a_plan_field_given_only_literals_has_no_sources() -> None:
@@ -1822,3 +1809,65 @@ def test_an_outcome_comes_from_its_contract_not_its_system() -> None:
         Issue("steps.record.inputs.status", "INPUT_POLICY", f"{reason}: use a value kyc gave")
     ]
     assert run("check.outcome").needs_attention == [f"record#1: {reason}"]
+
+
+# --- 10c, tutor review: a Literal input ---
+
+
+class PriorityInput(BaseModel):
+    amount: Decimal
+    priority: Literal["low", "high"]  # one of these texts, exactly
+
+
+def refund_flagging(priority: Any) -> dict[str, Any]:
+    """The refund, recording the request in the ledger with `priority`."""
+    refund = refund_recording({"var": "amount"})
+    refund["steps"]["record"]["inputs"]["priority"] = priority
+    return refund
+
+
+def test_a_literal_input_takes_one_of_its_texts() -> None:
+    ledger = with_ledger(taking=PriorityInput)
+    calls: list[dict[str, Any]] = []
+
+    def record(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs)
+        return {"entry_id": "led-1"}
+
+    def run(priority: Any) -> CaseRun:
+        calls.clear()
+        return small_refund(
+            refund_flagging(priority), catalog=ledger, activities={"ledger.record@1": record}
+        )
+
+    # One of its texts: no issue, and the activity is called with it.
+    assert validate_case(parse_case(refund_flagging("high")), ledger) == []
+    assert run("high").needs_attention == [] and calls == [
+        {"amount": Decimal(40), "priority": "high"}
+    ]
+    # Another text is the mistake, so the message names it (brief, D35); run, the step fails.
+    assert validate_case(parse_case(refund_flagging("urgent")), ledger) == [
+        Issue(
+            "steps.record.inputs.priority",
+            "INPUT_TYPE",
+            'ledger.record@1 takes priority as one of low or high, and is given "urgent": give it '
+            "one of low or high",
+        )
+    ]
+    [refused] = run("urgent").needs_attention
+    assert refused.startswith("record#1: ledger.record@1 doesn't take these inputs: priority:")
+    assert calls == []
+    # A number never fits.
+    assert validate_case(parse_case(refund_flagging({"var": "amount"})), ledger) == [
+        Issue(
+            "steps.record.inputs.priority",
+            "INPUT_TYPE",
+            "ledger.record@1 takes priority as one of low or high, and is given a number: give it "
+            "one of low or high",
+        )
+    ]
+    [refused] = run({"var": "amount"}).needs_attention
+    assert refused.startswith("record#1: ledger.record@1 doesn't take these inputs: priority:")
+    # A text field may or may not be one of them: that depends on the value, so no issue.
+    refund = refund_flagging({"var": "order_id"})
+    assert validate_case(parse_case(refund), ledger) == []

@@ -830,11 +830,33 @@ Each starts with its negative test, seen failing for the right reason.
 - Untrusted values steering a condition (design question 17, layer 11).
 - No new dependency.
 
+### From the tutor review
+
+One finding, fixed test-first as agreed with the user.
+
+- **`INPUT_TYPE`'s "which no value of a case ever is" wasn't a proof.** `taken` read only
+  `Decimal`, `str` and `bool`, and called every other input type unfillable; but strict Pydantic
+  accepts a `Literal` given one of its texts (the probe's `priority: Literal["low", "high"]`
+  given `"high"` was refused by the check and run by the engine), a `float` given a decimal
+  (which the activity's model then turns into a binary float, against "never converted"), `Any`,
+  `str | Decimal` and `list[Decimal]`. Two fixes:
+  - **Registration holds inputs to the case's types** (brief, D36, adding to D29): a `Decimal`, a
+    `str`, a `bool` or a `Literal` of texts, each possibly optional (`core/contract.py`'s
+    `held_input`, used by registration and by the check). Every contract input in the repository
+    already fit. The activities guide says what an input may be, and its table of refusals has
+    the `float` row. The check's "no value fits" branch can't be reached through a catalog,
+    which checks every contract again when registered; it stays an error, worded as such.
+  - **The check knows the `Literal`:** an outcome all of whose outcomes are among its texts
+    fits; a text field, a reference, or an outcome with others may fit or not, so no issue; a
+    text written in the definition outside the set is `INPUT_TYPE` naming it (brief, D35); a
+    number or a boolean is `INPUT_TYPE`. Each with its run. The branch naming the text was seen
+    failing with it removed.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
 `V` is `tests/test_case_validation.py`, `P` `tests/test_plan_step.py`, `T`
-`tests/test_temporal_case.py`, `I` `tests/test_interpreter.py`. Checked against the tests,
+`tests/test_temporal_case.py`, `I` `tests/test_interpreter.py`, `C` `tests/test_catalog.py`. Checked against the tests,
 2026-10-16: every test named here exists, and every test 10c added is named here.
 
 | Promise | Test |
@@ -844,7 +866,9 @@ Each claim this section makes about behaviour, and the test that would fail if i
 | A refusal that depends on who opens the case is a warning, `OPENER_DECIDES`; one that holds for any opener is an error | V `test_who_opens_the_case_decides_only_a_warning` |
 | A plan step's fields carry the case's sources into the plan: refused at the case's input before the plan runs; run, the plan stops; the plan's own marks are the plan's issue; a field a wait sets is a person's | V `test_a_plan_step_carries_the_cases_sources_into_its_plan`, `test_a_plans_own_mark_is_the_plans_issue` |
 | A reference input given another system's reference, a text or a computed value is `REFERENCE`, in activity and plan steps; run, the step fails, in memory and on Temporal (G7: the made-up order ID is no longer paid) | V `test_a_reference_goes_only_where_its_system_is_expected`, `test_a_plan_steps_reference_field_takes_a_reference_of_its_system`; P `test_a_plan_field_takes_only_a_reference_to_its_system`; T `test_a_plan_field_takes_only_a_reference_of_its_system_on_temporal` |
-| An input of another type than it takes is `INPUT_TYPE`; run, it is refused, never converted (G6), in a case and in a plan; a contract input no case value fits (an `int`) is refused, and so is a whole number held as a decimal | V `test_an_input_is_given_the_type_it_takes`, `test_an_input_no_value_of_a_case_fits_is_refused`; I `test_an_input_is_never_converted` |
+| An input of another type than it takes is `INPUT_TYPE`; run, it is refused, never converted (G6), in a case and in a plan | V `test_an_input_is_given_the_type_it_takes`; I `test_an_input_is_never_converted` |
+| A contract input no value of a case is (an `int`, a `float`) is refused at registration, saying what to use instead | V `test_an_input_no_value_of_a_case_fits_is_refused_at_registration`; C `test_the_guides_refusals_are_what_the_catalog_says` (its `float` row) |
+| A `Literal` input takes one of its texts: no issue, and the activity is called; another text is `INPUT_TYPE` naming it, a number is `INPUT_TYPE`, and the run fails each; a text field may fit, so no issue | V `test_a_literal_input_takes_one_of_its_texts` |
 | A plan's fields are checked against their types when it starts (G7) | I `test_a_plan_field_takes_a_value_of_its_type` |
 | A plan field given only literals is `NO_SOURCES`; run, the plan doesn't start | V `test_a_plan_field_given_only_literals_has_no_sources` |
 | A sensitive value given to a workflow step is `SENSITIVE_TO_WORKFLOW`; run, the step fails | V `test_a_workflow_step_is_never_given_a_sensitive_value` |

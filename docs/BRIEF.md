@@ -989,6 +989,12 @@ be erased on request), has size limits, and a second copy of business records go
   checks each field the case gives it against the field's type when it starts, and a reference
   field takes only a reference to its system, read as it is, as a contract's reference input does
   (D30). Case validation refuses both first.
+- **An input takes only what a case's value can be,** checked when its contract is registered,
+  as an output's type is (adds to D29): a `Decimal`, a `str`, a `bool` or a `Literal` of texts,
+  each possibly optional, a reference being a `str`. Strict validation would accept other types
+  (a `float` from a decimal, an `Any`), and the activity's own model would then convert the value;
+  so the catalog refuses them, saying what to use instead. *Added in the tutor review of 10c,
+  before D36 was merged.*
 - **A workflow step is never given a sensitive value** (D31), and case validation refuses one
   first. A plan field given only values written in the definition comes from nobody, so the plan
   refuses to start, and case validation says so first.

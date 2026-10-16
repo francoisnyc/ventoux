@@ -5,10 +5,13 @@ team, says what that name promises. See docs/guides/activities.md.
 """
 
 import re
-from typing import Any, Literal, Self
+from decimal import Decimal
+from types import UnionType
+from typing import Any, Literal, Self, Union, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ventoux.core.expressions import BooleanType, FieldType, NumberType, OutcomeType, StringType
 from ventoux.core.output_sources import HELD, HELD_NAMES, OutputSource, is_output_source
 from ventoux.core.policy import KIND_NAMES, KINDS, Policy
 from ventoux.core.references import marks
@@ -34,6 +37,36 @@ def is_reference(text: str) -> bool:
     """Whether `text` is a whole reference, `name@N`: `payments.refund@1` is, `payments.refund@1.0`
     and `Payments Refund@1` aren't."""
     return REFERENCE.fullmatch(text) is not None
+
+
+# What an input may be, as people read it: what a case's value can be exactly (brief, D36).
+INPUT_NAMES = (
+    "a decimal (Decimal), a text (str), true or false (bool) or one of some texts (a Literal of "
+    "str), each possibly optional"
+)
+
+
+def held_input(annotation: Any) -> FieldType | None:
+    """The type of a case's value an input of type `annotation` takes, or None if no value of a
+    case is ever one: a `Decimal` is a number, a `str` a string, a `bool` a boolean, a `Literal`
+    of texts one of them (an outcome type), each possibly optional. Inputs are validated
+    strictly, so a value is never converted to fit (brief, D36)."""
+    # typing: `Decimal | None` is a union; its other member is what a value must be.
+    if get_origin(annotation) in (Union, UnionType):
+        members = [member for member in get_args(annotation) if member is not type(None)]
+        if len(members) != 1:
+            return None
+        annotation = members[0]
+    if annotation is Decimal:
+        return NumberType()
+    if annotation is str:
+        return StringType()
+    if annotation is bool:
+        return BooleanType()
+    # typing: `Literal["low", "high"]` takes exactly those values; get_args gives them.
+    if get_origin(annotation) is Literal and all(isinstance(a, str) for a in get_args(annotation)):
+        return OutcomeType(outcomes=tuple(get_args(annotation)))
+    return None
 
 
 class Timeouts(BaseModel):
@@ -181,6 +214,20 @@ class Contract(BaseModel):
                         "An output's source is system:<name> or untrusted:<label>: an activity "
                         "is never a person, and trust is earned, not declared."
                     )
+        return self
+
+    @model_validator(mode="after")
+    def inputs_are_held_exactly(self) -> Self:
+        # An input is given a case's value, never converted to fit: so it takes only a type a
+        # case's value is, as an output does (brief, D29) (brief, D36).
+        for name, field in self.input.model_fields.items():
+            if held_input(field.annotation) is None:
+                kind = getattr(field.annotation, "__name__", str(field.annotation))
+                raise ValueError(
+                    f"{self.reference}: input {name} is {kind}, which no value of a case is. An "
+                    f"input is {INPUT_NAMES}: numbers are exact decimals, never binary floats "
+                    "(brief, D20)."
+                )
         return self
 
     @model_validator(mode="after")
