@@ -760,3 +760,66 @@ only above 100. Each of these is met when the case runs too, whether or not the 
 checked: the step fails, the answer, proposal or opening is refused, or the role counts for
 nothing (it answers, approves and sees nothing). A misspelt outcome fails the step that reads it,
 never reading as false.
+
+### Where each value comes from
+
+The check then follows each value a step reads to where it goes: whether it may go there, and
+whether it is the kind of value the step takes. Every value in the case file comes from someone
+who stamps it, whatever they read to make it:
+
+| Who writes it | Where the check says it comes from |
+|---|---|
+| the opening | the opener: a system, or the person who opens the case |
+| a task's answer, its outcome and its form | the person who answers |
+| an activity, a workflow or a plan step's outcome | the contract or plan |
+| an output | the source its contract declares for it, or `untrusted:undeclared` |
+
+A field declared `untrusted:<label>` keeps that label whoever writes it. An input reading several
+fields comes from all of them, a condition inside it included. That is exactly what the runtime
+records as the case runs, so a value the check refuses is refused every time the step runs.
+
+Say the claim records the customer's own estimate, and the payout should be the lesser of the
+adjuster's payout and that estimate:
+
+```json
+"estimate": {"type": "number", "source": "untrusted:customer",
+             "display": {"title": "Customer's own estimate"}}
+```
+
+```json
+"amount": {"if": [{"<": [{"var": "estimate"}, {"var": "payout"}]},
+                  {"var": "estimate"}, {"var": "payout"}]}
+```
+
+Taking the lesser still lets the customer choose the amount: type 1 as the estimate, and 1 is
+paid. `payments.refund@2` takes `amount` only from a system or a person, so the check refuses it:
+
+```
+steps.pay.inputs.amount  INPUT_POLICY  payments.refund@2 takes amount only from a system or a
+person, never from untrusted data, and this value comes from estimate (the opener,
+untrusted:customer): use a value a system or a person gave
+```
+
+Run as it is, the step fails with the same reason, before the payment is called. The adjuster can
+read the estimate and set `payout` from it: a person's answer is trusted, and the history shows
+who.
+
+A plan step is followed into its plan: each of the plan's fields comes from what the case gives
+it, and each activity in the plan is checked with that. Sending the estimate through
+`refund-order@1` is refused in the same words, at the plan step's input, before the plan asks
+anyone to approve a payment it could never make.
+
+| Code | Kind | What is wrong | Example message |
+|---|---|---|---|
+| `REFERENCE` | error | an input that takes a reference to one system is given another system's reference, a text, or a computed value | `letters.draft@3 takes customer as a reference to crm, and is given order_id, a reference to orders: give it a reference to crm, read as it is` |
+| `INPUT_POLICY` | error | an input is given a value from a source its policy refuses, whoever opens the case | as above |
+| `OPENER_DECIDES` | warning | an input's policy takes a value given at the opening only when a system opens the case | `ledger.record@1 takes amount only from opener, and this value comes from amount (the opener), which is refused when a person opens the case: open it only from a system, or give amount a value a system gave` |
+| `INPUT_TYPE` | error | an input is given a value of another type than it takes | `payments.refund@2 takes amount as a number, and is given a string: give it a number` |
+| `NO_SOURCES` | error | a plan step gives a plan's field only values written in the definition, which come from nobody | `refund-order@1 takes amount from the case, and is given only values written in the definition, which come from nobody: give it a field of the case file` |
+| `SENSITIVE_TO_WORKFLOW` | error | a workflow step is given a sensitive value: its worker doesn't hold the case's key | `kyc.check@1 is a workflow step and can't be given national_id, a sensitive field: its worker doesn't hold the case's key; give it a value that isn't sensitive` |
+| `APPROVER_CANT_SEE` | warning | a role on an approval can't see a value its step reads | `support-lead can't see fraud_score, which pay reads: a person approving pay needs fraud as well; let support-lead see fraud_score, or approve with a role that does` |
+
+`APPROVER_CANT_SEE` is a warning: a person approving holds all their roles at once, so a team lead
+who also holds `fraud` may approve, and the check can't know who holds which roles. When the case
+runs, an approval from anyone who can't see every value the step reads is refused (brief, D30).
+An input gets one of these issues at most: the first the runtime would meet when the step runs.

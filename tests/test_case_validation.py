@@ -10,13 +10,18 @@ import re
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import pytest
+from pydantic import BaseModel
 
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
+from ventoux.core.catalog import Catalog
+from ventoux.core.contract import ActivityContract, RetryPolicy, Timeouts
+from ventoux.core.contract import Display as ContractDisplay
+from ventoux.core.policy import only_from
 from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
@@ -1283,3 +1288,618 @@ def test_a_message_quotes_only_the_literal_that_is_wrong() -> None:
     }
     [issue] = issues(claim)
     assert '"acept"' in issue.message and "987654" not in issue.message
+
+
+# --- 10c, slice 1: where each value comes from ---
+
+
+def estimated_claim() -> dict[str, Any]:
+    """The guide's claim, paying the lesser of the payout and the customer's own estimate."""
+    claim = guide_json(0)
+    claim["fields"] |= guide_json(3)
+    claim["steps"]["pay"]["inputs"] |= guide_json(4)
+    return claim
+
+
+def test_an_untrusted_value_is_refused_where_only_trusted_ones_go() -> None:
+    # The guide's example, word for word, line breaks aside.
+    shown = guide_section().split("so the check refuses it:\n\n```\n")[1].split("```")[0]
+    assert printed(issues(estimated_claim())) == " ".join(shown.split())
+    # The proof: run as it is, the step fails with the same reason, before the payment is called.
+    run = run_case(
+        estimated_claim(),
+        file=CLAIM_FILE | {"estimate": 1},
+        answers=[ACCEPTED, ("pay", "approve", "sam")],
+        people=CLAIM_PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: payments.refund@2 takes amount only from a system or a person, never from "
+            "untrusted data, and this value comes from estimate (system:opener, untrusted:customer)"
+        )
+    ]
+
+
+def claim_writing_to(to_customer: Any) -> dict[str, Any]:
+    """The guide's claim, drafting a letter to `to_customer` once the customer is checked."""
+    claim = guide_json(0)
+    claim["steps"]["write"] = {
+        "kind": "activity",
+        "display": {"title": "Write to the customer"},
+        "activity": "letters.draft@2",
+        "requires": ["checked"],
+        "inputs": {"to_customer": to_customer, "template": "claim-received"},
+    }
+    return claim
+
+
+def test_one_pass_gives_the_sources_the_run_records() -> None:
+    # An output carries its contract's source; one declaring none is untrusted:undeclared
+    # (brief, D29). A value computed from several fields comes from all of them.
+    computed = {"cat": [{"var": "check.status"}, " ", {"var": "check.contact_email"}]}
+    reason = (
+        "letters.draft@2 takes to_customer only from a system or a person, never from untrusted "
+        "data, and this value comes from check.contact_email (untrusted:undeclared)"
+    )
+    assert issues(claim_writing_to(computed)) == [
+        Issue(
+            "steps.write.inputs.to_customer",
+            "INPUT_POLICY",
+            f"{reason}: use a value a system or a person gave",
+        )
+    ]
+    run = run_case(claim_writing_to(computed), file=CLAIM_FILE, answers=[], people=CLAIM_PEOPLE)
+    assert run.needs_attention == [f"write#1: {reason}"]
+    # The check's sources are the run's: what passes one passes the other, as the history says.
+    trusted = {"cat": [{"var": "check.status"}, " ", {"string": [{"var": "customer_id"}]}]}
+    assert issues(claim_writing_to(trusted)) == []
+    run = run_case(claim_writing_to(trusted), file=CLAIM_FILE, answers=[], people=CLAIM_PEOPLE)
+    assert any(
+        "letters.draft@2 (to_customer from system:kyc, system:opener; template from the case)"
+        in line
+        for line in run.history
+    )
+
+
+class RecordInput(BaseModel):
+    amount: Annotated[Decimal, only_from("opener")]  # only an amount the opening system gave
+
+
+class RecordOutput(BaseModel):
+    entry_id: str
+
+
+def with_ledger(taking: type[BaseModel] | None = None) -> Catalog:
+    """The development catalog, and `ledger.record@1`, taking only an amount the opener gave, or
+    what `taking` says."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(
+        ActivityContract(
+            name="ledger.record",
+            version=1,
+            input=taking or RecordInput,
+            output=RecordOutput,
+            risk="low",
+            effect="compute",
+            timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+            idempotency_key=None,
+            outcomes=[],
+            display=ContractDisplay(title="Record", description="Record an amount"),
+        )
+    )
+    return catalog
+
+
+def refund_recording(amount: Any) -> dict[str, Any]:
+    """The quickstart's refund, recording `amount` in the ledger once reviewed."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["record"] = {
+        "kind": "activity",
+        "display": {"title": "Record the request"},
+        "activity": "ledger.record@1",
+        "requires": ["review"],
+        "inputs": {"amount": amount},
+    }
+    return refund
+
+
+def test_who_opens_the_case_decides_only_a_warning() -> None:
+    ledger = with_ledger()
+    # A value given at the opening passes `only_from("opener")` when a system opens the case, and
+    # not when a person does: the check can't know who will, so it warns (brief, D36).
+    opened = refund_recording({"var": "amount"})
+    assert validate_case(parse_case(opened), ledger) == [
+        Issue(
+            "steps.record.inputs.amount",
+            "OPENER_DECIDES",
+            "ledger.record@1 takes amount only from opener, and this value comes from amount "
+            "(the opener), which is refused when a person opens the case: open it only from a "
+            "system, or give amount a value a system gave",
+            "warning",
+        )
+    ]
+    record = {"ledger.record@1": lambda inputs: {"entry_id": "led-1"}}
+    by_a_system = small_refund(opened, catalog=ledger, activities=record)
+    assert by_a_system.needs_attention == []
+    by_ana = small_refund(opened, catalog=ledger, activities=record, opened_by="ana")
+    assert by_ana.needs_attention == [
+        (
+            "record#1: ledger.record@1 takes amount only from opener, and this value comes from "
+            "amount (person:ana)"
+        )
+    ]
+    # Refused whoever opens it, it is an error: the reviewer's amount comes from a person.
+    [refused] = validate_case(parse_case(refund_recording({"var": "approved_amount"})), ledger)
+    assert refused == Issue(
+        "steps.record.inputs.amount",
+        "INPUT_POLICY",
+        "ledger.record@1 takes amount only from opener, and this value comes from "
+        "approved_amount (person:answering review): use a value opener gave",
+    )
+
+
+# --- 10c, slice 2: into plan steps ---
+
+
+def settled_from_the_estimate() -> dict[str, Any]:
+    """The refund through `refund-order@1`, its amount the customer's, declared untrusted."""
+    refund = settled(inputs={"order_id": {"var": "order_id"}, "amount": {"var": "amount"}})
+    refund["fields"]["amount"]["source"] = "untrusted:customer"
+    return refund
+
+
+def test_a_plan_step_carries_the_cases_sources_into_its_plan() -> None:
+    # Refused at the case's input, before the plan runs, naming the plan's state (brief, D36).
+    assert checked_with(settled_from_the_estimate(), PLANS) == [
+        Issue(
+            "steps.settle.inputs.amount",
+            "INPUT_POLICY",
+            "refund-order@1, in its state pay: payments.refund@2 takes amount only from a system "
+            "or a person, never from untrusted data, and this value comes from amount (the "
+            "opener, untrusted:customer): use a value a system or a person gave",
+        )
+    ]
+    # The proof: run as it is, the plan starts, asks for its approval, and stops at `pay`.
+    run = run_case(
+        settled_from_the_estimate(),
+        file=SMALL,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        plans=PLANS,
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+    )
+    assert run.needs_attention == [
+        (
+            "settle#1: refund-order@1 stopped: payments.refund@2 takes amount only from a system "
+            "or a person, never from untrusted data, and this value comes from amount "
+            "(system:opener, untrusted:customer)"
+        )
+    ]
+
+
+def test_a_plans_own_mark_is_the_plans_issue() -> None:
+    # A plan declaring its own field untrusted refuses it wherever it is published (layer 3's
+    # `validate`): the case's check doesn't say it again, since the case can't change it.
+    marked_plan = refund_order()
+    marked_plan["fields"]["amount"]["source"] = "untrusted:customer"
+    assert checked_with(settled(), {"refund-order@1": marked_plan}) == []
+    # A field a person sets in the plan comes from them: trusted, the case's input or not.
+    given = settled(plan="review-and-pay@1", inputs={"order_id": {"var": "order_id"}})
+    assert checked_with(given, {"review-and-pay@1": review_and_pay()}) == []
+
+
+# --- 10c, slice 3: references ---
+
+
+def claim_lettering(customer: Any) -> dict[str, Any]:
+    """The guide's claim, drafting a letter through `letters.draft@3` to `customer`."""
+    claim = claim_writing_to("unused")
+    claim["steps"]["write"] |= {
+        "activity": "letters.draft@3",
+        "inputs": {"customer": customer, "template": "claim-received"},
+    }
+    return claim
+
+
+def test_a_reference_goes_only_where_its_system_is_expected() -> None:
+    reason = (
+        "letters.draft@3 takes customer as a reference to crm, and is given order_id, a "
+        "reference to orders"
+    )
+    wrong_system = claim_lettering({"var": "order_id"})
+    assert issues(wrong_system) == [
+        Issue(
+            "steps.write.inputs.customer",
+            "REFERENCE",
+            f"{reason}: give it a reference to crm, read as it is",
+        )
+    ]
+    # The proof: run as it is, the step fails before the letter is drafted (brief, D30).
+    run = run_case(wrong_system, file=CLAIM_FILE, answers=[], people=CLAIM_PEOPLE)
+    assert run.needs_attention == [f"write#1: {reason}"]
+    # A computed value has no system, whatever it looks like.
+    computed = claim_lettering({"cat": ["cus-", {"string": [{"var": "order_id"}]}]})
+    [refused] = issues(computed)
+    assert refused.message == (
+        "letters.draft@3 takes customer as a reference to crm, and is given a computed value: "
+        "give it a reference to crm, read as it is"
+    )
+
+
+def test_a_plan_steps_reference_field_takes_a_reference_of_its_system() -> None:
+    made_up = {"cat": ["ord-", {"string": [{"var": "amount"}]}]}
+    settle = settled(inputs={"order_id": made_up, "amount": {"var": "approved_amount"}})
+    reason = "refund-order@1 takes order_id as a reference to orders, and is given a computed value"
+    assert checked_with(settle, PLANS) == [
+        Issue(
+            "steps.settle.inputs.order_id",
+            "REFERENCE",
+            f"{reason}: give it a reference to orders, read as it is",
+        )
+    ]
+    # The proof: run as it is, the step fails before the plan starts (G7).
+    run = run_case(settle, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS)
+    assert run.needs_attention == [f"settle#1: {reason}"]
+
+
+# --- 10c, slice 4: types ---
+
+
+def test_an_input_is_given_the_type_it_takes() -> None:
+    text = refund_with(inputs={"order_id": {"var": "order_id"}, "amount": "40"})
+    assert issues(text) == [
+        Issue(
+            "steps.pay.inputs.amount",
+            "INPUT_TYPE",
+            "payments.refund@2 takes amount as a number, and is given a string: give it a number",
+        )
+    ]
+    # The proof: run as it is, the text is refused, never paid as 40 (G6). Before 10c, it was.
+    assert small_refund(text).needs_attention == [
+        (
+            "pay#1: payments.refund@2 doesn't take these inputs: amount: Input should be an "
+            "instance of Decimal"
+        )
+    ]
+    # A plan's field too: the plan doesn't start (G7).
+    as_text = {"string": [{"var": "approved_amount"}]}
+    settle = settled(inputs={"order_id": {"var": "order_id"}, "amount": as_text})
+    assert checked_with(settle, PLANS) == [
+        Issue(
+            "steps.settle.inputs.amount",
+            "INPUT_TYPE",
+            "refund-order@1 takes amount as a number, and is given a string: give it a number",
+        )
+    ]
+    run = run_case(settle, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS)
+    assert run.needs_attention == [
+        "settle#1: refund-order@1 can't start: amount is a number, and is given a string"
+    ]
+
+
+class CountInput(BaseModel):
+    amount: int  # a whole number: no value of a case is one
+
+
+def test_an_input_no_value_of_a_case_fits_is_refused_at_registration() -> None:
+    # A whole number: strict validation refuses a decimal for it, so no case could ever give it
+    # one. Registration refuses the contract, as it refuses a float output (brief, D29) (brief,
+    # D36), so no case can call it.
+    with pytest.raises(ValueError, match="input amount is int, which no value of a case is"):
+        with_ledger(taking=CountInput)
+
+
+def test_a_plan_field_given_only_literals_has_no_sources() -> None:
+    literal = settled(inputs={"order_id": {"var": "order_id"}, "amount": Decimal(40)})
+    assert checked_with(literal, PLANS) == [
+        Issue(
+            "steps.settle.inputs.amount",
+            "NO_SOURCES",
+            "refund-order@1 takes amount from the case, and is given only values written in the "
+            "definition, which come from nobody: give it a field of the case file",
+        )
+    ]
+    run = run_case(literal, file=SMALL, answers=[REVIEWED], people=PEOPLE, plans=PLANS)
+    assert run.needs_attention == [
+        (
+            "settle#1: refund-order@1 can't start: amount comes with no sources: say where its "
+            "value came from, such as system:opener"
+        )
+    ]
+
+
+# --- 10c, slice 5: sensitive values and approvers ---
+
+
+def claim_checking_national_id() -> dict[str, Any]:
+    """The guide's claim, its workflow step given the customer's national ID, a sensitive field."""
+    claim = guide_json(0)
+    claim["fields"]["national_id"] = {
+        "type": "string",
+        "sensitive": True,
+        "visible_to": ["claims-sensitive"],
+        "display": {"title": "National ID"},
+    }
+    claim["steps"]["check"]["inputs"] = {"customer_id": {"var": "national_id"}}
+    return claim
+
+
+def test_a_workflow_step_is_never_given_a_sensitive_value() -> None:
+    reason = (
+        "kyc.check@1 is a workflow step and can't be given national_id, a sensitive field: its "
+        "worker doesn't hold the case's key"
+    )
+    assert issues(claim_checking_national_id()) == [
+        Issue(
+            "steps.check.inputs.customer_id",
+            "SENSITIVE_TO_WORKFLOW",
+            f"{reason}; give it a value that isn't sensitive",
+        )
+    ]
+    # The proof: run as it is, the step fails before the workflow starts (brief, D31).
+    run = run_case(
+        claim_checking_national_id(),
+        file=CLAIM_FILE | {"national_id": "1850775123456"},
+        answers=[],
+        people=CLAIM_PEOPLE,
+    )
+    assert run.needs_attention == [f"check#1: {reason}"]
+
+
+def claim_paying_below_a_fraud_score() -> dict[str, Any]:
+    """The guide's claim, paid only below a fraud score only the fraud team sees."""
+    claim = guide_json(0)
+    claim["fields"]["fraud_score"] = {
+        "type": "number",
+        "visible_to": ["fraud"],
+        "display": {"title": "Fraud score"},
+    }
+    claim["steps"]["pay"]["when"] = {"<": [{"var": "fraud_score"}, 50]}
+    return claim
+
+
+def test_an_approver_who_cannot_see_is_warned() -> None:
+    assert issues(claim_paying_below_a_fraud_score()) == [
+        Issue(
+            "steps.pay.approval.roles",
+            "APPROVER_CANT_SEE",
+            "support-lead can't see fraud_score, which pay reads: a person approving pay needs "
+            "fraud as well; let support-lead see fraud_score, or approve with a role that does",
+            "warning",
+        )
+    ]
+
+    # A warning, not an error: who holds which roles is what the check can't know (brief, D34).
+    # Sam holds support-lead only, and is refused; Lee holds fraud too, and the claim is paid.
+    def paid(roles: list[str]) -> CaseRun:
+        return run_case(
+            claim_paying_below_a_fraud_score(),
+            file=CLAIM_FILE | {"fraud_score": 10},
+            answers=[ACCEPTED, ("pay", "approve", "lee")],
+            people={**CLAIM_PEOPLE, "lee": roles},
+        )
+
+    with pytest.raises(AnswerRefused, match="^lee can't see fraud_score, which pay reads"):
+        paid(["support-lead"])
+    assert paid(["support-lead", "fraud"]).reached("pay")
+
+
+# --- 10c, slice 6: one cause, one issue; the guide ---
+
+
+def test_an_input_has_one_data_flow_issue() -> None:
+    # The first the runtime meets. A reference refused is not asked where it comes from.
+    claim = claim_lettering({"var": "estimate_ref"})
+    claim["fields"]["estimate_ref"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "Customer's reference"},
+    }
+    assert [issue.code for issue in issues(claim)] == ["REFERENCE"]
+    run = run_case(
+        claim, file=CLAIM_FILE | {"estimate_ref": "cus-1"}, answers=[], people=CLAIM_PEOPLE
+    )
+    [refused] = run.needs_attention
+    assert "as a reference to crm" in refused
+    # A sensitive value from an untrusted source: the policy first, as `checked_inputs` is asked
+    # before the workflow's own refusal.
+    claim = claim_checking_national_id()
+    claim["fields"]["national_id"]["source"] = "untrusted:customer"
+    assert [issue.code for issue in issues(claim)] == ["INPUT_POLICY"]
+    # An input whose expression is refused is not asked again, nor one of a missing contract.
+    misspelt = refund_with(inputs={"order_id": {"var": "order_id"}, "amount": {"var": "amout"}})
+    assert [issue.code for issue in issues(misspelt)] == ["EXPRESSION_INVALID"]
+    missing = refund_with(activity="payments.refund@3", inputs={"amount": "40"})
+    assert [issue.code for issue in issues(missing)] == ["UNKNOWN_CONTRACT"]
+    no_plan = settled(inputs={"order_id": {"var": "order_id"}, "amount": "40"})
+    assert [issue.code for issue in issues(no_plan)] == ["UNKNOWN_PLAN"]
+    # A plan step refused when it starts runs nothing inside its plan: no in-plan issue.
+    made_up = {"cat": ["ord-", {"string": [{"var": "amount"}]}]}
+    both = settled_from_the_estimate()
+    both["steps"]["settle"]["inputs"]["order_id"] = made_up
+    assert [issue.code for issue in checked_with(both, PLANS)] == ["REFERENCE"]
+
+
+FLOW_EXAMPLES: dict[str, Callable[[], dict[str, Any]]] = {
+    "REFERENCE": lambda: claim_lettering({"var": "order_id"}),
+    "INPUT_POLICY": estimated_claim,
+    "OPENER_DECIDES": lambda: refund_recording({"var": "amount"}),
+    "INPUT_TYPE": lambda: refund_with(inputs={"order_id": {"var": "order_id"}, "amount": "40"}),
+    "NO_SOURCES": lambda: settled(inputs={"order_id": {"var": "order_id"}, "amount": Decimal(40)}),
+    "SENSITIVE_TO_WORKFLOW": claim_checking_national_id,
+    "APPROVER_CANT_SEE": claim_paying_below_a_fraud_score,
+}
+
+
+def flow_issues(definition: dict[str, Any]) -> list[Issue]:
+    """The issues of `definition`, read with the ledger beside the catalog and the guide's plans."""
+    return validate_case(parse_case(definition), with_ledger(), plans=PLANS)
+
+
+def test_the_guide_lists_every_code_for_data_flow() -> None:
+    assert [code for code, _, _ in guide_table(3)] == list(FLOW_EXAMPLES)
+
+
+@pytest.mark.parametrize(("code", "kind", "says"), guide_table(3))
+def test_the_guides_table_of_data_flow_is_what_validate_case_says(
+    code: str, kind: str, says: str
+) -> None:
+    found = [issue for issue in flow_issues(FLOW_EXAMPLES[code]()) if issue.code == code]
+    assert [issue.severity for issue in found] == [kind]
+    if says != "as above":
+        assert [issue.message for issue in found] == [says]
+
+
+def test_no_data_flow_message_quotes_a_value() -> None:
+    # Fields, types, sources and roles, never a title, a literal or who opens the case
+    # (brief, D30) (brief, D35).
+    for make in FLOW_EXAMPLES.values():
+        for issue in flow_issues(marked(make())):
+            assert "TITLE-" not in issue.message and "person:opening" not in issue.message, issue
+    text = refund_with(inputs={"order_id": {"var": "order_id"}, "amount": "987654"})
+    literal = settled(inputs={"order_id": {"var": "order_id"}, "amount": Decimal(987654)})
+    for definition in (text, literal):
+        [issue] = flow_issues(definition)
+        assert "987654" not in issue.message
+
+
+class StatusInput(BaseModel):
+    amount: Decimal
+    status: Annotated[str, only_from("kyc")]  # only what the KYC system says
+
+
+def test_an_outcome_comes_from_its_contract_not_its_system() -> None:
+    # The output `check.status` comes from what the contract declares, system:kyc; the workflow's
+    # outcome from the contract itself, system:kyc.check@1 (brief, D29). The run records the same.
+    ledger = with_ledger(taking=StatusInput)
+    record = {"ledger.record@1": lambda inputs: {"entry_id": "led-1"}}
+
+    def recording(status: str) -> dict[str, Any]:
+        claim = guide_json(0)
+        claim["steps"]["record"] = {
+            "kind": "activity",
+            "display": {"title": "Record the check"},
+            "activity": "ledger.record@1",
+            "requires": ["checked", "assessed"],
+            "inputs": {"amount": {"var": "payout"}, "status": {"var": status}},
+        }
+        return claim
+
+    def run(status: str) -> CaseRun:
+        return run_case(
+            recording(status),
+            file=CLAIM_FILE,
+            answers=[ACCEPTED],
+            people=CLAIM_PEOPLE,
+            catalog=ledger,
+            activities=record,
+        )
+
+    assert validate_case(parse_case(recording("check.status")), ledger) == []
+    assert (
+        "scheduled record#1: ledger.record@1 (amount from person:ana; status from system:kyc)"
+        in run("check.status").history
+    )
+    reason = (
+        "ledger.record@1 takes status only from kyc, and this value comes from check.outcome "
+        "(system:kyc.check@1)"
+    )
+    assert validate_case(parse_case(recording("check.outcome")), ledger) == [
+        Issue("steps.record.inputs.status", "INPUT_POLICY", f"{reason}: use a value kyc gave")
+    ]
+    assert run("check.outcome").needs_attention == [f"record#1: {reason}"]
+
+
+# --- 10c, tutor review: a Literal input ---
+
+
+class PriorityInput(BaseModel):
+    amount: Decimal
+    priority: Literal["low", "high"]  # one of these texts, exactly
+
+
+def refund_flagging(priority: Any) -> dict[str, Any]:
+    """The refund, recording the request in the ledger with `priority`."""
+    refund = refund_recording({"var": "amount"})
+    refund["steps"]["record"]["inputs"]["priority"] = priority
+    return refund
+
+
+def test_a_literal_input_takes_one_of_its_texts() -> None:
+    ledger = with_ledger(taking=PriorityInput)
+    calls: list[dict[str, Any]] = []
+
+    def record(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs)
+        return {"entry_id": "led-1"}
+
+    def run(priority: Any) -> CaseRun:
+        calls.clear()
+        return small_refund(
+            refund_flagging(priority), catalog=ledger, activities={"ledger.record@1": record}
+        )
+
+    # One of its texts: no issue, and the activity is called with it.
+    assert validate_case(parse_case(refund_flagging("high")), ledger) == []
+    assert run("high").needs_attention == [] and calls == [
+        {"amount": Decimal(40), "priority": "high"}
+    ]
+    # Another text is the mistake, so the message names it (brief, D35); run, the step fails.
+    assert validate_case(parse_case(refund_flagging("urgent")), ledger) == [
+        Issue(
+            "steps.record.inputs.priority",
+            "INPUT_TYPE",
+            'ledger.record@1 takes priority as one of low or high, and is given "urgent": give it '
+            "one of low or high",
+        )
+    ]
+    [refused] = run("urgent").needs_attention
+    assert refused.startswith("record#1: ledger.record@1 doesn't take these inputs: priority:")
+    assert calls == []
+    # A number never fits.
+    assert validate_case(parse_case(refund_flagging({"var": "amount"})), ledger) == [
+        Issue(
+            "steps.record.inputs.priority",
+            "INPUT_TYPE",
+            "ledger.record@1 takes priority as one of low or high, and is given a number: give it "
+            "one of low or high",
+        )
+    ]
+    [refused] = run({"var": "amount"}).needs_attention
+    assert refused.startswith("record#1: ledger.record@1 doesn't take these inputs: priority:")
+    # A text field may or may not be one of them: that depends on the value, so no issue.
+    refund = refund_flagging({"var": "order_id"})
+    assert validate_case(parse_case(refund), ledger) == []
+
+
+class DecisionInput(BaseModel):
+    amount: Decimal
+    decision: Literal["approve", "reject", "hold"]  # what the review decided, or a hold
+
+
+def test_an_outcome_or_a_boolean_given_to_a_literal_input() -> None:
+    # An outcome all of whose outcomes are among the texts always fits: no issue, and it runs.
+    ledger = with_ledger(taking=DecisionInput)
+    record = {"ledger.record@1": lambda inputs: {"entry_id": "led-1"}}
+    decided = refund_recording({"var": "amount"})
+    decided["steps"]["record"]["inputs"]["decision"] = {"var": "review.outcome"}
+    assert validate_case(parse_case(decided), ledger) == []
+    assert small_refund(decided, catalog=ledger, activities=record).needs_attention == []
+    # An outcome with others may fit or not, depending on the answer: no issue.
+    ledger = with_ledger(taking=PriorityInput)
+    flagged = refund_flagging({"var": "review.outcome"})
+    assert validate_case(parse_case(flagged), ledger) == []
+    # A boolean never fits; run, the step fails.
+    as_boolean = refund_flagging(True)
+    assert validate_case(parse_case(as_boolean), ledger) == [
+        Issue(
+            "steps.record.inputs.priority",
+            "INPUT_TYPE",
+            "ledger.record@1 takes priority as one of low or high, and is given a boolean: give "
+            "it one of low or high",
+        )
+    ]
+    run = small_refund(as_boolean, catalog=ledger, activities=record)
+    [refused] = run.needs_attention
+    assert refused.startswith("record#1: ledger.record@1 doesn't take these inputs: priority:")

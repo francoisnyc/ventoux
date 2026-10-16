@@ -257,10 +257,12 @@ stops when:
 
   A field marked untrusted in the plan stays untrusted, whatever the case says: a mark can add
   distrust, never remove it.
-- **an input doesn't fit the contract,** such as a text where it takes a number;
-- **a condition can't be evaluated.** The fork shown in "What `ventoux check` proves", run with
-  `amount` given as the text `"250"`, stops at `check_order`, and never tries the next transition
-  to `pay`:
+- **an input doesn't fit the contract,** such as a text where it takes a number: a value is
+  never converted, so the text `"40"` is refused where a decimal is taken;
+- **a condition can't be evaluated.** The check refuses such a plan first, but the engine checks
+  again on nothing the check did. The fork shown in "What `ventoux check` proves", with `amount`
+  declared a text (`{"type": "string"}`) and given `"250"`, stops at `check_order`, and never
+  tries the next transition to `pay`:
 
   ```
   stopped at check_order: on done, amount > 100 can't be evaluated: `>` compares numbers, and it
@@ -276,7 +278,8 @@ stops when:
   stops ("a plan that loops needs a wait or an end"). A loop through a wait, such as a retry each
   pass approves, doesn't count against it.
 
-A run also refuses to start when a field is missing, isn't declared, or comes with no sources. An
+A run also refuses to start when a field is missing, isn't declared, comes with no sources, or
+isn't of its declared type (`amount is a number, and is given a string`). An
 answer the wait doesn't offer (or `timeout` from a wait without one) is refused, and the wait goes
 on; so is an answer from someone the wait doesn't accept (see "People in the loop").
 

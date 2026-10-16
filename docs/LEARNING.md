@@ -1067,4 +1067,18 @@ and record the key points. A question is closed once you can explain the answer 
   see "10 days old", ask for what history never did, and stop on a non-determinism error. The
   same lesson as question 32: time enters as data history recorded, never as a clock the case
   reads.
-- Status: open, until "the recorded time, not the clock's" comes back from memory.
+- Retrieval (layer 10c warm-up): "facts are timestamped and they are used by Temporal during
+  replay." b's core came back: time is data the case was given, not a clock it reads. Sharpened:
+  - **Which timestamp, and who reads it.** Every event carries `at`, stamped once as it reaches
+    the case, from Temporal's workflow time (`workflow.now()`), which history records; each value
+    then records when it was obtained (brief, D33). Temporal doesn't use it: the case's own
+    `decide` reads it. On replay `workflow.now()` gives the recorded time again, so Sam's approval
+    is day 3 even replayed on day 10, and the fact is 3 days old again. A clock read on day 10
+    would ask for a refresh history never recorded: a non-determinism error.
+  - **a didn't come back:** the two facts are treated differently. `check_order.status` is a
+    read, so it is fetched again, as a new run of the step (with no approval needed, or it
+    needs attention); `approved_amount` is a person's answer, which the engine can't ask again, so
+    `pay` needs attention and a person decides (send the review back, then retry, or close).
+  In one line: a stale read is refreshed, a stale answer goes to a person; and replay decides the
+  same because the time is recorded on each event, never read from a clock.
+- Status: open, until a (a read refreshed, a person's answer to a person) comes back from memory.

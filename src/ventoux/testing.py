@@ -18,7 +18,7 @@ from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import CaseDefinition, parse_case
 from ventoux.case.freshness import seconds_in
 from ventoux.case.memory import Activity, CaseRun, Finish, PlanRunner, run_case_in_memory
-from ventoux.case.plan_step import PlanNotSupplied, supplied
+from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
 from ventoux.case.runtime import CaseRefused
 from ventoux.case.state import (
     Answered,
@@ -432,6 +432,8 @@ def plan_runner(
             plan = supplied(plans, command.plan)
         except PlanNotSupplied as missing:
             return Failed(command.entry, str(missing), at=at)
+        if (wrong := wrong_references(plan, command)) is not None:
+            return Failed(command.entry, wrong, at=at)  # fail closed, before the plan starts
         script = scripts.setdefault(command.entry.split("#")[0], [])
         try:
             # asyncio: `interpret` is async, as a Temporal workflow is; `asyncio.run` runs it.

@@ -4,7 +4,9 @@ Status: the split into four parts and 10a's six choices agreed in the session, 2
 proposed); 10a's note drafted the same day; 10a built, slices 0–6; Promises checked against the
 tests, 2026-10-15; the tutor review's three fixes built test-first, 2026-10-15. 10b's choices and
 its four runtime fixes agreed in the session, 2026-10-15 (all as proposed); 10b's note drafted the
-same day; 10b built, slices 0–6; Promises checked against the tests, 2026-10-15.
+same day; 10b built, slices 0–6; Promises checked against the tests, 2026-10-15. 10c's choices and
+its two runtime fixes agreed in the session, 2026-10-16 (all as proposed); 10c's note drafted the
+same day; 10c built, slices 1–6; Promises checked against the tests, 2026-10-16.
 
 ## What this layer is for
 
@@ -591,3 +593,289 @@ and every test 10b added to `V` is named here (10a's table names the rest).
 | A message quotes a literal only when it is the mistake; never a title or reason | V `test_a_message_quotes_only_the_literal_that_is_wrong`, `test_no_message_quotes_a_value` |
 | The guide says what the code does: its example output, its table (every code, each message and kind) | V `test_a_misspelt_outcome_is_refused`, `test_the_guide_lists_every_code_for_what_steps_call`, `test_the_guides_table_of_calls_is_what_validate_case_says` |
 | `case` imports no Temporal or LLM code, and reads no clock or I/O, in the new modules too | `tests/test_layers.py`, unchanged |
+
+---
+
+## 10c. Data flow: where each value comes from, and whether it may go there
+
+User-facing description, written first: `docs/guides/cases.md`, "Where each value comes from".
+Decision: brief D36 (drafted with this note).
+
+### What this part is for
+
+10b reads what each step calls. 10c follows each value a step reads to where it goes. Today all
+of it is found only when the step runs, and probes with `run_case` (2026-10-16) found worse:
+
+| Definition | The runtime today |
+|---|---|
+| plan step `settle` given `amount` from a field declared `untrusted:customer` | the plan starts, its own approval is asked and given, and only then its `pay` stops on `trusted_only` |
+| `settle` given `order_id` as `cat("x", string(order_id))`, its plan field a reference to `orders` | **paid**: the plan's reference check trusts its field's declared type, and nothing checks what the case gave it |
+| `settle` given `amount` as `string(approved_amount)` | **paid**: Pydantic turns the text into a decimal |
+| `pay` given `"amount": "40"` (carried from 10b) | **paid 40**, for the same reason |
+| `settle` given the literal `40` | refused when the plan starts: `amount comes with no sources` |
+
+### Decided in the session
+
+Agreed 2026-10-16, all as proposed.
+
+1. **The codes:** `REFERENCE`, `INPUT_POLICY`, `INPUT_TYPE`, `NO_SOURCES`,
+   `SENSITIVE_TO_WORKFLOW` (errors); `APPROVER_CANT_SEE` (warning). `INPUT_TYPE` and
+   `NO_SOURCES` are new beside the split's table; `OPENER_DECIDES` (warning) was named while
+   drafting the guide, for the one input whose fate depends on who opens the case (below).
+2. **`APPROVER_CANT_SEE` is a warning, never an error.** `unseen` judges an approval with every
+   role the person holds (`may_see(…, answer.roles, …)`), so a team lead who also holds `fraud`
+   may approve a step reading a field only `fraud` sees. Whether anyone holds both is what the
+   check can't know (brief, D34). The only value nobody could ever see is one whose `visible_to`
+   names only unregistered roles, already `UNKNOWN_ROLE`. The refusal at answer time stays.
+3. **Two runtime gaps closed** (brief, D36), each on nothing validation did (brief, D34):
+   - **G6, the lax conversion.** `checked_inputs` validates an activity's or workflow's inputs
+     strictly, in cases and in plans: a value is never converted, so `"40"` is refused where a
+     decimal is taken. Probed first: lax Pydantic turns `"40"` into `Decimal(40)`, `"yes"` and
+     `Decimal(1)` into `True`, `True` into the `int` 1; strict refuses each, and refuses
+     `Decimal(3)` for an `int` (a whole number given as a decimal). Every contract input in the
+     repository is `str` or `Decimal`, and the whole suite passed with `strict=True` (1005 tests).
+   - **G7, a plan's fields at its start.** `refuse_to_start` checks each field the case gives
+     against the plan field's type, and a reference field takes only a reference to its system,
+     read as it is, as a contract's reference input does (brief, D30: "in cases and in plans").
+4. **A plan field given only literals stays refused at runtime;** validation says so first
+   (`NO_SOURCES`). A literal has no source, and D28 gives a plan field the sources of what it read.
+5. **One data-flow issue per input:** the first the runtime would meet. Activity and workflow
+   steps: reference, policy, type, then sensitive (a workflow step), the order of `checked_inputs`
+   and `schedule`. Plan steps: reference and type, then no sources (the plan's start), then policy
+   (inside the plan). An input already refused for its expression, or whose step's contract or
+   plan is missing (10b), gets none.
+6. **D36,** drafted with this note.
+
+### Provenance in one pass
+
+Every writer stamps what it writes with sources that don't depend on what it read (brief, D34),
+so a field's static sources are the union of its writers' stamps, plus the field's mark:
+
+| Writer | Static source | The runtime records |
+|---|---|---|
+| the opening | the opener (below) | `system:opener`, or `person:<who>` |
+| a task's form and its outcome | `person:answering <task>`, layer 4's stand-in | `person:ana` |
+| an activity's or a workflow's outcome | `system:<contract>` | the same |
+| a plan step's outcome | `system:<plan>` | the same |
+| an output | its contract's source, or `untrusted:undeclared` (brief, D29) | the same |
+| a field declared `untrusted:<label>` | the label, added to every writer's stamp | the same (`marked`) |
+
+An input's sources are the union over every field it reads (`provenance`, conditions and both
+branches of an `if` included), as the runtime computes them. The stand-ins differ from what the
+runtime records only in *which* person and *who* opens. `trusted_only` takes any person and any
+system; `only_from` refuses any person and takes `system:opener` only if it names `opener`.
+Untrusted sources never vary. So the check runs each policy twice, once with the case opened by a
+system and once by a person:
+
+- refused both times: **`INPUT_POLICY`**, an error, and a proof;
+- refused only when a person opens it (an `only_from` naming `opener`): **`OPENER_DECIDES`**, a
+  warning: whether it runs depends on who opens the case, which the check can't know;
+- passed both times: nothing.
+
+Messages name the opening's source **the opener**, never a person. **A source the check can't
+know fails closed:** one that is neither trusted nor declared untrusted is refused by
+`trusted_only`, as at runtime; a field with no known sources (`NoSources`) can't occur after 10b
+(every value an expression may read has a writer), and if it does, `validate_case` raises, never
+returning "no issues".
+
+### Plan steps
+
+A plan field's runtime sources are the case expression's sources, plus the plan's own mark
+(`interpreter.run`). The check gives each plan field the case expression's static sources and
+runs the plan's layer 4 policy check with them, in place of `case`. A field a wait in the plan
+sets stays `person:answering <wait>`. The plan's own marks are left out: a plan refusing its own
+untrusted field is the plan's issue, given by `validate` where plans are published (layer 3), not
+the case's. The issue sits at the case's `steps.<s>.inputs.<field>`, what the case's author can
+change, and its message starts with the plan and its state: `refund-order@1, in its state pay:
+payments.refund@2 takes amount only from …`. `validate(plan, catalog)` is unchanged; the
+policy check gains a seam that takes the fields' sources.
+
+### The checks
+
+| Code | At | Given when | The runtime |
+|---|---|---|---|
+| `REFERENCE` | `steps.<s>.inputs.<i>` | a contract's reference input, or a plan's reference field, is given anything but a reference field of its system read as it is | `checked_inputs` (`not_a_reference_to`), or the plan's start (G7): the step fails |
+| `INPUT_POLICY` | `steps.<s>.inputs.<i>` | a policy refuses the value's sources whoever opens the case | `checked_inputs`, in the case or inside the plan: the step fails |
+| `OPENER_DECIDES` (warning) | `steps.<s>.inputs.<i>` | a policy refuses them only when a person opens the case | the same, for a case a person opens |
+| `INPUT_TYPE` | `steps.<s>.inputs.<i>` | the expression's type isn't the input's: a number for `Decimal`, a string, outcome or reference for `str`, a boolean for `bool`; a plan field's own type. A contract input of any other type is never given exactly by a case (it holds decimals, texts and booleans) | strict validation (G6), or the plan's start (G7): the step fails |
+| `NO_SOURCES` | `steps.<s>.inputs.<i>` | a plan field is given an expression reading no field | the plan's start: the step fails |
+| `SENSITIVE_TO_WORKFLOW` | `steps.<s>.inputs.<i>` | a workflow step's input reads a field declared sensitive | `refuse_sensitive_inputs`: the step fails |
+| `APPROVER_CANT_SEE` (warning) | `steps.<s>.approval.roles` | a registered role on the approval, held alone, can't see a value the step reads (its inputs, its `when`, the approval's `when`); one issue per role and value (revised while building, slice 5) | an answer from a person who can't see one is refused (`unseen`) |
+
+**References follow the runtime:** an output is never a reference field, even one its contract
+types as a reference (`not_a_reference_to` reads the case's declared fields). In practice
+`APPROVER_CANT_SEE` comes only from a field narrowed by `visible_to`: approval roles are among the
+roles a case names, which see every value not narrowed.
+
+No message quotes a value from a case file (brief, D35): they name fields, types, sources and
+roles. Sources are the stand-ins, never a person's name.
+
+### Where the code goes
+
+- `case/flow.py` (new): the case's static sources, and 10c's checks, one function per code.
+- `core/validate.py`: `refused_inputs`, the policy check over the fields' sources it is given (a
+  seam for plan steps); `core/policy.py`: `refusal` may name a source as a message says it.
+- `case/validate.py`: adds `flow`'s issues, in the order the runtime meets them.
+- Runtime: `core/before_activity.py` (G6; `given_as_reference`, split out of
+  `not_a_reference_to`), `core/interpreter.py`'s `refuse_to_start` (G7's type half);
+  `case/runtime.py`'s `start_plan`, `case/state.py`'s `StartPlan.references`,
+  `case/plan_step.py`'s `wrong_references`, asked by both drivers (`testing.py`,
+  `temporal/cases.py`) (G7's reference half; revised while building, slice 3).
+- Tests: `tests/test_case_validation.py`; G6 and G7 beside their earlier tests
+  (`test_interpreter.py`, `test_plan_step.py`, `test_temporal_case.py`).
+
+### Seams the tests use
+
+- `parse_case`, then `validate_case(case, catalog, plans=…)`; an issue's `path`, `code`,
+  `message`, `severity`.
+- `run_case(…, plans=…, plan_answers=…)` for every proof: the same definition, refused or failed
+  as the issue says; its history's `amount from …` for the one-pass promise.
+- `run_plan` (from `testing`) for G6 inside a plan, beside layer 5's tests.
+- The guide: its example output and its third table are what `validate_case` says.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+1. **Sources in one pass, `INPUT_POLICY` on activity and workflow steps.** Negative: the guide's
+   lesser-of-two refund (`INPUT_POLICY`, and the run fails the same). Then an output with no
+   declared source, an outcome read by `only_from`, a value computed from several fields compared
+   with what the run records; `OPENER_DECIDES`.
+2. **Into plan steps.** Negative: the estimate through `refund-order@1`, refused at the case's
+   input; the run stops inside the plan. A plan's own mark isn't the case's issue.
+3. **References.** `REFERENCE` for activity steps; G7's reference half, and `REFERENCE` for plan
+   steps (the fabricated order ID, paid today, then refused).
+4. **Types.** G6 (`"40"` refused, in a case and in a plan); G7's type half; `INPUT_TYPE`;
+   `NO_SOURCES`.
+5. **Sensitive values and approvers.** `SENSITIVE_TO_WORKFLOW`, `APPROVER_CANT_SEE`, each with
+   its run.
+6. **One cause, one issue; the guide and the promises.**
+
+### Decided while building
+
+- **A source the check doesn't recognise can't come from a definition** (slice 1). A field's mark
+  is `untrusted:<label>` (`parse_case`), and an output's source `system:` or `untrusted:`
+  (registration, brief, D29), so nothing a case writes gives one. `trusted_only` refusing it is
+  layer 4's, tested there; the note's promise for it leaves the table, as the check can't be shown
+  meeting it through the seam.
+- **`OPENER_DECIDES` needs a contract taking `only_from("opener")`;** the tests register their
+  own, `ledger.record@1`, and the guide's row names it. The warning's proof runs the same case
+  twice: opened by a system, the amount is recorded; opened by Ana, it is refused.
+- **One pass gave what the run records at once** (slice 1): the first test's code already stamped
+  outputs. Seen failing with every output stamped `system:kyc`, then restored.
+
+- **A case step's `only_from` refusal had a plan's advice** (slice 1): `core.validate`'s
+  `what_to_do` tells a plan's author to give the input in a case step. A case's check has its
+  own: `use a value opener gave`. Found reading the code, fixed test-first.
+- **A plan step's check is `validate`'s policy check with the case's sources** (slice 2):
+  `core.validate.refused_inputs(plan, catalog, sources)` is the new seam, `validate` unchanged.
+  A person opening refuses whatever a system opening does, and more, so the check walks the
+  refusals when a person opens it and asks which also hold when a system does. "The plan's own
+  mark is the plan's issue" passed at once; seen failing with the marks added back.
+
+- **G7's reference half is checked by the case, not the plan** (slice 3). A plan's field
+  arrives as `Sourced(value, sources)`: the plan can't tell a `crm` reference from a text, and
+  `decide` doesn't hold the plans (the drivers read them). So `start_plan` says, for each field,
+  what it gives (`given_as_reference`, split out of `not_a_reference_to`, which now uses it), on
+  `StartPlan.references`; both drivers ask `plan_step.wrong_references` before the plan starts,
+  as they ask `supplied`. Validation reads the same function. The type half stays the plan's
+  (`refuse_to_start`, slice 4): a value's type is in the value.
+- **G7 met an earlier test's fixture** (slice 3): `test_fresh_facts.needing` gave
+  `refund-order@1`'s `orders` reference a case field declared as a text. The fixture now declares
+  it a reference to orders, as an order ID is; the test's subject (a plan step's outcome isn't
+  fetched again) is unchanged.
+- **The Temporal comparison passed at once** (slice 3), the driver's check written first; seen
+  failing with it removed (the child started).
+
+- **G7's type half met five earlier tests** (slice 4), all in `tests/test_interpreter.py`.
+  Three gave a plan's number field an `int` (`sourced(250, …)`), now `Decimal(250)`, as the case
+  file holds numbers. One gave a reference field a number to reach the contract's refusal; it now
+  writes the number in the plan's input, which still reaches it. Two (one of them the plans
+  guide's example) gave the text `"250"` to a number field so a condition couldn't be read; the
+  plan now doesn't start. Their subject, a condition that can't be evaluated stops the run, still
+  matters for a plan run unchecked, so they declare `amount` a text, which `validate` refuses and
+  the runtime meets on its own (learning question 34); the plans guide says so, and lists the
+  type among what refuses a run's start. No assertion was loosened.
+- **G7 found a bug of its own making** (slice 4): the new branch named its type `declared`, which
+  `refuse_to_start` already used for the list of fields, so an undeclared field's message listed
+  `type='number'`. Caught by layer 5's test; renamed.
+- **A list can't be given to a plan,** as it can't be given at a case's opening: `fits` fails
+  closed on a type it doesn't know (a list, for now). No plan in the repository has a list field;
+  `INPUT_TYPE` says the same, as a proof. Lists given across the boundary wait for a layer that
+  needs them.
+- **An `int` input passed at once** (slice 4), its branch written with the first; seen failing
+  with `int` read as a number.
+
+- **`APPROVER_CANT_SEE` is one issue per role and value, not per role** (slice 5). One value may
+  be seen through either of two roles (`fraud or audit`), and two values may need two different
+  roles: one message naming several values could say neither exactly. Its proof runs both ways:
+  Lee holding `support-lead` alone is refused; holding `fraud` too, the claim is paid.
+
+- **The Promises check found two claims without a test** (slice 6): "an outcome from its
+  contract" (a wrong trusted stamp would pass `trusted_only` unseen, so its test reads an
+  outcome where only `only_from("kyc")` tells `system:kyc.check@1` from `system:kyc`), and "or
+  whose plan is missing". Both got tests, passing at once; the first was seen failing with
+  outcomes stamped by their contract's system. The no-quoted-value promise names the new test it
+  is, not the earlier one it said it would extend.
+- **One cause, one issue, and the guide's table passed at once** (slice 6): seen failing with the
+  policy check made to ignore earlier issues (`REFERENCE` and `INPUT_POLICY` both given), and
+  with one word of a row changed.
+- **A plan step refused at its start gets no in-plan issue** (slice 6), as the runtime never
+  starts the plan: one cause, one issue holds per step for plans, not only per input.
+
+### Not in 10c
+
+- Teaching warnings (10d), among them D9's approval whose condition reads none of its step's
+  fields.
+- Untrusted values steering a condition (design question 17, layer 11).
+- No new dependency.
+
+### From the tutor review
+
+One finding, fixed test-first as agreed with the user.
+
+- **`INPUT_TYPE`'s "which no value of a case ever is" wasn't a proof.** `taken` read only
+  `Decimal`, `str` and `bool`, and called every other input type unfillable; but strict Pydantic
+  accepts a `Literal` given one of its texts (the probe's `priority: Literal["low", "high"]`
+  given `"high"` was refused by the check and run by the engine), a `float` given a decimal
+  (which the activity's model then turns into a binary float, against "never converted"), `Any`,
+  `str | Decimal` and `list[Decimal]`. Two fixes:
+  - **Registration holds inputs to the case's types** (brief, D36, adding to D29): a `Decimal`, a
+    `str`, a `bool` or a `Literal` of texts, each possibly optional (`core/contract.py`'s
+    `held_input`, used by registration and by the check). Every contract input in the repository
+    already fit. The activities guide says what an input may be, and its table of refusals has
+    the `float` row. The check's "no value fits" branch can't be reached through a catalog,
+    which checks every contract again when registered; it stays an error, worded as such.
+  - **The check knows the `Literal`:** an outcome all of whose outcomes are among its texts
+    fits; a text field, a reference, or an outcome with others may fit or not, so no issue; a
+    text written in the definition outside the set is `INPUT_TYPE` naming it (brief, D35); a
+    number or a boolean is `INPUT_TYPE`. Each with its run. The branch naming the text was seen
+    failing with it removed; the outcome and boolean rules, tested in a second pass, passed at
+    once and were each seen failing on a deliberate break.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`V` is `tests/test_case_validation.py`, `P` `tests/test_plan_step.py`, `T`
+`tests/test_temporal_case.py`, `I` `tests/test_interpreter.py`, `C` `tests/test_catalog.py`. Checked against the tests,
+2026-10-16: every test named here exists, and every test 10c added is named here.
+
+| Promise | Test |
+|---|---|
+| A value from a source an input's policy refuses is `INPUT_POLICY`, the guide's message word for word; run, the step fails with the same reason | V `test_an_untrusted_value_is_refused_where_only_trusted_ones_go` |
+| One pass gives what the runtime records: a value computed from several fields, an output with its contract's source or `untrusted:undeclared`, an outcome from its contract | V `test_one_pass_gives_the_sources_the_run_records`, `test_an_outcome_comes_from_its_contract_not_its_system` |
+| A refusal that depends on who opens the case is a warning, `OPENER_DECIDES`; one that holds for any opener is an error | V `test_who_opens_the_case_decides_only_a_warning` |
+| A plan step's fields carry the case's sources into the plan: refused at the case's input before the plan runs; run, the plan stops; the plan's own marks are the plan's issue; a field a wait sets is a person's | V `test_a_plan_step_carries_the_cases_sources_into_its_plan`, `test_a_plans_own_mark_is_the_plans_issue` |
+| A reference input given another system's reference, a text or a computed value is `REFERENCE`, in activity and plan steps; run, the step fails, in memory and on Temporal (G7: the made-up order ID is no longer paid) | V `test_a_reference_goes_only_where_its_system_is_expected`, `test_a_plan_steps_reference_field_takes_a_reference_of_its_system`; P `test_a_plan_field_takes_only_a_reference_to_its_system`; T `test_a_plan_field_takes_only_a_reference_of_its_system_on_temporal` |
+| An input of another type than it takes is `INPUT_TYPE`; run, it is refused, never converted (G6), in a case and in a plan | V `test_an_input_is_given_the_type_it_takes`; I `test_an_input_is_never_converted` |
+| A contract input no value of a case is (an `int`, a `float`) is refused at registration, saying what to use instead | V `test_an_input_no_value_of_a_case_fits_is_refused_at_registration`; C `test_the_guides_refusals_are_what_the_catalog_says` (its `float` row) |
+| A `Literal` input takes one of its texts: no issue, and the activity is called; another text is `INPUT_TYPE` naming it, a number is `INPUT_TYPE`, and the run fails each; a text field may fit, so no issue | V `test_a_literal_input_takes_one_of_its_texts` |
+| An outcome all of whose outcomes are among a `Literal`'s texts fits, and runs; one with others depends on the answer, so no issue; a boolean is `INPUT_TYPE`, and the run fails | V `test_an_outcome_or_a_boolean_given_to_a_literal_input` |
+| A plan's fields are checked against their types when it starts (G7) | I `test_a_plan_field_takes_a_value_of_its_type` |
+| A plan field given only literals is `NO_SOURCES`; run, the plan doesn't start | V `test_a_plan_field_given_only_literals_has_no_sources` |
+| A sensitive value given to a workflow step is `SENSITIVE_TO_WORKFLOW`; run, the step fails | V `test_a_workflow_step_is_never_given_a_sensitive_value` |
+| An approval role that can't see what its step reads is `APPROVER_CANT_SEE`, a warning; run, its holder alone is refused, and a person also holding a role that sees it approves | V `test_an_approver_who_cannot_see_is_warned` |
+| One data-flow issue per input, the first the runtime meets; none for an input already refused, or whose contract or plan is missing | V `test_an_input_has_one_data_flow_issue` |
+| No message quotes a value: no title, no literal; sources are stand-ins, never who opens the case | V `test_no_data_flow_message_quotes_a_value` |
+| The guide says what the code does: its example output and its third table | V `test_the_guide_lists_every_code_for_data_flow`, `test_the_guides_table_of_data_flow_is_what_validate_case_says` |
+| `case` imports no Temporal or LLM code, and reads no clock or I/O, in the new module too | `tests/test_layers.py`, unchanged |

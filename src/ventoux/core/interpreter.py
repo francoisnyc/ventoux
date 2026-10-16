@@ -31,7 +31,8 @@ from ventoux.core.expressions import (
     evaluate,
     render,
 )
-from ventoux.core.form import form_problem
+from ventoux.core.expressions.check import a_type
+from ventoux.core.form import fits, form_problem
 from ventoux.core.history import (
     Answered,
     Ended,
@@ -523,5 +524,9 @@ def refuse_to_start(plan: Plan, catalog: Catalog, fields: Mapping[str, Sourced])
                 f"{name} comes from case, which only the static check uses: give the source its "
                 "value really came from"
             )
+        # Exactly its type, never converted: the text "40" is not a number. The types, never the
+        # value: refusals reach people who may not see it (brief, D30) (brief, D36).
+        elif not fits(plain(given.value), field_type := plan.fields[name]):
+            problems.append(f"{name} is {a_type(field_type)}, and is given {a_kind(given.value)}")
     if problems:
         raise RunRefused("\n".join(problems))

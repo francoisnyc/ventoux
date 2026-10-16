@@ -355,7 +355,8 @@ def needing(
         "case": "fresh",
         "display": {"title": "Fresh facts"},
         "fields": {
-            "order_id": {"type": "string", "display": {"title": "Order"}},
+            # A reference to orders, as the plan's field is: a text would be refused (brief, D36).
+            "order_id": {"type": "reference", "system": "orders", "display": {"title": "Order"}},
             "amount": {"type": "number", "display": {"title": "Amount"}},
         },
         "steps": steps,
