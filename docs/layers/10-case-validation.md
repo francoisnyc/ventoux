@@ -745,6 +745,19 @@ Each starts with its negative test, seen failing for the right reason.
    its run.
 6. **One cause, one issue; the guide and the promises.**
 
+### Decided while building
+
+- **A source the check doesn't recognise can't come from a definition** (slice 1). A field's mark
+  is `untrusted:<label>` (`parse_case`), and an output's source `system:` or `untrusted:`
+  (registration, brief, D29), so nothing a case writes gives one. `trusted_only` refusing it is
+  layer 4's, tested there; the note's promise for it leaves the table, as the check can't be shown
+  meeting it through the seam.
+- **`OPENER_DECIDES` needs a contract taking `only_from("opener")`;** the tests register their
+  own, `ledger.record@1`, and the guide's row names it. The warning's proof runs the same case
+  twice: opened by a system, the amount is recorded; opened by Ana, it is refused.
+- **One pass gave what the run records at once** (slice 1): the first test's code already stamped
+  outputs. Seen failing with every output stamped `system:kyc`, then restored.
+
 ### Not in 10c
 
 - Teaching warnings (10d), among them D9's approval whose condition reads none of its step's
@@ -762,7 +775,6 @@ Drafted with the note; checked against the tests in slice 6.
 | A value from a source an input's policy refuses is `INPUT_POLICY`, the guide's message word for word; run, the step fails with the same reason | V `test_an_untrusted_value_is_refused_where_only_trusted_ones_go` |
 | One pass gives what the runtime records: a value computed from several fields, an output with its contract's source or `untrusted:undeclared`, an outcome from its contract | V `test_one_pass_gives_the_sources_the_run_records` |
 | A refusal that depends on who opens the case is a warning, `OPENER_DECIDES`; one that holds for any opener is an error | V `test_who_opens_the_case_decides_only_a_warning` |
-| A source the check doesn't recognise is refused, never trusted | V `test_a_source_the_check_does_not_know_is_refused` |
 | A plan step's fields carry the case's sources into the plan: refused at the case's input before the plan runs; run, the plan stops; the plan's own marks are the plan's issue | V `test_a_plan_step_carries_the_cases_sources_into_its_plan` |
 | A reference input given another system's reference, a text or a computed value is `REFERENCE`, in activity and plan steps; run, the step fails (G7: the fabricated order ID is no longer paid) | V `test_a_reference_goes_only_where_its_system_is_expected`; I `test_a_plan_field_takes_only_a_reference_to_its_system` |
 | An input of another type than it takes is `INPUT_TYPE`; run, it is refused, never converted (G6), in a case and in a plan | V `test_an_input_is_given_the_type_it_takes`; I `test_an_input_is_never_converted` |

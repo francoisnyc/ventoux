@@ -4,7 +4,7 @@ A policy is written on the input field it guards, in the activity's input model.
 docs/guides/activities.md.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -111,8 +111,14 @@ KINDS: tuple[type[Policy], ...] = (TrustedOnly, OnlyFrom)
 KIND_NAMES = "trusted_only and only_from"
 
 
-def origins(expression: Expression, sources: Mapping[str, frozenset[str]], policy: Policy) -> str:
-    """Where the refused value comes from: each field read whose own sources the policy refuses."""
+def origins(
+    expression: Expression,
+    sources: Mapping[str, frozenset[str]],
+    policy: Policy,
+    named: Callable[[str], str] = str,
+) -> str:
+    """Where the refused value comes from: each field read whose own sources the policy refuses,
+    each source said as `named` says it."""
     refused = [
         field
         for field in dict.fromkeys(fields_read(expression))  # each field once, in order
@@ -123,7 +129,7 @@ def origins(expression: Expression, sources: Mapping[str, frozenset[str]], polic
     return ", ".join(
         f"{field}, which the case gives the plan"
         if sources[field] == {CASE}
-        else f"{field} ({', '.join(sorted(sources[field]))})"
+        else f"{field} ({', '.join(sorted(named(source) for source in sources[field]))})"
         for field in refused
     )
 
@@ -134,10 +140,12 @@ def refusal(
     policy: Policy,
     expression: Expression,
     sources: Mapping[str, frozenset[str]],
+    named: Callable[[str], str] = str,
 ) -> str:
-    """The input policy's refusal as one sentence, the same in `validate` and before an activity
-    runs: `letters.draft@2 takes to_customer only from …, and this value comes from …`."""
+    """The input policy's refusal as one sentence, the same in `validate`, in case validation and
+    before an activity runs: `letters.draft@2 takes to_customer only from …, and this value comes
+    from …`. `named` says a source as a message shows it: case validation's stand-ins."""
     return (
         f"{reference} takes {field} {policy.describe()}, and this value comes from "
-        f"{origins(expression, sources, policy)}"
+        f"{origins(expression, sources, policy, named)}"
     )

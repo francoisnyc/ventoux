@@ -10,13 +10,18 @@ import re
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
+from pydantic import BaseModel
 
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
+from ventoux.core.catalog import Catalog
+from ventoux.core.contract import ActivityContract, RetryPolicy, Timeouts
+from ventoux.core.contract import Display as ContractDisplay
+from ventoux.core.policy import only_from
 from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
@@ -1283,3 +1288,146 @@ def test_a_message_quotes_only_the_literal_that_is_wrong() -> None:
     }
     [issue] = issues(claim)
     assert '"acept"' in issue.message and "987654" not in issue.message
+
+
+# --- 10c, slice 1: where each value comes from ---
+
+
+def estimated_claim() -> dict[str, Any]:
+    """The guide's claim, paying the lesser of the payout and the customer's own estimate."""
+    claim = guide_json(0)
+    claim["fields"] |= guide_json(3)
+    claim["steps"]["pay"]["inputs"] |= guide_json(4)
+    return claim
+
+
+def test_an_untrusted_value_is_refused_where_only_trusted_ones_go() -> None:
+    # The guide's example, word for word, line breaks aside.
+    shown = guide_section().split("so the check refuses it:\n\n```\n")[1].split("```")[0]
+    assert printed(issues(estimated_claim())) == " ".join(shown.split())
+    # The proof: run as it is, the step fails with the same reason, before the payment is called.
+    run = run_case(
+        estimated_claim(),
+        file=CLAIM_FILE | {"estimate": 1},
+        answers=[ACCEPTED, ("pay", "approve", "sam")],
+        people=CLAIM_PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: payments.refund@2 takes amount only from a system or a person, never from "
+            "untrusted data, and this value comes from estimate (system:opener, untrusted:customer)"
+        )
+    ]
+
+
+def claim_writing_to(to_customer: Any) -> dict[str, Any]:
+    """The guide's claim, drafting a letter to `to_customer` once the customer is checked."""
+    claim = guide_json(0)
+    claim["steps"]["write"] = {
+        "kind": "activity",
+        "display": {"title": "Write to the customer"},
+        "activity": "letters.draft@2",
+        "requires": ["checked"],
+        "inputs": {"to_customer": to_customer, "template": "claim-received"},
+    }
+    return claim
+
+
+def test_one_pass_gives_the_sources_the_run_records() -> None:
+    # An output carries its contract's source; one declaring none is untrusted:undeclared
+    # (brief, D29). A value computed from several fields comes from all of them.
+    computed = {"cat": [{"var": "check.status"}, " ", {"var": "check.contact_email"}]}
+    reason = (
+        "letters.draft@2 takes to_customer only from a system or a person, never from untrusted "
+        "data, and this value comes from check.contact_email (untrusted:undeclared)"
+    )
+    assert issues(claim_writing_to(computed)) == [
+        Issue(
+            "steps.write.inputs.to_customer",
+            "INPUT_POLICY",
+            f"{reason}: use a value a system or a person gave",
+        )
+    ]
+    run = run_case(claim_writing_to(computed), file=CLAIM_FILE, answers=[], people=CLAIM_PEOPLE)
+    assert run.needs_attention == [f"write#1: {reason}"]
+    # The check's sources are the run's: what passes one passes the other, as the history says.
+    trusted = {"cat": [{"var": "check.status"}, " ", {"string": [{"var": "customer_id"}]}]}
+    assert issues(claim_writing_to(trusted)) == []
+    run = run_case(claim_writing_to(trusted), file=CLAIM_FILE, answers=[], people=CLAIM_PEOPLE)
+    assert any(
+        "letters.draft@2 (to_customer from system:kyc, system:opener; template from the case)"
+        in line
+        for line in run.history
+    )
+
+
+class RecordInput(BaseModel):
+    amount: Annotated[Decimal, only_from("opener")]  # only an amount the opening system gave
+
+
+class RecordOutput(BaseModel):
+    entry_id: str
+
+
+def with_ledger() -> Catalog:
+    """The development catalog, and `ledger.record@1`, taking only an amount the opener gave."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(
+        ActivityContract(
+            name="ledger.record",
+            version=1,
+            input=RecordInput,
+            output=RecordOutput,
+            risk="low",
+            effect="compute",
+            timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+            idempotency_key=None,
+            outcomes=[],
+            display=ContractDisplay(title="Record", description="Record an amount"),
+        )
+    )
+    return catalog
+
+
+def refund_recording(amount: Any) -> dict[str, Any]:
+    """The quickstart's refund, recording `amount` in the ledger once reviewed."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["record"] = {
+        "kind": "activity",
+        "display": {"title": "Record the request"},
+        "activity": "ledger.record@1",
+        "requires": ["review"],
+        "inputs": {"amount": amount},
+    }
+    return refund
+
+
+def test_who_opens_the_case_decides_only_a_warning() -> None:
+    ledger = with_ledger()
+    # A value given at the opening passes `only_from("opener")` when a system opens the case, and
+    # not when a person does: the check can't know who will, so it warns (brief, D36).
+    opened = refund_recording({"var": "amount"})
+    assert validate_case(parse_case(opened), ledger) == [
+        Issue(
+            "steps.record.inputs.amount",
+            "OPENER_DECIDES",
+            "ledger.record@1 takes amount only from opener, and this value comes from amount "
+            "(the opener), which is refused when a person opens the case: open it only from a "
+            "system, or give amount a value a system gave",
+            "warning",
+        )
+    ]
+    record = {"ledger.record@1": lambda inputs: {"entry_id": "led-1"}}
+    by_a_system = small_refund(opened, catalog=ledger, activities=record)
+    assert by_a_system.needs_attention == []
+    by_ana = small_refund(opened, catalog=ledger, activities=record, opened_by="ana")
+    assert by_ana.needs_attention == [
+        (
+            "record#1: ledger.record@1 takes amount only from opener, and this value comes from "
+            "amount (person:ana)"
+        )
+    ]
+    # Refused whoever opens it, it is an error: the reviewer's amount comes from a person.
+    [refused] = validate_case(parse_case(refund_recording({"var": "approved_amount"})), ledger)
+    assert (refused.code, refused.severity) == ("INPUT_POLICY", "error")
