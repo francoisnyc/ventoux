@@ -1871,3 +1871,35 @@ def test_a_literal_input_takes_one_of_its_texts() -> None:
     # A text field may or may not be one of them: that depends on the value, so no issue.
     refund = refund_flagging({"var": "order_id"})
     assert validate_case(parse_case(refund), ledger) == []
+
+
+class DecisionInput(BaseModel):
+    amount: Decimal
+    decision: Literal["approve", "reject", "hold"]  # what the review decided, or a hold
+
+
+def test_an_outcome_or_a_boolean_given_to_a_literal_input() -> None:
+    # An outcome all of whose outcomes are among the texts always fits: no issue, and it runs.
+    ledger = with_ledger(taking=DecisionInput)
+    record = {"ledger.record@1": lambda inputs: {"entry_id": "led-1"}}
+    decided = refund_recording({"var": "amount"})
+    decided["steps"]["record"]["inputs"]["decision"] = {"var": "review.outcome"}
+    assert validate_case(parse_case(decided), ledger) == []
+    assert small_refund(decided, catalog=ledger, activities=record).needs_attention == []
+    # An outcome with others may fit or not, depending on the answer: no issue.
+    ledger = with_ledger(taking=PriorityInput)
+    flagged = refund_flagging({"var": "review.outcome"})
+    assert validate_case(parse_case(flagged), ledger) == []
+    # A boolean never fits; run, the step fails.
+    as_boolean = refund_flagging(True)
+    assert validate_case(parse_case(as_boolean), ledger) == [
+        Issue(
+            "steps.record.inputs.priority",
+            "INPUT_TYPE",
+            "ledger.record@1 takes priority as one of low or high, and is given a boolean: give "
+            "it one of low or high",
+        )
+    ]
+    run = small_refund(as_boolean, catalog=ledger, activities=record)
+    [refused] = run.needs_attention
+    assert refused.startswith("record#1: ledger.record@1 doesn't take these inputs: priority:")

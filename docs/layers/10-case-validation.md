@@ -850,7 +850,8 @@ One finding, fixed test-first as agreed with the user.
     fits; a text field, a reference, or an outcome with others may fit or not, so no issue; a
     text written in the definition outside the set is `INPUT_TYPE` naming it (brief, D35); a
     number or a boolean is `INPUT_TYPE`. Each with its run. The branch naming the text was seen
-    failing with it removed.
+    failing with it removed; the outcome and boolean rules, tested in a second pass, passed at
+    once and were each seen failing on a deliberate break.
 
 ### Promises
 
@@ -869,6 +870,7 @@ Each claim this section makes about behaviour, and the test that would fail if i
 | An input of another type than it takes is `INPUT_TYPE`; run, it is refused, never converted (G6), in a case and in a plan | V `test_an_input_is_given_the_type_it_takes`; I `test_an_input_is_never_converted` |
 | A contract input no value of a case is (an `int`, a `float`) is refused at registration, saying what to use instead | V `test_an_input_no_value_of_a_case_fits_is_refused_at_registration`; C `test_the_guides_refusals_are_what_the_catalog_says` (its `float` row) |
 | A `Literal` input takes one of its texts: no issue, and the activity is called; another text is `INPUT_TYPE` naming it, a number is `INPUT_TYPE`, and the run fails each; a text field may fit, so no issue | V `test_a_literal_input_takes_one_of_its_texts` |
+| An outcome all of whose outcomes are among a `Literal`'s texts fits, and runs; one with others depends on the answer, so no issue; a boolean is `INPUT_TYPE`, and the run fails | V `test_an_outcome_or_a_boolean_given_to_a_literal_input` |
 | A plan's fields are checked against their types when it starts (G7) | I `test_a_plan_field_takes_a_value_of_its_type` |
 | A plan field given only literals is `NO_SOURCES`; run, the plan doesn't start | V `test_a_plan_field_given_only_literals_has_no_sources` |
 | A sensitive value given to a workflow step is `SENSITIVE_TO_WORKFLOW`; run, the step fails | V `test_a_workflow_step_is_never_given_a_sensitive_value` |
