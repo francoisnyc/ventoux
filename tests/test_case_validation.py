@@ -14,10 +14,13 @@ from typing import Annotated, Any, Literal
 
 import pytest
 from pydantic import BaseModel
+from test_case import guide_refund_with_plan  # the cases guide's plan step, as it runs
+from test_fresh_facts import refund_fresh  # the case-data guide's fresh refund
 
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
+from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, RetryPolicy, Timeouts
 from ventoux.core.contract import Display as ContractDisplay
@@ -30,7 +33,9 @@ from ventoux.testing import (
     Outcome,
     ProposalRefused,
     RetryRefused,
+    later,
     load_definition,
+    payments_refund,
     propose,
     retry,
     run_case,
@@ -121,11 +126,18 @@ def test_the_order_of_the_steps_does_not_matter() -> None:
     # in the written order would find `pay` and `assess` not yet possible, and refuse them.
     claim = guide_json(0)
     claim["steps"] = dict(reversed(claim["steps"].items()))
-    assert list(claim["steps"]) == ["pay", "assess", "check"]
+    assert list(claim["steps"]) == ["call_customer", "pay", "assess", "check"]
     assert issues(claim) == []
 
 
 # --- Slice 2: the curriculum's negative test ---
+
+# The claim's `call_customer` waits for `pay`: wherever `pay` can never run, neither can it.
+CALL_CUSTOMER_NEVER_RUNS = Issue(
+    "steps.call_customer.requires",
+    "NEVER_RUNS",
+    "call_customer can never run: it requires pay, which can never run: fix pay first",
+)
 
 
 def deadlocked_claim() -> dict[str, Any]:
@@ -163,7 +175,8 @@ def test_the_deadlocked_claim_is_refused() -> None:
             "DEADLOCK",
             "assess and pay wait on each other: assess requires paid, which only pay reaches; "
             "pay requires assessed, which only assess reaches: remove one of these requirements",
-        )
+        ),
+        CALL_CUSTOMER_NEVER_RUNS,
     ]
 
 
@@ -188,6 +201,7 @@ def test_a_step_requiring_itself_is_deadlocked() -> None:
             "pay can never run: it requires assessed, which only assess reaches, and assess can "
             "never run: fix assess first",
         ),
+        CALL_CUSTOMER_NEVER_RUNS,
     ]
 
 
@@ -204,7 +218,8 @@ def test_sequence_and_requires_can_deadlock() -> None:
             "DEADLOCK",
             "assess and pay wait on each other: assess requires pay; pay comes after assess in "
             "sequence: remove one of these requirements",
-        )
+        ),
+        CALL_CUSTOMER_NEVER_RUNS,
     ]
 
 
@@ -222,6 +237,7 @@ def test_a_step_waiting_on_a_deadlock_never_runs() -> None:
     claim["steps"]["notify"] = NOTIFY
     claim["steps"]["remind"] = {**NOTIFY, "requires": ["assess"]}
     assert errors(claim)[1:] == [
+        CALL_CUSTOMER_NEVER_RUNS,
         Issue(
             "steps.notify.requires",
             "NEVER_RUNS",
@@ -450,8 +466,8 @@ CLOSE_UNREACHABLE = Issue(
 def test_an_unreachable_close_is_a_warning() -> None:
     # A warning, as D10 asks: the case still closes, when nothing is left to do.
     found = issues(deadlocked_claim())
-    assert [issue.code for issue in found] == ["DEADLOCK", "CLOSE_UNREACHABLE"]
-    assert found[1] == CLOSE_UNREACHABLE
+    assert [issue.code for issue in found] == ["DEADLOCK", "NEVER_RUNS", "CLOSE_UNREACHABLE"]
+    assert found[2] == CLOSE_UNREACHABLE
 
 
 def test_an_unreachable_close_says_how_the_case_closes_instead() -> None:
@@ -460,7 +476,7 @@ def test_an_unreachable_close_says_how_the_case_closes_instead() -> None:
     claim["close_reasons"] = {
         "withdrawn": {"display": {"title": "Claim withdrawn"}, "roles": ["adjuster"]}
     }
-    assert issues(claim)[1].message == (
+    assert issues(claim)[2].message == (
         "paid can never be reached, so closes_when never closes claim, and only a person can "
         "close it: reach paid from a step that can run, or remove it from closes_when"
     )
@@ -469,7 +485,7 @@ def test_an_unreachable_close_says_how_the_case_closes_instead() -> None:
 def test_every_unreachable_close_milestone_is_named() -> None:
     claim = deadlocked_claim()
     claim["closes_when"] = ["assessed", "paid"]
-    assert issues(claim)[1].message == (
+    assert issues(claim)[2].message == (
         "assessed and paid can never be reached, so closes_when never closes claim, and it closes "
         "when nothing is left to do: reach them from steps that can run, or remove them from "
         "closes_when"
@@ -492,7 +508,11 @@ def test_a_milestone_nothing_reaches_is_a_warning() -> None:
     closing = reviewed(guide_json(0))
     closing["closes_when"] = ["reviewed"]
     assert [issue.code for issue in issues(closing)] == ["CLOSE_UNREACHABLE"]
-    assert [issue.code for issue in issues(deadlocked_claim())] == ["DEADLOCK", "CLOSE_UNREACHABLE"]
+    assert [issue.code for issue in issues(deadlocked_claim())] == [
+        "DEADLOCK",
+        "NEVER_RUNS",
+        "CLOSE_UNREACHABLE",
+    ]
 
 
 # --- Slice 5: the runtime on its own ---
@@ -605,7 +625,8 @@ def test_three_steps_can_wait_on_each_other() -> None:
             "check, pay and assess wait on each other: check requires paid, which only pay reaches; "
             "pay requires assessed, which only assess reaches; assess requires checked, which only "
             "check reaches: remove one of these requirements",
-        )
+        ),
+        CALL_CUSTOMER_NEVER_RUNS,
     ]
 
 
@@ -626,6 +647,7 @@ def test_a_milestone_two_dead_steps_reach_names_both() -> None:
             "pay requires assessed, which only assess and reassess reach: remove one of these "
             "requirements",
         ),
+        CALL_CUSTOMER_NEVER_RUNS,
         Issue(
             "steps.notify.requires",
             "NEVER_RUNS",
@@ -740,10 +762,13 @@ PLANS = {"refund-order@1": refund_order(), "refund-order@3": refund_order(versio
 
 
 def settled(**settle: Any) -> dict[str, Any]:
-    """The quickstart's refund, `pay` replaced by the plan step, with `settle`'s keys changed."""
+    """The quickstart's refund, `pay` replaced by the plan step, with `settle`'s keys changed, and
+    `call_customer` reacting to the plan failing, as the cases guide writes it."""
     refund = copy.deepcopy(REFUND)
     del refund["steps"]["pay"], refund["sequence"]
     refund["steps"]["settle"] = {**copy.deepcopy(SETTLE), **settle}
+    refund["steps"]["call_customer"]["requires"] = ["settle"]
+    refund["steps"]["call_customer"]["when"] = {"==": [{"var": "settle.outcome"}, "failed"]}
     return refund
 
 
@@ -1043,7 +1068,8 @@ def test_a_case_reads_only_its_values() -> None:
 def test_outcomes_and_outputs_have_their_contracts_types() -> None:
     def when(expression: Any) -> list[Issue]:
         thank = {**NOTIFY, "display": {"title": "Thank the customer"}, "requires": ["check"]}
-        return issues(claim_with(thank={**thank, "when": expression}))
+        # Errors only: thank doesn't wait for pay, so reading pay.outcome warns (10d).
+        return errors(claim_with(thank={**thank, "when": expression}))
 
     # An activity's outcome: done, or one its contract declares; a workflow's: done.
     assert when({"in": [{"var": "pay.outcome"}, ["done", "declined"]]}) == []
@@ -1903,3 +1929,923 @@ def test_an_outcome_or_a_boolean_given_to_a_literal_input() -> None:
     run = small_refund(as_boolean, catalog=ledger, activities=record)
     [refused] = run.needs_attention
     assert refused.startswith("record#1: ledger.record@1 doesn't take these inputs: priority:")
+
+
+# --- Layer 10d: teaching warnings ---
+
+WARNINGS = "### What the check warns about"
+
+
+def warning_output(index: int) -> str:
+    """The plain-text block `index` of the guide's warnings (one whose fence names no language,
+    as the guide prints output), its line breaks aside."""
+    blocks: list[tuple[str, list[str]]] = []  # each block's language, and its lines
+    inside = False
+    for line in GUIDE.read_text().split(WARNINGS)[1].splitlines():
+        if line.startswith("```"):
+            if not inside:
+                blocks.append((line[3:], []))
+            inside = not inside
+        elif inside:
+            blocks[-1][1].append(line)
+    plain = [lines for language, lines in blocks if language == ""]
+    return " ".join(" ".join(plain[index]).split())
+
+
+def without_call_customer() -> dict[str, Any]:
+    """The quickstart's refund, with nothing reacting to a declined refund."""
+    refund = copy.deepcopy(REFUND)
+    del refund["steps"]["call_customer"]
+    return refund
+
+
+PAY_UNREAD = Issue(
+    "steps.pay",
+    "OUTCOME_UNREAD",
+    "pay may end declined, and no condition tells that from done, so the case goes on and nobody "
+    "is told: add a step that runs when pay.outcome is declined",
+    "warning",
+)
+
+
+def test_an_outcome_nobody_reads_is_a_warning() -> None:
+    # The guide's output, word for word, line breaks aside.
+    assert printed(issues(without_call_customer())) == warning_output(0)
+    assert issues(without_call_customer()) == [PAY_UNREAD]
+    # The surprise it warns about: declined, the case closes, and nobody is told.
+    run = run_case(
+        without_call_customer(),
+        file=SMALL,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        activities={"payments.refund@2": declines},
+    )
+    assert run.history[-2:] == ["pay#1 gave declined", "closed: nothing left to do"]
+    assert run.waiting_for == [] and run.needs_attention == []
+
+
+def holding() -> Catalog:
+    """The development catalog, and `payments.refund@3`: `@2`, able to end `held` as well."""
+    catalog = copy.deepcopy(CATALOG)
+    refund = dict(payments_refund)
+    refund["version"] = 3
+    refund["outcomes"] = ["declined", "held"]
+    refund["display"] = ContractDisplay(
+        title="Refund a customer",
+        description="Refunds an order through the payment provider.",
+        outcomes={"declined": "Declined by the provider", "held": "Held for review"},
+    )
+    catalog.register(ActivityContract(**refund))
+    return catalog
+
+
+def paying_with_held(definition: dict[str, Any]) -> dict[str, Any]:
+    definition["steps"]["pay"]["activity"] = "payments.refund@3"
+    return definition
+
+
+def test_each_outcome_is_read_on_its_own() -> None:
+    # call_customer tells declined from done, and nothing tells held: held is unread.
+    catalog = holding()
+    refund = paying_with_held(copy.deepcopy(REFUND))
+    assert validate_case(parse_case(refund), catalog) == [
+        Issue(
+            "steps.pay",
+            "OUTCOME_UNREAD",
+            "pay may end held, and no condition tells that from done, so the case goes on and "
+            "nobody is told: add a step that runs when pay.outcome is held",
+            "warning",
+        )
+    ]
+    # Neither read: one issue for the step, naming both.
+    assert validate_case(parse_case(paying_with_held(without_call_customer())), catalog) == [
+        Issue(
+            "steps.pay",
+            "OUTCOME_UNREAD",
+            "pay may end declined or held, and no condition tells them from done, so the case goes "
+            "on and nobody is told: add a step that runs when pay.outcome is one of them",
+            "warning",
+        )
+    ]
+
+
+def reacting_when(when: Any) -> dict[str, Any]:
+    """The quickstart's refund, `call_customer` running on `when`."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["call_customer"]["when"] = when
+    return refund
+
+
+def test_a_condition_reads_an_outcome_when_it_tells_it_from_done() -> None:
+    outcome = {"var": "pay.outcome"}
+    read = [
+        {"!=": [outcome, "declined"]},  # true for done, false for declined
+        {"!=": [outcome, "done"]},  # done compared: every outcome told from it
+        {"==": ["done", outcome]},  # either side
+        {"in": [outcome, ["declined"]]},
+        {"in": [outcome, ["done"]]},
+        {"==": [{"cat": [outcome]}, "declined"]},  # read as a value: the check doesn't guess
+    ]
+    for reading in read:
+        assert issues(reacting_when(reading)) == [], reading
+    # Reading another step's outcome, or only whether pay ended, tells nothing about pay's.
+    unread = [
+        {"==": [{"var": "review.outcome"}, "approve"]},
+        {"exists": "pay.outcome"},
+    ]
+    for not_reading in unread:
+        assert issues(reacting_when(not_reading)) == [PAY_UNREAD], not_reading
+    # `in` reads only the outcomes it lists: held stays unread.
+    listing = paying_with_held(reacting_when({"in": [{"var": "pay.outcome"}, ["declined"]]}))
+    assert [issue.message for issue in validate_case(parse_case(listing), holding())] == [
+        (
+            "pay may end held, and no condition tells that from done, so the case goes on and "
+            "nobody is told: add a step that runs when pay.outcome is held"
+        )
+    ]
+    # So does `!=`, and a comparison written either way round: each tells declined, not held.
+    for when in (
+        {"!=": [{"var": "pay.outcome"}, "declined"]},
+        {"==": ["declined", {"var": "pay.outcome"}]},
+    ):
+        told = paying_with_held(reacting_when(when))
+        assert [issue.code for issue in validate_case(parse_case(told), holding())] == [
+            "OUTCOME_UNREAD"
+        ], when
+
+
+def unread_settle() -> dict[str, Any]:
+    """The refund with its plan step, and nothing reacting to the plan failing."""
+    refund = settled()
+    del refund["steps"]["call_customer"]
+    return refund
+
+
+def test_a_plan_that_fails_unread_is_a_warning() -> None:
+    assert checked_with(unread_settle(), PLANS) == [
+        Issue(
+            "steps.settle",
+            "OUTCOME_UNREAD",
+            "settle may end failed, and no condition tells that from done, so the case goes on "
+            "and nobody is told: add a step that runs when settle.outcome is failed",
+            "warning",
+        )
+    ]
+    # The surprise: Sam rejects the refund inside the plan, and the case closes, nobody told.
+    run = run_case(
+        unread_settle(),
+        file=LARGE,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        plans=PLANS,
+        plan_answers={"settle": [("approve_refund", "reject", "sam")]},
+    )
+    assert run.history[-2:] == ["settle#1 gave failed", "closed: nothing left to do"]
+    assert run.needs_attention == []
+
+
+def test_an_outcome_a_person_chose_is_never_unread() -> None:
+    # The claim's deny reaches nothing and no condition reads it: that is how a "no" is written,
+    # and the adjuster who chose it knows. Its check, a workflow step, ends only done.
+    claim = guide_json(0)
+    assert "reaches" not in claim["steps"]["assess"]["outcomes"]["deny"]
+    assert issues(claim) == []
+
+
+def refund_without_when() -> dict[str, Any]:
+    """The quickstart's refund, `pay` running whatever the review said."""
+    refund = copy.deepcopy(REFUND)
+    del refund["steps"]["pay"]["when"]
+    return refund
+
+
+def test_a_value_read_before_it_is_surely_set_is_a_warning() -> None:
+    # The guide's output, word for word, line breaks aside.
+    assert printed(issues(refund_without_when())) == warning_output(1)
+    # The surprise: the review rejected, pay still starts, reads approved_amount, and fails.
+    run = run_case(
+        refund_without_when(),
+        file=SMALL,
+        answers=[("review", "reject", "ana")],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: pay's approval condition approved_amount > 100 can't be evaluated: "
+            "approved_amount has no value"
+        )
+    ]
+    assert not run.closed
+
+
+def refund_paying_when(when: Any) -> dict[str, Any]:
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["pay"]["when"] = when
+    return refund
+
+
+APPROVED = {"==": [{"var": "review.outcome"}, "approve"]}
+AMOUNT_UNSET = (
+    "pay reads approved_amount, which only review's approve sets, and pay may run after review is "
+    "answered otherwise: then pay fails and needs attention: run pay only when review.outcome is "
+    "approve"
+)
+
+
+def test_a_guard_in_the_when_makes_a_value_surely_set() -> None:
+    outcome = {"var": "review.outcome"}
+    guards = [
+        APPROVED,
+        {"!=": [outcome, "reject"]},  # review has two outcomes: not reject is approve
+        {"in": [outcome, ["approve"]]},
+        {"exists": "approved_amount"},
+        {"and": [{">": [{"var": "amount"}, 0]}, APPROVED]},  # a part of an `and`, once true
+        {"if": [APPROVED, {">": [{"var": "amount"}, 0]}, False]},  # true only through its branch
+    ]
+    for guard in guards:
+        assert issues(refund_paying_when(guard)) == [], guard
+    # What guards nothing: a condition on another value, or an `if` that may be true otherwise.
+    for no_guard in (
+        {">": [{"var": "amount"}, 0]},
+        {"if": [APPROVED, True, True]},
+        {"in": [outcome, ["approve", "reject"]]},
+    ):
+        found = issues(refund_paying_when(no_guard))
+        assert found == [
+            Issue("steps.pay.approval.when", "MAY_BE_UNSET", AMOUNT_UNSET, "warning")
+        ], no_guard
+
+
+def test_and_reads_every_part_so_a_part_guards_nothing_beside_it() -> None:
+    # The runtime evaluates every part of an `and` (brief, D20): a rejected review fails pay's
+    # condition, though its first part is already false.
+    both_parts = {"and": [APPROVED, {">": [{"var": "approved_amount"}, 0]}]}
+    assert issues(refund_paying_when(both_parts)) == [
+        Issue("steps.pay.when", "MAY_BE_UNSET", AMOUNT_UNSET, "warning")
+    ]
+    run = run_case(
+        refund_paying_when(both_parts),
+        file=SMALL,
+        answers=[("review", "reject", "ana")],
+        people=PEOPLE,
+    )
+    [failed] = run.needs_attention
+    assert failed.endswith("approved_amount has no value")
+    # Inside an `if`, the branch is read only once its condition held: no issue.
+    in_if = {"if": [APPROVED, {">": [{"var": "approved_amount"}, 0]}, False]}
+    assert issues(refund_paying_when(in_if)) == []
+    rejected = run_case(
+        refund_paying_when(in_if),
+        file=SMALL,
+        answers=[("review", "reject", "ana")],
+        people=PEOPLE,
+    )
+    assert rejected.closed and rejected.needs_attention == []
+
+
+def old_refund_fresh() -> dict[str, Any]:
+    """The case-data guide's `refund_fresh` as it was before 10d: `pay`'s `when` reads the
+    lookup's status, and nothing guards the approved amount."""
+    guide = (ROOT / "docs" / "guides" / "case-data.md").read_text()
+    section = guide.split("### Saying how fresh a step needs its facts")[1]
+    steps = json.loads(
+        "{" + section.split("```json\n")[1].split("```")[0] + "}", parse_float=Decimal
+    )
+    refund = copy.deepcopy(REFUND)
+    refund["steps"] = {"check_order": steps["check_order"], **refund["steps"]}
+    refund["steps"]["pay"] = steps["pay"]
+    refund["steps"]["pay"]["when"] = {"==": [{"var": "check_order.status"}, "delivered"]}
+    return refund
+
+
+def gives(outcome: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def giving(inputs: dict[str, Any]) -> dict[str, Any]:
+        raise Outcome(outcome)
+
+    return giving
+
+
+def test_the_old_refund_fresh_reads_two_values_that_may_be_unset() -> None:
+    assert issues(old_refund_fresh()) == [
+        Issue(
+            "steps.pay.when",
+            "MAY_BE_UNSET",
+            "pay reads check_order.status, which check_order gives only when done, and "
+            "check_order may end not_found: then pay fails and needs attention: read it only "
+            "when check_order.outcome is done",
+            "warning",
+        ),
+        Issue("steps.pay.approval.when", "MAY_BE_UNSET", AMOUNT_UNSET, "warning"),
+    ]
+    # Each surprise, run: the order not found, and the review rejected.
+    not_found = run_case(
+        old_refund_fresh(),
+        file=SMALL,
+        answers=[REVIEWED],
+        people=PEOPLE,
+        activities={"orders.lookup@1": gives("not_found")},
+    )
+    [failed] = not_found.needs_attention
+    assert failed.endswith("check_order.status has no value")
+    rejected = run_case(
+        old_refund_fresh(), file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE
+    )
+    [failed] = rejected.needs_attention
+    assert failed.endswith("approved_amount has no value")
+    # As the guide now writes it, neither: the status read only once the lookup is done.
+    assert issues(refund_fresh_as_guided()) == []
+
+
+def refund_fresh_as_guided() -> dict[str, Any]:
+    refund = old_refund_fresh()
+    guide = (ROOT / "docs" / "guides" / "case-data.md").read_text()
+    section = guide.split("### Saying how fresh a step needs its facts")[1]
+    steps = json.loads(
+        "{" + section.split("```json\n")[1].split("```")[0] + "}", parse_float=Decimal
+    )
+    refund["steps"]["pay"] = steps["pay"]
+    return refund
+
+
+NOTED = {
+    "kind": "task",
+    "display": {"title": "Note the refund"},
+    "roles": ["support"],
+    "outcomes": {"noted": {"display": {"title": "Noted"}}},
+}
+
+
+def test_what_a_step_waits_for_says_what_is_set() -> None:
+    # A value from a step not waited for: it may not be there yet.
+    note = {**NOTED, "requires": ["review"], "when": {"==": [{"var": "pay.outcome"}, "done"]}}
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["note"] = note
+    assert issues(refund) == [
+        Issue(
+            "steps.note.when",
+            "MAY_BE_UNSET",
+            "note reads pay.outcome, and doesn't wait for pay, which gives it: if note runs "
+            "first, it fails and needs attention: require pay",
+            "warning",
+        )
+    ]
+    # Waited for through the step it requires: call_customer requires pay.
+    refund["steps"]["note"] = {**note, "requires": ["call_customer"]}
+    assert issues(refund) == []
+    # A task every outcome of which sets the value: pay needs no guard.
+    both_set = refund_without_when()
+    both_set["steps"]["review"]["outcomes"]["reject"]["sets"] = ["approved_amount"]
+    assert issues(both_set) == []
+
+
+def test_a_milestone_only_setting_outcomes_reach_says_the_value_is_set() -> None:
+    # The claim's pay requires assessed, which only accept reaches, and accept sets payout.
+    assert issues(guide_json(0)) == []
+    # If deny reaches assessed too, payout may be unset when pay runs.
+    claim = guide_json(0)
+    claim["steps"]["assess"]["outcomes"]["deny"]["reaches"] = ["assessed"]
+    assert issues(claim) == [
+        Issue(
+            "steps.pay.inputs.amount",
+            "MAY_BE_UNSET",
+            "pay reads payout, which only assess's accept sets, and pay may run after assess is "
+            "answered otherwise: then pay fails and needs attention: run pay only when "
+            "assess.outcome is accept",
+            "warning",
+        )
+    ]
+    # Reached another way as well, by a fast track that sets nothing: payout may be unset.
+    claim = guide_json(0)
+    claim["steps"]["fast_track"] = {
+        **NOTED,
+        "roles": ["adjuster"],
+        "requires": ["checked"],
+        "outcomes": {"accept": {"display": {"title": "Accept"}, "reaches": ["assessed"]}},
+    }
+    assert [issue.message for issue in issues(claim)] == [
+        (
+            "pay reads payout, and doesn't wait for assess, which sets it: if pay runs first, it "
+            "fails and needs attention: require assess"
+        )
+    ]
+
+
+# --- 10d, slice 3: a value only a later step sets ---
+
+
+class NoteInput(BaseModel):
+    refund: str  # the refund's ID, to note it
+
+
+def noting() -> Catalog:
+    """The development catalog, and `refunds.note@1`, which notes a refund by its ID."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(
+        ActivityContract(
+            name="refunds.note",
+            version=1,
+            input=NoteInput,
+            output=RecordOutput,
+            risk="low",
+            effect="compute",
+            timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+            idempotency_key=None,
+            outcomes=[],
+            display=ContractDisplay(title="Note a refund", description="Notes a refund's ID"),
+        )
+    )
+    return catalog
+
+
+def noting_before_paying(**notify: Any) -> dict[str, Any]:
+    """The quickstart's refund, noting the refund's ID before paying it."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Note the refund"},
+        "activity": "refunds.note@1",
+        "inputs": {"refund": {"var": "pay.refund_id"}},
+        **notify,
+    }
+    refund["sequence"] = ["review", "notify", "pay"]
+    return refund
+
+
+def test_a_value_only_a_later_step_sets_is_refused() -> None:
+    catalog = noting()
+    found = validate_case(parse_case(noting_before_paying()), catalog)
+    # The guide's output, word for word, line breaks aside.
+    assert printed(found) == warning_output(2)
+    assert found[0].severity == "error"
+    # The proof: notify fails when it starts, and again when an operator retries it.
+    run = run_case(
+        noting_before_paying(),
+        file=SMALL,
+        answers=[REVIEWED, retry("notify#1", "omar")],
+        people={**PEOPLE, "omar": ["operations"]},
+        catalog=catalog,
+        activities={"refunds.note@1": lambda inputs: {"entry_id": "n-1"}},
+    )
+    # Its inputs' sources are asked first: a value nobody set has none.
+    failed = "notify#1 failed: refund can't be evaluated: pay.refund_id has no known sources"
+    assert [line for line in run.history if "failed" in line] == [failed, failed]
+    assert "omar retried notify#1 as operations" in run.history
+    assert not run.reached("pay")
+
+
+def test_a_step_that_can_be_proposed_still_fails_every_time() -> None:
+    # The value is set only once notify is done, and notify is done only after a run that read
+    # it: no run of it ever succeeds, proposed or not, repeatable or not.
+    catalog = noting()
+    for proposed in (
+        {"proposed_by": ["support"]},
+        {"proposed_by": ["support"], "repeatable": True},
+    ):
+        definition = noting_before_paying(**proposed)
+        [refused] = validate_case(parse_case(definition), catalog)
+        assert refused.code == "SET_AFTER", proposed
+        # Refused when proposed: it has run and isn't repeatable, or its inputs can't be read.
+        with pytest.raises((ProposalRefused, InputRefused)):
+            run_case(
+                definition,
+                file=SMALL,
+                answers=[REVIEWED, propose("notify", "ana")],
+                people=PEOPLE,
+                catalog=catalog,
+                activities={"refunds.note@1": lambda inputs: {"entry_id": "n-1"}},
+            )
+
+
+def test_a_condition_reads_only_the_branch_of_an_if_it_takes() -> None:
+    # notify's condition reads the refund's ID only after an approved review: a rejected one
+    # starts nothing, and the case closes.
+    catalog = noting()
+    noted = {"==": [{"var": "pay.refund_id"}, "r-1"]}
+    definition = noting_before_paying(when={"if": [APPROVED, noted, False]})
+    assert validate_case(parse_case(definition), catalog) == [
+        Issue(
+            "steps.notify.when",
+            "MAY_BE_UNSET",
+            "notify reads pay.refund_id, which only pay gives, and pay runs only after notify: "
+            "when notify reads it, it fails and needs attention: read it in a step that comes "
+            "after pay",
+            "warning",
+        )
+    ]
+    rejected = run_case(
+        definition,
+        file=SMALL,
+        answers=[("review", "reject", "ana")],
+        people=PEOPLE,
+        catalog=catalog,
+        activities={"refunds.note@1": lambda inputs: {"entry_id": "n-1"}},
+    )
+    assert rejected.closed and rejected.needs_attention == []
+
+
+def test_an_input_reads_every_value_it_names() -> None:
+    # Where an input's value comes from is worked out from every value it names, an `if`'s other
+    # branch and an `exists` included (brief, D36): a value nobody set fails it either way.
+    catalog = noting()
+    for refund in (
+        {"if": [APPROVED, {"var": "pay.refund_id"}, "none"]},
+        {"if": [{"exists": "pay.refund_id"}, "noted", "none"]},
+    ):
+        definition = noting_before_paying(inputs={"refund": refund})
+        [refused] = validate_case(parse_case(definition), catalog)
+        assert refused.code == "SET_AFTER", refund
+        rejected = run_case(
+            definition,
+            file=SMALL,
+            answers=[("review", "reject", "ana")],
+            people=PEOPLE,
+            catalog=catalog,
+            activities={"refunds.note@1": lambda inputs: {"entry_id": "n-1"}},
+        )
+        assert rejected.needs_attention == [
+            "notify#1: refund can't be evaluated: pay.refund_id has no known sources"
+        ], refund
+
+
+# --- 10d, slice 4: a max_age that can only end in attention ---
+
+
+def refund_needing_fresh(field: str) -> dict[str, Any]:
+    """The quickstart's refund, `pay` needing `field` at most a day old."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["pay"]["max_age"] = {field: "1d"}
+    return refund
+
+
+def test_a_max_age_nothing_can_fetch_again_is_a_warning() -> None:
+    # The guide's output, word for word, line breaks aside.
+    assert printed(issues(refund_needing_fresh("approved_amount"))) == warning_output(3)
+    # The surprise: Sam approves three days after the review, and pay needs attention.
+    run = run_case(
+        refund_needing_fresh("approved_amount"),
+        file=LARGE,
+        answers=[LARGE_REVIEW, later("3d"), ("pay", "approve", "sam")],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: approved_amount was obtained 3 days ago, and pay needs it at most 1 day old: "
+            "it came from a person, so it can't be fetched again"
+        )
+    ]
+
+
+def paying_fresh(value: str, **steps: Any) -> dict[str, Any]:
+    """The quickstart's refund with `steps` added, `pay` reading `value` and needing it at most
+    a day old."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"].update(copy.deepcopy(steps))
+    refund["steps"]["pay"]["when"] = {"and": [APPROVED, {"exists": value}]}
+    refund["steps"]["pay"]["max_age"] = {value: "1d"}
+    return refund
+
+
+LOOKUP = {
+    "kind": "activity",
+    "display": {"title": "Look the order up"},
+    "activity": "orders.lookup@1",
+    "inputs": {"order_id": {"var": "order_id"}},
+}
+TEAM_LEAD = {"roles": ["support-lead"], "display": {"reason": "Look-ups need a team lead"}}
+
+
+def never_refreshed(definition: dict[str, Any], catalog: Catalog = CATALOG) -> list[str]:
+    found = validate_case(parse_case(definition), catalog)
+    assert [issue for issue in found if issue.severity == "error"] == []
+    return [issue.message for issue in found if issue.code == "NEVER_REFRESHED"]
+
+
+def test_only_a_read_needing_no_approval_is_fetched_again() -> None:
+    def why(value: str) -> list[str]:
+        return [
+            f"{value} comes from {source}: whenever it is older than pay's max_age allows, pay "
+            "needs attention: keep it only if a person should decide each time"
+            for source in WHY[value]
+        ]
+
+    WHY = {
+        "amount": ["the opening, and can't be fetched again"],
+        "review.outcome": ["a person, in review, and can't be fetched again"],
+        "draft.draft_id": ["draft, which has side effects (write), and can't be run again"],
+        "note.entry_id": [
+            "note, which computes it (compute), so running it again gives nothing new"
+        ],
+        "check_order.status": [
+            "check_order, a read that always needs an approval, which a refresh never asks for"
+        ],
+    }
+    draft = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+    }
+    note = {
+        "kind": "activity",
+        "display": {"title": "Note the order"},
+        "activity": "refunds.note@1",
+        "inputs": {"refund": {"var": "order_id"}},
+    }
+    assert never_refreshed(paying_fresh("amount")) == why("amount")
+    assert never_refreshed(paying_fresh("review.outcome")) == why("review.outcome")
+    assert never_refreshed(paying_fresh("draft.draft_id", draft=draft)) == why("draft.draft_id")
+    noted = paying_fresh("note.entry_id", note=note)
+    assert never_refreshed(noted, noting()) == why("note.entry_id")
+    # A read is fetched again; behind an approval only if the approval may not be needed.
+    assert never_refreshed(paying_fresh("check_order.status", check_order=LOOKUP)) == []
+    asked = {**LOOKUP, "approval": TEAM_LEAD}
+    behind = paying_fresh("check_order.status", check_order=asked)
+    assert never_refreshed(behind) == why("check_order.status")
+    sometimes = {**LOOKUP, "approval": {**TEAM_LEAD, "when": {">": [{"var": "amount"}, 100]}}}
+    assert never_refreshed(paying_fresh("check_order.status", check_order=sometimes)) == []
+
+
+def test_a_workflow_or_a_plan_step_is_never_run_again_unasked() -> None:
+    check = {
+        "kind": "workflow",
+        "display": {"title": "Check the customer"},
+        "workflow": "kyc.check@1",
+        "inputs": {"customer_id": {"var": "customer_id"}},
+    }
+    checked = paying_fresh("check.status", check=check)
+    checked["fields"]["customer_id"] = {
+        "type": "reference",
+        "system": "crm",
+        "display": {"title": "Customer"},
+    }
+    assert never_refreshed(checked) == [
+        (
+            "check.status comes from check, a workflow step, which isn't run again unasked: whenever "
+            "it is older than pay's max_age allows, pay needs attention: keep it only if a person "
+            "should decide each time"
+        )
+    ]
+    # A plan step's outcome, read by a step after it.
+    settled_then = settled()
+    settled_then["steps"]["note"] = {
+        "kind": "activity",
+        "display": {"title": "Note the order"},
+        "activity": "refunds.note@1",
+        "requires": ["settle"],
+        "when": {"==": [{"var": "settle.outcome"}, "done"]},
+        "max_age": {"settle.outcome": "1d"},
+        "inputs": {"refund": {"var": "order_id"}},
+    }
+    found = validate_case(parse_case(settled_then), noting(), plans=PLANS)
+    assert [issue.message for issue in found if issue.code == "NEVER_REFRESHED"] == [
+        (
+            "settle.outcome comes from settle, a plan step, which isn't run again unasked: whenever it "
+            "is older than note's max_age allows, note needs attention: keep it only if a person "
+            "should decide each time"
+        )
+    ]
+
+
+def test_a_read_behind_an_approval_needs_attention_when_stale() -> None:
+    # The refresh gate (brief, D33): a refresh never asks for an approval, so a read that always
+    # needs one is never fetched again, and the step that needs it fresh needs attention.
+    behind = paying_fresh("check_order.status", check_order={**LOOKUP, "approval": TEAM_LEAD})
+    run = run_case(
+        behind,
+        file=SMALL,
+        answers=[("check_order", "approve", "sam"), later("3d"), REVIEWED],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: check_order.status was obtained 3 days ago, and pay needs it at most 1 day "
+            "old: check_order needs an approval to run, so it isn't run again unasked"
+        )
+    ]
+    # An approval asked only above 100: for a small refund the read is fetched again, so no
+    # warning, and the run refreshes it.
+    when = {">": [{"var": "amount"}, 100]}
+    sometimes = paying_fresh(
+        "check_order.status", check_order={**LOOKUP, "approval": {**TEAM_LEAD, "when": when}}
+    )
+    fetched = run_case(sometimes, file=SMALL, answers=[later("3d"), REVIEWED], people=PEOPLE)
+    assert "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day" in (
+        fetched.history
+    )
+    assert fetched.reached("pay")
+
+
+# --- 10d, slice 5: an approval that guards a neighbouring value ---
+
+
+def approving_on(when: Any) -> dict[str, Any]:
+    """The quickstart's refund, its approval asked when `when` holds."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["pay"]["approval"]["when"] = when
+    return refund
+
+
+ON_THE_REQUEST = {">": [{"var": "amount"}, 100]}
+
+
+def test_an_approval_that_guards_a_neighbouring_value_is_a_warning() -> None:
+    # The guide's output, word for word, line breaks aside.
+    assert printed(issues(approving_on(ON_THE_REQUEST))) == warning_output(4)
+    # The surprise: a customer asks for 50, the reviewer approves 5000, and 5000 is paid with
+    # no team lead asked.
+    run = run_case(
+        approving_on(ON_THE_REQUEST),
+        file={"order_id": "ord-1", "amount": 50},
+        answers=[("review", "approve", "ana", {"approved_amount": 5000})],
+        people=PEOPLE,
+    )
+    assert not any(line.startswith("asked pay.approval") for line in run.history)
+    assert "pay#1 done, giving refund_id from untrusted:undeclared" in run.history
+    assert run.closed
+
+
+def test_an_approval_reading_any_value_its_step_is_given_guards_it() -> None:
+    amount, approved = {"var": "amount"}, {"var": "approved_amount"}
+    for when in (
+        {">": [approved, 100]},  # the quickstart's
+        {"or": [{">": [amount, 100]}, {">": [approved, 100]}]},  # a neighbour beside it
+        {">": [{"-": [approved, amount]}, 0]},  # more approved than asked
+    ):
+        assert issues(approving_on(when)) == [], when
+    # An approval with no `when` guards every run.
+    always = copy.deepcopy(REFUND)
+    del always["steps"]["pay"]["approval"]["when"]
+    assert issues(always) == []
+    # A field the step is given through an expression counts: the amount is the lesser of two.
+    lesser = approving_on(ON_THE_REQUEST)
+    lesser["steps"]["pay"]["inputs"]["amount"] = {
+        "if": [{"<": [amount, approved]}, amount, approved]
+    }
+    assert issues(lesser) == []
+    # Two neighbouring values, both named.
+    neighbours = approving_on(
+        {"and": [ON_THE_REQUEST, {"==": [{"var": "review.outcome"}, "approve"]}]}
+    )
+    assert [issue.message for issue in issues(neighbours)] == [
+        (
+            "pay's approval reads amount and review.outcome, and pay is given only order_id and "
+            "approved_amount: it guards a value pay doesn't use: read one of those in its when"
+        )
+    ]
+
+
+# --- 10d, slice 6: every example, one cause, no quoted value, the guide's table ---
+
+
+def test_every_example_definition_gives_no_issue() -> None:
+    # No noise: a warning that fires on what the guides call correct teaches people to ignore
+    # warnings. Each whole definition the quickstart and the guides show, as they show it.
+    case_data = (ROOT / "docs" / "guides" / "case-data.md").read_text()
+    read_aloud = GUIDE.read_text().split("```json\n")[1].split("```")[0]
+    examples = {
+        "the quickstart's refund": (REFUND, {}),
+        "the cases guide's refund, read aloud": (json.loads(read_aloud, parse_float=Decimal), {}),
+        "the cases guide's claim": (guide_json(0), {}),
+        "the cases guide's plan step": (guide_refund_with_plan(), PLANS),
+        "the case data guide's claim": (
+            json.loads(case_data.split("```json\n")[1].split("```")[0], parse_float=Decimal),
+            {},
+        ),
+        "the case data guide's fresh refund": (refund_fresh(), {}),
+    }
+    for name, (definition, plans) in examples.items():
+        assert validate_case(parse_case(definition), CATALOG, plans=plans) == [], name
+
+
+# Each 10d issue, and the same definition with an error on its step, or on the step whose value
+# it reads: the error alone is said.
+def unknown_contract(definition: dict[str, Any], step: str = "pay") -> dict[str, Any]:
+    definition["steps"][step]["activity"] = "payments.refund@9"
+    return definition
+
+
+def note_reading_pay_outcome() -> dict[str, Any]:
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["note"] = {
+        **NOTED,
+        "requires": ["review"],
+        "when": {"==": [{"var": "pay.outcome"}, "done"]},
+    }
+    return refund
+
+
+ONE_CAUSE: dict[str, tuple[Callable[[], dict[str, Any]], Callable[[dict[str, Any]], Any]]] = {
+    "OUTCOME_UNREAD": (without_call_customer, unknown_contract),
+    "MAY_BE_UNSET": (refund_without_when, unknown_contract),
+    "MAY_BE_UNSET from a refused writer": (note_reading_pay_outcome, unknown_contract),
+    "NEVER_REFRESHED": (lambda: refund_needing_fresh("approved_amount"), unknown_contract),
+    "APPROVAL_ELSEWHERE": (lambda: approving_on(ON_THE_REQUEST), unknown_contract),
+}
+
+
+def misspelt_role(definition: dict[str, Any], step: str = "pay") -> dict[str, Any]:
+    definition["steps"][step]["approval"]["roles"] = ["suport-lead"]
+    return definition
+
+
+@pytest.mark.parametrize("code", list(ONE_CAUSE))
+def test_a_step_an_error_refuses_gets_no_warning(code: str) -> None:
+    make, refuse = ONE_CAUSE[code]
+    assert code.split()[0] in [issue.code for issue in issues(make())]
+    # Its contract missing, or any other error on the step: that error alone.
+    assert [issue.code for issue in issues(refuse(make()))] == ["UNKNOWN_CONTRACT"]
+    assert [issue.code for issue in issues(misspelt_role(make()))] == ["UNKNOWN_ROLE"]
+
+
+def test_a_step_that_fails_every_time_gets_its_error_alone() -> None:
+    # SET_AFTER replaces MAY_BE_UNSET for its read; and an error on its step replaces it.
+    catalog = noting()
+    found = validate_case(parse_case(noting_before_paying()), catalog)
+    assert [issue.code for issue in found] == ["SET_AFTER"]
+    refused = noting_before_paying(activity="refunds.note@9")
+    assert [issue.code for issue in validate_case(parse_case(refused), catalog)] == [
+        "UNKNOWN_CONTRACT"
+    ]
+
+
+TEN_D: dict[str, Callable[[], dict[str, Any]]] = {
+    "OUTCOME_UNREAD": without_call_customer,
+    "MAY_BE_UNSET": refund_without_when,
+    "NEVER_REFRESHED": lambda: refund_needing_fresh("approved_amount"),
+    "APPROVAL_ELSEWHERE": lambda: approving_on({">": [{"var": "amount"}, 987654]}),
+}
+
+
+def test_no_10d_message_quotes_a_value() -> None:
+    # Names only: no title, no reason, no literal the definition compares (brief, D35).
+    for code, make in TEN_D.items():
+        definition = make()
+        if code != "APPROVAL_ELSEWHERE":  # its own approval compares the marked literal already
+            definition["steps"]["pay"]["approval"]["when"] = {
+                ">": [{"var": "approved_amount"}, 987654]
+            }
+        found = [issue for issue in issues(marked(definition)) if issue.code == code]
+        assert found, code
+        for issue in found:
+            assert "TITLE-" not in issue.message and "987654" not in issue.message, issue
+    set_after = validate_case(parse_case(marked(noting_before_paying())), noting())
+    assert set_after and all("TITLE-" not in issue.message for issue in set_after)
+
+
+def test_the_guides_table_of_warnings_is_what_validate_case_says() -> None:
+    # Each row's code and kind is what the code gives for its example; its message is the
+    # output above it, compared word for word by each slice's first test.
+    table = GUIDE.read_text().split(WARNINGS)[1].split("| Code | Kind |")[1].split("\n\n")[0]
+    rows = [line.split("|") for line in table.splitlines() if line.startswith("| `")]
+    kinds = {code.strip().strip("`"): kind.strip() for _, code, kind, *_ in rows}
+    given = {code: issues(make()) for code, make in TEN_D.items()}
+    given["SET_AFTER"] = validate_case(parse_case(noting_before_paying()), noting())
+    assert list(kinds) == [
+        "OUTCOME_UNREAD",
+        "MAY_BE_UNSET",
+        "SET_AFTER",
+        "NEVER_REFRESHED",
+        "APPROVAL_ELSEWHERE",
+    ]
+    for code, kind in kinds.items():
+        [issue] = [issue for issue in given[code] if issue.code == code]
+        assert issue.severity == kind, code
+
+
+# --- 10d, from the tutor review: a guard written with `or` ---
+
+
+def reviewed_also(outcome: str, sets: bool) -> dict[str, Any]:
+    """The quickstart's refund, its review also answerable `outcome` (setting the approved amount
+    if `sets`), and `pay` running on approve or `outcome`, the guard written with `or`."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["review"]["outcomes"][outcome] = {
+        "display": {"title": f"Answer {outcome}"},
+        "sets": ["approved_amount"] if sets else [],
+    }
+    refund["steps"]["pay"]["when"] = {
+        "or": [APPROVED, {"==": [{"var": "review.outcome"}, outcome]}]
+    }
+    return refund
+
+
+def test_an_or_guards_what_all_its_parts_agree_on() -> None:
+    # approve or partial: both set the approved amount, so pay reads it set.
+    partial = reviewed_also("partial", sets=True)
+    assert issues(partial) == []
+    rejected = run_case(partial, file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE)
+    assert rejected.closed and rejected.needs_attention == []
+    answered = ("review", "partial", "ana", {"approved_amount": 20})
+    paid = run_case(partial, file=SMALL, answers=[answered], people=PEOPLE)
+    assert paid.closed and paid.needs_attention == [] and paid.reached("pay")
+    # approve or escalate: escalate sets nothing, so the amount may be unset, and is.
+    escalate = reviewed_also("escalate", sets=False)
+    assert issues(escalate) == [
+        Issue("steps.pay.approval.when", "MAY_BE_UNSET", AMOUNT_UNSET, "warning")
+    ]
+    escalated = run_case(
+        escalate, file=SMALL, answers=[("review", "escalate", "ana")], people=PEOPLE
+    )
+    [failed] = escalated.needs_attention
+    assert failed.endswith("approved_amount has no value")

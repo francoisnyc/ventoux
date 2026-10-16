@@ -27,6 +27,14 @@
         "roles": ["support-lead"],
         "display": {"reason": "Refunds over 100 need a team lead"}
       }
+    },
+    "call_customer": {
+      "kind": "task",
+      "display": {"title": "Call the customer about the declined refund"},
+      "roles": ["support"],
+      "requires": ["pay"],
+      "when": {"==": [{"var": "pay.outcome"}, "declined"]},
+      "outcomes": {"called": {"display": {"title": "Customer called"}}}
     }
   },
   "sequence": ["review", "pay"]

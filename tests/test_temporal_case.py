@@ -382,11 +382,15 @@ def test_a_declared_outcome_is_never_retried() -> None:
     async def scenario(client: Client) -> CaseReport:
         case = await start_case(client, DevelopmentCases, REFUND, SMALL, "refund-1", QUEUE)
         await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], SMALL_FORM)
+        # The quickstart reacts to the decline: support calls the customer, then it closes.
+        await reported(case, lambda now: now.waiting_at == ["call_customer#1"])
+        await answer(case, "call_customer#1", "called", "ana", PEOPLE["ana"])
         return await case.result()
 
     ended = on_temporal(scenario, {**FAKES, "payments.refund@2": declines})
     assert len(attempts) == 1
     assert "pay#1 gave declined" in ended.history
+    assert "started call_customer#1: waiting for called by support" in ended.history
     assert ended.needs_attention == []
 
 
@@ -498,9 +502,9 @@ SETTLE: dict[str, Any] = {
 
 
 def refund_with_plan(plan: str = "refund-order@1", **settle: Any) -> dict[str, Any]:
-    """The refund, `pay` replaced by the guide's plan step running `plan`."""
+    """The refund, `pay` and `call_customer` replaced by the guide's plan step running `plan`."""
     definition = copy.deepcopy(REFUND)
-    del definition["steps"]["pay"], definition["sequence"]
+    del definition["steps"]["pay"], definition["steps"]["call_customer"], definition["sequence"]
     definition["steps"]["settle"] = {**SETTLE, "plan": plan, **settle}
     return definition
 
@@ -560,7 +564,9 @@ def test_a_plan_field_takes_only_a_reference_of_its_system_on_temporal() -> None
         return await reported(case, lambda now: now.needs_attention != [])
 
     run = on_temporal(scenario, cases=CasesWithPlans)
-    [issue] = validate_case(parse_case(refund_with_plan(inputs=inputs)), CATALOG, plans=TEST_PLANS)
+    found = validate_case(parse_case(refund_with_plan(inputs=inputs)), CATALOG, plans=TEST_PLANS)
+    # The error the driver meets; nothing here reacts to the plan failing, which only warns.
+    [issue] = [issue for issue in found if issue.severity == "error"]
     assert issue.code == "REFERENCE"
     assert run.needs_attention == [f"settle#1: {issue.message.split(': give it')[0]}"]
 

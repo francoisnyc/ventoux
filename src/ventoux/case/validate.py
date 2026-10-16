@@ -37,6 +37,7 @@ from ventoux.case.registered import role_issues_of, source_issues_of, system_iss
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
 from ventoux.case.types import case_types
+from ventoux.case.warnings import warning_issues
 from ventoux.core.catalog import Catalog
 from ventoux.core.validate import Issue
 
@@ -88,7 +89,14 @@ def validate_case(
     found += approver_issues(case, catalog, contracts)
     found += role_issues_of(case, catalog, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
-    return found + close_unreachable(case, can) + unreachable_milestones(case)
+    found += close_unreachable(case, can) + unreachable_milestones(case)
+    # What a definition may mean but surprises its author when a case runs (10d).
+    # A step an error refuses gets no warning, nor does what it would give: one cause, one issue.
+    # A step that can never run is refused too, though its group's DEADLOCK may name another.
+    refused = {i.path.split(".")[1] for i in found if i.severity == "error" and "." in i.path}
+    refused |= {name for name in case.steps if name not in can}
+    said = {issue.path for issue in found}
+    return found + warning_issues(case, contracts, supplied, said, missing | refused)
 
 
 def unreachable_milestones(case: CaseDefinition) -> list[Issue]:

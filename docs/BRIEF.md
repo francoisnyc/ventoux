@@ -1004,6 +1004,39 @@ be erased on request), has size limits, and a second copy of business records go
   answer time stays (D30).
 - **One data-flow issue per input:** the first the runtime would meet when the step runs.
 
+### D37. Case validation warns about what surprises an author; only what holds for every case refuses
+
+*Drafted 2026-10-16, in layer 10d.*
+
+- **A warning describes what the runtime really does** with the definition, and each is shown
+  with its run. Four are given:
+  - **an outcome a system may give that no condition reads** (D9, D17): each outcome an
+    activity's contract declares, and a plan step's `failed`, that no condition tells from `done`.
+    The case goes on, and with nothing left to do closes, with nobody told. A task's outcomes get
+    none: the person who answered chose it.
+  - **a value read before it is surely set** (D9, design question 14): reading a value nobody set
+    fails the step. A value is surely set when it is given at the opening, when the step waits
+    for its writer and every way the writer ends sets it, when the step requires a milestone only
+    setting it reaches, or when a guard says so: the step's `when`, read first, guards its
+    approval's `when` and its inputs, and inside one expression only `if` guards a branch, since
+    `and` and `or` read every part (D20).
+  - **a `max_age` on a fact that can never be fetched again** (D33): from the opening, a person, a
+    step that writes, notifies or computes, a workflow or a plan step, or a read whose step always
+    needs an approval. Each time it is stale, the step needs attention.
+  - **an approval whose `when` reads none of the fields its step is given** (D9): it guards a
+    neighbouring value, not the one that is sent.
+- **What holds for every case is an error** (D34): a step reading, every time it starts, a value
+  that only steps waiting for it set fails every time. The value is set only once the step is
+  done, and it is done only after a run that read it, so no retry or proposal helps. A
+  condition reads only the branch of an `if` it takes; an input reads every value it names, as
+  where its value comes from is worked out from all of them (D36). *Corrected while building
+  layer 10d, before D37 was merged: the draft exempted a step that can be proposed, which the
+  runtime refuses too.*
+- **The quickstart warns about nothing:** its refund calls the customer when the provider
+  declines, so a declined refund no longer closes the case with nobody told.
+- **One cause, one issue,** as for errors (D35): a step or a value an error already names gets no
+  warning.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step

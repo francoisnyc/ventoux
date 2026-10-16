@@ -59,6 +59,15 @@ pay = refund.activity(
 )
 
 refund.sequence(review, pay)
+
+call_customer = refund.task(
+    "call_customer",
+    title="Call the customer about the declined refund",
+    roles=["support"],
+    requires=[pay],
+    when=pay.outcome == "declined",
+    outcomes={"called": Outcome("Customer called")},
+)
 ```
 
 What this says:
@@ -75,8 +84,12 @@ What this says:
   can't be the person who reviewed it, since the reviewer set the amount being paid.
 - `sequence(review, pay)`: the steps run in this order, each starting by itself when the previous
   one is done.
-- The case closes when nothing is left to do: after the payment, or after a rejected review. While
-  it waits for the team lead's approval, it stays open.
+- `call_customer`: the payment provider may decline a refund, an outcome `payments.refund@2`
+  declares. Then someone in support calls the customer. Without this step a declined refund would
+  close the case with nobody told, and `ventoux check` would warn you about it.
+- The case closes when nothing is left to do: after the payment, after a rejected review, or once
+  the customer has been called about a declined refund. While it waits for the team lead's
+  approval, it stays open.
 
 ## 3. Check it
 
@@ -85,10 +98,11 @@ uv run ventoux check
 ```
 
 ```text
-✓ refund is valid (2 steps)
-  review   task for support · outcomes: approve (sets approved_amount), reject
-  pay      runs payments.refund@2 · only after review = approve
-           · needs approval by support-lead when approved_amount > 100
+✓ refund is valid (3 steps)
+  review         task for support · outcomes: approve (sets approved_amount), reject
+  pay            runs payments.refund@2 · only after review = approve
+                 · needs approval by support-lead when approved_amount > 100
+  call_customer  task for support · only after pay = declined
   Case map: build/refund.md
 ```
 

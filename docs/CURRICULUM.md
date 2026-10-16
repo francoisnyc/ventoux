@@ -274,6 +274,14 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
 - **Negative test:** a trigger whose condition only untrusted content could satisfy is rejected
   (`UNTRUSTED_TRIGGER`).
 - **Reference:** `src/case/events.ts`, `src/case/deadlines.ts`; `docs/design.md` §7 and §10.
+- **Research first** (agreed at the end of layer 10, 2026-10-16): a targeted read of Flowable's
+  CMMN engine, its code that re-checks sentries and above all its tests, to answer: when is a met
+  "on" part forgotten (a step repeated)? What do exit conditions stop, and what of work already
+  running? What does each repeated run see? How does an event listener differ from waiting for an
+  event (brief, D10's "listening is not waiting")? When does a stage or a case count as complete
+  (required items, manual steps only available)? Report what each answer means for Ventoux, say
+  which file it came from, and never translate it. Prior art, as the brief lists it; first check
+  that this environment's network can reach it.
 - **Check yourself:** "arrival is a fact, content is not": give an example.
 
 ## 12. Releases and changing open cases

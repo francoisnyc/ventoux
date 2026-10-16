@@ -415,7 +415,10 @@ its `when` or its approval's `when`:
   "display": {"title": "Refund the customer"},
   "activity": "payments.refund@2",
   "requires": ["review", "check_order"],
-  "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+  "when": {"if": [{"==": [{"var": "check_order.outcome"}, "done"]},
+                  {"and": [{"==": [{"var": "review.outcome"}, "approve"]},
+                           {"==": [{"var": "check_order.status"}, "delivered"]}]},
+                  false]},
   "max_age": {"check_order.status": "1d"},
   "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
   "approval": {"when": {">": [{"var": "approved_amount"}, 100]}, "roles": ["support-lead"],
@@ -424,6 +427,12 @@ its `when` or its approval's `when`:
 ```
 
 An age is a whole number and a unit: `30m` (minutes), `12h` (hours) or `1d` (days).
+
+`pay` reads the status only once the lookup is `done`: a lookup that gives `not_found` gives no
+status, and reading a value nobody set fails the step. It pays only an approved review, which
+alone sets `approved_amount`. (In a condition, `and` reads all its parts, so only `if` can keep a
+part from being read; `ventoux check` warns about a value read before it is surely set: the cases guide,
+"What the check warns about".)
 
 ### What happens to a stale fact
 
