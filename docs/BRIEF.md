@@ -969,6 +969,35 @@ be erased on request), has size limits, and a second copy of business records go
   that reads what it would give is reported again; a role already named by a structural issue
   (D34) isn't repeated.
 
+### D36. Case validation follows each value to where it goes; inputs take only their exact type
+
+*Drafted 2026-10-16, in layer 10c.*
+
+- **Where a value comes from is computed in one pass** (D34): the opening is stamped with the
+  opener, a person's answer with the person, an outcome with its contract or plan, an output with
+  its contract's source (D29), and a field declared `untrusted:<label>` keeps its label whoever
+  writes it (D12). An input comes from every field it reads, a condition inside it included, as
+  the runtime records. So a value an input policy refuses (D21) is refused every time the step
+  runs, and case validation's `INPUT_POLICY` is an error. Who opens a case is the one thing the
+  check can't know: a refusal that holds only when a person opens it is a warning.
+- **A plan step carries its case's sources into its plan** (D28): each of the plan's fields comes
+  from what the case gives it, and each activity in the plan is checked with that, at the case's
+  input, before the plan runs. The plan's own marks stay the plan's to answer for (layer 3).
+- **Every input is given exactly the type it takes.** A case holds decimals, texts and booleans
+  (D20), and an activity's or a workflow's inputs are validated strictly: a value is never
+  converted, so the text `"40"` is refused where a decimal is taken, in cases and in plans. A plan
+  checks each field the case gives it against the field's type when it starts, and a reference
+  field takes only a reference to its system, read as it is, as a contract's reference input does
+  (D30). Case validation refuses both first.
+- **A workflow step is never given a sensitive value** (D31), and case validation refuses one
+  first. A plan field given only values written in the definition comes from nobody, so the plan
+  refuses to start, and case validation says so first.
+- **An approver who can't see what they approve is a warning, never an error** (D16): an
+  approval is judged with every role the person holds, so someone holding a role that sees the
+  value as well may approve, and the check can't know who holds which roles. The refusal at
+  answer time stays (D30).
+- **One data-flow issue per input:** the first the runtime would meet when the step runs.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
