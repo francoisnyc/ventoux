@@ -1025,8 +1025,13 @@ be erased on request), has size limits, and a second copy of business records go
     needs an approval. Each time it is stale, the step needs attention.
   - **an approval whose `when` reads none of the fields its step is given** (D9): it guards a
     neighbouring value, not the one that is sent.
-- **What holds for every case is an error** (D34): a step reading, unguarded, a value that only
-  steps waiting for it set, and that can't be proposed to run again, fails every time it starts.
+- **What holds for every case is an error** (D34): a step reading, every time it starts, a value
+  that only steps waiting for it set fails every time. The value is set only once the step is
+  done, and it is done only after a run that read it, so no retry or proposal helps. A
+  condition reads only the branch of an `if` it takes; an input reads every value it names, as
+  where its value comes from is worked out from all of them (D36). *Corrected while building
+  layer 10d, before D37 was merged: the draft exempted a step that can be proposed, which the
+  runtime refuses too.*
 - **The quickstart warns about nothing:** its refund calls the customer when the provider
   declines, so a declined refund no longer closes the case with nobody told.
 - **One cause, one issue,** as for errors (D35): a step or a value an error already names gets no

@@ -91,7 +91,12 @@ def validate_case(
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     found += close_unreachable(case, can) + unreachable_milestones(case)
     # What a definition may mean but surprises its author when a case runs (10d).
-    return found + warning_issues(case, contracts, supplied, {i.path for i in found}, missing)
+    # A step an error refuses gets no warning, nor does what it would give: one cause, one issue.
+    # A step that can never run is refused too, though its group's DEADLOCK may name another.
+    refused = {i.path.split(".")[1] for i in found if i.severity == "error" and "." in i.path}
+    refused |= {name for name in case.steps if name not in can}
+    said = {issue.path for issue in found}
+    return found + warning_issues(case, contracts, supplied, said, missing | refused)
 
 
 def unreachable_milestones(case: CaseDefinition) -> list[Issue]:

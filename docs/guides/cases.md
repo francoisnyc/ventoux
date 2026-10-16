@@ -888,11 +888,14 @@ A value is surely set where a step reads it when:
 - or a guard says so. The step's `when` is read first, so it guards the approval's `when` and the
   inputs: a `when` that is, or holds in an `and` or an `if`'s condition, `review.outcome ==
   "approve"` (an outcome that sets the field), `in` a list of such outcomes, `exists`, or the
-  writer's outcome `== "done"` for its outputs. Inside one expression only an `if` guards its
-  branch: `and` and `or` read all their parts (brief, D20).
+  writer's outcome `== "done"` for its outputs. Inside a condition only an `if` guards its
+  branch: `and` and `or` read all their parts (brief, D20). An input reads every value it names,
+  both branches of an `if` and an `exists` included, since where its value comes from is worked
+  out from all of them (brief, D36): only the step's `when` guards an input.
 
-If the step that sets the value can only run after the step that reads it, and the read isn't
-guarded, the step fails every time it starts. That is an error:
+If the step that sets the value can only run after the step that reads it, and the step reads
+it every time it starts (not in a condition's `if` branch), it fails every time. That is an
+error:
 
 ```
 steps.notify.inputs.refund  SET_AFTER  notify reads pay.refund_id, which only pay gives, and pay
@@ -900,7 +903,11 @@ runs only after notify: notify fails every time it starts: read it in a step tha
 pay, or run notify after pay
 ```
 
-A step that can be proposed again gets the warning instead: a later run may read the value.
+Proposing the step again changes nothing: the value is set only once the step is done, and it is
+done only after a run that read it. A value read in a condition's `if` branch, which some runs
+don't take, gets the warning instead: `notify reads pay.refund_id, which only pay gives, and pay
+runs only after notify: when notify reads it, it fails and needs attention: read it in a step
+that comes after pay`.
 
 **A `max_age` that can only end in attention.** Only a read is fetched again (brief, D33). A
 `max_age` on any other fact means a person decides each time it is stale:
@@ -934,7 +941,7 @@ given, such as approved_amount
 |---|---|---|---|
 | `OUTCOME_UNREAD` | warning | an activity or plan step may end with an outcome no condition tells from `done` | as above |
 | `MAY_BE_UNSET` | warning | a step reads a value that may not be set yet when it runs | as above |
-| `SET_AFTER` | error | a step reads a value only a step after it sets, unguarded, and can't run again later | as above |
+| `SET_AFTER` | error | a step reads, every time it starts, a value only steps after it set | as above |
 | `NEVER_REFRESHED` | warning | a `max_age` names a fact that can never be fetched again | as above |
 | `APPROVAL_ELSEWHERE` | warning | an approval's `when` reads none of the fields its step is given | as above |
 

@@ -430,8 +430,8 @@ An age is a whole number and a unit: `30m` (minutes), `12h` (hours) or `1d` (day
 
 `pay` reads the status only once the lookup is `done`: a lookup that gives `not_found` gives no
 status, and reading a value nobody set fails the step. It pays only an approved review, which
-alone sets `approved_amount`. (`and` reads all its parts, so only `if` can keep a part from
-being read; `ventoux check` warns about a value read before it is surely set: the cases guide,
+alone sets `approved_amount`. (In a condition, `and` reads all its parts, so only `if` can keep a
+part from being read; `ventoux check` warns about a value read before it is surely set: the cases guide,
 "What the check warns about".)
 
 ### What happens to a stale fact

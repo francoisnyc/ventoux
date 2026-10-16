@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
+from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, RetryPolicy, Timeouts
 from ventoux.core.contract import Display as ContractDisplay
@@ -2314,3 +2315,141 @@ def test_a_milestone_only_setting_outcomes_reach_says_the_value_is_set() -> None
             "fails and needs attention: require assess"
         )
     ]
+
+
+# --- 10d, slice 3: a value only a later step sets ---
+
+
+class NoteInput(BaseModel):
+    refund: str  # the refund's ID, to note it
+
+
+def noting() -> Catalog:
+    """The development catalog, and `refunds.note@1`, which notes a refund by its ID."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(
+        ActivityContract(
+            name="refunds.note",
+            version=1,
+            input=NoteInput,
+            output=RecordOutput,
+            risk="low",
+            effect="compute",
+            timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+            idempotency_key=None,
+            outcomes=[],
+            display=ContractDisplay(title="Note a refund", description="Notes a refund's ID"),
+        )
+    )
+    return catalog
+
+
+def noting_before_paying(**notify: Any) -> dict[str, Any]:
+    """The quickstart's refund, noting the refund's ID before paying it."""
+    refund = copy.deepcopy(REFUND)
+    refund["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Note the refund"},
+        "activity": "refunds.note@1",
+        "inputs": {"refund": {"var": "pay.refund_id"}},
+        **notify,
+    }
+    refund["sequence"] = ["review", "notify", "pay"]
+    return refund
+
+
+def test_a_value_only_a_later_step_sets_is_refused() -> None:
+    catalog = noting()
+    found = validate_case(parse_case(noting_before_paying()), catalog)
+    # The guide's output, word for word, line breaks aside.
+    assert printed(found) == warning_output(2)
+    assert found[0].severity == "error"
+    # The proof: notify fails when it starts, and again when an operator retries it.
+    run = run_case(
+        noting_before_paying(),
+        file=SMALL,
+        answers=[REVIEWED, retry("notify#1", "omar")],
+        people={**PEOPLE, "omar": ["operations"]},
+        catalog=catalog,
+        activities={"refunds.note@1": lambda inputs: {"entry_id": "n-1"}},
+    )
+    # Its inputs' sources are asked first: a value nobody set has none.
+    failed = "notify#1 failed: refund can't be evaluated: pay.refund_id has no known sources"
+    assert [line for line in run.history if "failed" in line] == [failed, failed]
+    assert "omar retried notify#1 as operations" in run.history
+    assert not run.reached("pay")
+
+
+def test_a_step_that_can_be_proposed_still_fails_every_time() -> None:
+    # The value is set only once notify is done, and notify is done only after a run that read
+    # it: no run of it ever succeeds, proposed or not, repeatable or not.
+    catalog = noting()
+    for proposed in (
+        {"proposed_by": ["support"]},
+        {"proposed_by": ["support"], "repeatable": True},
+    ):
+        definition = noting_before_paying(**proposed)
+        [refused] = validate_case(parse_case(definition), catalog)
+        assert refused.code == "SET_AFTER", proposed
+        # Refused when proposed: it has run and isn't repeatable, or its inputs can't be read.
+        with pytest.raises((ProposalRefused, InputRefused)):
+            run_case(
+                definition,
+                file=SMALL,
+                answers=[REVIEWED, propose("notify", "ana")],
+                people=PEOPLE,
+                catalog=catalog,
+                activities={"refunds.note@1": lambda inputs: {"entry_id": "n-1"}},
+            )
+
+
+def test_a_condition_reads_only_the_branch_of_an_if_it_takes() -> None:
+    # notify's condition reads the refund's ID only after an approved review: a rejected one
+    # starts nothing, and the case closes.
+    catalog = noting()
+    noted = {"==": [{"var": "pay.refund_id"}, "r-1"]}
+    definition = noting_before_paying(when={"if": [APPROVED, noted, False]})
+    assert validate_case(parse_case(definition), catalog) == [
+        Issue(
+            "steps.notify.when",
+            "MAY_BE_UNSET",
+            "notify reads pay.refund_id, which only pay gives, and pay runs only after notify: "
+            "when notify reads it, it fails and needs attention: read it in a step that comes "
+            "after pay",
+            "warning",
+        )
+    ]
+    rejected = run_case(
+        definition,
+        file=SMALL,
+        answers=[("review", "reject", "ana")],
+        people=PEOPLE,
+        catalog=catalog,
+        activities={"refunds.note@1": lambda inputs: {"entry_id": "n-1"}},
+    )
+    assert rejected.closed and rejected.needs_attention == []
+
+
+def test_an_input_reads_every_value_it_names() -> None:
+    # Where an input's value comes from is worked out from every value it names, an `if`'s other
+    # branch and an `exists` included (brief, D36): a value nobody set fails it either way.
+    catalog = noting()
+    for refund in (
+        {"if": [APPROVED, {"var": "pay.refund_id"}, "none"]},
+        {"if": [{"exists": "pay.refund_id"}, "noted", "none"]},
+    ):
+        definition = noting_before_paying(inputs={"refund": refund})
+        [refused] = validate_case(parse_case(definition), catalog)
+        assert refused.code == "SET_AFTER", refund
+        rejected = run_case(
+            definition,
+            file=SMALL,
+            answers=[("review", "reject", "ana")],
+            people=PEOPLE,
+            catalog=catalog,
+            activities={"refunds.note@1": lambda inputs: {"entry_id": "n-1"}},
+        )
+        assert rejected.needs_attention == [
+            "notify#1: refund can't be evaluated: pay.refund_id has no known sources"
+        ], refund

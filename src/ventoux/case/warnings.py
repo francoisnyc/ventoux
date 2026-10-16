@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from ventoux.case.definition import ActivityStep, CaseDefinition, PlanStep
-from ventoux.case.known import DONE, Known, Reading, reads, set_by_outcomes
+from ventoux.case.known import DONE, Known, Read, Reading, reads, set_by_outcomes
 from ventoux.case.types import expressions_of
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions.model import (
@@ -34,6 +34,7 @@ from ventoux.core.expressions.model import (
     Var,
 )
 from ventoux.core.plan import Plan
+from ventoux.core.provenance import fields_read
 from ventoux.core.validate import Issue
 
 
@@ -44,8 +45,9 @@ def warning_issues(
     said: Collection[str],
     missing: Collection[str],
 ) -> list[Issue]:
-    """10d's warnings, given the paths an error already names (`said`) and the steps whose
-    contract or plan is `missing`: one cause, one issue (brief, D35)."""
+    """10d's issues, given the paths an issue already names (`said`) and the steps that are
+    `missing` their contract or plan, or refused by an error: one cause, one issue (brief, D35).
+    Such a step gets none of these, and nor does what it would give."""
     reading = Reading(case, contracts, plans)
     unset = unset_reads(reading, said, missing)
     # An outcome that leaves an output another step reads is said by that read: the reading step
@@ -150,6 +152,7 @@ class Unset:
     where: str  # `when`, `approval.when` or `inputs.<input>`
     value: str
     known: Known  # what is surely known there
+    always: bool  # read every time the step starts: not inside an `if`'s branch
 
     def ended_otherwise(self, reading: Reading) -> bool:
         """Whether it is an output of a step that has ended, but may have ended otherwise."""
@@ -165,6 +168,8 @@ def unset_reads(reading: Reading, said: Collection[str], missing: Collection[str
     value a step whose contract or plan is `missing` would give (brief, D35)."""
     found: list[Unset] = []
     for name, step in reading.case.steps.items():
+        if name in missing:
+            continue  # refused already: one cause, one issue
         before = reading.before(name)
         # Its `when` is read first; once true, what it says guards the rest (`admit`).
         guarded = before if step.when is None else reading.holds(step.when, before)
@@ -173,22 +178,69 @@ def unset_reads(reading: Reading, said: Collection[str], missing: Collection[str
             if f"steps.{name}.{where}" in said:
                 continue
             known = before if where == "when" else guarded
-            for value, at in reads(expression, known, reading):
+            for value, at, always in step_reads(where, expression, known, reading):
                 if value.partition(".")[0] in missing or value in warned:
                     continue
                 if not reading.surely_set(value, at):
                     warned.add(value)
-                    found.append(Unset(name, where, value, at))
+                    found.append(Unset(name, where, value, at, always))
     return found
 
 
+def step_reads(where: str, expression: Expression, known: Known, reading: Reading) -> list[Read]:
+    """What a step's expression reads, as the runtime reads it. A condition is evaluated: an
+    `if` reads only the branch it takes. An input also needs where its value comes from, which
+    is worked out from every value it names, both branches of an `if` and an `exists` included
+    (brief, D36): so each is read every time, and only the step's `when` guards them."""
+    if where.startswith("inputs."):
+        return [Read(value, known, True) for value in fields_read(expression)]
+    return reads(expression, known, reading)
+
+
 def unset_issue(reading: Reading, read: Unset) -> Issue:
-    return Issue(
-        f"steps.{read.step}.{read.where}",
-        "MAY_BE_UNSET",
-        unset_message(reading, read.step, read.value, read.known),
-        "warning",
-    )
+    """The read's issue: an error when it fails every time (`SET_AFTER`), a warning otherwise."""
+    writers = writers_of(reading, read.value)
+    if set_after(reading, read, writers):
+        gives = "gives" if read.value.partition(".")[0] in reading.case.steps else "sets"
+        who, run = (writers[0], "runs") if len(writers) == 1 else (" or ".join(writers), "run")
+        return Issue(
+            f"steps.{read.step}.{read.where}",
+            "SET_AFTER",
+            f"{read.step} reads {read.value}, which only {who} {gives}, and {who} {run} only "
+            f"after {read.step}: {read.step} fails every time it starts: read it in a step that "
+            f"comes after {who}, or run {read.step} after {who}",
+        )
+    if writers and all(read.step in reading.before(writer).ended for writer in writers):
+        # Read only on some runs, and set only after: requiring the writer would be a circle.
+        gives = "gives" if read.value.partition(".")[0] in reading.case.steps else "sets"
+        who, run = (writers[0], "runs") if len(writers) == 1 else (" or ".join(writers), "run")
+        message = (
+            f"{read.step} reads {read.value}, which only {who} {gives}, and {who} {run} only "
+            f"after {read.step}: when {read.step} reads it, it fails and needs attention: read "
+            f"it in a step that comes after {who}"
+        )
+    else:
+        message = unset_message(reading, read.step, read.value, read.known)
+    return Issue(f"steps.{read.step}.{read.where}", "MAY_BE_UNSET", message, "warning")
+
+
+def writers_of(reading: Reading, value: str) -> list[str]:
+    """The steps that set `value`: the step whose outcome or output it is, or the tasks whose
+    form sets it. None for a value given at the opening."""
+    step = value.partition(".")[0]
+    if step in reading.case.steps:
+        return [step]
+    return list(set_by_outcomes(reading.case).get(value, {}))
+
+
+def set_after(reading: Reading, read: Unset, writers: list[str]) -> bool:
+    """Whether the read fails every time its step starts: it is read on every start, and every
+    writer of the value waits for the step to be done. The value can be set only once the step
+    is done, and the step is done only after a run that read it: so no run of it, retried or
+    proposed, ever succeeds (brief, D34) (brief, D37)."""
+    if not read.always:
+        return False  # inside an `if`'s branch: a run that doesn't take it may succeed
+    return bool(writers) and all(read.step in reading.before(writer).ended for writer in writers)
 
 
 def unset_message(reading: Reading, name: str, value: str, known: Known) -> str:

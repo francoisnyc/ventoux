@@ -934,10 +934,12 @@ Agreed 2026-10-16, all as proposed.
    Inside one expression only an `if` guards its branch: `and` and `or` evaluate every part on
    purpose (brief, D20), so `{"and": [review approved, approved_amount > 100]}` still fails on a
    rejected review. A read the check can't see guarded warns: a warning errs towards saying.
+   (Corrected while building slice 3: in a condition. An input reads every value it names.)
 5. **`SET_AFTER` is an error, kept narrow:** every writer of the value waits for the reading
    step, the read isn't guarded, and the step can't be proposed. Then it fails every time it
    starts, and a retry too: its writers wait for it to be *done*. A step that can be proposed gets
-   `MAY_BE_UNSET`: a later run may read the value.
+   `MAY_BE_UNSET`: a later run may read the value. (Corrected while building slice 3: a
+   proposed run fails too; the exception is a read some runs skip.)
 6. **`NEVER_REFRESHED`:** a `max_age` fact from the opening, a person, a `write`, `notify` or
    `compute` activity, a workflow or a plan step, or a read whose step's approval has no `when`
    (a refresh never asks for one, brief, D33). A conditional approval or a `when` depends on
@@ -1062,6 +1064,27 @@ Each starts with its negative test, seen failing for the right reason.
 - **A value reached another way reads as not waited for:** with a fast track reaching `assessed`
   too, `pay reads payout, and doesn't wait for assess, which sets it`: `pay` may run before
   `assess` answers, on the fast track. Accepted as said.
+
+- **Choice 5's exemption was wrong, and the runtime says so** (slice 3). Probed before writing
+  its test: proposing `notify` again is refused, `notify has run, and is not repeatable`, and
+  when repeatable, by its inputs (`pay.refund_id has no known sources`). The value is set only
+  once `notify` is done, and `notify` is done only after a run that read it: no run of it ever
+  succeeds. So `SET_AFTER` holds whether or not the step can be proposed; the exception is a
+  read some runs skip, which stays `MAY_BE_UNSET` (its message says to read it after the
+  writer, since "require pay" would make a circle). D37 corrected before it was merged.
+- **Inside an input, an `if` guards nothing** (slice 3). The test of a read in an input's `if`
+  failed at runtime on a rejected review too: an input's sources are worked out from every value
+  it names, both branches and `exists` included (`provenance` over `fields_read`, brief, D36), and
+  a value nobody set has none. So an input reads every value it names, guarded only by the
+  step's `when`; a condition is evaluated, and its `if` reads one branch. The guide's "inside
+  one expression only an `if` guards" is now "inside a condition". The runtime is unchanged:
+  D36 decided an input comes from both branches, and changing that is a runtime decision.
+- **The runtime's message differs from my guess:** `notify#1 failed: refund can't be evaluated:
+  pay.refund_id has no known sources`, sources being asked before the value.
+- **A step that can never run is refused for 10d, though its group's `DEADLOCK` names another**
+  (slice 3): two deadlocked claims gave `pay` a `SET_AFTER` for `payout`, `assess` being in the
+  circle. Every step outside `can`, and every step an error names, gets no 10d issue, nor does
+  what it would give.
 
 ### Not in 10d
 

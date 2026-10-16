@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from functools import reduce
+from typing import NamedTuple
 
 from ventoux.case.definition import ActivityStep, CaseDefinition, PlanStep, TaskStep
 from ventoux.case.sequence import requirements
@@ -194,31 +195,49 @@ def set_by_outcomes(case: CaseDefinition) -> dict[str, dict[str, frozenset[str]]
     }
 
 
-def reads(expression: Expression, known: Known, reading: Reading) -> list[tuple[str, Known]]:
+class Read(NamedTuple):
+    """One value an expression reads, what is known where it reads it, and whether it is read
+    every time the expression is: not inside an `if`'s branch, nor an element `count` or `sum`
+    reads (an empty list reads none)."""
+
+    value: str
+    known: Known
+    always: bool
+
+
+def reads(
+    expression: Expression, known: Known, reading: Reading, always: bool = True
+) -> list[Read]:
     """Each value `expression` reads, with what is known where it reads it: inside an `if`, its
     first branch is read only once its condition held. `and` and `or` read every part
     (brief, D20), so a part guards nothing."""
     if isinstance(expression, Decimal | str | bool | Item | Exists):
         return []  # `exists` asks whether a value is set: it never fails for one that isn't
     if isinstance(expression, Var):
-        return [(expression.var, known)]
+        return [Read(expression.var, known, always)]
     if isinstance(expression, If):
         condition, then, otherwise = expression.args
         held = reading.holds(condition, known)
         return (
-            reads(condition, known, reading)
-            + reads(then, held, reading)
-            + reads(otherwise, known, reading)
+            reads(condition, known, reading, always)
+            + reads(then, held, reading, always=False)
+            + reads(otherwise, known, reading, always=False)
         )
     if isinstance(expression, Count | Sum):
-        parts = [expression.args.over, expression.args.where]
+        found = reads(expression.args.over, known, reading, always)
+        each = [expression.args.where]  # read for each element
         if isinstance(expression, Sum):
-            parts.append(expression.args.value)
-        return [read for part in parts if part is not None for read in reads(part, known, reading)]
+            each.append(expression.args.value)
+        return found + [
+            read for part in each if part is not None for read in reads(part, known, reading, False)
+        ]
     if isinstance(expression, In):
-        return reads(expression.args[0], known, reading)  # the list after it holds only literals
+        # The list after it holds only literals.
+        return reads(expression.args[0], known, reading, always)
     if isinstance(expression, Comparison | And | Or | Not | Add | Sub | Mul | Div | Cat | String):
-        return [read for argument in expression.args for read in reads(argument, known, reading)]
+        return [
+            read for argument in expression.args for read in reads(argument, known, reading, always)
+        ]
     # Fail closed: an operator this walk doesn't know is an error, never "reads nothing"
     # (brief, D20).
     raise TypeError(f"not an expression: {type(expression).__name__}")
