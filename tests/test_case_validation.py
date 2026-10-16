@@ -1696,3 +1696,129 @@ def test_an_approver_who_cannot_see_is_warned() -> None:
     with pytest.raises(AnswerRefused, match="^lee can't see fraud_score, which pay reads"):
         paid(["support-lead"])
     assert paid(["support-lead", "fraud"]).reached("pay")
+
+
+# --- 10c, slice 6: one cause, one issue; the guide ---
+
+
+def test_an_input_has_one_data_flow_issue() -> None:
+    # The first the runtime meets. A reference refused is not asked where it comes from.
+    claim = claim_lettering({"var": "estimate_ref"})
+    claim["fields"]["estimate_ref"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "Customer's reference"},
+    }
+    assert [issue.code for issue in issues(claim)] == ["REFERENCE"]
+    run = run_case(
+        claim, file=CLAIM_FILE | {"estimate_ref": "cus-1"}, answers=[], people=CLAIM_PEOPLE
+    )
+    [refused] = run.needs_attention
+    assert "as a reference to crm" in refused
+    # A sensitive value from an untrusted source: the policy first, as `checked_inputs` is asked
+    # before the workflow's own refusal.
+    claim = claim_checking_national_id()
+    claim["fields"]["national_id"]["source"] = "untrusted:customer"
+    assert [issue.code for issue in issues(claim)] == ["INPUT_POLICY"]
+    # An input whose expression is refused is not asked again, nor one of a missing contract.
+    misspelt = refund_with(inputs={"order_id": {"var": "order_id"}, "amount": {"var": "amout"}})
+    assert [issue.code for issue in issues(misspelt)] == ["EXPRESSION_INVALID"]
+    missing = refund_with(activity="payments.refund@3", inputs={"amount": "40"})
+    assert [issue.code for issue in issues(missing)] == ["UNKNOWN_CONTRACT"]
+    no_plan = settled(inputs={"order_id": {"var": "order_id"}, "amount": "40"})
+    assert [issue.code for issue in issues(no_plan)] == ["UNKNOWN_PLAN"]
+    # A plan step refused when it starts runs nothing inside its plan: no in-plan issue.
+    made_up = {"cat": ["ord-", {"string": [{"var": "amount"}]}]}
+    both = settled_from_the_estimate()
+    both["steps"]["settle"]["inputs"]["order_id"] = made_up
+    assert [issue.code for issue in checked_with(both, PLANS)] == ["REFERENCE"]
+
+
+FLOW_EXAMPLES: dict[str, Callable[[], dict[str, Any]]] = {
+    "REFERENCE": lambda: claim_lettering({"var": "order_id"}),
+    "INPUT_POLICY": estimated_claim,
+    "OPENER_DECIDES": lambda: refund_recording({"var": "amount"}),
+    "INPUT_TYPE": lambda: refund_with(inputs={"order_id": {"var": "order_id"}, "amount": "40"}),
+    "NO_SOURCES": lambda: settled(inputs={"order_id": {"var": "order_id"}, "amount": Decimal(40)}),
+    "SENSITIVE_TO_WORKFLOW": claim_checking_national_id,
+    "APPROVER_CANT_SEE": claim_paying_below_a_fraud_score,
+}
+
+
+def flow_issues(definition: dict[str, Any]) -> list[Issue]:
+    """The issues of `definition`, read with the ledger beside the catalog and the guide's plans."""
+    return validate_case(parse_case(definition), with_ledger(), plans=PLANS)
+
+
+def test_the_guide_lists_every_code_for_data_flow() -> None:
+    assert [code for code, _, _ in guide_table(3)] == list(FLOW_EXAMPLES)
+
+
+@pytest.mark.parametrize(("code", "kind", "says"), guide_table(3))
+def test_the_guides_table_of_data_flow_is_what_validate_case_says(
+    code: str, kind: str, says: str
+) -> None:
+    found = [issue for issue in flow_issues(FLOW_EXAMPLES[code]()) if issue.code == code]
+    assert [issue.severity for issue in found] == [kind]
+    if says != "as above":
+        assert [issue.message for issue in found] == [says]
+
+
+def test_no_data_flow_message_quotes_a_value() -> None:
+    # Fields, types, sources and roles, never a title, a literal or who opens the case
+    # (brief, D30) (brief, D35).
+    for make in FLOW_EXAMPLES.values():
+        for issue in flow_issues(marked(make())):
+            assert "TITLE-" not in issue.message and "person:opening" not in issue.message, issue
+    text = refund_with(inputs={"order_id": {"var": "order_id"}, "amount": "987654"})
+    literal = settled(inputs={"order_id": {"var": "order_id"}, "amount": Decimal(987654)})
+    for definition in (text, literal):
+        [issue] = flow_issues(definition)
+        assert "987654" not in issue.message
+
+
+class StatusInput(BaseModel):
+    amount: Decimal
+    status: Annotated[str, only_from("kyc")]  # only what the KYC system says
+
+
+def test_an_outcome_comes_from_its_contract_not_its_system() -> None:
+    # The output `check.status` comes from what the contract declares, system:kyc; the workflow's
+    # outcome from the contract itself, system:kyc.check@1 (brief, D29). The run records the same.
+    ledger = with_ledger(taking=StatusInput)
+    record = {"ledger.record@1": lambda inputs: {"entry_id": "led-1"}}
+
+    def recording(status: str) -> dict[str, Any]:
+        claim = guide_json(0)
+        claim["steps"]["record"] = {
+            "kind": "activity",
+            "display": {"title": "Record the check"},
+            "activity": "ledger.record@1",
+            "requires": ["checked", "assessed"],
+            "inputs": {"amount": {"var": "payout"}, "status": {"var": status}},
+        }
+        return claim
+
+    def run(status: str) -> CaseRun:
+        return run_case(
+            recording(status),
+            file=CLAIM_FILE,
+            answers=[ACCEPTED],
+            people=CLAIM_PEOPLE,
+            catalog=ledger,
+            activities=record,
+        )
+
+    assert validate_case(parse_case(recording("check.status")), ledger) == []
+    assert (
+        "scheduled record#1: ledger.record@1 (amount from person:ana; status from system:kyc)"
+        in run("check.status").history
+    )
+    reason = (
+        "ledger.record@1 takes status only from kyc, and this value comes from check.outcome "
+        "(system:kyc.check@1)"
+    )
+    assert validate_case(parse_case(recording("check.outcome")), ledger) == [
+        Issue("steps.record.inputs.status", "INPUT_POLICY", f"{reason}: use a value kyc gave")
+    ]
+    assert run("check.outcome").needs_attention == [f"record#1: {reason}"]

@@ -6,7 +6,7 @@ tests, 2026-10-15; the tutor review's three fixes built test-first, 2026-10-15. 
 its four runtime fixes agreed in the session, 2026-10-15 (all as proposed); 10b's note drafted the
 same day; 10b built, slices 0–6; Promises checked against the tests, 2026-10-15. 10c's choices and
 its two runtime fixes agreed in the session, 2026-10-16 (all as proposed); 10c's note drafted the
-same day.
+same day; 10c built, slices 1–6; Promises checked against the tests, 2026-10-16.
 
 ## What this layer is for
 
@@ -713,10 +713,16 @@ roles. Sources are the stand-ins, never a person's name.
 ### Where the code goes
 
 - `case/flow.py` (new): the case's static sources, and 10c's checks, one function per code.
-- `core/validate.py`: the policy check takes the fields' sources (a seam for plan steps).
-- `case/validate.py`: adds `flow`'s issues.
-- Runtime: `core/before_activity.py` (G6), `core/interpreter.py`'s `refuse_to_start` (G7).
-- Tests: `tests/test_case_validation.py`; G6 and G7 beside their earlier tests.
+- `core/validate.py`: `refused_inputs`, the policy check over the fields' sources it is given (a
+  seam for plan steps); `core/policy.py`: `refusal` may name a source as a message says it.
+- `case/validate.py`: adds `flow`'s issues, in the order the runtime meets them.
+- Runtime: `core/before_activity.py` (G6; `given_as_reference`, split out of
+  `not_a_reference_to`), `core/interpreter.py`'s `refuse_to_start` (G7's type half);
+  `case/runtime.py`'s `start_plan`, `case/state.py`'s `StartPlan.references`,
+  `case/plan_step.py`'s `wrong_references`, asked by both drivers (`testing.py`,
+  `temporal/cases.py`) (G7's reference half; revised while building, slice 3).
+- Tests: `tests/test_case_validation.py`; G6 and G7 beside their earlier tests
+  (`test_interpreter.py`, `test_plan_step.py`, `test_temporal_case.py`).
 
 ### Seams the tests use
 
@@ -805,6 +811,18 @@ Each starts with its negative test, seen failing for the right reason.
   roles: one message naming several values could say neither exactly. Its proof runs both ways:
   Lee holding `support-lead` alone is refused; holding `fraud` too, the claim is paid.
 
+- **The Promises check found two claims without a test** (slice 6): "an outcome from its
+  contract" (a wrong trusted stamp would pass `trusted_only` unseen, so its test reads an
+  outcome where only `only_from("kyc")` tells `system:kyc.check@1` from `system:kyc`), and "or
+  whose plan is missing". Both got tests, passing at once; the first was seen failing with
+  outcomes stamped by their contract's system. The no-quoted-value promise names the new test it
+  is, not the earlier one it said it would extend.
+- **One cause, one issue, and the guide's table passed at once** (slice 6): seen failing with the
+  policy check made to ignore earlier issues (`REFERENCE` and `INPUT_POLICY` both given), and
+  with one word of a row changed.
+- **A plan step refused at its start gets no in-plan issue** (slice 6), as the runtime never
+  starts the plan: one cause, one issue holds per step for plans, not only per input.
+
 ### Not in 10c
 
 - Teaching warnings (10d), among them D9's approval whose condition reads none of its step's
@@ -816,13 +834,13 @@ Each starts with its negative test, seen failing for the right reason.
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
 `V` is `tests/test_case_validation.py`, `P` `tests/test_plan_step.py`, `T`
-`tests/test_temporal_case.py`, `I` `tests/test_interpreter.py`. Drafted with the note; checked
-against the tests in slice 6.
+`tests/test_temporal_case.py`, `I` `tests/test_interpreter.py`. Checked against the tests,
+2026-10-16: every test named here exists, and every test 10c added is named here.
 
 | Promise | Test |
 |---|---|
 | A value from a source an input's policy refuses is `INPUT_POLICY`, the guide's message word for word; run, the step fails with the same reason | V `test_an_untrusted_value_is_refused_where_only_trusted_ones_go` |
-| One pass gives what the runtime records: a value computed from several fields, an output with its contract's source or `untrusted:undeclared`, an outcome from its contract | V `test_one_pass_gives_the_sources_the_run_records` |
+| One pass gives what the runtime records: a value computed from several fields, an output with its contract's source or `untrusted:undeclared`, an outcome from its contract | V `test_one_pass_gives_the_sources_the_run_records`, `test_an_outcome_comes_from_its_contract_not_its_system` |
 | A refusal that depends on who opens the case is a warning, `OPENER_DECIDES`; one that holds for any opener is an error | V `test_who_opens_the_case_decides_only_a_warning` |
 | A plan step's fields carry the case's sources into the plan: refused at the case's input before the plan runs; run, the plan stops; the plan's own marks are the plan's issue; a field a wait sets is a person's | V `test_a_plan_step_carries_the_cases_sources_into_its_plan`, `test_a_plans_own_mark_is_the_plans_issue` |
 | A reference input given another system's reference, a text or a computed value is `REFERENCE`, in activity and plan steps; run, the step fails, in memory and on Temporal (G7: the made-up order ID is no longer paid) | V `test_a_reference_goes_only_where_its_system_is_expected`, `test_a_plan_steps_reference_field_takes_a_reference_of_its_system`; P `test_a_plan_field_takes_only_a_reference_to_its_system`; T `test_a_plan_field_takes_only_a_reference_of_its_system_on_temporal` |
@@ -832,6 +850,6 @@ against the tests in slice 6.
 | A sensitive value given to a workflow step is `SENSITIVE_TO_WORKFLOW`; run, the step fails | V `test_a_workflow_step_is_never_given_a_sensitive_value` |
 | An approval role that can't see what its step reads is `APPROVER_CANT_SEE`, a warning; run, its holder alone is refused, and a person also holding a role that sees it approves | V `test_an_approver_who_cannot_see_is_warned` |
 | One data-flow issue per input, the first the runtime meets; none for an input already refused, or whose contract or plan is missing | V `test_an_input_has_one_data_flow_issue` |
-| No message quotes a value; sources are stand-ins, never a person | V `test_no_message_quotes_a_value`, extended |
+| No message quotes a value: no title, no literal; sources are stand-ins, never who opens the case | V `test_no_data_flow_message_quotes_a_value` |
 | The guide says what the code does: its example output and its third table | V `test_the_guide_lists_every_code_for_data_flow`, `test_the_guides_table_of_data_flow_is_what_validate_case_says` |
 | `case` imports no Temporal or LLM code, and reads no clock or I/O, in the new module too | `tests/test_layers.py`, unchanged |
