@@ -284,6 +284,22 @@ design note. Full QRSPI is kept for later work that cuts across several layers.
   that this environment's network can reach it.
 - **Check yourself:** "arrival is a fact, content is not": give an example.
 
+## Checkpoint (after layer 11, before layer 12): doors left open
+
+Agreed at the start of layer 11, 2026-10-16. Layer 12 publishes the definition format and lets
+open cases depend on it, so a concept missing then costs a migration, not an edit. This is one
+short note, not a layer.
+
+- **Do:** a table in `docs/layers/checkpoint-doors.md` of what Flowable's CMMN engine offers and
+  Ventoux doesn't (stages, or steps that close together; required items; one step per item of a
+  list; human waits inside a workflow step; child cases; claiming and reassigning tasks; and any
+  other the layer 11 research found). For each: Ventoux's answer (built, planned at layer N, after
+  v1.0, or out of scope), and whether any decision so far blocks adding it without breaking
+  existing definitions.
+- **Done when:** every row that would be blocked is either unblocked before layer 12, or
+  recorded in the brief as a deliberate limit.
+- **Reference:** `docs/layers/11-research.md`; the brief's "Out of scope" and "Deferred".
+
 ## 12. Releases and changing open cases
 
 - **Learn:** packages and releases (decision D5); behaviour vs presentation; publish, activate,

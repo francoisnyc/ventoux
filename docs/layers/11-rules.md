@@ -216,7 +216,13 @@ Each is a proposal for the session; the alternative I'd set aside is said with i
    it is. A rule's firings and failed firings are part of the case's state, so they cross
    continue-as-new (brief, D27: "the whole state of the case"); a retried rule is the existing
    `retry` signal, naming its entry.
-10. **D38**, drafted with this note once agreed: rules, their moments, what they read, untrusted
+10. **Doors left open** (the checkpoint before layer 12, agreed 2026-10-16). Each choice above
+    is checked in the session against what Flowable can express and Ventoux can't yet. Two
+    checks so far: "A has completed and, later, x holds" is admission (a step requiring A's
+    milestone, with `when: x`), and a rule on a milestone, so remembering nothing loses nothing
+    a sentry says; and `on` names one moment, so a stage's moments ("a stage completed") would
+    be a new moment, recorded in the brief, without changing the shape.
+11. **D38**, drafted with this note once agreed: rules, their moments, what they read, untrusted
     data can't decide (design question 17), and rules stop with the close.
 
 ### Where the code goes (proposed)
