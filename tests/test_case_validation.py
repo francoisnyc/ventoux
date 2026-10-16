@@ -1430,4 +1430,9 @@ def test_who_opens_the_case_decides_only_a_warning() -> None:
     ]
     # Refused whoever opens it, it is an error: the reviewer's amount comes from a person.
     [refused] = validate_case(parse_case(refund_recording({"var": "approved_amount"})), ledger)
-    assert (refused.code, refused.severity) == ("INPUT_POLICY", "error")
+    assert refused == Issue(
+        "steps.record.inputs.amount",
+        "INPUT_POLICY",
+        "ledger.record@1 takes amount only from opener, and this value comes from "
+        "approved_amount (person:answering review): use a value opener gave",
+    )

@@ -10,9 +10,9 @@ from collections.abc import Collection, Mapping
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
 from ventoux.core.contract import Contract
 from ventoux.core.output_sources import output_sources
-from ventoux.core.policy import refusal
+from ventoux.core.policy import OnlyFrom, Policy, refusal
 from ventoux.core.provenance import answering, provenance
-from ventoux.core.validate import Issue, what_to_do
+from ventoux.core.validate import Issue
 
 # Who opens a case is the one writer the check can't know: a system, recorded as `system:opener`,
 # or a person, recorded as `person:<who>`. The check reads the case both ways.
@@ -23,6 +23,13 @@ BY_A_PERSON = "person:opening"  # a stand-in for whoever opens it: a person, tru
 def named(source: str) -> str:
     """A source as a message says it: the opening's, whoever opened, is `the opener`."""
     return "the opener" if source in (BY_A_SYSTEM, BY_A_PERSON) else source
+
+
+def what_to_do(policy: Policy) -> str:
+    """What the case's author can do about a refused input."""
+    if isinstance(policy, OnlyFrom):
+        return f"use a value {' or '.join(policy.systems)} gave"
+    return "use a value a system or a person gave"
 
 
 def case_sources(
