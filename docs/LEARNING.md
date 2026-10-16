@@ -623,6 +623,25 @@ and record the key points. A question is closed once you can explain the answer 
   can loosen only its own tightening, back to the contract's level, never past it. So a case
   that needs more than the contract allows asks the platform team for a new version. Why: a
   reader can then trust a contract's limits by reading the contract alone, whatever case uses it.
+- Retrieval (layer 10d warm-up): "the catalog contains the list of steps; contracts the
+  definition of input, output and policies; a binding defines how to connect with Temporal and
+  workflow configs." The contract came back best; the other two need sharpening, and the
+  examples and the "changes when…" column didn't come back, for the third time.
+  - **Catalog:** it lists *contracts*, not steps. Steps live in a case definition, and each
+    *references* a contract by name and version (`pay` calls `payments.refund@2`). The catalog
+    also holds what the platform team registers: roles, source labels, systems. It changes when a
+    contract is added or retired.
+  - **Contract:** inputs, outputs and their policies, yes; also risk, effect (`read`, `write`,
+    `notify`, `compute`), retries and timeouts, the idempotency key and the declared outcomes
+    (brief, D17). It never changes: a change is a new `@N`. 10d reads two of these: the outcomes
+    (`declined`, an outcome no step may read) and the effect (only a `read` is fetched again
+    when a `max_age` finds it stale).
+  - **Binding:** narrower than "how to connect with Temporal": per environment, which task queue
+    serves a reference (production: `risk.score@1` on queue `risk-v2`). A workflow's settings
+    that a case could notice (its timeout, its outputs' sources) are in its *workflow contract*,
+    not the binding. A binding changes when operations move it, with no version and no release.
+  In one line: the catalog lists contracts; a contract is what one entry promises; a binding is
+  where it runs here.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
 
 ## 29. Layer 1: why `@1` and not `@1.0`
