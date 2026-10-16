@@ -43,6 +43,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 36 | Layer 8: the model picks the step, never the values | open |
 | 37 | Layer 9c: what the audit keeps after forgetting | open |
 | 38 | Layer 9d: stale facts, and why replay decides the same way | open |
+| 39 | Layer 10: why a fixpoint is needed | open |
 
 ---
 
@@ -1101,3 +1102,38 @@ and record the key points. A question is closed once you can explain the answer 
   In one line: a stale read is refreshed, a stale answer goes to a person; and replay decides the
   same because the time is recorded on each event, never read from a clock.
 - Status: open, until a (a read refreshed, a person's answer to a person) comes back from memory.
+
+
+## 39. Layer 10: why a fixpoint is needed
+
+> Why is a fixpoint needed? a) What a case can reach: why can't one pass in the written order
+> decide which steps can ever run, and why start from nothing rather than from everything?
+> b) Where each value comes from: why does that need no fixpoint, and what would bring one back?
+
+- Your answer (layer 10d, closing the layer): "not sure"; asked for a short explanation, without
+  jargon.
+- Discussion, in plain words:
+  - **a) Going round more than once.** The claim written `pay`, `assess`, `check`: one pass down
+    the list finds `pay` waiting for "assessed" and `assess` waiting for "checked", neither
+    there yet, then adds `check`, and would conclude two steps never run. They only come later
+    than they are written: a case has no position. So the check goes down the list again until a
+    round adds nothing (round 2 adds `assess`, round 3 `pay`, round 4 nothing). It always ends:
+    each round only adds, and the steps are a finite list.
+  - **Why start from nothing.** Starting from "everything can run", the deadlocked pair vouch
+    for each other ("pay can run because assess can, and assess because pay can") and the
+    deadlock passes. Grown from nothing, a step goes in only once what it waits for is in, so
+    neither ever does: only what some order of events really reaches.
+  - **b) One look is enough for where values come from.** Whoever writes a value stamps it with
+    its own mark, whatever it read: a person's answer with the person, an output with its
+    contract's source (brief, D29, D34). A field's origin never depends on another field's, so
+    one look at each field's writers gives the whole answer.
+  - **What brings the repeating back:** a field computed from other fields, as layer 11's rules
+    may do ("total = amount + fee"). Its origin then depends on theirs, which may depend on
+    others: round again until nothing changes (brief, D34).
+  In one line: what a case can reach needs rounds until nothing changes, grown from nothing;
+  where a value comes from needs one look, until fields are computed from fields.
+- Follow-up: with steps written `c`, `b`, `a`, where `c` requires `b` and `b` requires `a`, how
+  many rounds does the check take, and what does each add? And why would starting from
+  "everything" wrongly accept two steps that each require the other?
+- Status: open.
+
