@@ -1,7 +1,7 @@
 # Layer 11: rules
 
 Status: research done, 2026-10-16 (`docs/layers/11-research.md`, Flowable's CMMN engine at
-`f6017e3`); the split and 11a's choices **proposed, not yet agreed**. Nothing is built.
+`f6017e3`); the warm-up skipped at the user's request, 2026-10-17 (learning question 32 stays open, for the next layer); the split and 11a's choices **proposed, not yet agreed**. Nothing is built.
 
 ## What this layer is for
 
