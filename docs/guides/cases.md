@@ -523,7 +523,8 @@ flag_high_risk#1 on reached checked: not applied: checked is reached, so the cas
 
 **What the check says about rules.** `ventoux check` reads rules too: a milestone a rule may
 reach counts as reachable, every `when` taken as possibly true, but proves nothing about what is
-set; a rule's `when` is type-checked; and two codes are its own:
+set; a step that a rule on the opening may let start keeps the case from closing at once, so no
+`CLOSES_AT_OPENING` is given for it; a rule's `when` is type-checked; and two codes are its own:
 
 | Code | Kind | What is wrong | Example message |
 |---|---|---|---|

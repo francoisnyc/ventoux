@@ -59,18 +59,6 @@ def validate_case(
         )
     can = can_happen(case, catalog)
     found: list[Issue] = []
-    # Steps the structure lets run are still kept out if the case closes when it opens. If every
-    # step is dead anyway, their own issues say why: one cause, one issue.
-    if closes_at_opening(case) and any(name in can for name in case.steps):
-        found.append(
-            Issue(
-                "steps",
-                "CLOSES_AT_OPENING",
-                f"nothing starts by itself when {case.case} opens, so it closes at once and every "
-                "proposal is refused: let a step start by itself with nothing required, or add "
-                "stays_open",
-            )
-        )
     nobody_closes = never_closes(case, catalog, can)
     found += never_run(case, catalog, can) + never_fires(case, can) + nobody_closes
     contracts, unknown_contracts = called_contracts(case, catalog)
@@ -100,7 +88,25 @@ def validate_case(
     refused = {i.path.split(".")[1] for i in found if i.severity == "error" and "." in i.path}
     refused |= {name for name in case.steps if name not in can}
     said = {issue.path for issue in found}
-    return found + warning_issues(case, contracts, supplied, said, missing | refused)
+    found += warning_issues(case, contracts, supplied, said, missing | refused)
+    # Steps the structure lets run are still kept out if the case closes when it opens. If every
+    # step is dead anyway, their own issues say why; and a rule on the opening with its own issue
+    # may fail, so the case may need attention instead of closing: one cause, one issue. Said
+    # first, as the first thing the case would do.
+    with_issue = {i.path.split(".")[1] for i in found if i.path.startswith("rules.")}
+    own_issue = bool(with_issue & set(opening_fired(case)))
+    if closes_at_opening(case) and any(name in can for name in case.steps) and not own_issue:
+        found.insert(
+            0,
+            Issue(
+                "steps",
+                "CLOSES_AT_OPENING",
+                f"nothing starts by itself when {case.case} opens, so it closes at once and every "
+                "proposal is refused: let a step start by itself with nothing required, or add "
+                "stays_open",
+            ),
+        )
+    return found
 
 
 def unreachable_milestones(case: CaseDefinition) -> list[Issue]:
@@ -173,13 +179,40 @@ def never_closes(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[
 
 
 def closes_at_opening(case: CaseDefinition) -> bool:
-    """Whether the case closes the moment it opens: nothing is reached yet, so only a step that
-    starts by itself with nothing required can start, and with none, nothing is pending
-    (brief, D10). A case that stays open waits for a person instead."""
+    """Whether the case closes the moment it opens: only what rules on the opening may reach is
+    reached yet, so only a step that starts by itself with every requirement among those can
+    start, and with none, nothing is pending (brief, D10). A case that stays open waits for a
+    person instead."""
     required = requirements(case)
+    reached = opening_reaches(case)
     return not case.stays_open and not any(
-        step.automatic and not required[name] for name, step in case.steps.items()
+        step.automatic and set(required[name]) <= reached for name, step in case.steps.items()
     )
+
+
+def opening_fired(case: CaseDefinition) -> list[str]:
+    """The rules that may fire as the case opens: those on the opening, then those on a milestone
+    one of them may reach, and so on, every `when` taken as possibly true (brief, D38)."""
+    fired: list[str] = []
+    reached: set[str] = set()
+    while True:
+        more = [
+            name
+            for name, rule in case.rules.items()
+            if name not in fired
+            and (
+                rule.on == "opened" or (isinstance(rule.on, Reached) and rule.on.reached in reached)
+            )
+        ]
+        if not more:  # a round added nothing: it ends, over finitely many rules
+            return fired
+        fired += more
+        reached |= {m for name in more for m in case.rules[name].then.reach}
+
+
+def opening_reaches(case: CaseDefinition) -> set[str]:
+    """Every milestone a rule may reach as the case opens."""
+    return {m for name in opening_fired(case) for m in case.rules[name].then.reach}
 
 
 def never_run(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Issue]:

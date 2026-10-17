@@ -4,7 +4,8 @@ Status: research done, 2026-10-16 (`docs/layers/11-research.md`, Flowable's CMMN
 `f6017e3`); the warm-up skipped at the user's request, 2026-10-17 (learning question 32 stays
 open, for the next layer); the split and 11a's eleven choices agreed in the session, 2026-10-17
 (all as proposed; design question 17, option a); D38 and the cases guide's "Rules" drafted the same
-day; 11a built, slices 0–7; Promises checked against the tests, 2026-10-17.
+day; 11a built, slices 0–7; Promises checked against the tests, 2026-10-17; the tutor review's
+fix built test-first, and the Promises table names every test, the same day.
 
 ## What this layer is for
 
@@ -212,7 +213,10 @@ All eleven agreed as proposed, 2026-10-17; the alternative set aside is said wit
    - `OUTCOME_UNREAD` counts a rule's condition as a reader; `EXPRESSION_INVALID`, `MAY_BE_UNSET`
      and `SET_AFTER` read a rule's condition too, its moment standing for `requires` (`reached m`
      as requiring `m`; `started s` as requiring what `s` requires; the opening as nothing);
-   - `CLOSES_AT_OPENING` is unchanged: in 11a a rule starts nothing;
+   - `CLOSES_AT_OPENING` counts what rules on the opening may reach: a rule starts no step, but a
+     milestone it reaches admits the steps requiring it in the same decision. *Corrected in the
+     tutor review of 11a: it said "unchanged: in 11a a rule starts nothing", which made the error
+     no longer a proof (see "From the tutor review").*
    - the runtime depends on nothing validation did (brief, D34): every refusal above happens in
      `decide` too.
 9. **On Temporal, nothing new but state.** Rules run in `decide`, so the case workflow runs them as
@@ -311,30 +315,75 @@ Each starts with its negative test, seen failing for the right reason.
   `checked`, which this refund reaches, where it said `paid`. The two new codes have their own
   table in the guide's "Rules", checked like the others.
 
+### From the tutor review
+
+- **`CLOSES_AT_OPENING` was no longer a proof.** It asked only whether a step starting by itself
+  required nothing, but a rule on the opening may reach a milestone that lets such a step start:
+  the review's probe (`review` requiring `triaged`, which a rule on the opening reaches) was
+  refused as closing at once, and ran waiting for the review. Now the check first collects what
+  the opening may reach: the milestones of rules on the opening, then of rules on those, every
+  `when` taken as possibly true, as `can_happen` does. A step starting by itself whose
+  requirements are all among them may start, so no issue is given; whether it does then depends
+  on data.
+- **A rule on the opening with an issue of its own gets no `CLOSES_AT_OPENING` beside it.** It may
+  fail as the case opens, and the case then needs attention instead of closing; its own issue says
+  why (one cause, one issue). Any issue at the rule counts, a warning included, since a rule that
+  may fail is enough to make "closes at once" unproven.
+- **The Promises table names every test,** one per row or listed by name, so it can be checked
+  against the file mechanically, as every earlier table can.
+
 ### Promises
 
 Every test is in `tests/test_rules.py` unless said otherwise.
 
 | Promise | Test that would fail |
 |---|---|
-| A rule naming what the case doesn't declare, named like a step or milestone, untitled, on an unknown moment, or reaching nothing is refused when read | slice 0's seven tests, `test_a_rule_reaching_an_undeclared_milestone_is_refused` to `test_a_rule_that_does_nothing_is_refused` |
-| The opening fires its rules once; a milestone once; each started run once | `test_a_rule_on_the_opening_reaches_its_milestone_once`, `test_a_rule_fires_on_each_run_of_its_step` |
+| A rule reaching a milestone nobody declared is refused when read | `test_a_rule_reaching_an_undeclared_milestone_is_refused` |
+| A rule named like a step or a milestone is refused | `test_a_rule_named_like_a_step_or_a_milestone_is_refused` |
+| A rule on a step or milestone the case doesn't declare is refused | `test_a_rule_on_what_the_case_doesnt_declare_is_refused` |
+| A rule names one of three moments: the opening, a step started, a milestone reached | `test_a_rule_names_one_of_three_moments` |
+| An unknown moment is refused in one line | `test_an_unknown_moment_is_refused_in_one_line` |
+| A rule without a title is refused | `test_a_rule_without_a_title_is_refused` |
+| A rule that reaches nothing is refused | `test_a_rule_that_does_nothing_is_refused` |
 | A rule whose `when` is false reaches nothing, and says so | `test_a_false_condition_reaches_nothing`, `test_the_guides_false_condition_says_so` |
-| Rules on one moment fire in the order written; moments in the order they come; rules follow rules | `test_rules_on_one_moment_fire_in_the_order_written`, `test_a_milestone_a_rule_reaches_starts_what_requires_it` |
-| A milestone a rule reaches admits the steps that require it, in the same decision | `test_a_milestone_a_rule_reaches_starts_what_requires_it`, `test_the_guides_rule_runs_as_shown` |
+| The opening fires its rules once, and a milestone is reached once | `test_a_rule_on_the_opening_reaches_its_milestone_once` |
+| A rule fires on each started run of its step | `test_a_rule_fires_on_each_run_of_its_step` |
+| Rules follow rules, moments in the order they come, and a milestone a rule reaches admits the steps requiring it in the same decision | `test_a_milestone_a_rule_reaches_starts_what_requires_it`, `test_the_guides_rule_runs_as_shown` |
+| Rules on one moment fire in the order written | `test_rules_on_one_moment_fire_in_the_order_written` |
 | A rule that can't be read needs attention and keeps the case open, never read as false | `test_a_rule_that_cant_be_read_needs_attention`, `test_the_guides_unreadable_rule_is_shown` |
 | A misspelt outcome in a rule's `when` fails it (brief, D35) | `test_a_misspelt_outcome_fails_the_rule_never_reads_false` |
-| An operator's retry reads a failed rule's condition again, and is refused while it still can't be read | `test_a_retried_rule_reads_its_condition_again`, `test_a_rule_still_unreadable_is_not_retried` |
-| A rule whose condition reads untrusted data reaches nothing, even beside trusted data, saying which value and source; a trusted value decides | `test_untrusted_data_cant_decide`, `test_untrusted_data_beside_trusted_data_still_cant_decide`, `test_a_trusted_value_decides`, `test_the_guides_untrusted_rule_is_shown` |
-| Once every `closes_when` milestone is reached, no rule acts, even on that moment or while a failed step holds the close, and each firing says why | `test_rules_stop_with_the_close`, `test_rules_dont_act_while_a_failed_step_holds_the_close`, `test_the_guides_rule_stopped_by_the_close_is_shown` |
+| A retry of a rule that still can't be read is refused | `test_a_rule_still_unreadable_is_not_retried` |
+| An operator's retry reads a failed rule's condition again | `test_a_retried_rule_reads_its_condition_again` |
+| A rule whose condition reads untrusted data reaches nothing, saying which value and source | `test_untrusted_data_cant_decide`, `test_the_guides_untrusted_rule_is_shown` |
+| A trusted value decides | `test_a_trusted_value_decides` |
+| Untrusted data beside trusted data still can't decide | `test_untrusted_data_beside_trusted_data_still_cant_decide` |
+| Once every `closes_when` milestone is reached, no rule acts, even on that moment, and each firing says why | `test_rules_stop_with_the_close`, `test_the_guides_rule_stopped_by_the_close_is_shown` |
 | A rule reaching the last `closes_when` milestone closes the case | `test_a_rule_reaching_closes_when_closes_the_case` |
-| A failed rule holds the close; retried meanwhile, it decides nothing and the case closes; a person's close cancels it | `test_a_failed_rule_holds_the_close`, `test_a_failed_rule_retried_while_it_holds_the_close_lets_the_case_close`, `test_a_person_closing_the_case_cancels_a_failed_rule` |
-| A rule that can never fire is refused (`NEVER_FIRES`) | the four `…never_fires` / `…never_acts` tests, `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
-| A rule whose condition reads always-untrusted data is refused (`UNTRUSTED_TRIGGER`); one reading trusted data isn't | `test_a_rule_reading_untrusted_data_is_refused`, `test_a_rule_reading_trusted_data_is_not_refused`, the guide's table test |
-| A milestone only a rule reaches is reachable: not `NEVER_RUNS`, `CLOSE_UNREACHABLE` nor `UNREACHABLE_MILESTONE`; a rule can break a deadlock; one nothing reaches says "no step or rule reaches" | `test_a_milestone_only_a_rule_reaches_is_reachable`, `test_a_rule_breaks_a_deadlock`, `test_a_milestone_nothing_reaches_says_no_step_or_rule_reaches_it` |
-| A milestone a rule may reach proves nothing about values (`MAY_BE_UNSET`; `SET_AFTER` becomes a warning) | `test_a_milestone_a_rule_may_reach_proves_nothing_about_values`, `test_a_rule_may_let_a_writer_run_first_so_set_after_becomes_a_warning` (both seen failing without the fix) |
-| A rule's condition is type-checked, read for `OUTCOME_UNREAD`, and warned when it may read an unset value (an error on the opening) | `test_a_rules_condition_is_type_checked`, `test_a_rule_reading_an_outcome_tells_it_apart`, `test_a_rule_reading_on_the_opening_what_only_a_person_sets_fails_every_time`, `test_a_rule_reading_what_may_not_be_set_yet_is_warned`, `test_a_rule_reading_what_its_moment_ensures_is_not_warned` |
-| The runtime refuses what validation refuses, on nothing validation did | slices 1–4 call only `run_case`: the `UNTRUSTED_TRIGGER` definition reaches nothing (`test_untrusted_data_cant_decide`), the `NEVER_FIRES` one is not applied (`test_rules_stop_with_the_close`), the `SET_AFTER` one needs attention (`test_a_rule_that_cant_be_read_needs_attention`) |
-| A rule's firings cross continue-as-new, and replay decides the same | `test_rule_firings_cross_continue_as_new_and_replay` (`tests/test_temporal_case.py`, seen failing with firings left out), `test_a_carried_state_reads_back_as_it_was` |
+| A failed rule holds the close | `test_a_failed_rule_holds_the_close` |
+| A failed rule retried while it holds the close decides nothing, and the case closes | `test_a_failed_rule_retried_while_it_holds_the_close_lets_the_case_close` |
+| A person's close cancels a failed rule | `test_a_person_closing_the_case_cancels_a_failed_rule` |
+| While a failed step holds the close, no rule acts | `test_rules_dont_act_while_a_failed_step_holds_the_close` |
+| A rule on a milestone nothing reaches never fires (`NEVER_FIRES`) | `test_a_rule_on_a_milestone_nothing_reaches_never_fires` |
+| A rule on a step that never runs never fires | `test_a_rule_on_a_step_that_never_runs_never_fires` |
+| A rule waiting on a rule that never fires never fires | `test_a_rule_waiting_on_a_rule_that_never_fires_never_fires` |
+| A rule on reaching the one `closes_when` milestone never acts | `test_a_rule_on_the_last_closes_when_milestone_never_acts`, `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
+| A rule whose condition reads always-untrusted data is refused (`UNTRUSTED_TRIGGER`) | `test_a_rule_reading_untrusted_data_is_refused`, `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
+| A rule reading trusted data is not refused | `test_a_rule_reading_trusted_data_is_not_refused` |
+| A milestone only a rule reaches is reachable: not `NEVER_RUNS`, `CLOSE_UNREACHABLE` nor `UNREACHABLE_MILESTONE` | `test_a_milestone_only_a_rule_reaches_is_reachable` |
+| A rule can break a deadlock | `test_a_rule_breaks_a_deadlock` |
+| A milestone nothing reaches says "no step or rule reaches" | `test_a_milestone_nothing_reaches_says_no_step_or_rule_reaches_it` |
+| A milestone a rule may reach proves nothing about values (`MAY_BE_UNSET`) | `test_a_milestone_a_rule_may_reach_proves_nothing_about_values` (seen failing without the fix) |
+| A `SET_AFTER` a rule could undo becomes a warning | `test_a_rule_may_let_a_writer_run_first_so_set_after_becomes_a_warning` (seen failing without the fix) |
+| A rule's condition is type-checked (`EXPRESSION_INVALID`) | `test_a_rules_condition_is_type_checked` |
+| A rule's condition reads an outcome, for `OUTCOME_UNREAD` | `test_a_rule_reading_an_outcome_tells_it_apart` |
+| A rule on the opening reading what only a person sets fails every time (`SET_AFTER`) | `test_a_rule_reading_on_the_opening_what_only_a_person_sets_fails_every_time` |
+| A rule reading what may not be set yet is warned (`MAY_BE_UNSET`) | `test_a_rule_reading_what_may_not_be_set_yet_is_warned` |
+| A rule reading what its moment ensures is not warned | `test_a_rule_reading_what_its_moment_ensures_is_not_warned` |
+| A step that a rule on the opening admits keeps the case open: no `CLOSES_AT_OPENING`, and the run waits for it | `test_a_step_a_rule_on_the_opening_admits_keeps_the_case_open` |
+| A rule on the opening whose `when` may be false gives no `CLOSES_AT_OPENING` | `test_a_rule_on_the_opening_whose_when_may_be_false_gives_no_issue` |
+| A rule on the opening reaching what no starting step requires leaves `CLOSES_AT_OPENING` as it was | `test_a_rule_on_the_opening_admitting_nothing_leaves_closes_at_opening` |
+| A rule on the opening with its own issue gets no `CLOSES_AT_OPENING` beside it | `test_a_rule_on_the_opening_with_its_own_error_gets_no_closes_at_opening_beside_it` |
+| The runtime refuses what validation refuses, on nothing validation did | `test_untrusted_data_cant_decide` (`UNTRUSTED_TRIGGER` reaches nothing), `test_rules_stop_with_the_close` (`NEVER_FIRES` is not applied), `test_a_rule_that_cant_be_read_needs_attention` (`SET_AFTER` needs attention): each calls only `run_case` |
+| A rule's firings cross continue-as-new, and replay decides the same | `test_rule_firings_cross_continue_as_new_and_replay` (`tests/test_temporal_case.py`, seen failing with firings left out), `test_a_carried_state_reads_back_as_it_was` (`tests/test_temporal_case.py`) |
 | No rule line or rule issue quotes a value from a case file | `test_no_rule_line_or_issue_quotes_a_value_from_the_case_file` |
-| The guide's examples run as written | slice 7's `test_the_guides_…` tests |
+| The guide's rule runs as shown | `test_the_guides_rule_runs_as_shown` |

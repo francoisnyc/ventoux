@@ -834,3 +834,61 @@ def test_no_rule_line_or_issue_quotes_a_value_from_the_case_file() -> None:
         said += run.needs_attention + [issue.message for issue in issues(definition)]
         assert said
         assert not [line for line in said if any(value in line for value in values)]
+
+
+# --- From the tutor review: what the opening may reach ---
+
+
+def triaged_first(**rule: Any) -> dict[str, Any]:
+    """The review's probe: the refund's review requires `triaged`, which only a rule on the
+    opening reaches; no step starts by itself with nothing required."""
+    definition = copy.deepcopy(REFUND)
+    definition["milestones"] = {"triaged": {"display": {"title": "Triaged"}}}
+    definition["steps"]["review"]["requires"] = ["triaged"]
+    definition["rules"] = {
+        "triage": {
+            "display": {"title": "Triage the refund"},
+            "on": "opened",
+            "then": {"reach": ["triaged"]},
+        }
+        | rule
+    }
+    return definition
+
+
+def test_a_step_a_rule_on_the_opening_admits_keeps_the_case_open() -> None:
+    # The rule reaches triaged as the case opens, and the review starts in the same decision:
+    # the case doesn't close at opening, so CLOSES_AT_OPENING would not be a proof.
+    assert issues(triaged_first()) == []
+    run = run_case(
+        triaged_first(), file={"order_id": "ord-1", "amount": 250}, answers=[], people=PEOPLE
+    )
+    assert run.waiting_for == ["review by support"] and not run.closed
+
+
+def test_a_rule_on_the_opening_whose_when_may_be_false_gives_no_issue() -> None:
+    # Whether the case closes at opening then depends on the amount: a value, never proven.
+    assert issues(triaged_first(when={">": [{"var": "amount"}, 1000]})) == []
+
+
+def test_a_rule_on_the_opening_admitting_nothing_leaves_closes_at_opening() -> None:
+    # Nothing starts by itself, and the milestone the rule reaches is one no step requires.
+    definition = with_rule(when=None)
+    definition["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    without_rule = copy.deepcopy(definition)
+    del without_rule["rules"]
+    del without_rule["milestones"]
+
+    def closing(d: dict[str, Any]) -> list[Issue]:
+        return [i for i in issues(d) if i.code == "CLOSES_AT_OPENING"]
+
+    assert closing(definition) == closing(without_rule) != []
+
+
+def test_a_rule_on_the_opening_with_its_own_error_gets_no_closes_at_opening_beside_it() -> None:
+    # The rule fails as the case opens, so the case needs attention instead of closing; its own
+    # SET_AFTER says why: one cause, one issue.
+    definition = triaged_first(when={">": [{"var": "approved_amount"}, 1000]})
+    definition["steps"]["review"]["requires"] = []
+    definition["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    assert [i.code for i in issues(definition)] == ["SET_AFTER"]
