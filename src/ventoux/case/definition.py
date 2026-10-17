@@ -195,6 +195,63 @@ class PlanStep(Step):
         return data
 
 
+def some_milestones(names: tuple[str, ...]) -> tuple[str, ...]:
+    """A rule that reaches nothing would do nothing: refused, so a typo never hides a rule."""
+    if not names:
+        raise ValueError("a rule reaches at least one milestone")
+    return names
+
+
+class Then(Shape):
+    """What a rule does when it fires (brief, D38)."""
+
+    reach: Annotated[tuple[Name, ...], AfterValidator(some_milestones)]  # milestones it reaches
+
+
+class Started(Shape):
+    """The moment a run of a step starts: each run, a refresh included (brief, D38)."""
+
+    started: Name  # the step
+
+
+class Reached(Shape):
+    """The moment a milestone is reached: once, since it is never undone (brief, D38)."""
+
+    reached: Name  # the milestone
+
+
+def moment_of(on: object) -> str | None:
+    """The kind of moment `on` names, which picks its shape; None if it names none."""
+    if on == "opened":
+        return "opened moment"
+    if isinstance(on, dict) and len(on) == 1 and next(iter(on)) in ("started", "reached"):
+        return f"{next(iter(on))} moment"
+    return None
+
+
+# Pydantic: `Discriminator` picks one shape from the data, as for steps, so a wrong moment gets one
+# line, not one per shape it could have been.
+type Moment = Annotated[
+    Annotated[Literal["opened"], Tag("opened moment")]
+    | Annotated[Started, Tag("started moment")]
+    | Annotated[Reached, Tag("reached moment")],
+    Discriminator(moment_of),
+]
+
+MOMENTS = '"opened", {"started": <step>} or {"reached": <milestone>}'
+
+
+class Rule(Shape):
+    """On a moment, when a condition holds, then act on the case (brief, D38)."""
+
+    display: Display
+    # The moment it reacts to: the case opened, a step's run started, a milestone reached. A closed
+    # list: a new moment is a decision recorded in the brief (brief, D38).
+    on: Moment
+    when: PlanExpression | None = None  # read once the moment has come, on the case file then
+    then: Then
+
+
 def kind_of(step: object) -> str | None:
     """The kind a step says it is, which picks its shape; None if it says none."""
     if isinstance(step, dict):
@@ -221,6 +278,7 @@ class CaseDefinition(Shape):
     milestones: dict[Name, Milestone] = {}
     steps: Annotated[dict[Name, AnyStep], Field(min_length=1)]
     sequence: tuple[Name, ...] = ()  # each step requires the one before it
+    rules: dict[Name, Rule] = {}  # what the case does on a moment (brief, D38)
     close_reasons: dict[Name, CloseReason] = {}  # how a person may close it, and who (brief, D10)
     closes_when: tuple[Name, ...] = ()  # milestones that close it once all are reached
     stays_open: bool = False  # True: it never closes by itself; a person closes it
@@ -263,6 +321,15 @@ class CaseDefinition(Shape):
         ]
         for name, step in self.steps.items():
             problems += step_problems(f"steps.{name}", step, self)
+        for name, rule in self.rules.items():
+            # A rule's firings are entries beside step runs (`flag_large#1`), so no name is shared.
+            if name in self.steps or name in self.milestones:
+                problems.append(f"rules.{name}: a rule is not named like a step or a milestone")
+            if isinstance(rule.on, Started) and rule.on.started not in self.steps:
+                problems.append(f"rules.{name}.on.started: {rule.on.started} is not a step")
+            if isinstance(rule.on, Reached):
+                problems += reaching(f"rules.{name}.on.reached", (rule.on.reached,), self)
+            problems += reaching(f"rules.{name}.then.reach", rule.then.reach, self)
         if problems:
             raise ValueError("\n".join(problems))
         return self
@@ -353,8 +420,14 @@ def problem(error: Any) -> str:
     if "declared" in loc:
         at = loc.index("declared")
         loc = loc[:at] + loc[at + 2 :]
-    path = ".".join(part for part in loc if not part.endswith(" step") and part != "[key]")
+    path = ".".join(
+        part
+        for part in loc
+        if not part.endswith(" step") and not part.endswith(" moment") and part != "[key]"
+    )
     kind = error["type"]
+    if kind in ("union_tag_invalid", "union_tag_not_found") and loc[:1] == ["rules"]:
+        return f"{path}: a moment is {MOMENTS}"
     if kind in ("union_tag_invalid", "union_tag_not_found") and loc[:1] == ["steps"]:
         tag = error.get("ctx", {}).get("tag", "").removesuffix(" step")
         found = f", and this one is {tag!r}" if tag else ", and this one says none"
