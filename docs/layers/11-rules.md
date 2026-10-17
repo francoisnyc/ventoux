@@ -1,7 +1,8 @@
 # Layer 11: rules
 
 Status: research done, 2026-10-16 (`docs/layers/11-research.md`, Flowable's CMMN engine at
-`f6017e3`); the warm-up skipped at the user's request, 2026-10-17 (learning question 32 stays open, for the next layer); the split and 11a's choices **proposed, not yet agreed**. Nothing is built.
+`f6017e3`); the warm-up skipped at the user's request, 2026-10-17 (learning question 32 stays open, for the next layer); the split and 11a's eleven choices agreed in the session, 2026-10-17 (all as proposed; design
+question 17, option a); D38 and the cases guide's "Rules" drafted the same day. Nothing is built.
 
 ## What this layer is for
 
@@ -11,8 +12,8 @@ in five days, escalate", "when the customer cancels, stop", or "once the check i
 customer high risk if the score is over 70". Layer 11 adds the **rule**: *when* something happens,
 *if* a condition holds, *then* act on the case (brief, Simplifications, "one kind of rule"; D7).
 
-User-facing description: `docs/guides/cases.md` gains a "Rules" section, written once each part's
-design is agreed and before it is built (the curriculum's "document first").
+User-facing description: `docs/guides/cases.md`, "Rules" (11a's part written 2026-10-17, before
+building: the curriculum's "document first"); each later part adds to it. Decision: brief D38.
 
 The `chartering` prototype is checked out in this session (`/home/user/chartering`, `197d519`). It
 splits rules into sentries, triggers and deadlines; drawn on below: `src/case/events.ts` (a
@@ -125,9 +126,9 @@ reached high_risk
 started review_risk#1: waiting for cleared by fraud
 ```
 
-### Proposed choices
+### Decided in the session
 
-Each is a proposal for the session; the alternative I'd set aside is said with it.
+All eleven agreed as proposed, 2026-10-17; the alternative set aside is said with each.
 
 1. **Shape: `on`, `when`, `then`.** A rule is `{"display", "on", "when"?, "then"}` under the
    definition's `rules`, by name. `when` means what it means on a step: a condition read once the
@@ -176,7 +177,7 @@ Each is a proposal for the session; the alternative I'd set aside is said with i
      value is either always untrusted or never; a field only some writers make untrusted comes with
      `set` (11c), and gets a warning then;
    - **the other half of the question**, whether untrusted data may steer *which step starts*
-     (a step's `when`, a rule's `start`), is decided now and built in 11b. My proposal: a
+     (a step's `when`, a rule's `start`), is decided now and built in 11b. Agreed (option a): a
      condition's sources count as read by every input of the step it lets start, for the input
      policy check (the prototype's "strict mode", bounded in a case: the influence ends at the step
      it gates, since a case has no position to carry it further); and an approval's `when` that
@@ -225,7 +226,7 @@ Each is a proposal for the session; the alternative I'd set aside is said with i
 11. **D38**, drafted with this note once agreed: rules, their moments, what they read, untrusted
     data can't decide (design question 17), and rules stop with the close.
 
-### Where the code goes (proposed)
+### Where the code goes
 
 - `case/definition.py`: `Rule`, `rules` on the definition; names unlike steps and milestones.
 - `case/rules.py` (new): which rules a moment fires, reading the condition, the trust check, acting.
@@ -243,7 +244,7 @@ Each is a proposal for the session; the alternative I'd set aside is said with i
 - The steering half of design question 17 is decided here and built in 11b.
 - No new dependency.
 
-### Seams the tests use (proposed)
+### Seams the tests use
 
 - `parse_case(data)` with `rules`; `CaseInvalid` for a rule naming what doesn't exist.
 - `run_case(...)`: `history`, `needs_attention`, `closed`, `waiting_for`; `retry(entry, who)` for a
@@ -252,7 +253,7 @@ Each is a proposal for the session; the alternative I'd set aside is said with i
 - The Temporal test server, once: a case whose rule fired continues as new and replays.
 - The guide's examples, run as written.
 
-### Slices, in order (proposed)
+### Slices, in order
 
 Each starts with its negative test, seen failing for the right reason.
 
@@ -272,7 +273,7 @@ Each starts with its negative test, seen failing for the right reason.
 6. **On Temporal.** A case whose rule fired continues as new and replays the same.
 7. **The guide and the promises.**
 
-### Promises (proposed: each test is written in its slice)
+### Promises (each test is written in its slice; checked against the tests before review)
 
 | Promise | Test that would fail |
 |---|---|

@@ -423,6 +423,100 @@ case is flagged.
 
 A workflow step never waits for people: put the human work in a task step before or after it.
 
+## Rules
+
+A step asks "may I start now?" after every event, and starts as soon as the answer is yes: it
+reacts to how the case *is*. Some things a case should react to are moments instead: the
+customer has just been checked, and the score says high risk. A **rule** says it: *on* a moment,
+*when* a condition holds, *then* act on the case.
+
+Give the refund's KYC check (above) `"reaches": ["checked"]`, and add a rule and a step for the
+fraud team:
+
+```json
+"rules": {
+  "flag_high_risk": {
+    "display": {"title": "Flag a high-risk customer"},
+    "on": {"reached": "checked"},
+    "when": {">": [{"var": "kyc.risk_score"}, 70]},
+    "then": {"reach": ["high_risk"]}
+  }
+}
+```
+
+```json
+"review_risk": {
+  "kind": "task",
+  "display": {"title": "Review a high-risk customer"},
+  "roles": ["fraud"],
+  "requires": ["high_risk"],
+  "outcomes": {"cleared": {"display": {"title": "Customer cleared"}}}
+}
+```
+
+Read aloud: once the customer is checked, if the risk score is over 70, the customer is high risk,
+and someone in fraud reviews them. `high_risk` is declared under `milestones`, like any other.
+
+```
+kyc#1 done, giving analyst_notes from untrusted:llm; contact_email from untrusted:undeclared; risk_score from system:kyc; status from system:kyc
+reached checked
+flag_high_risk#1 on reached checked: reaching high_risk
+reached high_risk
+started review_risk#1: waiting for cleared by fraud
+```
+
+A rule's `on` names one moment:
+
+| `on` | The rule fires |
+|---|---|
+| `"opened"` | once, when the case opens, with its first values in the case file |
+| `{"reached": "checked"}` | once, when the milestone is reached: a milestone is never undone |
+| `{"started": "assess"}` | each time a run of the step starts: a task opening, an activity or workflow scheduled, a plan started, a stale fact fetched again. A retry is the same run, so it doesn't start again |
+
+`when` is optional, and reads the case file as it is at that moment, as a step's `when` does: it
+is checked against the case's values first, so a misspelt outcome is an error, never false. With
+its `when` false, a rule does nothing, and the history says so: `flag_high_risk#1 on reached
+checked: its condition is false`. `then` lists the milestones it reaches.
+
+**A rule reacts to a moment, never to a state.** It remembers nothing: when its moment comes, it
+reads the case file then, once. To start something as soon as a state holds, and whenever it
+holds again, write a step's `requires` and `when`, which are read after every event.
+
+**Rules run in order, before the case settles.** Moments are taken as they happen, and the rules
+on one moment in the order they are written. A milestone a rule reaches is a moment too, so rules
+can follow rules, and a step that requires it starts in the same decision. The case closes, if
+nothing is left to do, only after all of that.
+
+**A rule that can't be read needs attention.** If its `when` reads a value nobody set, or one of
+the wrong type, it reaches nothing, the case needs attention and doesn't close:
+
+```
+flag_high_risk#1 failed: flag_high_risk's condition kyc.risk_score > 70 can't be evaluated: kyc.risk_score has no value
+```
+
+An operator retries it, `retry("flag_high_risk#1", "omar")`, which reads its condition again, on
+the case file as it is then; or closes the case.
+
+**Untrusted data can't decide.** Reaching a milestone decides something for the case. A rule
+whose `when` reads a value from an untrusted source reaches nothing, and says why, never quoting
+the value. Here the rule reads what a model wrote about the customer:
+
+```json
+"when": {"==": [{"var": "kyc.analyst_notes"}, "high risk"]}
+```
+
+```
+flag_high_risk#1 on reached checked: reaches nothing: its condition reads kyc.analyst_notes, from untrusted:llm, and untrusted data can't decide
+```
+
+Read the notes in a task instead, and let a person's answer reach the milestone: a person's answer
+is trusted, and the history shows who.
+
+**Rules stop with the close.** Once every `closes_when` milestone is reached, no rule acts, even
+on the moment that reached the last one, and even while a failed step holds the close. Each rule
+that would have fired says so: `flag_high_risk#1 on reached checked: not applied: paid is
+reached, so the case closes and nothing new is decided`.
+
 ## Testing a case
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`
