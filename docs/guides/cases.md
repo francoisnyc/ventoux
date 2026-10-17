@@ -488,7 +488,8 @@ can follow rules, and a step that requires it starts in the same decision. The c
 nothing is left to do, only after all of that.
 
 **A rule that can't be read needs attention.** If its `when` reads a value nobody set, or one of
-the wrong type, it reaches nothing, the case needs attention and doesn't close:
+the wrong type, it reaches nothing, the case needs attention and doesn't close. Fire the same rule
+`"on": "opened"`, before the check has run:
 
 ```
 flag_high_risk#1 failed: flag_high_risk's condition kyc.risk_score > 70 can't be evaluated: kyc.risk_score has no value
@@ -514,8 +515,20 @@ is trusted, and the history shows who.
 
 **Rules stop with the close.** Once every `closes_when` milestone is reached, no rule acts, even
 on the moment that reached the last one, and even while a failed step holds the close. Each rule
-that would have fired says so: `flag_high_risk#1 on reached checked: not applied: paid is
-reached, so the case closes and nothing new is decided`.
+that would have fired says so. With `"closes_when": ["checked"]`:
+
+```
+flag_high_risk#1 on reached checked: not applied: checked is reached, so the case closes and nothing new is decided
+```
+
+**What the check says about rules.** `ventoux check` reads rules too: a milestone a rule may
+reach counts as reachable, every `when` taken as possibly true, but proves nothing about what is
+set; a rule's `when` is type-checked; and two codes are its own:
+
+| Code | Kind | What is wrong | Example message |
+|---|---|---|---|
+| `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
+| `UNTRUSTED_TRIGGER` | error | a rule's `when` reads a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
 
 ## Testing a case
 

@@ -1,8 +1,10 @@
 # Layer 11: rules
 
 Status: research done, 2026-10-16 (`docs/layers/11-research.md`, Flowable's CMMN engine at
-`f6017e3`); the warm-up skipped at the user's request, 2026-10-17 (learning question 32 stays open, for the next layer); the split and 11a's eleven choices agreed in the session, 2026-10-17 (all as proposed; design
-question 17, option a); D38 and the cases guide's "Rules" drafted the same day. Nothing is built.
+`f6017e3`); the warm-up skipped at the user's request, 2026-10-17 (learning question 32 stays
+open, for the next layer); the split and 11a's eleven choices agreed in the session, 2026-10-17
+(all as proposed; design question 17, option a); D38 and the cases guide's "Rules" drafted the same
+day; 11a built, slices 0–7; Promises checked against the tests, 2026-10-17.
 
 ## What this layer is for
 
@@ -273,24 +275,66 @@ Each starts with its negative test, seen failing for the right reason.
 6. **On Temporal.** A case whose rule fired continues as new and replays the same.
 7. **The guide and the promises.**
 
-### Promises (each test is written in its slice; checked against the tests before review)
+### Decided while building
+
+- **A retried run starts nothing again** (slice 1), as D38 says; and neither does a run that
+  failed before it started (an input refused), when an operator retries it: it is the same run,
+  and `started` fires only for a new one.
+- **Firings cross continue-as-new from slice 1,** not slice 6: the guard on the carried state
+  (`test_a_carried_state_reads_back_as_it_was`) failed as soon as the state had a new field.
+  Slice 6 kept its Temporal test, seen failing with firings left out.
+- **`needs_attention` is one function** for both drivers (slice 2), and who may retry is one
+  function for steps and rules (`operating_role`).
+- **Not acting is checked before acting, whatever the condition gave** (slice 3): the trust check
+  runs on what the condition reads once it could be read, so an untrusted condition's value never
+  shows in what happens next.
+- **The close, completed** (slice 4), with three things the session left implicit:
+  - "nothing new is decided" covers a person's close too, with its own reason (`the case is
+    closing, so nothing new is decided`);
+  - a rule reaching the last `closes_when` milestone closes the case in the same decision: `decide`
+    checks `closes_when` again after admission, which it didn't need while only events reached
+    milestones, and stops plan steps after both checks;
+  - a failed rule holds a `closes_when` close and a person's close cancels it, as for a failed
+    step (brief, D26); retried while it holds the close, it reads its condition, decides nothing,
+    and the case closes.
+- **What validation claims, and no more** (slice 5):
+  - `NEVER_FIRES` "after the close" is claimed only for a rule on reaching the one `closes_when`
+    milestone; other forms are left unsaid;
+  - a rule's own `SET_AFTER` is claimed only on the opening, where nothing has run; on any other
+    moment it is `MAY_BE_UNSET`;
+  - the 10a messages for a milestone nothing reaches now say "no step or rule reaches" (choice 8),
+    in the guide's table and tests too;
+  - all four `NEVER_FIRES` branches were written before their tests, which passed at once; one
+    exposed a message ("it can ever happen") copied into the test from the code. Fixed in both.
+- **The guide's examples, corrected by running them** (slice 7): the unreadable rule fires
+  `"on": "opened"` (on `checked` the score is always set), and the close example closes on
+  `checked`, which this refund reaches, where it said `paid`. The two new codes have their own
+  table in the guide's "Rules", checked like the others.
+
+### Promises
+
+Every test is in `tests/test_rules.py` unless said otherwise.
 
 | Promise | Test that would fail |
 |---|---|
-| A rule's moment fires it once: the opening once, a milestone once, each started run once | `test_each_moment_fires_its_rules_once` (slice 1) |
-| A rule whose `when` is false reaches nothing | `test_a_false_condition_reaches_nothing` (slice 1) |
-| Rules on one moment fire in the definition's order; moments are taken in the order they happen | `test_rules_fire_in_order` (slice 1) |
-| A milestone a rule reaches admits the steps that require it, in the same decision | `test_a_rule_reached_milestone_admits_steps` (slice 1) |
-| A rule that can't be read needs attention and keeps the case open, never read as false | `test_an_unreadable_rule_needs_attention` (slice 2) |
-| A misspelt outcome in a rule's `when` fails it (brief, D35) | `test_a_misspelt_outcome_fails_the_rule` (slice 2) |
-| An operator's retry reads a failed rule's condition again | `test_a_retried_rule_reads_again` (slice 2) |
-| A rule whose condition reads untrusted data reaches nothing, saying which value and source, never the value | `test_untrusted_data_cant_decide` (slice 3) |
-| Once every `closes_when` milestone is reached, no rule acts, and each firing says why | `test_rules_stop_with_the_close` (slice 4) |
-| A definition with a rule that can never fire is refused (`NEVER_FIRES`) | `test_never_fires` (slice 5) |
-| A rule whose condition reads always-untrusted data is refused (`UNTRUSTED_TRIGGER`) | `test_untrusted_trigger` (slice 5) |
-| A step requiring a milestone only a rule reaches is not `NEVER_RUNS`; a deadlock a rule breaks is not `DEADLOCK` | `test_rules_count_in_what_can_happen` (slice 5) |
-| A milestone a rule may reach proves nothing about values (`MAY_BE_UNSET`, `SET_AFTER`) | `test_a_rule_reached_milestone_sets_nothing` (slice 5) |
-| A rule's condition reads an outcome (`OUTCOME_UNREAD` silent) and is type-checked (`EXPRESSION_INVALID`) | `test_rule_conditions_are_checked` (slice 5) |
-| A case run without validation refuses the same at runtime | the runtime tests of slices 1–4 use no validation |
-| A rule's firings cross continue-as-new, and replay decides the same | `test_rule_firings_cross_continue_as_new` (slice 6) |
-| No message quotes a value from a case file | each slice's messages, checked in slice 7 |
+| A rule naming what the case doesn't declare, named like a step or milestone, untitled, on an unknown moment, or reaching nothing is refused when read | slice 0's seven tests, `test_a_rule_reaching_an_undeclared_milestone_is_refused` to `test_a_rule_that_does_nothing_is_refused` |
+| The opening fires its rules once; a milestone once; each started run once | `test_a_rule_on_the_opening_reaches_its_milestone_once`, `test_a_rule_fires_on_each_run_of_its_step` |
+| A rule whose `when` is false reaches nothing, and says so | `test_a_false_condition_reaches_nothing`, `test_the_guides_false_condition_says_so` |
+| Rules on one moment fire in the order written; moments in the order they come; rules follow rules | `test_rules_on_one_moment_fire_in_the_order_written`, `test_a_milestone_a_rule_reaches_starts_what_requires_it` |
+| A milestone a rule reaches admits the steps that require it, in the same decision | `test_a_milestone_a_rule_reaches_starts_what_requires_it`, `test_the_guides_rule_runs_as_shown` |
+| A rule that can't be read needs attention and keeps the case open, never read as false | `test_a_rule_that_cant_be_read_needs_attention`, `test_the_guides_unreadable_rule_is_shown` |
+| A misspelt outcome in a rule's `when` fails it (brief, D35) | `test_a_misspelt_outcome_fails_the_rule_never_reads_false` |
+| An operator's retry reads a failed rule's condition again, and is refused while it still can't be read | `test_a_retried_rule_reads_its_condition_again`, `test_a_rule_still_unreadable_is_not_retried` |
+| A rule whose condition reads untrusted data reaches nothing, even beside trusted data, saying which value and source; a trusted value decides | `test_untrusted_data_cant_decide`, `test_untrusted_data_beside_trusted_data_still_cant_decide`, `test_a_trusted_value_decides`, `test_the_guides_untrusted_rule_is_shown` |
+| Once every `closes_when` milestone is reached, no rule acts, even on that moment or while a failed step holds the close, and each firing says why | `test_rules_stop_with_the_close`, `test_rules_dont_act_while_a_failed_step_holds_the_close`, `test_the_guides_rule_stopped_by_the_close_is_shown` |
+| A rule reaching the last `closes_when` milestone closes the case | `test_a_rule_reaching_closes_when_closes_the_case` |
+| A failed rule holds the close; retried meanwhile, it decides nothing and the case closes; a person's close cancels it | `test_a_failed_rule_holds_the_close`, `test_a_failed_rule_retried_while_it_holds_the_close_lets_the_case_close`, `test_a_person_closing_the_case_cancels_a_failed_rule` |
+| A rule that can never fire is refused (`NEVER_FIRES`) | the four `…never_fires` / `…never_acts` tests, `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
+| A rule whose condition reads always-untrusted data is refused (`UNTRUSTED_TRIGGER`); one reading trusted data isn't | `test_a_rule_reading_untrusted_data_is_refused`, `test_a_rule_reading_trusted_data_is_not_refused`, the guide's table test |
+| A milestone only a rule reaches is reachable: not `NEVER_RUNS`, `CLOSE_UNREACHABLE` nor `UNREACHABLE_MILESTONE`; a rule can break a deadlock; one nothing reaches says "no step or rule reaches" | `test_a_milestone_only_a_rule_reaches_is_reachable`, `test_a_rule_breaks_a_deadlock`, `test_a_milestone_nothing_reaches_says_no_step_or_rule_reaches_it` |
+| A milestone a rule may reach proves nothing about values (`MAY_BE_UNSET`; `SET_AFTER` becomes a warning) | `test_a_milestone_a_rule_may_reach_proves_nothing_about_values`, `test_a_rule_may_let_a_writer_run_first_so_set_after_becomes_a_warning` (both seen failing without the fix) |
+| A rule's condition is type-checked, read for `OUTCOME_UNREAD`, and warned when it may read an unset value (an error on the opening) | `test_a_rules_condition_is_type_checked`, `test_a_rule_reading_an_outcome_tells_it_apart`, `test_a_rule_reading_on_the_opening_what_only_a_person_sets_fails_every_time`, `test_a_rule_reading_what_may_not_be_set_yet_is_warned`, `test_a_rule_reading_what_its_moment_ensures_is_not_warned` |
+| The runtime refuses what validation refuses, on nothing validation did | slices 1–4 call only `run_case`: the `UNTRUSTED_TRIGGER` definition reaches nothing (`test_untrusted_data_cant_decide`), the `NEVER_FIRES` one is not applied (`test_rules_stop_with_the_close`), the `SET_AFTER` one needs attention (`test_a_rule_that_cant_be_read_needs_attention`) |
+| A rule's firings cross continue-as-new, and replay decides the same | `test_rule_firings_cross_continue_as_new_and_replay` (`tests/test_temporal_case.py`, seen failing with firings left out), `test_a_carried_state_reads_back_as_it_was` |
+| No rule line or rule issue quotes a value from a case file | `test_no_rule_line_or_issue_quotes_a_value_from_the_case_file` |
+| The guide's examples run as written | slice 7's `test_the_guides_…` tests |

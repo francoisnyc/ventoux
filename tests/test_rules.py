@@ -5,6 +5,8 @@ See docs/layers/11-rules.md and docs/guides/cases.md, "Rules".
 """
 
 import copy
+import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +15,16 @@ import pytest
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.validate import validate_case
 from ventoux.core.validate import Issue
-from ventoux.testing import CATALOG, RetryRefused, close, load_definition, propose, retry, run_case
+from ventoux.testing import (
+    CATALOG,
+    RetryRefused,
+    close,
+    fake_kyc,
+    load_definition,
+    propose,
+    retry,
+    run_case,
+)
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "omar": ["operations"]}
@@ -682,3 +693,144 @@ def test_a_rule_reading_what_its_moment_ensures_is_not_warned() -> None:
         on={"started": "pay"}, when={"==": [{"var": "review.outcome"}, "approve"]}
     )
     assert [i for i in issues(definition) if i.code in ("SET_AFTER", "MAY_BE_UNSET")] == []
+
+
+# --- Slice 7: the guide, as the engine does it ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+RULES_SECTION = GUIDE.split("## Rules\n")[1].split("\n## ")[0]
+
+
+def guide_blocks(language: str) -> list[str]:
+    """The Rules section's code blocks in `language` (`""` for plain ones), in order."""
+    found: list[str] = []
+    opened: str | None = None
+    body: list[str] = []
+    for line in RULES_SECTION.splitlines():
+        if not line.startswith("```"):
+            body.append(line)
+        elif opened is None:
+            opened, body = line.removeprefix("```"), []
+        else:
+            if opened == language:
+                found.append("\n".join(body))
+            opened = None
+    return found
+
+
+def guide_json(index: int) -> dict[str, Any]:
+    """The section's JSON block `index`, a fragment (`"name": {...}`) read as an object."""
+    loaded: dict[str, Any] = json.loads("{" + guide_json_text(index) + "}", parse_float=Decimal)
+    return loaded
+
+
+def guide_json_text(index: int) -> str:
+    return guide_blocks("json")[index]
+
+
+def guide_case() -> dict[str, Any]:
+    """The refund with the guide's KYC check reaching checked, its rule and its fraud review."""
+    definition = with_kyc_rule({">": [{"var": "kyc.risk_score"}, 70]})
+    definition |= guide_json(0)  # the rules block
+    definition["steps"] |= guide_json(1)  # review_risk
+    return definition
+
+
+def risky(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The KYC workflow, scoring the customer 85."""
+    return fake_kyc(inputs) | {"risk_score": Decimal(85)}
+
+
+def shown(index: int) -> list[str]:
+    """The section's plain block `index`, as history lines."""
+    return guide_blocks("")[index].splitlines()
+
+
+def appears_in_order(lines: list[str], history: list[str]) -> bool:
+    """Whether `lines` appear in `history` one after the other."""
+    return any(history[at : at + len(lines)] == lines for at in range(len(history)))
+
+
+def test_the_guides_rule_runs_as_shown() -> None:
+    run = run_case(
+        guide_case(),
+        file=KYC_FILE,
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": risky},
+    )
+    assert appears_in_order(shown(0), run.history)
+    assert run.waiting_for == ["review by support", "review_risk by fraud"]
+
+
+def test_the_guides_false_condition_says_so() -> None:
+    # The development KYC fake scores the customer 12.
+    run = run_case(guide_case(), file=KYC_FILE, answers=[], people=PEOPLE)
+    assert "flag_high_risk#1 on reached checked: its condition is false" in run.history
+
+
+def test_the_guides_unreadable_rule_is_shown() -> None:
+    definition = guide_case()
+    definition["rules"]["flag_high_risk"]["on"] = "opened"
+    run = run_case(definition, file=KYC_FILE, answers=[], people=PEOPLE)
+    assert appears_in_order(shown(1), run.history)
+    assert run.needs_attention == [shown(1)[0].replace(" failed: ", ": ", 1)]
+
+
+def test_the_guides_untrusted_rule_is_shown() -> None:
+    definition = guide_case()
+    definition["rules"]["flag_high_risk"] |= guide_json(2)
+    run = run_case(definition, file=KYC_FILE, answers=[], people=PEOPLE)
+    assert appears_in_order(shown(2), run.history)
+
+
+def test_the_guides_rule_stopped_by_the_close_is_shown() -> None:
+    definition = guide_case()
+    definition["closes_when"] = ["checked"]
+    run = run_case(
+        definition, file=KYC_FILE, answers=[], people=PEOPLE, workflows={"kyc.check@1": risky}
+    )
+    assert appears_in_order(shown(3), run.history)
+
+
+def guide_rules_table() -> list[tuple[str, str, str]]:
+    table = RULES_SECTION.split("| Code | Kind |")[1].split("\n\n")[0]
+    rows = [line.split("|") for line in table.splitlines() if line.startswith("| `")]
+    return [(c.strip().strip("`"), k.strip(), m.strip().strip("`")) for _, c, k, _, m, _ in rows]
+
+
+def test_the_guides_table_of_rule_codes_is_what_validate_case_says() -> None:
+    closing_on_checked = guide_case() | {"closes_when": ["checked"]}
+    untrusted = guide_case()
+    untrusted["rules"]["flag_high_risk"] |= guide_json(2)
+    examples = {"NEVER_FIRES": closing_on_checked, "UNTRUSTED_TRIGGER": untrusted}
+    rows = guide_rules_table()
+    assert [code for code, _, _ in rows] == list(examples)
+    for code, kind, message in rows:
+        found = [i for i in issues(examples[code]) if i.code == code]
+        assert [(i.severity, i.message) for i in found] == [(kind, message)]
+
+
+def test_no_rule_line_or_issue_quotes_a_value_from_the_case_file() -> None:
+    # What the case file holds reaches people who may not see it: rule lines and the check's
+    # messages name values, never quote them (brief, D30). The values here are distinctive, so a
+    # quoted one would show.
+    values = ["ord-77401", "c-77402", "77403", "77404", "No concerns in the documents."]
+    file = {"order_id": "ord-77401", "amount": 77403, "customer_id": "c-77402"}
+
+    def scored(inputs: dict[str, Any]) -> dict[str, Any]:
+        return fake_kyc(inputs) | {"risk_score": Decimal(77404)}
+
+    variants = [guide_case(), guide_case() | {"closes_when": ["checked"]}]
+    for rule in ({"on": "opened"}, guide_json(2)):
+        variant = guide_case()
+        variant["rules"]["flag_high_risk"] |= rule
+        variants.append(variant)
+    for definition in variants:
+        run = run_case(
+            definition, file=file, answers=[], people=PEOPLE, workflows={"kyc.check@1": scored}
+        )
+        said = [line for line in run.history if line.startswith("flag_high_risk")]
+        said += run.needs_attention + [issue.message for issue in issues(definition)]
+        assert said
+        assert not [line for line in said if any(value in line for value in values)]
