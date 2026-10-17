@@ -13,7 +13,7 @@ from ventoux.case.calls import (
     plan_input_issues,
     supplied_plans,
 )
-from ventoux.case.definition import CaseDefinition, TaskStep
+from ventoux.case.definition import CaseDefinition, Reached, Started, TaskStep
 from ventoux.case.flow import (
     approver_issues,
     no_sources_issues,
@@ -21,15 +21,18 @@ from ventoux.case.flow import (
     policy_issues,
     reference_issues,
     sensitive_issues,
+    trigger_issues,
     type_issues,
 )
 from ventoux.case.reach import (
     Through,
+    acts_after_close,
     can_happen,
     can_start,
     reachable,
     reached_before,
     reached_by,
+    rules_reaching,
     shortest_circle,
     waited_on,
 )
@@ -56,20 +59,8 @@ def validate_case(
         )
     can = can_happen(case, catalog)
     found: list[Issue] = []
-    # Steps the structure lets run are still kept out if the case closes when it opens. If every
-    # step is dead anyway, their own issues say why: one cause, one issue.
-    if closes_at_opening(case) and any(name in can for name in case.steps):
-        found.append(
-            Issue(
-                "steps",
-                "CLOSES_AT_OPENING",
-                f"nothing starts by itself when {case.case} opens, so it closes at once and every "
-                "proposal is refused: let a step start by itself with nothing required, or add "
-                "stays_open",
-            )
-        )
     nobody_closes = never_closes(case, catalog, can)
-    found += never_run(case, catalog, can) + nobody_closes
+    found += never_run(case, catalog, can) + never_fires(case, can) + nobody_closes
     contracts, unknown_contracts = called_contracts(case, catalog)
     supplied, unknown_plans = supplied_plans(case, plans or {})
     found += unknown_contracts + unknown_plans
@@ -87,6 +78,7 @@ def validate_case(
     found += plan_policy_issues(case, catalog, contracts, supplied, {i.path for i in found})
     found += sensitive_issues(case, contracts, {issue.path for issue in found})
     found += approver_issues(case, catalog, contracts)
+    found += trigger_issues(case, contracts)
     found += role_issues_of(case, catalog, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     found += close_unreachable(case, can) + unreachable_milestones(case)
@@ -96,22 +88,44 @@ def validate_case(
     refused = {i.path.split(".")[1] for i in found if i.severity == "error" and "." in i.path}
     refused |= {name for name in case.steps if name not in can}
     said = {issue.path for issue in found}
-    return found + warning_issues(case, contracts, supplied, said, missing | refused)
+    found += warning_issues(case, contracts, supplied, said, missing | refused)
+    # Steps the structure lets run are still kept out if the case closes when it opens. If every
+    # step is dead anyway, their own issues say why; and a rule on the opening with its own issue
+    # may fail, so the case may need attention instead of closing: one cause, one issue. Said
+    # first, as the first thing the case would do.
+    with_issue = {i.path.split(".")[1] for i in found if i.path.startswith("rules.")}
+    own_issue = bool(with_issue & set(opening_fired(case)))
+    if closes_at_opening(case) and any(name in can for name in case.steps) and not own_issue:
+        found.insert(
+            0,
+            Issue(
+                "steps",
+                "CLOSES_AT_OPENING",
+                f"nothing starts by itself when {case.case} opens, so it closes at once and every "
+                "proposal is refused: let a step start by itself with nothing required, or add "
+                "stays_open",
+            ),
+        )
+    return found
 
 
 def unreachable_milestones(case: CaseDefinition) -> list[Issue]:
-    """A milestone no step or outcome reaches: a warning, since nothing waits for it. One a step
+    """A milestone no step, outcome or rule reaches: a warning, since nothing waits for it. One a step
     requires is said by that step's issue, one in `closes_when` by its own: one cause, one issue."""
     required = {r for step_requires in requirements(case).values() for r in step_requires}
     return [
         Issue(
             f"milestones.{name}",
             "UNREACHABLE_MILESTONE",
-            f"no step reaches {name}: reach it from a step or an outcome, or remove it",
+            f"no step or rule reaches {name}: reach it from a step, an outcome or a rule, or "
+            "remove it",
             "warning",
         )
         for name in case.milestones
-        if not reached_by(case, name) and name not in required and name not in case.closes_when
+        if not reached_by(case, name)
+        and not rules_reaching(case, name)  # a rule may reach it too (brief, D38)
+        and name not in required
+        and name not in case.closes_when
     ]
 
 
@@ -165,13 +179,40 @@ def never_closes(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[
 
 
 def closes_at_opening(case: CaseDefinition) -> bool:
-    """Whether the case closes the moment it opens: nothing is reached yet, so only a step that
-    starts by itself with nothing required can start, and with none, nothing is pending
-    (brief, D10). A case that stays open waits for a person instead."""
+    """Whether the case closes the moment it opens: only what rules on the opening may reach is
+    reached yet, so only a step that starts by itself with every requirement among those can
+    start, and with none, nothing is pending (brief, D10). A case that stays open waits for a
+    person instead."""
     required = requirements(case)
+    reached = opening_reaches(case)
     return not case.stays_open and not any(
-        step.automatic and not required[name] for name, step in case.steps.items()
+        step.automatic and set(required[name]) <= reached for name, step in case.steps.items()
     )
+
+
+def opening_fired(case: CaseDefinition) -> list[str]:
+    """The rules that may fire as the case opens: those on the opening, then those on a milestone
+    one of them may reach, and so on, every `when` taken as possibly true (brief, D38)."""
+    fired: list[str] = []
+    reached: set[str] = set()
+    while True:
+        more = [
+            name
+            for name, rule in case.rules.items()
+            if name not in fired
+            and (
+                rule.on == "opened" or (isinstance(rule.on, Reached) and rule.on.reached in reached)
+            )
+        ]
+        if not more:  # a round added nothing: it ends, over finitely many rules
+            return fired
+        fired += more
+        reached |= {m for name in more for m in case.rules[name].then.reach}
+
+
+def opening_reaches(case: CaseDefinition) -> set[str]:
+    """Every milestone a rule may reach as the case opens."""
+    return {m for name in opening_fired(case) for m in case.rules[name].then.reach}
 
 
 def never_run(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Issue]:
@@ -300,11 +341,11 @@ def why_never(case: CaseDefinition, name: str, waits_on: str) -> str:
             f"{name} can never run: it requires {waits_on}, which can never run: fix {waits_on} "
             "first"
         )
-    reachers = reached_by(case, waits_on)
+    reachers = reached_by(case, waits_on) + rules_reaching(case, waits_on)
     if not reachers:
         return (
-            f"{name} can never run: it requires {waits_on}, which no step reaches: reach "
-            f"{waits_on} from a step, or remove the requirement"
+            f"{name} can never run: it requires {waits_on}, which no step or rule reaches: reach "
+            f"{waits_on} from a step or a rule, or remove the requirement"
         )
     # Every step reaching a milestone nothing can reach can never run itself.
     one = len(reachers) == 1
@@ -313,3 +354,46 @@ def why_never(case: CaseDefinition, name: str, waits_on: str) -> str:
         f"{name} can never run: it requires {waits_on}, which only {listed(reachers)} {reach}, "
         f"and {they} can never run: fix {reachers[0]} first"
     )
+
+
+def never_fires(case: CaseDefinition, can: set[str]) -> list[Issue]:
+    """A rule left out of `can`: its moment can never come, or comes only once every
+    `closes_when` milestone is reached, when nothing new is decided (brief, D38). An error, not
+    the teaching warning "rules that can never fire" (brief, D7): it is proven for every case
+    (brief, D34)."""
+    found: list[Issue] = []
+    for name, rule in case.rules.items():
+        if name in can:
+            continue
+        on = rule.on
+        said = f"reached {on.reached}" if isinstance(on, Reached) else ""
+        if acts_after_close(case, name):
+            assert isinstance(on, Reached)
+            why = (
+                f"{name} can never act: it fires on {said}, and {case.case} closes once "
+                f"{on.reached} is reached, when nothing new is decided: fire it on an earlier "
+                f"moment, or remove {on.reached} from closes_when"
+            )
+        elif isinstance(on, Started):
+            why = (
+                f"{name} can never fire: it fires on started {on.started}, which can never run: "
+                f"fix {on.started} first"
+            )
+        else:
+            assert isinstance(on, Reached)  # the opening always comes
+            reachers = reached_by(case, on.reached) + rules_reaching(case, on.reached)
+            if reachers:
+                one = len(reachers) == 1
+                why = (
+                    f"{name} can never fire: it fires on {said}, which only {listed(reachers)} "
+                    f"{'reaches' if one else 'reach'}, and "
+                    f"{'it can never' if one else 'none of them can ever'} happen: fix "
+                    f"{reachers[0]} first"
+                )
+            else:
+                why = (
+                    f"{name} can never fire: it fires on {said}, which no step or rule reaches: "
+                    f"reach {on.reached} from a step or a rule, or fire it on another moment"
+                )
+        found.append(Issue(f"rules.{name}.on", "NEVER_FIRES", why))
+    return found

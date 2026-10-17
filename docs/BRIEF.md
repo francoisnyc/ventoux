@@ -1037,6 +1037,48 @@ be erased on request), has size limits, and a second copy of business records go
 - **One cause, one issue,** as for errors (D35): a step or a value an error already names gets no
   warning.
 
+### D38. Rules: a moment, a condition read then, and untrusted data never decides (design question 17)
+
+*Drafted 2026-10-17, in layer 11a. Adds to D7, D10 and D34.*
+
+- **A rule is `on`, `when`, `then`.** `on` names one moment; `when` is a condition, as on a step,
+  read once the moment has come; `then` acts. People read it as *when / if / then* (D7). In 11a a
+  rule only reaches milestones; starting and stopping steps, events from outside, updates to the
+  case file and timers come in the later parts of layer 11.
+- **Three moments, a closed list:** the case opened (once), a milestone reached (once, since it is
+  never undone), a step's run started (each run, a refresh included; a retry is the same run,
+  D26). Adding a moment is a decision recorded here, like an operator (D20).
+- **A rule remembers nothing.** Its condition is read in the decision that handles its moment, on
+  the case file as it is then, and type-checked first (D35). A step's admission is read again
+  after every event: admission is level-triggered, a rule edge-triggered. Why: Flowable's CMMN
+  engine remembers a met sentry part until its item starts, and needed a second mode because the
+  memory outlived the data it was read from (`docs/layers/11-research.md`).
+- **Rules run inside the decision, in order.** Moments are taken as they happen, the rules on one
+  moment in the definition's order; a milestone a rule reaches is a moment too; admission runs
+  again after; the case settles only once nothing is left. Each firing is an entry
+  (`flag_high_risk#1`), so a rule's name is unlike any step's or milestone's.
+- **A rule that can't be read needs attention** (D17): it acts on nothing, keeps the case open, and
+  an operator retries it, reading its condition again, or closes the case. Never read as false.
+- **Untrusted data informs; it never decides** (design question 17). A rule that reaches a
+  milestone decides for the case, so if its condition reads a value from an `untrusted:` source it
+  doesn't act, and says which value and source, never the value. Case validation refuses a rule
+  whose condition reads a value that is untrusted whoever writes it (`UNTRUSTED_TRIGGER`). And,
+  built in layer 11b: a condition that lets a step start (its `when`, or a rule that starts it)
+  counts as read by every input of that step, for its input policies (D21), so an untrusted
+  condition can't choose which trusted value is sent; an approval whose `when` reads untrusted
+  data is asked whatever it says, since untrusted data may add an approval, never remove one
+  (D11). This changes the runtime check before a step (layers 4, 8) and case validation's
+  `INPUT_POLICY` (D36) when it is built.
+- **Rules stop with the close.** Once every `closes_when` milestone is reached, closing or held by
+  a failed run (D34), no rule acts, including one on the moment that completed it; each such
+  firing is recorded with why. D34's "nothing new starts" becomes "nothing new is decided"; a
+  person's close does the same.
+- **Case validation counts rules** (D34): what a case can reach includes what rules reach, every
+  `when` taken as possibly true; a milestone a rule may reach proves nothing about values; and a
+  rule whose moment can never come, or comes only once every `closes_when` milestone is reached,
+  is an error (`NEVER_FIRES`). D7's "rules that can never fire" stays a warning only where it
+  depends on values.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
@@ -1233,7 +1275,9 @@ New questions found while building go here, numbered from 10.
     entered state's inputs, as the prototype; refuse a condition reading untrusted data before
     an activity with an input policy; or leave conditions to inform and let rules decide (D7's
     teaching warning on "rules whose condition reads untrusted data"). To decide with
-    `UNTRUSTED_TRIGGER` (layer 11), or earlier if case validation (layer 10) needs it.
+    `UNTRUSTED_TRIGGER` (layer 11), or earlier if case validation (layer 10) needs it. **Decided in
+    layer 11a:** untrusted data informs, never decides; a condition that lets a step start counts
+    as read by its inputs, and an untrusted approval condition asks anyway (D38).
 18. **When does a run continue as new, and what does it carry?** (found in layer 6) Temporal
     warns at about 10,000 history events and ends a run at 51,200; continue-as-new ends a run and
     starts a fresh one with its state carried over. A plan doesn't need it yet: the bound of 1,000

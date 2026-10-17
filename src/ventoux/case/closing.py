@@ -44,7 +44,8 @@ def refuse_to_close(
 
 
 def begin_closing(state: CaseState, cancelled_because: str, closed_because: str) -> None:
-    """Put the case in closing: cancel every open task, approval and failed run, saying why, so
+    """Put the case in closing: cancel every open task, approval, failed run and failed rule,
+    saying why, so
     the people they were assigned to see it; running activities finish (brief, D10)."""
     state.phase = "closing"
     state.closed_because = closed_because
@@ -53,6 +54,10 @@ def begin_closing(state: CaseState, cancelled_because: str, closed_because: str)
             run.status = "cancelled"
             state.waiting.pop(run.entry, None)
             state.history.append(f"cancelled {run.entry}: {cancelled_because}")
+    for firing in state.firings:
+        if firing.status == "failed":  # a rule waiting for a person, as a failed run does
+            firing.status = "cancelled"
+            state.history.append(f"cancelled {firing.entry}: {cancelled_because}")
     for approval in list(state.approvals.values()):
         del state.approvals[approval.step]
         del state.waiting[approval.entry]
@@ -74,12 +79,14 @@ def settle(case: CaseDefinition, state: CaseState) -> None:
 
 def close_when_reached(case: CaseDefinition, state: CaseState) -> None:
     """Begin closing once every milestone in `closes_when` is reached (brief, D10), unless a step
-    needs attention: a failed run waits for a person, never cancelled by a milestone (brief, D26).
+    or a rule needs attention: a failed run waits for a person, never cancelled by a milestone (brief, D26).
     The case closes once it is retried to completion, or a person closes it with a reason."""
     if state.phase != "open" or not case.closes_when:
         return
     if any(run.status in ("failed", "retrying") for run in state.runs):
         return  # nothing is skipped automatically (brief, D17)
+    if any(firing.status == "failed" for firing in state.firings):
+        return  # nor is a rule that couldn't be read (brief, D38)
     if all(milestone in state.milestones for milestone in case.closes_when):
         names = " and ".join(case.closes_when)
         verb = "are" if len(case.closes_when) > 1 else "is"
@@ -99,6 +106,16 @@ def close_held(case: CaseDefinition, state: CaseState) -> bool:
 
 def pending(state: CaseState) -> bool:
     """Whether anything is left to do (brief, D10): a task open, an activity running, an approval
-    asked or given and not yet spent, or a step failed, which waits for a person (brief, D17)."""
+    asked or given and not yet spent, or a step or a rule failed, which waits for a person
+    (brief, D17) (brief, D38)."""
     unfinished = any(run.status in ("open", "running", "failed", "retrying") for run in state.runs)
-    return unfinished or bool(state.approvals) or bool(state.given)
+    failed_rule = any(firing.status == "failed" for firing in state.firings)
+    return unfinished or failed_rule or bool(state.approvals) or bool(state.given)
+
+
+def needs_attention(state: CaseState) -> list[str]:
+    """What waits for an operator, each with why: every failed step run, then every failed rule
+    (brief, D17) (brief, D38)."""
+    runs = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
+    rules = [f"{f.entry}: {f.reason}" for f in state.firings if f.status == "failed"]
+    return runs + rules

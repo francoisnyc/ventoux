@@ -106,6 +106,9 @@ class Reading:
             both(Known({step: endings}), self.before(step, visiting))
             for step, endings in self.reachers(requirement).items()
         ]
+        # A rule may reach it too, saying nothing of what steps ended or set: a way that proves
+        # nothing, so the milestone proves only what every other way agrees on (brief, D38).
+        ways += [Known() for rule in self.case.rules.values() if requirement in rule.then.reach]
         # Nothing reaches it: the step can never run (NEVER_RUNS says so), so know nothing.
         return reduce(either, ways) if ways else Known()
 
