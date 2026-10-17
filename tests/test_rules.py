@@ -517,3 +517,63 @@ def test_a_rule_on_the_last_closes_when_milestone_never_acts() -> None:
             "from closes_when"
         )
     ]
+
+
+def test_a_rule_reading_untrusted_data_is_refused() -> None:
+    # The curriculum's negative test: what a model wrote is untrusted whoever runs the check, so
+    # the rule could never act; the runtime refuses it every time (brief, D38).
+    when = {"!=": [{"var": "kyc.analyst_notes"}, ""]}
+    assert [i for i in issues(with_kyc_rule(when)) if i.code == "UNTRUSTED_TRIGGER"] == [
+        Issue(
+            "rules.flag_high_risk.when",
+            "UNTRUSTED_TRIGGER",
+            "flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm "
+            "whoever writes it, and untrusted data can't decide, so it never reaches high_risk: "
+            "read a value a person or a trusted system gives, such as a task's answer",
+        )
+    ]
+
+
+def test_a_rule_reading_trusted_data_is_not_refused() -> None:
+    when = {">": [{"var": "kyc.risk_score"}, 70]}
+    assert [i for i in issues(with_kyc_rule(when)) if i.code == "UNTRUSTED_TRIGGER"] == []
+
+
+def test_a_milestone_only_a_rule_reaches_is_reachable() -> None:
+    # Requires it, closes on it, or nothing waits for it: none is NEVER_RUNS, CLOSE_UNREACHABLE
+    # or UNREACHABLE_MILESTONE, since the rule can reach it (brief, D34, D38).
+    definition = with_rule()
+    definition["steps"]["check_large"] = {
+        "kind": "task",
+        "display": {"title": "Check a large refund"},
+        "roles": ["support-lead"],
+        "requires": ["large"],
+        "outcomes": {"checked": {"display": {"title": "Checked"}}},
+    }
+    assert issues(definition) == []
+    del definition["steps"]["check_large"]
+    assert issues(definition) == []
+    definition["closes_when"] = ["large"]
+    assert issues(definition) == []
+
+
+def test_a_rule_breaks_a_deadlock() -> None:
+    # review waits for pay (through approved), pay for review: a deadlock, unless a rule on the
+    # opening can reach what review waits for.
+    definition = with_rule(when=None)
+    definition["steps"]["review"]["requires"] = ["large"]
+    definition["steps"]["pay"]["reaches"] = ["large"]
+    definition["rules"]["flag_large"]["on"] = {"started": "pay"}
+    assert [i.code for i in issues(definition)][:1] == ["DEADLOCK"]
+    definition["rules"]["flag_large"]["on"] = "opened"
+    assert [i.code for i in issues(definition) if i.code in ("DEADLOCK", "NEVER_RUNS")] == []
+
+
+def test_a_milestone_nothing_reaches_says_no_step_or_rule_reaches_it() -> None:
+    definition = with_rule()
+    definition["milestones"]["nowhere"] = {"display": {"title": "Nowhere"}}
+    definition["steps"]["pay"]["requires"] = ["nowhere"]
+    assert next(i.message for i in issues(definition) if i.code == "NEVER_RUNS") == (
+        "pay can never run: it requires nowhere, which no step or rule reaches: reach nowhere "
+        "from a step or a rule, or remove the requirement"
+    )

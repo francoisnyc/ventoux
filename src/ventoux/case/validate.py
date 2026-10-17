@@ -21,6 +21,7 @@ from ventoux.case.flow import (
     policy_issues,
     reference_issues,
     sensitive_issues,
+    trigger_issues,
     type_issues,
 )
 from ventoux.case.reach import (
@@ -89,6 +90,7 @@ def validate_case(
     found += plan_policy_issues(case, catalog, contracts, supplied, {i.path for i in found})
     found += sensitive_issues(case, contracts, {issue.path for issue in found})
     found += approver_issues(case, catalog, contracts)
+    found += trigger_issues(case, contracts)
     found += role_issues_of(case, catalog, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     found += close_unreachable(case, can) + unreachable_milestones(case)
@@ -102,18 +104,22 @@ def validate_case(
 
 
 def unreachable_milestones(case: CaseDefinition) -> list[Issue]:
-    """A milestone no step or outcome reaches: a warning, since nothing waits for it. One a step
+    """A milestone no step, outcome or rule reaches: a warning, since nothing waits for it. One a step
     requires is said by that step's issue, one in `closes_when` by its own: one cause, one issue."""
     required = {r for step_requires in requirements(case).values() for r in step_requires}
     return [
         Issue(
             f"milestones.{name}",
             "UNREACHABLE_MILESTONE",
-            f"no step reaches {name}: reach it from a step or an outcome, or remove it",
+            f"no step or rule reaches {name}: reach it from a step, an outcome or a rule, or "
+            "remove it",
             "warning",
         )
         for name in case.milestones
-        if not reached_by(case, name) and name not in required and name not in case.closes_when
+        if not reached_by(case, name)
+        and not rules_reaching(case, name)  # a rule may reach it too (brief, D38)
+        and name not in required
+        and name not in case.closes_when
     ]
 
 
@@ -302,11 +308,11 @@ def why_never(case: CaseDefinition, name: str, waits_on: str) -> str:
             f"{name} can never run: it requires {waits_on}, which can never run: fix {waits_on} "
             "first"
         )
-    reachers = reached_by(case, waits_on)
+    reachers = reached_by(case, waits_on) + rules_reaching(case, waits_on)
     if not reachers:
         return (
-            f"{name} can never run: it requires {waits_on}, which no step reaches: reach "
-            f"{waits_on} from a step, or remove the requirement"
+            f"{name} can never run: it requires {waits_on}, which no step or rule reaches: reach "
+            f"{waits_on} from a step or a rule, or remove the requirement"
         )
     # Every step reaching a milestone nothing can reach can never run itself.
     one = len(reachers) == 1
