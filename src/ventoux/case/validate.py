@@ -325,8 +325,9 @@ def why_never(case: CaseDefinition, name: str, waits_on: str) -> str:
 
 def never_fires(case: CaseDefinition, can: set[str]) -> list[Issue]:
     """A rule left out of `can`: its moment can never come, or comes only once every
-    `closes_when` milestone is reached, when nothing new is decided (brief, D38). An error: it is
-    proven for every case, as D34 refines D7's "rules that can never fire"."""
+    `closes_when` milestone is reached, when nothing new is decided (brief, D38). An error, not
+    the teaching warning "rules that can never fire" (brief, D7): it is proven for every case
+    (brief, D34)."""
     found: list[Issue] = []
     for name, rule in case.rules.items():
         if name in can:

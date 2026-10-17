@@ -577,3 +577,108 @@ def test_a_milestone_nothing_reaches_says_no_step_or_rule_reaches_it() -> None:
         "pay can never run: it requires nowhere, which no step or rule reaches: reach nowhere "
         "from a step or a rule, or remove the requirement"
     )
+
+
+def approved_first(**rule: Any) -> dict[str, Any]:
+    """The refund paying once `approved` is reached, which only the review's approve reaches,
+    and approve sets approved_amount: so pay surely has it, unless a rule reaches approved too."""
+    definition = with_rule(**rule)
+    definition["milestones"]["approved"] = {"display": {"title": "Refund approved"}}
+    definition["steps"]["review"]["outcomes"]["approve"]["reaches"] = ["approved"]
+    definition["steps"]["pay"]["requires"] = ["approved"]
+    del definition["steps"]["pay"]["when"]
+    definition["sequence"] = []
+    return definition
+
+
+def test_a_milestone_a_rule_may_reach_proves_nothing_about_values() -> None:
+    # Reached by the rule, approved says nothing about approved_amount: pay may read it unset
+    # (brief, D37, D38).
+    assert [i.code for i in issues(approved_first(then={"reach": ["large"]}))] == []
+    reached_by_rule = approved_first(then={"reach": ["approved"]})
+    assert [i.path for i in issues(reached_by_rule) if i.code == "MAY_BE_UNSET"] == [
+        "steps.pay.approval.when"
+    ]
+
+
+def test_a_rule_may_let_a_writer_run_first_so_set_after_becomes_a_warning() -> None:
+    # notify reads pay's refund_id, and pay waits for what notify reaches: SET_AFTER, proven. A
+    # rule on the opening reaching it too lets pay run first: then it may be set, not surely.
+    definition = with_rule(when=None, then={"reach": ["large"]})
+    definition["milestones"]["notified"] = {"display": {"title": "Customer notified"}}
+    definition["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Tell the customer"},
+        "activity": "letters.draft@2",
+        "requires": ["review"],
+        "inputs": {"to_customer": {"var": "order_id"}, "template": {"var": "pay.refund_id"}},
+        "reaches": ["notified"],
+    }
+    definition["steps"]["pay"]["requires"] = ["notified"]
+    codes = {i.code for i in issues(definition)}
+    assert "SET_AFTER" in codes
+    definition["rules"]["flag_large"]["then"] = {"reach": ["notified"]}
+    codes = {i.code for i in issues(definition)}
+    assert "SET_AFTER" not in codes and "MAY_BE_UNSET" in codes
+
+
+def test_a_rules_condition_is_type_checked() -> None:
+    # The runtime fails it (slice 2); the check says so first (brief, D35).
+    definition = with_rule(
+        on={"started": "pay"}, when={"==": [{"var": "review.outcome"}, "aprove"]}
+    )
+    assert [i for i in issues(definition) if i.code == "EXPRESSION_INVALID"] == [
+        Issue(
+            "rules.flag_large.when",
+            "EXPRESSION_INVALID",
+            '==[1]: review.outcome has no outcome "aprove"; its outcomes are approve, reject',
+        )
+    ]
+
+
+def test_a_rule_reading_an_outcome_tells_it_apart() -> None:
+    # Without call_customer, nothing reads pay's declined: OUTCOME_UNREAD. A rule that tells it
+    # from done reads it, as a step's condition would (brief, D37).
+    definition = with_rule(
+        on={"reached": "large"}, when={"==": [{"var": "pay.outcome"}, "declined"]}
+    )
+    del definition["steps"]["call_customer"]
+    definition["milestones"]["told"] = {"display": {"title": "Told"}}
+    definition["rules"]["flag_large"]["then"] = {"reach": ["told"]}
+    definition["steps"]["pay"]["reaches"] = ["large"]
+    assert "OUTCOME_UNREAD" not in {i.code for i in issues(definition)}
+
+
+def test_a_rule_reading_on_the_opening_what_only_a_person_sets_fails_every_time() -> None:
+    # Nothing has run when the case opens: approved_amount, which only the review sets, is never
+    # set then, so the rule fails each time it fires: proven, an error (brief, D34, D37).
+    assert [i for i in issues(unreadable()) if i.code in ("SET_AFTER", "MAY_BE_UNSET")] == [
+        Issue(
+            "rules.flag_large.when",
+            "SET_AFTER",
+            "flag_large reads approved_amount when the case opens, and only review sets it, "
+            "later: flag_large fails every time it fires: fire it on a moment after review",
+        )
+    ]
+
+
+def test_a_rule_reading_what_may_not_be_set_yet_is_warned() -> None:
+    # On pay's start the review has ended, but approved_amount is set only by approve.
+    definition = with_rule(on={"started": "pay"}, when={">": [{"var": "approved_amount"}, 1000]})
+    assert [i for i in issues(definition) if i.code in ("SET_AFTER", "MAY_BE_UNSET")] == [
+        Issue(
+            "rules.flag_large.when",
+            "MAY_BE_UNSET",
+            "flag_large reads approved_amount, which may not be set when started pay comes: then "
+            "flag_large fails and needs attention: read it only when it is set, or fire it on "
+            "another moment",
+            "warning",
+        )
+    ]
+
+
+def test_a_rule_reading_what_its_moment_ensures_is_not_warned() -> None:
+    definition = with_rule(
+        on={"started": "pay"}, when={"==": [{"var": "review.outcome"}, "approve"]}
+    )
+    assert [i for i in issues(definition) if i.code in ("SET_AFTER", "MAY_BE_UNSET")] == []

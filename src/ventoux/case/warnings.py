@@ -12,10 +12,13 @@ from ventoux.case.definition import (
     CallStep,
     CaseDefinition,
     PlanStep,
+    Reached,
+    Started,
     TaskStep,
     WorkflowStep,
 )
 from ventoux.case.known import DONE, Known, Read, Reading, reads, set_by_outcomes
+from ventoux.case.rules import said as moment_said
 from ventoux.case.runtime import listed
 from ventoux.case.types import expressions_of
 from ventoux.core.contract import ActivityContract, Contract
@@ -63,7 +66,59 @@ def warning_issues(
     failing = {read.value.partition(".")[0] for read in unset if read.ended_otherwise(reading)}
     found = outcome_issues(case, contracts, plans, failing | set(missing))
     found += [unset_issue(reading, read) for read in unset]
+    found += rule_unset_issues(reading, said, missing)
     return found + refresh_issues(case, contracts, missing) + elsewhere_issues(case, missing)
+
+
+def rule_unset_issues(
+    reading: Reading, said: Collection[str], missing: Collection[str]
+) -> list[Issue]:
+    """Each value a rule's condition reads that may not be set when its moment comes: the rule
+    then fails and needs attention (brief, D37) (brief, D38). Its moment stands for a step's
+    requirements: the opening knows nothing has run; a milestone reached, what reaching it
+    proves; a step started, what that step required. Proven, so an error (`SET_AFTER`), only on
+    the opening, where nothing has run: the check claims less, never more."""
+    found: list[Issue] = []
+    for name, rule in reading.case.rules.items():
+        path = f"rules.{name}.when"
+        if rule.when is None or path in said:
+            continue
+        on = rule.on
+        if isinstance(on, Reached):
+            known = reading.met(on.reached, frozenset())
+        elif isinstance(on, Started):
+            known = reading.before(on.started)
+        else:
+            known = Known()  # the opening: nothing has run
+        for value, at, always in reads(rule.when, known, reading):
+            if value.partition(".")[0] in missing or reading.surely_set(value, at):
+                continue
+            writers = writers_of(reading, value)
+            if isinstance(on, str) and always and writers:
+                who = " or ".join(writers)
+                found.append(
+                    Issue(
+                        path,
+                        "SET_AFTER",
+                        f"{name} reads {value} when the case opens, and only {who} "
+                        f"{'gives' if value.partition('.')[0] in reading.case.steps else 'sets'} "
+                        f"it, later: {name} fails every time it fires: fire it on a moment after "
+                        f"{who}",
+                    )
+                )
+            else:
+                found.append(
+                    Issue(
+                        path,
+                        "MAY_BE_UNSET",
+                        f"{name} reads {value}, which may not be set when {moment_said(on)} "
+                        f"comes: then {name} fails and needs attention: read it only when it is "
+                        "set, or fire it on another moment",
+                        "warning",
+                    )
+                )
+            break  # one issue per rule: the first value the runtime would miss
+    return found
 
 
 def outcome_issues(
@@ -112,13 +167,11 @@ def unread_issue(name: str, unread: list[str]) -> Issue:
 
 
 def read_outcomes(case: CaseDefinition, field: str) -> set[str]:
-    """Every outcome of `field` (`pay.outcome`) some expression of the case tells apart."""
-    return {
-        outcome
-        for step in case.steps.values()
-        for _, expression, _ in expressions_of(step)
-        for outcome in told_apart(expression, field)
-    }
+    """Every outcome of `field` (`pay.outcome`) some expression of the case tells apart: a
+    step's, or a rule's condition (brief, D38)."""
+    expressions = [e for step in case.steps.values() for _, e, _ in expressions_of(step)]
+    expressions += [rule.when for rule in case.rules.values() if rule.when is not None]
+    return {outcome for expression in expressions for outcome in told_apart(expression, field)}
 
 
 def told_apart(expression: Expression, field: str) -> set[str]:

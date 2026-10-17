@@ -139,7 +139,7 @@ def plan_input_issues(case: CaseDefinition, plans: Mapping[str, Plan]) -> list[I
 def expression_issues(
     case: CaseDefinition, types: dict[str, FieldType], missing: set[str]
 ) -> list[Issue]:
-    """Each expression a step reads, type-checked over the case's values. One that reads what a
+    """Each expression a step or a rule reads, type-checked over the case's values. One that reads what a
     step in `missing` would give (its contract or plan can't be found) isn't said again, nor are
     such a step's own inputs: that step's issue says it (one cause, one issue)."""
     issues: list[Issue] = []
@@ -153,6 +153,14 @@ def expression_issues(
             problem = type_problem(expression, types, condition)
             if problem is not None:
                 issues.append(Issue(f"steps.{name}.{where}", "EXPRESSION_INVALID", problem))
+    # A rule's condition too, as the runtime checks it before reading it (brief, D38).
+    for name, rule in case.rules.items():
+        if rule.when is None:
+            continue
+        if any(field.split(".")[0] in missing and "." in field for field in fields_read(rule.when)):
+            continue
+        if (problem := type_problem(rule.when, types, True)) is not None:
+            issues.append(Issue(f"rules.{name}.when", "EXPRESSION_INVALID", problem))
     return issues
 
 
