@@ -256,3 +256,79 @@ def test_a_retried_rule_reads_its_condition_again() -> None:
         "flag_large#1 on opened: reaching large",
         "reached large",
     ]
+
+
+# --- Slice 3: untrusted data can't decide ---
+
+
+def with_kyc_rule(when: dict[str, Any]) -> dict[str, Any]:
+    """The refund with the cases guide's KYC check, reaching `checked`, and a rule on it."""
+    definition = copy.deepcopy(REFUND)
+    definition["fields"]["customer_id"] = {
+        "type": "reference",
+        "system": "crm",
+        "display": {"title": "Customer"},
+    }
+    definition["milestones"] = {
+        "checked": {"display": {"title": "Customer checked"}},
+        "high_risk": {"display": {"title": "High-risk customer"}},
+    }
+    definition["steps"]["kyc"] = {
+        "kind": "workflow",
+        "display": {"title": "Check the customer"},
+        "workflow": "kyc.check@1",
+        "inputs": {"customer_id": {"var": "customer_id"}},
+        "reaches": ["checked"],
+    }
+    definition["rules"] = {
+        "flag_high_risk": {
+            "display": {"title": "Flag a high-risk customer"},
+            "on": {"reached": "checked"},
+            "when": when,
+            "then": {"reach": ["high_risk"]},
+        }
+    }
+    return definition
+
+
+KYC_FILE = {"order_id": "ord-1", "amount": 40, "customer_id": "c-1"}
+
+
+def test_untrusted_data_cant_decide() -> None:
+    # A model wrote the notes (untrusted:llm), and the condition holds on them: still, reaching a
+    # milestone decides for the case, so the rule reaches nothing (brief, D38). It names the value
+    # and its source, never what the notes say (brief, D30).
+    when = {"!=": [{"var": "kyc.analyst_notes"}, ""]}
+    run = run_case(with_kyc_rule(when), file=KYC_FILE, answers=[], people=PEOPLE)
+    assert (
+        "flag_high_risk#1 on reached checked: reaches nothing: its condition reads "
+        "kyc.analyst_notes, from untrusted:llm, and untrusted data can't decide"
+    ) in run.history
+    assert "reached high_risk" not in run.history
+    assert not any("No concerns" in line for line in run.history)
+
+
+def test_a_trusted_value_decides() -> None:
+    # risk_score comes from system:kyc, which the KYC team's contract declares (brief, D29).
+    run = run_case(
+        with_kyc_rule({">": [{"var": "kyc.risk_score"}, 5]}),
+        file=KYC_FILE,
+        answers=[],
+        people=PEOPLE,
+    )
+    assert "flag_high_risk#1 on reached checked: reaching high_risk" in run.history
+    assert "reached high_risk" in run.history
+
+
+def test_untrusted_data_beside_trusted_data_still_cant_decide() -> None:
+    when = {
+        "and": [
+            {">": [{"var": "kyc.risk_score"}, 5]},
+            {"!=": [{"var": "kyc.analyst_notes"}, ""]},
+        ]
+    }
+    run = run_case(with_kyc_rule(when), file=KYC_FILE, answers=[], people=PEOPLE)
+    assert "reached high_risk" not in run.history
+    assert any(
+        "its condition reads kyc.analyst_notes, from untrusted:llm" in line for line in run.history
+    )

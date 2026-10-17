@@ -11,6 +11,7 @@ from ventoux.case.definition import CaseDefinition, Reached, Started
 from ventoux.case.state import CaseState, RuleFiring
 from ventoux.case.types import rule_problem
 from ventoux.core.catalog import Catalog
+from ventoux.core.provenance import fields_read
 
 
 def said(moment: object) -> str:
@@ -69,14 +70,35 @@ def read(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str) ->
 
 
 def act(case: CaseDefinition, state: CaseState, firing: RuleFiring, decided: bool) -> None:
-    """Do what the rule says, if its condition held; say so either way."""
+    """Do what the rule says, if its condition held and read only trusted values; say so either
+    way."""
     firing.status, firing.reason = "done", ""
+    # Untrusted data informs; it never decides. Reaching a milestone decides for the case, so a
+    # condition reading an untrusted value stops it whatever it gave (brief, D38). The message
+    # names the value and its source, never the value (brief, D30).
+    if (untrusted := untrusted_read(case, state, firing.rule)) is not None:
+        state.history.append(
+            f"{firing.entry} on {firing.moment}: reaches nothing: its condition reads {untrusted}, "
+            "and untrusted data can't decide"
+        )
+        return
     if not decided:
         state.history.append(f"{firing.entry} on {firing.moment}: its condition is false")
         return
     reaches = case.rules[firing.rule].then.reach
     state.history.append(f"{firing.entry} on {firing.moment}: reaching {' and '.join(reaches)}")
     reach(state, reaches)
+
+
+def untrusted_read(case: CaseDefinition, state: CaseState, name: str) -> str | None:
+    """The first value the rule's condition reads from an untrusted source, said as
+    `kyc.analyst_notes, from untrusted:llm`; None if it reads only trusted ones."""
+    when = case.rules[name].when
+    for field in [] if when is None else fields_read(when):
+        untrusted = sorted(s for s in state.sources.get(field, ()) if s.startswith("untrusted:"))
+        if untrusted:
+            return f"{field}, from {', '.join(untrusted)}"
+    return None
 
 
 def retry_rule(
