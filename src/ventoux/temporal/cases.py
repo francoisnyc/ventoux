@@ -36,7 +36,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.admission import ProposalRefused, RetryRefused
     from ventoux.case.answers import AnswerRefused
     from ventoux.case.called import unbound
-    from ventoux.case.closing import CloseRefused
+    from ventoux.case.closing import CloseRefused, needs_attention
     from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.freshness import TimeRefused
@@ -221,7 +221,7 @@ class CaseWorkflow:
     @workflow.query(name="report")
     def report(self) -> CaseReport:
         state = self.state
-        attention = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
+        attention = needs_attention(state)
         return CaseReport(
             state.phase,
             list(state.waiting.values()),

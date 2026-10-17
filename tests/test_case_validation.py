@@ -115,8 +115,8 @@ def test_a_step_requiring_what_nothing_reaches_never_runs() -> None:
         Issue(
             "steps.approve.requires",
             "NEVER_RUNS",
-            "approve can never run: it requires reviewed, which no step reaches: reach reviewed "
-            "from a step, or remove the requirement",
+            "approve can never run: it requires reviewed, which no step or rule reaches: reach "
+            "reviewed from a step or a rule, or remove the requirement",
         )
     ]
 
@@ -497,7 +497,8 @@ def test_a_milestone_nothing_reaches_is_a_warning() -> None:
         Issue(
             "milestones.reviewed",
             "UNREACHABLE_MILESTONE",
-            "no step reaches reviewed: reach it from a step or an outcome, or remove it",
+            "no step or rule reaches reviewed: reach it from a step, an outcome or a rule, or "
+            "remove it",
             "warning",
         )
     ]

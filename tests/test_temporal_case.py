@@ -945,6 +945,46 @@ def test_a_case_history_replays() -> None:
     )
 
 
+# --- Layer 11a: rules on Temporal (brief, D27, D38) ---
+
+FLAGGING = copy.deepcopy(REWORKABLE)
+FLAGGING["milestones"] = {"reviewing": {"display": {"title": "Under review"}}}
+FLAGGING["rules"] = {
+    "flag_review": {
+        "display": {"title": "Mark the case under review"},
+        "on": {"started": "review"},
+        "then": {"reach": ["reviewing"]},
+    }
+}
+
+
+def test_rule_firings_cross_continue_as_new_and_replay() -> None:
+    # A rule fires on each start of the review; the review is reworked over several runs of the
+    # case. Its firings cross with the rest of the state, so the second is flag_review#2, never a
+    # second #1; and the last run, started from the carried state, replays.
+    async def scenario(client: Client) -> tuple[CaseReport, tuple[str, str], WorkflowHistory]:
+        case = await start_case(client, SwitchingCases, FLAGGING, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await propose(case, "review", "ana", PEOPLE["ana"])
+        await reported(case, lambda now: now.waiting_at == ["review#2"])
+        await answer(case, "review#2", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#2"])
+        await answer(case, "pay.approval#2", "approve", "sam", PEOPLE["sam"])
+        ended = await case.result()
+        return ended, await runs_of(client, "refund-1"), await case.fetch_history()
+
+    converter = development_converter()
+    ended, (first, last), history = on_temporal(scenario, cases=SwitchingCases, converter=converter)
+    assert last != first  # the case continued as new at least once
+    assert [line for line in ended.history if line.startswith("flag_review#")] == [
+        "flag_review#1 on started review: reaching reviewing",
+        "flag_review#2 on started review: reaching reviewing",
+    ]
+    assert ended.history.count("reached reviewing") == 1
+    replay(history, SwitchingCases, converter)
+
+
 # --- Slice 8: the guide, as the engine does it ---
 
 CASES_GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()

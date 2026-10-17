@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ventoux.case.called import unbound
+from ventoux.case.closing import needs_attention
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.runtime import decide
 from ventoux.case.state import (
@@ -105,7 +106,7 @@ def run_case_in_memory(
         else:
             state = driver.carry(state, event)
     done = frozenset(run.step for run in state.runs if run.status == "done")
-    attention = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
+    attention = needs_attention(state)
     waiting = list(state.waiting.values())
     registered = tuple(catalog.roles)
     return CaseRun(

@@ -413,3 +413,29 @@ def plan_policy_issues(
                     given.add(plan_field)
                     issues.append(issue)
     return issues
+
+
+def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> list[Issue]:
+    """A rule whose condition reads a value from an untrusted source whoever writes it: the
+    runtime refuses to let it act every time, so it never does (`UNTRUSTED_TRIGGER`). Untrusted
+    data informs; it never decides (brief, D38). In 11a every value is untrusted always or never
+    (a field's mark stays whoever writes it, an output carries its contract's source), so any
+    untrusted source is a proof; a field only some writers make untrusted comes with `set`."""
+    sources = case_sources(case, contracts, BY_A_SYSTEM)  # who opens it changes no trust
+    found: list[Issue] = []
+    for name, rule in case.rules.items():
+        for field in [] if rule.when is None else fields_read(rule.when):
+            untrusted = sorted(s for s in sources.get(field, ()) if s.startswith("untrusted:"))
+            if untrusted:
+                found.append(
+                    Issue(
+                        f"rules.{name}.when",
+                        "UNTRUSTED_TRIGGER",
+                        f"{name}'s condition reads {field}, which comes from "
+                        f"{', '.join(untrusted)} whoever writes it, and untrusted data can't "
+                        f"decide, so it never reaches {' and '.join(rule.then.reach)}: read a "
+                        "value a person or a trusted system gives, such as a task's answer",
+                    )
+                )
+                break  # one cause, one issue
+    return found

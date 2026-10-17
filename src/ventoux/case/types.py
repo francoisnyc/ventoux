@@ -112,3 +112,11 @@ def expression_problem(case: CaseDefinition, catalog: Catalog, name: str) -> str
         if problem is not None:
             return f"{name}.{where} can't be read: {problem}"
     return None
+
+
+def rule_problem(case: CaseDefinition, catalog: Catalog, name: str) -> str | None:
+    """Why the rule `name` can't read its condition, or None, said as `flag_large.when can't be
+    read: …`: asked before it is read, as for a step (brief, D35) (brief, D38)."""
+    when = case.rules[name].when
+    problem = None if when is None else type_problem(when, case_types(case, catalog), True)
+    return None if problem is None else f"{name}.when can't be read: {problem}"

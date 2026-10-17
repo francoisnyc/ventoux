@@ -423,6 +423,113 @@ case is flagged.
 
 A workflow step never waits for people: put the human work in a task step before or after it.
 
+## Rules
+
+A step asks "may I start now?" after every event, and starts as soon as the answer is yes: it
+reacts to how the case *is*. Some things a case should react to are moments instead: the
+customer has just been checked, and the score says high risk. A **rule** says it: *on* a moment,
+*when* a condition holds, *then* act on the case.
+
+Give the refund's KYC check (above) `"reaches": ["checked"]`, and add a rule and a step for the
+fraud team:
+
+```json
+"rules": {
+  "flag_high_risk": {
+    "display": {"title": "Flag a high-risk customer"},
+    "on": {"reached": "checked"},
+    "when": {">": [{"var": "kyc.risk_score"}, 70]},
+    "then": {"reach": ["high_risk"]}
+  }
+}
+```
+
+```json
+"review_risk": {
+  "kind": "task",
+  "display": {"title": "Review a high-risk customer"},
+  "roles": ["fraud"],
+  "requires": ["high_risk"],
+  "outcomes": {"cleared": {"display": {"title": "Customer cleared"}}}
+}
+```
+
+Read aloud: once the customer is checked, if the risk score is over 70, the customer is high risk,
+and someone in fraud reviews them. `high_risk` is declared under `milestones`, like any other.
+
+```
+kyc#1 done, giving analyst_notes from untrusted:llm; contact_email from untrusted:undeclared; risk_score from system:kyc; status from system:kyc
+reached checked
+flag_high_risk#1 on reached checked: reaching high_risk
+reached high_risk
+started review_risk#1: waiting for cleared by fraud
+```
+
+A rule's `on` names one moment:
+
+| `on` | The rule fires |
+|---|---|
+| `"opened"` | once, when the case opens, with its first values in the case file |
+| `{"reached": "checked"}` | once, when the milestone is reached: a milestone is never undone |
+| `{"started": "assess"}` | each time a run of the step starts: a task opening, an activity or workflow scheduled, a plan started, a stale fact fetched again. A retry is the same run, so it doesn't start again |
+
+`when` is optional, and reads the case file as it is at that moment, as a step's `when` does: it
+is checked against the case's values first, so a misspelt outcome is an error, never false. With
+its `when` false, a rule does nothing, and the history says so: `flag_high_risk#1 on reached
+checked: its condition is false`. `then` lists the milestones it reaches.
+
+**A rule reacts to a moment, never to a state.** It remembers nothing: when its moment comes, it
+reads the case file then, once. To start something as soon as a state holds, and whenever it
+holds again, write a step's `requires` and `when`, which are read after every event.
+
+**Rules run in order, before the case settles.** Moments are taken as they happen, and the rules
+on one moment in the order they are written. A milestone a rule reaches is a moment too, so rules
+can follow rules, and a step that requires it starts in the same decision. The case closes, if
+nothing is left to do, only after all of that.
+
+**A rule that can't be read needs attention.** If its `when` reads a value nobody set, or one of
+the wrong type, it reaches nothing, the case needs attention and doesn't close. Fire the same rule
+`"on": "opened"`, before the check has run:
+
+```
+flag_high_risk#1 failed: flag_high_risk's condition kyc.risk_score > 70 can't be evaluated: kyc.risk_score has no value
+```
+
+An operator retries it, `retry("flag_high_risk#1", "omar")`, which reads its condition again, on
+the case file as it is then; or closes the case.
+
+**Untrusted data can't decide.** Reaching a milestone decides something for the case. A rule
+whose `when` reads a value from an untrusted source reaches nothing, and says why, never quoting
+the value. Here the rule reads what a model wrote about the customer:
+
+```json
+"when": {"==": [{"var": "kyc.analyst_notes"}, "high risk"]}
+```
+
+```
+flag_high_risk#1 on reached checked: reaches nothing: its condition reads kyc.analyst_notes, from untrusted:llm, and untrusted data can't decide
+```
+
+Read the notes in a task instead, and let a person's answer reach the milestone: a person's answer
+is trusted, and the history shows who.
+
+**Rules stop with the close.** Once every `closes_when` milestone is reached, no rule acts, even
+on the moment that reached the last one, and even while a failed step holds the close. Each rule
+that would have fired says so. With `"closes_when": ["checked"]`:
+
+```
+flag_high_risk#1 on reached checked: not applied: checked is reached, so the case closes and nothing new is decided
+```
+
+**What the check says about rules.** `ventoux check` reads rules too: a milestone a rule may
+reach counts as reachable, every `when` taken as possibly true, but proves nothing about what is
+set; a rule's `when` is type-checked; and two codes are its own:
+
+| Code | Kind | What is wrong | Example message |
+|---|---|---|---|
+| `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
+| `UNTRUSTED_TRIGGER` | error | a rule's `when` reads a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
+
 ## Testing a case
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`
@@ -715,11 +822,11 @@ what can *never* happen, and says nothing about what depends on values:
 | Code | Kind | What is wrong | Example message |
 |---|---|---|---|
 | `DEADLOCK` | error | steps wait on each other, so none of them can run | as above |
-| `NEVER_RUNS` | error | a step's requirements can never all be met, or nobody may propose it | `approve can never run: it requires reviewed, which no step reaches: reach reviewed from a step, or remove the requirement` |
+| `NEVER_RUNS` | error | a step's requirements can never all be met, or nobody may propose it | `approve can never run: it requires reviewed, which no step or rule reaches: reach reviewed from a step or a rule, or remove the requirement` |
 | `CLOSES_AT_OPENING` | error | no step starts by itself when the case opens, so it closes at once and every proposal is refused | `nothing starts by itself when claim opens, so it closes at once and every proposal is refused: let a step start by itself with nothing required, or add stays_open` |
 | `NEVER_CLOSES` | error | the case stays open, no close reason names a registered role, and `closes_when` is empty or can never be met | `claim stays open, none of its close reasons' roles (supprt) is registered, and closes_when never closes it, so nobody could ever close it: name a registered role in a close reason` |
 | `CLOSE_UNREACHABLE` | warning | a `closes_when` milestone can never be reached | as above |
-| `UNREACHABLE_MILESTONE` | warning | no step or outcome reaches a milestone, and nothing requires it | `no step reaches reviewed: reach it from a step or an outcome, or remove it` |
+| `UNREACHABLE_MILESTONE` | warning | no step, outcome or rule reaches a milestone, and nothing requires it | `no step or rule reaches reviewed: reach it from a step, an outcome or a rule, or remove it` |
 
 A role nobody registered counts for nothing, as when the case runs (brief, D22): a step that
 starts only when proposed, by roles none of which is registered, can never run.

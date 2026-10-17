@@ -9,7 +9,14 @@ lists, and are read back as sets.
 from decimal import Decimal
 from typing import Any
 
-from ventoux.case.state import CaseState, GivenApproval, Obtained, OpenApproval, StepRun
+from ventoux.case.state import (
+    CaseState,
+    GivenApproval,
+    Obtained,
+    OpenApproval,
+    RuleFiring,
+    StepRun,
+)
 
 
 def state_as_data(state: CaseState) -> dict[str, Any]:
@@ -49,6 +56,17 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "closed_because": state.closed_because,
         "flags": list(state.flags),
         "history": list(state.history),
+        "firings": [
+            {
+                "entry": f.entry,
+                "rule": f.rule,
+                "moment": f.moment,
+                "status": f.status,
+                "reason": f.reason,
+            }
+            for f in state.firings
+        ],
+        "moments": list(state.moments),  # always empty between events (brief, D38)
     }
 
 
@@ -95,6 +113,9 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         closed_because=data["closed_because"],
         flags=list(data["flags"]),
         history=list(data["history"]),
+        # None in a state from before layer 11a: no rule had fired.
+        firings=[RuleFiring(**firing) for firing in data.get("firings", [])],
+        moments=list(data.get("moments", [])),
     )
 
 
