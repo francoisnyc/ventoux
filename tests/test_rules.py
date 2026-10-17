@@ -11,9 +11,10 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.testing import load_definition
+from ventoux.testing import load_definition, propose, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
+PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
 
 
 def with_rule(**rule: Any) -> dict[str, Any]:
@@ -93,3 +94,88 @@ def test_a_rule_that_does_nothing_is_refused(then: dict[str, Any]) -> None:
     if then:
         with pytest.raises(CaseInvalid, match="a rule reaches at least one milestone$"):
             parse_case(with_rule(then=then))
+
+
+# --- Slice 1: reaching ---
+
+
+def test_a_false_condition_reaches_nothing() -> None:
+    run = run_case(
+        with_rule(), file={"order_id": "ord-1", "amount": 250}, answers=[], people=PEOPLE
+    )
+    assert "flag_large#1 on opened: its condition is false" in run.history
+    assert "reached large" not in run.history
+
+
+def test_a_rule_on_the_opening_reaches_its_milestone_once() -> None:
+    run = run_case(
+        with_rule(), file={"order_id": "ord-1", "amount": 5000}, answers=[], people=PEOPLE
+    )
+    assert run.history[:3] == [
+        "opened by system:opener, with amount and order_id",
+        "flag_large#1 on opened: reaching large",
+        "reached large",
+    ]
+    assert run.history.count("reached large") == 1
+
+
+def test_a_rule_fires_on_each_run_of_its_step() -> None:
+    # Two runs of the review: the rule fires on each, and reaches its milestone once.
+    definition = with_rule(on={"started": "review"}, when=None)
+    definition["steps"]["review"].update({"repeatable": True, "proposed_by": ["support"]})
+    definition["stays_open"] = True  # so the review can be proposed again once rejected
+    definition["close_reasons"] = {"done": {"display": {"title": "Done"}, "roles": ["support"]}}
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[("review", "reject", "ana"), propose("review", "ana")],
+        people=PEOPLE,
+    )
+    assert [line for line in run.history if line.startswith("flag_large#")] == [
+        "flag_large#1 on started review: reaching large",
+        "flag_large#2 on started review: reaching large",
+    ]
+    assert run.history.count("reached large") == 1
+
+
+def test_a_milestone_a_rule_reaches_starts_what_requires_it() -> None:
+    # A rule on a milestone another rule reached: rules follow rules, and the step requiring the
+    # last one starts in the same decision.
+    definition = with_rule()
+    definition["milestones"]["escalated"] = {"display": {"title": "Escalated"}}
+    definition["rules"]["escalate"] = {
+        "display": {"title": "Escalate a large refund"},
+        "on": {"reached": "large"},
+        "then": {"reach": ["escalated"]},
+    }
+    definition["steps"]["check_large"] = {
+        "kind": "task",
+        "display": {"title": "Check a large refund"},
+        "roles": ["support-lead"],
+        "requires": ["escalated"],
+        "outcomes": {"checked": {"display": {"title": "Checked"}}},
+    }
+    run = run_case(
+        definition, file={"order_id": "ord-1", "amount": 5000}, answers=[], people=PEOPLE
+    )
+    assert run.history[1:6] == [
+        "flag_large#1 on opened: reaching large",
+        "reached large",
+        "escalate#1 on reached large: reaching escalated",
+        "reached escalated",
+        "started review#1: waiting for approve or reject by support",
+    ]
+    assert run.waiting_for == ["review by support", "check_large by support-lead"]
+
+
+def test_rules_on_one_moment_fire_in_the_order_written() -> None:
+    definition = with_rule()
+    rule = definition["rules"].pop("flag_large")
+    definition["rules"] = {"second_in_name": rule, "first_in_name": rule | {"when": None}}
+    run = run_case(
+        definition, file={"order_id": "ord-1", "amount": 5000}, answers=[], people=PEOPLE
+    )
+    assert [line for line in run.history if " on opened" in line] == [
+        "second_in_name#1 on opened: reaching large",
+        "first_in_name#1 on opened: reaching large",
+    ]

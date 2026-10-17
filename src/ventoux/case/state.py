@@ -43,6 +43,16 @@ class StepRun:
 
 
 @dataclass
+class RuleFiring:
+    """One time a rule's moment came: `flag_large#1` (brief, D38)."""
+
+    entry: str  # the rule and how many times its moment came, such as `flag_large#1`
+    rule: str
+    moment: str  # the moment, as the history says it: `opened`, `reached checked`, `started pay`
+    status: Literal["done"]  # done: it read its condition, and did what it says
+
+
+@dataclass
 class OpenApproval:
     """An approval asked and not yet answered: `pay.approval#1`."""
 
@@ -90,6 +100,10 @@ class CaseState:
     closed_because: str = ""  # why it is closing, as the closed line will say
     flags: list[str] = field(default_factory=list[str])  # what a person should look at
     history: list[str] = field(default_factory=list[str])  # what happened, one line each
+    firings: list[RuleFiring] = field(default_factory=list[RuleFiring])  # every rule's, in order
+    # The moments that came in the decision being made, waiting for their rules: always empty
+    # between events, so nothing about them crosses continue-as-new (brief, D38).
+    moments: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)

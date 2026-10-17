@@ -41,6 +41,7 @@ from ventoux.case.definition import (
 )
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
+from ventoux.case.rules import fire_rules, reach
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     Answered,
@@ -151,6 +152,7 @@ def decide(
         stop_plans(case, state, commands)
     if state.phase == "open":
         admit(case, catalog, state, commands, event.at)  # nothing new starts once closing
+    state.moments.clear()  # a case that isn't open decides nothing new (brief, D38)
     settle(case, state)
     return state, commands
 
@@ -190,6 +192,7 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
         state.sources[name] = marked(case, name, origin)
         state.obtained[name] = Obtained(event.at, None)  # from the opening, by no step run
     state.history.append(f"opened by {event.by or OPENER}, with {listed(sorted(event.file))}")
+    state.moments.append("opened")
 
 
 def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, object]) -> None:
@@ -606,14 +609,6 @@ def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retri
             del state.refreshing[field]
 
 
-def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
-    """Record each milestone reached: a fact, never undone."""
-    for milestone in milestones:
-        if milestone not in state.milestones:
-            state.milestones.append(milestone)
-            state.history.append(f"reached {milestone}")
-
-
 def admit(
     case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command], at: int
 ) -> None:
@@ -623,6 +618,7 @@ def admit(
     started = True
     while started:
         started = False
+        fire_rules(case, state)  # the moments that came, before any step is asked again
         follow(case, state)  # an open approval follows the case file (brief, D25)
         for name, step in case.steps.items():
             if not free_to_start(state, name, step) or not requirements_met(required[name], state):
@@ -910,6 +906,8 @@ def coming_run(
         return latest
     run = StepRun(next_entry(state, name), name, status)
     state.runs.append(run)
+    if status != "failed":  # a run that fails before it starts never started
+        state.moments.append(f"started {name}")
     return run
 
 
