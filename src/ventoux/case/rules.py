@@ -7,6 +7,7 @@ See docs/layers/11-rules.md.
 """
 
 from ventoux.case.admission import StepStopped, holds
+from ventoux.case.closing import close_held
 from ventoux.case.definition import CaseDefinition, Reached, Started
 from ventoux.case.state import CaseState, RuleFiring
 from ventoux.case.types import rule_problem
@@ -47,6 +48,9 @@ def fire(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str, mo
     entry = f"{name}#{sum(1 for firing in state.firings if firing.rule == name) + 1}"
     firing = RuleFiring(entry, name, moment, "done")
     state.firings.append(firing)
+    if (stopped := nothing_decided(case, state)) is not None:
+        state.history.append(f"{entry} on {moment}: not applied: {stopped}")
+        return
     try:
         decided = read(case, catalog, state, name)
     except StepStopped as unreadable:
@@ -73,6 +77,9 @@ def act(case: CaseDefinition, state: CaseState, firing: RuleFiring, decided: boo
     """Do what the rule says, if its condition held and read only trusted values; say so either
     way."""
     firing.status, firing.reason = "done", ""
+    if (stopped := nothing_decided(case, state)) is not None:  # a retry while the close is held
+        state.history.append(f"{firing.entry} on {firing.moment}: not applied: {stopped}")
+        return
     # Untrusted data informs; it never decides. Reaching a milestone decides for the case, so a
     # condition reading an untrusted value stops it whatever it gave (brief, D38). The message
     # names the value and its source, never the value (brief, D30).
@@ -88,6 +95,23 @@ def act(case: CaseDefinition, state: CaseState, firing: RuleFiring, decided: boo
     reaches = case.rules[firing.rule].then.reach
     state.history.append(f"{firing.entry} on {firing.moment}: reaching {' and '.join(reaches)}")
     reach(state, reaches)
+
+
+def nothing_decided(case: CaseDefinition, state: CaseState) -> str | None:
+    """Why no rule acts now, or None: once every `closes_when` milestone is reached, even while a
+    failed run holds the close, or once the case is closing, nothing new is decided
+    (brief, D34) (brief, D38)."""
+    if close_held(case, state) or (
+        state.phase != "open"
+        and case.closes_when
+        and set(case.closes_when) <= set(state.milestones)
+    ):
+        names = " and ".join(case.closes_when)
+        verb = "are" if len(case.closes_when) > 1 else "is"
+        return f"{names} {verb} reached, so the case closes and nothing new is decided"
+    if state.phase != "open":
+        return f"the case is {state.phase}, so nothing new is decided"
+    return None
 
 
 def untrusted_read(case: CaseDefinition, state: CaseState, name: str) -> str | None:

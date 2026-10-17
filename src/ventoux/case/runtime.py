@@ -148,11 +148,14 @@ def decide(
     else:
         complete(case, catalog, state, event)
     close_when_reached(case, state)
-    if was_open and state.phase == "closing":
-        stop_plans(case, state, commands)
     if state.phase == "open":
         admit(case, catalog, state, commands, event.at)  # nothing new starts once closing
-    state.moments.clear()  # a case that isn't open decides nothing new (brief, D38)
+        close_when_reached(case, state)  # a rule may have reached the last of closes_when
+    if was_open and state.phase == "closing":
+        stop_plans(case, state, commands)
+    # Moments left because the case is no longer open: each rule on them says it wasn't applied
+    # (brief, D38).
+    fire_rules(case, catalog, state)
     settle(case, state)
     return state, commands
 

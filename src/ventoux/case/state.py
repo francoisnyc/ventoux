@@ -50,8 +50,9 @@ class RuleFiring:
     rule: str
     moment: str  # the moment, as the history says it: `opened`, `reached checked`, `started pay`
     # done: it read its condition, and did what it says; failed: its condition couldn't be read,
-    # and it waits for a person (brief, D17) (brief, D38).
-    status: Literal["done", "failed"]
+    # and it waits for a person (brief, D17) (brief, D38); cancelled: the case was closed while it
+    # waited (brief, D10).
+    status: Literal["done", "failed", "cancelled"]
     reason: str = ""  # why it failed
 
 

@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.testing import RetryRefused, load_definition, propose, retry, run_case
+from ventoux.testing import RetryRefused, close, load_definition, propose, retry, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "omar": ["operations"]}
@@ -332,3 +332,118 @@ def test_untrusted_data_beside_trusted_data_still_cant_decide() -> None:
     assert any(
         "its condition reads kyc.analyst_notes, from untrusted:llm" in line for line in run.history
     )
+
+
+# --- Slice 4: the close ---
+
+
+def closing_on_paid(**rule: Any) -> dict[str, Any]:
+    """The refund closing once `pay` reaches `paid`, with `flag_large` changed by `rule`."""
+    definition = with_rule(**rule)
+    definition["milestones"]["paid"] = {"display": {"title": "Refund paid"}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["closes_when"] = ["paid"]
+    return definition
+
+
+def test_rules_stop_with_the_close() -> None:
+    # The rule's moment is the very one that completes closes_when: nothing new is decided once
+    # it is reached, and the history says why the rule did nothing (brief, D34, D38).
+    run = run_case(
+        closing_on_paid(on={"reached": "paid"}, when=None),
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+    )
+    assert (
+        "flag_large#1 on reached paid: not applied: paid is reached, so the case closes and "
+        "nothing new is decided"
+    ) in run.history
+    assert "reached large" not in run.history
+    assert run.closed
+
+
+def test_a_rule_reaching_closes_when_closes_the_case() -> None:
+    # Reached by a rule or by a step, closes_when closes the case the same way (brief, D10).
+    definition = with_rule()
+    definition["closes_when"] = ["large"]
+    run = run_case(
+        definition, file={"order_id": "ord-1", "amount": 5000}, answers=[], people=PEOPLE
+    )
+    assert run.history[-1] == "closed: large reached"
+
+
+def test_a_failed_rule_holds_the_close() -> None:
+    # As a failed step does: paid is reached, and the case waits for an operator instead of
+    # closing over the failed rule. Nothing is skipped automatically (brief, D17, D26).
+    run = run_case(
+        closing_on_paid(when={">": [{"var": "approved_amount"}, 1000]}),
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+    )
+    assert "reached paid" in run.history
+    assert run.status == "open"
+    assert run.needs_attention == [UNREAD]
+
+
+def test_a_failed_rule_retried_while_it_holds_the_close_lets_the_case_close() -> None:
+    # Read again, it decides nothing: paid is reached. Done, it holds nothing, and the case closes.
+    run = run_case(
+        closing_on_paid(when={">": [{"var": "approved_amount"}, 1000]}),
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 40}),
+            retry("flag_large#1", "omar"),
+        ],
+        people=PEOPLE,
+    )
+    at = run.history.index("omar retried flag_large#1 as operations")
+    assert run.history[at + 1] == (
+        "flag_large#1 on opened: not applied: paid is reached, so the case closes and nothing new "
+        "is decided"
+    )
+    assert run.closed and run.needs_attention == []
+
+
+def test_a_person_closing_the_case_cancels_a_failed_rule() -> None:
+    definition = unreadable()
+    definition["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate"}, "roles": ["support"]}
+    }
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[close("duplicate", "ana")],
+        people=PEOPLE,
+    )
+    assert "cancelled flag_large#1: closed as duplicate by ana" in run.history
+    assert run.closed and run.needs_attention == []
+
+
+def test_rules_dont_act_while_a_failed_step_holds_the_close() -> None:
+    # A lookup beside the review fails and needs attention; paid is then reached, and the close
+    # waits for it (brief, D26, D34). The rule on paid decides nothing meanwhile.
+    def down(inputs: dict[str, Any]) -> dict[str, Any]:
+        raise ConnectionError("orders unreachable")
+
+    definition = closing_on_paid(on={"reached": "paid"}, when=None)
+    definition["steps"]["look_up"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+        activities={"orders.lookup@1": down},
+    )
+    assert run.status == "open" and "reached paid" in run.history
+    assert (
+        "flag_large#1 on reached paid: not applied: paid is reached, so the case closes and "
+        "nothing new is decided"
+    ) in run.history
+    assert "reached large" not in run.history
