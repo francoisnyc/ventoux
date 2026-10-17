@@ -13,6 +13,8 @@ from ventoux.case.definition import (
     CallStep,
     CaseDefinition,
     PlanStep,
+    Reached,
+    Started,
     TaskStep,
     WorkflowStep,
 )
@@ -29,11 +31,22 @@ def can_happen(case: CaseDefinition, catalog: Catalog) -> set[str]:
     position), so one pass in the written order would miss what a later step makes possible. It
     ends: a round only adds, and there are finitely many steps and milestones to add (learning
     question 33). Starting from nothing matters: steps that wait on each other never get in.
+
+    A rule whose moment can come adds itself and the milestones it reaches, its condition taken as
+    possibly true (brief, D38). Rule names are unlike step and milestone names, so they share the
+    set; there are finitely many rules too, so it still ends.
     """
     can: set[str] = set()
     required = requirements(case)
     while True:
         before = len(can)
+        for name, rule in case.rules.items():
+            if (
+                name not in can
+                and moment_can_come(rule.on, can)
+                and not acts_after_close(case, name)
+            ):
+                can |= {name, *rule.then.reach}
         for name, step in case.steps.items():
             if not can_start(step, catalog.roles) or after_the_close(case, catalog, name):
                 continue
@@ -44,6 +57,31 @@ def can_happen(case: CaseDefinition, catalog: Catalog) -> set[str]:
                         can |= set(outcome.reaches)
         if len(can) == before:  # a round added nothing: nothing more can ever happen
             return can
+
+
+def moment_can_come(moment: object, can: set[str]) -> bool:
+    """Whether a rule's moment can come, given what can happen so far: the opening always; a
+    milestone, or a step's start, once it is in `can`."""
+    if isinstance(moment, Reached):
+        return moment.reached in can
+    if isinstance(moment, Started):
+        return moment.started in can
+    return True
+
+
+def acts_after_close(case: CaseDefinition, name: str) -> bool:
+    """Whether the rule `name` can act only once every `closes_when` milestone is reached: its
+    moment is reaching the only one. Nothing new is decided then (brief, D38). Only this form is
+    claimed: the check says less, never more."""
+    on = case.rules[name].on
+    return (
+        isinstance(on, Reached) and bool(case.closes_when) and set(case.closes_when) == {on.reached}
+    )
+
+
+def rules_reaching(case: CaseDefinition, milestone: str) -> list[str]:
+    """The rules that may reach `milestone`, in order."""
+    return [name for name, rule in case.rules.items() if milestone in rule.then.reach]
 
 
 def reached_by(case: CaseDefinition, milestone: str) -> list[str]:

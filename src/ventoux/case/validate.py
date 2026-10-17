@@ -13,7 +13,7 @@ from ventoux.case.calls import (
     plan_input_issues,
     supplied_plans,
 )
-from ventoux.case.definition import CaseDefinition, TaskStep
+from ventoux.case.definition import CaseDefinition, Reached, Started, TaskStep
 from ventoux.case.flow import (
     approver_issues,
     no_sources_issues,
@@ -25,11 +25,13 @@ from ventoux.case.flow import (
 )
 from ventoux.case.reach import (
     Through,
+    acts_after_close,
     can_happen,
     can_start,
     reachable,
     reached_before,
     reached_by,
+    rules_reaching,
     shortest_circle,
     waited_on,
 )
@@ -69,7 +71,7 @@ def validate_case(
             )
         )
     nobody_closes = never_closes(case, catalog, can)
-    found += never_run(case, catalog, can) + nobody_closes
+    found += never_run(case, catalog, can) + never_fires(case, can) + nobody_closes
     contracts, unknown_contracts = called_contracts(case, catalog)
     supplied, unknown_plans = supplied_plans(case, plans or {})
     found += unknown_contracts + unknown_plans
@@ -313,3 +315,45 @@ def why_never(case: CaseDefinition, name: str, waits_on: str) -> str:
         f"{name} can never run: it requires {waits_on}, which only {listed(reachers)} {reach}, "
         f"and {they} can never run: fix {reachers[0]} first"
     )
+
+
+def never_fires(case: CaseDefinition, can: set[str]) -> list[Issue]:
+    """A rule left out of `can`: its moment can never come, or comes only once every
+    `closes_when` milestone is reached, when nothing new is decided (brief, D38). An error: it is
+    proven for every case, as D34 refines D7's "rules that can never fire"."""
+    found: list[Issue] = []
+    for name, rule in case.rules.items():
+        if name in can:
+            continue
+        on = rule.on
+        said = f"reached {on.reached}" if isinstance(on, Reached) else ""
+        if acts_after_close(case, name):
+            assert isinstance(on, Reached)
+            why = (
+                f"{name} can never act: it fires on {said}, and {case.case} closes once "
+                f"{on.reached} is reached, when nothing new is decided: fire it on an earlier "
+                f"moment, or remove {on.reached} from closes_when"
+            )
+        elif isinstance(on, Started):
+            why = (
+                f"{name} can never fire: it fires on started {on.started}, which can never run: "
+                f"fix {on.started} first"
+            )
+        else:
+            assert isinstance(on, Reached)  # the opening always comes
+            reachers = reached_by(case, on.reached) + rules_reaching(case, on.reached)
+            if reachers:
+                one = len(reachers) == 1
+                why = (
+                    f"{name} can never fire: it fires on {said}, which only {listed(reachers)} "
+                    f"{'reaches' if one else 'reach'}, and "
+                    f"{'it can never' if one else 'none of them can ever'} happen: fix "
+                    f"{reachers[0]} first"
+                )
+            else:
+                why = (
+                    f"{name} can never fire: it fires on {said}, which no step or rule reaches: "
+                    f"reach {on.reached} from a step or a rule, or fire it on another moment"
+                )
+        found.append(Issue(f"rules.{name}.on", "NEVER_FIRES", why))
+    return found

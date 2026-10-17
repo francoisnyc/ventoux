@@ -11,7 +11,9 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.testing import RetryRefused, close, load_definition, propose, retry, run_case
+from ventoux.case.validate import validate_case
+from ventoux.core.validate import Issue
+from ventoux.testing import CATALOG, RetryRefused, close, load_definition, propose, retry, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "omar": ["operations"]}
@@ -447,3 +449,71 @@ def test_rules_dont_act_while_a_failed_step_holds_the_close() -> None:
         "nothing new is decided"
     ) in run.history
     assert "reached large" not in run.history
+
+
+# --- Slice 5: validation stays true ---
+
+
+def issues(definition: dict[str, Any]) -> list[Issue]:
+    return validate_case(parse_case(definition), CATALOG)
+
+
+def test_a_rule_on_a_milestone_nothing_reaches_never_fires() -> None:
+    definition = with_rule(on={"reached": "large"}, when=None)
+    definition["milestones"]["escalated"] = {"display": {"title": "Escalated"}}
+    definition["rules"]["flag_large"]["then"] = {"reach": ["escalated"]}
+    assert [i for i in issues(definition) if i.code == "NEVER_FIRES"] == [
+        Issue(
+            "rules.flag_large.on",
+            "NEVER_FIRES",
+            "flag_large can never fire: it fires on reached large, which no step or rule "
+            "reaches: reach large from a step or a rule, or fire it on another moment",
+        )
+    ]
+
+
+def test_a_rule_on_a_step_that_never_runs_never_fires() -> None:
+    definition = with_rule(on={"started": "pay"})
+    definition["steps"]["pay"]["requires"] = ["nowhere"]
+    definition["milestones"]["nowhere"] = {"display": {"title": "Nowhere"}}
+    assert [i.message for i in issues(definition) if i.code == "NEVER_FIRES"] == [
+        "flag_large can never fire: it fires on started pay, which can never run: fix pay first"
+    ]
+
+
+def test_a_rule_waiting_on_a_rule_that_never_fires_never_fires() -> None:
+    # A milestone only a rule that can never fire reaches: one cause, said at the first.
+    definition = with_rule(on={"reached": "nowhere"}, when=None)
+    definition["milestones"] |= {
+        "nowhere": {"display": {"title": "Nowhere"}},
+        "later": {"display": {"title": "Later"}},
+    }
+    definition["rules"]["then_later"] = {
+        "display": {"title": "Then later"},
+        "on": {"reached": "large"},
+        "then": {"reach": ["later"]},
+    }
+    assert [i.message for i in issues(definition) if i.code == "NEVER_FIRES"] == [
+        (
+            "flag_large can never fire: it fires on reached nowhere, which no step or rule "
+            "reaches: reach nowhere from a step or a rule, or fire it on another moment"
+        ),
+        (
+            "then_later can never fire: it fires on reached large, which only flag_large "
+            "reaches, and it can never happen: fix flag_large first"
+        ),
+    ]
+
+
+def test_a_rule_on_the_last_closes_when_milestone_never_acts() -> None:
+    assert [
+        i.message
+        for i in issues(closing_on_paid(on={"reached": "paid"}, when=None))
+        if i.code == "NEVER_FIRES"
+    ] == [
+        (
+            "flag_large can never act: it fires on reached paid, and refund closes once paid is "
+            "reached, when nothing new is decided: fire it on an earlier moment, or remove paid "
+            "from closes_when"
+        )
+    ]
