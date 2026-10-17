@@ -57,7 +57,13 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "flags": list(state.flags),
         "history": list(state.history),
         "firings": [
-            {"entry": f.entry, "rule": f.rule, "moment": f.moment, "status": f.status}
+            {
+                "entry": f.entry,
+                "rule": f.rule,
+                "moment": f.moment,
+                "status": f.status,
+                "reason": f.reason,
+            }
             for f in state.firings
         ],
         "moments": list(state.moments),  # always empty between events (brief, D38)

@@ -41,7 +41,7 @@ from ventoux.case.definition import (
 )
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
-from ventoux.case.rules import fire_rules, reach
+from ventoux.case.rules import fire_rules, reach, retry_rule
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     Answered,
@@ -559,17 +559,9 @@ def fail(state: CaseState, name: str, reason: str) -> None:
     state.history.append(f"{run.entry} failed: {reason}")
 
 
-def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retried) -> None:
-    """An operator retries a failed run: it runs again as the same run, with the same key, once
-    the step is checked again (brief, D26). Or `RetryRefused`."""
-    # Who retried is written one way, before anything is checked against it (brief, D22).
-    if (wrong := identifier_problem(event.by)) is not None:
-        raise RetryRefused(wrong)
-    if state.phase != "open":
-        raise RetryRefused(f"the case is {state.phase}: nothing starts")
-    run = next((run for run in state.runs if run.entry == event.entry), None)
-    if run is None or run.status != "failed":
-        raise RetryRefused(f"{event.entry} has not failed: nothing to retry")
+def operating_role(catalog: Catalog, event: Retried) -> str:
+    """The role that lets `event`'s person retry: one the catalog marks as operating
+    (brief, D26); or `RetryRefused`."""
     counted = sorted(role for role in event.roles if role in catalog.operators)
     if not counted:
         registered = sorted(role for role in event.roles if role in catalog.roles)
@@ -579,6 +571,29 @@ def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retri
             f"({', '.join(catalog.operators) or 'none registered'}), and {event.by} has "
             f"{known or 'no role'}"
         )
+    return counted[0]
+
+
+def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retried) -> None:
+    """An operator retries a failed run: it runs again as the same run, with the same key, once
+    the step is checked again (brief, D26). Or `RetryRefused`."""
+    # Who retried is written one way, before anything is checked against it (brief, D22).
+    if (wrong := identifier_problem(event.by)) is not None:
+        raise RetryRefused(wrong)
+    if state.phase != "open":
+        raise RetryRefused(f"the case is {state.phase}: nothing starts")
+    firing = next((f for f in state.firings if f.entry == event.entry), None)
+    if firing is not None and firing.status == "failed":
+        role = operating_role(catalog, event)
+        try:
+            retry_rule(case, catalog, state, firing, f"{event.by} retried {event.entry} as {role}")
+        except StepStopped as unreadable:
+            raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
+        return
+    run = next((run for run in state.runs if run.entry == event.entry), None)
+    if run is None or run.status != "failed":
+        raise RetryRefused(f"{event.entry} has not failed: nothing to retry")
+    counted = [operating_role(catalog, event)]
     step = case.steps[run.step]
     # The step is checked again: what made it fail may still hold. Fail closed: nothing starts.
     for requirement in requirements(case)[run.step]:
@@ -618,7 +633,7 @@ def admit(
     started = True
     while started:
         started = False
-        fire_rules(case, state)  # the moments that came, before any step is asked again
+        fire_rules(case, catalog, state)  # the moments that came, before any step is asked again
         follow(case, state)  # an open approval follows the case file (brief, D25)
         for name, step in case.steps.items():
             if not free_to_start(state, name, step) or not requirements_met(required[name], state):

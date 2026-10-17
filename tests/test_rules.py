@@ -11,10 +11,10 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.testing import load_definition, propose, run_case
+from ventoux.testing import RetryRefused, load_definition, propose, retry, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
-PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
+PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "omar": ["operations"]}
 
 
 def with_rule(**rule: Any) -> dict[str, Any]:
@@ -178,4 +178,81 @@ def test_rules_on_one_moment_fire_in_the_order_written() -> None:
     assert [line for line in run.history if " on opened" in line] == [
         "second_in_name#1 on opened: reaching large",
         "first_in_name#1 on opened: reaching large",
+    ]
+
+
+# --- Slice 2: fail closed ---
+
+UNREAD = (
+    "flag_large#1: flag_large's condition approved_amount > 1000 can't be evaluated: "
+    "approved_amount has no value"
+)
+
+
+def unreadable() -> dict[str, Any]:
+    """A rule on the opening reading the amount the review sets, which nobody has set yet."""
+    return with_rule(when={">": [{"var": "approved_amount"}, 1000]})
+
+
+def test_a_rule_that_cant_be_read_needs_attention() -> None:
+    # Fail closed: never read as false. The rejected review leaves nothing else to do, and the
+    # case still doesn't close: the failed rule waits for a person (brief, D17, D38).
+    run = run_case(
+        unreadable(),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[("review", "reject", "ana")],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [UNREAD]
+    assert f"flag_large#1 failed: {UNREAD.split(': ', 1)[1]}" in run.history
+    assert not run.closed
+
+
+def test_a_misspelt_outcome_fails_the_rule_never_reads_false() -> None:
+    # Checked over the case's values before it is read, as a step's are (brief, D35).
+    definition = with_rule(
+        on={"started": "pay"}, when={"==": [{"var": "review.outcome"}, "aprove"]}
+    )
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "flag_large#1: flag_large.when can't be read: ==[1]: review.outcome has no outcome "
+            '"aprove"; its outcomes are approve, reject'
+        )
+    ]
+
+
+def test_a_rule_still_unreadable_is_not_retried() -> None:
+    with pytest.raises(
+        RetryRefused, match=f"^flag_large#1 can't be retried: {UNREAD.split(': ', 1)[1]}$"
+    ):
+        run_case(
+            unreadable(),
+            file={"order_id": "ord-1", "amount": 250},
+            answers=[retry("flag_large#1", "omar")],
+            people=PEOPLE,
+        )
+
+
+def test_a_retried_rule_reads_its_condition_again() -> None:
+    # Read on the case file as it is when retried: the review has set the amount since.
+    run = run_case(
+        unreadable(),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 5000}),
+            retry("flag_large#1", "omar"),
+        ],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == []
+    at = run.history.index("omar retried flag_large#1 as operations")
+    assert run.history[at + 1 : at + 3] == [
+        "flag_large#1 on opened: reaching large",
+        "reached large",
     ]

@@ -99,6 +99,16 @@ def close_held(case: CaseDefinition, state: CaseState) -> bool:
 
 def pending(state: CaseState) -> bool:
     """Whether anything is left to do (brief, D10): a task open, an activity running, an approval
-    asked or given and not yet spent, or a step failed, which waits for a person (brief, D17)."""
+    asked or given and not yet spent, or a step or a rule failed, which waits for a person
+    (brief, D17) (brief, D38)."""
     unfinished = any(run.status in ("open", "running", "failed", "retrying") for run in state.runs)
-    return unfinished or bool(state.approvals) or bool(state.given)
+    failed_rule = any(firing.status == "failed" for firing in state.firings)
+    return unfinished or failed_rule or bool(state.approvals) or bool(state.given)
+
+
+def needs_attention(state: CaseState) -> list[str]:
+    """What waits for an operator, each with why: every failed step run, then every failed rule
+    (brief, D17) (brief, D38)."""
+    runs = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
+    rules = [f"{f.entry}: {f.reason}" for f in state.firings if f.status == "failed"]
+    return runs + rules

@@ -49,7 +49,10 @@ class RuleFiring:
     entry: str  # the rule and how many times its moment came, such as `flag_large#1`
     rule: str
     moment: str  # the moment, as the history says it: `opened`, `reached checked`, `started pay`
-    status: Literal["done"]  # done: it read its condition, and did what it says
+    # done: it read its condition, and did what it says; failed: its condition couldn't be read,
+    # and it waits for a person (brief, D17) (brief, D38).
+    status: Literal["done", "failed"]
+    reason: str = ""  # why it failed
 
 
 @dataclass
