@@ -16,6 +16,7 @@ import pytest
 from pydantic import BaseModel
 from test_case import guide_refund_with_plan  # the cases guide's plan step, as it runs
 from test_fresh_facts import refund_fresh  # the case-data guide's fresh refund
+from test_rules import SAYS_SEND, notes_say_send, welcome_file, with_welcome  # the welcome letter
 
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import CaseRun
@@ -24,7 +25,8 @@ from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, RetryPolicy, Timeouts
 from ventoux.core.contract import Display as ContractDisplay
-from ventoux.core.policy import only_from
+from ventoux.core.output_sources import source
+from ventoux.core.policy import only_from, trusted_only
 from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
@@ -2342,6 +2344,12 @@ class NoteInput(BaseModel):
     refund: str  # the refund's ID, to note it
 
 
+class NoteOutput(BaseModel):
+    # Declared, so a condition may read it: an undeclared value refuses what its step sends
+    # (brief, D39).
+    entry_id: Annotated[str, source("system:ledger")]
+
+
 def noting() -> Catalog:
     """The development catalog, and `refunds.note@1`, which notes a refund by its ID."""
     catalog = copy.deepcopy(CATALOG)
@@ -2350,7 +2358,7 @@ def noting() -> Catalog:
             name="refunds.note",
             version=1,
             input=NoteInput,
-            output=RecordOutput,
+            output=NoteOutput,
             risk="low",
             effect="compute",
             timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
@@ -2523,6 +2531,38 @@ TEAM_LEAD = {"roles": ["support-lead"], "display": {"reason": "Look-ups need a t
 DELIVERED = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}  # @2 has no fake
 
 
+class FileInput(BaseModel):
+    to_customer: Annotated[str, trusted_only()]  # never an address chosen by an AI
+    template: str
+    idempotency_key: str
+
+
+class FiledOutput(BaseModel):
+    draft_id: Annotated[str, source("system:letters")]  # the letters system says it
+
+
+def filing() -> Catalog:
+    """`noting()`'s catalog, and `letters.file@1`, which files a letter, a write, and declares
+    where its draft ID comes from, so `pay` may decide on it (brief, D39)."""
+    catalog = noting()
+    catalog.register(
+        ActivityContract(
+            name="letters.file",
+            version=1,
+            input=FileInput,
+            output=FiledOutput,
+            risk="low",
+            effect="write",
+            timeouts=Timeouts(start_to_close=30, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=5, initial_interval=1, backoff_coefficient=2),
+            idempotency_key="idempotency_key",
+            outcomes=[],
+            display=ContractDisplay(title="File a letter", description="Files a letter"),
+        )
+    )
+    return catalog
+
+
 def never_refreshed(definition: dict[str, Any], catalog: Catalog = CATALOG) -> list[str]:
     found = validate_case(parse_case(definition), catalog)
     assert [issue for issue in found if issue.severity == "error"] == []
@@ -2551,7 +2591,7 @@ def test_only_a_read_needing_no_approval_is_fetched_again() -> None:
     draft = {
         "kind": "activity",
         "display": {"title": "Draft a letter"},
-        "activity": "letters.draft@2",
+        "activity": "letters.file@1",
         "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
     }
     note = {
@@ -2562,7 +2602,8 @@ def test_only_a_read_needing_no_approval_is_fetched_again() -> None:
     }
     assert never_refreshed(paying_fresh("amount")) == why("amount")
     assert never_refreshed(paying_fresh("review.outcome")) == why("review.outcome")
-    assert never_refreshed(paying_fresh("draft.draft_id", draft=draft)) == why("draft.draft_id")
+    drafted = paying_fresh("draft.draft_id", draft=draft)
+    assert never_refreshed(drafted, filing()) == why("draft.draft_id")
     noted = paying_fresh("note.entry_id", note=note)
     assert never_refreshed(noted, noting()) == why("note.entry_id")
     # A read is fetched again; behind an approval only if the approval may not be needed.
@@ -2895,3 +2936,72 @@ def test_a_step_a_rule_may_start_can_run() -> None:
     assert "recheck_checked#1 on reached checked: starting recheck" in run.history
     # A rule starts it, so its misspelt role is said: it counts for nothing (brief, D22).
     assert issues(rechecked("supprt")) == [unknown_role("steps.recheck.proposed_by", "supprt")]
+
+
+CHOSEN_BY_THE_MODEL = (
+    "letters.draft@2 takes to_customer only from a system or a person, never from untrusted data, "
+    "and {who}'s condition reads kyc.analyst_notes (untrusted:llm): read a value a person or a "
+    "trusted system gives, such as a task's answer"
+)
+
+
+def welcomed_by_a_rule() -> dict[str, Any]:
+    """The welcome letter, started by a rule when the model's notes say so."""
+    definition = with_welcome(SAYS_SEND)
+    del definition["steps"]["welcome"]["when"]
+    definition["steps"]["welcome"]["automatic"] = False
+    definition["rules"]["send_welcome"] = {
+        "display": {"title": "Send a welcome letter"},
+        "on": {"reached": "checked"},
+        "when": SAYS_SEND,
+        "then": {"start": ["welcome"]},
+    }
+    return definition
+
+
+def test_input_policy_counts_conditions() -> None:
+    # A condition that lets a step start decides that its inputs are sent: the untrusted data it
+    # reads counts for their policies (brief, D39). The opener's source is trusted either way, so
+    # who opens the case changes nothing: an error, never OPENER_DECIDES.
+    assert issues(with_welcome(SAYS_SEND)) == [
+        Issue(
+            "steps.welcome.inputs.to_customer",
+            "INPUT_POLICY",
+            CHOSEN_BY_THE_MODEL.format(who="welcome"),
+        )
+    ]
+    for opened_by in (None, "ana"):
+        run = run_case(
+            with_welcome(SAYS_SEND),
+            file=welcome_file(),
+            answers=[],
+            people={"ana": ["support"]},
+            opened_by=opened_by,
+            workflows={"kyc.check@1": notes_say_send},
+        )
+        [failed] = run.needs_attention
+        assert failed.startswith("welcome#1: letters.draft@2 takes to_customer only from")
+    # At the rule, said as a failure; no UNTRUSTED_TRIGGER, since a rule that only starts acts.
+    assert issues(welcomed_by_a_rule()) == [
+        Issue(
+            "rules.send_welcome.then.start",
+            "INPUT_POLICY",
+            "welcome fails on its inputs every time send_welcome starts it: "
+            + CHOSEN_BY_THE_MODEL.format(who="send_welcome"),
+        )
+    ]
+    # A rule that reaches a milestone too doesn't act at all on untrusted data (brief, D38).
+    reaching = welcomed_by_a_rule()
+    reaching["milestones"]["welcomed"] = {"display": {"title": "Welcomed"}}
+    reaching["rules"]["send_welcome"]["then"]["reach"] = ["welcomed"]
+    [untrusted] = issues(reaching)
+    assert (untrusted.path, untrusted.code) == ("rules.send_welcome.when", "UNTRUSTED_TRIGGER")
+    assert untrusted.message.endswith(
+        "so it never reaches welcomed or starts welcome: read a value a person or a trusted "
+        "system gives, such as a task's answer"
+    )
+    # An input already refused on its own is the cause, said at the input only: one cause, one
+    # issue.
+    own = welcomed_by_a_rule()
+    own["steps"]["welcome"]["inputs"]["to_customer"] = {"var": "kyc.analyst_notes"}
+    assert [issue.path for issue in issues(own)] == ["steps.welcome.inputs.to_customer"]

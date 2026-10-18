@@ -16,6 +16,7 @@ from ventoux.case.calls import (
 from ventoux.case.definition import AnsweredTask, CaseDefinition, Reached, Started, TaskStep
 from ventoux.case.flow import (
     approver_issues,
+    condition_issues,
     no_sources_issues,
     plan_policy_issues,
     policy_issues,
@@ -81,6 +82,7 @@ def validate_case(
     found += reference_issues(case, contracts, supplied, {issue.path for issue in found})
     said = {issue.path for issue in found}
     found += policy_issues(case, contracts, said) + no_sources_issues(case, supplied, said)
+    found += condition_issues(case, contracts, {issue.path for issue in found})
     found += type_issues(case, catalog, contracts, supplied, {issue.path for issue in found})
     found += plan_policy_issues(case, catalog, contracts, supplied, {i.path for i in found})
     found += sensitive_issues(case, contracts, {issue.path for issue in found})
