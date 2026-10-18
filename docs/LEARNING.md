@@ -1154,5 +1154,23 @@ and record the key points. A question is closed once you can explain the answer 
 - Follow-up: with steps written `c`, `b`, `a`, where `c` requires `b` and `b` requires `a`, how
   many rounds does the check take, and what does each add? And why would starting from
   "everything" wrongly accept two steps that each require the other?
+- Retrieval (layer 11c warm-up, 2026-10-18), the follow-up: "not sure, tell me". In plain words:
+  - **Four rounds, three that add.** `can_happen` (`case/reach.py`) goes down the steps in the
+    written order each round, and a step added earlier in a round counts for the steps after it.
+    Round 1: `c` waits for `b`, not in yet; `b` waits for `a`, not in yet; `a` requires nothing,
+    so it goes in. Round 2: `c` still waits; `b` goes in. Round 3: `c` goes in. Round 4 adds
+    nothing, and that empty round is how the check knows it is done. Written `a`, `b`, `c`, one
+    round would add all three and a second would confirm it: the order changes how many rounds,
+    never the answer. Each round only adds, out of a finite list of steps (and, since 11a,
+    milestones and rules), so it always ends.
+  - **Why not start from "everything".** Say `pay` requires `assess` and `assess` requires
+    `pay`. Started from "everything can run", each step's requirement is already in the set, so
+    nothing is ever taken out: each vouches for the other, and the deadlock passes as fine.
+    Grown from nothing, a step goes in only once what it waits for is in, so neither ever does,
+    and validation says `DEADLOCK`. Starting from nothing finds only what some real order of
+    events reaches.
+  - **Why it came up in 11c.** A rule's `stop` only takes paths away, so this set, a "may
+    happen", stays sound; what has to be checked again are the claims that something always or
+    never happens (11c's audit of the proofs).
 - Status: open.
 
