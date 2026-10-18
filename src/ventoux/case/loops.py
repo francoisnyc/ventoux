@@ -6,6 +6,7 @@ person answering a task (brief, D39). A loop nothing in the case ends keeps a ta
 so the case never closes by itself (brief, D10). Claimed only where proven (brief, D34).
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -22,10 +23,16 @@ class Loop:
     steps: tuple[str, ...]  # the task each rule starts again
 
 
-def endless_loops(case: CaseDefinition) -> list[Loop]:
+def endless_loops(case: CaseDefinition, stoppable: Collection[str]) -> list[Loop]:
     """Each loop of starts nothing in the case ends, entered in every case: a task in it starts by
-    itself as the case opens, and each answer surely starts the next one again."""
-    restarts = surely_restarts(case)
+    itself as the case opens, and each answer surely starts the next one again. A task a rule
+    may stop can end it, so it is left out before any loop is looked for: a loop through it
+    proves nothing, and one found first must never hide another (brief, D39) (brief, D40)."""
+    restarts = {
+        task: [(step, rule) for step, rule in starts if step not in stoppable]
+        for task, starts in surely_restarts(case).items()
+        if task not in stoppable
+    }
     waits = {name: [step for step, _ in restarts.get(name, [])] for name in case.steps}
     found: list[Loop] = []
     looped: set[str] = set()
