@@ -302,20 +302,20 @@ def test_a_workflow_finishing_after_the_close_flags_the_case() -> None:
 
 # --- Layer 11c: stopping a workflow step, cancellable or not (brief, D40) ---
 
-KYC_CANCELLABLE = "kyc.check@2"
+KYC_CANCELLABLE = "kyc.check@3"
 
 
 def with_cancellable_kyc() -> Catalog:
-    """The development catalog, and `kyc.check@2`: the same check, whose team promises it stops
+    """The development catalog, and `kyc.check@3`: the same check, whose team promises it stops
     cleanly when cancelled."""
     catalog = copy.deepcopy(CATALOG)
     kyc = catalog.workflow("kyc.check@1")
-    catalog.register(kyc.model_copy(update={"version": 2, "cancellable": True}))
+    catalog.register(kyc.model_copy(update={"version": 3, "cancellable": True}))
     return catalog
 
 
 def cancellable_kyc(**changes: Any) -> dict[str, Any]:
-    """The refund with its customer checked by `kyc.check@2`, a support task logging a
+    """The refund with its customer checked by `kyc.check@3`, a support task logging a
     withdrawal, a rule stopping the check once it is logged, and a close reason."""
     definition = with_kyc()
     definition["steps"]["kyc"]["workflow"] = KYC_CANCELLABLE

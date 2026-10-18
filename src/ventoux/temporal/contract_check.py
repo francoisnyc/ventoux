@@ -100,6 +100,12 @@ ENDS = {
         "child_workflow_execution_terminated"
     ),
 }
+# The attributes by which an ending event names the event that started what it ends.
+LINKS = ("scheduled_event_id", "started_event_id", "initiated_event_id")
+# The marker a local activity's result is recorded under (Temporal's SDK core).
+LOCAL_ACTIVITY = "core_local_activity"
+# How many times the test looks for the cancellation run's first workflow task, 0.05 s apart.
+POLLS = 100
 # The event recording that the run was asked to cancel.
 CANCEL_REQUESTED = EventType.EVENT_TYPE_WORKFLOW_EXECUTION_CANCEL_REQUESTED
 # What completing, rather than failing or being cancelled, looks like for what it started.
@@ -115,6 +121,7 @@ async def cancellation_problems(
     """Every part of a cancellable contract's promise its workflow breaks, read from the history
     of a second run, asked to cancel once it has started (brief, D40)."""
     run = test_run(client, contract)
+    # Temporal: `start_workflow` starts the run and returns its handle at once, without waiting.
     handle = await client.start_workflow(
         binding.workflow,
         input,
@@ -123,15 +130,25 @@ async def cancellation_problems(
         execution_timeout=timedelta(seconds=contract.timeout),
     )
     # Started: its first workflow task has run, so what it starts first is in its history. The
-    # time-skipping test server moves time on only while a result is awaited, so it waits here.
-    while not any(
-        event.event_type == EventType.EVENT_TYPE_WORKFLOW_TASK_COMPLETED
-        for event in (await handle.fetch_history()).events
-    ):
+    # time-skipping test server moves time on only while a result is awaited, so it waits here,
+    # a bounded number of times: a run no worker takes would never start.
+    for _ in range(POLLS):
+        # Temporal: `fetch_history` reads the events the server has recorded for the run so far.
+        events = list((await handle.fetch_history()).events)
+        if any(e.event_type == EventType.EVENT_TYPE_WORKFLOW_TASK_COMPLETED for e in events):
+            break
         await asyncio.sleep(0.05)  # real time, for the worker to take its first task
+    else:
+        never = (
+            f"{contract.reference} is cancellable, and its run for the cancellation never "
+            "started: run its worker, and fix what fails its first workflow task"
+        )
+        return [never]
+    # Temporal: `describe` reads the run's status as the server has it now.
     if (await handle.describe()).status != WorkflowExecutionStatus.RUNNING:
         return [unchecked(contract)]
     try:
+        # Temporal: `cancel` asks the run to cancel; the server refuses once it has ended.
         await handle.cancel()
     except RPCError:
         return [unchecked(contract)]  # it ended in between: nothing left to cancel
@@ -157,19 +174,21 @@ def unchecked(contract: WorkflowContract) -> str:
 def broken_parts(contract: WorkflowContract, events: list[HistoryEvent], asked: int) -> list[str]:
     """The parts of the promise the history breaks, after the cancellation `asked` (an event
     ID): it schedules nothing new; it ends only once all it started has ended; it ends
-    cancelled only if nothing it started completed after the request."""
+    cancelled only if nothing it started completed after the request. One cause, one problem:
+    what it started after the request is said once, under the first part."""
     problems = []
     said = f"{contract.reference} is cancellable, and"
     for event in events:
-        if event.event_id > asked and event.event_type in STARTS:
-            what = STARTS[event.event_type]
-            problems.append(f"{said} started {what} after its cancellation was requested")
+        if event.event_id > asked and (what := new_work(event)) is not None:
+            problems.append(f"{said} {what} after its cancellation was requested")
             break
     started = {e.event_id for e in events if e.event_type in STARTS}
     for event in events:
         if event.event_type in ENDS:
+            # Temporal: each event's details are in its `<kind>_event_attributes`, naming the
+            # event that started what it ends.
             attributes = getattr(event, f"{ENDS[event.event_type]}_event_attributes")
-            for link in ("scheduled_event_id", "started_event_id", "initiated_event_id"):
+            for link in LINKS:
                 started.discard(getattr(attributes, link, 0))
     if started:
         problems.append(f"{said} ended before everything it started had ended")
@@ -177,10 +196,25 @@ def broken_parts(contract: WorkflowContract, events: list[HistoryEvent], asked: 
     if last == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_CANCELED:
         for event in events:
             if event.event_id > asked and event.event_type in COMPLETIONS:
-                what = COMPLETIONS[event.event_type]
-                problems.append(f"{said} ended cancelled though {what} completed after the request")
-                break
+                attributes = getattr(event, f"{ENDS[event.event_type]}_event_attributes")
+                if any(0 < getattr(attributes, link, 0) < asked for link in LINKS):
+                    what = COMPLETIONS[event.event_type]
+                    problems.append(
+                        f"{said} ended cancelled though {what} completed after the request"
+                    )
+                    break
     return problems
+
+
+def new_work(event: HistoryEvent) -> str | None:
+    """What the event says the workflow started, as the problem says it: `started a timer`; a
+    local activity, which its history records only once it has run, `ran a local activity`."""
+    if event.event_type in STARTS:
+        return f"started {STARTS[event.event_type]}"
+    marker = event.marker_recorded_event_attributes.marker_name
+    if event.event_type == EventType.EVENT_TYPE_MARKER_RECORDED and marker == LOCAL_ACTIVITY:
+        return "ran a local activity"
+    return None
 
 
 def output_problems(contract: WorkflowContract, output: dict[str, Any]) -> list[str]:

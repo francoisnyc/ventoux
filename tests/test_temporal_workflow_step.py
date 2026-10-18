@@ -39,7 +39,7 @@ from ventoux.temporal.cases import (
     retry,
     start_case,
 )
-from ventoux.temporal.contract_check import check_workflow_contract
+from ventoux.temporal.contract_check import cancellation_problems, check_workflow_contract
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import answer_forget, forget_report, propose_forget
 from ventoux.temporal.worker import SANDBOX, case_worker
@@ -131,9 +131,22 @@ class KycCheck:
                 raise
         if inputs["customer_id"] == "c-leaves-early":  # ends while its read still runs
             await slow_read_of(inputs["customer_id"])
+        if inputs["customer_id"] == "c-reads-locally":  # runs a local activity after the request
+            try:
+                await workflow.sleep(60)
+            except asyncio.CancelledError:
+                # Temporal: a local activity runs in the worker, recorded only once it ends.
+                await workflow.execute_local_activity(
+                    "kyc_slow_read",
+                    inputs["customer_id"],
+                    start_to_close_timeout=timedelta(seconds=10),
+                )
+                raise
         if inputs["customer_id"] == "c-completes-anyway":  # its read completes after the request
             read = slow_read_of(inputs["customer_id"])
             try:
+                # asyncio: `shield` keeps the run's cancellation from reaching the read, so the
+                # read completes after the request.
                 await asyncio.shield(read)
             except asyncio.CancelledError:
                 await read  # it completes, after the request; then the run ends cancelled
@@ -494,9 +507,12 @@ DRIFTS = {
     "declares `cancellable=True`, and ends cancelled though its activity completed after the "
     "request": "c-completes-anyway",
     "declares `cancellable=True`, and ends before it can be cancelled": "c-1",
+    "declares `cancellable=True`, and runs a local activity after the cancellation is requested": (
+        "c-reads-locally"
+    ),
 }
 # The same check, whose team promises it stops cleanly when cancelled (brief, D40).
-KYC_CANCELLABLE = kyc_check.model_copy(update={"version": 2, "cancellable": True})
+KYC_CANCELLABLE = kyc_check.model_copy(update={"version": 3, "cancellable": True})
 
 
 def contract_test_rows() -> list[tuple[str, str]]:
@@ -547,6 +563,19 @@ def test_the_contract_test_checks_cancellation() -> None:
     assert contract_test_of("c-sleeps", KYC_CANCELLABLE) == []
     # Not cancellable: no second run, so a workflow that would break the promise isn't asked.
     assert contract_test_of("c-sleeps-again") == []
+
+    # A second run no worker takes never starts: the test says so, and doesn't wait for ever.
+    async def unserved(environment: WorkflowEnvironment) -> list[str]:
+        binding = Binding(workflow="KycCheck", task_queue="nobody-serves-this")
+        return await cancellation_problems(
+            environment.client, KYC_CANCELLABLE, binding, {"customer_id": "c-sleeps"}
+        )
+
+    never = (
+        "kyc.check@3 is cancellable, and its run for the cancellation never started: run its "
+        "worker, and fix what fails its first workflow task"
+    )
+    assert on_temporal(unserved) == [never]
 
 
 def test_the_guides_contract_test_runs_as_written() -> None:
@@ -661,7 +690,7 @@ def test_a_case_history_replays() -> None:
 
 
 def with_cancellable_kyc_catalog() -> Any:
-    """The development catalog, and `kyc.check@2`, the check whose team promises it stops
+    """The development catalog, and `kyc.check@3`, the check whose team promises it stops
     cleanly when cancelled."""
     catalog = copy.deepcopy(CATALOG)
     catalog.register(KYC_CANCELLABLE)
@@ -670,11 +699,11 @@ def with_cancellable_kyc_catalog() -> Any:
 
 @workflow.defn(name="ventoux.case")
 class CasesWithCancellableKyc(CaseWorkflow):
-    """The development cases, with `kyc.check@2` bound to the KYC team's workflow."""
+    """The development cases, with `kyc.check@3` bound to the KYC team's workflow."""
 
     catalog = with_cancellable_kyc_catalog()
     workflows: ClassVar[Mapping[str, Binding]] = {
-        "kyc.check@2": Binding(workflow="KycCheck", task_queue=KYC)
+        "kyc.check@3": Binding(workflow="KycCheck", task_queue=KYC)
     }
 
     @workflow.run
@@ -683,10 +712,10 @@ class CasesWithCancellableKyc(CaseWorkflow):
 
 
 def withdrawn_kyc() -> dict[str, Any]:
-    """The refund checked by `kyc.check@2`, with a support task logging a withdrawal, a rule that
+    """The refund checked by `kyc.check@3`, with a support task logging a withdrawal, a rule that
     stops the check once it is logged, and a close reason."""
     definition = with_kyc()
-    definition["steps"]["kyc"]["workflow"] = "kyc.check@2"
+    definition["steps"]["kyc"]["workflow"] = "kyc.check@3"
     definition["milestones"] = {"withdrawn": {"display": {"title": "Withdrawn"}}}
     definition["steps"]["log_withdrawal"] = {
         "kind": "task",
