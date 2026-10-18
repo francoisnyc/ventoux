@@ -17,6 +17,7 @@ from ventoux.case.admission import (
     RetryRefused,
     StepStopped,
     holds,
+    latest_counted,
     latest_run,
     proposal_refusal,
     requirements_met,
@@ -780,13 +781,20 @@ def admit(
         for name, step in case.steps.items():
             if not free_to_start(state, name, step):
                 continue
+            latest = latest_run(state, name)
+            retried = latest if latest is not None and latest.status == "retrying" else None
             if not requirements_met(required[name], state):
+                # A retry waits for a step it requires while that step is on its way, which the
+                # case shows; one that ended without completing can't let it start.
+                ended = ended_requirement(state, required[name])
+                if retried is not None and ended is not None:
+                    why = f"{name} requires {ended}, which hasn't completed"
+                    retry_fails(state, retried, why, "retry it once it has")
                 drop_waiting(state, name, "its requirements are no longer met")
                 continue
             # Once the close is only held by a failed run, nothing new starts: only the run an
             # operator retries (brief, D34).
-            latest = latest_run(state, name)
-            if close_held(case, state) and (latest is None or latest.status != "retrying"):
+            if close_held(case, state) and retried is None:
                 continue
             try:
                 # Every expression it reads is checked over the case's types first, so a misspelt
@@ -805,6 +813,9 @@ def admit(
                 if step.when is not None and not holds(
                     step.when, state.values, f"{name}'s condition"
                 ):
+                    if retried is not None:  # nothing can let it start now
+                        why = f"{render(step.when)} is false now"
+                        retry_fails(state, retried, why, "retry it once it holds")
                     drop_waiting(state, name, f"{render(step.when)} is false")
                     continue
                 taken_up(state, name)
@@ -815,6 +826,28 @@ def admit(
                 taken_up(state, name)
                 fail(state, name, str(error))
             started = True
+
+
+def ended_requirement(state: CaseState, required: tuple[str, ...]) -> str | None:
+    """A step or milestone the step requires that isn't met, and has nothing on its way to meet
+    it: its latest run ended without completing (cancelled, rejected), or there is none. None if
+    each unmet one is on its way: open, running, failed or retried, each shown by the case."""
+    for requirement in required:
+        if requirements_met((requirement,), state):
+            continue
+        latest = latest_counted(state, requirement)
+        if latest is None or latest.status not in ("open", "running", "failed", "retrying"):
+            return requirement
+    return None
+
+
+def retry_fails(state: CaseState, run: StepRun, why: str, then: str) -> None:
+    """A retried run that nothing can let start any more goes back to failed, saying why and
+    what to do, never kept waiting for nothing: an operator retries it again, or closes the case
+    (brief, D17) (brief, D26)."""
+    run.status = "failed"
+    run.reason = f"its retry can't start: {why}: {then}, or close the case"
+    state.history.append(f"{run.entry} failed again: its retry can't start: {why}")
 
 
 def refresh_stale(

@@ -191,13 +191,10 @@ def seeds(listed: str) -> set[int]:
 
 
 # Silent before the fix, by the path of the note's table each seed is silent on now: its mark
-# comes off with the slice that fixes that path (C, E' and F in slice 3, K in slice 4). A seed
-# whose path is fixed may play on to another, as 229 did after A. L and M are scripted below:
-# they need a refresh held across a person's act.
+# comes off with the slice that fixes that path (K in slice 4). A seed whose path is fixed may
+# play on to another, as 229 did after A. L and M are scripted below: they need a refresh held
+# across a person's act.
 SILENT_ON_MAIN = {
-    "C": seeds("313 369 492 497 791"),
-    "E'": seeds("229 323 876"),
-    "F": seeds("71 511"),
     "K": seeds("393 713 753 754"),
 }
 # The seeds that were silent on a path now fixed, with the line its fix writes: each must still
@@ -213,6 +210,9 @@ FIXED = {
         ),
         "so it needs attention again",
     ),
+    "C": (seeds("313 369 492 497 791"), "failed again: its retry can't start:"),
+    "E'": (seeds("229 323 876"), "which hasn't completed"),
+    "F": (seeds("71 511"), "failed again: its retry can't start:"),
 }
 
 
@@ -238,7 +238,7 @@ def test_generated_cases_show_what_is_pending(seed: int) -> None:
 @pytest.mark.parametrize("path", sorted(FIXED))
 def test_the_generated_cases_reach_the_paths(path: str) -> None:
     # Each seed once silent on a fixed path now writes that fix's line; for D, while the close
-    # is held, after the audit reached the case's closes_when milestone.
+    # is held, after the audit reached the case's closes_when milestone, and for A, not.
     found, line = FIXED[path]
     still_silent = set().union(*SILENT_ON_MAIN.values())  # marked: they fail on another path
     checked = sorted(found - still_silent)
@@ -247,8 +247,9 @@ def test_the_generated_cases_reach_the_paths(path: str) -> None:
         history = generated_case(seed).history
         fixed = [i for i, said in enumerate(history) if line in said]
         assert fixed, f"seed {seed} no longer reaches path {path}"
-        held = "reached audited" in history[: fixed[0]]
-        assert held == (path == "D"), f"seed {seed}: the close is {'' if held else 'not '}held"
+        if path in ("A", "D"):  # the same line: told apart by whether the close is held
+            held = "reached audited" in history[: fixed[0]]
+            assert held == (path == "D"), f"seed {seed}: the close is {'' if held else 'not '}held"
 
 
 # --- Slice 1: the paths the generated cases can't reach, scripted ---
@@ -524,3 +525,27 @@ def test_nothing_new_starts_beside_a_rejected_rescue() -> None:
         ProposalRefused, match="^pay#1 needs attention: retry it, or close the case$"
     ):
         run_case(definition, FILE, script, PEOPLE, activities={"payments.refund@2": down_once([])})
+
+
+# --- Slice 3: a retry waits only for what can still let it start ---
+
+
+def test_a_retry_whose_condition_turns_false_needs_attention() -> None:
+    # Path C. While pay#1's retry waits for its approval, the review is proposed again, which
+    # withdraws the approval, and the new review is rejected: pay's condition is false now, so
+    # nothing can let the retry start. It goes back to failed, naming the condition as the
+    # definition writes it, never a value (the note, decision 2) (brief, D17, D26).
+    script = [*RESCUED, propose("review", "ana"), ("review#3", "reject", "ana")]
+    run = run_case(
+        refund_retried(), FILE, script, PEOPLE, activities={"payments.refund@2": down_once([])}
+    )
+    assert "withdrew pay.approval#1: review started again" in run.history
+    assert run.history[-1] == (
+        'pay#1 failed again: its retry can\'t start: review.outcome = "approve" is false now'
+    )
+    assert run.needs_attention == [
+        (
+            'pay#1: its retry can\'t start: review.outcome = "approve" is false now: retry it once '
+            "it holds, or close the case"
+        )
+    ]
