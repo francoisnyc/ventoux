@@ -888,6 +888,48 @@ def test_a_rule_starts_nothing_once_the_case_closes() -> None:
     ]
 
 
+def test_a_failed_rule_holding_the_close_is_named() -> None:
+    # checked is reached, and a rule on the same answer fails: the close waits for it (brief, D26)
+    # (brief, D38), and what is refused meanwhile says which failed run or rule it waits for.
+    # Before the third review's fix, a failed rule alone made it "closes once nothing are
+    # retried".
+    definition = closing_on_checked(
+        {
+            "note_it": {
+                "display": {"title": "Note a large refund"},
+                "on": {"answered": "review"},
+                "when": {">": [{"var": "approved_amount"}, 1000]},
+                "then": {"reach": ["checked"]},
+            },
+            "begin": {
+                "display": {"title": "Look it up"},
+                "on": {"answered": "review"},
+                "then": {"start": ["lookup"]},
+            },
+            "finish": {
+                "display": {"title": "Checked"},
+                "on": {"answered": "review"},
+                "then": {"reach": ["checked"]},
+            },
+        }
+    )
+    definition["steps"]["lookup"]["proposed_by"] = ["support"]
+    held = (
+        "checked is reached, so the case closes once note_it#1 is retried, or a person closes it: "
+        "nothing new starts"
+    )
+    run = run_case(definition, file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE)
+    assert f"begin#1 on answered review: lookup not started: {held}" in run.history
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            definition,
+            file=SMALL,
+            answers=[("review", "reject", "ana"), propose("lookup", "ana")],
+            people=PEOPLE,
+        )
+    assert str(refused.value) == held
+
+
 def welcome_on_a_fresh_status() -> dict[str, Any]:
     """The welcome letter started by a rule on the model's notes, once the review is answered,
     drafted only on an order status at most a day old."""
@@ -1048,6 +1090,83 @@ def test_a_new_proposal_replaces_a_withdrawn_one() -> None:
     assert "withdrew goodwill.approval#1: approved_amount changed" in run.history
     assert "sam answered goodwill.approval#2 approve as support-lead" in run.history
     assert run.reached("goodwill")
+    # The other way round: Sam proposes it, his approval is withdrawn, and then the rule starts
+    # it, on Lee's check. The rule's is the proposal now, and Sam may approve it.
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[
+            APPROVED_40,
+            propose("goodwill", "sam"),
+            propose("review", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 30}),
+            ("lead_check", "ok", "lee"),
+            ("goodwill.approval#2", "approve", "sam"),
+        ],
+        people=LEADS,
+    )
+    assert "withdrew goodwill.approval#1: approved_amount changed" in run.history
+    assert "start_goodwill#1 on answered lead_check: starting goodwill" in run.history
+    assert "sam answered goodwill.approval#2 approve as support-lead" in run.history
+
+
+def failing_goodwill_once() -> dict[str, Any]:
+    """The refund's payments, the goodwill refund's first run failing once."""
+    failed: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        if inputs["idempotency_key"].endswith("goodwill#1") and not failed:
+            failed.append(inputs["idempotency_key"])
+            raise ConnectionError("the provider is down")
+        return {"refund_id": "refund-ord-1"}
+
+    return {"payments.refund@2": refund}
+
+
+def test_a_retried_run_keeps_who_may_not_approve_it() -> None:
+    # A retry is the same run (brief, D26): whoever could not approve it still can't, though its
+    # approval is asked only now, when the rejected review makes it needed. Sam checked the review,
+    # which decided that the rule started it (brief, D39); in the second case, he proposed it
+    # (brief, D25). Before the third review's fix, a retried activity forgot both.
+    rejected = [propose("review", "ana"), ("review", "reject", "ana"), retry("goodwill#1", "omar")]
+    by_a_rule = with_goodwill(CHECKED_OK)
+    by_a_rule["steps"]["goodwill"]["approval"]["when"] = {
+        "==": [{"var": "review.outcome"}, "reject"]
+    }
+    proposed = copy.deepcopy(by_a_rule)
+    del proposed["rules"]["start_goodwill"]
+    proposed["steps"]["goodwill"]["proposed_by"] = ["support"]
+    proposed |= closable(proposed, "support") | {"stays_open": True}
+    cases: list[tuple[dict[str, Any], list[Any], str]] = [
+        (
+            by_a_rule,
+            [("lead_check", "ok", "sam")],
+            (
+                "sam set lead_check.outcome, which decided that start_goodwill#1 started goodwill, so "
+                "cannot approve it"
+            ),
+        ),
+        (
+            proposed,
+            [("lead_check", "ok", "lee"), propose("goodwill", "sam")],
+            "sam proposed goodwill, so cannot approve it",
+        ),
+    ]
+    for definition, started, refusal in cases:
+        with pytest.raises(AnswerRefused) as refused:
+            run_case(
+                definition,
+                file=SMALL,
+                answers=[
+                    APPROVED_40,
+                    *started,
+                    *rejected,
+                    ("goodwill.approval#1", "approve", "sam"),
+                ],
+                people=LEADS,
+                activities=failing_goodwill_once(),
+            )
+        assert str(refused.value) == refusal
 
 
 # --- 11b, slice 4: validation ---
@@ -1125,6 +1244,19 @@ def test_a_start_refused_every_time_is_never_starts() -> None:
         "then": {"start": ["review"]},
     }
     assert not [i for i in issues(may_retry) if i.code == "NEVER_STARTS"]
+    # Each half alone still proves it: a condition on a step that can't run again, or no
+    # condition on one that can.
+    once = copy.deepcopy(own_run)
+    once["rules"]["again"]["when"] = {">": [{"var": "approved_amount"}, 10]}
+    no_condition = copy.deepcopy(may_retry)
+    del no_condition["rules"]["again"]["when"]
+    for proven, step in ((once, "pay"), (no_condition, "review")):
+        assert [i.message for i in issues(proven) if i.code == "NEVER_STARTS"] == [
+            (
+                f"again can never start {step}: it fires on started {step}, while {step} is running: "
+                "start it on another moment"
+            )
+        ]
     # On its own answer, a step that isn't repeatable has run by then.
     answered = with_rule(on={"answered": "review"}, when=None, then={"start": ["review"]})
     del answered["milestones"]

@@ -371,6 +371,7 @@ def settled_by_a_rule(when: Any) -> dict[str, Any]:
 
 
 CHECKED = [("review", "approve", "ana", {"approved_amount": 40}), ("lead_check", "ok", "sam")]
+DONE = {"display": {"title": "Done"}, "roles": ["support"]}
 
 
 def test_a_plan_step_a_rule_starts_carries_what_the_rule_read() -> None:
@@ -383,19 +384,32 @@ def test_a_plan_step_a_rule_starts_carries_what_the_rule_read() -> None:
         "source": "untrusted:customer",
         "display": {"title": "The customer's note"},
     }
+    paid: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paid.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-ord-1"}
+
     run = run_case(
         on_the_note,
         file={"order_id": "ord-1", "amount": 40, "note": "refund me"},
-        answers=CHECKED,
-        people=PEOPLE,
+        answers=[*CHECKED, retry("settle#1", "omar")],
+        people={**PEOPLE, "omar": ["operations"]},
         plans={"refund-order@1": refund_order()},
-        plan_answers={"settle": [("approve_refund", "approve", "lee")]},
+        plan_answers={"settle": [("approve_refund", "approve", "lee")] * 2},
+        activities={**FAKES, "payments.refund@2": refund},
     )
-    [failed] = run.needs_attention
-    assert failed.endswith(
+    refused = (
         "payments.refund@2 takes order_id only from a system or a person, never from untrusted "
         "data, and settle_on#1's condition, which started settle, reads note (untrusted:customer)"
     )
+    # Refused on the first run, and again on the operator's retry, the same run (brief, D26):
+    # what the rule read is kept with it.
+    assert "omar retried settle#1 as operations" in run.history
+    assert [line for line in run.history if line.startswith("settle#1 failed")] == [
+        f"settle#1 failed: refund-order@1 stopped: {refused}"
+    ] * 2
+    assert paid == []
 
 
 def test_a_retried_plan_keeps_who_may_not_approve_in_it() -> None:
@@ -425,3 +439,22 @@ def test_a_retried_plan_keeps_who_may_not_approve_in_it() -> None:
     assert "omar retried settle#1 as operations" in run.history
     assert calls == ["memory/settle#1/pay#1"]  # Sam's approval of the retried plan was refused
     assert not run.closed
+    # The same for a person who proposed it (brief, D25): a gap since layer 8, closed with it.
+    proposed = settled_by_a_rule({"==": [{"var": "lead_check.outcome"}, "ok"]})
+    del proposed["rules"]["settle_on"]
+    proposed["steps"]["settle"]["proposed_by"] = ["support-lead"]
+    proposed |= {"stays_open": True, "close_reasons": {"done": DONE}}
+    calls.clear()
+    run = run_case(
+        proposed,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[*CHECKED, propose("settle", "sam"), retry("settle#1", "omar")],
+        people={**PEOPLE, "omar": ["operations"]},
+        plans={"refund-order@1": refund_order()},
+        plan_answers={
+            "settle": [("approve_refund", "approve", "lee"), ("approve_refund", "approve", "sam")]
+        },
+        activities={**FAKES, "payments.refund@2": failing_once},
+    )
+    assert "omar retried settle#1 as operations" in run.history
+    assert calls == ["memory/settle#1/pay#1"]  # Sam proposed it: his approval was refused

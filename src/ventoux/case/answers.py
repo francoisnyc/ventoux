@@ -10,6 +10,7 @@ proposer, and not whoever's answer feeds the step (brief, D11).
 
 from collections.abc import Mapping
 
+from ventoux.case.admission import latest_run
 from ventoux.case.called import called
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
 from ventoux.case.state import Answered, CaseState, RuleStart
@@ -91,6 +92,11 @@ def judge_approval(
     asked = state.proposed_by_rules.get(name)
     if asked is not None and answer.by in asked.read_from:
         raise AnswerRefused(decided_by(answer.by, asked.read_from[answer.by], asked))
+    # A retried run is the same run: whoever its first start excluded still can't approve it,
+    # though the proposal behind it is spent (brief, D26).
+    latest = latest_run(state, name)
+    if latest is not None and latest.status == "retrying" and answer.by in latest.excluded:
+        raise AnswerRefused(latest.excluded[answer.by])
     refuse_unless(someone_else(state.sources, answer.by, name, step))
     return approver
 

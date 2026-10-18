@@ -401,10 +401,17 @@ def left_unstarted(case: CaseDefinition, state: CaseState) -> None:
 def nothing_new(case: CaseDefinition, state: CaseState) -> str:
     """Why nothing new starts once every `closes_when` milestone is reached: the case closes,
     now or once what failed is retried (brief, D34)."""
-    if any(run.status in ("failed", "retrying") for run in state.runs):
+    if holding(state):
         return held_close_refusal(case, state)
     verb = "is" if len(case.closes_when) == 1 else "are"
     return f"{listed(list(case.closes_when))} {verb} reached, so the case closes and nothing new starts"
+
+
+def holding(state: CaseState) -> list[str]:
+    """The failed runs and rules the close waits for, as their entries: each waits for a person
+    (brief, D26) (brief, D38)."""
+    runs = [run.entry for run in state.runs if run.status in ("failed", "retrying")]
+    return runs + [firing.entry for firing in state.firings if firing.status == "failed"]
 
 
 def held_close_refusal(case: CaseDefinition, state: CaseState) -> str:
@@ -412,7 +419,7 @@ def held_close_refusal(case: CaseDefinition, state: CaseState) -> str:
     waits for before it closes (brief, D34)."""
     reached = listed(list(case.closes_when))
     verb = "is" if len(case.closes_when) == 1 else "are"
-    failed = [run.entry for run in state.runs if run.status in ("failed", "retrying")]
+    failed = holding(state)
     retried = "is" if len(failed) == 1 else "are"
     return (
         f"{reached} {verb} reached, so the case closes once {listed(failed)} {retried} retried, "
@@ -1013,11 +1020,15 @@ def schedule(
     entry = entry or next_entry(state, name)
     key = f"{state.case}/{entry}"
     types = {name: field.declared for name, field in case.fields.items()}
-    steered = steering(case, catalog, state, name, step)
+    # A retry starts the same run again, with what its first start kept (brief, D26).
+    kept = latest.steered if latest is not None and latest.status == "retrying" else ()
+    steered = tuple(dict.fromkeys((*kept, *steering(case, catalog, state, name, step))))
     inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key, types, steered)
     if isinstance(step, WorkflowStep):
         refuse_sensitive_inputs(contract.reference, step.inputs, state.values)
-    coming_run(state, name, "running").approved = approved
+    run = coming_run(state, name, "running")
+    run.approved, run.steered = approved, steered
+    run.excluded = may_not_approve(state, name, run)  # read before the proposal is spent
     proposal_spent(state, name)  # the proposed run has started
     if isinstance(step, WorkflowStep):
         # The run's name names its child workflow on Temporal, as a plan step's does.
@@ -1100,21 +1111,9 @@ def start_plan(
             raise InputRefused(f"{field} can't be evaluated: {error}") from None
     run = coming_run(state, name, "running")
     # Who may approve nothing in the plan crosses into it, or a plan step would be a way around
-    # them (brief, D25). A retry starts the same run again, with what its first start kept
-    # (brief, D26).
-    excluded = dict(run.excluded)
-    if state.opened_by is not None:
-        excluded[state.opened_by] = (
-            f"{state.opened_by} opened the case, so cannot approve its steps"
-        )
-    proposer = state.proposers.get(name)
-    if proposer is not None:
-        excluded.setdefault(proposer, f"{proposer} proposed {name}, so cannot approve it")
-    # Whoever's answer decided that a rule started it is excluded too (brief, D11) (brief, D39).
-    if (asked := state.proposed_by_rules.get(name)) is not None:
-        for person, field in asked.read_from.items():
-            excluded.setdefault(person, decided_by(person, field, asked))
-    # Read before the proposal is spent: the rule's record is part of it (brief, D39).
+    # them (brief, D25). Read before the proposal is spent: the rule's record is part of it, and
+    # a retry starts the same run again, with what its first start kept (brief, D26) (brief, D39).
+    excluded = may_not_approve(state, name, run)
     steered = tuple(dict.fromkeys((*run.steered, *steering(case, catalog, state, name, step))))
     run.excluded, run.steered = excluded, steered
     proposal_spent(state, name)  # the proposed run has started
@@ -1129,6 +1128,24 @@ def start_plan(
     commands.append(
         StartPlan(run.entry, step.plan, fields, plan_run, excluded, references, steered)
     )
+
+
+def may_not_approve(state: CaseState, name: str, run: StepRun) -> dict[str, str]:
+    """Who may approve nothing in the step's run, and why: whoever its first start excluded, kept
+    with the run for its retry (brief, D26); the person who opened the case (brief, D11); who
+    proposed it (brief, D25); and whoever's answer the condition of the rule that started it read
+    (brief, D11) (brief, D39)."""
+    excluded = dict(run.excluded)
+    if state.opened_by is not None:
+        excluded[state.opened_by] = (
+            f"{state.opened_by} opened the case, so cannot approve its steps"
+        )
+    if (proposer := state.proposers.get(name)) is not None:
+        excluded.setdefault(proposer, f"{proposer} proposed {name}, so cannot approve it")
+    if (asked := state.proposed_by_rules.get(name)) is not None:
+        for person, field in asked.read_from.items():
+            excluded.setdefault(person, decided_by(person, field, asked))
+    return excluded
 
 
 def coming_run(

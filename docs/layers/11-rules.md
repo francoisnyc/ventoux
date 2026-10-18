@@ -12,8 +12,8 @@ two (see "The split"); D39, the guides' 11b part and a draft Promises table writ
 before building, then reviewed (fidelity, truth, proofs, style), which left three questions open
 for the user, answered "Go" the same day, taken as the recommendations (see 11b, "Decided after the
 review"); 11b built, slices 0–6, and its Promises table checked against the tests, the same day;
-then two code reviews, whose fixes were built test-first (see 11b, "From the code review" and "From
-the second review"), with two questions left for the user.
+then three code reviews, whose fixes were built test-first (see 11b, "From the code review", "From
+the second review" and "From the third review"), with two questions left for the user.
 
 ## What this layer is for
 
@@ -836,6 +836,24 @@ refute it. 27 findings, 18 kept (three were one bug). Each fix landed test-first
   promise says only that. Gating the changed paths (Temporal's `patched`, or a version stamped in
   the state when a case opens) would keep them; changing open cases is layer 12's subject.
 
+### From the third review
+
+A last pass checked the second review's fixes for regressions (three reviewers, a skeptic for each
+finding): none, but the fixes left gaps, closed test-first:
+
+- **Every retried run keeps who may not approve it**, not only a plan's: an activity or workflow
+  step keeps, when it is scheduled, the people its first start excluded and the untrusted values
+  that chose it, on its run (`may_not_approve`, one function for both), and an approval asked
+  only on its retry refuses them. Before, Sam, who proposed the goodwill refund, or whose check a
+  rule read, approved its retried run.
+- **The close names what holds it:** a failed rule holds a `closes_when` close as a failed run
+  does, and what is refused meanwhile now names it (`checked is reached, so the case closes once
+  note_it#1 is retried, …`); with only a failed rule, it said "closes once nothing are retried".
+- **Pinned by tests:** a retried plan still refused on what the rule read, and refusing the person
+  who proposed it; a rule's start replacing a person's withdrawn proposal; each half of
+  `NEVER_STARTS`'s exception on a step's own start; `NEVER_REFRESHED` for a step a rule starts.
+  Each was a promise that a reverted fix would have broken with every test still passing.
+
 ### Promises
 
 Drafted before building, from the choices above; each row's test was named here first, and the
@@ -855,9 +873,11 @@ says. Every test is in `tests/test_rules.py` unless said otherwise.
 | A start of a running step, one waiting for its approval or to start, or one that has run and isn't repeatable is recorded, and nothing runs | `test_a_refused_start_is_recorded` |
 | A start of a step approved and waiting for a fact is recorded, and the step starts on that approval once the fact lands | `test_a_start_of_an_approved_step_waiting_for_its_fact_is_refused` (`tests/test_fresh_facts.py`) |
 | A rule's start is decided after an open approval follows the case file | `test_a_rules_start_sees_the_approvals_that_stand` |
-| A new proposal replaces a withdrawn one's record: the person whose check the rule read may approve a run a person proposed | `test_a_new_proposal_replaces_a_withdrawn_one` |
+| A new proposal replaces a withdrawn one's record, either way: the person whose check the rule read may approve a run a person proposed, and a person whose proposal was withdrawn may approve the rule's | `test_a_new_proposal_replaces_a_withdrawn_one` |
 | A plan step a rule starts carries the rule's untrusted sources into its plan | `test_a_plan_step_a_rule_starts_carries_what_the_rule_read` (`tests/test_plan_step.py`) |
-| A retried plan keeps who may approve nothing in it | `test_a_retried_plan_keeps_who_may_not_approve_in_it` (`tests/test_plan_step.py`) |
+| A retried plan keeps who may approve nothing in it, the person who proposed it included, and is refused again on what the rule read | `test_a_retried_plan_keeps_who_may_not_approve_in_it`, `test_a_plan_step_a_rule_starts_carries_what_the_rule_read` (`tests/test_plan_step.py`) |
+| A retried activity keeps who may not approve it: the person whose answer the rule read, and who proposed it | `test_a_retried_run_keeps_who_may_not_approve_it` |
+| While a failed rule or run holds the close, what is refused names it | `test_a_failed_rule_holding_the_close_is_named` |
 | A person's proposal of a step whose start already waits is refused, and the first proposer still can't approve its run | `test_a_second_proposal_of_a_waiting_step_is_refused` (`tests/test_fresh_facts.py`) |
 | A rule's start beside a failed run is refused | `test_a_rule_starts_nothing_beside_a_failed_run` |
 | A rule's start whose condition can't be read, whose contract is missing, whose input is refused, or whose stale fact can't be fetched again needs attention, saying why nothing can fetch it | `test_a_start_that_cant_be_made_needs_attention` |

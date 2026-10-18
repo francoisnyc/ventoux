@@ -2717,6 +2717,17 @@ def test_never_refreshed_says_a_proposal_is_refused() -> None:
     both["steps"]["pay"]["repeatable"] = True
     [said] = never_refreshed(both)
     assert "allows, pay needs attention, and a proposal of it is refused:" in said
+    # Started by a rule as well: the rule's start needs attention.
+    by_a_rule = copy.deepcopy(proposed)
+    by_a_rule["rules"] = {
+        "pay_it": {
+            "display": {"title": "Pay an answered review"},
+            "on": {"answered": "review"},
+            "then": {"start": ["pay"]},
+        }
+    }
+    [said] = never_refreshed(by_a_rule)
+    assert "allows, pay needs attention, and a proposal of it is refused:" in said
 
 
 def test_an_untrusted_approval_is_always_needed() -> None:
