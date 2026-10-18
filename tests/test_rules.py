@@ -112,13 +112,18 @@ def test_a_rule_without_a_title_is_refused() -> None:
         parse_case(definition)
 
 
-@pytest.mark.parametrize("then", [{"reach": []}, {}, {"reach": [], "start": []}])
+@pytest.mark.parametrize(
+    "then", [{"reach": []}, {}, {"reach": [], "start": []}, {"reach": [], "stop": []}]
+)
 def test_a_rule_that_does_nothing_is_refused(then: dict[str, Any]) -> None:
-    # Since 11b a rule may start steps instead of reaching milestones (brief, D39): one that does
-    # neither would do nothing, so a typo never hides a rule.
+    # Since 11b a rule may start steps, and since 11c stop them, instead of reaching milestones
+    # (brief, D39, D40): one that does none of them would do nothing, so a typo never hides a rule.
     with pytest.raises(
         CaseInvalid,
-        match="^rules.flag_large.then: a rule reaches a milestone or starts a step, at least one$",
+        match=(
+            "^rules.flag_large.then: a rule reaches a milestone, starts a step or stops one, "
+            "at least one$"
+        ),
     ):
         parse_case(with_rule(then=then))
 
@@ -137,6 +142,35 @@ def test_answered_names_a_task_and_start_a_step() -> None:
         parse_case(with_rule(then={"start": ["lage"]}))
     parse_case(with_rule(on={"answered": "review"}, then={"start": ["pay"]}))
     parse_case(with_rule(then={"reach": ["large"], "start": ["pay"]}))
+
+
+# --- 11c, slice 1: the shape of a rule that stops steps ---
+
+
+def test_stop_names_a_step() -> None:
+    # `stop` lists steps, and refuses any other name, so a stage named there later is a new
+    # meaning, never a changed one (brief, D40; the doors note, row 1).
+    with pytest.raises(CaseInvalid, match="^rules.flag_large.then.stop: large is not a step$"):
+        parse_case(with_rule(then={"stop": ["large"]}))
+    with pytest.raises(CaseInvalid, match="^rules.flag_large.then.stop: revew is not a step$"):
+        parse_case(with_rule(then={"stop": ["revew"]}))
+    parse_case(with_rule(then={"stop": ["review", "pay"]}))
+    parse_case(with_rule(then={"reach": ["large"], "stop": ["review"]}))
+
+
+def test_a_rule_cant_stop_and_start_one_step() -> None:
+    # In one rule it would be a restart whose meaning depends on the step's kind: a task is
+    # cancelled at once, so the start opens a new run; an activity runs on, so the start is
+    # refused. Refused when read; a restart can come later, as an option (brief, D40).
+    with pytest.raises(
+        CaseInvalid,
+        match=(
+            "^rules.flag_large.then: review is both stopped and started: a rule can't restart a "
+            "step; stop it here, and start it from another rule$"
+        ),
+    ):
+        parse_case(with_rule(then={"stop": ["review", "pay"], "start": ["review"]}))
+    parse_case(with_rule(then={"stop": ["review"], "start": ["pay"]}))
 
 
 def only_a_rule_starts(**step: Any) -> dict[str, Any]:
