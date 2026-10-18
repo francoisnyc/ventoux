@@ -407,7 +407,7 @@ its `when` or its approval's `when`:
 "check_order": {
   "kind": "activity",
   "display": {"title": "Look the order up"},
-  "activity": "orders.lookup@1",
+  "activity": "orders.lookup@2",
   "inputs": {"order_id": {"var": "order_id"}}
 },
 "pay": {
@@ -427,6 +427,11 @@ its `when` or its approval's `when`:
 ```
 
 An age is a whole number and a unit: `30m` (minutes), `12h` (hours) or `1d` (days).
+
+`orders.lookup@2` declares where `status` comes from: the orders system (`system:orders`).
+`orders.lookup@1` declares no source for `status`, so it is `untrusted:undeclared` (brief, D29), and
+`pay`, whose `when` reads it, would fail on its inputs every time: a value nobody vouched for would
+decide whether a payment is sent (the cases guide, "Untrusted data can't choose what is sent").
 
 `pay` reads the status only once the lookup is `done`: a lookup that gives `not_found` gives no
 status, and reading a value nobody set fails the step. It pays only an approved review, which
@@ -453,6 +458,13 @@ than its `max_age`:
   answer the task again (propose it, if it is repeatable), then retry the step; or close the
   case.
 
+A step a person proposes whose stale fact can be fetched again waits the same way: the proposal
+is accepted, the fact is fetched again, then the step starts, or doesn't, on the fresh value. If
+the fact can't be fetched again, the proposal is refused, saying why. A rule's start doesn't wait:
+the step needs attention, and an operator's retry fetches the fact again, if anything can; if
+nothing can, the step's line says why, as a refused proposal does. Nothing proposed runs on a
+stale fact.
+
 A fact is fetched again **once for each need**, never in a loop:
 
 - **A refresh that fails** needs attention itself, like any failed run. A step that requires the
@@ -472,7 +484,7 @@ run = run_case(
     file={"order_id": "ord-1", "amount": 80},
     answers=[later("3d"), ("review", "approve", "ana", {"approved_amount": 80})],
     people=PEOPLE,
-    activities={"orders.lookup@1": lambda inputs: {"status": next(looked_up)}},
+    activities={"orders.lookup@2": lambda inputs: {"status": next(looked_up)}},
 )
 assert not run.reached("pay")
 assert "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day" in run.history
@@ -502,6 +514,7 @@ run = run_case(
     file={"order_id": "ord-1", "amount": 250},
     answers=[("review", "approve", "ana", {"approved_amount": 250})],
     people=PEOPLE,
+    activities={"orders.lookup@2": lambda inputs: {"status": "delivered"}},
 )
 sheet = run.approval_sheet("pay.approval#1", roles=["support-lead"], at=START + 3 * DAY)
 assert "check_order.status: delivered, obtained 3 days ago" in sheet.lines

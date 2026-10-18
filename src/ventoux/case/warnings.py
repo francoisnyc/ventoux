@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from ventoux.case.definition import (
     ActivityStep,
+    AnsweredTask,
     CallStep,
     CaseDefinition,
     PlanStep,
@@ -18,9 +19,12 @@ from ventoux.case.definition import (
     WorkflowStep,
 )
 from ventoux.case.known import DONE, Known, Read, Reading, reads, set_by_outcomes
+from ventoux.case.reach import starters
 from ventoux.case.rules import said as moment_said
+from ventoux.case.rules import unknown_moment
 from ventoux.case.runtime import listed
 from ventoux.case.types import expressions_of
+from ventoux.case.writers import OPENER, case_sources, untrusted_of
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions.model import (
     Add,
@@ -76,8 +80,9 @@ def rule_unset_issues(
     """Each value a rule's condition reads that may not be set when its moment comes: the rule
     then fails and needs attention (brief, D37) (brief, D38). Its moment stands for a step's
     requirements: the opening knows nothing has run; a milestone reached, what reaching it
-    proves; a step started, what that step required. Proven, so an error (`SET_AFTER`), only on
-    the opening, where nothing has run: the check claims less, never more."""
+    proves; a step started, what that step required; a task answered, that it ended, as
+    requiring it does (brief, D39). Proven, so an error (`SET_AFTER`), only on the opening, where
+    nothing has run: the check claims less, never more."""
     found: list[Issue] = []
     for name, rule in reading.case.rules.items():
         path = f"rules.{name}.when"
@@ -88,8 +93,12 @@ def rule_unset_issues(
             known = reading.met(on.reached, frozenset())
         elif isinstance(on, Started):
             known = reading.before(on.started)
+        elif isinstance(on, AnsweredTask):
+            known = reading.met(on.answered, frozenset())
+        elif on == "opened":
+            known = Known()  # nothing has run
         else:
-            known = Known()  # the opening: nothing has run
+            unknown_moment(on)  # fail closed: never read as the opening
         for value, at, always in reads(rule.when, known, reading):
             if value.partition(".")[0] in missing or reading.surely_set(value, at):
                 continue
@@ -361,12 +370,25 @@ def refresh_issues(
                         f"steps.{name}.max_age.{value}",
                         "NEVER_REFRESHED",
                         f"{value} comes from {why}: whenever it is older than {name}'s max_age "
-                        f"allows, {name} needs attention: keep it only if a person should decide "
-                        "each time",
+                        f"allows, {when_stale(case, name)}: keep it only if a person should "
+                        "decide each time",
                         "warning",
                     )
                 )
     return found
+
+
+def when_stale(case: CaseDefinition, name: str) -> str:
+    """What happens to the step `name` on a stale fact nothing can fetch again, for each way it
+    starts: by itself or by a rule, it needs attention; a person's proposal is refused, saying why
+    (brief, D33) (brief, D39)."""
+    step = case.steps[name]
+    alone = step.automatic or bool(starters(case, name))
+    if alone and step.proposed_by:
+        return f"{name} needs attention, and a proposal of it is refused"
+    if step.proposed_by:
+        return f"a proposal of {name} is refused"
+    return f"{name} needs attention"
 
 
 def never_fetched(
@@ -392,10 +414,22 @@ def never_fetched(
         return f"{writer}, which computes it (compute), so running it again gives nothing new"
     if contract.effect != "read":
         return f"{writer}, which has side effects ({contract.effect}), and can't be run again"
-    if step.approval is not None and step.approval.when is None:
+    if step.approval is not None and always_asked(case, contracts, step.approval.when):
         # A refresh passes the same gate as any start, and never asks for an approval.
         return f"{writer}, a read that always needs an approval, which a refresh never asks for"
     return None
+
+
+def always_asked(
+    case: CaseDefinition, contracts: Mapping[str, Contract], when: Expression | None
+) -> bool:
+    """Whether an approval with the condition `when` is asked every time: it has none, or it
+    reads untrusted data, which can add an approval, never remove one (brief, D39). The opener is
+    trusted either way."""
+    if when is None:
+        return True
+    sources = case_sources(case, contracts, OPENER)
+    return bool(untrusted_of({name: sources.get(name, frozenset()) for name in fields_read(when)}))
 
 
 def elsewhere_issues(case: CaseDefinition, refused: Collection[str]) -> list[Issue]:

@@ -6,7 +6,8 @@ one reads where each value really came from. Used by the interpreter and the cas
 See docs/layers/05-interpreter.md.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 
 from pydantic import ValidationError
@@ -32,6 +33,16 @@ class InputRefused(Exception):
     """An activity's inputs the engine won't give it: what is wrong."""
 
 
+@dataclass(frozen=True)
+class Steering:
+    """A condition that let the step start, and the untrusted sources of one value it read: they
+    count for the step's input policies, apart from what each input reads (brief, D38)
+    (brief, D39)."""
+
+    said: str  # what it read, as a refusal says it: `welcome's condition reads kyc.analyst_notes`
+    sources: frozenset[str]  # the sources of that value the engine doesn't trust: never empty
+
+
 def checked_inputs(
     contract: Contract,
     inputs: Mapping[str, Expression],
@@ -39,12 +50,14 @@ def checked_inputs(
     sources: Mapping[str, frozenset[str]],
     key: str,
     types: Mapping[str, FieldType],
+    steered: Sequence[Steering] = (),
 ) -> dict[str, object]:
     """The inputs `contract`'s activity gets, evaluated from `values`, with the idempotency `key`
     if it takes one; or `InputRefused`.
 
     `sources` are where each value really came from, never only what a definition declared;
-    `types` are the declared fields' types, which say which system each reference names.
+    `types` are the declared fields' types, which say which system each reference names;
+    `steered`, the untrusted values the conditions that let the step start read.
     """
     # The engine fills the key, never a definition: one given is refused, never overwritten in
     # silence (brief, D17) (brief, D35).
@@ -71,6 +84,17 @@ def checked_inputs(
         for policy in contract.policies(field):
             if policy.refuses(found) is not None:
                 raise InputRefused(refusal(contract.reference, field, policy, expression, sources))
+    # Untrusted data can't choose which trusted value is sent: what a condition that let the step
+    # start read is checked against each input's policy, apart from the input's own sources, so a
+    # value written in the definition is never credited with them (brief, D38) (brief, D39).
+    for field in inputs:
+        for policy in contract.policies(field):
+            for steering in steered:
+                if policy.refuses(steering.sources) is not None:
+                    raise InputRefused(
+                        f"{contract.reference} takes {field} {policy.describe()}, and "
+                        f"{steering.said} ({', '.join(sorted(steering.sources))})"
+                    )
     given = {
         field: kept_sensitive(expression, values, evaluated(field, expression, values))
         for field, expression in inputs.items()

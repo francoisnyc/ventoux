@@ -16,6 +16,7 @@ import pytest
 from pydantic import BaseModel
 from test_case import guide_refund_with_plan  # the cases guide's plan step, as it runs
 from test_fresh_facts import refund_fresh  # the case-data guide's fresh refund
+from test_rules import SAYS_SEND, notes_say_send, welcome_file, with_welcome  # the welcome letter
 
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import CaseRun
@@ -24,7 +25,8 @@ from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract, RetryPolicy, Timeouts
 from ventoux.core.contract import Display as ContractDisplay
-from ventoux.core.policy import only_from
+from ventoux.core.output_sources import source
+from ventoux.core.policy import only_from, trusted_only
 from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
@@ -298,7 +300,8 @@ def test_a_case_that_closes_at_opening_is_refused() -> None:
             "steps",
             "CLOSES_AT_OPENING",
             "nothing starts by itself when claim opens, so it closes at once and every proposal "
-            "is refused: let a step start by itself with nothing required, or add stays_open",
+            "is refused: let a step start by itself with nothing required, start one from a rule "
+            "on the opening, or add stays_open",
         )
     ]
 
@@ -325,7 +328,8 @@ NEVER_CLOSES = Issue(
     "close_reasons",
     "NEVER_CLOSES",
     "claim stays open, none of its close reasons' roles (supprt) is registered, and closes_when "
-    "never closes it, so nobody could ever close it: name a registered role in a close reason",
+    "never closes it, so nothing but a forget request could close it: name a registered role in "
+    "a close reason",
 )
 
 
@@ -335,7 +339,8 @@ def test_a_case_nobody_can_close_is_refused() -> None:
     # Since 10b, the role nobody registered is said: it can never close the case (brief, D35).
     misspelt = unknown_role("close_reasons.duplicate.roles", "supprt")
     assert issues(staying_open(guide_json(0))) == [misspelt]
-    # With paid unreachable, or no closes_when at all, nobody could ever close it. The issue
+    # With paid unreachable, or no closes_when at all, only a forget request could close it
+    # (brief, D32), as 11b's wording says (it said "nobody could ever close it"). The issue
     # names the roles, and no UNKNOWN_ROLE repeats them: one cause, one issue.
     assert NEVER_CLOSES in issues(staying_open(deadlocked_claim()))
     assert misspelt not in issues(staying_open(deadlocked_claim()))
@@ -2244,12 +2249,16 @@ def test_the_old_refund_fresh_reads_two_values_that_may_be_unset() -> None:
         file=SMALL,
         answers=[REVIEWED],
         people=PEOPLE,
-        activities={"orders.lookup@1": gives("not_found")},
+        activities={"orders.lookup@2": gives("not_found")},
     )
     [failed] = not_found.needs_attention
     assert failed.endswith("check_order.status has no value")
     rejected = run_case(
-        old_refund_fresh(), file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE
+        old_refund_fresh(),
+        file=SMALL,
+        answers=[("review", "reject", "ana")],
+        people=PEOPLE,
+        activities={"orders.lookup@2": lambda inputs: {"status": "delivered"}},
     )
     [failed] = rejected.needs_attention
     assert failed.endswith("approved_amount has no value")
@@ -2338,6 +2347,12 @@ class NoteInput(BaseModel):
     refund: str  # the refund's ID, to note it
 
 
+class NoteOutput(BaseModel):
+    # Declared, so a condition may read it: an undeclared value refuses what its step sends
+    # (brief, D39).
+    entry_id: Annotated[str, source("system:ledger")]
+
+
 def noting() -> Catalog:
     """The development catalog, and `refunds.note@1`, which notes a refund by its ID."""
     catalog = copy.deepcopy(CATALOG)
@@ -2346,7 +2361,7 @@ def noting() -> Catalog:
             name="refunds.note",
             version=1,
             input=NoteInput,
-            output=RecordOutput,
+            output=NoteOutput,
             risk="low",
             effect="compute",
             timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
@@ -2507,13 +2522,48 @@ def paying_fresh(value: str, **steps: Any) -> dict[str, Any]:
     return refund
 
 
+# `orders.lookup@2` declares its status from the orders system, so `pay` may decide on it: under
+# `@1`, undeclared, it couldn't (brief, D39).
 LOOKUP = {
     "kind": "activity",
     "display": {"title": "Look the order up"},
-    "activity": "orders.lookup@1",
+    "activity": "orders.lookup@2",
     "inputs": {"order_id": {"var": "order_id"}},
 }
 TEAM_LEAD = {"roles": ["support-lead"], "display": {"reason": "Look-ups need a team lead"}}
+DELIVERED = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}  # @2 has no fake
+
+
+class FileInput(BaseModel):
+    to_customer: Annotated[str, trusted_only()]  # never an address chosen by an AI
+    template: str
+    idempotency_key: str
+
+
+class FiledOutput(BaseModel):
+    draft_id: Annotated[str, source("system:letters")]  # the letters system says it
+
+
+def filing() -> Catalog:
+    """`noting()`'s catalog, and `letters.file@1`, which files a letter, a write, and declares
+    where its draft ID comes from, so `pay` may decide on it (brief, D39)."""
+    catalog = noting()
+    catalog.register(
+        ActivityContract(
+            name="letters.file",
+            version=1,
+            input=FileInput,
+            output=FiledOutput,
+            risk="low",
+            effect="write",
+            timeouts=Timeouts(start_to_close=30, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=5, initial_interval=1, backoff_coefficient=2),
+            idempotency_key="idempotency_key",
+            outcomes=[],
+            display=ContractDisplay(title="File a letter", description="Files a letter"),
+        )
+    )
+    return catalog
 
 
 def never_refreshed(definition: dict[str, Any], catalog: Catalog = CATALOG) -> list[str]:
@@ -2544,7 +2594,7 @@ def test_only_a_read_needing_no_approval_is_fetched_again() -> None:
     draft = {
         "kind": "activity",
         "display": {"title": "Draft a letter"},
-        "activity": "letters.draft@2",
+        "activity": "letters.file@1",
         "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
     }
     note = {
@@ -2555,7 +2605,8 @@ def test_only_a_read_needing_no_approval_is_fetched_again() -> None:
     }
     assert never_refreshed(paying_fresh("amount")) == why("amount")
     assert never_refreshed(paying_fresh("review.outcome")) == why("review.outcome")
-    assert never_refreshed(paying_fresh("draft.draft_id", draft=draft)) == why("draft.draft_id")
+    drafted = paying_fresh("draft.draft_id", draft=draft)
+    assert never_refreshed(drafted, filing()) == why("draft.draft_id")
     noted = paying_fresh("note.entry_id", note=note)
     assert never_refreshed(noted, noting()) == why("note.entry_id")
     # A read is fetched again; behind an approval only if the approval may not be needed.
@@ -2617,6 +2668,7 @@ def test_a_read_behind_an_approval_needs_attention_when_stale() -> None:
         file=SMALL,
         answers=[("check_order", "approve", "sam"), later("3d"), REVIEWED],
         people=PEOPLE,
+        activities=DELIVERED,
     )
     assert run.needs_attention == [
         (
@@ -2630,11 +2682,85 @@ def test_a_read_behind_an_approval_needs_attention_when_stale() -> None:
     sometimes = paying_fresh(
         "check_order.status", check_order={**LOOKUP, "approval": {**TEAM_LEAD, "when": when}}
     )
-    fetched = run_case(sometimes, file=SMALL, answers=[later("3d"), REVIEWED], people=PEOPLE)
+    fetched = run_case(
+        sometimes, file=SMALL, answers=[later("3d"), REVIEWED], people=PEOPLE, activities=DELIVERED
+    )
     assert "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day" in (
         fetched.history
     )
     assert fetched.reached("pay")
+
+
+def test_never_refreshed_says_a_proposal_is_refused() -> None:
+    # A person's proposal on a stale fact nothing can fetch again is refused, saying why; a start
+    # by itself or by a rule needs attention (brief, D39). The warning says which happens.
+    proposed = paying_fresh("review.outcome")
+    proposed["steps"]["pay"] |= {"automatic": False, "proposed_by": ["support"]}
+    done = {"display": {"title": "Done"}, "roles": ["support"]}
+    proposed |= {"stays_open": True, "close_reasons": {"done": done}}
+    assert never_refreshed(proposed) == [
+        (
+            "review.outcome comes from a person, in review, and can't be fetched again: whenever it "
+            "is older than pay's max_age allows, a proposal of pay is refused: keep it only if a "
+            "person should decide each time"
+        )
+    ]
+    with pytest.raises(ProposalRefused, match="it came from a person, so it can't be fetched"):
+        run_case(
+            proposed,
+            file=SMALL,
+            answers=[REVIEWED, later("3d"), propose("pay", "ana")],
+            people=PEOPLE,
+        )
+    both = copy.deepcopy(proposed)
+    both["steps"]["pay"]["automatic"] = True
+    both["steps"]["pay"]["repeatable"] = True
+    [said] = never_refreshed(both)
+    assert "allows, pay needs attention, and a proposal of it is refused:" in said
+    # Started by a rule as well: the rule's start needs attention.
+    by_a_rule = copy.deepcopy(proposed)
+    by_a_rule["rules"] = {
+        "pay_it": {
+            "display": {"title": "Pay an answered review"},
+            "on": {"answered": "review"},
+            "then": {"start": ["pay"]},
+        }
+    }
+    [said] = never_refreshed(by_a_rule)
+    assert "allows, pay needs attention, and a proposal of it is refused:" in said
+
+
+def test_an_untrusted_approval_is_always_needed() -> None:
+    # An approval whose condition reads untrusted data is asked whatever it gives (brief, D39), so
+    # for a refresh, which never asks for one, it is always needed: the read isn't fetched again.
+    when = {"!": [{"exists": "notes"}]}
+    approval = {**TEAM_LEAD, "when": when}
+    untrusted = paying_fresh("check_order.status", check_order={**LOOKUP, "approval": approval})
+    untrusted["fields"]["notes"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's notes"},
+    }
+    assert never_refreshed(untrusted) == [
+        (
+            "check_order.status comes from check_order, a read that always needs an approval, which "
+            "a refresh never asks for: whenever it is older than pay's max_age allows, pay needs "
+            "attention: keep it only if a person should decide each time"
+        )
+    ]
+    run = run_case(
+        untrusted,
+        file=SMALL,
+        answers=[("check_order", "approve", "sam"), later("3d"), REVIEWED],
+        people=PEOPLE,
+        activities=DELIVERED,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: check_order.status was obtained 3 days ago, and pay needs it at most 1 day "
+            "old: check_order needs an approval to run, so it isn't run again unasked"
+        )
+    ]
 
 
 # --- 10d, slice 5: an approval that guards a neighbouring value ---
@@ -2850,3 +2976,158 @@ def test_an_or_guards_what_all_its_parts_agree_on() -> None:
     )
     [failed] = escalated.needs_attention
     assert failed.endswith("approved_amount has no value")
+
+
+# --- 11b: rules that start steps ---
+
+
+def rechecked(*roles: str) -> dict[str, Any]:
+    """The guide's claim with `recheck`, which a rule starts once the customer is checked, and
+    which only `roles` may propose."""
+    recheck = {
+        **NOTIFY,
+        "display": {"title": "Check the customer again"},
+        "requires": ["checked"],
+        "automatic": False,
+        "proposed_by": list(roles),
+    }
+    claim = claim_with(recheck=recheck)
+    claim["rules"] = {
+        "recheck_checked": {
+            "display": {"title": "Have the check looked at again"},
+            "on": {"reached": "checked"},
+            "then": {"start": ["recheck"]},
+        }
+    }
+    return claim
+
+
+def test_a_step_a_rule_may_start_can_run() -> None:
+    # Who can start a step is one answer: it starts by itself, a person with a registered role
+    # proposes it, or a rule that can fire starts it (brief, D39). Before 11b, a step only a rule
+    # started was NEVER_RUNS.
+    assert issues(rechecked()) == []
+    run = run_case(rechecked(), file=CLAIM_FILE, answers=[], people=CLAIM_PEOPLE)
+    assert "recheck_checked#1 on reached checked: starting recheck" in run.history
+    # A rule starts it, so its misspelt role is said: it counts for nothing (brief, D22).
+    assert issues(rechecked("supprt")) == [unknown_role("steps.recheck.proposed_by", "supprt")]
+
+
+CHOSEN_BY_THE_MODEL = (
+    "letters.draft@2 takes to_customer only from a system or a person, never from untrusted data, "
+    "and {who}'s condition reads kyc.analyst_notes (untrusted:llm): read a value a person or a "
+    "trusted system gives, such as a task's answer"
+)
+
+
+def welcomed_by_a_rule() -> dict[str, Any]:
+    """The welcome letter, started by a rule when the model's notes say so."""
+    definition = with_welcome(SAYS_SEND)
+    del definition["steps"]["welcome"]["when"]
+    definition["steps"]["welcome"]["automatic"] = False
+    definition["rules"]["send_welcome"] = {
+        "display": {"title": "Send a welcome letter"},
+        "on": {"reached": "checked"},
+        "when": SAYS_SEND,
+        "then": {"start": ["welcome"]},
+    }
+    return definition
+
+
+def test_input_policy_counts_conditions() -> None:
+    # A condition that lets a step start decides that its inputs are sent: the untrusted data it
+    # reads counts for their policies (brief, D39). The opener's source is trusted either way, so
+    # who opens the case changes nothing: an error, never OPENER_DECIDES.
+    assert issues(with_welcome(SAYS_SEND)) == [
+        Issue(
+            "steps.welcome.inputs.to_customer",
+            "INPUT_POLICY",
+            CHOSEN_BY_THE_MODEL.format(who="welcome"),
+        )
+    ]
+    for opened_by in (None, "ana"):
+        run = run_case(
+            with_welcome(SAYS_SEND),
+            file=welcome_file(),
+            answers=[],
+            people={"ana": ["support"]},
+            opened_by=opened_by,
+            workflows={"kyc.check@1": notes_say_send},
+        )
+        [failed] = run.needs_attention
+        assert failed.startswith("welcome#1: letters.draft@2 takes to_customer only from")
+    # At the rule, said as a failure; no UNTRUSTED_TRIGGER, since a rule that only starts acts.
+    assert issues(welcomed_by_a_rule()) == [
+        Issue(
+            "rules.send_welcome.then.start",
+            "INPUT_POLICY",
+            "welcome fails on its inputs every time send_welcome starts it: "
+            + CHOSEN_BY_THE_MODEL.format(who="send_welcome"),
+        )
+    ]
+    # A rule that reaches a milestone too doesn't act at all on untrusted data (brief, D38).
+    reaching = welcomed_by_a_rule()
+    reaching["milestones"]["welcomed"] = {"display": {"title": "Welcomed"}}
+    reaching["rules"]["send_welcome"]["then"]["reach"] = ["welcomed"]
+    [untrusted] = issues(reaching)
+    assert (untrusted.path, untrusted.code) == ("rules.send_welcome.when", "UNTRUSTED_TRIGGER")
+    assert untrusted.message.endswith(
+        "so it never reaches welcomed or starts welcome: read a value a person or a trusted "
+        "system gives, such as a task's answer"
+    )
+    # An input already refused on its own is the cause, said at the input only: one cause, one
+    # issue.
+    own = welcomed_by_a_rule()
+    own["steps"]["welcome"]["inputs"]["to_customer"] = {"var": "kyc.analyst_notes"}
+    assert [issue.path for issue in issues(own)] == ["steps.welcome.inputs.to_customer"]
+    # A warning on the input's own sources is another cause: it never hides the condition's
+    # error. `ledger.record@1` takes the amount only from the opener, so a person opening the case
+    # would be refused too (OPENER_DECIDES); the model's notes refuse it whoever opens it (the
+    # second review).
+    recorded = with_welcome(SAYS_SEND)
+    del recorded["steps"]["welcome"]
+    recorded["steps"]["record"] = {
+        "kind": "activity",
+        "display": {"title": "Record the request"},
+        "activity": "ledger.record@1",
+        "requires": ["checked"],
+        "when": SAYS_SEND,
+        "inputs": {"amount": {"var": "amount"}},
+    }
+    found = validate_case(parse_case(recorded), with_ledger())
+    assert [(i.path, i.code) for i in found] == [
+        ("steps.record.inputs.amount", "OPENER_DECIDES"),
+        ("steps.record.inputs.amount", "INPUT_POLICY"),
+    ]
+
+
+def without_forgetters() -> Catalog:
+    """The development catalog, with no role that may forget a case."""
+    catalog = Catalog()
+    for label in CATALOG.labels:
+        catalog.register_label(label)
+    for system in CATALOG.systems:
+        catalog.register_system(system)
+    for role, approves in CATALOG.roles.items():
+        if role not in CATALOG.forgetters:
+            catalog.register_role(role, approves, operates=role in CATALOG.operators)
+    for contract in CATALOG.contracts():
+        catalog.register(contract)
+    return catalog
+
+
+def test_never_closes_says_nothing_could_without_forgetting() -> None:
+    # A forget request closes any case its definition lets be forgotten (brief, D32): without
+    # one, nothing could close it, and the issue says so.
+    never = staying_open(guide_json(0))
+    del never["closes_when"]
+    nothing_could = Issue(
+        "close_reasons",
+        "NEVER_CLOSES",
+        "claim stays open, none of its close reasons' roles (supprt) is registered, and "
+        "closes_when never closes it, so nothing could ever close it: name a registered role in "
+        "a close reason",
+    )
+    assert issues(never) == [NEVER_CLOSES]
+    assert validate_case(parse_case(never), without_forgetters()) == [nothing_could]
+    assert issues(never | {"forgetting": "never"}) == [nothing_could]

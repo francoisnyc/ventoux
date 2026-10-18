@@ -3,6 +3,8 @@ registered (layer 10b): a typo is caught before any case opens. See
 docs/layers/10-case-validation.md (10b).
 """
 
+from collections.abc import Collection
+
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
 from ventoux.case.reach import can_start
 from ventoux.core.catalog import Catalog
@@ -10,11 +12,15 @@ from ventoux.core.references import unregistered
 from ventoux.core.validate import Issue, role_issues
 
 
-def role_issues_of(case: CaseDefinition, catalog: Catalog, closing: bool = True) -> list[Issue]:
+def role_issues_of(
+    case: CaseDefinition, catalog: Catalog, can: Collection[str], closing: bool = True
+) -> list[Issue]:
     """Each role nobody registered, where the case names it: it counts for nothing when the case
     runs, so it answers, approves, proposes, closes and sees nothing (brief, D22). A role a
-    structural issue already names isn't said again: proposed_by roles none of which is
-    registered (`NEVER_RUNS`), and close reasons' when `closing` is False (`NEVER_CLOSES`)."""
+    structural issue already names isn't said again: proposed_by roles of a step nobody can start
+    (`NEVER_RUNS`), given `can`, what the case can ever reach, and close reasons' when `closing`
+    is False (`NEVER_CLOSES`). A step a rule may start is started by someone, so its misspelt
+    `proposed_by` is said (brief, D39)."""
     issues: list[Issue] = []
     for name, step in case.steps.items():
         path = f"steps.{name}"
@@ -22,7 +28,7 @@ def role_issues_of(case: CaseDefinition, catalog: Catalog, closing: bool = True)
             issues += role_issues(f"{path}.roles", step.roles, catalog)
         if isinstance(step, CallStep) and step.approval is not None:
             issues += role_issues(f"{path}.approval.roles", step.approval.roles, catalog)
-        if can_start(step, catalog.roles):
+        if can_start(case, catalog, name, can):
             issues += role_issues(f"{path}.proposed_by", step.proposed_by, catalog)
     if closing:
         for name, reason in case.close_reasons.items():

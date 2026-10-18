@@ -6,22 +6,37 @@ state holds is a step's `requires` and `when`, which admission reads after every
 See docs/layers/11-rules.md.
 """
 
+from typing import NoReturn
+
 from ventoux.case.admission import StepStopped, holds
 from ventoux.case.closing import close_held
-from ventoux.case.definition import CaseDefinition, Reached, Started
-from ventoux.case.state import CaseState, RuleFiring
+from ventoux.case.definition import AnsweredTask, CaseDefinition, Reached, Started
+from ventoux.case.state import CaseState, RuleFiring, RuleStart
 from ventoux.case.types import rule_problem
+from ventoux.case.writers import read_sources, untrusted_of
 from ventoux.core.catalog import Catalog
-from ventoux.core.provenance import fields_read
 
 
 def said(moment: object) -> str:
-    """A rule's moment as the history says it: `opened`, `started pay`, `reached checked`."""
+    """A rule's moment as the history says it: `opened`, `started pay`, `reached checked`,
+    `answered review`. A moment it doesn't know is an error, never read as the opening (fail
+    closed)."""
     if isinstance(moment, Started):
         return f"started {moment.started}"
     if isinstance(moment, Reached):
         return f"reached {moment.reached}"
-    return "opened"
+    if isinstance(moment, AnsweredTask):
+        return f"answered {moment.answered}"
+    if moment == "opened":
+        return "opened"
+    unknown_moment(moment)
+
+
+def unknown_moment(moment: object) -> NoReturn:
+    """Refuse a moment Ventoux doesn't know, wherever one is read: never read as the opening, or
+    as one that can come (fail closed). `parse_case` refuses it first; this is for a definition
+    that didn't come through it."""
+    raise ValueError(f"{moment!r} is not a moment Ventoux knows")
 
 
 def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
@@ -59,7 +74,7 @@ def fire(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str, mo
         firing.status, firing.reason = "failed", str(unreadable)
         state.history.append(f"{entry} failed: {firing.reason}")
         return
-    act(case, state, firing, decided)
+    act(case, catalog, state, firing, decided)
 
 
 def read(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str) -> bool:
@@ -73,28 +88,44 @@ def read(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str) ->
     return when is None or holds(when, state.values, f"{name}'s condition")
 
 
-def act(case: CaseDefinition, state: CaseState, firing: RuleFiring, decided: bool) -> None:
+def act(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, firing: RuleFiring, decided: bool
+) -> None:
     """Do what the rule says, if its condition held and read only trusted values; say so either
     way."""
     firing.status, firing.reason = "done", ""
     if (stopped := nothing_decided(case, state)) is not None:  # a retry while the close is held
         state.history.append(f"{firing.entry} on {firing.moment}: not applied: {stopped}")
         return
+    then = case.rules[firing.rule].then
     # Untrusted data informs; it never decides. Reaching a milestone decides for the case, so a
-    # condition reading an untrusted value stops it whatever it gave (brief, D38). The message
-    # names the value and its source, never the value (brief, D30).
-    if (untrusted := untrusted_read(case, state, firing.rule)) is not None:
+    # condition reading an untrusted value stops it whatever it gave, its starts included
+    # (brief, D38). A rule that only starts steps acts: what it read counts for their inputs'
+    # policies (brief, D39). The message names the value and its source, never the value
+    # (brief, D30).
+    untrusted = untrusted_read(case, catalog, state, firing.rule)
+    if then.reach and untrusted is not None:
+        does = "reaches and starts" if then.start else "reaches"
         state.history.append(
-            f"{firing.entry} on {firing.moment}: reaches nothing: its condition reads {untrusted}, "
+            f"{firing.entry} on {firing.moment}: {does} nothing: its condition reads {untrusted}, "
             "and untrusted data can't decide"
         )
         return
     if not decided:
         state.history.append(f"{firing.entry} on {firing.moment}: its condition is false")
         return
-    reaches = case.rules[firing.rule].then.reach
-    state.history.append(f"{firing.entry} on {firing.moment}: reaching {' and '.join(reaches)}")
-    reach(state, reaches)
+    if then.reach:
+        state.history.append(
+            f"{firing.entry} on {firing.moment}: reaching {' and '.join(then.reach)}"
+        )
+        reach(state, then.reach)
+    # Each start is the engine's proposal, with what the condition read now: admission decides,
+    # once the rules on this moment have fired (brief, D39).
+    read = read_sources(case, catalog, state, case.rules[firing.rule].when)
+    for step in then.start:
+        state.rule_starts.append(
+            RuleStart(firing.entry, firing.moment, step, people_in(read), untrusted_of(read))
+        )
 
 
 def nothing_decided(case: CaseDefinition, state: CaseState) -> str | None:
@@ -114,14 +145,24 @@ def nothing_decided(case: CaseDefinition, state: CaseState) -> str | None:
     return None
 
 
-def untrusted_read(case: CaseDefinition, state: CaseState, name: str) -> str | None:
-    """The first value the rule's condition reads from an untrusted source, said as
+def people_in(read: dict[str, frozenset[str]]) -> dict[str, str]:
+    """Each person whose answer a condition read, and the first field of theirs it read."""
+    people: dict[str, str] = {}
+    for field, sources in read.items():
+        for source in sorted(sources):
+            if source.startswith("person:"):
+                people.setdefault(source.removeprefix("person:"), field)
+    return people
+
+
+def untrusted_read(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, name: str
+) -> str | None:
+    """The first value the rule's condition reads from a source the engine doesn't trust, said as
     `kyc.analyst_notes, from untrusted:llm`; None if it reads only trusted ones."""
-    when = case.rules[name].when
-    for field in [] if when is None else fields_read(when):
-        untrusted = sorted(s for s in state.sources.get(field, ()) if s.startswith("untrusted:"))
-        if untrusted:
-            return f"{field}, from {', '.join(untrusted)}"
+    read = read_sources(case, catalog, state, case.rules[name].when)
+    for field, untrusted in untrusted_of(read).items():
+        return f"{field}, from {', '.join(sorted(untrusted))}"
     return None
 
 
@@ -133,4 +174,4 @@ def retry_rule(
     history's line for the retry, written once the condition is read."""
     decided = read(case, catalog, state, firing.rule)
     state.history.append(said)
-    act(case, state, firing, decided)
+    act(case, catalog, state, firing, decided)

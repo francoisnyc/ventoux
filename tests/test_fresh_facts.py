@@ -7,31 +7,35 @@ import copy
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
 from pydantic import BaseModel
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.freshness import TimeRefused, ago, as_said
+from ventoux.case.memory import CaseRun
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Completed, Obtained, Opened, Schedule
 from ventoux.case.visibility import SheetRefused
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.interpreter import Outcome
+from ventoux.core.output_sources import source as declared_source
 from ventoux.core.sensitive import Sensitive
 from ventoux.testing import (
     CATALOG,
     DAY,
     START,
+    AnswerRefused,
+    ProposalRefused,
     finish,
     later,
     load_definition,
     propose,
     retry,
-    run_case,
     shown,
 )
+from ventoux.testing import run_case as run_any_case
 
 ROOT = Path(__file__).parent.parent
 REFUND = load_definition(ROOT / "examples" / "refund" / "refund.json")
@@ -39,6 +43,16 @@ GUIDE = (ROOT / "docs" / "guides" / "case-data.md").read_text()
 FILE = {"order_id": "ord-1", "amount": Decimal(80)}
 PEOPLE = {"ana": ["support"], "sam": ["support-lead"]}
 HOUR = 60 * 60
+# The guide's fresh refund looks the order up with `orders.lookup@2`, which has no development
+# fake (layer 11b): each test says what it returns, and this is what the order says unless it
+# says otherwise.
+DELIVERED = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}
+
+
+def run_case(*args: Any, **options: Any) -> CaseRun:
+    """`run_case`, with `orders.lookup@2` answering "delivered" unless the test gives its own."""
+    options["activities"] = {**DELIVERED, **options.get("activities", {})}
+    return run_any_case(*args, **options)
 
 
 def refund_fresh() -> dict[str, Any]:
@@ -150,7 +164,8 @@ class TrackInput(BaseModel):
 
 
 class TrackOutput(BaseModel):
-    status: str
+    # From the orders system, so `pay` may decide on it (brief, D39).
+    status: Annotated[str, declared_source("system:orders")]
 
 
 def with_keyed_lookup() -> Any:
@@ -211,7 +226,7 @@ def test_a_stale_fact_is_refreshed_before_the_step_runs() -> None:
     ]
     # Its output replaces the old one, with fresh sources and a fresh time.
     assert run.state.obtained["check_order.status"] == Obtained(START + 3 * DAY, "check_order#2")
-    assert run.state.sources["check_order.status"] == frozenset({"untrusted:undeclared"})
+    assert run.state.sources["check_order.status"] == frozenset({"system:orders"})
     assert run.reached("pay")
 
 
@@ -225,6 +240,24 @@ def test_a_fresh_fact_refreshes_nothing() -> None:
     assert run.reached("pay")
     assert not any(line.startswith("refreshing") for line in run.history)
     assert [r.entry for r in run.state.runs if r.step == "check_order"] == ["check_order#1"]
+
+
+def test_an_undeclared_status_cant_choose_a_payment() -> None:
+    # `pay`'s condition reads the status, so the status chooses whether a payment is sent: a status
+    # nobody vouched for fails `pay` on its inputs, for a person to look at (brief, D39). The guide
+    # looks the order up with `orders.lookup@2`, which says the status comes from the orders system.
+    review = [("review", "approve", "ana", {"approved_amount": 80})]
+    undeclared = refund_fresh()
+    undeclared["steps"]["check_order"]["activity"] = "orders.lookup@1"
+    run = run_case(undeclared, file=FILE, answers=review, people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "pay#1: payments.refund@2 takes order_id only from a system or a person, never from "
+            "untrusted data, and pay's condition reads check_order.status (untrusted:undeclared)"
+        )
+    ]
+    assert not run.reached("pay")
+    assert run_case(refund_fresh(), file=FILE, answers=review, people=PEOPLE).reached("pay")
 
 
 def guide_example(heading: str) -> str:
@@ -405,6 +438,154 @@ def test_a_retry_checks_freshness_again() -> None:
     assert not run.reached("letter")
 
 
+def proposed_pay() -> dict[str, Any]:
+    """The guide's fresh refund, with `pay` started only when someone in support proposes it."""
+    definition = refund_fresh()
+    definition["steps"]["pay"].update({"automatic": False, "proposed_by": ["support"]})
+    definition["stays_open"] = True
+    definition["close_reasons"] = {"done": {"display": {"title": "Done"}, "roles": ["support"]}}
+    return definition
+
+
+def test_a_proposal_waits_for_its_fresh_facts() -> None:
+    # A proposal is a start like any other: the age of what the step reads is checked first, and a
+    # stale read is fetched again before anything else is read (brief, D33) (brief, D39). The
+    # proposal waits for it, then the step starts on the fresh value. Until 11b, a proposed `pay`
+    # ran at once, on a status three days old.
+    looked_up = iter(["delivered", "delivered"])
+    run = run_case(
+        proposed_pay(),
+        file=FILE,
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 80}),
+            later("3d"),
+            propose("pay", "ana"),
+        ],
+        people=PEOPLE,
+        activities={"orders.lookup@2": lambda inputs: {"status": next(looked_up)}},
+    )
+    proposed = run.history.index("ana proposed pay as support")
+    assert run.history[proposed + 1 : proposed + 4] == [
+        "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day",
+        "scheduled check_order#2: orders.lookup@2 (order_id from system:opener)",
+        "check_order#2 done, giving status from system:orders",
+    ]
+    assert run.history[proposed + 4].startswith("scheduled pay#1: payments.refund@2")
+    assert run.reached("pay")
+
+
+def test_a_second_proposal_of_a_waiting_step_is_refused() -> None:
+    # While a proposed `pay` waits for its fact, proposing it again is refused: accepted, the
+    # second proposal would replace the first proposer, who could then approve the run
+    # (brief, D25) (brief, D39). Once the fact lands, the approval is asked, and lee, who proposed
+    # it, still can't give it.
+    people = {**PEOPLE, "lee": ["support", "support-lead"], "bea": ["support"]}
+    waiting = [
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        finish("check_order#1"),
+        later("3d"),
+        propose("pay", "lee"),
+    ]
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            proposed_pay(),
+            file=LARGE,
+            answers=[*waiting, propose("pay", "bea")],
+            people=people,
+            held=["check_order"],
+        )
+    assert (
+        str(refused.value) == "pay is already proposed, and waits for its facts to be fetched again"
+    )
+    with pytest.raises(AnswerRefused) as refused_approval:
+        run_case(
+            proposed_pay(),
+            file=LARGE,
+            answers=[*waiting, finish("check_order#2"), ("pay.approval#1", "approve", "lee")],
+            people=people,
+            held=["check_order"],
+        )
+    assert str(refused_approval.value) == "lee proposed pay, so cannot approve it"
+
+
+def test_a_proposal_on_a_fact_that_cant_be_fetched_is_refused() -> None:
+    # A person's answer can't be fetched again: a proposal that would need it fresher is refused,
+    # saying why, and changes nothing (brief, D33) (brief, D39). It never waits for a refresh
+    # that can't come.
+    definition = proposed_pay()
+    definition["steps"]["pay"]["max_age"] = {"review.outcome": "1d"}
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            definition,
+            file=FILE,
+            answers=[
+                ("review", "approve", "ana", {"approved_amount": 80}),
+                later("3d"),
+                propose("pay", "ana"),
+            ],
+            people=PEOPLE,
+        )
+    assert str(refused.value) == (
+        "review.outcome was obtained 3 days ago, and pay needs it at most 1 day old: it came "
+        "from a person, so it can't be fetched again"
+    )
+
+
+def test_a_contract_with_no_fake_raises() -> None:
+    # `orders.lookup@2` has no development fake: a test that runs it says what it returns, so no
+    # test reads a status nobody chose (layer 11b).
+    with pytest.raises(LookupError, match="^no implementation of orders.lookup@2 is available$"):
+        run_any_case(
+            refund_fresh(),
+            file=FILE,
+            answers=[("review", "approve", "ana", {"approved_amount": 80})],
+            people=PEOPLE,
+        )
+
+
+def test_a_start_of_an_approved_step_waiting_for_its_fact_is_refused() -> None:
+    # Pay is approved, and waits for its stale status to be fetched again. A rule's start of it
+    # then is refused and recorded, as one waiting for its approval is: it starts once the fact
+    # lands, on its approval (brief, D33) (brief, D39). Before the second review's fix, the
+    # start failed pay, took its approval, and the refresh landed to nothing.
+    definition = refund_fresh()
+    definition["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    definition["rules"] = {
+        "pay_on_note": {
+            "display": {"title": "Pay once noted"},
+            "on": {"answered": "note"},
+            "then": {"start": ["pay"]},
+        }
+    }
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[
+            finish("check_order#1"),
+            ("review", "approve", "ana", {"approved_amount": 250}),
+            later("3d"),
+            ("pay.approval#1", "approve", "sam"),
+            propose("note", "ana"),
+            ("note", "noted", "ana"),
+            finish("check_order#2"),
+        ],
+        people=PEOPLE,
+        held=["check_order"],
+    )
+    assert (
+        "pay_on_note#1 on answered note: pay not started: pay is approved, and waits to start: "
+        "pay.approval#1"
+    ) in run.history
+    assert run.needs_attention == [] and run.reached("pay")
+
+
 def load_plan() -> dict[str, Any]:
     """The plans guide's `refund-order` plan, its first JSON block, as stored data."""
     guide = (ROOT / "docs" / "guides" / "plans.md").read_text()
@@ -438,7 +619,7 @@ def test_a_refresh_without_a_fresh_value_needs_attention() -> None:
         file={"order_id": "ord-1", "amount": 80},
         answers=REVIEWED_ON_DAY_3,
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", Outcome("not_found"))},
+        activities={"orders.lookup@2": answers_in_turn("delivered", Outcome("not_found"))},
     )
     assert run.needs_attention == [
         (
@@ -461,10 +642,10 @@ def test_a_failed_refresh_needs_attention_and_is_retried() -> None:
         answers=[*REVIEWED_ON_DAY_3, retry("check_order#2", "omar")],
         people={**PEOPLE, "omar": ["operations"]},
         activities={
-            "orders.lookup@1": answers_in_turn("delivered", ConnectionError("down"), "delivered")
+            "orders.lookup@2": answers_in_turn("delivered", ConnectionError("down"), "delivered")
         },
     )
-    failed = "check_order#2 failed: orders.lookup@1 failed with ConnectionError: ‹sensitive›"
+    failed = "check_order#2 failed: orders.lookup@2 failed with ConnectionError: ‹sensitive›"
     assert run.history.index(failed) < run.history.index("omar retried check_order#2 as operations")
     assert run.needs_attention == []
     assert run.reached("pay")
@@ -484,7 +665,7 @@ def test_a_failed_refresh_is_never_made_again_for_the_same_need() -> None:
         file={"order_id": "ord-1", "amount": 80},
         answers=[*REVIEWED_ON_DAY_3, later("1h"), shown("order_id", "ana")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", ConnectionError("down"))},
+        activities={"orders.lookup@2": answers_in_turn("delivered", ConnectionError("down"))},
     )
     assert (
         "pay#1: check_order#2 failed, so check_order.status is still 3 days old, and pay "
@@ -579,7 +760,7 @@ def test_an_approval_is_asked_only_on_fresh_facts() -> None:
         file=LARGE,
         answers=[later("3d"), REVIEWED_LARGE],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", "delivered")},
+        activities={"orders.lookup@2": answers_in_turn("delivered", "delivered")},
     )
     refreshing = run.history.index(
         "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day"
@@ -596,9 +777,9 @@ def test_an_unchanged_refresh_leaves_approvals_standing() -> None:
         file=LARGE,
         answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", "delivered")},
+        activities={"orders.lookup@2": answers_in_turn("delivered", "delivered")},
     )
-    assert "scheduled check_order#2: orders.lookup@1 (order_id from system:opener)" in run.history
+    assert "scheduled check_order#2: orders.lookup@2 (order_id from system:opener)" in run.history
     assert not any(line.startswith(("lapsed", "withdrew")) for line in run.history)
     assert run.reached("pay")
 
@@ -615,7 +796,7 @@ def test_a_changed_refresh_lapses_a_given_approval() -> None:
         file=LARGE,
         answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", "partly returned")},
+        activities={"orders.lookup@2": answers_in_turn("delivered", "partly returned")},
     )
     lapsed = run.history.index("lapsed pay.approval#1: check_order.status changed when refreshed")
     assert run.history.index("asked pay.approval#2: approval of pay by support-lead") > lapsed
@@ -632,7 +813,7 @@ def test_a_changed_refresh_that_stops_the_step_lapses_its_approval() -> None:
         file=LARGE,
         answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", "returned")},
+        activities={"orders.lookup@2": answers_in_turn("delivered", "returned")},
     )
     assert "lapsed pay.approval#1: check_order.status changed when refreshed" in run.history
     assert not run.reached("pay")
@@ -657,7 +838,7 @@ def test_a_changed_refresh_withdraws_another_steps_open_approval() -> None:
         file={"order_id": "ord-1", "amount": 80},
         answers=REVIEWED_ON_DAY_3,
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", "returned")},
+        activities={"orders.lookup@2": answers_in_turn("delivered", "returned")},
     )
     assert "withdrew notice.approval#1: check_order.status changed" in run.history
     assert "asked notice.approval#2: approval of notice by support-lead" in run.history
@@ -898,14 +1079,14 @@ def test_the_guides_freshness_refusals_are_what_the_engine_says() -> None:
     attention(
         refund_fresh(),
         REVIEWED_ON_DAY_3,
-        activities={"orders.lookup@1": answers_in_turn("delivered", Outcome("not_found"))},
+        activities={"orders.lookup@2": answers_in_turn("delivered", Outcome("not_found"))},
     )
     reads_only = refund_fresh()
     reads_only["steps"]["pay"]["requires"] = ["review"]
     attention(
         reads_only,
         REVIEWED_ON_DAY_3,
-        activities={"orders.lookup@1": answers_in_turn("delivered", ConnectionError("x"))},
+        activities={"orders.lookup@2": answers_in_turn("delivered", ConnectionError("x"))},
     )
 
     credit = refund_fresh()
@@ -962,7 +1143,7 @@ def test_freshness_is_checked_before_anything_else() -> None:
         file={"order_id": "ord-1", "amount": 80},
         answers=REVIEWED_ON_DAY_3,
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("returned", "delivered")},
+        activities={"orders.lookup@2": answers_in_turn("returned", "delivered")},
     )
     assert run.reached("pay")
 
@@ -978,7 +1159,7 @@ def test_freshness_lines_quote_no_value() -> None:
         file=LARGE,
         answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn(first, second)},
+        activities={"orders.lookup@2": answers_in_turn(first, second)},
     )
     assert any(line.startswith("lapsed pay.approval#1") for line in lapsed.history)
     stopped = copy.deepcopy(definition)
@@ -988,7 +1169,7 @@ def test_freshness_lines_quote_no_value() -> None:
         file=LARGE,
         answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn(first, second)},
+        activities={"orders.lookup@2": answers_in_turn(first, second)},
     )
     assert attention.needs_attention
     for line in [*lapsed.history, *attention.history, *attention.needs_attention]:

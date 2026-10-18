@@ -7,14 +7,16 @@ sources are known in one pass (brief, D34) (brief, D36). See docs/layers/10-case
 
 from collections.abc import Collection, Mapping
 
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep, WorkflowStep
+from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
 from ventoux.case.types import case_types
 from ventoux.case.visibility import may_see, seen_by
+from ventoux.case.writers import case_sources, untrusted_of
 from ventoux.core.before_activity import not_a_reference_to
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract, held_input
 from ventoux.core.expressions import (
     BooleanType,
+    Expression,
     FieldType,
     NumberType,
     OutcomeType,
@@ -23,7 +25,6 @@ from ventoux.core.expressions import (
     check,
 )
 from ventoux.core.expressions.check import a_type
-from ventoux.core.output_sources import output_sources
 from ventoux.core.plan import Plan, set_by
 from ventoux.core.policy import OnlyFrom, Policy, refusal
 from ventoux.core.provenance import answering, fields_read, provenance
@@ -46,39 +47,6 @@ def what_to_do(policy: Policy) -> str:
     if isinstance(policy, OnlyFrom):
         return f"use a value {' or '.join(policy.systems)} gave"
     return "use a value a system or a person gave"
-
-
-def case_sources(
-    case: CaseDefinition, contracts: Mapping[str, Contract], opener: str
-) -> dict[str, frozenset[str]]:
-    """Where each value of `case` comes from, by the name an expression reads it with, when
-    `opener` opens it: the union of what each of its writers stamps (brief, D34)."""
-    # A field a task's form sets comes from whoever answers; any other, from the opening, which
-    # never gives a field a form sets.
-    answered: dict[str, set[str]] = {}
-    for name, step in case.steps.items():
-        if isinstance(step, TaskStep):
-            for outcome in step.outcomes.values():
-                for set_field in outcome.sets:
-                    answered.setdefault(set_field, set()).add(answering(name))
-    sources: dict[str, frozenset[str]] = {}
-    for name, field in case.fields.items():
-        writers = answered.get(name, {opener})
-        # A mark adds distrust, never removes it, whoever writes the field (brief, D12).
-        sources[name] = frozenset(writers | ({field.source} if field.source else set()))
-    for name, step in case.steps.items():
-        if isinstance(step, TaskStep):
-            sources[f"{name}.outcome"] = frozenset({answering(name)})
-        elif isinstance(step, PlanStep):
-            sources[f"{name}.outcome"] = frozenset({f"system:{step.plan}"})
-        elif name in contracts:
-            contract = contracts[name]
-            sources[f"{name}.outcome"] = frozenset({f"system:{contract.reference}"})
-            # An output carries its contract's source, never one the activity sends (brief, D29).
-            for output, source in output_sources(contract.output).items():
-                sources[f"{name}.{output}"] = frozenset({source})
-        # A step whose contract is missing gives nothing: reading it is already an issue (10b).
-    return sources
 
 
 def reference_issues(
@@ -349,6 +317,66 @@ def policy_issues(
     return issues
 
 
+def condition_issues(
+    case: CaseDefinition, contracts: Mapping[str, Contract], said: Collection[str]
+) -> list[Issue]:
+    """Each call step's input whose policy refuses the untrusted data a condition that lets the
+    step start reads: untrusted data can't choose what is sent (brief, D39). Its own `when` is said
+    at the input; a rule's, at the rule, as a failure. An input at a path in `said` already has
+    its issue, which is the cause: one cause, one issue. The opener is trusted whoever it is, so
+    who opens the case changes nothing: always an error."""
+    sources = case_sources(case, contracts, BY_A_SYSTEM)
+    issues: list[Issue] = []
+    for name, contract in contracts.items():
+        step = case.steps[name]
+        assert isinstance(step, CallStep)  # only a call step has a contract
+        for field in step.inputs:
+            path = f"steps.{name}.inputs.{field}"
+            if path not in said and (why := steered(contract, field, sources, name, step.when)):
+                issues.append(Issue(path, "INPUT_POLICY", why))
+    given = {*said, *(issue.path for issue in issues)}
+    for rule, written in case.rules.items():
+        if written.then.reach:
+            continue  # on untrusted data it doesn't act at all: UNTRUSTED_TRIGGER says so
+        for name in written.then.start:
+            if name not in contracts or any(p.startswith(f"steps.{name}.inputs.") for p in given):
+                continue
+            started = case.steps[name]
+            assert isinstance(started, CallStep)  # only a call step has a contract
+            for field in started.inputs:
+                if why := steered(contracts[name], field, sources, rule, written.when):
+                    issues.append(
+                        Issue(
+                            f"rules.{rule}.then.start",
+                            "INPUT_POLICY",
+                            f"{name} fails on its inputs every time {rule} starts it: {why}",
+                        )
+                    )
+                    break  # one issue per start: the first input the runtime meets
+    return issues
+
+
+def steered(
+    contract: Contract,
+    field: str,
+    sources: Mapping[str, frozenset[str]],
+    who: str,
+    when: Expression | None,
+) -> str | None:
+    """Why the input `field` is refused by what `who`'s condition `when` reads, as the runtime
+    says it, with what to do; None if it isn't."""
+    read = {name: sources.get(name, frozenset()) for name in fields_read(when)} if when else {}
+    for policy in contract.policies(field):
+        for value, untrusted in untrusted_of(read).items():
+            if policy.refuses(untrusted) is not None:
+                return (
+                    f"{contract.reference} takes {field} {policy.describe()}, and {who}'s "
+                    f"condition reads {value} ({', '.join(sorted(untrusted))}): read a value a "
+                    "person or a trusted system gives, such as a task's answer"
+                )
+    return None
+
+
 def plan_fields_sources(
     step: PlanStep, plan: Plan, sources: Mapping[str, frozenset[str]]
 ) -> dict[str, frozenset[str]]:
@@ -424,6 +452,8 @@ def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> l
     sources = case_sources(case, contracts, BY_A_SYSTEM)  # who opens it changes no trust
     found: list[Issue] = []
     for name, rule in case.rules.items():
+        if not rule.then.reach:
+            continue  # a rule that only starts steps acts: its condition counts for their inputs
         for field in [] if rule.when is None else fields_read(rule.when):
             untrusted = sorted(s for s in sources.get(field, ()) if s.startswith("untrusted:"))
             if untrusted:
@@ -433,7 +463,9 @@ def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> l
                         "UNTRUSTED_TRIGGER",
                         f"{name}'s condition reads {field}, which comes from "
                         f"{', '.join(untrusted)} whoever writes it, and untrusted data can't "
-                        f"decide, so it never reaches {' and '.join(rule.then.reach)}: read a "
+                        f"decide, so it never reaches {' and '.join(rule.then.reach)}"
+                        f"{' or starts ' + ' and '.join(rule.then.start) if rule.then.start else ''}"
+                        ": read a "
                         "value a person or a trusted system gives, such as a task's answer",
                     )
                 )

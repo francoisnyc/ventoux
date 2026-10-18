@@ -33,6 +33,7 @@ from ventoux.testing import (
     RetryRefused,
     close,
     finish,
+    later,
     load_definition,
     propose,
     retry,
@@ -134,15 +135,15 @@ def test_a_step_nobody_can_start_is_refused() -> None:
     with pytest.raises(
         CaseInvalid,
         match="^steps.pay: a step that doesn't start by itself names proposed_by, who may "
-        "propose it$",
+        "propose it, or a rule starts it$",
     ):
         parse_case(manual)
     again = refund()
     again["steps"]["review"]["repeatable"] = True
     with pytest.raises(
         CaseInvalid,
-        match="^steps.review: a repeatable step runs again only when proposed: name "
-        "proposed_by, who may propose it$",
+        match="^steps.review: a repeatable step runs again only when proposed or started by a "
+        "rule: name proposed_by, who may propose it$",
     ):
         parse_case(again)
 
@@ -233,12 +234,22 @@ def test_a_forms_values_land_in_the_case_file() -> None:
     # the form adds who answered, and payments.refund@2 takes no untrusted amount.
     definition = refund()
     definition["fields"]["approved_amount"]["source"] = "untrusted:customer"
+    # Since 11b the approval, whose condition reads the untrusted amount, is asked whatever it
+    # gives: untrusted data can add an approval, never remove one (brief, D39). The order of the
+    # checks stays: the approval, then the inputs.
     run = run_case(
         definition,
         file={"order_id": "ord-1", "amount": 40},
-        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 40}),
+            ("pay.approval#1", "approve", "sam"),
+        ],
         people=PEOPLE,
     )
+    assert (
+        "asked pay.approval#1: approval of pay by support-lead: its condition reads "
+        "approved_amount, from untrusted:customer, and untrusted data can't remove an approval"
+    ) in run.history
     # Since 8b a refused input fails the step, and the case needs attention.
     [failed] = run.needs_attention
     assert failed.startswith("pay#1: payments.refund@2 takes amount only from")
@@ -776,6 +787,142 @@ def guide_with_close_reasons() -> dict[str, Any]:
     return guide_json(0) | guide_json(4)
 
 
+def repeatable_check_order() -> dict[str, Any]:
+    """The guide's refund with its proposed `check_order`, made repeatable."""
+    definition = with_guides_check_order()
+    definition["steps"]["check_order"]["repeatable"] = True
+    return definition
+
+
+def down_then_up() -> Activity:
+    """An order lookup that fails once, then answers."""
+    calls: list[str] = []
+
+    def lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs["order_id"])
+        if len(calls) == 1:
+            raise ConnectionError("orders system down")
+        return {"status": "delivered"}
+
+    return lookup
+
+
+def test_nothing_starts_beside_a_failed_run() -> None:
+    # While check_order#1 needs attention, a new run would skip it by another name, and the
+    # operator's retry of it would never be scheduled (brief, D17, D26, D39). So proposing the
+    # step again is refused; the operator retries the failed run, which runs as itself.
+    failed_first = [REVIEWED, propose("check_order", "ana")]
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            repeatable_check_order(),
+            file=LARGE,
+            answers=[*failed_first, propose("check_order", "ana")],
+            people=OPERATORS,
+            activities={"orders.lookup@1": down_then_up()},
+        )
+    assert str(refused.value) == "check_order#1 needs attention: retry it, or close the case"
+    retried = run_case(
+        repeatable_check_order(),
+        file=LARGE,
+        answers=[*failed_first, retry("check_order#1", "omar")],
+        people=OPERATORS,
+        activities={"orders.lookup@1": down_then_up()},
+    )
+    assert "check_order#1 done, giving status from untrusted:undeclared" in retried.history
+    assert not any(line.startswith("scheduled check_order#2") for line in retried.history)
+
+
+def proposed_call(step: dict[str, Any]) -> dict[str, Any]:
+    """The guide's refund, with one more step support proposes, calling what `step` says."""
+    definition = guide_json(0)
+    definition["fields"]["suggested_email"] = {
+        "type": "string",
+        "source": "untrusted:llm",
+        "display": {"title": "An address a model suggested"},
+    }
+    definition["steps"]["extra"] = {
+        "kind": "activity",
+        "display": {"title": "Something support asks for"},
+        "automatic": False,
+        "proposed_by": ["support"],
+    } | step
+    return definition
+
+
+@pytest.mark.parametrize(
+    ("step", "reason"),
+    [
+        (
+            {
+                "activity": "letters.draft@2",
+                "inputs": {"to_customer": {"var": "suggested_email"}, "template": "welcome"},
+            },
+            (
+                "letters.draft@2 takes to_customer only from a system or a person, never from "
+                "untrusted data, and this value comes from suggested_email (system:opener, "
+                "untrusted:llm)"
+            ),
+        ),
+        (
+            {"activity": "orders.lookup@9", "inputs": {"order_id": {"var": "order_id"}}},
+            (
+                "orders.lookup@9 is not in the catalog. Registered: orders.lookup@1, "
+                "orders.lookup@2. Use a registered version, or register this one first."
+            ),
+        ),
+        (
+            {
+                "activity": "payments.refund@2",
+                "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "amount"}},
+            },
+            "payments.refund@2 is high risk, and extra has no approval",
+        ),
+    ],
+)
+def test_a_proposal_that_cant_be_made_needs_attention(step: dict[str, Any], reason: str) -> None:
+    # A proposal accepted by admission whose step can't be scheduled fails its run, and the case
+    # needs attention, as when the step starts by itself (brief, D17) (brief, D39). Until 11b it
+    # raised out of the decision: on Temporal, the case stopped deciding.
+    run = run_case(
+        proposed_call(step),
+        file={**LARGE, "suggested_email": "someone@example.com"},
+        answers=[propose("extra", "ana")],
+        people=PEOPLE,
+    )
+    assert "ana proposed extra as support" in run.history
+    assert run.needs_attention == [f"extra#1: {reason}"]
+    assert not run.closed
+
+
+def pay_proposed_on_an_answer() -> dict[str, Any]:
+    """The guide's refund, with `pay` proposed by support, and the approved amount needed at most a
+    day old: a person's answer, which nothing can fetch again (brief, D33)."""
+    definition = guide_with_close_reasons()
+    definition["stays_open"] = True
+    pay = definition["steps"]["pay"]
+    pay.update({"automatic": False, "proposed_by": ["support"]})
+    pay["max_age"] = {"approved_amount": "1d"}
+    return definition
+
+
+def guide_rework_by_rules() -> dict[str, Any]:
+    """The guide's refund, with its rules sending the review back ("Rules that start steps"): the
+    rules and the team lead's check as the guide writes them, `review` repeatable, the milestone
+    declared, and `pay` requiring it."""
+    json_blocks = blocks("json")
+    rules = next(block for block in json_blocks if '"check_review"' in block)
+    check = next(block for block in json_blocks if block.lstrip().startswith('"lead_check": {'))
+    definition = guide_json(0)
+    definition |= json.loads("{" + rules + "}", parse_float=Decimal)
+    definition["steps"] |= json.loads("{" + check + "}", parse_float=Decimal)
+    definition["steps"]["review"]["repeatable"] = True
+    definition.setdefault("milestones", {})["lead_checked"] = {
+        "display": {"title": "Checked by a team lead"}
+    }
+    definition["steps"]["pay"]["requires"] = ["lead_checked"]
+    return definition
+
+
 def refusal(run: Any) -> str:
     """What the engine says when it refuses `run`."""
     try:
@@ -818,8 +965,24 @@ GUIDE_REFUSALS: dict[str, Any] = {
         answers=[propose("check_order", "ana")],
         people=PEOPLE,
     ),
+    "a proposed step's stale fact can't be fetched again": lambda: run_case(
+        pay_proposed_on_an_answer(),
+        file=LARGE,
+        answers=[REVIEWED, later("3d"), propose("pay", "ana")],
+        people=PEOPLE,
+    ),
     "nobody proposes a step that starts by itself": lambda: run_case(
         guide_json(0), file=LARGE, answers=[REVIEWED, propose("pay", "ana")], people=PEOPLE
+    ),
+    "nobody proposes a step only a rule starts": lambda: run_case(
+        guide_rework_by_rules(), file=LARGE, answers=[propose("lead_check", "sam")], people=PEOPLE
+    ),
+    "the step's latest run needs attention": lambda: run_case(
+        repeatable_check_order(),
+        file=LARGE,
+        answers=[REVIEWED, propose("check_order", "ana"), propose("check_order", "ana")],
+        people=OPERATORS,
+        activities={"orders.lookup@1": down_then_up()},
     ),
     "the opening gives a field a person sets": lambda: run_case(
         guide_json(0), file={**LARGE, "approved_amount": 250}, answers=[], people=PEOPLE

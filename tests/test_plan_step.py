@@ -15,7 +15,7 @@ import pytest
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Completed, Opened, StartPlan
-from ventoux.testing import CATALOG, START, close, load_definition, propose, run_case
+from ventoux.testing import CATALOG, FAKES, START, close, load_definition, propose, retry, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 
@@ -302,3 +302,159 @@ def test_a_plan_field_takes_only_a_reference_to_its_system() -> None:
             "computed value"
         )
     ]
+
+
+# --- Layer 11b: a plan step's condition counts beside its fields (brief, D39) ---
+
+
+def test_a_plan_step_carries_its_conditions_sources() -> None:
+    # The step's condition read the customer's own note, which chose that the plan runs. Its
+    # untrusted sources travel with the plan beside its fields, never in them, and count for
+    # every activity's input policies there: the refund is refused, though each value it gets is
+    # trusted (brief, D38) (brief, D39).
+    definition = refund_with_plan(
+        when={
+            "and": [
+                {"==": [{"var": "review.outcome"}, "approve"]},
+                {"==": [{"var": "note"}, "refund me"]},
+            ]
+        }
+    )
+    definition["fields"]["note"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's note"},
+    }
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 40, "note": "refund me"},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+    )
+    [failed] = run.needs_attention
+    assert failed.startswith("settle#1: refund-order@1 stopped: ")
+    assert failed.endswith(
+        "payments.refund@2 takes order_id only from a system or a person, never from untrusted "
+        "data, and settle's condition reads note (untrusted:customer)"
+    )
+    assert "refund me" not in "\n".join(run.history)
+
+
+def settled_by_a_rule(when: Any) -> dict[str, Any]:
+    """The refund with the plan step started only by a rule, `settle_on`, once a team lead's check
+    of the review is answered, when `when` holds."""
+    definition = refund_with_plan(automatic=False)
+    del definition["steps"]["settle"]["when"]
+    definition["steps"]["lead_check"] = {
+        "kind": "task",
+        "display": {"title": "Check the review"},
+        "roles": ["support-lead"],
+        "automatic": False,
+        "outcomes": {"ok": {"display": {"title": "The review is right"}}},
+    }
+    definition["rules"] = {
+        "check": {
+            "display": {"title": "Have the review checked"},
+            "on": {"answered": "review"},
+            "then": {"start": ["lead_check"]},
+        },
+        "settle_on": {
+            "display": {"title": "Settle a checked refund"},
+            "on": {"answered": "lead_check"},
+            "when": when,
+            "then": {"start": ["settle"]},
+        },
+    }
+    return definition
+
+
+CHECKED = [("review", "approve", "ana", {"approved_amount": 40}), ("lead_check", "ok", "sam")]
+DONE = {"display": {"title": "Done"}, "roles": ["support"]}
+
+
+def test_a_plan_step_a_rule_starts_carries_what_the_rule_read() -> None:
+    # The rule's condition read the customer's note: its untrusted sources travel with the plan,
+    # as the step's own condition's do (brief, D39). Before the review's fix, the record was spent
+    # before it was read, and the refund was paid on the customer's say.
+    on_the_note = settled_by_a_rule({"==": [{"var": "note"}, "refund me"]})
+    on_the_note["fields"]["note"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's note"},
+    }
+    paid: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paid.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-ord-1"}
+
+    run = run_case(
+        on_the_note,
+        file={"order_id": "ord-1", "amount": 40, "note": "refund me"},
+        answers=[*CHECKED, retry("settle#1", "omar")],
+        people={**PEOPLE, "omar": ["operations"]},
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "approve", "lee")] * 2},
+        activities={**FAKES, "payments.refund@2": refund},
+    )
+    refused = (
+        "payments.refund@2 takes order_id only from a system or a person, never from untrusted "
+        "data, and settle_on#1's condition, which started settle, reads note (untrusted:customer)"
+    )
+    # Refused on the first run, and again on the operator's retry, the same run (brief, D26):
+    # what the rule read is kept with it.
+    assert "omar retried settle#1 as operations" in run.history
+    assert [line for line in run.history if line.startswith("settle#1 failed")] == [
+        f"settle#1 failed: refund-order@1 stopped: {refused}"
+    ] * 2
+    assert paid == []
+
+
+def test_a_retried_plan_keeps_who_may_not_approve_in_it() -> None:
+    # A retried plan is the same run, started again (brief, D26): who may approve nothing in it
+    # stays the same, the people the rule's condition read included (brief, D11) (brief, D39). Sam
+    # checked the review, which decided that the plan runs; Lee approves the first run, whose
+    # refund fails, and Sam can't approve the retried one.
+    calls: list[str] = []
+
+    def failing_once(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs["idempotency_key"])
+        if len(calls) == 1:
+            raise RuntimeError("the provider is down")
+        return {"refund_id": "refund-ord-1"}
+
+    run = run_case(
+        settled_by_a_rule({"==": [{"var": "lead_check.outcome"}, "ok"]}),
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[*CHECKED, retry("settle#1", "omar")],
+        people={**PEOPLE, "omar": ["operations"]},
+        plans={"refund-order@1": refund_order()},
+        plan_answers={
+            "settle": [("approve_refund", "approve", "lee"), ("approve_refund", "approve", "sam")]
+        },
+        activities={**FAKES, "payments.refund@2": failing_once},
+    )
+    assert "omar retried settle#1 as operations" in run.history
+    assert calls == ["memory/settle#1/pay#1"]  # Sam's approval of the retried plan was refused
+    assert not run.closed
+    # The same for a person who proposed it (brief, D25): a gap since layer 8, closed with it.
+    proposed = settled_by_a_rule({"==": [{"var": "lead_check.outcome"}, "ok"]})
+    del proposed["rules"]["settle_on"]
+    proposed["steps"]["settle"]["proposed_by"] = ["support-lead"]
+    proposed |= {"stays_open": True, "close_reasons": {"done": DONE}}
+    calls.clear()
+    run = run_case(
+        proposed,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[*CHECKED, propose("settle", "sam"), retry("settle#1", "omar")],
+        people={**PEOPLE, "omar": ["operations"]},
+        plans={"refund-order@1": refund_order()},
+        plan_answers={
+            "settle": [("approve_refund", "approve", "lee"), ("approve_refund", "approve", "sam")]
+        },
+        activities={**FAKES, "payments.refund@2": failing_once},
+    )
+    assert "omar retried settle#1 as operations" in run.history
+    assert calls == ["memory/settle#1/pay#1"]  # Sam proposed it: his approval was refused

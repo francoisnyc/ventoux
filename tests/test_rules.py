@@ -8,18 +8,29 @@ import copy
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
+from pydantic import BaseModel
 
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import CaseState, Completed, Opened, StartWorkflow
 from ventoux.case.validate import validate_case
+from ventoux.core.catalog import Catalog
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.policy import only_from
 from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
+    START,
+    AnswerRefused,
+    ProposalRefused,
     RetryRefused,
     close,
     fake_kyc,
+    finish,
+    later,
     load_definition,
     propose,
     retry,
@@ -84,10 +95,11 @@ def test_a_rule_names_one_of_three_moments(on: object) -> None:
 
 
 @pytest.mark.parametrize(
-    "on", ["closed", {"answered": "review"}, {"started": "pay", "reached": "large"}]
+    "on", ["closed", {"completed": "review"}, {"started": "pay", "reached": "large"}]
 )
 def test_an_unknown_moment_is_refused_in_one_line(on: object) -> None:
-    moments = '"opened", {"started": <step>} or {"reached": <milestone>}'
+    # Four moments since 11b: `answered` is one (brief, D39).
+    moments = '"opened", {"started": <step>}, {"reached": <milestone>} or {"answered": <task>}'
     with pytest.raises(CaseInvalid, match=f"^rules.flag_large.on: a moment is {moments}$"):
         parse_case(with_rule(on=on))
 
@@ -100,13 +112,1493 @@ def test_a_rule_without_a_title_is_refused() -> None:
         parse_case(definition)
 
 
-@pytest.mark.parametrize("then", [{"reach": []}, {}])
+@pytest.mark.parametrize("then", [{"reach": []}, {}, {"reach": [], "start": []}])
 def test_a_rule_that_does_nothing_is_refused(then: dict[str, Any]) -> None:
-    with pytest.raises(CaseInvalid, match="^rules.flag_large.then.reach: "):
+    # Since 11b a rule may start steps instead of reaching milestones (brief, D39): one that does
+    # neither would do nothing, so a typo never hides a rule.
+    with pytest.raises(
+        CaseInvalid,
+        match="^rules.flag_large.then: a rule reaches a milestone or starts a step, at least one$",
+    ):
         parse_case(with_rule(then=then))
-    if then:
-        with pytest.raises(CaseInvalid, match="a rule reaches at least one milestone$"):
-            parse_case(with_rule(then=then))
+
+
+# --- 11b, slice 1: the shape of a rule that starts steps ---
+
+
+def test_answered_names_a_task_and_start_a_step() -> None:
+    # `answered` is a task's moment: an activity, a workflow or a plan finishing is not one, so a
+    # loop of rules always comes round through a person (brief, D39).
+    with pytest.raises(CaseInvalid, match="^rules.flag_large.on.answered: pay is not a task$"):
+        parse_case(with_rule(on={"answered": "pay"}))
+    with pytest.raises(CaseInvalid, match="^rules.flag_large.on.answered: revew is not a task$"):
+        parse_case(with_rule(on={"answered": "revew"}))
+    with pytest.raises(CaseInvalid, match="^rules.flag_large.then.start: lage is not a step$"):
+        parse_case(with_rule(then={"start": ["lage"]}))
+    parse_case(with_rule(on={"answered": "review"}, then={"start": ["pay"]}))
+    parse_case(with_rule(then={"reach": ["large"], "start": ["pay"]}))
+
+
+def only_a_rule_starts(**step: Any) -> dict[str, Any]:
+    """The refund with a team lead's check of the review, `lead_check`, changed by `step`, which a
+    rule starts once the review is approved."""
+    definition = with_rule(
+        on={"answered": "review"},
+        when={"==": [{"var": "review.outcome"}, "approve"]},
+        then={"start": ["lead_check"]},
+    )
+    definition["steps"]["lead_check"] = {
+        "kind": "task",
+        "display": {"title": "Check the approved review"},
+        "roles": ["support-lead"],
+        "automatic": False,
+        "outcomes": {"ok": {"display": {"title": "The review is right"}}},
+    } | step
+    return definition
+
+
+def test_a_step_only_a_rule_starts_is_proposed_by_nobody() -> None:
+    # The one loosening of 11b: a step that doesn't start by itself, or is repeatable, needed
+    # `proposed_by`, since nothing else could start it; a rule may now (brief, D39).
+    parse_case(only_a_rule_starts())
+    parse_case(only_a_rule_starts(repeatable=True))
+    unstarted = only_a_rule_starts()
+    del unstarted["rules"]
+    with pytest.raises(CaseInvalid, match="a step that doesn't start by itself names proposed_by"):
+        parse_case(unstarted)
+    # `proposed_by` still names which people may propose it: with none, nobody may.
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            only_a_rule_starts(),
+            file={"order_id": "ord-1", "amount": 40},
+            answers=[propose("lead_check", "sam")],
+            people=PEOPLE,
+        )
+    assert str(refused.value) == "lead_check is started only by a rule: nobody proposes it"
+
+
+# --- 11b, slice 2: starting ---
+
+APPROVED_40 = ("review", "approve", "ana", {"approved_amount": 40})
+SMALL = {"order_id": "ord-1", "amount": 40}
+
+
+def test_a_start_whose_condition_is_false_runs_nothing() -> None:
+    # The engine proposes; admission decides, the step's own `when` included. A start it refuses
+    # is recorded, and nothing runs (brief, D39).
+    definition = only_a_rule_starts(when={"==": [{"var": "amount"}, 0]})
+    run = run_case(definition, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert (
+        "flag_large#1 on answered review: lead_check not started: lead_check doesn't run now: "
+        "amount = 0 is false"
+    ) in run.history
+    assert not any(line.startswith("started lead_check") for line in run.history)
+
+
+def test_answered_fires_on_each_answer() -> None:
+    # A milestone is reached once; a task is answered on each run, whatever the outcome. So a rule
+    # on `answered` fires again when the review is sent back and answered again (brief, D39).
+    definition = only_a_rule_starts(repeatable=True)
+    definition["rules"]["flag_large"]["when"] = None
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[
+            ("review", "reject", "ana"),
+            propose("review", "ana"),
+            ("review", "reject", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert [line for line in run.history if line.startswith("flag_large#")] == [
+        "flag_large#1 on answered review: starting lead_check",
+        (
+            "flag_large#2 on answered review: lead_check not started: lead_check is already "
+            "running: lead_check#1"
+        ),
+    ]
+
+
+def test_a_start_whose_requirements_arent_met_runs_nothing() -> None:
+    run = run_case(
+        only_a_rule_starts(requires=["pay"]), file=SMALL, answers=[APPROVED_40], people=PEOPLE
+    )
+    assert (
+        "flag_large#1 on answered review: lead_check not started: lead_check requires pay, which "
+        "hasn't completed"
+    ) in run.history
+
+
+def test_a_refused_start_is_recorded() -> None:
+    # Running, or run and not repeatable: recorded, and nothing runs (brief, D39).
+    definition = only_a_rule_starts()
+    definition["rules"]["flag_large"]["when"] = None
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    reworked = [("review", "reject", "ana"), propose("review", "ana"), ("review", "reject", "ana")]
+    running = run_case(definition, file=SMALL, answers=reworked, people=PEOPLE)
+    assert (
+        "flag_large#2 on answered review: lead_check not started: lead_check is already running: "
+        "lead_check#1"
+    ) in running.history
+    checked = [*reworked[:2], ("lead_check", "ok", "sam"), reworked[2]]
+    has_run = run_case(definition, file=SMALL, answers=checked, people=PEOPLE)
+    assert (
+        "flag_large#2 on answered review: lead_check not started: lead_check has run, and is not "
+        "repeatable"
+    ) in has_run.history
+    # Waiting for its approval: a note answered while the refund's approval is open starts it.
+    approval = with_rule(on={"answered": "note"}, then={"start": ["pay"]})
+    approval["rules"]["flag_large"]["when"] = None
+    approval["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    waiting = run_case(
+        approval,
+        file=SMALL,
+        answers=[("review", "approve", "ana", {"approved_amount": 250}), ("note", "noted", "ana")],
+        people=PEOPLE,
+    )
+    assert (
+        "flag_large#1 on answered note: pay not started: pay is waiting for its approval: "
+        "pay.approval#1"
+    ) in waiting.history
+    # Waiting to start: Ana proposed pay on a stale status, which is being fetched again.
+    fresh = copy.deepcopy(approval)
+    fresh["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    fresh["steps"]["pay"] |= {
+        "automatic": False,
+        "proposed_by": ["support"],
+        "requires": ["check_order"],
+        "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+        "max_age": {"check_order.status": "1d"},
+    }
+    del fresh["steps"]["pay"]["approval"]
+    fresh |= closable(fresh, "support") | {"stays_open": True}
+    proposed = run_case(
+        fresh,
+        file=SMALL,
+        answers=[
+            finish("check_order#1"),
+            APPROVED_40,
+            later("3d"),
+            propose("pay", "ana"),
+            ("note", "noted", "ana"),
+        ],
+        people=PEOPLE,
+        held=["check_order"],
+        activities={"orders.lookup@2": lambda inputs: {"status": "delivered"}},
+    )
+    assert (
+        "flag_large#1 on answered note: pay not started: pay is already proposed, and waits for "
+        "its facts to be fetched again"
+    ) in proposed.history
+
+
+def test_a_rule_starts_nothing_beside_a_failed_run() -> None:
+    definition = with_rule(on={"answered": "review"}, then={"start": ["check_order"]})
+    definition["rules"]["flag_large"]["when"] = None
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    definition["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "automatic": False,
+        "repeatable": True,
+    }
+
+    def down(inputs: dict[str, Any]) -> dict[str, Any]:
+        raise ConnectionError("orders system down")
+
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[
+            ("review", "reject", "ana"),
+            propose("review", "ana"),
+            ("review", "reject", "ana"),
+        ],
+        people=PEOPLE,
+        activities={"orders.lookup@1": down},
+    )
+    assert (
+        "flag_large#2 on answered review: check_order not started: check_order#1 needs "
+        "attention: retry it, or close the case"
+    ) in run.history
+
+
+def test_a_start_that_cant_be_made_needs_attention() -> None:
+    # Accepted by admission, and it can't be made: the run fails and waits for a person, as when
+    # a step starts by itself (brief, D17) (brief, D39). A condition that can't be read:
+    unreadable = only_a_rule_starts(when={">": [{"var": "approved_amount"}, 10]})
+    unreadable["rules"]["flag_large"]["when"] = None
+    run = run_case(unreadable, file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE)
+    assert run.history[-1] == (
+        "lead_check#1 failed: lead_check's condition approved_amount > 10 can't be evaluated: "
+        "approved_amount has no value"
+    )
+    assert run.needs_attention == [run.history[-1].replace(" failed:", ":", 1)]
+    # A contract the catalog lacks:
+    missing = with_rule(on={"answered": "review"}, then={"start": ["lookup"]})
+    missing["rules"]["flag_large"]["when"] = None
+    missing["steps"]["lookup"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@9",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "automatic": False,
+    }
+    run = run_case(missing, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "lookup#1: orders.lookup@9 is not in the catalog. Registered: orders.lookup@1, "
+            "orders.lookup@2. Use a registered version, or register this one first."
+        )
+    ]
+    # An input refused: the letter would go to an address the customer typed.
+    typed = with_rule(on={"answered": "review"}, then={"start": ["letter"]})
+    typed["rules"]["flag_large"]["when"] = None
+    typed["fields"]["email"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The address the customer typed"},
+    }
+    typed["steps"]["letter"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "email"}, "template": "refund"},
+        "automatic": False,
+    }
+    run = run_case(
+        typed, file={**SMALL, "email": "c@example.com"}, answers=[APPROVED_40], people=PEOPLE
+    )
+    [refused] = run.needs_attention
+    assert refused.startswith("letter#1: letters.draft@2 takes to_customer only from a system")
+    # A stale fact nothing can fetch again: a person's answer. The retry would fail the same way,
+    # so the line says so, as a person's proposal does (the second review).
+    stale = only_a_rule_starts(max_age={"review.outcome": "1d"}, when={"exists": "review.outcome"})
+    stale["steps"]["lead_check"] |= {"kind": "activity", "activity": "orders.lookup@1"}
+    del stale["steps"]["lead_check"]["roles"], stale["steps"]["lead_check"]["outcomes"]
+    stale["steps"]["lead_check"]["inputs"] = {"order_id": {"var": "order_id"}}
+    stale["rules"]["flag_large"]["on"] = {"answered": "note"}
+    stale["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    stale |= closable(stale, "support") | {"stays_open": True}
+    answers = [APPROVED_40, later("3d"), propose("note", "ana"), ("note", "noted", "ana")]
+    run = run_case(stale, file=SMALL, answers=answers, people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "lead_check#1: review.outcome was obtained 3 days ago, and lead_check needs it at most "
+            "1 day old: it came from a person, so it can't be fetched again"
+        )
+    ]
+
+
+def stale_notify() -> dict[str, Any]:
+    """The refund with a look-up, and `notify`, started by a rule once the review is answered, on
+    a status at most a day old."""
+    definition = with_rule(on={"answered": "review"}, then={"start": ["notify"]})
+    definition["rules"]["flag_large"]["when"] = None
+    definition["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    definition["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up again before the letter"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+        "max_age": {"check_order.status": "1d"},
+        "automatic": False,
+        "requires": ["check_order"],
+    }
+    return definition
+
+
+def test_a_rules_start_never_waits_for_a_refresh() -> None:
+    # A refresh lands with no person in it, so a rule's start that waited for one could bring a
+    # loop round with nobody in between. It needs attention instead; an operator's retry fetches
+    # the fact again, then the step runs (brief, D33) (brief, D39).
+    definition = stale_notify()
+    looked_up = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}
+    stale = [later("3d"), APPROVED_40]
+    run = run_case(definition, file=SMALL, answers=stale, people=PEOPLE, activities=looked_up)
+    assert run.needs_attention == [
+        (
+            "notify#1: check_order.status was obtained 3 days ago, and notify needs it at most 1 "
+            "day old: a rule's start doesn't wait for it to be fetched again; retry it to fetch it"
+        )
+    ]
+    assert not any(line.startswith("refreshing") for line in run.history)
+    retried = run_case(
+        definition,
+        file=SMALL,
+        answers=[*stale, retry("notify#1", "omar")],
+        people=PEOPLE,
+        activities=looked_up,
+    )
+    assert "refreshing check_order.status for notify: obtained 3 days ago, at most 1 day" in (
+        retried.history
+    )
+    assert "notify#1 done, giving status from system:orders" in retried.history
+
+
+def noticed_when_notify_starts(definition: dict[str, Any]) -> dict[str, Any]:
+    """`definition` with a rule that marks `noticed` each time a run of `notify` starts."""
+    definition["milestones"]["noticed"] = {"display": {"title": "Notify started"}}
+    definition["rules"]["notice"] = {
+        "display": {"title": "Notice the notification"},
+        "on": {"started": "notify"},
+        "then": {"reach": ["noticed"]},
+    }
+    return definition
+
+
+def test_a_retried_run_that_never_started_fires_started_when_it_starts() -> None:
+    # A run that failed before it started (a rule's start on a stale fact) starts for the first
+    # time when the operator's retry schedules it: it is the same run, but it starts now, so
+    # `started` fires then, once (brief, D38, as amended in 11b). Before the tutor review's fix,
+    # it never fired, and a rule on it never heard of the run an operator rescued.
+    definition = noticed_when_notify_starts(stale_notify())
+    looked_up = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[later("3d"), APPROVED_40, retry("notify#1", "omar")],
+        people=PEOPLE,
+        activities=looked_up,
+    )
+    assert "notify#1 failed" in " ".join(run.history)
+    noticed = [line for line in run.history if line.startswith("notice#")]
+    assert noticed == ["notice#1 on started notify: reaching noticed"]
+    assert run.history.index(noticed[0]) > run.history.index(
+        next(line for line in run.history if line.startswith("scheduled notify#1"))
+    )
+
+
+def test_a_retry_of_a_run_that_started_fires_nothing() -> None:
+    # notify#1 was scheduled, so it started, and `started` fired; its activity then failed. The
+    # operator's retry runs the same run again: it starts nothing again (brief, D26) (brief, D38).
+    definition = noticed_when_notify_starts(stale_notify())
+    tried: list[str] = []
+
+    def lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        tried.append(inputs["order_id"])
+        if len(tried) == 2:  # the first look-up is check_order's, the second notify's
+            raise ConnectionError("the orders system is down")
+        return {"status": "delivered"}
+
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[APPROVED_40, retry("notify#1", "omar")],
+        people=PEOPLE,
+        activities={"orders.lookup@2": lookup},
+    )
+    assert "omar retried notify#1 as operations" in run.history
+    assert run.history.count("notify#1 done, giving status from system:orders") == 1
+    assert [line for line in run.history if line.startswith("notice#")] == [
+        "notice#1 on started notify: reaching noticed"
+    ]
+    assert run.history.index("notice#1 on started notify: reaching noticed") < run.history.index(
+        "omar retried notify#1 as operations"
+    )
+
+
+def test_a_rule_starts_a_step_once_per_decision() -> None:
+    # Two rules on one moment both start lead_check: the second is refused by the guard, read
+    # before admission's other refusals, so its line says why even while the run is open
+    # (brief, D39).
+    definition = only_a_rule_starts()
+    definition["rules"]["again"] = definition["rules"]["flag_large"] | {
+        "display": {"title": "Have it checked again"}
+    }
+    run = run_case(definition, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert [line for line in run.history if " on answered review: " in line] == [
+        "flag_large#1 on answered review: starting lead_check",
+        (
+            "again#1 on answered review: lead_check not started: a rule already started it in this "
+            "decision"
+        ),
+    ]
+
+
+def with_goodwill(when: object = None) -> dict[str, Any]:
+    """The refund, with a team lead's check of an approved review, and a goodwill refund a rule
+    starts once the check is answered (when `when` holds), behind a team lead's approval."""
+    definition = only_a_rule_starts(repeatable=True)
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    definition["rules"]["start_goodwill"] = {
+        "display": {"title": "Make a goodwill refund"},
+        "on": {"answered": "lead_check"},
+        "then": {"start": ["goodwill"]},
+    } | ({} if when is None else {"when": when})
+    definition["steps"]["goodwill"] = {
+        "kind": "activity",
+        "display": {"title": "Refund a goodwill gesture"},
+        "activity": "payments.refund@2",
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "amount"}},
+        "approval": {"roles": ["support-lead"], "display": {"reason": "Goodwill needs a lead"}},
+        "automatic": False,
+    }
+    return definition
+
+
+CHECKED_OK = {"==": [{"var": "lead_check.outcome"}, "ok"]}
+LEADS = {**PEOPLE, "lee": ["support-lead"]}
+
+
+def test_whoever_a_rules_condition_read_cant_approve_what_it_started() -> None:
+    # Sam's answer is what the rule's condition read: it decided that the goodwill refund runs,
+    # so Sam can't approve it; Lee can (brief, D11) (brief, D25) (brief, D39).
+    checked = [APPROVED_40, ("lead_check", "ok", "sam")]
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            with_goodwill(CHECKED_OK),
+            file=SMALL,
+            answers=[*checked, ("goodwill.approval#1", "approve", "sam")],
+            people=LEADS,
+        )
+    assert str(refused.value) == (
+        "sam set lead_check.outcome, which decided that start_goodwill#1 started goodwill, so "
+        "cannot approve it"
+    )
+    run = run_case(
+        with_goodwill(CHECKED_OK),
+        file=SMALL,
+        answers=[*checked, ("goodwill.approval#1", "approve", "lee")],
+        people=LEADS,
+    )
+    assert "goodwill#1 done, giving refund_id from untrusted:undeclared" in run.history
+
+
+def test_the_answer_that_brought_the_moment_doesnt_exclude() -> None:
+    # With no condition, the rule reads nothing: Sam's answer only brought the moment, as a person
+    # whose step another requires does today (brief, D39). Sam may approve.
+    run = run_case(
+        with_goodwill(),
+        file=SMALL,
+        answers=[
+            APPROVED_40,
+            ("lead_check", "ok", "sam"),
+            ("goodwill.approval#1", "approve", "sam"),
+        ],
+        people=LEADS,
+    )
+    assert "goodwill#1 done, giving refund_id from untrusted:undeclared" in run.history
+
+
+def test_a_rules_record_outlives_the_case_file_changing() -> None:
+    # The rule remembers nothing, so the run keeps what its condition read: Lee answers the check
+    # again while the goodwill approval is open, and lead_check.outcome is Lee's now; Sam, whose
+    # answer decided it, is still refused (brief, D38) (brief, D39).
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            with_goodwill(CHECKED_OK),
+            file=SMALL,
+            answers=[
+                APPROVED_40,
+                ("lead_check", "ok", "sam"),
+                propose("review", "ana"),
+                APPROVED_40,
+                ("lead_check", "ok", "lee"),
+                ("goodwill.approval#1", "approve", "sam"),
+            ],
+            people=LEADS,
+        )
+    assert str(refused.value).startswith("sam set lead_check.outcome, which decided that")
+
+
+# --- 11b, slice 3: untrusted data can't choose what is sent (option a) ---
+
+
+def with_welcome(when: dict[str, Any]) -> dict[str, Any]:
+    """The refund with the KYC check, and a welcome letter drafted to the address the case was
+    opened with, when `when` holds."""
+    definition = with_kyc_rule({">": [{"var": "kyc.risk_score"}, 70]})
+    definition["fields"]["email"] = {"type": "string", "display": {"title": "Customer's email"}}
+    definition["steps"]["welcome"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a welcome letter"},
+        "activity": "letters.draft@2",
+        "requires": ["checked"],
+        "when": when,
+        "inputs": {"to_customer": {"var": "email"}, "template": "welcome"},
+    }
+    return definition
+
+
+def welcome_file() -> dict[str, Any]:
+    """The KYC check's first values, and the customer's address."""
+    return {**KYC_FILE, "email": "c-1@example.com"}
+
+
+SAYS_SEND = {"==": [{"var": "kyc.analyst_notes"}, "send welcome"]}
+
+
+def notes_say_send(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The KYC workflow, with a model's notes saying to send the letter."""
+    return fake_kyc(inputs) | {"analyst_notes": "send welcome"}
+
+
+def test_an_untrusted_condition_cant_choose_what_is_sent() -> None:
+    # Each input is trusted, but the model's notes chose that the letter is sent: the untrusted
+    # sources the condition read are checked against each input's policy, apart from what the
+    # input reads, and the run fails naming the field and source, never the value
+    # (brief, D38) (brief, D39).
+    run = run_case(
+        with_welcome(SAYS_SEND),
+        file=welcome_file(),
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+    )
+    assert run.needs_attention == [
+        (
+            "welcome#1: letters.draft@2 takes to_customer only from a system or a person, never from "
+            "untrusted data, and welcome's condition reads kyc.analyst_notes (untrusted:llm)"
+        )
+    ]
+    assert not any(line.startswith("scheduled welcome") for line in run.history)
+    assert not any("send welcome" in line for line in run.history)
+
+
+def test_a_rules_untrusted_condition_cant_choose_what_is_sent() -> None:
+    # A rule that only starts steps acts on untrusted data: what its condition read is kept with
+    # the run, and counts for the started step's input policies (brief, D38) (brief, D39).
+    definition = with_welcome(SAYS_SEND)
+    del definition["steps"]["welcome"]["when"]
+    definition["steps"]["welcome"]["automatic"] = False
+    definition["rules"]["send_welcome"] = {
+        "display": {"title": "Send a welcome letter"},
+        "on": {"reached": "checked"},
+        "when": SAYS_SEND,
+        "then": {"start": ["welcome"]},
+    }
+    run = run_case(
+        definition,
+        file=welcome_file(),
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+    )
+    assert "send_welcome#1 on reached checked: starting welcome" in run.history
+    assert run.needs_attention == [
+        (
+            "welcome#1: letters.draft@2 takes to_customer only from a system or a person, never from "
+            "untrusted data, and send_welcome#1's condition, which started welcome, reads "
+            "kyc.analyst_notes (untrusted:llm)"
+        )
+    ]
+
+
+class RecordInput(BaseModel):
+    amount: Annotated[Decimal, only_from("opener")]  # only an amount the opening system gave
+
+
+class RecordOutput(BaseModel):
+    entry_id: str
+
+
+def with_ledger() -> Catalog:
+    """The development catalog, and `ledger.record@1`, taking only an amount the opener gave."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(
+        ActivityContract(
+            name="ledger.record",
+            version=1,
+            input=RecordInput,
+            output=RecordOutput,
+            risk="low",
+            effect="compute",
+            timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+            idempotency_key=None,
+            outcomes=[],
+            display=Display(title="Record", description="Record an amount"),
+        )
+    )
+    return catalog
+
+
+def recording(amount: Any) -> dict[str, Any]:
+    """The refund, recording `amount` in the ledger once the review approves: its `when` reads
+    Ana's answer."""
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["record"] = {
+        "kind": "activity",
+        "display": {"title": "Record the refund"},
+        "activity": "ledger.record@1",
+        "requires": ["review"],
+        "when": {"==": [{"var": "review.outcome"}, "approve"]},
+        "inputs": {"amount": amount},
+    }
+    return definition
+
+
+LEDGER = {"ledger.record@1": lambda inputs: {"entry_id": "led-1"}}
+
+
+def test_a_trusted_condition_changes_nothing() -> None:
+    # Only untrusted sources count: the condition read Ana's answer, a person's, so the amount the
+    # opener gave still goes to an input that takes it only from the opener (brief, D39).
+    run = run_case(
+        recording({"var": "amount"}),
+        file=SMALL,
+        answers=[APPROVED_40],
+        people=PEOPLE,
+        catalog=with_ledger(),
+        activities=LEDGER,
+    )
+    assert "record#1 done, giving entry_id from untrusted:undeclared" in run.history
+
+
+def test_a_condition_never_vouches_for_a_literal() -> None:
+    # The check is separate: a value written in the definition comes from no system, whatever
+    # the condition read, and `only_from` refuses it as before (brief, D39). Merged, the
+    # condition's sources would have credited it to Ana.
+    run = run_case(
+        recording(Decimal(40)),
+        file=SMALL,
+        answers=[APPROVED_40],
+        people=PEOPLE,
+        catalog=with_ledger(),
+        activities=LEDGER,
+    )
+    [failed] = run.needs_attention
+    assert failed.startswith("record#1: ledger.record@1 takes amount only from opener")
+
+
+def test_a_rule_that_cant_decide_starts_nothing() -> None:
+    # A rule that reaches a milestone decides, so on untrusted data it doesn't act at all, its
+    # starts included (brief, D38) (brief, D39).
+    definition = with_welcome(SAYS_SEND)
+    definition["rules"]["flag_high_risk"] |= {
+        "when": SAYS_SEND,
+        "then": {"reach": ["high_risk"], "start": ["welcome"]},
+    }
+    run = run_case(
+        definition,
+        file=welcome_file(),
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+    )
+    assert (
+        "flag_high_risk#1 on reached checked: reaches and starts nothing: its condition reads "
+        "kyc.analyst_notes, from untrusted:llm, and untrusted data can't decide"
+    ) in run.history
+    assert "reached high_risk" not in run.history
+
+
+def test_an_untrusted_approval_condition_asks_anyway() -> None:
+    # Untrusted data may add an approval, never remove one: an approval whose condition read it
+    # is asked whatever it gave, saying why (brief, D11) (brief, D39).
+    definition = copy.deepcopy(REFUND)
+    definition["fields"]["approved_amount"]["source"] = "untrusted:customer"
+    run = run_case(definition, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert run.history[-1] == (
+        "asked pay.approval#1: approval of pay by support-lead: its condition reads "
+        "approved_amount, from untrusted:customer, and untrusted data can't remove an approval"
+    )
+    # Read first: one that can't be read stops the step, never asks in silence (fail closed).
+    unreadable = copy.deepcopy(REFUND)
+    unreadable["fields"]["bonus"] = {
+        "type": "number",
+        "source": "untrusted:customer",
+        "display": {"title": "A bonus the customer asks for"},
+    }
+    unreadable["steps"]["pay"]["approval"]["when"] = {">": [{"var": "bonus"}, 100]}
+    run = run_case(unreadable, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert run.needs_attention == [
+        "pay#1: pay's approval condition bonus > 100 can't be evaluated: bonus has no value"
+    ]
+
+
+def test_an_unrecognised_condition_source_counts_as_untrusted() -> None:
+    # Fail closed: a source the engine doesn't recognise counts as untrusted, never as trusted.
+    # A value's sources are only ever stamped by the engine; here one is changed by hand, to an
+    # origin Ventoux has never heard of, and the letter is still refused (brief, D39).
+    definition = with_welcome({"==": [{"var": "region"}, "north"]})
+    definition["fields"]["region"] = {"type": "string", "display": {"title": "Region"}}
+    case = parse_case(definition)
+    opened, commands = decide(
+        case,
+        CATALOG,
+        CaseState("t"),
+        Opened({**welcome_file(), "amount": Decimal(40), "region": "north"}, None, at=START),
+    )
+    [kyc] = [command for command in commands if isinstance(command, StartWorkflow)]
+    opened.sources["region"] = frozenset({"rumour:somewhere"})
+    done, _ = decide(case, CATALOG, opened, Completed(kyc.entry, fake_kyc(kyc.inputs), at=START))
+    assert done.history[-1] == (
+        "welcome#1 failed: letters.draft@2 takes to_customer only from a system or a person, "
+        "never from untrusted data, and welcome's condition reads region (rumour:somewhere)"
+    )
+
+
+def test_an_unset_field_in_a_steps_condition_counts_its_writers() -> None:
+    # The welcome letter is drafted when the customer left no notes: a field nobody has set, and
+    # untrusted whoever writes it. It counts what its writers could give (brief, D39).
+    definition = with_welcome({"!": [{"exists": "notes"}]})
+    definition["fields"]["notes"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's notes"},
+    }
+    run = run_case(definition, file=welcome_file(), answers=[], people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "welcome#1: letters.draft@2 takes to_customer only from a system or a person, never from "
+            "untrusted data, and welcome's condition reads notes (untrusted:customer)"
+        )
+    ]
+
+
+# --- 11b, from the code review ---
+
+
+def closing_on_checked(rules: dict[str, Any]) -> dict[str, Any]:
+    """The refund closing on `checked`, with a look-up that requires it, and `rules`."""
+    definition = copy.deepcopy(REFUND)
+    definition["milestones"] = {"checked": {"display": {"title": "Checked"}}}
+    definition["closes_when"] = ["checked"]
+    definition["steps"]["lookup"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "automatic": False,
+        "requires": ["checked"],
+    }
+    definition["rules"] = rules
+    return definition
+
+
+def test_a_rule_starts_nothing_once_the_case_closes() -> None:
+    # Once every closes_when milestone is reached, nothing new starts (layer 8b), a rule's start
+    # included, even one decided on the same moment (brief, D34) (brief, D39). Validation said
+    # lookup never runs; before the review's fix, a rule ran it, and the case was flagged.
+    one = {
+        "wrap": {
+            "display": {"title": "Wrap up"},
+            "on": {"answered": "review"},
+            "then": {"reach": ["checked"], "start": ["lookup"]},
+        }
+    }
+    two = {
+        "begin": {
+            "display": {"title": "Look it up"},
+            "on": {"answered": "review"},
+            "then": {"start": ["lookup"]},
+        },
+        "finish": {
+            "display": {"title": "Checked"},
+            "on": {"answered": "review"},
+            "then": {"reach": ["checked"]},
+        },
+    }
+    for rules, entry in ((one, "wrap#1"), (two, "begin#1")):
+        definition = closing_on_checked(rules)
+        assert [i.code for i in issues(definition)] == ["NEVER_RUNS"]
+        run = run_case(definition, file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE)
+        assert (
+            f"{entry} on answered review: lookup not started: checked is reached, so the case "
+            "closes and nothing new starts"
+        ) in run.history
+        assert not any(line.startswith("scheduled lookup") for line in run.history)
+        assert run.closed and run.flags == []
+    # A rule retried after it failed reaches checked, and the case begins closing before any
+    # start is decided: its start is recorded too, never dropped in silence (the second review).
+    retried = closing_on_checked(copy.deepcopy(one))
+    retried["rules"]["wrap"]["when"] = {"==": [{"var": "note.outcome"}, "noted"]}
+    retried["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    answers = [
+        ("review", "reject", "ana"),
+        propose("note", "ana"),
+        ("note", "noted", "ana"),
+        retry("wrap#1", "omar"),
+    ]
+    run = run_case(retried, file=SMALL, answers=answers, people=PEOPLE)
+    assert run.history[run.history.index("omar retried wrap#1 as operations") + 1 :] == [
+        "wrap#1 on answered review: reaching checked",
+        "reached checked",
+        (
+            "wrap#1 on answered review: lookup not started: checked is reached, so the case "
+            "closes and nothing new starts"
+        ),
+        "closed: checked reached",
+    ]
+
+
+def test_a_failed_rule_holding_the_close_is_named() -> None:
+    # checked is reached, and a rule on the same answer fails: the close waits for it (brief, D26)
+    # (brief, D38), and what is refused meanwhile says which failed run or rule it waits for.
+    # Before the third review's fix, a failed rule alone made it "closes once nothing are
+    # retried".
+    definition = closing_on_checked(
+        {
+            "note_it": {
+                "display": {"title": "Note a large refund"},
+                "on": {"answered": "review"},
+                "when": {">": [{"var": "approved_amount"}, 1000]},
+                "then": {"reach": ["checked"]},
+            },
+            "begin": {
+                "display": {"title": "Look it up"},
+                "on": {"answered": "review"},
+                "then": {"start": ["lookup"]},
+            },
+            "finish": {
+                "display": {"title": "Checked"},
+                "on": {"answered": "review"},
+                "then": {"reach": ["checked"]},
+            },
+        }
+    )
+    definition["steps"]["lookup"]["proposed_by"] = ["support"]
+    held = (
+        "checked is reached, so the case closes once note_it#1 is retried, or a person closes it: "
+        "nothing new starts"
+    )
+    run = run_case(definition, file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE)
+    assert f"begin#1 on answered review: lookup not started: {held}" in run.history
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            definition,
+            file=SMALL,
+            answers=[("review", "reject", "ana"), propose("lookup", "ana")],
+            people=PEOPLE,
+        )
+    assert str(refused.value) == held
+
+
+def welcome_on_a_fresh_status() -> dict[str, Any]:
+    """The welcome letter started by a rule on the model's notes, once the review is answered,
+    drafted only on an order status at most a day old."""
+    definition = with_welcome({"==": [{"var": "check_order.status"}, "delivered"]})
+    definition["steps"]["welcome"] |= {
+        "automatic": False,
+        "requires": ["checked", "check_order"],
+        "max_age": {"check_order.status": "1d"},
+    }
+    definition["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    definition["rules"]["send_welcome"] = {
+        "display": {"title": "Send a welcome letter"},
+        "on": {"answered": "review"},
+        "when": SAYS_SEND,
+        "then": {"start": ["welcome"]},
+    }
+    return definition
+
+
+def test_a_rules_record_survives_a_start_that_fails() -> None:
+    # A rule's start that fails before its run starts (a stale fact, a condition not readable
+    # yet) is retried by an operator: what the rule read is kept with the run until it starts,
+    # so it still counts for the inputs and still excludes (brief, D38) (brief, D39). Before the
+    # review's fix, the retry drafted the letter the model's notes chose.
+    run = run_case(
+        welcome_on_a_fresh_status(),
+        file=welcome_file(),
+        answers=[later("3d"), ("review", "reject", "ana"), retry("welcome#1", "omar")],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+        activities={"orders.lookup@2": lambda inputs: {"status": "delivered"}},
+    )
+    assert "omar retried welcome#1 as operations" in run.history
+    assert not any(line.startswith("scheduled welcome") for line in run.history)
+    assert run.needs_attention == [
+        (
+            "welcome#1: letters.draft@2 takes to_customer only from a system or a person, never "
+            "from untrusted data, and send_welcome#1's condition, which started welcome, reads "
+            "kyc.analyst_notes (untrusted:llm)"
+        )
+    ]
+    # The goodwill refund fails on a condition not readable yet: retried once the note is in,
+    # Sam, whose check the rule read, still can't approve it.
+    definition = with_goodwill(CHECKED_OK)
+    definition["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    definition["steps"]["goodwill"]["when"] = {"==": [{"var": "note.outcome"}, "noted"]}
+    noted = [
+        APPROVED_40,
+        ("lead_check", "ok", "sam"),
+        propose("note", "ana"),
+        ("note", "noted", "ana"),
+        retry("goodwill#1", "omar"),
+    ]
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            definition,
+            file=SMALL,
+            answers=[*noted, ("goodwill.approval#1", "approve", "sam")],
+            people=LEADS,
+        )
+    assert str(refused.value) == (
+        "sam set lead_check.outcome, which decided that start_goodwill#1 started goodwill, so "
+        "cannot approve it"
+    )
+
+
+def test_a_rule_on_the_opening_that_may_fail_keeps_the_case_open() -> None:
+    # A rule on the opening whose condition can't be read fails, and the case waits for a
+    # person instead of closing, whatever the check says of the value it reads: the opener may
+    # leave a field out, and a value read only once a dead step ran is never set. So a condition
+    # there makes CLOSES_AT_OPENING unproven (brief, D34). A gap from 11a, found in 11b's review.
+    unopened = with_rule()
+    unopened["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    assert not [i for i in issues(unopened) if i.code == "CLOSES_AT_OPENING"]
+    run = run_case(unopened, file={"order_id": "ord-1"}, answers=[], people=PEOPLE)
+    assert not run.closed
+    assert run.needs_attention == [
+        "flag_large#1: flag_large's condition amount > 1000 can't be evaluated: amount has no value"
+    ]
+    dead = copy.deepcopy(REFUND)
+    dead["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    dead["milestones"] = {
+        "noted": {"display": {"title": "Noted"}},
+        "never": {"display": {"title": "Never reached"}},
+    }
+    dead["steps"]["call_customer"]["requires"] = ["never"]
+    dead["rules"] = {
+        "note_call": {
+            "display": {"title": "Note the call"},
+            "on": "opened",
+            "when": {"==": [{"var": "call_customer.outcome"}, "called"]},
+            "then": {"reach": ["noted"]},
+        }
+    }
+    assert [i.code for i in issues(dead)] == ["NEVER_RUNS"]
+    run = run_case(dead, file=SMALL, answers=[propose("review", "ana")], people=PEOPLE)
+    assert run.waiting_for == ["review by support"] and not run.closed
+
+
+def test_a_rules_start_sees_the_approvals_that_stand() -> None:
+    # The review is answered again with a new amount: the goodwill refund's open approval reads it,
+    # so it is withdrawn in this decision, before the rule's start is decided, which then asks
+    # again (brief, D25) (brief, D39). Before the second review's fix, the start was refused by
+    # the approval being withdrawn, and nothing was asked.
+    definition = with_goodwill()
+    del definition["rules"]["flag_large"], definition["steps"]["lead_check"]
+    definition["rules"]["start_goodwill"]["on"] = {"answered": "review"}
+    definition["steps"]["goodwill"]["inputs"]["amount"] = {"var": "approved_amount"}
+    reworked = ("review", "approve", "ana", {"approved_amount": 30})
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[APPROVED_40, propose("review", "ana"), reworked],
+        people=LEADS,
+    )
+    second = run.history.index("review#2 done")
+    assert run.history[second + 1 : second + 4] == [
+        "withdrew goodwill.approval#1: approved_amount changed",
+        "start_goodwill#2 on answered review: starting goodwill",
+        "asked goodwill.approval#2: approval of goodwill by support-lead",
+    ]
+
+
+def test_a_new_proposal_replaces_a_withdrawn_one() -> None:
+    # The rule's start of the goodwill refund waits for its approval, which is withdrawn when the
+    # amount changes; the start is over. Ana then proposes it herself: hers is the proposal now,
+    # and Sam, whose check the rule read, may approve it (brief, D25) (brief, D39). Before the
+    # second review's fix, the rule's record stayed, and refused Sam naming a rule that no longer
+    # proposed anything.
+    definition = with_goodwill(CHECKED_OK)
+    definition["steps"]["goodwill"]["inputs"]["amount"] = {"var": "approved_amount"}
+    definition["steps"]["goodwill"]["proposed_by"] = ["support"]
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[
+            APPROVED_40,
+            ("lead_check", "ok", "sam"),
+            propose("review", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 30}),
+            propose("goodwill", "ana"),
+            ("goodwill.approval#2", "approve", "sam"),
+        ],
+        people=LEADS,
+    )
+    assert "withdrew goodwill.approval#1: approved_amount changed" in run.history
+    assert "sam answered goodwill.approval#2 approve as support-lead" in run.history
+    assert run.reached("goodwill")
+    # The other way round: Sam proposes it, his approval is withdrawn, and then the rule starts
+    # it, on Lee's check. The rule's is the proposal now, and Sam may approve it.
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[
+            APPROVED_40,
+            propose("goodwill", "sam"),
+            propose("review", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 30}),
+            ("lead_check", "ok", "lee"),
+            ("goodwill.approval#2", "approve", "sam"),
+        ],
+        people=LEADS,
+    )
+    assert "withdrew goodwill.approval#1: approved_amount changed" in run.history
+    assert "start_goodwill#1 on answered lead_check: starting goodwill" in run.history
+    assert "sam answered goodwill.approval#2 approve as support-lead" in run.history
+
+
+def failing_goodwill_once() -> dict[str, Any]:
+    """The refund's payments, the goodwill refund's first run failing once."""
+    failed: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        if inputs["idempotency_key"].endswith("goodwill#1") and not failed:
+            failed.append(inputs["idempotency_key"])
+            raise ConnectionError("the provider is down")
+        return {"refund_id": "refund-ord-1"}
+
+    return {"payments.refund@2": refund}
+
+
+def test_a_retried_run_keeps_who_may_not_approve_it() -> None:
+    # A retry is the same run (brief, D26): whoever could not approve it still can't, though its
+    # approval is asked only now, when the rejected review makes it needed. Sam checked the review,
+    # which decided that the rule started it (brief, D39); in the second case, he proposed it
+    # (brief, D25). Before the third review's fix, a retried activity forgot both.
+    rejected = [propose("review", "ana"), ("review", "reject", "ana"), retry("goodwill#1", "omar")]
+    by_a_rule = with_goodwill(CHECKED_OK)
+    by_a_rule["steps"]["goodwill"]["approval"]["when"] = {
+        "==": [{"var": "review.outcome"}, "reject"]
+    }
+    proposed = copy.deepcopy(by_a_rule)
+    del proposed["rules"]["start_goodwill"]
+    proposed["steps"]["goodwill"]["proposed_by"] = ["support"]
+    proposed |= closable(proposed, "support") | {"stays_open": True}
+    cases: list[tuple[dict[str, Any], list[Any], str]] = [
+        (
+            by_a_rule,
+            [("lead_check", "ok", "sam")],
+            (
+                "sam set lead_check.outcome, which decided that start_goodwill#1 started goodwill, so "
+                "cannot approve it"
+            ),
+        ),
+        (
+            proposed,
+            [("lead_check", "ok", "lee"), propose("goodwill", "sam")],
+            "sam proposed goodwill, so cannot approve it",
+        ),
+    ]
+    for definition, started, refusal in cases:
+        with pytest.raises(AnswerRefused) as refused:
+            run_case(
+                definition,
+                file=SMALL,
+                answers=[
+                    APPROVED_40,
+                    *started,
+                    *rejected,
+                    ("goodwill.approval#1", "approve", "sam"),
+                ],
+                people=LEADS,
+                activities=failing_goodwill_once(),
+            )
+        assert str(refused.value) == refusal
+
+
+# --- 11b, slice 4: validation ---
+
+
+def starting_at_opening(step: str, **rule: Any) -> dict[str, Any]:
+    """The guide's rework loop, with a rule `start_<step>` that starts `step` as the case opens,
+    changed by `rule`."""
+    definition = guide_rework()
+    definition["rules"][f"start_{step}"] = {
+        "display": {"title": "Start it at once"},
+        "on": "opened",
+        "then": {"start": [step]},
+    } | rule
+    return definition
+
+
+def test_a_start_refused_every_time_is_never_starts() -> None:
+    # A rule on the opening fires once, before anything is done: a step requiring what the opening
+    # can't reach is refused, and the rule never fires again. Only proven when its condition can't
+    # fail: a failed firing is retried later, on the case file as it is then (brief, D34)
+    # (brief, D39).
+    assert [i for i in issues(starting_at_opening("pay")) if i.code == "NEVER_STARTS"] == [
+        Issue(
+            "rules.start_pay.then.start",
+            "NEVER_STARTS",
+            "start_pay can never start pay: it fires on opened, and pay requires lead_checked, "
+            "which nothing can reach by then: start it on a later moment, or remove the "
+            "requirement",
+        )
+    ]
+    run = run_case(starting_at_opening("pay"), file=SMALL, answers=[], people=PEOPLE)
+    assert [line for line in run.history if line.startswith("start_pay#1")] == [
+        (
+            "start_pay#1 on opened: pay not started: pay requires lead_checked, which hasn't "
+            "been reached"
+        )
+    ]
+    may_fail = starting_at_opening("pay", when={"exists": "approved_amount"})
+    assert not [i for i in issues(may_fail) if i.code == "NEVER_STARTS"]
+    # A step whose every start is refused never runs, and says which rule can't start it.
+    only_at_opening = starting_at_opening("lead_check")
+    del only_at_opening["rules"]["check_review"]
+    only_at_opening["steps"]["lead_check"]["requires"] = ["review"]
+    assert [i for i in issues(only_at_opening) if i.path.startswith("steps.lead_check")] == [
+        Issue(
+            "steps.lead_check",
+            "NEVER_RUNS",
+            "lead_check can never run: it starts only when a rule starts it, and start_lead_check "
+            "can never start it: fix start_lead_check first",
+        )
+    ]
+    # Or the rule fires on the step's own run, which isn't repeatable: refused every time too.
+    own_run = guide_rework()
+    own_run["rules"]["again"] = {
+        "display": {"title": "Pay again"},
+        "on": {"started": "pay"},
+        "then": {"start": ["pay"]},
+    }
+    assert [i for i in issues(own_run) if i.code == "NEVER_STARTS"] == [
+        Issue(
+            "rules.again.then.start",
+            "NEVER_STARTS",
+            "again can never start pay: it fires on started pay, while pay is running: start it "
+            "on another moment",
+        )
+    ]
+    # Unless its condition may fail and the step is repeatable: the retry may come once the step
+    # is done.
+    may_retry = guide_rework()
+    may_retry["rules"]["again"] = {
+        "display": {"title": "Review it again"},
+        "on": {"started": "review"},
+        "when": {">": [{"var": "approved_amount"}, 10]},
+        "then": {"start": ["review"]},
+    }
+    assert not [i for i in issues(may_retry) if i.code == "NEVER_STARTS"]
+    # Each half alone still proves it: a condition on a step that can't run again, or no
+    # condition on one that can.
+    once = copy.deepcopy(own_run)
+    once["rules"]["again"]["when"] = {">": [{"var": "approved_amount"}, 10]}
+    no_condition = copy.deepcopy(may_retry)
+    del no_condition["rules"]["again"]["when"]
+    for proven, step in ((once, "pay"), (no_condition, "review")):
+        assert [i.message for i in issues(proven) if i.code == "NEVER_STARTS"] == [
+            (
+                f"again can never start {step}: it fires on started {step}, while {step} is running: "
+                "start it on another moment"
+            )
+        ]
+    # On its own answer, a step that isn't repeatable has run by then.
+    answered = with_rule(on={"answered": "review"}, when=None, then={"start": ["review"]})
+    del answered["milestones"]
+    assert [i for i in issues(answered) if i.code == "NEVER_STARTS"] == [
+        Issue(
+            "rules.flag_large.then.start",
+            "NEVER_STARTS",
+            "flag_large can never start review: it fires on answered review, once review has "
+            "run, and review is not repeatable: make review repeatable, or start it on another "
+            "moment",
+        )
+    ]
+    run = run_case(answered, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert (
+        "flag_large#1 on answered review: review not started: review has run, and is not repeatable"
+    ) in run.history
+
+
+def test_a_step_started_only_on_its_own_moment_gets_one_issue() -> None:
+    # Nothing starts lead_check but a rule on its own answer: it never runs, and the rule never
+    # fires, for one cause. One issue names the circle, with no NEVER_FIRES beside it (brief, D39).
+    circle = only_a_rule_starts()
+    circle["rules"]["flag_large"] |= {"on": {"answered": "lead_check"}, "when": None}
+    del circle["milestones"]  # `large`, which nothing reaches here
+    assert issues(circle) == [
+        Issue(
+            "steps.lead_check",
+            "NEVER_RUNS",
+            "lead_check can never run: it starts only when a rule starts it, and flag_large fires "
+            "on answered lead_check, which comes only once lead_check has run: start it from a "
+            "rule on another moment",
+        )
+    ]
+    run = run_case(circle, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert not any(line.startswith(("flag_large", "started lead_check")) for line in run.history)
+
+
+def test_a_step_a_rule_on_the_opening_starts_keeps_the_case_open() -> None:
+    # The review starts only when proposed, and nothing starts by itself, but a rule on the
+    # opening starts it: the case waits for it instead of closing at once (brief, D39).
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    definition["rules"] = {
+        "ask_review": {
+            "display": {"title": "Ask for a review"},
+            "on": "opened",
+            "then": {"start": ["review"]},
+        }
+    }
+    assert issues(definition) == []
+    run = run_case(definition, file=SMALL, answers=[], people=PEOPLE)
+    assert run.waiting_for == ["review by support"] and not run.closed
+
+
+def test_answered_waits_for_its_task() -> None:
+    # A task's answer comes once the task has ended: a rule on it reads its outcome set, as a step
+    # requiring the task does (brief, D39). Before, the check read it as the opening.
+    assert issues(guide_rework()) == []
+    # What only one of its outcomes sets may still be unset.
+    amount = guide_rework()
+    amount["rules"]["check_review"]["when"] = {">": [{"var": "approved_amount"}, 100]}
+    assert issues(amount) == [
+        Issue(
+            "rules.check_review.when",
+            "MAY_BE_UNSET",
+            "check_review reads approved_amount, which may not be set when answered review "
+            "comes: then check_review fails and needs attention: read it only when it is set, or "
+            "fire it on another moment",
+            "warning",
+        )
+    ]
+    run = run_case(amount, file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE)
+    [failed] = run.needs_attention
+    assert failed.startswith("check_review#1: ") and failed.endswith("approved_amount has no value")
+
+
+def test_an_unknown_moment_fails_closed() -> None:
+    # `parse_case` refuses a moment Ventoux doesn't know. One that comes another way is refused
+    # wherever a moment is read: never read as the opening, nor as one that can come (fail
+    # closed).
+    refused = "^'closed' is not a moment Ventoux knows$"
+    case = parse_case(with_rule(when=None))
+    rule = case.rules["flag_large"].model_copy(update={"on": "closed"})
+    unknown = case.model_copy(update={"rules": {"flag_large": rule}})
+    with pytest.raises(ValueError, match=refused):
+        validate_case(unknown, CATALOG)
+    with pytest.raises(ValueError, match=refused):
+        decide(
+            unknown,
+            CATALOG,
+            CaseState("t"),
+            Opened({**SMALL, "amount": Decimal(40)}, None, at=START),
+        )
+
+
+def endless_rework() -> dict[str, Any]:
+    """The guide's rework loop with its rules' conditions removed: each answer starts the other
+    task again."""
+    definition = guide_rework()
+    for rule in definition["rules"].values():
+        del rule["when"]
+    return definition
+
+
+ENDLESS = "check_review and send_back start lead_check and review again on every answer, and "
+
+
+def test_a_loop_of_starts_never_closes() -> None:
+    # The review starts as the case opens, and each answer starts the other task again: nothing in
+    # the case ends it, and it has no close reason, so only a forget request could close it
+    # (brief, D10) (brief, D39).
+    assert [i for i in issues(endless_rework()) if i.severity == "error"] == [
+        Issue(
+            "rules.check_review.then.start",
+            "NEVER_CLOSES",
+            ENDLESS + "nothing ends it: refund has no close reason, and closes_when never closes "
+            "it, so nothing but a forget request could close it: give one of the rules a when "
+            "that ends the loop",
+        )
+    ]
+    reviewed = ("review", "approve", "ana", {"approved_amount": 40})
+    run = run_case(
+        endless_rework(),
+        file=SMALL,
+        answers=[reviewed, ("lead_check", "ok", "sam"), reviewed, ("lead_check", "ok", "sam")],
+        people=PEOPLE,
+    )
+    assert run.reached("pay") and not run.closed
+    assert run.waiting_for == ["review by support"]
+
+
+def closable(definition: dict[str, Any], *roles: str) -> dict[str, Any]:
+    """`definition` with the guide's `duplicate` close reason ("Closing a case"), for `roles`."""
+    reason = {"display": {"title": "Duplicate request"}, "roles": list(roles)}
+    return definition | {"close_reasons": {"duplicate": reason}}
+
+
+def test_a_loop_of_one_rule_says_it_starts() -> None:
+    # The tutor's probe: one rule restarts the review on every answer. Its message agrees with
+    # one rule, "send_back starts review", as with several, "check_review and send_back start",
+    # and its fix names the rule: "give send_back a when".
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["review"]["repeatable"] = True
+    definition["rules"] = {
+        "send_back": {
+            "display": {"title": "Send the review back"},
+            "on": {"answered": "review"},
+            "then": {"start": ["review"]},
+        }
+    }
+    looping = "send_back starts review again on every answer, and nothing ends it: refund "
+    assert [i for i in issues(definition) if i.code == "NEVER_CLOSES"] == [
+        Issue(
+            "rules.send_back.then.start",
+            "NEVER_CLOSES",
+            looping + "has no close reason, and closes_when never closes it, so nothing but a "
+            "forget request could close it: give send_back a when that ends the loop",
+        )
+    ]
+    warned = [i.message for i in issues(closable(definition, "support"))]
+    assert warned == [
+        looping + "closes only through a close reason or closes_when: give send_back a when "
+        "that ends the loop"
+    ]
+
+
+def test_a_loop_a_close_can_end_is_warned() -> None:
+    # A person can still close it with a reason, or closes_when can: a warning (brief, D10:
+    # "a step that can always be restarted").
+    warned = Issue(
+        "rules.check_review.then.start",
+        "LOOPS_UNTIL_CLOSED",
+        ENDLESS + "nothing ends it: refund closes only through a close reason or closes_when: "
+        "give one of the rules a when that ends the loop",
+        "warning",
+    )
+    assert issues(closable(endless_rework(), "support")) == [warned]
+    closing_on_paid = endless_rework() | {"closes_when": ["paid"]}
+    closing_on_paid["milestones"]["paid"] = {"display": {"title": "Refund paid"}}
+    closing_on_paid["steps"]["pay"]["reaches"] = ["paid"]
+    assert issues(closing_on_paid) == [warned]
+    # A misspelt role beside a registered one is still said: it closes nothing (brief, D22).
+    misspelt = [i.code for i in issues(closable(endless_rework(), "support", "supprt"))]
+    assert misspelt == ["LOOPS_UNTIL_CLOSED", "UNKNOWN_ROLE"]
+    run = run_case(
+        closable(endless_rework(), "support"),
+        file=SMALL,
+        answers=[APPROVED_40, ("lead_check", "ok", "sam"), close("duplicate", "ana")],
+        people=PEOPLE,
+    )
+    assert run.closed
+
+
+def test_a_loop_a_requirement_ends_gets_no_issue() -> None:
+    # A refused start ends a loop: lead_check needs the refund flagged large, which only a rule
+    # on the opening may reach, so for a small refund the loop never comes round (brief, D39).
+    definition = endless_rework()
+    definition["milestones"]["large"] = {"display": {"title": "Large refund"}}
+    definition["rules"]["flag_large"] = {
+        "display": {"title": "Flag a large refund"},
+        "on": "opened",
+        "when": {">": [{"var": "amount"}, 1000]},
+        "then": {"reach": ["large"]},
+    }
+    definition["steps"]["lead_check"]["requires"] = ["large"]
+    assert not [i for i in issues(definition) if i.path.startswith("rules.check_review")]
+    run = run_case(definition, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert (
+        "check_review#1 on answered review: lead_check not started: lead_check requires large, "
+        "which hasn't been reached"
+    ) in run.history
+    assert run.closed
+    # A task that can't run again ends it too.
+    once = endless_rework()
+    once["steps"]["review"]["repeatable"] = False
+    assert not [i for i in issues(once) if i.code in ("NEVER_CLOSES", "LOOPS_UNTIL_CLOSED")]
+    # And a loop only a person's proposal enters may never be entered: nothing is claimed.
+    proposed = closable(endless_rework(), "support") | {"stays_open": True}
+    proposed["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    assert issues(proposed) == []
+
+
+def test_what_rules_that_start_steps_dont_claim() -> None:
+    # The check claims less, never more (brief, D34). A value whose writer only a rule on the
+    # reader's own moment starts is never set when it is read, but only MAY_BE_UNSET says so,
+    # never SET_AFTER.
+    noted = guide_rework()
+    noted["milestones"]["noted"] = {"display": {"title": "Noted"}}
+    noted["rules"]["note_check"] = {
+        "display": {"title": "Note the check"},
+        "on": {"answered": "review"},
+        "when": {"==": [{"var": "lead_check.outcome"}, "ok"]},
+        "then": {"reach": ["noted"]},
+    }
+    assert [i.code for i in issues(noted)] == ["MAY_BE_UNSET"]
+    # A circle through `started` gets nothing: a rule's start never waits, so it can't come
+    # round by itself, and each round begins with a person's event (brief, D39).
+    started = endless_rework()
+    started["rules"]["check_review"]["on"] = {"started": "review"}
+    started["rules"]["send_back"]["on"] = {"started": "lead_check"}
+    assert issues(started) == []
+    run = run_case(started, file=SMALL, answers=[], people=PEOPLE)
+    assert (
+        "send_back#1 on started lead_check: review not started: review is already running: review#1"
+    ) in run.history
+
+
+def test_no_start_line_or_issue_quotes_a_value() -> None:
+    # What the case file holds reaches people who may not see it: start lines, failures and the
+    # check's messages name values, never quote them (brief, D30). The values are distinctive, so
+    # a quoted one would show; "send welcome" is what the model's notes say.
+    values = ["ord-77401", "77403", "77404", "c-77402", "send welcome"]
+    file = {"order_id": "ord-77401", "amount": Decimal(77403)}
+    reviewed = ("review", "approve", "ana", {"approved_amount": Decimal(77404)})
+    rework = [reviewed, ("lead_check", "send_back", "sam"), reviewed, ("lead_check", "ok", "sam")]
+    runs: list[tuple[dict[str, Any], dict[str, Any], list[Any], dict[str, Any]]] = [
+        (guide_rework(), file, rework, {}),
+        (endless_rework(), file, rework, {}),
+        (starting_at_opening("pay"), file, [], {}),
+        (only_a_rule_starts(requires=["pay"]), file, [reviewed], {}),
+        (
+            with_welcome(SAYS_SEND),
+            {**welcome_file(), **file, "email": "c-77402@example.com"},
+            [],
+            {"kyc.check@1": notes_say_send},
+        ),
+    ]
+    for definition, opened_with, answers, workflows in runs:
+        run = run_case(
+            definition, file=opened_with, answers=answers, people=PEOPLE, workflows=workflows
+        )
+        said = run.history + run.needs_attention + [i.message for i in issues(definition)]
+        assert not [line for line in said if any(value in line for value in values)]
 
 
 # --- Slice 1: reaching ---
@@ -319,6 +1811,33 @@ def test_untrusted_data_cant_decide() -> None:
     ) in run.history
     assert "reached high_risk" not in run.history
     assert not any("No concerns" in line for line in run.history)
+
+
+def test_an_unset_untrusted_field_still_cant_decide() -> None:
+    # The customer's notes are declared untrusted, and the case opens without them. The condition
+    # reads a field nobody has set: it still counts the sources any of its writers could give,
+    # here untrusted:customer, so it decides nothing (brief, D38) (brief, D39). Until 11b, the
+    # runtime skipped a field with no sources and reached the milestone, though validation said
+    # the rule never acts: the two now agree.
+    definition = with_rule(
+        on="opened",
+        when={"!": [{"exists": "notes"}]},
+        then={"reach": ["large"]},
+    )
+    definition["fields"]["notes"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's notes"},
+    }
+    run = run_case(definition, file={"order_id": "ord-1", "amount": 40}, answers=[], people=PEOPLE)
+    assert (
+        "flag_large#1 on opened: reaches nothing: its condition reads notes, from "
+        "untrusted:customer, and untrusted data can't decide"
+    ) in run.history
+    assert "reached large" not in run.history
+    assert [issue.code for issue in validate_case(parse_case(definition), CATALOG)] == [
+        "UNTRUSTED_TRIGGER"
+    ]
 
 
 def test_a_trusted_value_decides() -> None:
@@ -793,6 +2312,71 @@ def test_the_guides_rule_stopped_by_the_close_is_shown() -> None:
     assert appears_in_order(shown(3), run.history)
 
 
+def guide_rework() -> dict[str, Any]:
+    """The refund with the guide's rules sending the review back, its team lead's check, the
+    review repeatable, the milestone declared, and `pay` requiring it ("Rules that start
+    steps")."""
+    definition = copy.deepcopy(REFUND)
+    definition |= guide_json(3)  # the rules block
+    definition["steps"] |= guide_json(4)  # lead_check
+    definition["steps"]["review"]["repeatable"] = True
+    definition["milestones"] = {"lead_checked": {"display": {"title": "Checked by a team lead"}}}
+    definition["steps"]["pay"]["requires"] = ["lead_checked"]
+    return definition
+
+
+def test_the_guides_rework_loop_runs_as_shown() -> None:
+    approved = ("review", "approve", "ana", {"approved_amount": 40})
+    run = run_case(
+        guide_rework(),
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[
+            approved,
+            ("lead_check", "send_back", "lee"),
+            approved,
+            ("lead_check", "ok", "lee"),
+        ],
+        people={**PEOPLE, "lee": ["support-lead"]},
+    )
+    assert appears_in_order(shown(4), run.history)
+    assert run.reached("pay") and run.closed
+
+
+def guide_says(line: str) -> bool:
+    """Whether the Rules section quotes `line` as code, line breaks aside."""
+    return f"`{line}`" in " ".join(RULES_SECTION.split())
+
+
+def test_the_guides_start_lines_are_what_the_engine_says() -> None:
+    approved = ("review", "approve", "ana", {"approved_amount": 40})
+    people = {**PEOPLE, "lee": ["support-lead"]}
+    # Without `repeatable` on lead_check, the rule's second start is refused, and recorded.
+    once = guide_rework()
+    once["steps"]["lead_check"]["repeatable"] = False
+    answers = [approved, ("lead_check", "send_back", "lee"), approved]
+    run = run_case(once, file=SMALL, answers=answers, people=people)
+    has_run = (
+        "check_review#2 on answered review: lead_check not started: lead_check has run, and is "
+        "not repeatable"
+    )
+    assert has_run in run.history and guide_says(has_run)
+    # The per-decision guard: the guide gives the end of its line.
+    guard = only_a_rule_starts()
+    guard["rules"]["again"] = guard["rules"]["flag_large"] | {"display": {"title": "Again"}}
+    run = run_case(guard, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    said = " not started: a rule already started it in this decision"
+    assert any(line.endswith(said) for line in run.history) and guide_says(f"… review{said}")
+    # The welcome letter on a model's notes, with the guide's condition.
+    run = run_case(
+        with_welcome(guide_json(5)["when"]),
+        file=welcome_file(),
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+    )
+    assert appears_in_order(shown(5), run.history)
+
+
 def guide_rules_table() -> list[tuple[str, str, str]]:
     table = RULES_SECTION.split("| Code | Kind |")[1].split("\n\n")[0]
     rows = [line.split("|") for line in table.splitlines() if line.startswith("| `")]
@@ -803,7 +2387,12 @@ def test_the_guides_table_of_rule_codes_is_what_validate_case_says() -> None:
     closing_on_checked = guide_case() | {"closes_when": ["checked"]}
     untrusted = guide_case()
     untrusted["rules"]["flag_high_risk"] |= guide_json(2)
-    examples = {"NEVER_FIRES": closing_on_checked, "UNTRUSTED_TRIGGER": untrusted}
+    examples = {
+        "NEVER_FIRES": closing_on_checked,
+        "UNTRUSTED_TRIGGER": untrusted,
+        "NEVER_STARTS": starting_at_opening("pay"),
+        "LOOPS_UNTIL_CLOSED": closable(endless_rework(), "support"),
+    }
     rows = guide_rules_table()
     assert [code for code, _, _ in rows] == list(examples)
     for code, kind, message in rows:

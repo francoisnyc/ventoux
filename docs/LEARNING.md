@@ -794,6 +794,25 @@ and record the key points. A question is closed once you can explain the answer 
     point, and nothing waits or reads a clock, so the condition sees the same case file and the
     case decides the same way. Layer 9 needs the same idea for `max_age`: the time a decision is
     made reaches `decide` as data that history recorded, never from a clock that `case` reads.
+- Retrieval (layer 11b warm-up, 2026-10-18; skipped at 11a): "tell me". Nothing came back this
+  time, so the answer, in plain words, in three parts:
+  - **How it is written:** a rule (brief, D7, D38). *When* 5 days have passed since the claim
+    opened: a timer, written as data (`5d`, anchored on a moment, layer 11e). *If* the claim is
+    still not assessed: a question about the case file, read when the timer fires. *Then* start
+    `escalate`, to a team lead. The assessment stays open: nothing is cancelled or skipped
+    because time passed (brief, D17). The `sla` pattern writes this for you, and cancels its
+    timer once the assessment is done (brief, D7).
+  - **Where the time comes from:** a durable timer the case workflow sets and the Temporal
+    server fires; nobody sends "5 days have passed". History records `TimerStarted` when the
+    claim opens and `TimerFired` five days later, and the firing reaches the case as an event
+    stamped with its own due time (brief, D33).
+  - **Why replay decides the same:** on replay the code reads `TimerFired` from history at the
+    same point, instead of waiting or reading a clock. So the condition reads the same case file
+    and decides the same way. A clock read on replay would see another time, ask for what
+    history never recorded, and stop on a non-determinism error.
+  One sharpening, new since 11a: a milestone is not a value a condition can read (brief, D35),
+  so "not assessed" is written over what the assessment gives (its outcome), and how a timer's
+  condition says it exactly is 11e's to decide.
 - Status: open. The timer is solid now; the question stays in the rotation until the *if* and
   replay come back too.
 

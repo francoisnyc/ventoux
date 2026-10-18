@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
+from ventoux.core.before_activity import Steering
 from ventoux.core.provenance import Sourced
 from ventoux.core.sensitive import Sensitive
 
@@ -40,6 +41,14 @@ class StepRun:
     refresh: bool = (
         False  # run to fetch a stale fact again, not because the case asked (brief, D33)
     )
+    # Kept for its retry, which starts the same run again (brief, D26): who may approve nothing in
+    # it, and why, and the untrusted values the conditions that let it start read (brief, D25)
+    # (brief, D39).
+    excluded: dict[str, str] = field(default_factory=dict)
+    steered: tuple[Steering, ...] = ()
+    # Whether it has started: a run that failed before it started hasn't, and starts for the first
+    # time when an operator's retry runs it (brief, D38, as amended in 11b).
+    started: bool = True
 
 
 @dataclass
@@ -54,6 +63,22 @@ class RuleFiring:
     # waited (brief, D10).
     status: Literal["done", "failed", "cancelled"]
     reason: str = ""  # why it failed
+
+
+@dataclass(frozen=True)
+class RuleStart:
+    """A rule's start of a step: the engine's proposal, with what its condition read, kept until
+    the run starts, since the rule itself remembers nothing (brief, D38) (brief, D39)."""
+
+    entry: str  # the firing that proposes it, such as `send_back#1`
+    moment: str  # its moment, as the history says it: `answered lead_check`
+    step: str  # the step it starts
+    # Each person whose answer the rule's condition read, and the field: none of them approves
+    # the run it starts (brief, D11) (brief, D25).
+    read_from: dict[str, str] = field(default_factory=dict[str, str])
+    # Each value the condition read from a source the engine doesn't trust, with those sources:
+    # they count for the step's input policies (brief, D38) (brief, D39).
+    untrusted: dict[str, frozenset[str]] = field(default_factory=dict[str, frozenset[str]])
 
 
 @dataclass
@@ -96,6 +121,12 @@ class CaseState:
     withdrawn: dict[str, str] = field(default_factory=dict[str, str])  # entry: why
     # Who proposed each step's coming run, until it runs or is rejected (brief, D25).
     proposers: dict[str, str] = field(default_factory=dict[str, str])
+    # Each step a person proposed whose start waits for a stale fact to be fetched again; admission
+    # takes it up once the fact lands (brief, D33) (brief, D39).
+    waiting_to_start: list[str] = field(default_factory=list[str])
+    # Each step a rule started whose run hasn't started yet (waiting for its approval), with what
+    # the rule read: like `proposers`, for the engine (brief, D39).
+    proposed_by_rules: dict[str, RuleStart] = field(default_factory=dict[str, RuleStart])
     # What waits on people, in the order it opened: entry, and how it reads (brief, D24).
     waiting: dict[str, str] = field(default_factory=dict[str, str])
     opened_by: str | None = None  # the person who opened the case, if a person did
@@ -108,6 +139,11 @@ class CaseState:
     # The moments that came in the decision being made, waiting for their rules: always empty
     # between events, so nothing about them crosses continue-as-new (brief, D38).
     moments: list[str] = field(default_factory=list[str])
+    # The starts the rules fired in this decision asked for, waiting for admission; and the steps
+    # a rule has started in it, which no rule starts again in it (brief, D39). Always empty
+    # between events, like `moments`.
+    rule_starts: list[RuleStart] = field(default_factory=list[RuleStart])
+    started_by_rules: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -271,6 +307,9 @@ class StartPlan:
     # What each field is given, as a reference: the system of a reference field read as it is, or
     # None; and how a message says it. Only the case sees the expression, so it says (brief, D30).
     references: dict[str, tuple[str | None, str]] = field(default_factory=dict)
+    # The untrusted values the conditions that let the step start read: they count for every
+    # activity's input policies in the plan, beside its fields (brief, D39).
+    steered: tuple[Steering, ...] = ()
 
 
 @dataclass(frozen=True)

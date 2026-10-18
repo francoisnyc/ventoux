@@ -299,8 +299,8 @@ short note, not a layer.
 - **Done when:** every row that would be blocked is either unblocked before layer 12, or
   recorded in the brief as a deliberate limit.
 - **Reference:** `docs/layers/11-research.md`; the brief's "Out of scope" and "Deferred".
-- **Drafted after 11a** (2026-10-17), so 11b–11d can check their choices against the table; the
-  checkpoint still closes it before layer 12.
+- **Drafted after 11a** (2026-10-17), so 11b–11e (as renumbered in 11b's session) can check their
+  choices against the table; the checkpoint still closes it before layer 12.
 
 ## 12. Releases and changing open cases
 
