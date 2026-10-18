@@ -642,6 +642,27 @@ be erased on request), has size limits, and a second copy of business records go
   written before failed runs were pending work): it closes once the run is retried to completion,
   or a person closes it with a declared reason. Nothing is skipped automatically (D17). *Added in
   the tutor review of layer 8b, before D26 was merged.*
+- **Amended 2026-10-18, in the fix of a rejected retry** (the text above stands; this adds to it;
+  docs/layers/fix-retry-rejected.md has the paths and the tests):
+  - a retry whose approval is rejected goes back to failed, as the run it is, saying so: its side
+    effect may or may not have happened, so the case can't close on it. The rejection is
+    recorded on the approval's entry, never on a new run of the step; an operator retries again,
+    which asks again, or closes the case. Whoever may not approve the run still may not;
+  - a retry waits only for what can still let it start: its approval, its fact fetched again,
+    or a step it requires that is on its way and shown (open, running, failed or retried). Its
+    condition false now, or a requirement that ended without completing (cancelled, rejected),
+    sends it back to failed, saying why and what to do. Read once admission has settled, so a
+    requirement a rule stopped and another started again in the same decision is on its way;
+  - a retry is not refused on a false condition that reads a fact the step needs fresh that is
+    stale: the fact is fetched again first (D33);
+  - while every `closes_when` milestone is reached and a failed run holds the close, an approval
+    given for any other step is let go, and a person's proposal waiting for its fact is dropped,
+    each saying so: nothing waits to start (D34);
+  - an approval given and not yet spent lapses when a step its step requires ended without
+    completing, saying so; one on its way keeps it, tied to the values it saw (D11);
+  - a history recorded before this amendment in which the case was later brought back by hand (a
+    retry again that now starts at once, a review proposed again, a fact fetched again) may not
+    replay: Temporal refuses it, and the case waits until the code is fixed (D17).
 
 ### D27. A case continues as new, keeping its keys (design question 18)
 

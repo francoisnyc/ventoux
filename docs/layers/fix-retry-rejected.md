@@ -78,7 +78,10 @@ the others go on only if a person happens to act (proposes the review again) wit
    different on each path, so a history recorded before the fix up to it, or closed after it,
    replays (a fixture shows one). A history in which the case was later brought back does not:
    - A, D: someone sent `retry pay#1` again: it was refused before the fix (`has not failed`),
-     and is now accepted and schedules `pay#1`;
+     and is now taken. If it asks an approval, as it does when nothing changed, that is state, not
+     a command, and the history still replays; if it needs none (the review answered again for
+     less), it schedules `pay#1` at once, and the history doesn't. A fixture recorded under main
+     shows each;
    - A: a repeatable step was proposed again, or started by a rule, after the rejection: before
      the fix it ran as a new run (`pay#3`, with a new key); now the proposal is refused, and the
      rule's start says `… pay not started: pay#1 needs attention: retry it, or close the case`;
@@ -243,7 +246,8 @@ finding; all seven held, each fixed in slice 5:
 - `tests/test_case.py`: K's test, run on the plain `decide` until slice 4, and K's own test,
   marked until then.
 - `tests/test_temporal_case.py`: the replay of the fixture, and the rejected retry on Temporal.
-- `tests/histories/before_fix_retry_rejected.json`, recorded under main.
+- `tests/histories/before_fix_retry_rejected.json`, `…_retried.json` and `…_unapproved.json`,
+  recorded under main, each with its development key beside it.
 
 No new dependency.
 
@@ -275,12 +279,15 @@ Each starts with its negative test, seen failing for the right reason.
 4. **Nothing waits on a held close.** Negative: the approval given while the close is held is no
    longer pending (K). Then the proposal waiting for its fact (M).
 5. **A given approval lapses with its requirement.** Negative: L, and L on a retry.
-6. **On Temporal,** the brief's amendment, and the promises.
+6. **On Temporal,** the brief's amendment, and the promises. Negative: the rejected retry on the
+   time-skipping test server, seen failing on main's runtime (the case never needs attention).
+   Then the two histories with a retry sent again, and D26's amendment.
 
 ## Promises
 
-Drafted before building, to be checked against the files once built. Every test is in
-`tests/test_retry_rejected.py` unless said otherwise.
+Drafted before building, then checked against the files once built, 2026-10-18: every test
+named here exists where it says (33 tests). Every test is in `tests/test_retry_rejected.py`
+unless said otherwise.
 
 | Promise | Test that would fail |
 |---|---|
@@ -300,5 +307,5 @@ Drafted before building, to be checked against the files once built. Every test 
 | A given approval whose requirement is on its way stays, and is spent on the first run's key, asking nothing again: the review answered again with the same values, a refresh that failed and is retried, a requirement running | `test_a_given_approval_survives_a_review_answered_the_same`, `test_a_given_approval_waits_for_a_requirement_on_its_way` (each seen failing on a mutation that lapses it) |
 | A requirement one rule stopped and another started again in the same decision, on the same moment or a later one, is on its way: a given approval stays and is spent with the first key; a retry keeps waiting, and runs with its key | `test_a_requirement_a_rule_starts_again_keeps_what_waits_for_it` (seen failing first) |
 | A person may close a case whose rescue was rejected | `test_a_rejected_retry_can_be_closed` |
-| On Temporal, a rejected retry needs attention, and retried again pays once with its key | `test_a_rejected_retry_on_temporal` (`tests/test_temporal_case.py`) |
-| A history recorded under main with a rejected retry and a close replays | `test_a_history_with_a_rejected_retry_replays` (`tests/test_temporal_case.py`) |
+| On Temporal, a rejected retry needs attention, and retried again pays once with its key | `test_a_rejected_retry_on_temporal` (`tests/test_temporal_case.py`, seen failing on main's runtime) |
+| A history recorded under main with a rejected retry and a close replays; one that then retried again replays while that retry asks an approval, and doesn't once it would start unasked (the known limit) | `test_a_history_with_a_rejected_retry_replays`, `test_a_history_that_retried_a_rejected_retry_again_replays_if_it_asks_again`, `test_a_history_whose_retry_again_would_start_unasked_doesnt_replay` (each `tests/test_temporal_case.py`) |
