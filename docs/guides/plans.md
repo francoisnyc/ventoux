@@ -181,7 +181,10 @@ Three things to know:
   either.
 
 What the check doesn't prove yet: that an input's type matches the contract's (checked when the
-step runs: see below), and whether an untrusted value steers a condition (design question 17).
+step runs: see below), and whether an untrusted value steers a transition's condition (design
+question 17). In a case, a step's condition that reads untrusted data counts for its inputs'
+policies (the cases guide, "Untrusted data can't choose what is sent"); inside a plan, a
+transition's condition is not checked that way yet.
 
 ## Running a plan
 

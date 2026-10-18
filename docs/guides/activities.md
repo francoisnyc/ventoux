@@ -391,12 +391,15 @@ real system, the source labels `customer`, `document`, `email`, `llm` and `web`,
 |---|---|---|---|---|
 | `payments.refund@2` | write | high | `order_id`, `amount`: trusted only | outcome `declined`; nothing is paid |
 | `orders.lookup@1` | read | low | none | no idempotency key needed |
+| `orders.lookup@2` | read | low | none | as `@1`, and declares `status` from `system:orders` |
 | `letters.draft@2` | write | low | `to_customer`: trusted only | only drafts, never sends |
 | `letters.draft@3` | write | low | `customer`: trusted only, a `crm` reference | the contract above; fetches the address itself, only drafts |
 | `kyc.check@1` (a workflow) | read | low | `customer_id`: trusted only | the contract above; its outputs as declared there |
 
-No development activity declares an output source, so every output they give is
-`untrusted:undeclared`, as the contracts were written before output sources existed.
+Only `orders.lookup@2` declares an output source: its `status` comes from `system:orders`.
+Every other output the development activities give is `untrusted:undeclared`, as their
+contracts were written before output sources existed. `orders.lookup@1` stays registered beside
+`@2`: declaring a source is a new version (brief, D29), which a case adopts by naming it.
 
 `payments.refund@1` and `letters.draft@1`, without policies, were retired when `@2` added them:
 a version without the policy, left in the catalog, would let a definition step around it.

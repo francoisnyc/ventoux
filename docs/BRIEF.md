@@ -1079,6 +1079,77 @@ be erased on request), has size limits, and a second copy of business records go
   is an error (`NEVER_FIRES`). D7's "rules that can never fire" stays a warning only where it
   depends on values.
 
+### D39. Rules that start steps: the engine proposes, and an untrusted condition can't choose what is sent
+
+*Drafted 2026-10-18, in layer 11b. Adds to D11, D17, D25, D26, D33, D34, D36 and D38.*
+
+- **`start` is a proposal by the engine.** `"then": {"start": ["review"]}` proposes a run of each
+  step named, and admission decides as for a person's proposal: its requirements, whether it is
+  running or waiting for its approval, whether it may run again, its `when`, its fresh facts, its
+  approval and its inputs; and rules stop with the close (D38). The proposer is the rule's entry
+  (`send_back#1`), never a person. A step a rule starts may leave out `proposed_by`, which keeps
+  meaning which people may propose it.
+- **A fourth moment: a task answered.** `{"answered": "<task>"}` fires each time a run of the task
+  is answered, whatever the outcome, and names only a task (D38: a moment is added by a decision).
+  A milestone is reached once and `started` fires before the answer exists, so a loop needs it.
+  What brings a loop of rules round again is then a person's answer, as a plan's loop passes
+  through a wait (design question 18). Set aside: a moment for any step finishing, with which a
+  case could call a payment provider again on each decline by itself, a retry policy that is the
+  platform team's (D17).
+- **A start the engine can't make is never silent.** It is recorded, and nothing runs, when the
+  step's `when` is false, it is running or waiting for its approval, it has run and isn't
+  repeatable, or its latest run needs attention; it waits when a fact it needs fresh can be
+  fetched again; and it fails, needing attention, as admission does, when its condition can't be
+  read, its contract is missing, an input is refused, or a stale fact can't be fetched again (D17,
+  D35).
+- **A proposal waits for its fresh facts** (adds to D33). A step a person proposes, or a rule
+  starts, whose stale fact can be fetched again is accepted and waits: the fact is fetched, then
+  admission reads everything again on the fresh value, and starts the step or says why not. The
+  waiting start crosses continue-as-new (D27). Until now a person's proposal skipped the check and
+  ran on the stale fact, against D33.
+- **Nothing starts beside a failed run** (adds to D26). A step whose latest run needs attention is
+  not started again, by a rule or a person's proposal: the new run would have a new key, so a side
+  effect may happen twice, and the failure would be skipped by another name (D17). An operator
+  retries it or closes the case. Until now a person could propose a new run, and the operator's
+  retry of the failed one was then never scheduled.
+- **Who can't approve what a rule started** (adds to D11, D25): whoever's answer the rule's `when`
+  read, as for a step's own `when`. A rule remembers nothing (D38), so the run keeps, until it
+  starts or is dropped, the rule's entry, those people and the untrusted sources the `when` read.
+  The person whose answer only brought the moment is not excluded, as a person whose run a step
+  `requires` isn't; changing that would be one decision covering both.
+- **Each decision still ends.** A step a rule has started in a decision isn't started again by a
+  rule in it (recorded): a rule that stops a step (layer 11c) could otherwise loop with one that
+  starts it. A decision then starts finitely many runs.
+- **An untrusted condition can't choose what is sent** (how D38's "counts as read by every input"
+  is read; adds to D36). A separate check, never merged into an input's own sources: if the step's
+  `when`, or the `when` of the rule that started it, read an untrusted (or unrecognised) source,
+  each input whose policy refuses that source is refused, and the run fails naming the condition's
+  field and source, never the value. Only those sources count: a `when` reading a person's answer
+  changes nothing for an input that takes a value from one system. Merging them would loosen a
+  policy: a literal input would be credited with the condition's sources. A plan step carries its
+  condition's untrusted sources beside its fields, never inside them. A field the condition names
+  that isn't set yet counts what any of its writers could give, read from the definition (fail
+  closed; this corrects 11a's runtime, which skipped it, so a rule validation refused acted).
+- **An approval's `when` that read untrusted data asks anyway.** It is read as before, so one that
+  can't be read stops the step; if it read untrusted data, the approval is asked whatever it gave,
+  saying why: untrusted data may add an approval, never remove one (D11).
+- **Where the influence ends:** at the step the condition lets start. A rule on that step's start,
+  or a milestone its run reaches, may carry it further; there the safe tool is a person, in an
+  approval or a task. A plan's own transitions are left as they are, and open (design question 17).
+- **Case validation counts what rules start** (D34). One answer to "who can start this step" (it
+  starts by itself, a person with a registered role proposes it, or a rule that can fire starts
+  it) wherever a check asks; a start refused every time it fires is an error at the rule
+  (`NEVER_STARTS`), and a step all of whose starts are refused never runs; an input refused every
+  time a rule starts its step is `INPUT_POLICY` at the rule; a moment a check doesn't know is an
+  error, never read as the opening.
+- **A loop of starts.** One nothing could ever end (no `when` on its rules or steps, every step
+  repeatable without an approval, no rule stopping it, no reachable `closes_when`, no close reason
+  with a registered role) is `NEVER_CLOSES`. One a person or `closes_when` can still end is a
+  warning, `CLOSED_ONLY_BY_A_PERSON`, as D10 asks for "a step that can always be restarted".
+- **`NEVER_CLOSES` says what it proves** (adds to D34): an approved forget request closes any case
+  whose definition allows it (D32), so the error says nothing in the case's work or its close
+  reasons can close it, and only a forget request would.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
@@ -1277,7 +1348,9 @@ New questions found while building go here, numbered from 10.
     teaching warning on "rules whose condition reads untrusted data"). To decide with
     `UNTRUSTED_TRIGGER` (layer 11), or earlier if case validation (layer 10) needs it. **Decided in
     layer 11a:** untrusted data informs, never decides; a condition that lets a step start counts
-    as read by its inputs, and an untrusted approval condition asks anyway (D38).
+    as read by its inputs, and an untrusted approval condition asks anyway (D38). *Added in layer
+    11b, 2026-10-18:* built for a case's steps, read as D39 says; a plan's own transitions are
+    left open, recorded in `docs/layers/checkpoint-doors.md` for the checkpoint before layer 12.
 18. **When does a run continue as new, and what does it carry?** (found in layer 6) Temporal
     warns at about 10,000 history events and ends a run at 51,200; continue-as-new ends a run and
     starts a fresh one with its state carried over. A plan doesn't need it yet: the bound of 1,000

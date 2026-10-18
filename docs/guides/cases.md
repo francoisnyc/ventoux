@@ -102,8 +102,9 @@ together, and the case waits for both.
 ## Steps that start by themselves, and steps a person proposes
 
 A step **starts by itself** once it is admitted, once. A step with `"automatic": false` starts
-only when a person **proposes** it; `proposed_by` names who may. The engine checks the proposal
-against admission, so a person can't start a step whose requirements aren't met:
+only when a person **proposes** it, or a rule starts it ("Rules", below); `proposed_by` names
+which people may. The engine checks the proposal against admission, so a person can't start a
+step whose requirements aren't met:
 
 ```json
 "check_order": {
@@ -117,8 +118,13 @@ against admission, so a person can't start a step whose requirements aren't met:
 }
 ```
 
-A **repeatable** step may run again, and only when proposed: it never starts itself a second time,
-or it would never stop. A task's `outcome` is then its latest answer, and a field its form sets
+If a fact the step needs fresh is stale, the proposal is accepted and waits while the fact is
+fetched again; then the step starts, or doesn't, on the fresh value (the case data guide, "Fresh
+facts"). A step whose latest run needs attention isn't started again beside it ("When something
+breaks").
+
+A **repeatable** step may run again, and only when proposed or started by a rule: it never starts
+itself a second time, or it would never stop. A task's `outcome` is then its latest answer, and a field its form sets
 holds the latest value (brief, D9). This is how a review is sent back for rework, with two keys
 added to `review`:
 
@@ -278,6 +284,11 @@ retried = run_case(refund, file={"order_id": "ord-1", "amount": 40},
 assert calls == ["memory/pay#1", "memory/pay#1"]
 assert retried.closed
 ```
+
+**Nothing starts beside a failed run.** While `pay#1` needs attention, proposing `pay` again is
+refused (`pay#1 needs attention: retry it, or close the case`), and so is a rule's start. A new
+run would get a new key, so a payment that went through before the failure could be made twice,
+and the failed run would be skipped by another name (brief, D17, D26).
 
 ## Closing a case
 
@@ -472,11 +483,13 @@ A rule's `on` names one moment:
 | `"opened"` | once, when the case opens, with its first values in the case file |
 | `{"reached": "checked"}` | once, when the milestone is reached: a milestone is never undone |
 | `{"started": "assess"}` | each time a run of the step starts: a task opening, an activity or workflow scheduled, a plan started, a stale fact fetched again. A retry is the same run, so it doesn't start again |
+| `{"answered": "check"}` | each time a run of the task is answered, whatever the outcome. It names a task: an activity, a workflow or a plan finishing is not a moment, so a loop of rules always passes through a person's answer |
 
 `when` is optional, and reads the case file as it is at that moment, as a step's `when` does: it
 is checked against the case's values first, so a misspelt outcome is an error, never false. With
 its `when` false, a rule does nothing, and the history says so: `flag_high_risk#1 on reached
-checked: its condition is false`. `then` lists the milestones it reaches.
+checked: its condition is false`. `then` lists the milestones it reaches, the steps it starts
+(below), or both.
 
 **A rule reacts to a moment, never to a state.** It remembers nothing: when its moment comes, it
 reads the case file then, once. To start something as soon as a state holds, and whenever it
@@ -521,15 +534,125 @@ that would have fired says so. With `"closes_when": ["checked"]`:
 flag_high_risk#1 on reached checked: not applied: checked is reached, so the case closes and nothing new is decided
 ```
 
+**Rules that start steps.** A rule's `then` may `start` steps: the engine proposes a run, as a
+person does, and admission decides, exactly as for a person's proposal. This is how a case sends
+work back by itself. Here a team lead checks each approved review of the refund, and a review
+sent back is asked again:
+
+```json
+"rules": {
+  "check_review": {
+    "display": {"title": "Check an approved review"},
+    "on": {"answered": "review"},
+    "when": {"==": [{"var": "review.outcome"}, "approve"]},
+    "then": {"start": ["check"]}
+  },
+  "send_back": {
+    "display": {"title": "Send the review back"},
+    "on": {"answered": "check"},
+    "when": {"==": [{"var": "check.outcome"}, "send_back"]},
+    "then": {"start": ["review"]}
+  }
+}
+```
+
+```json
+"check": {
+  "kind": "task",
+  "display": {"title": "Check the approved review"},
+  "roles": ["support-lead"],
+  "automatic": false,
+  "outcomes": {
+    "ok": {"display": {"title": "The review is right"}, "reaches": ["checked"]},
+    "send_back": {"display": {"title": "Send it back for rework"}}
+  }
+}
+```
+
+`review` is `repeatable`, and `pay` also requires `checked`. Read aloud: when the review is
+approved, a team lead checks it; when the check sends it back, the review is asked again; the
+refund is paid once a check says the review is right.
+
+```
+ana answered review#1 approve as support, setting approved_amount
+check_review#1 on answered review: starting check
+started check#1: waiting for ok or send_back by support-lead
+lea answered check#1 send_back as support-lead
+send_back#1 on answered check: starting review
+started review#2: waiting for approve or reject by support
+ana answered review#2 approve as support, setting approved_amount
+check_review#2 on answered review: starting check
+started check#2: waiting for ok or send_back by support-lead
+lea answered check#2 ok as support-lead
+send_back#2 on answered check: its condition is false
+reached checked
+```
+
+`check` and `review` name no `proposed_by`: a step a rule starts needs none, and `proposed_by`
+still names which people may propose it. Proposing `check` is refused: `check is started only by
+a rule: nobody proposes it`.
+
+**The engine proposes; admission decides.** The proposer is the rule's entry, `send_back#1`, never
+a person. Its start is checked like a person's proposal: the step's requirements, its `when`,
+whether it is running, its fresh facts, its approval and its inputs. A start the engine can't
+make is never silent:
+
+- **recorded, and nothing runs,** when the step's `when` is false; it is already running, or
+  waiting for its approval; it has run and isn't repeatable; or its latest run needs attention.
+  Without `repeatable` on `review`: `send_back#1 on answered check: review not started: review has
+  run, and is not repeatable`;
+- **waiting,** when a fact it needs fresh is stale and can be fetched again: the fact is fetched,
+  then everything is read again on the fresh value;
+- **failed, needing attention,** as when a step starts by itself: its condition can't be read,
+  its contract is missing, an input is refused, or a stale fact can't be fetched again.
+
+**Who can't approve it.** Whoever's answer the rule's `when` read can't approve the run it
+starts, as for a step's own `when` (brief, D11): the rule decided that the step runs, on their
+answer. The run keeps what its rule read until it starts, since the rule itself remembers
+nothing.
+
+**A loop comes round through a person.** A rule starts steps only on a moment, and what brings a
+loop of rules round again is a task being answered. A step finishing is not a moment, so a case
+can't call a payment provider again on each decline by itself: retrying is the contract's
+(brief, D17). And within one decision, a step a rule has started isn't started again by a rule:
+`… review not started: a rule already started it in this decision`.
+
+**Untrusted data can't choose what is sent.** A condition that lets a step start decides that
+its inputs are sent at all. Say the welcome letter is drafted when a model's notes say so, to an
+address the case was opened with:
+
+```json
+"when": {"==": [{"var": "kyc.analyst_notes"}, "send welcome"]}
+```
+
+Each input on its own is trusted, but the model chose that the letter is sent. So what a
+condition reads counts for the step's input policies, as if its inputs read it, and the run
+fails:
+
+```
+welcome#1 failed: letters.draft@2 takes to_customer only from a system or a person, never from untrusted data, and welcome's condition reads kyc.analyst_notes (untrusted:llm)
+```
+
+The same goes for the `when` of a rule that starts a step. Only untrusted sources count: `pay`'s
+`when` reads Ana's answer, and `pay` may still send a value only one system gives. An approval
+whose `when` reads untrusted data is asked whatever it says: untrusted data can add an
+approval, never remove one. The influence ends at the step the condition lets start: a rule on
+that step's start can carry it further, so where untrusted data should weigh on what happens
+next, let a person decide, in a task or an approval.
+
 **What the check says about rules.** `ventoux check` reads rules too: a milestone a rule may
 reach counts as reachable, every `when` taken as possibly true, but proves nothing about what is
-set; a step that a rule on the opening may let start keeps the case from closing at once, so no
-`CLOSES_AT_OPENING` is given for it; a rule's `when` is type-checked; and two codes are its own:
+set; a step a rule may start can run; a step that a rule on the opening may let start, or start,
+keeps the case from closing at once, so no `CLOSES_AT_OPENING` is given for it; a rule's `when`
+is type-checked, and counts for the input policies of the steps it starts (`INPUT_POLICY`, at
+`rules.<name>.then.start`); and these codes are its own:
 
 | Code | Kind | What is wrong | Example message |
 |---|---|---|---|
 | `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
-| `UNTRUSTED_TRIGGER` | error | a rule's `when` reads a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
+| `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone reads, in its `when`, a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
+| `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: the step's requirements can't be met at the rule's moment | `start_pay can never start pay: it fires when refund opens, and pay requires checked, which can't be reached by then: start it on a later moment, or remove the requirement` |
+| `CLOSED_ONLY_BY_A_PERSON` | warning | rules start steps in a loop no condition ends, so the case closes only when a person closes it, or `closes_when` does | `check_review and send_back start check and review again and again, and no condition ends it: refund closes only when a person closes it: give one of the rules a when that ends the loop` |
 
 ## Testing a case
 
@@ -572,6 +695,8 @@ Anything the engine won't accept is refused, with the reason:
 | the approval was withdrawn | `pay.approval#1 was withdrawn: review started again` |
 | a proposed step's requirements aren't met | `check_order requires review, which hasn't completed` |
 | nobody proposes a step that starts by itself | `pay starts by itself: nobody proposes it` |
+| nobody proposes a step only a rule starts | `check is started only by a rule: nobody proposes it` |
+| the step's latest run needs attention | `pay#1 needs attention: retry it, or close the case` |
 | the opening gives a field a person sets | `approved_amount is set by a person in review, never given at the opening` |
 | the person retrying has no operating role | `pay#1 is retried by an operating role (operations), and ana has support` |
 | the run hasn't failed | `pay#1 has not failed: nothing to retry` |
@@ -806,8 +931,8 @@ every milestone that step, or any of its outcomes, could reach; then again, unti
 nothing. Whatever is left out can never happen. The order steps are written in doesn't matter: a
 case has no position.
 
-**What it can't see.** The check reads `requires`, `reaches`, who may propose a step and how the
-case closes. It treats every `when` as possibly true, and every outcome as possible. So it proves
+**What it can't see.** The check reads `requires`, `reaches`, who may propose or start a step and
+how the case closes. It treats every `when` as possibly true, and every outcome as possible. So it proves
 what can *never* happen, and says nothing about what depends on values:
 
 | The check proves | It can't tell, since it depends on values or people |
@@ -823,9 +948,9 @@ what can *never* happen, and says nothing about what depends on values:
 | Code | Kind | What is wrong | Example message |
 |---|---|---|---|
 | `DEADLOCK` | error | steps wait on each other, so none of them can run | as above |
-| `NEVER_RUNS` | error | a step's requirements can never all be met, or nobody may propose it | `approve can never run: it requires reviewed, which no step or rule reaches: reach reviewed from a step or a rule, or remove the requirement` |
+| `NEVER_RUNS` | error | a step's requirements can never all be met, or no person or rule may start it | `approve can never run: it requires reviewed, which no step or rule reaches: reach reviewed from a step or a rule, or remove the requirement` |
 | `CLOSES_AT_OPENING` | error | no step starts by itself when the case opens, so it closes at once and every proposal is refused | `nothing starts by itself when claim opens, so it closes at once and every proposal is refused: let a step start by itself with nothing required, or add stays_open` |
-| `NEVER_CLOSES` | error | the case stays open, no close reason names a registered role, and `closes_when` is empty or can never be met | `claim stays open, none of its close reasons' roles (supprt) is registered, and closes_when never closes it, so nobody could ever close it: name a registered role in a close reason` |
+| `NEVER_CLOSES` | error | nothing in the case's work or its close reasons can close it: it stays open, or rules restart its steps in a loop nothing ends; no close reason names a registered role; and `closes_when` is empty or can never be met. Only a forget request would close it (the case data guide) | `claim stays open, none of its close reasons' roles (supprt) is registered, and closes_when never closes it, so nothing but a forget request could close it: name a registered role in a close reason` |
 | `CLOSE_UNREACHABLE` | warning | a `closes_when` milestone can never be reached | as above |
 | `UNREACHABLE_MILESTONE` | warning | no step, outcome or rule reaches a milestone, and nothing requires it | `no step or rule reaches reviewed: reach it from a step, an outcome or a rule, or remove it` |
 
@@ -934,6 +1059,11 @@ Run as it is, the step fails with the same reason, before the payment is called.
 read the estimate and set `payout` from it: a person's answer is trusted, and the history shows
 who.
 
+**What decides that a step runs counts too** (brief, D38, D39). A step's `when`, or the `when` of
+the rule that starts it, decides whether its inputs are sent at all. If it reads untrusted data,
+each input whose policy refuses that data is refused, as if the input read it ("Rules", above).
+Only the untrusted sources count, so a `when` reading a person's answer changes nothing.
+
 A plan step is followed into its plan: each of the plan's fields comes from what the case gives
 it, and each activity in the plan is checked with that. Sending the estimate through
 `refund-order@1` is refused in the same words, at the plan step's input, before the plan asks
@@ -942,7 +1072,7 @@ anyone to approve a payment it could never make.
 | Code | Kind | What is wrong | Example message |
 |---|---|---|---|
 | `REFERENCE` | error | an input that takes a reference to one system is given another system's reference, a text, or a computed value | `letters.draft@3 takes customer as a reference to crm, and is given order_id, a reference to orders: give it a reference to crm, read as it is` |
-| `INPUT_POLICY` | error | an input is given a value from a source its policy refuses, whoever opens the case | as above |
+| `INPUT_POLICY` | error | an input is given a value from a source its policy refuses, or its step's `when` (or the `when` of a rule starting it) reads untrusted data its policy refuses, whoever opens the case | as above |
 | `OPENER_DECIDES` | warning | an input's policy takes a value given at the opening only when a system opens the case | `ledger.record@1 takes amount only from opener, and this value comes from amount (the opener), which is refused when a person opens the case: open it only from a system, or give amount a value a system gave` |
 | `INPUT_TYPE` | error | an input is given a value of another type than it takes | `payments.refund@2 takes amount as a number, and is given a string: give it a number` |
 | `NO_SOURCES` | error | a plan step gives a plan's field only values written in the definition, which come from nobody | `refund-order@1 takes amount from the case, and is given only values written in the definition, which come from nobody: give it a field of the case file` |
