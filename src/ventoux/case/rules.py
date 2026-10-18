@@ -9,7 +9,7 @@ See docs/layers/11-rules.md.
 from ventoux.case.admission import StepStopped, holds
 from ventoux.case.closing import close_held
 from ventoux.case.definition import AnsweredTask, CaseDefinition, Reached, Started
-from ventoux.case.state import CaseState, RuleFiring
+from ventoux.case.state import CaseState, RuleFiring, RuleStart
 from ventoux.case.types import rule_problem
 from ventoux.case.writers import writers_of
 from ventoux.core.catalog import Catalog
@@ -101,9 +101,19 @@ def act(
     if not decided:
         state.history.append(f"{firing.entry} on {firing.moment}: its condition is false")
         return
-    reaches = case.rules[firing.rule].then.reach
-    state.history.append(f"{firing.entry} on {firing.moment}: reaching {' and '.join(reaches)}")
-    reach(state, reaches)
+    then = case.rules[firing.rule].then
+    if then.reach:
+        state.history.append(
+            f"{firing.entry} on {firing.moment}: reaching {' and '.join(then.reach)}"
+        )
+        reach(state, then.reach)
+    # Each start is the engine's proposal, with what the condition read now: admission decides,
+    # once the rules on this moment have fired (brief, D39).
+    read = condition_sources(case, catalog, state, firing.rule)
+    for step in then.start:
+        state.rule_starts.append(
+            RuleStart(firing.entry, firing.moment, step, people_in(read), untrusted_in(read))
+        )
 
 
 def nothing_decided(case: CaseDefinition, state: CaseState) -> str | None:
@@ -123,12 +133,12 @@ def nothing_decided(case: CaseDefinition, state: CaseState) -> str | None:
     return None
 
 
-def untrusted_read(
+def condition_sources(
     case: CaseDefinition, catalog: Catalog, state: CaseState, name: str
-) -> str | None:
-    """The first value the rule's condition reads from a source the engine doesn't trust, said as
-    `kyc.analyst_notes, from untrusted:llm`; None if it reads only trusted ones."""
+) -> dict[str, frozenset[str]]:
+    """Where each value the rule's condition reads came from, in the order it reads them."""
     when = case.rules[name].when
+    read: dict[str, frozenset[str]] = {}
     could: dict[str, frozenset[str]] | None = None
     for field in [] if when is None else fields_read(when):
         sources = state.sources.get(field)
@@ -137,6 +147,33 @@ def untrusted_read(
             # of its writers could give, never "no sources" (fail closed) (brief, D39).
             could = could if could is not None else writers_of(case, catalog, state.opened_by)
             sources = could.get(field, frozenset({f"no known source for {field}"}))
+        read.setdefault(field, sources)
+    return read
+
+
+def people_in(read: dict[str, frozenset[str]]) -> dict[str, str]:
+    """Each person whose answer a condition read, and the first field of theirs it read."""
+    people: dict[str, str] = {}
+    for field, sources in read.items():
+        for source in sorted(sources):
+            if source.startswith("person:"):
+                people.setdefault(source.removeprefix("person:"), field)
+    return people
+
+
+def untrusted_in(read: dict[str, frozenset[str]]) -> frozenset[str]:
+    """Every source a condition read that the engine doesn't trust."""
+    return frozenset(
+        source for sources in read.values() for source in sources if not is_trusted(source)
+    )
+
+
+def untrusted_read(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, name: str
+) -> str | None:
+    """The first value the rule's condition reads from a source the engine doesn't trust, said as
+    `kyc.analyst_notes, from untrusted:llm`; None if it reads only trusted ones."""
+    for field, sources in condition_sources(case, catalog, state, name).items():
         untrusted = sorted(source for source in sources if not is_trusted(source))
         if untrusted:
             return f"{field}, from {', '.join(untrusted)}"

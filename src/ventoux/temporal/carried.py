@@ -15,6 +15,7 @@ from ventoux.case.state import (
     Obtained,
     OpenApproval,
     RuleFiring,
+    RuleStart,
     StepRun,
 )
 
@@ -51,6 +52,9 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "withdrawn": dict(state.withdrawn),
         "proposers": dict(state.proposers),
         "waiting_to_start": list(state.waiting_to_start),
+        "proposed_by_rules": {
+            step: rule_start_as_data(asked) for step, asked in state.proposed_by_rules.items()
+        },
         "waiting": dict(state.waiting),  # in the order they opened: JSON keeps it
         "opened_by": state.opened_by,
         "phase": state.phase,
@@ -68,7 +72,29 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
             for f in state.firings
         ],
         "moments": list(state.moments),  # always empty between events (brief, D38)
+        "rule_starts": [rule_start_as_data(asked) for asked in state.rule_starts],  # the same
+        "started_by_rules": list(state.started_by_rules),  # the same
     }
+
+
+def rule_start_as_data(asked: RuleStart) -> dict[str, Any]:
+    return {
+        "entry": asked.entry,
+        "moment": asked.moment,
+        "step": asked.step,
+        "read_from": dict(asked.read_from),
+        "untrusted": sorted(asked.untrusted),
+    }
+
+
+def rule_start_from_data(data: dict[str, Any]) -> RuleStart:
+    return RuleStart(
+        data["entry"],
+        data["moment"],
+        data["step"],
+        dict(data["read_from"]),
+        frozenset(data["untrusted"]),
+    )
 
 
 def given_as_data(given: GivenApproval) -> dict[str, Any]:
@@ -110,6 +136,11 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         proposers=dict(data["proposers"]),
         # None in a state from before layer 11b: no proposal waited for a fact.
         waiting_to_start=list(data.get("waiting_to_start", [])),
+        # None in a state from before layer 11b: no rule started a step.
+        proposed_by_rules={
+            step: rule_start_from_data(asked)
+            for step, asked in data.get("proposed_by_rules", {}).items()
+        },
         waiting=dict(data["waiting"]),
         opened_by=data["opened_by"],
         phase=data["phase"],
@@ -119,6 +150,8 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         # None in a state from before layer 11a: no rule had fired.
         firings=[RuleFiring(**firing) for firing in data.get("firings", [])],
         moments=list(data.get("moments", [])),
+        rule_starts=[rule_start_from_data(asked) for asked in data.get("rule_starts", [])],
+        started_by_rules=list(data.get("started_by_rules", [])),
     )
 
 

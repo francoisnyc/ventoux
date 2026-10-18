@@ -21,7 +21,7 @@ from ventoux.case.admission import (
     proposal_refusal,
     requirements_met,
 )
-from ventoux.case.answers import AnswerRefused, judge_approval, judge_task
+from ventoux.case.answers import AnswerRefused, decided_by, judge_approval, judge_task
 from ventoux.case.approvals import ask, follow, lapsed, needs_approval
 from ventoux.case.called import called
 from ventoux.case.closing import (
@@ -119,6 +119,7 @@ def decide(
     can't run fails, and the case needs attention (brief, D17)."""
     refuse_unless_whole(event.at)  # time is only ever event data, so it is checked first
     state = copy.deepcopy(state)  # the state passed in is never changed
+    state.started_by_rules.clear()  # a guard for this decision only (brief, D39)
     commands: list[Command] = []
     was_open = state.phase == "open"
     if isinstance(event, Opened):
@@ -155,6 +156,8 @@ def decide(
     # Moments left because the case is no longer open: each rule on them says it wasn't applied
     # (brief, D38).
     fire_rules(case, catalog, state)
+    state.rule_starts.clear()  # none is taken up once the case no longer decides (brief, D38)
+    state.started_by_rules.clear()
     settle(case, state)
     return state, commands
 
@@ -406,6 +409,7 @@ def answer_task(
     setting = f", setting {listed(list(sets))}" if sets else ""
     state.history.append(f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}")
     state.history.append(f"{run.entry} done")
+    state.moments.append(f"answered {run.step}")  # each answer, whatever the outcome (brief, D39)
     reach(state, (*step.outcomes[event.outcome].reaches, *step.reaches))
 
 
@@ -434,7 +438,7 @@ def answer_approval(
         return
     # A rejection is an outcome: the step doesn't run (brief, D23).
     entry = next_entry(state, approval.step)
-    state.proposers.pop(approval.step, None)  # the proposed run is over
+    proposal_spent(state, approval.step)  # the proposed run is over
     state.runs.append(StepRun(entry, approval.step, "rejected"))
     state.history.append(f"{entry} won't run: {event.by} rejected {approval.entry}")
 
@@ -655,6 +659,9 @@ def admit(
     while started:
         started = False
         fire_rules(case, catalog, state)  # the moments that came, before any step is asked again
+        # The engine's proposals, from the rules that fired: admission decides (brief, D39).
+        if start_from_rules(case, catalog, state, commands, at):
+            started = True
         follow(case, state)  # an open approval follows the case file (brief, D25)
         for name, step in case.steps.items():
             if not free_to_start(state, name, step):
@@ -806,6 +813,74 @@ def free_to_start(state: CaseState, name: str, step: TaskStep | CallStep | PlanS
     return step.automatic and latest_run(state, name) is None
 
 
+def proposal_spent(state: CaseState, name: str) -> None:
+    """The proposed run started, or is over: who proposed it, a person or a rule, is forgotten."""
+    state.proposers.pop(name, None)
+    state.proposed_by_rules.pop(name, None)
+
+
+def start_from_rules(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command], at: int
+) -> bool:
+    """Take each start the rules asked for, in order: the engine proposes, and admission decides,
+    as for a person's proposal (brief, D39). A start it refuses is recorded, and nothing runs; one
+    that can't be made fails the step, which waits for a person. Whether any started."""
+    required = requirements(case)
+    started = False
+    while state.rule_starts:
+        asked = state.rule_starts.pop(0)
+        name, said = asked.step, f"{asked.entry} on {asked.moment}"
+        step = case.steps[name]
+        # Read first: a rule that stopped a step could otherwise start it again, for ever, in one
+        # decision (brief, D39).
+        if name in state.started_by_rules:
+            refusal: str | None = "a rule already started it in this decision"
+        else:
+            refusal = proposal_refusal(case, name, required[name], state)
+        if refusal is None:
+            try:
+                if (problem := expression_problem(case, catalog, name)) is not None:
+                    raise StepStopped(problem)
+                if not isinstance(step, TaskStep):
+                    never_waits(state, name, step, at)
+                if step.when is not None and not holds(
+                    step.when, state.values, f"{name}'s condition"
+                ):
+                    refusal = f"{name} doesn't run now: {render(step.when)} is false"
+            except StepStopped as error:
+                state.history.append(f"{said}: starting {name}")
+                state.started_by_rules.append(name)
+                fail(state, name, str(error))  # nothing is skipped: a person decides (brief, D17)
+                started = True
+                continue
+        if refusal is not None:
+            state.history.append(f"{said}: {name} not started: {refusal}")
+            continue
+        state.history.append(f"{said}: starting {name}")
+        state.started_by_rules.append(name)
+        state.proposed_by_rules[name] = asked  # what it read, kept with the run (brief, D38)
+        try:
+            start(case, catalog, state, name, step, commands)
+        except (StepStopped, InputRefused, NotInCatalog) as error:
+            fail(state, name, str(error))
+        started = True
+    return started
+
+
+def never_waits(state: CaseState, name: str, step: CallStep | PlanStep, at: int) -> None:
+    """`StepStopped` if a fact the step needs fresh is stale: a rule's start never waits for one to
+    be fetched again, since the fetch lands with no person in it, and a loop of rules could come
+    round with nobody in between. An operator's retry fetches it (brief, D33) (brief, D39)."""
+    for stale in stale_facts(step.max_age, state, at):
+        if stale.age is None:  # fail closed: an age that can't be told is never fresh
+            raise StepStopped(f"{stale.field} has no time obtained, so {name} can't tell its age")
+        raise StepStopped(
+            f"{stale.field} was obtained {ago(stale.age)} ago, and {name} needs it at most "
+            f"{as_said(stale.limit)} old: a rule's start doesn't wait for it to be fetched again; "
+            "retry it to fetch it"
+        )
+
+
 def taken_up(state: CaseState, name: str) -> None:
     """A proposal that waited for a fact is taken up: the step starts, or fails, now."""
     if name in state.waiting_to_start:
@@ -836,7 +911,7 @@ def start(
         return
     if isinstance(step, TaskStep):
         entry = coming_run(state, name, "open").entry
-        state.proposers.pop(name, None)  # a task has no approval: the proposed run has started
+        proposal_spent(state, name)  # a task has no approval: the proposed run has started
         state.waiting[entry] = f"{name} by {' or '.join(step.roles)}"
         state.history.append(
             f"started {entry}: waiting for {' or '.join(step.outcomes)} by "
@@ -880,7 +955,7 @@ def schedule(
     if isinstance(step, WorkflowStep):
         refuse_sensitive_inputs(contract.reference, step.inputs, state.values)
     coming_run(state, name, "running").approved = approved
-    state.proposers.pop(name, None)  # the proposed run has started
+    proposal_spent(state, name)  # the proposed run has started
     if isinstance(step, WorkflowStep):
         # The run's name names its child workflow on Temporal, as a plan step's does.
         state.history.append(
@@ -941,9 +1016,14 @@ def start_plan(
         excluded[state.opened_by] = (
             f"{state.opened_by} opened the case, so cannot approve its steps"
         )
-    proposer = state.proposers.pop(name, None)  # the proposed run has started
+    proposer = state.proposers.get(name)
     if proposer is not None:
         excluded.setdefault(proposer, f"{proposer} proposed {name}, so cannot approve it")
+    # Whoever's answer decided that a rule started it is excluded too (brief, D11) (brief, D39).
+    if (asked := state.proposed_by_rules.get(name)) is not None:
+        for person, field in asked.read_from.items():
+            excluded.setdefault(person, decided_by(person, field, asked))
+    proposal_spent(state, name)  # the proposed run has started
     plan_run = f"{state.case}/{run.entry}"
     state.history.append(
         f"started {run.entry}: plan {step.plan} ({origins(step.inputs, state)}), run {plan_run}"

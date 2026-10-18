@@ -64,6 +64,7 @@ def begin_closing(state: CaseState, cancelled_because: str, closed_because: str)
         state.history.append(f"cancelled {approval.entry}: {cancelled_because}")
     state.given.clear()  # an approval not yet spent starts nothing now
     state.proposers.clear()
+    state.proposed_by_rules.clear()
     state.waiting_to_start.clear()  # nor does a proposal waiting for a fact (brief, D39)
 
 

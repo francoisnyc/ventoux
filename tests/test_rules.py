@@ -17,10 +17,12 @@ from ventoux.case.validate import validate_case
 from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
+    AnswerRefused,
     ProposalRefused,
     RetryRefused,
     close,
     fake_kyc,
+    later,
     load_definition,
     propose,
     retry,
@@ -165,6 +167,309 @@ def test_a_step_only_a_rule_starts_is_proposed_by_nobody() -> None:
             people=PEOPLE,
         )
     assert str(refused.value) == "lead_check is started only by a rule: nobody proposes it"
+
+
+# --- 11b, slice 2: starting ---
+
+APPROVED_40 = ("review", "approve", "ana", {"approved_amount": 40})
+SMALL = {"order_id": "ord-1", "amount": 40}
+
+
+def test_a_start_whose_condition_is_false_runs_nothing() -> None:
+    # The engine proposes; admission decides, the step's own `when` included. A start it refuses
+    # is recorded, and nothing runs (brief, D39).
+    definition = only_a_rule_starts(when={"==": [{"var": "amount"}, 0]})
+    run = run_case(definition, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert (
+        "flag_large#1 on answered review: lead_check not started: lead_check doesn't run now: "
+        "amount = 0 is false"
+    ) in run.history
+    assert not any(line.startswith("started lead_check") for line in run.history)
+
+
+def test_answered_fires_on_each_answer() -> None:
+    # A milestone is reached once; a task is answered on each run, whatever the outcome. So a rule
+    # on `answered` fires again when the review is sent back and answered again (brief, D39).
+    definition = only_a_rule_starts(repeatable=True)
+    definition["rules"]["flag_large"]["when"] = None
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[
+            ("review", "reject", "ana"),
+            propose("review", "ana"),
+            ("review", "reject", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert [line for line in run.history if line.startswith("flag_large#")] == [
+        "flag_large#1 on answered review: starting lead_check",
+        (
+            "flag_large#2 on answered review: lead_check not started: lead_check is already "
+            "running: lead_check#1"
+        ),
+    ]
+
+
+def test_a_start_whose_requirements_arent_met_runs_nothing() -> None:
+    run = run_case(
+        only_a_rule_starts(requires=["pay"]), file=SMALL, answers=[APPROVED_40], people=PEOPLE
+    )
+    assert (
+        "flag_large#1 on answered review: lead_check not started: lead_check requires pay, which "
+        "hasn't completed"
+    ) in run.history
+
+
+def test_a_refused_start_is_recorded() -> None:
+    # Running, or run and not repeatable: recorded, and nothing runs (brief, D39).
+    definition = only_a_rule_starts()
+    definition["rules"]["flag_large"]["when"] = None
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    reworked = [("review", "reject", "ana"), propose("review", "ana"), ("review", "reject", "ana")]
+    running = run_case(definition, file=SMALL, answers=reworked, people=PEOPLE)
+    assert (
+        "flag_large#2 on answered review: lead_check not started: lead_check is already running: "
+        "lead_check#1"
+    ) in running.history
+    checked = [*reworked[:2], ("lead_check", "ok", "sam"), reworked[2]]
+    has_run = run_case(definition, file=SMALL, answers=checked, people=PEOPLE)
+    assert (
+        "flag_large#2 on answered review: lead_check not started: lead_check has run, and is not "
+        "repeatable"
+    ) in has_run.history
+    # Waiting for its approval: a note answered while the refund's approval is open starts it.
+    approval = with_rule(on={"answered": "note"}, then={"start": ["pay"]})
+    approval["rules"]["flag_large"]["when"] = None
+    approval["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    waiting = run_case(
+        approval,
+        file=SMALL,
+        answers=[("review", "approve", "ana", {"approved_amount": 250}), ("note", "noted", "ana")],
+        people=PEOPLE,
+    )
+    assert (
+        "flag_large#1 on answered note: pay not started: pay is waiting for its approval: "
+        "pay.approval#1"
+    ) in waiting.history
+
+
+def test_a_rule_starts_nothing_beside_a_failed_run() -> None:
+    definition = with_rule(on={"answered": "review"}, then={"start": ["check_order"]})
+    definition["rules"]["flag_large"]["when"] = None
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    definition["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "automatic": False,
+        "repeatable": True,
+    }
+
+    def down(inputs: dict[str, Any]) -> dict[str, Any]:
+        raise ConnectionError("orders system down")
+
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[
+            ("review", "reject", "ana"),
+            propose("review", "ana"),
+            ("review", "reject", "ana"),
+        ],
+        people=PEOPLE,
+        activities={"orders.lookup@1": down},
+    )
+    assert (
+        "flag_large#2 on answered review: check_order not started: check_order#1 needs "
+        "attention: retry it, or close the case"
+    ) in run.history
+
+
+def test_a_start_that_cant_be_made_needs_attention() -> None:
+    # Accepted by admission, and it can't be made: the run fails and waits for a person, as when
+    # a step starts by itself (brief, D17) (brief, D39). A condition that can't be read:
+    unreadable = only_a_rule_starts(when={">": [{"var": "approved_amount"}, 10]})
+    unreadable["rules"]["flag_large"]["when"] = None
+    run = run_case(unreadable, file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE)
+    assert run.history[-1] == (
+        "lead_check#1 failed: lead_check's condition approved_amount > 10 can't be evaluated: "
+        "approved_amount has no value"
+    )
+    assert run.needs_attention == [run.history[-1].replace(" failed:", ":", 1)]
+    # A contract the catalog lacks:
+    missing = with_rule(on={"answered": "review"}, then={"start": ["lookup"]})
+    missing["rules"]["flag_large"]["when"] = None
+    missing["steps"]["lookup"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@9",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "automatic": False,
+    }
+    run = run_case(missing, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "lookup#1: orders.lookup@9 is not in the catalog. Registered: orders.lookup@1, "
+            "orders.lookup@2. Use a registered version, or register this one first."
+        )
+    ]
+
+
+def test_a_rules_start_never_waits_for_a_refresh() -> None:
+    # A refresh lands with no person in it, so a rule's start that waited for one could bring a
+    # loop round with nobody in between. It needs attention instead; an operator's retry fetches
+    # the fact again, then the step runs (brief, D33) (brief, D39).
+    definition = with_rule(on={"answered": "review"}, then={"start": ["notify"]})
+    definition["rules"]["flag_large"]["when"] = None
+    definition["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    definition["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up again before the letter"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+        "max_age": {"check_order.status": "1d"},
+        "automatic": False,
+        "requires": ["check_order"],
+    }
+    looked_up = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}
+    stale = [later("3d"), APPROVED_40]
+    run = run_case(definition, file=SMALL, answers=stale, people=PEOPLE, activities=looked_up)
+    assert run.needs_attention == [
+        (
+            "notify#1: check_order.status was obtained 3 days ago, and notify needs it at most 1 "
+            "day old: a rule's start doesn't wait for it to be fetched again; retry it to fetch it"
+        )
+    ]
+    assert not any(line.startswith("refreshing") for line in run.history)
+    retried = run_case(
+        definition,
+        file=SMALL,
+        answers=[*stale, retry("notify#1", "omar")],
+        people=PEOPLE,
+        activities=looked_up,
+    )
+    assert "refreshing check_order.status for notify: obtained 3 days ago, at most 1 day" in (
+        retried.history
+    )
+    assert "notify#1 done, giving status from system:orders" in retried.history
+
+
+def test_a_rule_starts_a_step_once_per_decision() -> None:
+    # Two rules on one moment both start lead_check: the second is refused by the guard, read
+    # before admission's other refusals, so its line says why even while the run is open
+    # (brief, D39).
+    definition = only_a_rule_starts()
+    definition["rules"]["again"] = definition["rules"]["flag_large"] | {
+        "display": {"title": "Have it checked again"}
+    }
+    run = run_case(definition, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert [line for line in run.history if " on answered review: " in line] == [
+        "flag_large#1 on answered review: starting lead_check",
+        (
+            "again#1 on answered review: lead_check not started: a rule already started it in this "
+            "decision"
+        ),
+    ]
+
+
+def with_goodwill(when: object = None) -> dict[str, Any]:
+    """The refund, with a team lead's check of an approved review, and a goodwill refund a rule
+    starts once the check is answered (when `when` holds), behind a team lead's approval."""
+    definition = only_a_rule_starts(repeatable=True)
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    definition["rules"]["start_goodwill"] = {
+        "display": {"title": "Make a goodwill refund"},
+        "on": {"answered": "lead_check"},
+        "then": {"start": ["goodwill"]},
+    } | ({} if when is None else {"when": when})
+    definition["steps"]["goodwill"] = {
+        "kind": "activity",
+        "display": {"title": "Refund a goodwill gesture"},
+        "activity": "payments.refund@2",
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "amount"}},
+        "approval": {"roles": ["support-lead"], "display": {"reason": "Goodwill needs a lead"}},
+        "automatic": False,
+    }
+    return definition
+
+
+CHECKED_OK = {"==": [{"var": "lead_check.outcome"}, "ok"]}
+LEADS = {**PEOPLE, "lee": ["support-lead"]}
+
+
+def test_whoever_a_rules_condition_read_cant_approve_what_it_started() -> None:
+    # Sam's answer is what the rule's condition read: it decided that the goodwill refund runs,
+    # so Sam can't approve it; Lee can (brief, D11) (brief, D25) (brief, D39).
+    checked = [APPROVED_40, ("lead_check", "ok", "sam")]
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            with_goodwill(CHECKED_OK),
+            file=SMALL,
+            answers=[*checked, ("goodwill.approval#1", "approve", "sam")],
+            people=LEADS,
+        )
+    assert str(refused.value) == (
+        "sam set lead_check.outcome, which decided that start_goodwill#1 started goodwill, so "
+        "cannot approve it"
+    )
+    run = run_case(
+        with_goodwill(CHECKED_OK),
+        file=SMALL,
+        answers=[*checked, ("goodwill.approval#1", "approve", "lee")],
+        people=LEADS,
+    )
+    assert "goodwill#1 done, giving refund_id from untrusted:undeclared" in run.history
+
+
+def test_the_answer_that_brought_the_moment_doesnt_exclude() -> None:
+    # With no condition, the rule reads nothing: Sam's answer only brought the moment, as a person
+    # whose step another requires does today (brief, D39). Sam may approve.
+    run = run_case(
+        with_goodwill(),
+        file=SMALL,
+        answers=[
+            APPROVED_40,
+            ("lead_check", "ok", "sam"),
+            ("goodwill.approval#1", "approve", "sam"),
+        ],
+        people=LEADS,
+    )
+    assert "goodwill#1 done, giving refund_id from untrusted:undeclared" in run.history
+
+
+def test_a_rules_record_outlives_the_case_file_changing() -> None:
+    # The rule remembers nothing, so the run keeps what its condition read: Lee answers the check
+    # again while the goodwill approval is open, and lead_check.outcome is Lee's now; Sam, whose
+    # answer decided it, is still refused (brief, D38) (brief, D39).
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            with_goodwill(CHECKED_OK),
+            file=SMALL,
+            answers=[
+                APPROVED_40,
+                ("lead_check", "ok", "sam"),
+                propose("review", "ana"),
+                APPROVED_40,
+                ("lead_check", "ok", "lee"),
+                ("goodwill.approval#1", "approve", "sam"),
+            ],
+            people=LEADS,
+        )
+    assert str(refused.value).startswith("sam set lead_check.outcome, which decided that")
 
 
 # --- Slice 1: reaching ---
@@ -876,6 +1181,36 @@ def test_the_guides_rule_stopped_by_the_close_is_shown() -> None:
         definition, file=KYC_FILE, answers=[], people=PEOPLE, workflows={"kyc.check@1": risky}
     )
     assert appears_in_order(shown(3), run.history)
+
+
+def guide_rework() -> dict[str, Any]:
+    """The refund with the guide's rules sending the review back, its team lead's check, the
+    review repeatable, the milestone declared, and `pay` requiring it ("Rules that start
+    steps")."""
+    definition = copy.deepcopy(REFUND)
+    definition |= guide_json(3)  # the rules block
+    definition["steps"] |= guide_json(4)  # lead_check
+    definition["steps"]["review"]["repeatable"] = True
+    definition["milestones"] = {"lead_checked": {"display": {"title": "Checked by a team lead"}}}
+    definition["steps"]["pay"]["requires"] = ["lead_checked"]
+    return definition
+
+
+def test_the_guides_rework_loop_runs_as_shown() -> None:
+    approved = ("review", "approve", "ana", {"approved_amount": 40})
+    run = run_case(
+        guide_rework(),
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[
+            approved,
+            ("lead_check", "send_back", "lee"),
+            approved,
+            ("lead_check", "ok", "lee"),
+        ],
+        people={**PEOPLE, "lee": ["support-lead"]},
+    )
+    assert appears_in_order(shown(4), run.history)
+    assert run.reached("pay") and run.closed
 
 
 def guide_rules_table() -> list[tuple[str, str, str]]:

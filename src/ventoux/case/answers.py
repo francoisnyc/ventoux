@@ -12,7 +12,7 @@ from collections.abc import Mapping
 
 from ventoux.case.called import called
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
-from ventoux.case.state import Answered, CaseState
+from ventoux.case.state import Answered, CaseState, RuleStart
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.approval import approver_role, not_someone_else, risk_refusal
 from ventoux.core.catalog import Catalog
@@ -85,6 +85,12 @@ def judge_approval(
     # Nor does the person who proposed this run: their proposal decides that it runs (brief, D25).
     if answer.by == state.proposers.get(name):
         raise AnswerRefused(f"{answer.by} proposed {name}, so cannot approve it")
+    # Nor does anyone whose answer the condition of the rule that started it read: it decided
+    # that the step runs (brief, D11) (brief, D39). Kept with the run, since a rule remembers
+    # nothing: a value changed since still excludes them.
+    asked = state.proposed_by_rules.get(name)
+    if asked is not None and answer.by in asked.read_from:
+        raise AnswerRefused(decided_by(answer.by, asked.read_from[answer.by], asked))
     refuse_unless(someone_else(state.sources, answer.by, name, step))
     return approver
 
@@ -119,3 +125,11 @@ def unseen(
 def offers(what: str, outcomes: tuple[str, ...], outcome: str) -> str:
     """`review offers approve or reject, and the answer is 'aprove'`."""
     return f"{what} offers {' or '.join(outcomes)}, and the answer is {outcome!r}"
+
+
+def decided_by(person: str, field: str, asked: RuleStart) -> str:
+    """Why `person` approves nothing a rule started: their answer decided that it starts."""
+    return (
+        f"{person} set {field}, which decided that {asked.entry} started {asked.step}, so cannot "
+        "approve it"
+    )

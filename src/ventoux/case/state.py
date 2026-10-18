@@ -56,6 +56,22 @@ class RuleFiring:
     reason: str = ""  # why it failed
 
 
+@dataclass(frozen=True)
+class RuleStart:
+    """A rule's start of a step: the engine's proposal, with what its condition read, kept until
+    the run starts, since the rule itself remembers nothing (brief, D38) (brief, D39)."""
+
+    entry: str  # the firing that proposes it, such as `send_back#1`
+    moment: str  # its moment, as the history says it: `answered lead_check`
+    step: str  # the step it starts
+    # Each person whose answer the rule's condition read, and the field: none of them approves
+    # the run it starts (brief, D11) (brief, D25).
+    read_from: dict[str, str] = field(default_factory=dict[str, str])
+    # The untrusted sources the condition read, which count for the step's input policies
+    # (brief, D38) (brief, D39).
+    untrusted: frozenset[str] = frozenset()
+
+
 @dataclass
 class OpenApproval:
     """An approval asked and not yet answered: `pay.approval#1`."""
@@ -99,6 +115,9 @@ class CaseState:
     # Each step a person proposed whose start waits for a stale fact to be fetched again; admission
     # takes it up once the fact lands (brief, D33) (brief, D39).
     waiting_to_start: list[str] = field(default_factory=list[str])
+    # Each step a rule started whose run hasn't started yet (waiting for its approval), with what
+    # the rule read: like `proposers`, for the engine (brief, D39).
+    proposed_by_rules: dict[str, RuleStart] = field(default_factory=dict[str, RuleStart])
     # What waits on people, in the order it opened: entry, and how it reads (brief, D24).
     waiting: dict[str, str] = field(default_factory=dict[str, str])
     opened_by: str | None = None  # the person who opened the case, if a person did
@@ -111,6 +130,11 @@ class CaseState:
     # The moments that came in the decision being made, waiting for their rules: always empty
     # between events, so nothing about them crosses continue-as-new (brief, D38).
     moments: list[str] = field(default_factory=list[str])
+    # The starts the rules fired in this decision asked for, waiting for admission; and the steps
+    # a rule has started in it, which no rule starts again in it (brief, D39). Always empty
+    # between events, like `moments`.
+    rule_starts: list[RuleStart] = field(default_factory=list[RuleStart])
+    started_by_rules: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
