@@ -26,6 +26,7 @@ from ventoux.testing import (
     ProposalRefused,
     RetryRefused,
     as_json,
+    close,
     finish,
     later,
     load_definition,
@@ -397,3 +398,56 @@ def test_a_rejected_retry_needs_attention_again() -> None:
     ]
     assert [(r.entry, r.status) for r in run.state.runs if r.step == "pay"] == [("pay#1", "failed")]
     assert run.status == "open"
+
+
+def test_a_rejected_retry_retried_again_asks_again() -> None:
+    # An operator retries pay#1 again: it is checked again, asks a new approval, and once given,
+    # runs as the same run, with the first run's key, so the refund is never made twice
+    # (brief, D17, D26).
+    keys: list[str] = []
+    again = [*REJECTED, retry("pay#1", "omar"), ("pay.approval#2", "approve", "sam")]
+    run = run_case(
+        refund_retried(), FILE, again, PEOPLE, activities={"payments.refund@2": down_once(keys)}
+    )
+    assert "asked pay.approval#2: approval of pay by support-lead" in run.history
+    assert keys == ["memory/pay#1", "memory/pay#1"]  # the failed call, then the retry's
+    assert [(r.entry, r.status) for r in run.state.runs if r.step == "pay"] == [("pay#1", "done")]
+    assert run.needs_attention == []
+    assert run.closed
+
+
+def test_a_rejected_retry_holds_the_close_and_says_so() -> None:
+    # The audit reaches the case's only closes_when milestone while pay#1 has failed: the close
+    # is held. The rescue's approval is rejected: pay#1 needs attention again, and still holds
+    # the close, which a proposal refused meanwhile names; retried to completion, the case closes
+    # (brief, D26, D34).
+    definition = refund_retried(audited=True)
+    held = [*RESCUED[:3], ("audit", "done", "ana"), RESCUED[3], ("pay.approval#1", "reject", "sam")]
+
+    def played(script: list[Any]) -> Any:  # each run with its own refund, down on its first call
+        return run_case(
+            definition, FILE, script, PEOPLE, activities={"payments.refund@2": down_once([])}
+        )
+
+    run = played(held)
+    assert (
+        "pay#1 won't run: sam rejected pay.approval#1, so it needs attention again" in run.history
+    )
+    assert run.needs_attention[0].startswith("pay#1: sam rejected pay.approval#1")
+    assert run.status == "open"
+    with pytest.raises(ProposalRefused) as why:
+        played([*held, propose("review", "ana")])
+    assert "the case closes once pay#1 is retried, or a person closes it" in str(why.value)
+    run = played([*held, retry("pay#1", "omar"), ("pay.approval#2", "approve", "sam")])
+    assert run.history[-1] == "closed: audited reached"
+
+
+def test_a_rejected_retry_can_be_closed() -> None:
+    # Or a person closes the case with a declared reason; the failed run is cancelled, saying why
+    # (brief, D10, D26).
+    closed = [*REJECTED, close("duplicate", "omar")]
+    run = run_case(
+        refund_retried(), FILE, closed, PEOPLE, activities={"payments.refund@2": down_once([])}
+    )
+    assert "cancelled pay#1: closed as duplicate by omar" in run.history
+    assert run.history[-1] == "closed: duplicate, by omar"
