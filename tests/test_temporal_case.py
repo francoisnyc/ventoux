@@ -49,6 +49,7 @@ from ventoux.temporal.cases import (
     propose,
     report,
     retry,
+    signal_stop,
     start_case,
 )
 from ventoux.temporal.converter import ExactPayloadConverter
@@ -1558,3 +1559,86 @@ def test_a_stop_request_crosses_continue_as_new() -> None:
     for run in data["runs"]:
         del run["stop_requested"]
     assert all(run.stop_requested == "" for run in state_from_data(data).runs)
+
+
+def test_a_retry_after_a_stop_runs_on_temporal() -> None:
+    # From the review: the payment in the plan a rule stopped fails, and an operator retries the
+    # step. The retry is a person's decision, so the driver forgets the stop: the retried child
+    # runs, and waits for a team lead again. Until the fix, it was stopped as it started, recorded
+    # as the case closing, and the case closed with nothing paid (brief, D26, D40).
+    release = threading.Event()
+    paying: list[str] = []
+    down = [True]
+
+    def flaky(inputs: dict[str, Any]) -> dict[str, Any]:
+        paying.append(inputs["idempotency_key"])
+        release.wait(timeout=10)
+        if down[0]:
+            raise ConnectionError("provider unreachable")
+        return {"refund_id": "refund-ord-1"}
+
+    async def scenario(environment: WorkflowEnvironment) -> CaseReport:
+        client = environment.client
+        case = await withdraw_while_paying(client, paying, release)
+        for _ in range(100):  # past the backoff between attempts, until the step fails
+            if (await report(case)).needs_attention:
+                break
+            await environment.sleep(timedelta(seconds=10))
+        down[0] = False
+        await retry(case, "settle#1", "omar", ["operations"])
+        await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+        return await report(case)
+
+    now = skipping(scenario, {**FAKES, "payments.refund@2": flaky}, cases=CasesWithLetters)
+    assert now.status == "open" and now.needs_attention == []
+    assert "settle#1 cancelled: the case is closing" not in now.history
+
+
+def with_a_rule_on_its_start(definition: dict[str, Any], step: str) -> dict[str, Any]:
+    """`definition` with a rule that stops `step` as each of its runs starts."""
+    definition["rules"] = {
+        "hold_back": {
+            "display": {"title": "Hold the step back"},
+            "on": {"started": step},
+            "then": {"stop": [step]},
+        }
+    }
+    return definition
+
+
+def test_a_plan_stopped_as_it_starts_is_stopped_on_temporal() -> None:
+    # From the review: a rule on the plan step's own start stops it in the decision that starts
+    # it, before the child exists. The driver keeps the stop, and signals the child once it has
+    # started; untested, its loss would leave the case waiting for ever (brief, D40).
+    async def scenario(client: Client) -> CaseReport:
+        definition = with_a_rule_on_its_start(refund_with_plan(), "settle")
+        case = await start_case(client, CasesWithPlans, definition, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        return await case.result()
+
+    ended = on_temporal(scenario, cases=CasesWithPlans)
+    assert "settle#1 cancelled: stopped by hold_back#1" in ended.history
+    assert ended.history[-1] == "closed: nothing left to do"
+
+
+class EndedChild:
+    """A child plan's handle whose signal fails as Temporal fails one to a workflow that has
+    ended, or with another failure."""
+
+    def __init__(self, failure: str) -> None:
+        self.failure = failure
+
+    async def signal(self, name: str, reason: str) -> None:
+        raise ApplicationError("the workflow has ended", type=self.failure)
+
+
+def test_a_stop_to_a_child_that_has_just_ended_is_dropped() -> None:
+    # From the review: a rule stops the plan step as its child ends, and the stop signal finds
+    # the child gone. Its result is already on its way, so nothing is left to stop. Until the fix
+    # the failed signal failed the whole case workflow; a race a close could hit before 11c, which
+    # every rule's stop of a plan now can (brief, D17, D40). Any other failure still raises: an
+    # engine bug is never lost.
+    ended = EndedChild("ExternalWorkflowExecutionNotFound")
+    asyncio.run(signal_stop(ended, "stopped by withdraw#1"))  # type: ignore[arg-type]
+    with pytest.raises(ApplicationError):
+        asyncio.run(signal_stop(EndedChild("Unexpected"), "stopped by withdraw#1"))  # type: ignore[arg-type]

@@ -13,7 +13,15 @@ from pydantic import BaseModel
 
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, CancelWorkflow, CaseState, CloseAsked, Opened, Proposed
+from ventoux.case.state import (
+    Answered,
+    CancelWorkflow,
+    CaseState,
+    CloseAsked,
+    Opened,
+    Proposed,
+    WorkflowCancelled,
+)
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Display
 from ventoux.core.output_sources import source
@@ -430,3 +438,19 @@ def test_a_child_is_never_stopped_twice() -> None:
     state, _ = decide(case, catalog, CaseState("t"), Opened(exact, None, at=START))
     state, commands = decide(case, catalog, state, CloseAsked("duplicate", "ana", roles, at=START))
     assert commands == [CancelWorkflow("kyc#1", "the case is closing")]
+
+
+def test_a_cancellation_nobody_asked_for_needs_attention() -> None:
+    # Fail closed, in `decide` too: a workflow step that ends cancelled though the case asked
+    # nothing of it, neither a rule's stop nor a close, failed, and waits for a person; it is
+    # never read as a close (brief, D17, D40).
+    case = parse_case(cancellable_kyc())
+    catalog = with_cancellable_kyc()
+    exact = FILE | {"amount": Decimal(40)}  # as the API passes it on
+    state, _ = decide(case, catalog, CaseState("t"), Opened(exact, None, at=START))
+    state, _ = decide(case, catalog, state, WorkflowCancelled("kyc#1", at=START))
+    assert state.history[-1] == (
+        "kyc#1 failed: it ended cancelled, though the case asked nothing of it: retry it, or close "
+        "the case"
+    )
+    assert [run.status for run in state.runs if run.entry == "kyc#1"] == ["failed"]

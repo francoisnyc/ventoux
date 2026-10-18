@@ -769,3 +769,56 @@ def test_a_child_is_cancelled_once_on_temporal() -> None:
     assert len(requests) == 1
     assert ended.history[-1] == "closed: duplicate, by ana"
     assert "kyc#1 cancelled: stopped by withdraw#1" in ended.history
+
+
+def test_a_workflow_step_cancelled_from_outside_needs_attention() -> None:
+    # From the review: someone cancels the check from outside the case, with Temporal's tools.
+    # The case never asked, so nothing it does explains it: the step failed, and waits for a
+    # person, as before 11c. Until the fix it read "cancelled: the case is closing", and the case
+    # closed with the check skipped (brief, D17, D40).
+    async def scenario(environment: WorkflowEnvironment) -> CaseReport:
+        client = environment.client
+        case = await reviewed(client, with_kyc(), customer="c-waits")
+        await started(case)
+        await client.get_workflow_handle("refund-1/kyc#1").cancel()
+        return await reported(case, lambda now: bool(now.needs_attention))
+
+    now = on_temporal(scenario)
+    assert now.needs_attention == ["kyc#1: kyc.check@1 failed with CancelledError: ‹sensitive›"]
+    assert now.status == "open" and now.flags == []
+
+
+def test_a_workflow_stopped_as_it_starts_is_cancelled_on_temporal() -> None:
+    # From the review: a rule on the check's own start stops it in the decision that starts it,
+    # before the child exists. The driver keeps the cancellation, and sends it once the child
+    # has started (brief, D40).
+    async def scenario(environment: WorkflowEnvironment) -> CaseReport:
+        definition = withdrawn_kyc()
+        definition["rules"] = {
+            "hold_back": {
+                "display": {"title": "Hold the check back"},
+                "on": {"started": "kyc"},
+                "then": {"stop": ["kyc"]},
+            }
+        }
+        case = await reviewed(
+            environment.client, definition, cases=CasesWithCancellableKyc, customer="c-sleeps"
+        )
+        return await reported(
+            case, lambda now: "kyc#1 cancelled: stopped by hold_back#1" in now.history
+        )
+
+    now = on_temporal(scenario, cases=CasesWithCancellableKyc)
+    assert "flagged: kyc#1 cancelled after its stop was requested by hold_back#1" in now.history
+
+
+OUTSIDE_CANCEL = Path(__file__).parent / "histories" / "before_11c_workflow_cancelled_outside.json"
+
+
+def test_a_history_with_an_outside_cancel_from_before_11c_replays() -> None:
+    # Recorded under 11b's driver, from main: someone cancels the check from outside the case, it
+    # fails and needs attention, an operator retries it, and it completes. 11c records a
+    # cancellation the case didn't ask for as that same failure, so the new worker replays it
+    # (brief, D17, D40); read as a stop, the case would have closed, and replay failed.
+    history = WorkflowHistory.from_json("refund-1", OUTSIDE_CANCEL.read_text())
+    replay(history, CasesWithKyc, fixture_converter(OUTSIDE_CANCEL))

@@ -620,6 +620,11 @@ def workflow_cancelled(state: CaseState, event: WorkflowCancelled) -> None:
     run = next(run for run in state.runs if run.entry == event.entry)
     if run.status != "running":
         return  # it ended before the cancellation reached it: what it gave is already recorded
+    if not run.stop_requested and state.phase != "closing":
+        # Fail closed: the case asked nothing of it, so nothing explains it; never read as a close.
+        why = "it ended cancelled, though the case asked nothing of it: retry it, or close the case"
+        failed(state, Failed(run.entry, why, at=event.at))
+        return
     run.status = "cancelled"
     state.history.append(f"{run.entry} cancelled: {stopped_because(run)}")
     if run.stop_requested:

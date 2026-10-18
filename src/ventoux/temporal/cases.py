@@ -44,7 +44,6 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
     from ventoux.case.runtime import CaseRefused, ShownRefused, decide
     from ventoux.case.state import (
-        CLOSING,
         Answered,
         CancelWorkflow,
         CaseState,
@@ -338,6 +337,10 @@ class CaseWorkflow:
             self.cancel_workflow(command)
             return
         self.running += 1
+        # A start is a new attempt, an operator's retry under the same entry included: a stop
+        # asked of an earlier one no longer applies. One decided after it, in the same decision,
+        # is carried after it, and asks again (brief, D26) (brief, D40).
+        self.stopping.pop(command.entry, None)
         if isinstance(command, StartPlan):
             self.beside(self.until_back(self.run_plan(command)))
         elif isinstance(command, StartWorkflow):
@@ -398,7 +401,7 @@ class CaseWorkflow:
             )
             self.children[command.entry] = child
             if command.entry in self.stopping:  # stopped while the child was starting
-                await child.signal("stop", self.stopping[command.entry])
+                await signal_stop(child, self.stopping[command.entry])
             ran: RunReport = await child
         except ChildWorkflowError as error:
             cause = error.cause
@@ -451,12 +454,16 @@ class CaseWorkflow:
             )
             self.children[command.entry] = child
             if command.entry in self.stopping:  # cancelled while the child was starting
+                # Temporal: a child's handle is a task; cancelling it, with a reason, sends the
+                # cancellation request, and awaiting it then waits for the child to end.
                 child.cancel(self.stopping[command.entry])
             output: dict[str, Any] = await child
         except ChildWorkflowError as error:
-            if isinstance(error.cause, CancelledError):
-                # Ended cancelled, as asked: its team promises nothing it started completed after
-                # the request (brief, D40).
+            if isinstance(error.cause, CancelledError) and command.entry in self.stopping:
+                # Ended cancelled, as the case asked: its team promises nothing it started
+                # completed after the request (brief, D40). A cancellation the case never asked
+                # for, from outside, is a failure like any other: a person looks at it
+                # (brief, D17).
                 self.inbox.append(WorkflowCancelled(command.entry, at=now()))
             else:
                 failure = workflow_failure(command.workflow, contract, error)
@@ -477,12 +484,8 @@ class CaseWorkflow:
             return  # asked once, never twice
         self.stopping[command.entry] = command.reason
         child = self.children.get(command.entry)
-        if child is None:
-            return  # it is starting: `run_plan` signals it once started
-        if command.reason == CLOSING:
-            await child.signal("stop")  # as before 11c, so an old history replays
-        else:
-            await child.signal("stop", command.reason)
+        if child is not None:  # else it is starting: `run_plan` signals it once started
+            await signal_stop(child, command.reason)
 
     def cancel_workflow(self, command: CancelWorkflow) -> None:
         """Cancel a workflow step whose contract says it may be: Temporal asks the child to
@@ -492,7 +495,6 @@ class CaseWorkflow:
         self.stopping[command.entry] = command.reason
         child = self.children.get(command.entry)
         if child is not None:  # else it is starting: `run_workflow` cancels it once started
-            # Temporal: a child's handle is a task; cancelling it sends the cancellation request.
             child.cancel(command.reason)
 
     async def run_activity(self, command: Schedule) -> None:
@@ -521,6 +523,21 @@ class CaseWorkflow:
             )
             return
         self.inbox.append(Completed(command.entry, output, at=now()))
+
+
+async def signal_stop(child: workflow.ChildWorkflowHandle[Any, Any], reason: str) -> None:
+    """Signal a child plan to stop, with the reason. A child that has just ended can't be
+    signalled, and needs nothing: its result is already on its way to the case. Any other
+    failure is an engine bug, never lost (brief, D17)."""
+    try:
+        await child.signal("stop", reason)
+    except ApplicationError as error:
+        if error.type != ENDED:
+            raise
+
+
+# How Temporal says a workflow signalled has already ended.
+ENDED = "ExternalWorkflowExecutionNotFound"
 
 
 def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWorkflowError) -> str:
