@@ -1029,6 +1029,21 @@ def test_a_history_from_before_11c_replays() -> None:
     replay(history, CasesWithPlans, fixture_converter(BEFORE_11C))
 
 
+# --- The fix of a rejected retry: a history recorded before it still replays (brief, D26) ---
+
+RETRY_REJECTED = Path(__file__).parent / "histories" / "before_fix_retry_rejected.json"
+
+
+def test_a_history_with_a_rejected_retry_replays() -> None:
+    # Recorded under main, before the fix: pay#1 fails, the review is answered again for more,
+    # an operator retries pay#1, its approval is rejected (recorded then as `pay#2 won't run`),
+    # and Ana closes the case as a duplicate. The fix sends the rejected retry back to failed,
+    # which schedules nothing either, so the new worker replays it. A history that went on to
+    # retry pay#1 again doesn't: that retry was refused then, and runs now (see the fix's note).
+    history = WorkflowHistory.from_json("refund-1", RETRY_REJECTED.read_text())
+    replay(history, DevelopmentCases, fixture_converter(RETRY_REJECTED))
+
+
 # --- Layer 11b: a waiting start and a rule's record cross continue-as-new (brief, D27, D39) ---
 
 # The refund with the order looked up, and `pay` proposed by support only on a status at most a
