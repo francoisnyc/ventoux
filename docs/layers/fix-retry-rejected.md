@@ -194,8 +194,8 @@ finding; seven held, two were refuted:
   `Silent`, the one error it raises.
 - `tests/conftest.py` (new): the check after every decision, in every test.
 - `tests/test_retry_rejected.py` (new): the paths above, the generated cases, the scripted L and M.
-- `tests/test_case.py`: K's test, run on the plain `decide` until slice 4, and a marked test of
-  the hook finding K.
+- `tests/test_case.py`: K's test, run on the plain `decide` until slice 4, and K's own test,
+  marked until then.
 - `tests/test_temporal_case.py`: the replay of the fixture, and the rejected retry on Temporal.
 - `tests/histories/before_fix_retry_rejected.json`, recorded under main.
 
@@ -248,7 +248,7 @@ Drafted before building, to be checked against the files once built. Every test 
 | A retry whose `when` turns false, before or after its fact is fetched again, needs attention again, naming the condition and never a value | `test_a_retry_whose_condition_turns_false_needs_attention`, `test_a_retry_whose_refreshed_fact_turns_it_false_needs_attention` |
 | A retry whose condition is false on a fact it needs fresh that is stale is taken, and the fact fetched again: then it runs with its key, or fails again; on a fresh fact it is refused | `test_a_retry_whose_condition_reads_a_stale_fact_fetches_it_again` (seen failing first) |
 | A retry whose requirement a rule stopped, or whose approval was rejected, needs attention again, naming that one, wherever it is listed and beside one still on its way; one whose requirements are on their way (proposed again and open or running, or a failed refresh) waits, and runs once they complete, with its key | `test_a_retry_whose_requirement_was_stopped_needs_attention`, `test_a_retry_reads_each_requirement_it_waits_for`, `test_a_retry_waits_for_a_requirement_on_its_way` (each seen failing on a mutation of `ended_requirement`) |
-| An approval given while the close is held starts nothing, says so, and isn't pending | `test_an_approval_answered_while_the_close_is_held_starts_nothing` (`tests/test_case.py`, extended), `test_the_hook_finds_the_approval_given_while_the_close_is_held` (`tests/test_case.py`, seen failing on main) |
+| An approval given while the close is held starts nothing, says so, and isn't pending | `test_an_approval_answered_while_the_close_is_held_starts_nothing` (`tests/test_case.py`, as before, under the hook again), `test_an_approval_given_while_the_close_is_held_is_let_go` (`tests/test_case.py`, seen failing on main) |
 | A person's proposal waiting for its fact when the close becomes held is dropped, saying so | `test_a_proposal_waiting_when_the_close_is_held_is_dropped` (seen failing on main) |
 | A given approval whose requirement a rule stopped lapses, saying so, and the step asks again once it completes; one whose requirement is answered again with the same values is spent; on a retry, it lapses before the retry fails again, and nothing runs under a new key | `test_a_given_approval_lapses_with_its_requirement` (seen failing on main), `test_a_given_approval_survives_a_review_answered_the_same`, `test_a_retry_s_given_approval_lapses_with_its_requirement` |
 | A person may close a case whose rescue was rejected | `test_a_rejected_retry_can_be_closed` |

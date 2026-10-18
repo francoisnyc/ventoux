@@ -805,6 +805,7 @@ def admit(
             # Once the close is only held by a failed run, nothing new starts: only the run an
             # operator retries (brief, D34).
             if close_held(case, state) and retried is None:
+                let_go_while_held(case, state, name)
                 continue
             try:
                 # Every expression it reads is checked over the case's types first, so a misspelt
@@ -836,6 +837,16 @@ def admit(
                 taken_up(state, name)
                 fail(state, name, str(error))
             started = True
+
+
+def let_go_while_held(case: CaseDefinition, state: CaseState, name: str) -> None:
+    """While the close is held nothing new starts, so nothing waits to: an approval given for
+    the step is let go, and a person's proposal waiting for its fact is dropped, each saying
+    why, never kept as pending work nobody sees (brief, D34) (brief, D39)."""
+    why = nothing_new(case, state)
+    if state.given.pop(name, None) is not None:
+        state.history.append(f"{name} not started: {why}")
+    drop_waiting(state, name, why)
 
 
 def ended_requirement(state: CaseState, required: tuple[str, ...]) -> str | None:

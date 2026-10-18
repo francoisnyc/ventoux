@@ -11,11 +11,8 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
-from invariants import Silent
 from pydantic import BaseModel
 
-import ventoux.case.memory
-import ventoux.case.runtime
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Opened
@@ -1710,14 +1707,9 @@ def goodwill_while_held() -> tuple[dict[str, Any], dict[str, Activity]]:
     return definition, fakes
 
 
-def test_an_approval_answered_while_the_close_is_held_starts_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # goodwill's approval is asked before paid is reached and answered after: it is given, and
-    # starts nothing; closing withdraws it once the letter is retried. Run on the plain `decide`
-    # until the fix's slice 4: the invariant's hook finds the given approval shown nowhere (the
-    # next test), and this test's own checks must keep running meanwhile.
-    monkeypatch.setattr(ventoux.case.memory, "decide", ventoux.case.runtime.decide)
+def test_an_approval_answered_while_the_close_is_held_starts_nothing() -> None:
+    # goodwill's approval is asked before paid is reached and answered after: it starts nothing,
+    # and the case closes once the letter is retried.
     definition, fakes = goodwill_while_held()
     answers = [SMALL_REVIEW, ("goodwill", "approve", "sam")]
     run = run_case(definition, file=SMALL, answers=answers, people=OPERATORS, activities=fakes)
@@ -1737,13 +1729,18 @@ def test_an_approval_answered_while_the_close_is_held_starts_nothing(
     assert closed.history[-1] == "closed: paid reached"
 
 
-# pytest: `xfail(strict=True, raises=Silent)` expects the invariant's own failure, and fails the
-# run if the test passes or fails any other way. The mark comes off with the fix's slice 4 (K).
-@pytest.mark.xfail(strict=True, raises=Silent, reason="path K, seen silent on main")
-def test_the_hook_finds_the_approval_given_while_the_close_is_held() -> None:
+def test_an_approval_given_while_the_close_is_held_is_let_go() -> None:
+    # Path K of the fix of a rejected retry. Once paid is reached, nothing new starts while the
+    # letter's failed run holds the close, so an approval given then can't be spent: it is let go,
+    # saying why, rather than kept as pending work nobody sees (brief, D34).
     definition, fakes = goodwill_while_held()
     answers = [SMALL_REVIEW, ("goodwill", "approve", "sam")]
-    run_case(definition, file=SMALL, answers=answers, people=OPERATORS, activities=fakes)
+    run = run_case(definition, file=SMALL, answers=answers, people=OPERATORS, activities=fakes)
+    assert run.history[-1] == (
+        "goodwill not started: paid is reached, so the case closes once notify#1 is retried, or "
+        "a person closes it: nothing new starts"
+    )
+    assert run.state.given == {}
 
 
 # --- Layer 8d, slice 1: outputs into the case file ---

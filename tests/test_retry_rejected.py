@@ -191,12 +191,10 @@ def seeds(listed: str) -> set[int]:
 
 
 # Silent before the fix, by the path of the note's table each seed is silent on now: its mark
-# comes off with the slice that fixes that path (K in slice 4). A seed whose path is fixed may
-# play on to another, as 229 did after A. L and M are scripted below: they need a refresh held
-# across a person's act.
-SILENT_ON_MAIN = {
-    "K": seeds("393 713 753 754"),
-}
+# comes off with the slice that fixes that path; none is left. A seed whose path is fixed may play
+# on to another, as 229 did after A. L and M are scripted below: they need a refresh held across a
+# person's act.
+SILENT_ON_MAIN: dict[str, set[int]] = {}
 # The seeds that were silent on a path now fixed, with the line its fix writes, as a part it
 # contains and its ending: each seed must still reach it, so a change to the generated cases can't
 # drop the path unseen.
@@ -214,6 +212,7 @@ FIXED = {
     "C": (seeds("313 369 492 497 791"), ("its retry can't start: ", " is false now")),
     "E'": (seeds("229 323 876"), ("its retry can't start: ", ", which hasn't completed")),
     "F": (seeds("71 511"), ("its retry can't start: ", " is false now")),
+    "K": (seeds("393 713 753 754"), ("goodwill not started: ", ": nothing new starts")),
 }
 
 
@@ -242,7 +241,7 @@ def test_the_generated_cases_reach_the_paths(path: str) -> None:
     # is held, after the audit reached the case's closes_when milestone, and for A, not; for F,
     # as the fact fetched again lands, and for C, not.
     found, (part, ending) = FIXED[path]
-    still_silent = set().union(*SILENT_ON_MAIN.values())  # marked: they fail on another path
+    still_silent: set[int] = set().union(*SILENT_ON_MAIN.values())  # marked: silent elsewhere
     checked = sorted(found - still_silent)
     assert checked, f"no seed left to show path {path}"
     for seed in checked:
@@ -309,7 +308,6 @@ def test_a_given_approval_survives_a_review_answered_the_same() -> None:
     assert "asked pay.approval#2: approval of pay by support-lead" not in run.history
 
 
-@pytest.mark.xfail(strict=True, raises=Silent, reason="path M, fixed in slice 4")
 def test_a_proposal_waiting_when_the_close_is_held_is_dropped() -> None:
     # Path M. Ana proposes pay, which waits for its fact; meanwhile a rule fails and the audit
     # reaches the case's only closes_when milestone, so the close is held. Nothing new starts,
