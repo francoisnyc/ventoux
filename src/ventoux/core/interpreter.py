@@ -5,7 +5,7 @@ docs/layers/05-interpreter.md.
 """
 
 from collections import Counter
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -21,7 +21,7 @@ from ventoux.core.approval import (
     not_someone_else,
     risk_refusal,
 )
-from ventoux.core.before_activity import InputRefused, checked_inputs, one_line
+from ventoux.core.before_activity import InputRefused, Steering, checked_inputs, one_line
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.expressions import (
     Expression,
@@ -147,6 +147,7 @@ async def interpret(
     run_name: str,
     record: PlanRun | None = None,
     excluded: Mapping[str, str] | None = None,
+    steered: Sequence[Steering] = (),
 ) -> PlanRun:
     """Run `plan` from its `initial` state, with the `fields` the case gives it.
 
@@ -158,6 +159,9 @@ async def interpret(
 
     `excluded` names each person who approves nothing in this run, and why: when a case runs the
     plan as a step, its opener and the step's proposer (brief, D25).
+
+    `steered` are the untrusted values the conditions that let the case's step start read: they
+    count for every activity's input policies, beside the fields, never in them (brief, D39).
     """
     refuse_to_start(plan, catalog, fields)
     run = PlanRun() if record is None else record
@@ -198,7 +202,7 @@ async def interpret(
                 # so a retry reuses the key and another pass or another run never does (brief, D17).
                 key = f"{run_name}/{here}#{entries[here]}"
                 gave = await run_activity(
-                    state, values, sources, key, catalog, call, run, plan.fields
+                    state, values, sources, key, catalog, call, run, plan.fields, steered
                 )
                 run.history.append(gave)
                 here = choose(here, state.on, gave.event, values)
@@ -262,15 +266,16 @@ async def run_activity(
     call: Call,
     run: PlanRun,
     types: Mapping[str, FieldType],
+    steered: Sequence[Steering] = (),
 ) -> Gave:
     """Call the state's activity with its inputs, and say what it gave. `types` are the plan's
-    fields' declared types."""
+    fields' declared types; `steered`, what the case step's conditions read untrusted."""
     try:
         contract = catalog.get(state.activity)
     except NotInCatalog as missing:
         raise Stop(str(missing)) from None
     try:
-        inputs = checked_inputs(contract, state.inputs, values, sources, key, types)
+        inputs = checked_inputs(contract, state.inputs, values, sources, key, types, steered)
     except InputRefused as refused:
         raise Stop(str(refused)) from None
     found = {name: provenance(expression, sources) for name, expression in state.inputs.items()}

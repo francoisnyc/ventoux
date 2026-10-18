@@ -302,3 +302,41 @@ def test_a_plan_field_takes_only_a_reference_to_its_system() -> None:
             "computed value"
         )
     ]
+
+
+# --- Layer 11b: a plan step's condition counts beside its fields (brief, D39) ---
+
+
+def test_a_plan_step_carries_its_conditions_sources() -> None:
+    # The step's condition read the customer's own note, which chose that the plan runs. Its
+    # untrusted sources travel with the plan beside its fields, never in them, and count for
+    # every activity's input policies there: the refund is refused, though each value it gets is
+    # trusted (brief, D38) (brief, D39).
+    definition = refund_with_plan(
+        when={
+            "and": [
+                {"==": [{"var": "review.outcome"}, "approve"]},
+                {"==": [{"var": "note"}, "refund me"]},
+            ]
+        }
+    )
+    definition["fields"]["note"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's note"},
+    }
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 40, "note": "refund me"},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+    )
+    [failed] = run.needs_attention
+    assert failed.startswith("settle#1: refund-order@1 stopped: ")
+    assert failed.endswith(
+        "payments.refund@2 takes order_id only from a system or a person, never from untrusted "
+        "data, and settle's condition reads note (untrusted:customer)"
+    )
+    assert "refund me" not in "\n".join(run.history)

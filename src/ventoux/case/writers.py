@@ -9,10 +9,12 @@ sources, so a condition naming it is judged on what it could be (brief, D39).
 from collections.abc import Mapping
 
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
+from ventoux.case.state import CaseState
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
+from ventoux.core.expressions import Expression
 from ventoux.core.output_sources import output_sources
-from ventoux.core.provenance import answering
+from ventoux.core.provenance import answering, fields_read, is_trusted
 
 # Where the case file's first values came from when a system opened the case (brief, D12).
 OPENER = "system:opener"
@@ -65,3 +67,30 @@ def writers_of(
                 continue  # it gives nothing: a step reading it fails, saying so
     opener = OPENER if opened_by is None else f"person:{opened_by}"
     return case_sources(case, contracts, opener)
+
+
+def read_sources(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, expression: Expression | None
+) -> dict[str, frozenset[str]]:
+    """Where each value `expression` reads came from, in the order it reads them. A value nobody
+    has set yet has no recorded sources: it counts what any of its writers could give, never "no
+    sources" (fail closed) (brief, D39)."""
+    read: dict[str, frozenset[str]] = {}
+    could: dict[str, frozenset[str]] | None = None
+    for field in [] if expression is None else fields_read(expression):
+        sources = state.sources.get(field)
+        if sources is None:
+            could = could if could is not None else writers_of(case, catalog, state.opened_by)
+            sources = could.get(field, frozenset({f"no known source for {field}"}))
+        read.setdefault(field, sources)
+    return read
+
+
+def untrusted_of(read: Mapping[str, frozenset[str]]) -> dict[str, frozenset[str]]:
+    """Each value read whose sources include one the engine doesn't trust, with those sources."""
+    found: dict[str, frozenset[str]] = {}
+    for field, sources in read.items():
+        untrusted = frozenset(source for source in sources if not is_trusted(source))
+        if untrusted:
+            found[field] = untrusted
+    return found

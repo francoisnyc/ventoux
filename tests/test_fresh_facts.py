@@ -7,7 +7,7 @@ import copy
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
 from pydantic import BaseModel
@@ -20,6 +20,7 @@ from ventoux.case.state import Answered, CaseState, Completed, Obtained, Opened,
 from ventoux.case.visibility import SheetRefused
 from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
 from ventoux.core.interpreter import Outcome
+from ventoux.core.output_sources import source as declared_source
 from ventoux.core.sensitive import Sensitive
 from ventoux.testing import (
     CATALOG,
@@ -163,7 +164,8 @@ class TrackInput(BaseModel):
 
 
 class TrackOutput(BaseModel):
-    status: str
+    # From the orders system, so `pay` may decide on it (brief, D39).
+    status: Annotated[str, declared_source("system:orders")]
 
 
 def with_keyed_lookup() -> Any:
@@ -224,7 +226,7 @@ def test_a_stale_fact_is_refreshed_before_the_step_runs() -> None:
     ]
     # Its output replaces the old one, with fresh sources and a fresh time.
     assert run.state.obtained["check_order.status"] == Obtained(START + 3 * DAY, "check_order#2")
-    assert run.state.sources["check_order.status"] == frozenset({"untrusted:undeclared"})
+    assert run.state.sources["check_order.status"] == frozenset({"system:orders"})
     assert run.reached("pay")
 
 
@@ -238,6 +240,24 @@ def test_a_fresh_fact_refreshes_nothing() -> None:
     assert run.reached("pay")
     assert not any(line.startswith("refreshing") for line in run.history)
     assert [r.entry for r in run.state.runs if r.step == "check_order"] == ["check_order#1"]
+
+
+def test_an_undeclared_status_cant_choose_a_payment() -> None:
+    # `pay`'s condition reads the status, so the status chooses whether a payment is sent: a status
+    # nobody vouched for fails `pay` on its inputs, for a person to look at (brief, D39). The guide
+    # looks the order up with `orders.lookup@2`, which says the status comes from the orders system.
+    review = [("review", "approve", "ana", {"approved_amount": 80})]
+    undeclared = refund_fresh()
+    undeclared["steps"]["check_order"]["activity"] = "orders.lookup@1"
+    run = run_case(undeclared, file=FILE, answers=review, people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "pay#1: payments.refund@2 takes order_id only from a system or a person, never from "
+            "untrusted data, and pay's condition reads check_order.status (untrusted:undeclared)"
+        )
+    ]
+    assert not run.reached("pay")
+    assert run_case(refund_fresh(), file=FILE, answers=review, people=PEOPLE).reached("pay")
 
 
 def guide_example(heading: str) -> str:

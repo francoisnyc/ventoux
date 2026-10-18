@@ -11,9 +11,8 @@ from ventoux.case.closing import close_held
 from ventoux.case.definition import AnsweredTask, CaseDefinition, Reached, Started
 from ventoux.case.state import CaseState, RuleFiring, RuleStart
 from ventoux.case.types import rule_problem
-from ventoux.case.writers import writers_of
+from ventoux.case.writers import read_sources, untrusted_of
 from ventoux.core.catalog import Catalog
-from ventoux.core.provenance import fields_read, is_trusted
 
 
 def said(moment: object) -> str:
@@ -89,19 +88,23 @@ def act(
     if (stopped := nothing_decided(case, state)) is not None:  # a retry while the close is held
         state.history.append(f"{firing.entry} on {firing.moment}: not applied: {stopped}")
         return
+    then = case.rules[firing.rule].then
     # Untrusted data informs; it never decides. Reaching a milestone decides for the case, so a
-    # condition reading an untrusted value stops it whatever it gave (brief, D38). The message
-    # names the value and its source, never the value (brief, D30).
-    if (untrusted := untrusted_read(case, catalog, state, firing.rule)) is not None:
+    # condition reading an untrusted value stops it whatever it gave, its starts included
+    # (brief, D38). A rule that only starts steps acts: what it read counts for their inputs'
+    # policies (brief, D39). The message names the value and its source, never the value
+    # (brief, D30).
+    untrusted = untrusted_read(case, catalog, state, firing.rule)
+    if then.reach and untrusted is not None:
+        does = "reaches and starts" if then.start else "reaches"
         state.history.append(
-            f"{firing.entry} on {firing.moment}: reaches nothing: its condition reads {untrusted}, "
+            f"{firing.entry} on {firing.moment}: {does} nothing: its condition reads {untrusted}, "
             "and untrusted data can't decide"
         )
         return
     if not decided:
         state.history.append(f"{firing.entry} on {firing.moment}: its condition is false")
         return
-    then = case.rules[firing.rule].then
     if then.reach:
         state.history.append(
             f"{firing.entry} on {firing.moment}: reaching {' and '.join(then.reach)}"
@@ -109,10 +112,10 @@ def act(
         reach(state, then.reach)
     # Each start is the engine's proposal, with what the condition read now: admission decides,
     # once the rules on this moment have fired (brief, D39).
-    read = condition_sources(case, catalog, state, firing.rule)
+    read = read_sources(case, catalog, state, case.rules[firing.rule].when)
     for step in then.start:
         state.rule_starts.append(
-            RuleStart(firing.entry, firing.moment, step, people_in(read), untrusted_in(read))
+            RuleStart(firing.entry, firing.moment, step, people_in(read), untrusted_of(read))
         )
 
 
@@ -133,24 +136,6 @@ def nothing_decided(case: CaseDefinition, state: CaseState) -> str | None:
     return None
 
 
-def condition_sources(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, name: str
-) -> dict[str, frozenset[str]]:
-    """Where each value the rule's condition reads came from, in the order it reads them."""
-    when = case.rules[name].when
-    read: dict[str, frozenset[str]] = {}
-    could: dict[str, frozenset[str]] | None = None
-    for field in [] if when is None else fields_read(when):
-        sources = state.sources.get(field)
-        if sources is None:
-            # Nobody has set it yet, so nothing recorded where it came from: it counts what any
-            # of its writers could give, never "no sources" (fail closed) (brief, D39).
-            could = could if could is not None else writers_of(case, catalog, state.opened_by)
-            sources = could.get(field, frozenset({f"no known source for {field}"}))
-        read.setdefault(field, sources)
-    return read
-
-
 def people_in(read: dict[str, frozenset[str]]) -> dict[str, str]:
     """Each person whose answer a condition read, and the first field of theirs it read."""
     people: dict[str, str] = {}
@@ -161,22 +146,14 @@ def people_in(read: dict[str, frozenset[str]]) -> dict[str, str]:
     return people
 
 
-def untrusted_in(read: dict[str, frozenset[str]]) -> frozenset[str]:
-    """Every source a condition read that the engine doesn't trust."""
-    return frozenset(
-        source for sources in read.values() for source in sources if not is_trusted(source)
-    )
-
-
 def untrusted_read(
     case: CaseDefinition, catalog: Catalog, state: CaseState, name: str
 ) -> str | None:
     """The first value the rule's condition reads from a source the engine doesn't trust, said as
     `kyc.analyst_notes, from untrusted:llm`; None if it reads only trusted ones."""
-    for field, sources in condition_sources(case, catalog, state, name).items():
-        untrusted = sorted(source for source in sources if not is_trusted(source))
-        if untrusted:
-            return f"{field}, from {', '.join(untrusted)}"
+    read = read_sources(case, catalog, state, case.rules[name].when)
+    for field, untrusted in untrusted_of(read).items():
+        return f"{field}, from {', '.join(sorted(untrusted))}"
     return None
 
 

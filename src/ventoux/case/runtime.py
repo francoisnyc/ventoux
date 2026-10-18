@@ -22,7 +22,7 @@ from ventoux.case.admission import (
     requirements_met,
 )
 from ventoux.case.answers import AnswerRefused, decided_by, judge_approval, judge_task
-from ventoux.case.approvals import ask, follow, lapsed, needs_approval
+from ventoux.case.approvals import ask, asked_anyway, follow, lapsed, needs_approval
 from ventoux.case.called import called
 from ventoux.case.closing import (
     begin_closing,
@@ -68,10 +68,11 @@ from ventoux.case.state import (
 )
 from ventoux.case.types import expression_problem
 from ventoux.case.visibility import may_see, seen_by
-from ventoux.case.writers import OPENER
+from ventoux.case.writers import OPENER, read_sources, untrusted_of
 from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import (
     InputRefused,
+    Steering,
     checked_inputs,
     given_as_reference,
     one_line,
@@ -786,7 +787,8 @@ def refreshable(
             )
     if step.when is not None and not holds(step.when, state.values, f"{run.step}'s condition"):
         return None, f"{run.step}'s condition is false now, so it isn't run again"
-    if needs_approval(state, run.step, step):
+    needed = needs_approval(state, run.step, step)
+    if needed or asked_anyway(case, catalog, state, step) is not None:
         return None, f"{run.step} needs an approval to run, so it isn't run again unasked"
     return run.step, ""
 
@@ -907,7 +909,7 @@ def start(
     """Open a task's run; start a plan; ask for an activity's or a workflow's approval, or start
     it."""
     if isinstance(step, PlanStep):
-        start_plan(case, state, name, step, commands)
+        start_plan(case, catalog, state, name, step, commands)
         return
     if isinstance(step, TaskStep):
         entry = coming_run(state, name, "open").entry
@@ -922,9 +924,14 @@ def start(
     latest = latest_run(state, name)
     if given is None and latest is not None and latest.status == "retrying":
         given = latest.approved  # a retry keeps the approval spent on its run (brief, D26)
-    if given is None and needs_approval(state, name, step):
-        ask(state, name, step)
-        return
+    if given is None:
+        # Read first, so a condition that can't be read stops the step; then, if it read
+        # untrusted data, the approval is asked whatever it gave (brief, D11) (brief, D39).
+        needed = needs_approval(state, name, step)
+        anyway = asked_anyway(case, catalog, state, step)
+        if needed or anyway is not None:
+            ask(state, name, step, anyway)
+            return
     if given is not None:
         lapsed(state, name, step, given)
     schedule(case, catalog, state, name, step, given, commands)
@@ -951,7 +958,8 @@ def schedule(
     entry = entry or next_entry(state, name)
     key = f"{state.case}/{entry}"
     types = {name: field.declared for name, field in case.fields.items()}
-    inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key, types)
+    steered = steering(case, catalog, state, name, step)
+    inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key, types, steered)
     if isinstance(step, WorkflowStep):
         refuse_sensitive_inputs(contract.reference, step.inputs, state.values)
     coming_run(state, name, "running").approved = approved
@@ -969,6 +977,28 @@ def schedule(
         f"scheduled {entry}: {contract.reference} ({origins(step.inputs, state)}){keyed}"
     )
     commands.append(Schedule(entry, contract.reference, inputs))
+
+
+def steering(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    step: CallStep | PlanStep,
+) -> tuple[Steering, ...]:
+    """What decided that the step runs, and the untrusted values it read: its own `when`, read
+    now, and the `when` of the rule that started it, as it read it then (brief, D38)
+    (brief, D39)."""
+    steered = [
+        Steering(f"{name}'s condition reads {field}", sources)
+        for field, sources in untrusted_of(read_sources(case, catalog, state, step.when)).items()
+    ]
+    if (asked := state.proposed_by_rules.get(name)) is not None:
+        steered += [
+            Steering(f"{asked.entry}'s condition, which started {name}, reads {field}", sources)
+            for field, sources in asked.untrusted.items()
+        ]
+    return tuple(steered)
 
 
 def refuse_sensitive_inputs(
@@ -993,7 +1023,12 @@ def origins(inputs: Mapping[str, Expression], state: CaseState) -> str:
 
 
 def start_plan(
-    case: CaseDefinition, state: CaseState, name: str, step: PlanStep, commands: list[Command]
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    step: PlanStep,
+    commands: list[Command],
 ) -> None:
     """Start the step's plan with its fields, each with where its value came from, so the plan's
     own checks see the real sources (brief, D28). The plan checks its fields when it starts."""
@@ -1032,7 +1067,10 @@ def start_plan(
     references = {
         field: given_as_reference(expression, types) for field, expression in step.inputs.items()
     }
-    commands.append(StartPlan(run.entry, step.plan, fields, plan_run, excluded, references))
+    steered = steering(case, catalog, state, name, step)
+    commands.append(
+        StartPlan(run.entry, step.plan, fields, plan_run, excluded, references, steered)
+    )
 
 
 def coming_run(

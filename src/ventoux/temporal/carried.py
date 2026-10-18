@@ -83,7 +83,7 @@ def rule_start_as_data(asked: RuleStart) -> dict[str, Any]:
         "moment": asked.moment,
         "step": asked.step,
         "read_from": dict(asked.read_from),
-        "untrusted": sorted(asked.untrusted),
+        "untrusted": {name: sorted(sources) for name, sources in asked.untrusted.items()},
     }
 
 
@@ -93,7 +93,7 @@ def rule_start_from_data(data: dict[str, Any]) -> RuleStart:
         data["moment"],
         data["step"],
         dict(data["read_from"]),
-        frozenset(data["untrusted"]),
+        {name: frozenset(sources) for name, sources in data["untrusted"].items()},
     )
 
 

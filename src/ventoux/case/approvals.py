@@ -11,7 +11,9 @@ from ventoux.case.admission import StepStopped, holds, latest_run, requirements_
 from ventoux.case.definition import CallStep, CaseDefinition
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState, GivenApproval, OpenApproval
+from ventoux.case.writers import read_sources, untrusted_of
 from ventoux.core.approval import inputs_digest
+from ventoux.core.catalog import Catalog
 from ventoux.core.expressions import ExpressionError
 from ventoux.core.provenance import fields_read
 
@@ -25,15 +27,34 @@ def needs_approval(state: CaseState, name: str, step: CallStep) -> bool:
     return condition is None or holds(condition, state.values, f"{name}'s approval condition")
 
 
-def ask(state: CaseState, name: str, step: CallStep) -> None:
-    """Ask for the step's approval, as its own entry (`pay.approval#1`), noting what it reads."""
+def asked_anyway(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, step: CallStep
+) -> str | None:
+    """Why the step's approval is asked whatever its `when` gave: it read untrusted data, which
+    may add an approval, never remove one (brief, D11) (brief, D39). None if it read only trusted
+    values. Read once the condition could be read: one that can't be read stops the step."""
+    if step.approval is None or step.approval.when is None:
+        return None
+    read = read_sources(case, catalog, state, step.approval.when)
+    for field, untrusted in untrusted_of(read).items():
+        return (
+            f"its condition reads {field}, from {', '.join(sorted(untrusted))}, and untrusted "
+            "data can't remove an approval"
+        )
+    return None
+
+
+def ask(state: CaseState, name: str, step: CallStep, why: str | None = None) -> None:
+    """Ask for the step's approval, as its own entry (`pay.approval#1`), noting what it reads, and
+    `why`, when it is asked whatever its condition gave."""
     assert step.approval is not None  # only a step with an approval is asked for one
     state.asked[name] = state.asked.get(name, 0) + 1
     entry = f"{name}.approval#{state.asked[name]}"
     state.approvals[name] = OpenApproval(entry, name, what_it_reads(step, state.values))
     roles = " or ".join(step.approval.roles)
     state.waiting[entry] = f"approval of {name} by {roles}"
-    state.history.append(f"asked {entry}: approval of {name} by {roles}")
+    asked_why = f": {why}" if why is not None else ""
+    state.history.append(f"asked {entry}: approval of {name} by {roles}{asked_why}")
 
 
 def what_it_reads(step: CallStep, values: dict[str, object]) -> dict[str, object]:

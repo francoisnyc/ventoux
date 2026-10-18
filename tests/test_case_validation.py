@@ -2511,13 +2511,16 @@ def paying_fresh(value: str, **steps: Any) -> dict[str, Any]:
     return refund
 
 
+# `orders.lookup@2` declares its status from the orders system, so `pay` may decide on it: under
+# `@1`, undeclared, it couldn't (brief, D39).
 LOOKUP = {
     "kind": "activity",
     "display": {"title": "Look the order up"},
-    "activity": "orders.lookup@1",
+    "activity": "orders.lookup@2",
     "inputs": {"order_id": {"var": "order_id"}},
 }
 TEAM_LEAD = {"roles": ["support-lead"], "display": {"reason": "Look-ups need a team lead"}}
+DELIVERED = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}  # @2 has no fake
 
 
 def never_refreshed(definition: dict[str, Any], catalog: Catalog = CATALOG) -> list[str]:
@@ -2621,6 +2624,7 @@ def test_a_read_behind_an_approval_needs_attention_when_stale() -> None:
         file=SMALL,
         answers=[("check_order", "approve", "sam"), later("3d"), REVIEWED],
         people=PEOPLE,
+        activities=DELIVERED,
     )
     assert run.needs_attention == [
         (
@@ -2634,7 +2638,9 @@ def test_a_read_behind_an_approval_needs_attention_when_stale() -> None:
     sometimes = paying_fresh(
         "check_order.status", check_order={**LOOKUP, "approval": {**TEAM_LEAD, "when": when}}
     )
-    fetched = run_case(sometimes, file=SMALL, answers=[later("3d"), REVIEWED], people=PEOPLE)
+    fetched = run_case(
+        sometimes, file=SMALL, answers=[later("3d"), REVIEWED], people=PEOPLE, activities=DELIVERED
+    )
     assert "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day" in (
         fetched.history
     )

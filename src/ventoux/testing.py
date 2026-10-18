@@ -479,6 +479,7 @@ def plan_runner(
                     scripted(script, people),
                     run_name=command.run,
                     excluded=command.excluded,
+                    steered=command.steered,
                 )
             )
         except RunRefused as refused:

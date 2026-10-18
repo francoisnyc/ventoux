@@ -372,7 +372,10 @@ class CaseWorkflow:
             name: Given(given.value, sorted(given.sources))
             for name, given in command.fields.items()
         }
-        start = PlanStart(self.plans[command.plan], fields, command.run, dict(command.excluded))
+        steered = {steering.said: sorted(steering.sources) for steering in command.steered}
+        start = PlanStart(
+            self.plans[command.plan], fields, command.run, dict(command.excluded), steered or None
+        )
         try:
             # Temporal: a child workflow is a workflow the case starts and waits for; its own
             # history holds its waits and activities. Its ID names the step run; a retry starts it

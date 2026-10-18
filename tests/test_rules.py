@@ -8,15 +8,22 @@ import copy
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
+from pydantic import BaseModel
 
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import CaseState, Completed, Opened, StartWorkflow
 from ventoux.case.validate import validate_case
+from ventoux.core.catalog import Catalog
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.policy import only_from
 from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
+    START,
     AnswerRefused,
     ProposalRefused,
     RetryRefused,
@@ -470,6 +477,252 @@ def test_a_rules_record_outlives_the_case_file_changing() -> None:
             people=LEADS,
         )
     assert str(refused.value).startswith("sam set lead_check.outcome, which decided that")
+
+
+# --- 11b, slice 3: untrusted data can't choose what is sent (option a) ---
+
+
+def with_welcome(when: dict[str, Any]) -> dict[str, Any]:
+    """The refund with the KYC check, and a welcome letter drafted to the address the case was
+    opened with, when `when` holds."""
+    definition = with_kyc_rule({">": [{"var": "kyc.risk_score"}, 70]})
+    definition["fields"]["email"] = {"type": "string", "display": {"title": "Customer's email"}}
+    definition["steps"]["welcome"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a welcome letter"},
+        "activity": "letters.draft@2",
+        "requires": ["checked"],
+        "when": when,
+        "inputs": {"to_customer": {"var": "email"}, "template": "welcome"},
+    }
+    return definition
+
+
+def welcome_file() -> dict[str, Any]:
+    """The KYC check's first values, and the customer's address."""
+    return {**KYC_FILE, "email": "c-1@example.com"}
+
+
+SAYS_SEND = {"==": [{"var": "kyc.analyst_notes"}, "send welcome"]}
+
+
+def notes_say_send(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The KYC workflow, with a model's notes saying to send the letter."""
+    return fake_kyc(inputs) | {"analyst_notes": "send welcome"}
+
+
+def test_an_untrusted_condition_cant_choose_what_is_sent() -> None:
+    # Each input is trusted, but the model's notes chose that the letter is sent: the untrusted
+    # sources the condition read are checked against each input's policy, apart from what the
+    # input reads, and the run fails naming the field and source, never the value
+    # (brief, D38) (brief, D39).
+    run = run_case(
+        with_welcome(SAYS_SEND),
+        file=welcome_file(),
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+    )
+    assert run.needs_attention == [
+        (
+            "welcome#1: letters.draft@2 takes to_customer only from a system or a person, never from "
+            "untrusted data, and welcome's condition reads kyc.analyst_notes (untrusted:llm)"
+        )
+    ]
+    assert not any(line.startswith("scheduled welcome") for line in run.history)
+    assert not any("send welcome" in line for line in run.history)
+
+
+def test_a_rules_untrusted_condition_cant_choose_what_is_sent() -> None:
+    # A rule that only starts steps acts on untrusted data: what its condition read is kept with
+    # the run, and counts for the started step's input policies (brief, D38) (brief, D39).
+    definition = with_welcome(SAYS_SEND)
+    del definition["steps"]["welcome"]["when"]
+    definition["steps"]["welcome"]["automatic"] = False
+    definition["rules"]["send_welcome"] = {
+        "display": {"title": "Send a welcome letter"},
+        "on": {"reached": "checked"},
+        "when": SAYS_SEND,
+        "then": {"start": ["welcome"]},
+    }
+    run = run_case(
+        definition,
+        file=welcome_file(),
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+    )
+    assert "send_welcome#1 on reached checked: starting welcome" in run.history
+    assert run.needs_attention == [
+        (
+            "welcome#1: letters.draft@2 takes to_customer only from a system or a person, never from "
+            "untrusted data, and send_welcome#1's condition, which started welcome, reads "
+            "kyc.analyst_notes (untrusted:llm)"
+        )
+    ]
+
+
+class RecordInput(BaseModel):
+    amount: Annotated[Decimal, only_from("opener")]  # only an amount the opening system gave
+
+
+class RecordOutput(BaseModel):
+    entry_id: str
+
+
+def with_ledger() -> Catalog:
+    """The development catalog, and `ledger.record@1`, taking only an amount the opener gave."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register(
+        ActivityContract(
+            name="ledger.record",
+            version=1,
+            input=RecordInput,
+            output=RecordOutput,
+            risk="low",
+            effect="compute",
+            timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+            retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+            idempotency_key=None,
+            outcomes=[],
+            display=Display(title="Record", description="Record an amount"),
+        )
+    )
+    return catalog
+
+
+def recording(amount: Any) -> dict[str, Any]:
+    """The refund, recording `amount` in the ledger once the review approves: its `when` reads
+    Ana's answer."""
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["record"] = {
+        "kind": "activity",
+        "display": {"title": "Record the refund"},
+        "activity": "ledger.record@1",
+        "requires": ["review"],
+        "when": {"==": [{"var": "review.outcome"}, "approve"]},
+        "inputs": {"amount": amount},
+    }
+    return definition
+
+
+LEDGER = {"ledger.record@1": lambda inputs: {"entry_id": "led-1"}}
+
+
+def test_a_trusted_condition_changes_nothing() -> None:
+    # Only untrusted sources count: the condition read Ana's answer, a person's, so the amount the
+    # opener gave still goes to an input that takes it only from the opener (brief, D39).
+    run = run_case(
+        recording({"var": "amount"}),
+        file=SMALL,
+        answers=[APPROVED_40],
+        people=PEOPLE,
+        catalog=with_ledger(),
+        activities=LEDGER,
+    )
+    assert "record#1 done, giving entry_id from untrusted:undeclared" in run.history
+
+
+def test_a_condition_never_vouches_for_a_literal() -> None:
+    # The check is separate: a value written in the definition comes from no system, whatever
+    # the condition read, and `only_from` refuses it as before (brief, D39). Merged, the
+    # condition's sources would have credited it to Ana.
+    run = run_case(
+        recording(Decimal(40)),
+        file=SMALL,
+        answers=[APPROVED_40],
+        people=PEOPLE,
+        catalog=with_ledger(),
+        activities=LEDGER,
+    )
+    [failed] = run.needs_attention
+    assert failed.startswith("record#1: ledger.record@1 takes amount only from opener")
+
+
+def test_a_rule_that_cant_decide_starts_nothing() -> None:
+    # A rule that reaches a milestone decides, so on untrusted data it doesn't act at all, its
+    # starts included (brief, D38) (brief, D39).
+    definition = with_welcome(SAYS_SEND)
+    definition["rules"]["flag_high_risk"] |= {
+        "when": SAYS_SEND,
+        "then": {"reach": ["high_risk"], "start": ["welcome"]},
+    }
+    run = run_case(
+        definition,
+        file=welcome_file(),
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+    )
+    assert (
+        "flag_high_risk#1 on reached checked: reaches and starts nothing: its condition reads "
+        "kyc.analyst_notes, from untrusted:llm, and untrusted data can't decide"
+    ) in run.history
+    assert "reached high_risk" not in run.history
+
+
+def test_an_untrusted_approval_condition_asks_anyway() -> None:
+    # Untrusted data may add an approval, never remove one: an approval whose condition read it
+    # is asked whatever it gave, saying why (brief, D11) (brief, D39).
+    definition = copy.deepcopy(REFUND)
+    definition["fields"]["approved_amount"]["source"] = "untrusted:customer"
+    run = run_case(definition, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert run.history[-1] == (
+        "asked pay.approval#1: approval of pay by support-lead: its condition reads "
+        "approved_amount, from untrusted:customer, and untrusted data can't remove an approval"
+    )
+    # Read first: one that can't be read stops the step, never asks in silence (fail closed).
+    unreadable = copy.deepcopy(REFUND)
+    unreadable["fields"]["bonus"] = {
+        "type": "number",
+        "source": "untrusted:customer",
+        "display": {"title": "A bonus the customer asks for"},
+    }
+    unreadable["steps"]["pay"]["approval"]["when"] = {">": [{"var": "bonus"}, 100]}
+    run = run_case(unreadable, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert run.needs_attention == [
+        "pay#1: pay's approval condition bonus > 100 can't be evaluated: bonus has no value"
+    ]
+
+
+def test_an_unrecognised_condition_source_counts_as_untrusted() -> None:
+    # Fail closed: a source the engine doesn't recognise counts as untrusted, never as trusted.
+    # A value's sources are only ever stamped by the engine; here one is changed by hand, to an
+    # origin Ventoux has never heard of, and the letter is still refused (brief, D39).
+    definition = with_welcome({"==": [{"var": "region"}, "north"]})
+    definition["fields"]["region"] = {"type": "string", "display": {"title": "Region"}}
+    case = parse_case(definition)
+    opened, commands = decide(
+        case,
+        CATALOG,
+        CaseState("t"),
+        Opened({**welcome_file(), "amount": Decimal(40), "region": "north"}, None, at=START),
+    )
+    [kyc] = [command for command in commands if isinstance(command, StartWorkflow)]
+    opened.sources["region"] = frozenset({"rumour:somewhere"})
+    done, _ = decide(case, CATALOG, opened, Completed(kyc.entry, fake_kyc(kyc.inputs), at=START))
+    assert done.history[-1] == (
+        "welcome#1 failed: letters.draft@2 takes to_customer only from a system or a person, "
+        "never from untrusted data, and welcome's condition reads region (rumour:somewhere)"
+    )
+
+
+def test_an_unset_field_in_a_steps_condition_counts_its_writers() -> None:
+    # The welcome letter is drafted when the customer left no notes: a field nobody has set, and
+    # untrusted whoever writes it. It counts what its writers could give (brief, D39).
+    definition = with_welcome({"!": [{"exists": "notes"}]})
+    definition["fields"]["notes"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's notes"},
+    }
+    run = run_case(definition, file=welcome_file(), answers=[], people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "welcome#1: letters.draft@2 takes to_customer only from a system or a person, never from "
+            "untrusted data, and welcome's condition reads notes (untrusted:customer)"
+        )
+    ]
 
 
 # --- Slice 1: reaching ---

@@ -17,6 +17,7 @@ from temporalio.exceptions import ActivityError, ApplicationError, ChildWorkflow
 # apart; modules passed through are imported once and shared. `core` is deterministic (the
 # boundary test holds it to that), so it is shared.
 with workflow.unsafe.imports_passed_through():
+    from ventoux.core.before_activity import Steering
     from ventoux.core.catalog import Catalog
     from ventoux.core.history import Refused
     from ventoux.core.interpreter import (
@@ -64,6 +65,9 @@ class PlanStart:
     # Each person who approves nothing in this run, and why: the case's opener and the step's
     # proposer (brief, D25).
     excluded: dict[str, str] | None = None
+    # The untrusted values the conditions that let the case's step start read, each said as a
+    # refusal says it, with its sources: they count for every input policy here (brief, D39).
+    steered: dict[str, list[str]] | None = None
 
 
 @dataclass
@@ -192,6 +196,10 @@ class PlanWorkflow:
                 run_name=start.run_name or self.name(),
                 record=self.record,
                 excluded=start.excluded,
+                steered=[
+                    Steering(said, frozenset(sources))
+                    for said, sources in (start.steered or {}).items()
+                ],
             )
         except (RunRefused, PlanInvalid) as refused:
             # A run that can't start fails at once, saying why. Any other exception fails only the

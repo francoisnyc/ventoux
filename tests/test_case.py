@@ -234,12 +234,22 @@ def test_a_forms_values_land_in_the_case_file() -> None:
     # the form adds who answered, and payments.refund@2 takes no untrusted amount.
     definition = refund()
     definition["fields"]["approved_amount"]["source"] = "untrusted:customer"
+    # Since 11b the approval, whose condition reads the untrusted amount, is asked whatever it
+    # gives: untrusted data can add an approval, never remove one (brief, D39). The order of the
+    # checks stays: the approval, then the inputs.
     run = run_case(
         definition,
         file={"order_id": "ord-1", "amount": 40},
-        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 40}),
+            ("pay.approval#1", "approve", "sam"),
+        ],
         people=PEOPLE,
     )
+    assert (
+        "asked pay.approval#1: approval of pay by support-lead: its condition reads "
+        "approved_amount, from untrusted:customer, and untrusted data can't remove an approval"
+    ) in run.history
     # Since 8b a refused input fails the step, and the case needs attention.
     [failed] = run.needs_attention
     assert failed.startswith("pay#1: payments.refund@2 takes amount only from")

@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
+from ventoux.core.before_activity import Steering
 from ventoux.core.provenance import Sourced
 from ventoux.core.sensitive import Sensitive
 
@@ -67,9 +68,9 @@ class RuleStart:
     # Each person whose answer the rule's condition read, and the field: none of them approves
     # the run it starts (brief, D11) (brief, D25).
     read_from: dict[str, str] = field(default_factory=dict[str, str])
-    # The untrusted sources the condition read, which count for the step's input policies
-    # (brief, D38) (brief, D39).
-    untrusted: frozenset[str] = frozenset()
+    # Each value the condition read from a source the engine doesn't trust, with those sources:
+    # they count for the step's input policies (brief, D38) (brief, D39).
+    untrusted: dict[str, frozenset[str]] = field(default_factory=dict[str, frozenset[str]])
 
 
 @dataclass
@@ -298,6 +299,9 @@ class StartPlan:
     # What each field is given, as a reference: the system of a reference field read as it is, or
     # None; and how a message says it. Only the case sees the expression, so it says (brief, D30).
     references: dict[str, tuple[str | None, str]] = field(default_factory=dict)
+    # The untrusted values the conditions that let the step start read: they count for every
+    # activity's input policies in the plan, beside its fields (brief, D39).
+    steered: tuple[Steering, ...] = ()
 
 
 @dataclass(frozen=True)
