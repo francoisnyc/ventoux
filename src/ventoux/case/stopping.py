@@ -47,14 +47,18 @@ def stop_step(
 
 
 def stop_coming_run(state: CaseState, name: str, by: str) -> bool:
-    """Stop the run about to start, if there is one: its approval asked is withdrawn, or the
-    approval given lapses, and the run is recorded `cancelled`, so the step doesn't start by
-    itself again (brief, D25) (brief, D40). Whether there was one."""
+    """Stop the run about to start, if there is one: its approval asked is withdrawn, the
+    approval given lapses, or a person's start waiting for a fact is dropped; and the run is
+    recorded `cancelled`, so the step doesn't start by itself again (brief, D25) (brief, D40).
+    Whether there was one. A refresh on its way for it still lands."""
     why = f"stopped by {by}"
     if (approval := state.approvals.pop(name, None)) is not None:
         del state.waiting[approval.entry]
         state.withdrawn[approval.entry] = why  # an answer to it is refused, saying why
         state.history.append(f"cancelled {approval.entry}: {why}")
+    elif name in state.waiting_to_start:
+        state.waiting_to_start.remove(name)
+        state.given.pop(name, None)  # approved and waiting for its fact: it lapses too
     elif state.given.pop(name, None) is None:
         return False
     entry = f"{name}#{sum(1 for run in state.runs if run.step == name) + 1}"

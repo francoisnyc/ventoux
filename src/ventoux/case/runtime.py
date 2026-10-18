@@ -587,7 +587,10 @@ def failed(state: CaseState, event: Failed) -> None:
     the case is closing, nobody will retry it: it is cancelled, and the case is flagged."""
     run = next(run for run in state.runs if run.entry == event.entry)
     run.status, run.reason = "failed", event.reason
-    state.history.append(f"{run.entry} failed: {event.reason}")
+    # A run that fails after its stop was asked needs attention like any other: nobody knows what
+    # it did, and a later run would get a new key (brief, D17) (brief, D40).
+    after = f" after its stop was requested by {run.stop_requested}" if run.stop_requested else ""
+    state.history.append(f"{run.entry} failed{after}: {event.reason}")
     if state.phase == "closing":
         run.status = "cancelled"
         flag(state, f"{run.entry} failed after the close was requested: {event.reason}")
@@ -691,16 +694,18 @@ def retry(
             raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
         if not decided:
             raise RetryRefused(f"{event.entry} can't be retried: {render(step.when)} is false now")
-    run.status, run.reason = "retrying", ""
+    # A person decided to try again: no longer a run whose stop was asked (brief, D40).
+    run.status, run.reason, run.stop_requested = "retrying", "", ""
     state.history.append(f"{event.by} retried {event.entry} as {counted[0]}")
     # A person decided to try again: a fact the step needs fresh may be fetched again, unless a
-    # refresh of it is still on its way (brief, D33).
+    # refresh of it is still on its way (brief, D33). A stopped refresh counts for nothing, even
+    # while it runs on (brief, D40).
     for field in step.max_age if not isinstance(step, TaskStep) else {}:
         prior = state.refreshing.get(field)
-        if prior is not None and next(r for r in state.runs if r.entry == prior).status in (
-            "done",
-            "failed",
-        ):
+        if prior is None:
+            continue
+        refresh = next(r for r in state.runs if r.entry == prior)
+        if refresh.status in ("done", "failed") or refresh.stop_requested:
             del state.refreshing[field]
 
 
@@ -782,6 +787,13 @@ def refresh_stale(
         prior = state.refreshing.get(stale.field)
         if prior is not None and prior != stale.run:  # fetched again, and still the old value
             run = next(run for run in state.runs if run.entry == prior)
+            if run.stop_requested and run.status == "running":
+                # A stopped refresh counts for nothing: what needed it fails, never waits and
+                # asks again, which could loop in one decision (brief, D39) (brief, D40).
+                raise StepStopped(
+                    f"{said}, and {needed}: its refresh {prior} was stopped by "
+                    f"{run.stop_requested}, so it counts for nothing; retry it to fetch it again"
+                )
             if run.status not in ("done", "failed"):
                 return "waiting"  # on its way: running, or retried by an operator
             gave = (

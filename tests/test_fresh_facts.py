@@ -1280,3 +1280,102 @@ def test_a_refresh_needs_what_any_run_of_its_step_needs() -> None:
             "run again"
         )
     ]
+
+
+# --- Layer 11c: stops and fresh facts (brief, D40) ---
+
+
+def stopped_lookup(stop: str) -> dict[str, Any]:
+    """The proposed fresh refund, with a rule that stops `stop` once the order is looked up again
+    after the review set the approved amount (its first look-up, at the opening, isn't stopped)."""
+    definition = proposed_pay()
+    definition["rules"] = {
+        "stop_lookup": {
+            "display": {"title": "Stop a second look-up"},
+            "on": {"started": "check_order"},
+            "when": {"exists": "approved_amount"},
+            "then": {"stop": [stop]},
+        }
+    }
+    return definition
+
+
+WAITING = [
+    ("review", "approve", "ana", {"approved_amount": 80}),
+    finish("check_order#1"),
+    later("3d"),
+    propose("pay", "ana"),
+]
+
+
+def test_a_stop_drops_a_waiting_start() -> None:
+    # Ana's proposal of pay waits for the status to be fetched again when a rule stops pay: the
+    # waiting start is dropped, as an open approval is withdrawn, and its coming run recorded
+    # cancelled; the refresh on its way still lands (brief, D39, D40).
+    run = run_case(
+        stopped_lookup("pay"),
+        file=FILE,
+        answers=[*WAITING, finish("check_order#2")],
+        people=PEOPLE,
+        held=["check_order"],
+    )
+    stopping = run.history.index("stop_lookup#2 on started check_order: stopping pay")
+    assert run.history[stopping + 1 :] == [
+        "pay#1 cancelled: stopped by stop_lookup#2",
+        "check_order#2 done, giving status from system:orders",
+    ]
+    assert not run.reached("pay") and run.needs_attention == []
+
+
+def test_a_step_needing_a_stopped_refresh_needs_attention() -> None:
+    # A rule stops the look-up fetching the status again for Ana's proposed pay. The look-up, a
+    # read, runs on, but a stopped refresh counts for nothing: pay fails, saying so, rather than
+    # waiting and asking again, which could loop in one decision. Once the look-up has landed, an
+    # operator's retry runs pay on the fresh status (brief, D33, D40).
+    people = {**PEOPLE, "omar": ["operations"]}
+    run = run_case(
+        stopped_lookup("check_order"),
+        file=FILE,
+        answers=[*WAITING, finish("check_order#2"), retry("pay#1", "omar")],
+        people=people,
+        held=["check_order"],
+    )
+    stopping = run.history.index("stop_lookup#2 on started check_order: stopping check_order")
+    assert run.history[stopping + 1 : stopping + 4] == [
+        "check_order#2: stop requested by stop_lookup#2",
+        (
+            "pay#1 failed: check_order.status was obtained 3 days ago, and pay needs it at most "
+            "1 day old: its refresh check_order#2 was stopped by stop_lookup#2, so it counts for "
+            "nothing; retry it to fetch it again"
+        ),
+        "check_order#2 done, giving status from system:orders",
+    ]
+    assert "flagged: check_order#2 completed after its stop was requested by stop_lookup#2" in (
+        run.history
+    )
+    retried = run.history.index("omar retried pay#1 as operations")
+    assert run.history[retried + 1].startswith("scheduled pay#1: payments.refund@2")
+    assert run.needs_attention == []
+
+
+def test_a_retry_fetches_again_past_a_stopped_refresh() -> None:
+    # Retried while the stopped look-up still runs, pay fetches the status again, as its failure
+    # said: a new run of the look-up, which this rule stops in turn, so pay fails again. A person
+    # is in every round (brief, D26, D40).
+    people = {**PEOPLE, "omar": ["operations"]}
+    run = run_case(
+        stopped_lookup("check_order"),
+        file=FILE,
+        answers=[*WAITING, retry("pay#1", "omar")],
+        people=people,
+        held=["check_order"],
+    )
+    retried = run.history.index("omar retried pay#1 as operations")
+    assert run.history[retried + 1 : retried + 3] == [
+        "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day",
+        "scheduled check_order#3: orders.lookup@2 (order_id from system:opener)",
+    ]
+    assert (
+        run.history[-1].startswith("pay#1 failed: ")
+        and "check_order#3 was stopped" in (run.history[-1])
+    )

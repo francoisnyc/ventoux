@@ -2806,3 +2806,56 @@ def test_stop_and_start_on_one_moment_end() -> None:
             "decision"
         ),
     ]
+
+
+# --- 11c, slice 3: after a stop ---
+
+
+def test_a_run_failing_after_its_stop_needs_attention() -> None:
+    # The payment, stopped while it runs, fails past its retries: nobody knows whether it paid, so
+    # it needs attention like any failure, never cancelled as a close would. A later run would get
+    # a new key (brief, D17, D39, D40).
+    answers = [SMALL_REVIEW, *WITHDRAWS, finish("pay#1")]
+    run = run_case(
+        withdrawable("pay"),
+        file=SMALL,
+        answers=answers,
+        people=PEOPLE,
+        held=["pay"],
+        activities={"payments.refund@2": unreachable},
+    )
+    assert run.history[-1] == (
+        "pay#1 failed after its stop was requested by withdraw#1: payments.refund@2 failed with "
+        "RuntimeError: ‹sensitive›"
+    )
+    assert run.needs_attention == ["pay#1: payments.refund@2 failed with RuntimeError: ‹sensitive›"]
+    assert run.status == "open" and run.flags == []
+    # An operator retries it, with the same key: a person decided to try again, so it is no longer
+    # a run whose stop was asked, and completing is not flagged.
+    calls: list[str] = []
+
+    def fails_once(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs["idempotency_key"])
+        if len(calls) == 1:
+            raise RuntimeError("provider unreachable")
+        return {"refund_id": "refund-ord-1"}
+
+    retried = run_case(
+        withdrawable("pay"),
+        file=SMALL,
+        answers=[*answers, retry("pay#1", "omar"), finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+        activities={"payments.refund@2": fails_once},
+    )
+    assert calls == ["memory/pay#1", "memory/pay#1"]  # the same key: the same run (brief, D26)
+    assert retried.history[-4:] == [
+        "omar retried pay#1 as operations",
+        (
+            "scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from "
+            "person:ana), key memory/pay#1"
+        ),
+        "pay#1 done, giving refund_id from untrusted:undeclared",
+        "closed: nothing left to do",
+    ]
+    assert retried.flags == []
