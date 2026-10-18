@@ -197,22 +197,23 @@ def seeds(listed: str) -> set[int]:
 SILENT_ON_MAIN = {
     "K": seeds("393 713 753 754"),
 }
-# The seeds that were silent on a path now fixed, with the line its fix writes: each must still
-# reach it, so a change to the generated cases can't drop the path unseen.
+# The seeds that were silent on a path now fixed, with the line its fix writes, as a part it
+# contains and its ending: each seed must still reach it, so a change to the generated cases can't
+# drop the path unseen.
 FIXED = {
     "A": (
         seeds("7 79 197 229 247 254 316 384 394 395 440 496 541 609 638 682 762 881"),
-        "so it needs attention again",
+        ("won't run: ", ", so it needs attention again"),
     ),
     "D": (
         seeds(
             "16 31 32 50 75 93 192 206 220 333 364 486 535 554 557 598 654 673 704 723 801 891 981"
         ),
-        "so it needs attention again",
+        ("won't run: ", ", so it needs attention again"),
     ),
-    "C": (seeds("313 369 492 497 791"), "failed again: its retry can't start:"),
-    "E'": (seeds("229 323 876"), "which hasn't completed"),
-    "F": (seeds("71 511"), "failed again: its retry can't start:"),
+    "C": (seeds("313 369 492 497 791"), ("its retry can't start: ", " is false now")),
+    "E'": (seeds("229 323 876"), ("its retry can't start: ", ", which hasn't completed")),
+    "F": (seeds("71 511"), ("its retry can't start: ", " is false now")),
 }
 
 
@@ -238,18 +239,22 @@ def test_generated_cases_show_what_is_pending(seed: int) -> None:
 @pytest.mark.parametrize("path", sorted(FIXED))
 def test_the_generated_cases_reach_the_paths(path: str) -> None:
     # Each seed once silent on a fixed path now writes that fix's line; for D, while the close
-    # is held, after the audit reached the case's closes_when milestone, and for A, not.
-    found, line = FIXED[path]
+    # is held, after the audit reached the case's closes_when milestone, and for A, not; for F,
+    # as the fact fetched again lands, and for C, not.
+    found, (part, ending) = FIXED[path]
     still_silent = set().union(*SILENT_ON_MAIN.values())  # marked: they fail on another path
     checked = sorted(found - still_silent)
     assert checked, f"no seed left to show path {path}"
     for seed in checked:
         history = generated_case(seed).history
-        fixed = [i for i, said in enumerate(history) if line in said]
+        fixed = [i for i, said in enumerate(history) if part in said and said.endswith(ending)]
         assert fixed, f"seed {seed} no longer reaches path {path}"
         if path in ("A", "D"):  # the same line: told apart by whether the close is held
             held = "reached audited" in history[: fixed[0]]
             assert held == (path == "D"), f"seed {seed}: the close is {'' if held else 'not '}held"
+        if path in ("C", "F"):  # the same line: told apart by whether a refresh just landed
+            refreshed = "done, giving status" in history[fixed[0] - 1]
+            assert refreshed == (path == "F"), f"seed {seed}: {'a' if refreshed else 'no'} refresh"
 
 
 # --- Slice 1: the paths the generated cases can't reach, scripted ---
@@ -534,7 +539,7 @@ def test_a_retry_whose_condition_turns_false_needs_attention() -> None:
     # Path C. While pay#1's retry waits for its approval, the review is proposed again, which
     # withdraws the approval, and the new review is rejected: pay's condition is false now, so
     # nothing can let the retry start. It goes back to failed, naming the condition as the
-    # definition writes it, never a value (the note, decision 2) (brief, D17, D26).
+    # engine writes it from the definition, never a value (the note, decision 2) (brief, D17, D26).
     script = [*RESCUED, propose("review", "ana"), ("review#3", "reject", "ana")]
     run = run_case(
         refund_retried(), FILE, script, PEOPLE, activities={"payments.refund@2": down_once([])}
@@ -593,20 +598,22 @@ def test_a_retry_whose_refreshed_fact_turns_it_false_needs_attention() -> None:
     assert "cancelled" not in run.needs_attention[0]  # what the case file holds is never quoted
 
 
-def test_a_retry_whose_requirement_was_stopped_needs_attention() -> None:
+@pytest.mark.parametrize("requires", [["check_order", "review"], ["review", "check_order"]])
+def test_a_retry_whose_requirement_was_stopped_needs_attention(requires: list[str]) -> None:
     # Path E'. While pay#1's retry waits for its approval, the review is proposed again, so the
     # retry waits for it; then a rule stops that review. Nothing is on its way to meet pay's
-    # requirement now, so the retry fails again, saying which (the note, decision 2).
-    definition = generated_definition(fresh=False, audited=False)  # with `hold`, which stops review
+    # requirement now, so the retry fails again, naming the one that ended, wherever it is
+    # listed beside one that is met (the note, decision 2).
+    definition = generated_definition(fresh=True, audited=False)  # `hold` stops the review
+    definition["steps"]["pay"]["requires"] = requires
     script = [
         *RESCUED,
         propose("review", "ana"),  # withdraws pay.approval#1; the retry waits for review#3
         propose("hold", "ana"),
         ("hold#1", "hold", "ana"),  # halt stops review#3
     ]
-    run = run_case(
-        definition, FILE, script, PEOPLE, activities={"payments.refund@2": down_once([])}
-    )
+    activities = {**DELIVERED, "payments.refund@2": down_once([])}
+    run = run_case(definition, FILE, script, PEOPLE, activities=activities)
     assert "cancelled review#3: stopped by halt#1" in run.history
     assert run.history[-1] == (
         "pay#1 failed again: its retry can't start: pay requires review, which hasn't completed"
@@ -674,3 +681,114 @@ def test_a_retry_waits_for_a_requirement_on_its_way() -> None:
     )
     assert keys == ["memory/pay#1", "memory/pay#1"]
     assert run.closed
+
+
+def verified() -> dict[str, Any]:
+    """The refund with `hold`, and a `verify` lookup pay also requires, which needs a team
+    lead's approval and may be proposed again: a requirement that can be rejected, or running."""
+    definition = generated_definition(fresh=False, audited=False)
+    definition["steps"]["verify"] = {
+        "kind": "activity",
+        "display": {"title": "Verify the order"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "repeatable": True,
+        "proposed_by": ["support"],
+        "approval": {"roles": ["support-lead"], "display": {"reason": "A lead verifies"}},
+    }
+    definition["steps"]["pay"]["requires"] = ["verify"]  # and review, by the sequence
+    return definition
+
+
+def test_a_retry_reads_each_requirement_it_waits_for() -> None:
+    # The retry waits while each requirement not met is on its way, and fails again, naming it,
+    # once one ended without completing (the note, decision 2). verify runs held, so it can be
+    # running while the retry waits.
+    proposed_again = [
+        ("verify.approval#1", "approve", "sam"),
+        finish("verify#1"),
+        *RESCUED,  # asks pay.approval#1
+        propose("verify", "ana"),  # withdraws it: the retry waits for verify#2's approval
+    ]
+
+    def played(script: list[Any], keys: list[str]) -> CaseRun:
+        activities = {**DELIVERED, "payments.refund@2": down_once(keys)}
+        return run_case(verified(), FILE, script, PEOPLE, activities=activities, held=["verify"])
+
+    # Rejected: verify#2 won't run, so nothing is on its way to meet the requirement.
+    run = played([*proposed_again, ("verify.approval#2", "reject", "sam")], [])
+    assert run.needs_attention == [
+        (
+            "pay#1: its retry can't start: pay requires verify, which hasn't completed: retry it "
+            "once it has, or close the case"
+        )
+    ]
+    # Running: the retry waits, and runs once verify#2 lands, as the same run, with its key.
+    running = [*proposed_again, ("verify.approval#2", "approve", "sam")]
+    run = played(running, [])
+    assert [(r.entry, r.status) for r in run.state.runs if r.step in ("pay", "verify")] == [
+        ("verify#1", "done"),
+        ("pay#1", "retrying"),
+        ("verify#2", "running"),
+    ]
+    assert run.needs_attention == []
+    keys: list[str] = []
+    run = played([*running, finish("verify#2"), ("pay.approval#2", "approve", "sam")], keys)
+    assert keys == ["memory/pay#1", "memory/pay#1"]
+    assert run.closed
+    # Two not met: verify#2 is running, and a rule stops the review proposed again. The retry
+    # fails, naming the review, the one with nothing on its way.
+    stopped = [
+        *running,
+        propose("review", "ana"),
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),
+    ]
+    run = played(stopped, [])
+    assert run.needs_attention == [
+        (
+            "pay#1: its retry can't start: pay requires review, which hasn't completed: retry it "
+            "once it has, or close the case"
+        )
+    ]
+
+
+@pytest.mark.xfail(strict=True, raises=Silent, reason="path L, fixed in slice 5")
+def test_a_retry_s_given_approval_lapses_with_its_requirement() -> None:
+    # Path L, on a retry. pay#1's retry is approved while its fact is fetched again; the review
+    # is proposed again, and a rule stops it. The approval lapses, and the retry fails again;
+    # once the review completes again, pay#1 asks a new approval, and nothing runs under a new
+    # key (the note, decisions 2 and 5) (brief, D26).
+    keys: list[str] = []
+    script = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 80}),  # pay#1 fails, unapproved
+        propose("review", "ana"),
+        ("review#2", "approve", "ana", {"approved_amount": 250}),
+        later("2d"),
+        retry("pay#1", "omar"),  # its status is stale: check_order#2, held
+        finish("check_order#2"),  # fresh: pay#1 asks pay.approval#1
+        later("2d"),
+        ("pay.approval#1", "approve", "sam"),  # given; stale again: check_order#3, held
+        propose("review", "ana"),  # review#3 opens while the refresh runs
+        finish("check_order#3"),  # pay#1 waits for review#3
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),  # halt stops review#3
+        propose("review", "ana"),
+        ("review#4", "approve", "ana", {"approved_amount": 250}),
+    ]
+    run = run_case(
+        generated_definition(fresh=True, audited=False),
+        FILE,
+        script,
+        PEOPLE,
+        activities={**DELIVERED, "payments.refund@2": down_once(keys)},
+        held=["check_order"],
+    )
+    lapse = "lapsed pay.approval#1: pay requires review, which hasn't completed"
+    failed = (
+        "pay#1 failed again: its retry can't start: pay requires review, which hasn't completed"
+    )
+    assert run.history.index(lapse) < run.history.index(failed)
+    assert [r.entry for r in run.state.runs if r.step == "pay"] == ["pay#1"]
+    assert keys == ["memory/pay#1"]
