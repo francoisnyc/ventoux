@@ -797,7 +797,7 @@ and record the key points. A question is closed once you can explain the answer 
 - Retrieval (layer 11b warm-up, 2026-10-18; skipped at 11a): "tell me". Nothing came back this
   time, so the answer, in plain words, in three parts:
   - **How it is written:** a rule (brief, D7, D38). *When* 5 days have passed since the claim
-    opened: a timer, written as data (`5d`, anchored on a moment, layer 11d). *If* the claim is
+    opened: a timer, written as data (`5d`, anchored on a moment, layer 11e). *If* the claim is
     still not assessed: a question about the case file, read when the timer fires. *Then* start
     `escalate`, to a team lead. The assessment stays open: nothing is cancelled or skipped
     because time passed (brief, D17). The `sla` pattern writes this for you, and cancels its
@@ -812,7 +812,7 @@ and record the key points. A question is closed once you can explain the answer 
     history never recorded, and stop on a non-determinism error.
   One sharpening, new since 11a: a milestone is not a value a condition can read (brief, D35),
   so "not assessed" is written over what the assessment gives (its outcome), and how a timer's
-  condition says it exactly is 11d's to decide.
+  condition says it exactly is 11e's to decide.
 - Status: open. The timer is solid now; the question stays in the rotation until the *if* and
   replay come back too.
 

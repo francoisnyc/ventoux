@@ -5,7 +5,10 @@ Status: research done, 2026-10-16 (`docs/layers/11-research.md`, Flowable's CMMN
 open, for the next layer); the split and 11a's eleven choices agreed in the session, 2026-10-17
 (all as proposed; design question 17, option a); D38 and the cases guide's "Rules" drafted the same
 day; 11a built, slices 0–7; Promises checked against the tests, 2026-10-17; the tutor review's
-fix built test-first, and the Promises table names every test, the same day.
+fix built test-first, and the Promises table names every test, the same day. 11b: the warm-up
+(learning question 32) answered "tell me", 2026-10-18; the mentor's review of the first proposal;
+the choices agreed in four groups the same day, all as recommended, one of them splitting 11b in
+two (see "The split").
 
 ## What this layer is for
 
@@ -49,39 +52,44 @@ From `11-research.md`, five findings shape the design (each is argued there, wit
 
 ## The split
 
-Layer 11 lands as six pull requests, each with its section in this note, its own Promises table
+Layer 11 lands as seven pull requests, each with its section in this note, its own Promises table
 and its own tutor review, as layers 8–10 did. Each part's choices are decided in its own session.
 
 | PR | Builds | Codes (proposed) |
 |---|---|---|
 | **11a: the raw rule, inside the case** | `rules` in the definition: `on` (the case opened, a milestone reached, a step started), `when`, `then: reach`; when rules run in `decide`; a rule that can't be read needs attention; untrusted data can't decide (design question 17 decided); rules and the close; case validation kept true | `NEVER_FIRES`, `UNTRUSTED_TRIGGER` |
-| **11b: rules that start and stop steps** | `then: start` (the engine proposes, through admission: the rework loop) and `then: stop` (what a close does, to one step; `cancellable` workflows, D29; never a failed run); the half of design question 17 that steers which step starts, built; validation: a step a rule starts can run; a rule that restarts a step for ever | `NEVER_CLOSES` extended |
-| **11c: events from outside** | declared events with a typed payload and a source (D12); `on: {"event": ...}`; `then: set` (update the case file), which brings back the provenance fixpoint (D34, D36); listening is not waiting, and a step explicitly waiting for an event (D10); "arrival is a fact, content is not"; an event as a signal on Temporal | `UNTRUSTED_TRIGGER` for event content; `UNKNOWN_EVENT` |
-| **11d: time** | timers, `on: {"after": "5d", "since": <moment>}`: set on their moment, pending work (D10), fired as an event stamped with its own due time (D33), never a clock `decide` reads; cancelled by their rule's purpose ending and by any close; crossing continue-as-new exactly (D27), replaying the same; staleness noticed by a timer (9d's carried note); reports list set timers (D24) | `NEVER_CLOSES` for a timer that re-arms itself |
-| **11e: reading rules** | the plain-language renderer for every rule; `ventoux simulate`: a story on a timeline, with simulated time, showing when each rule fires; stories as tests | |
-| **11f: patterns and teaching warnings** | `sla` (from the latest start; `since=first_start` explicitly), `reminder`, `four_eyes` (`count=2`, D11, D23), each expanding into raw rules visible in validation and views, each with a story test; D7's teaching warnings (a timer anchored on the first start of a repeatable step, a rule whose condition reads untrusted data, what is left of "rules that can never fire" once 11a's error has taken the proven ones) | warnings |
+| **11b: rules that start steps** | `then: start` (the engine proposes, through admission: the rework loop), and the moment a task is answered; the half of design question 17 that steers which step starts, built; validation: a step a rule starts can run; a rule that restarts a step for ever | `NEVER_STARTS`, `NEVER_CLOSES` extended, `CLOSED_ONLY_BY_A_PERSON` |
+| **11c: rules that stop steps** | `then: stop` (what a close does, to one step; never a failed run); one place in the case that stops every running child; `cancellable` workflows (D29), stopped by Temporal's cancellation; closing through that place | |
+| **11d: events from outside** | declared events with a typed payload and a source (D12); `on: {"event": ...}`; `then: set` (update the case file), which brings back the provenance fixpoint (D34, D36); listening is not waiting, and a step explicitly waiting for an event (D10); "arrival is a fact, content is not"; an event as a signal on Temporal | `UNTRUSTED_TRIGGER` for event content; `UNKNOWN_EVENT` |
+| **11e: time** | timers, `on: {"after": "5d", "since": <moment>}`: set on their moment, pending work (D10), fired as an event stamped with its own due time (D33), never a clock `decide` reads; cancelled by their rule's purpose ending and by any close; crossing continue-as-new exactly (D27), replaying the same; staleness noticed by a timer (9d's carried note); reports list set timers (D24) | `NEVER_CLOSES` for a timer that re-arms itself |
+| **11f: reading rules** | the plain-language renderer for every rule; `ventoux simulate`: a story on a timeline, with simulated time, showing when each rule fires; stories as tests | |
+| **11g: patterns and teaching warnings** | `sla` (from the latest start; `since=first_start` explicitly), `reminder`, `four_eyes` (`count=2`, D11, D23), each expanding into raw rules visible in validation and views, each with a story test; D7's teaching warnings (a timer anchored on the first start of a repeatable step, a rule whose condition reads untrusted data, what is left of "rules that can never fire" once 11a's error has taken the proven ones) | warnings |
 
 **Why this order.** 11a is the smallest rule that *acts*, and it brings the two things every later
 part stands on: where rules run in `decide`, and case validation kept true once something other
-than a step reaches a milestone (brief, D34). Starting and stopping steps (11b) need that loop and
-reuse admission and closing. Events (11c) bring outside content, so trust and the update action
-belong there, with the provenance fixpoint they need. Timers (11d) need moments to anchor on (11a)
-and events (11c), since a timer firing is an event with its own time. The renderer and `simulate`
-(11e) need every kind of rule to exist; the patterns (11f) are written in raw rules and tested as
-stories, so they come last, as D7 says: "raw rules are the engine's concept, not the first one
+than a step reaches a milestone (brief, D34). Starting steps (11b) needs that loop and reuses
+admission; stopping them (11c) reuses closing. Events (11d) bring outside content, so trust and
+the update action belong there, with the provenance fixpoint they need. Timers (11e) need moments
+to anchor on (11a) and events (11d), since a timer firing is an event with its own time. The
+renderer and `simulate` (11f) need every kind of rule to exist; the patterns (11g) are written in
+raw rules and tested as stories, so they come last, as D7 says: "raw rules are the engine's concept, not the first one
 people meet".
+
+*Renumbered 2026-10-18, in 11b's session:* 11b, as first planned, held both starting and stopping
+steps; it was split in two, so events, time, reading rules and patterns moved from 11c–11f to
+11d–11g. 11a's section below keeps the letters it was written with, where "11b" meant both.
 
 **Carried into layer 11, and where each lands:**
 
 | Carried | Where |
 |---|---|
-| Case validation stays true once rules reach milestones and start or stop steps (`can_happen`, `NEVER_RUNS`, `CLOSES_AT_OPENING`, `NEVER_CLOSES`, `SET_AFTER`, the 10d warnings) | 11a for `reach`, 11b for `start` and `stop`, 11c for `set` |
-| Provenance: a rule computing fields from fields brings the fixpoint back (D34, D36) | 11c, with `set` |
-| `UNTRUSTED_TRIGGER` and design question 17 | decided in 11a; built in 11a (a condition that decides) and 11b (a condition that steers which step starts); event content in 11c |
-| Time as event data stamped from workflow time (D33); timers as pending work (D10), across continue-as-new (D27), on replay; staleness noticed by a timer (9d) | 11d |
+| Case validation stays true once rules reach milestones and start or stop steps (`can_happen`, `NEVER_RUNS`, `CLOSES_AT_OPENING`, `NEVER_CLOSES`, `SET_AFTER`, the 10d warnings) | 11a for `reach`, 11b for `start`, 11c for `stop`, 11d for `set` |
+| Provenance: a rule computing fields from fields brings the fixpoint back (D34, D36) | 11d, with `set` |
+| `UNTRUSTED_TRIGGER` and design question 17 | decided in 11a; built in 11a (a condition that decides) and 11b (a condition that steers which step starts); event content in 11d |
+| Time as event data stamped from workflow time (D33); timers as pending work (D10), across continue-as-new (D27), on replay; staleness noticed by a timer (9d) | 11e |
 | Whether rules act once every `closes_when` milestone is reached (D34) | 11a (choice 7) |
-| What a close does to timers (D10: cancelled) | 11d |
-| `sla`, `reminder`, `four_eyes`, the renderer, teaching warnings, `ventoux simulate` | 11f, 11e, 11e, 11f, 11e (as in the table) |
+| What a close does to timers (D10: cancelled) | 11e |
+| `sla`, `reminder`, `four_eyes`, the renderer, teaching warnings, `ventoux simulate` | 11g, 11f, 11f, 11g, 11f (as in the table) |
 
 ---
 
