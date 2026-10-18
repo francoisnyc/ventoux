@@ -33,6 +33,7 @@ from ventoux.testing import (
     RetryRefused,
     close,
     finish,
+    later,
     load_definition,
     propose,
     retry,
@@ -776,6 +777,17 @@ def guide_with_close_reasons() -> dict[str, Any]:
     return guide_json(0) | guide_json(4)
 
 
+def pay_proposed_on_an_answer() -> dict[str, Any]:
+    """The guide's refund, with `pay` proposed by support, and the approved amount needed at most a
+    day old: a person's answer, which nothing can fetch again (brief, D33)."""
+    definition = guide_with_close_reasons()
+    definition["stays_open"] = True
+    pay = definition["steps"]["pay"]
+    pay.update({"automatic": False, "proposed_by": ["support"]})
+    pay["max_age"] = {"approved_amount": "1d"}
+    return definition
+
+
 def refusal(run: Any) -> str:
     """What the engine says when it refuses `run`."""
     try:
@@ -816,6 +828,12 @@ GUIDE_REFUSALS: dict[str, Any] = {
         with_guides_check_order(),
         file=LARGE,
         answers=[propose("check_order", "ana")],
+        people=PEOPLE,
+    ),
+    "a proposed step's stale fact can't be fetched again": lambda: run_case(
+        pay_proposed_on_an_answer(),
+        file=LARGE,
+        answers=[REVIEWED, later("3d"), propose("pay", "ana")],
         people=PEOPLE,
     ),
     "nobody proposes a step that starts by itself": lambda: run_case(

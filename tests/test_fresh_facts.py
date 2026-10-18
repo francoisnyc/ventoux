@@ -25,6 +25,8 @@ from ventoux.testing import (
     CATALOG,
     DAY,
     START,
+    AnswerRefused,
+    ProposalRefused,
     finish,
     later,
     load_definition,
@@ -414,6 +416,76 @@ def test_a_retry_checks_freshness_again() -> None:
         f"letter#1: {fact} was obtained 3 days ago, and letter needs it at most 1 day old: {why}"
     ]
     assert not run.reached("letter")
+
+
+def proposed_pay() -> dict[str, Any]:
+    """The guide's fresh refund, with `pay` started only when someone in support proposes it."""
+    definition = refund_fresh()
+    definition["steps"]["pay"].update({"automatic": False, "proposed_by": ["support"]})
+    definition["stays_open"] = True
+    definition["close_reasons"] = {"done": {"display": {"title": "Done"}, "roles": ["support"]}}
+    return definition
+
+
+def test_a_proposal_waits_for_its_fresh_facts() -> None:
+    # A proposal is a start like any other: the age of what the step reads is checked first, and a
+    # stale read is fetched again before anything else is read (brief, D33) (brief, D39). The
+    # proposal waits for it, then the step starts on the fresh value. Until 11b, a proposed `pay`
+    # ran at once, on a status three days old.
+    looked_up = iter(["delivered", "delivered"])
+    run = run_case(
+        proposed_pay(),
+        file=FILE,
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 80}),
+            later("3d"),
+            propose("pay", "ana"),
+        ],
+        people=PEOPLE,
+        activities={"orders.lookup@2": lambda inputs: {"status": next(looked_up)}},
+    )
+    proposed = run.history.index("ana proposed pay as support")
+    assert run.history[proposed + 1 : proposed + 4] == [
+        "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day",
+        "scheduled check_order#2: orders.lookup@2 (order_id from system:opener)",
+        "check_order#2 done, giving status from system:orders",
+    ]
+    assert run.history[proposed + 4].startswith("scheduled pay#1: payments.refund@2")
+    assert run.reached("pay")
+
+
+def test_a_second_proposal_of_a_waiting_step_is_refused() -> None:
+    # While a proposed `pay` waits for its fact, proposing it again is refused: accepted, the
+    # second proposal would replace the first proposer, who could then approve the run
+    # (brief, D25) (brief, D39). Once the fact lands, the approval is asked, and lee, who proposed
+    # it, still can't give it.
+    people = {**PEOPLE, "lee": ["support", "support-lead"], "bea": ["support"]}
+    waiting = [
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        finish("check_order#1"),
+        later("3d"),
+        propose("pay", "lee"),
+    ]
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            proposed_pay(),
+            file=LARGE,
+            answers=[*waiting, propose("pay", "bea")],
+            people=people,
+            held=["check_order"],
+        )
+    assert (
+        str(refused.value) == "pay is already proposed, and waits for its facts to be fetched again"
+    )
+    with pytest.raises(AnswerRefused) as refused_approval:
+        run_case(
+            proposed_pay(),
+            file=LARGE,
+            answers=[*waiting, finish("check_order#2"), ("pay.approval#1", "approve", "lee")],
+            people=people,
+            held=["check_order"],
+        )
+    assert str(refused_approval.value) == "lee proposed pay, so cannot approve it"
 
 
 def load_plan() -> dict[str, Any]:

@@ -96,6 +96,9 @@ class CaseState:
     withdrawn: dict[str, str] = field(default_factory=dict[str, str])  # entry: why
     # Who proposed each step's coming run, until it runs or is rejected (brief, D25).
     proposers: dict[str, str] = field(default_factory=dict[str, str])
+    # Each step a person proposed whose start waits for a stale fact to be fetched again; admission
+    # takes it up once the fact lands (brief, D33) (brief, D39).
+    waiting_to_start: list[str] = field(default_factory=list[str])
     # What waits on people, in the order it opened: entry, and how it reads (brief, D24).
     waiting: dict[str, str] = field(default_factory=dict[str, str])
     opened_by: str | None = None  # the person who opened the case, if a person did

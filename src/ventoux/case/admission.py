@@ -71,6 +71,10 @@ def proposal_refusal(
     latest = latest_run(state, name)
     if name in state.approvals:
         return f"{name} is waiting for its approval: {state.approvals[name].entry}"
+    # Proposed already, and waiting for a fact: a second proposal would replace the first
+    # proposer, who could then approve the run (brief, D25) (brief, D39).
+    if name in state.waiting_to_start:
+        return f"{name} is already proposed, and waits for its facts to be fetched again"
     if latest is not None and latest.status in ("open", "running"):
         return f"{name} is already running: {latest.entry}"
     if latest is not None and not step.repeatable:

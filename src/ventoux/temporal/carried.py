@@ -50,6 +50,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "asked": dict(state.asked),
         "withdrawn": dict(state.withdrawn),
         "proposers": dict(state.proposers),
+        "waiting_to_start": list(state.waiting_to_start),
         "waiting": dict(state.waiting),  # in the order they opened: JSON keeps it
         "opened_by": state.opened_by,
         "phase": state.phase,
@@ -107,6 +108,8 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         asked=dict(data["asked"]),
         withdrawn=dict(data["withdrawn"]),
         proposers=dict(data["proposers"]),
+        # None in a state from before layer 11b: no proposal waited for a fact.
+        waiting_to_start=list(data.get("waiting_to_start", [])),
         waiting=dict(data["waiting"]),
         opened_by=data["opened_by"],
         phase=data["phase"],

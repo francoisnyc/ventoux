@@ -340,6 +340,19 @@ def propose(
     # Its expressions checked over the case's types before any is read (brief, D35).
     if (problem := expression_problem(case, catalog, event.step)) is not None:
         raise ProposalRefused(problem)
+    state.history.append(f"{event.by} proposed {event.step} as {role}")
+    state.proposers[event.step] = event.by  # never its approver (brief, D25)
+    # Freshness first, before the condition, the approval and the start, as for any start
+    # (brief, D33): a stale read is fetched again and the proposal waits for it; a fact nothing
+    # can fetch again refuses the proposal, saying why (brief, D39). A refusal changes nothing.
+    if not isinstance(step, TaskStep):
+        try:
+            fresh = refresh_stale(case, catalog, state, event.step, step, event.at, commands)
+        except StepStopped as stale:
+            raise ProposalRefused(str(stale)) from None
+        if fresh != "fresh":
+            state.waiting_to_start.append(event.step)  # admission takes it up once it lands
+            return
     if step.when is not None:
         try:
             decided = holds(step.when, state.values, f"{event.step}'s condition")
@@ -347,8 +360,6 @@ def propose(
             raise ProposalRefused(str(unreadable)) from None  # fail closed: nothing starts
         if not decided:
             raise ProposalRefused(f"{event.step} doesn't run now: {render(step.when)} is false")
-    state.history.append(f"{event.by} proposed {event.step} as {role}")
-    state.proposers[event.step] = event.by  # never its approver (brief, D25)
     start(case, catalog, state, event.step, step, commands)
 
 
@@ -639,7 +650,10 @@ def admit(
         fire_rules(case, catalog, state)  # the moments that came, before any step is asked again
         follow(case, state)  # an open approval follows the case file (brief, D25)
         for name, step in case.steps.items():
-            if not free_to_start(state, name, step) or not requirements_met(required[name], state):
+            if not free_to_start(state, name, step):
+                continue
+            if not requirements_met(required[name], state):
+                drop_waiting(state, name, "its requirements are no longer met")
                 continue
             # Once the close is only held by a failed run, nothing new starts: only the run an
             # operator retries (brief, D34).
@@ -663,11 +677,14 @@ def admit(
                 if step.when is not None and not holds(
                     step.when, state.values, f"{name}'s condition"
                 ):
+                    drop_waiting(state, name, f"{render(step.when)} is false")
                     continue
+                taken_up(state, name)
                 start(case, catalog, state, name, step, commands)
             except (StepStopped, InputRefused, NotInCatalog) as error:
                 # Nothing is skipped automatically: the step fails, and waits for a person; the
                 # other steps go on (brief, D17).
+                taken_up(state, name)
                 fail(state, name, str(error))
             started = True
 
@@ -767,16 +784,34 @@ def is_from_a_person(state: CaseState, field: str) -> bool:
 
 def free_to_start(state: CaseState, name: str, step: TaskStep | CallStep | PlanStep) -> bool:
     """Whether the step may start by itself: it isn't waiting for its approval, and it starts by
-    itself and hasn't started before; or its approval was just given."""
+    itself and hasn't started before; or its approval was just given; or a person proposed it,
+    and it waited for a fact fetched again."""
     if name in state.approvals:
         return False  # waiting for its approval
     if name in state.given:
         return True  # approved, so it starts now
+    if name in state.waiting_to_start:
+        return True  # proposed, and waiting for a fact fetched again (brief, D39)
     latest = latest_run(state, name)
     if latest is not None and latest.status == "retrying":
         return True  # an operator retried it
     # A step starts by itself at most once; again, or at all if not automatic, only if proposed.
     return step.automatic and latest_run(state, name) is None
+
+
+def taken_up(state: CaseState, name: str) -> None:
+    """A proposal that waited for a fact is taken up: the step starts, or fails, now."""
+    if name in state.waiting_to_start:
+        state.waiting_to_start.remove(name)
+
+
+def drop_waiting(state: CaseState, name: str, why: str) -> None:
+    """A proposal that waited for a fact no longer holds once it has landed: dropped, saying
+    why, and its proposer with it (brief, D39)."""
+    if name in state.waiting_to_start:
+        state.waiting_to_start.remove(name)
+        proposer = state.proposers.pop(name)
+        state.history.append(f"dropped {proposer}'s proposal of {name}: {why}")
 
 
 def start(
