@@ -46,6 +46,9 @@ class StepRun:
     # (brief, D39).
     excluded: dict[str, str] = field(default_factory=dict)
     steered: tuple[Steering, ...] = ()
+    # Whether it has started: a run that failed before it started hasn't, and starts for the first
+    # time when an operator's retry runs it (brief, D38, as amended in 11b).
+    started: bool = True
 
 
 @dataclass

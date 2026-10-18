@@ -486,7 +486,7 @@ A rule's `on` names one moment:
 |---|---|
 | `"opened"` | once, when the case opens, with its first values in the case file |
 | `{"reached": "checked"}` | once, when the milestone is reached: a milestone is never undone |
-| `{"started": "assess"}` | each time a run of the step starts: a task opening, an activity or workflow scheduled, a plan started, a stale fact fetched again. A retry is the same run, so it doesn't start again |
+| `{"started": "assess"}` | each time a run of the step starts: a task opening, an activity or workflow scheduled, a plan started, a stale fact fetched again. A run starts once: a retry of a run that had started is the same run, and doesn't start again; a run that failed before it started starts when the operator's retry runs it |
 | `{"answered": "review"}` | each time a run of the task is answered, whatever the outcome. It names a task: an activity, a workflow or a plan finishing is not a moment, so a loop of rules always comes round through a person |
 
 `when` is optional, and reads the case file as it is at that moment, as a step's `when` does: it

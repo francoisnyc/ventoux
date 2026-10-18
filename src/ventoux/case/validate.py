@@ -202,9 +202,10 @@ def loop_issues(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
     found: list[Issue] = []
     for loop in endless_loops(case):
         path = f"rules.{loop.rules[0]}.then.start"
+        starts = "starts" if len(loop.rules) == 1 else "start"  # "send_back starts review"
         endless = (
-            f"{listed(list(loop.rules))} start {listed(list(loop.steps))} again on every answer, "
-            "and nothing ends it"
+            f"{listed(list(loop.rules))} {starts} {listed(list(loop.steps))} again on every "
+            "answer, and nothing ends it"
         )
         fix = "give one of the rules a when that ends the loop"
         if closers & set(catalog.roles) or closes_when:

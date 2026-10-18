@@ -410,10 +410,9 @@ def test_a_start_that_cant_be_made_needs_attention() -> None:
     ]
 
 
-def test_a_rules_start_never_waits_for_a_refresh() -> None:
-    # A refresh lands with no person in it, so a rule's start that waited for one could bring a
-    # loop round with nobody in between. It needs attention instead; an operator's retry fetches
-    # the fact again, then the step runs (brief, D33) (brief, D39).
+def stale_notify() -> dict[str, Any]:
+    """The refund with a look-up, and `notify`, started by a rule once the review is answered, on
+    a status at most a day old."""
     definition = with_rule(on={"answered": "review"}, then={"start": ["notify"]})
     definition["rules"]["flag_large"]["when"] = None
     definition["steps"]["check_order"] = {
@@ -432,6 +431,14 @@ def test_a_rules_start_never_waits_for_a_refresh() -> None:
         "automatic": False,
         "requires": ["check_order"],
     }
+    return definition
+
+
+def test_a_rules_start_never_waits_for_a_refresh() -> None:
+    # A refresh lands with no person in it, so a rule's start that waited for one could bring a
+    # loop round with nobody in between. It needs attention instead; an operator's retry fetches
+    # the fact again, then the step runs (brief, D33) (brief, D39).
+    definition = stale_notify()
     looked_up = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}
     stale = [later("3d"), APPROVED_40]
     run = run_case(definition, file=SMALL, answers=stale, people=PEOPLE, activities=looked_up)
@@ -453,6 +460,68 @@ def test_a_rules_start_never_waits_for_a_refresh() -> None:
         retried.history
     )
     assert "notify#1 done, giving status from system:orders" in retried.history
+
+
+def noticed_when_notify_starts(definition: dict[str, Any]) -> dict[str, Any]:
+    """`definition` with a rule that marks `noticed` each time a run of `notify` starts."""
+    definition["milestones"]["noticed"] = {"display": {"title": "Notify started"}}
+    definition["rules"]["notice"] = {
+        "display": {"title": "Notice the notification"},
+        "on": {"started": "notify"},
+        "then": {"reach": ["noticed"]},
+    }
+    return definition
+
+
+def test_a_retried_run_that_never_started_fires_started_when_it_starts() -> None:
+    # A run that failed before it started (a rule's start on a stale fact) starts for the first
+    # time when the operator's retry schedules it: it is the same run, but it starts now, so
+    # `started` fires then, once (brief, D38, as amended in 11b). Before the tutor review's fix,
+    # it never fired, and a rule on it never heard of the run an operator rescued.
+    definition = noticed_when_notify_starts(stale_notify())
+    looked_up = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[later("3d"), APPROVED_40, retry("notify#1", "omar")],
+        people=PEOPLE,
+        activities=looked_up,
+    )
+    assert "notify#1 failed" in " ".join(run.history)
+    noticed = [line for line in run.history if line.startswith("notice#")]
+    assert noticed == ["notice#1 on started notify: reaching noticed"]
+    assert run.history.index(noticed[0]) > run.history.index(
+        next(line for line in run.history if line.startswith("scheduled notify#1"))
+    )
+
+
+def test_a_retry_of_a_run_that_started_fires_nothing() -> None:
+    # notify#1 was scheduled, so it started, and `started` fired; its activity then failed. The
+    # operator's retry runs the same run again: it starts nothing again (brief, D26) (brief, D38).
+    definition = noticed_when_notify_starts(stale_notify())
+    tried: list[str] = []
+
+    def lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        tried.append(inputs["order_id"])
+        if len(tried) == 2:  # the first look-up is check_order's, the second notify's
+            raise ConnectionError("the orders system is down")
+        return {"status": "delivered"}
+
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[APPROVED_40, retry("notify#1", "omar")],
+        people=PEOPLE,
+        activities={"orders.lookup@2": lookup},
+    )
+    assert "omar retried notify#1 as operations" in run.history
+    assert run.history.count("notify#1 done, giving status from system:orders") == 1
+    assert [line for line in run.history if line.startswith("notice#")] == [
+        "notice#1 on started notify: reaching noticed"
+    ]
+    assert run.history.index("notice#1 on started notify: reaching noticed") < run.history.index(
+        "omar retried notify#1 as operations"
+    )
 
 
 def test_a_rule_starts_a_step_once_per_decision() -> None:
@@ -1392,6 +1461,34 @@ def closable(definition: dict[str, Any], *roles: str) -> dict[str, Any]:
     """`definition` with the guide's `duplicate` close reason ("Closing a case"), for `roles`."""
     reason = {"display": {"title": "Duplicate request"}, "roles": list(roles)}
     return definition | {"close_reasons": {"duplicate": reason}}
+
+
+def test_a_loop_of_one_rule_says_it_starts() -> None:
+    # The tutor's probe: one rule restarts the review on every answer. Its message agrees with
+    # one rule, "send_back starts review", as with several, "check_review and send_back start".
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["review"]["repeatable"] = True
+    definition["rules"] = {
+        "send_back": {
+            "display": {"title": "Send the review back"},
+            "on": {"answered": "review"},
+            "then": {"start": ["review"]},
+        }
+    }
+    looping = "send_back starts review again on every answer, and nothing ends it: refund "
+    assert [i for i in issues(definition) if i.code == "NEVER_CLOSES"] == [
+        Issue(
+            "rules.send_back.then.start",
+            "NEVER_CLOSES",
+            looping + "has no close reason, and closes_when never closes it, so nothing but a "
+            "forget request could close it: give one of the rules a when that ends the loop",
+        )
+    ]
+    warned = [i.message for i in issues(closable(definition, "support"))]
+    assert warned == [
+        looping + "closes only through a close reason or closes_when: give one of the rules a "
+        "when that ends the loop"
+    ]
 
 
 def test_a_loop_a_close_can_end_is_warned() -> None:

@@ -1078,6 +1078,12 @@ be erased on request), has size limits, and a second copy of business records go
   rule whose moment can never come, or comes only once every `closes_when` milestone is reached,
   is an error (`NEVER_FIRES`). D7's "rules that can never fire" stays a warning only where it
   depends on values.
+- **Amended 2026-10-18, in layer 11b** (adds to "a retry is the same run", above, and to 11a's
+  "a retried run starts nothing"): a run starts once. One that failed before it started (a rule's
+  start on a stale fact, an input refused) hasn't, so when an operator's retry runs it, it starts
+  for the first time, and `started` fires then, once. A retry of a run that had already started
+  is the same run, and fires nothing. Why: 11e's timers `since` a start and 11g's `sla` from a
+  step's latest start (D7) would otherwise miss the run an operator had to rescue.
 
 ### D39. Rules that start steps: the engine proposes, and an untrusted condition can't choose what is sent
 

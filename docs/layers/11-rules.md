@@ -13,7 +13,9 @@ before building, then reviewed (fidelity, truth, proofs, style), which left thre
 for the user, answered "Go" the same day, taken as the recommendations (see 11b, "Decided after the
 review"); 11b built, slices 0–6, and its Promises table checked against the tests, the same day;
 then three code reviews, whose fixes were built test-first (see 11b, "From the code review", "From
-the second review" and "From the third review"), with two questions left for the user.
+the second review" and "From the third review"), with two questions left for the user; the tutor
+review answered both, and its three items were built test-first the same day (see 11b, "From the
+tutor review").
 
 ## What this layer is for
 
@@ -297,7 +299,9 @@ Each starts with its negative test, seen failing for the right reason.
 
 - **A retried run starts nothing again** (slice 1), as D38 says; and neither does a run that
   failed before it started (an input refused), when an operator retries it: it is the same run,
-  and `started` fires only for a new one.
+  and `started` fires only for a new one. *(Amended in 11b, 2026-10-18: a run that failed before
+  it started fires `started` when its retry runs it, its first start; see 11b, "From the tutor
+  review", and D38's amendment.)*
 - **Firings cross continue-as-new from slice 1,** not slice 6: the guard on the carried state
   (`test_a_carried_state_reads_back_as_it_was`) failed as soon as the state had a new field.
   Slice 6 kept its Temporal test, seen failing with firings left out.
@@ -677,6 +681,14 @@ Built in 11c, with its own section, Promises and tutor review. What the session 
 - Stopping steps, `cancellable` workflows and the one place that stops children (11c); events and
   `set` (11d); timers (11e); the renderer and `simulate` (11f); patterns and warnings (11g).
 - Option a inside a plan's own transitions (left open, doors row 31).
+- Three paths carried to layer 12 (from the tutor review), beside 10b's G1 replay note ("Not in
+  10b"): on Temporal, a case open under 11a's code on a path 11b decides differently would replay
+  differently under the new code, and wait until the code is fixed (brief, D17). The paths: a
+  proposal on a stale fact, a proposal beside a failed run, and a condition reading an unset
+  untrusted field. Nothing runs in production before v1.0, so no case is open on one; layer 12
+  ("releases and changing open cases") is where a behaviour version stored with each case belongs.
+  No gating in 11b: `case` stays free of Temporal, and Temporal's `patched` in the driver wouldn't
+  reach what `decide` decides.
 - No new dependency.
 
 ### Seams the tests use
@@ -794,7 +806,8 @@ three, each fixed test-first, and one question for the user:
   claimed any more.
 - **Left for the user:** a run that failed before it started, retried, fires no `started`
   moment (11a's "a retried run starts nothing again"). 11b makes that retry the way a rule's
-  failed start goes on, so a rule on `started` never hears of that run.
+  failed start goes on, so a rule on `started` never hears of that run. *(Answered by the tutor
+  review: it fires; see "From the tutor review".)*
 
 ### From the second review
 
@@ -835,6 +848,7 @@ refute it. 27 findings, 18 kept (three were one bug). Each fix landed test-first
   is fixed (brief, D17). The fixture replays because its path is decided the same way, so its
   promise says only that. Gating the changed paths (Temporal's `patched`, or a version stamped in
   the state when a case opens) would keep them; changing open cases is layer 12's subject.
+  *(Answered by the tutor review: no gating; carried to layer 12, see "Not in 11b".)*
 
 ### From the third review
 
@@ -853,6 +867,25 @@ finding): none, but the fixes left gaps, closed test-first:
   who proposed it; a rule's start replacing a person's withdrawn proposal; each half of
   `NEVER_STARTS`'s exception on a step's own start; `NEVER_REFRESHED` for a step a rule starts.
   Each was a promise that a reverted fix would have broken with every test still passing.
+
+### From the tutor review
+
+The tutor review (at `18edafd`) found nothing that must change but one wording slip, and answered
+the two questions; the user agreed with both answers, 2026-10-18. Built test-first:
+
+- **The loop's verb agrees with its rules:** `send_back starts review again on every answer`, and
+  `check_review and send_back start …` only when several rules are named. The guide's example
+  names two rules, so its table already read right.
+- **Cases open at deployment:** no gating; the three changed paths are carried to layer 12 ("Not
+  in 11b").
+- **`started` fires the first time a run really starts,** whether admission, a proposal, a rule's
+  start or an operator's retry of a run that failed before it started starts it; a retry of a
+  run that had already started fires nothing. Recorded as a dated amendment to D38, which adds to
+  its "a retry is the same run" and to 11a's "a retried run starts nothing" (above, 11a's
+  "Decided while building"): the run is the same, but it starts for the first time. Why: 11e's
+  timers `since` a start and 11g's `sla` from a step's latest start (D7) would otherwise miss the
+  run an operator had to rescue. A run now records whether it has started (`StepRun.started`,
+  carried across continue-as-new; a state from before reads every run as started).
 
 ### Promises
 
@@ -875,8 +908,11 @@ says. Every test is in `tests/test_rules.py` unless said otherwise.
 | A rule's start is decided after an open approval follows the case file | `test_a_rules_start_sees_the_approvals_that_stand` |
 | A new proposal replaces a withdrawn one's record, either way: the person whose check the rule read may approve a run a person proposed, and a person whose proposal was withdrawn may approve the rule's | `test_a_new_proposal_replaces_a_withdrawn_one` |
 | A plan step a rule starts carries the rule's untrusted sources into its plan | `test_a_plan_step_a_rule_starts_carries_what_the_rule_read` (`tests/test_plan_step.py`) |
-| A retried plan keeps who may approve nothing in it, the person who proposed it included, and is refused again on what the rule read | `test_a_retried_plan_keeps_who_may_not_approve_in_it`, `test_a_plan_step_a_rule_starts_carries_what_the_rule_read` (`tests/test_plan_step.py`) |
+| A retried plan keeps who may approve nothing in it, the person who proposed it included, and is refused again on what the rule read | `test_a_retried_plan_keeps_who_may_not_approve_in_it` (`tests/test_plan_step.py`), `test_a_plan_step_a_rule_starts_carries_what_the_rule_read` (`tests/test_plan_step.py`) |
 | A retried activity keeps who may not approve it: the person whose answer the rule read, and who proposed it | `test_a_retried_run_keeps_who_may_not_approve_it` |
+| A run that failed before it started fires `started` once, when an operator's retry schedules it | `test_a_retried_run_that_never_started_fires_started_when_it_starts` |
+| A retry of a run that failed after it started fires nothing | `test_a_retry_of_a_run_that_started_fires_nothing` |
+| Whether a run has started crosses continue-as-new | `test_a_waiting_start_crosses_continue_as_new` (`tests/test_temporal_case.py`) |
 | While a failed rule or run holds the close, what is refused names it | `test_a_failed_rule_holding_the_close_is_named` |
 | A person's proposal of a step whose start already waits is refused, and the first proposer still can't approve its run | `test_a_second_proposal_of_a_waiting_step_is_refused` (`tests/test_fresh_facts.py`) |
 | A rule's start beside a failed run is refused | `test_a_rule_starts_nothing_beside_a_failed_run` |
@@ -911,6 +947,7 @@ says. Every test is in `tests/test_rules.py` unless said otherwise.
 | A rule's record is kept with a run that fails before it starts: the retry is still refused on its inputs, and still excludes | `test_a_rules_record_survives_a_start_that_fails` |
 | A moment a check doesn't know is refused, never read as the opening | `test_an_unknown_moment_fails_closed` |
 | `answered` counts as waiting for its task for `MAY_BE_UNSET` and `SET_AFTER` | `test_answered_waits_for_its_task` |
+| A loop of one rule says it `starts` its step; several rules `start` theirs | `test_a_loop_of_one_rule_says_it_starts`, `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
 | A loop nothing in the case can end is `NEVER_CLOSES`; the same loop a close reason or `closes_when` can close is `LOOPS_UNTIL_CLOSED`, beside a misspelt close role; a loop a refused start ends, or only a person's proposal enters, gets neither | `test_a_loop_of_starts_never_closes`, `test_a_loop_a_close_can_end_is_warned`, `test_a_loop_a_requirement_ends_gets_no_issue` |
 | `NEVER_CLOSES` says only a forget request could close the case, or, with no forgetting, that nothing could | `test_the_guides_table_is_what_validate_case_says` (`tests/test_case_validation.py`), `test_never_closes_says_nothing_could_without_forgetting` (`tests/test_case_validation.py`) |
 | What isn't claimed: a writer started only on the reader's own moment gives `MAY_BE_UNSET`, a cycle through `started` nothing | `test_what_rules_that_start_steps_dont_claim` |

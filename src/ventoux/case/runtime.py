@@ -480,7 +480,7 @@ def answer_approval(
     # A rejection is an outcome: the step doesn't run (brief, D23).
     entry = next_entry(state, approval.step)
     proposal_spent(state, approval.step)  # the proposed run is over
-    state.runs.append(StepRun(entry, approval.step, "rejected"))
+    state.runs.append(StepRun(entry, approval.step, "rejected", started=False))
     state.history.append(f"{entry} won't run: {event.by} rejected {approval.entry}")
 
 
@@ -1156,10 +1156,16 @@ def coming_run(
     latest = latest_run(state, name)
     if latest is not None and latest.status == "retrying":
         latest.status = status
+        # The same run, so it starts nothing again (brief, D26) (brief, D38); but one that failed
+        # before it started starts now, for the first time: `started` fires once (brief, D38, as
+        # amended in 11b).
+        if status != "failed" and not latest.started:
+            latest.started = True
+            state.moments.append(f"started {name}")
         return latest
-    run = StepRun(next_entry(state, name), name, status)
+    run = StepRun(next_entry(state, name), name, status, started=status != "failed")
     state.runs.append(run)
-    if status != "failed":  # a run that fails before it starts never started
+    if run.started:  # a run that fails before it starts never started
         state.moments.append(f"started {name}")
     return run
 

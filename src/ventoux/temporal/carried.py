@@ -43,6 +43,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
                 "refresh": run.refresh,
                 "excluded": dict(run.excluded),
                 "steered": [steering_as_data(steering) for steering in run.steered],
+                "started": run.started,
             }
             for run in state.runs
         ],
@@ -137,6 +138,9 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
                 # None in a state from before layer 11b: no plan run kept what it started on.
                 dict(run.get("excluded", {})),
                 tuple(steering_from_data(steering) for steering in run.get("steered", [])),
+                # None in a state from before 11b: read as started, so a retry of such a run fires
+                # nothing, as it did when the state was written.
+                started=run.get("started", True),
             )
             for run in data["runs"]
         ],
