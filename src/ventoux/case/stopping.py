@@ -6,7 +6,7 @@ run is never stopped (brief, D17) (brief, D26). See docs/layers/11-rules.md (11c
 """
 
 from ventoux.case.admission import latest_run
-from ventoux.case.definition import CaseDefinition, PlanStep, WorkflowStep
+from ventoux.case.definition import CaseDefinition, PlanStep, TaskStep, WorkflowStep
 from ventoux.case.state import CLOSING, CancelWorkflow, CaseState, Command, StepRun, StopPlan
 from ventoux.core.catalog import Catalog
 
@@ -42,15 +42,15 @@ def stop_step(
         del state.waiting[latest.entry]
         state.history.append(f"cancelled {latest.entry}: stopped by {by}")
         return
-    if not stop_coming_run(state, name, by):
+    if not stop_coming_run(case, state, name, by):
         state.history.append(f"{said}: {name} not stopped: no run of {name} is going on")
 
 
-def stop_coming_run(state: CaseState, name: str, by: str) -> bool:
+def stop_coming_run(case: CaseDefinition, state: CaseState, name: str, by: str) -> bool:
     """Stop the run about to start, if there is one: its approval asked is withdrawn, the
-    approval given lapses, or a person's start waiting for a fact is dropped; and the run is
-    recorded `cancelled`, so the step doesn't start by itself again (brief, D25) (brief, D40).
-    Whether there was one. A refresh on its way for it still lands."""
+    approval given lapses, or a start waiting for a fact, a person's or the step's own, is
+    dropped; and the run is recorded `cancelled`, so the step doesn't start by itself again
+    (brief, D25) (brief, D40). Whether there was one. A refresh on its way for it still lands."""
     why = f"stopped by {by}"
     if (approval := state.approvals.pop(name, None)) is not None:
         del state.waiting[approval.entry]
@@ -59,7 +59,7 @@ def stop_coming_run(state: CaseState, name: str, by: str) -> bool:
     elif name in state.waiting_to_start:
         state.waiting_to_start.remove(name)
         state.given.pop(name, None)  # approved and waiting for its fact: it lapses too
-    elif state.given.pop(name, None) is None:
+    elif state.given.pop(name, None) is None and not waits_for_its_fact(case, state, name):
         return False
     entry = f"{name}#{sum(1 for run in state.runs if run.step == name) + 1}"
     state.runs.append(StepRun(entry, name, "cancelled", started=False))
@@ -113,3 +113,13 @@ def ask_to_stop(
         commands.append(StopPlan(run.entry, reason))
     elif isinstance(step, WorkflowStep) and catalog.workflow(step.workflow).cancellable:
         commands.append(CancelWorkflow(run.entry, reason))
+
+
+def waits_for_its_fact(case: CaseDefinition, state: CaseState, name: str) -> bool:
+    """Whether the step is about to start by itself, once a fact it needs fresh is fetched again:
+    it has never run, and a refresh of one of its facts is running (brief, D33)."""
+    step = case.steps[name]
+    if isinstance(step, TaskStep) or not step.automatic or latest_run(state, name) is not None:
+        return False
+    fetching = {state.refreshing[field] for field in step.max_age if field in state.refreshing}
+    return any(run.entry in fetching and run.status == "running" for run in state.runs)

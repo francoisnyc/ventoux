@@ -1379,3 +1379,36 @@ def test_a_retry_fetches_again_past_a_stopped_refresh() -> None:
         run.history[-1].startswith("pay#1 failed: ")
         and "check_order#3 was stopped" in (run.history[-1])
     )
+
+
+def test_a_stop_drops_a_step_waiting_for_its_own_fact() -> None:
+    # pay starts by itself once reviewed, three days on: its status is stale, so it waits for the
+    # look-up to fetch it again when a rule stops pay. Its coming run is recorded cancelled, so
+    # once the status lands, pay doesn't start by itself after all (brief, D33, D40).
+    definition = refund_fresh()
+    definition["rules"] = {
+        "stop_pay": {
+            "display": {"title": "Stop the payment on a second look-up"},
+            "on": {"started": "check_order"},
+            "when": {"exists": "approved_amount"},
+            "then": {"stop": ["pay"]},
+        }
+    }
+    run = run_case(
+        definition,
+        file=FILE,
+        answers=[
+            finish("check_order#1"),
+            later("3d"),
+            ("review", "approve", "ana", {"approved_amount": 80}),
+            finish("check_order#2"),
+        ],
+        people=PEOPLE,
+        held=["check_order"],
+    )
+    stopping = run.history.index("stop_pay#2 on started check_order: stopping pay")
+    assert run.history[stopping + 1 : stopping + 3] == [
+        "pay#1 cancelled: stopped by stop_pay#2",
+        "check_order#2 done, giving status from system:orders",
+    ]
+    assert not run.reached("pay") and run.closed
