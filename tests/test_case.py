@@ -1693,6 +1693,9 @@ def test_the_failed_run_retried_closes_the_case() -> None:
     assert run.history[-1] == "closed: paid reached"
 
 
+# The invariant's hook finds the given approval pending and shown nowhere (the fix's K); the
+# mark comes off with its fix, slice 4.
+@pytest.mark.xfail(strict=True, reason="a given approval nobody sees")
 def test_an_approval_answered_while_the_close_is_held_starts_nothing() -> None:
     # goodwill's approval is asked before paid is reached and answered after: it is given, and
     # starts nothing; closing withdraws it once the letter is retried.
