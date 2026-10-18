@@ -12,7 +12,7 @@ from typing import assert_never
 from ventoux.case.admission import latest_counted, requirements_met
 from ventoux.case.definition import CaseDefinition, TaskStep
 from ventoux.case.sequence import requirements
-from ventoux.case.state import CaseState
+from ventoux.case.state import CaseState, StepRun
 
 
 class Silent(AssertionError):
@@ -48,7 +48,9 @@ def unshown(case: CaseDefinition, state: CaseState) -> list[str]:
         if approval.entry not in state.waiting:
             silent.append(f"{approval.entry} is open, and waiting_for doesn't list it")
     for name, given in state.given.items():
-        if not fact_on_its_way(case, state, name) and not requirement_on_its_way(case, state, name):
+        if not fact_on_its_way(case, state, name) and not requirements_on_their_way(
+            case, state, name
+        ):
             silent.append(f"{given.entry} is given, and {name} waits for no fact or requirement")
     for name in state.waiting_to_start:
         if not fact_on_its_way(case, state, name):
@@ -57,13 +59,16 @@ def unshown(case: CaseDefinition, state: CaseState) -> list[str]:
 
 
 def retry_waits_for_its_own(case: CaseDefinition, state: CaseState, name: str) -> bool:
-    """Whether the step's retried run waits for its approval, asked and listed, or for its fact.
-    Admission reads `requires` before freshness, so a refresh helps a retry only once its
-    requirements are met (the note, decision 2)."""
+    """Whether the step's retried run waits for what can still let it start: its approval, asked
+    and listed; its fact, fetched again; or its requirements, on their way (the note, decision
+    2). Admission reads `requires` before freshness, so a refresh helps a retry only once its
+    requirements are met."""
     approval = state.approvals.get(name)
     if approval is not None and approval.entry in state.waiting:
         return True
-    return requirements_met(requirements(case)[name], state) and fact_on_its_way(case, state, name)
+    if requirements_met(requirements(case)[name], state):
+        return fact_on_its_way(case, state, name)
+    return requirements_on_their_way(case, state, name)
 
 
 def fact_on_its_way(case: CaseDefinition, state: CaseState, name: str) -> bool:
@@ -79,11 +84,16 @@ def fact_on_its_way(case: CaseDefinition, state: CaseState, name: str) -> bool:
     )
 
 
-def requirement_on_its_way(case: CaseDefinition, state: CaseState, name: str) -> bool:
-    """Whether a step the step requires, not completed, has a run still on its way, which the
-    case shows itself: open, running, failed or retried (the note, decision 5)."""
-    for required in requirements(case)[name]:
-        latest = latest_counted(state, required)
-        if latest is not None and latest.status in ("open", "running", "failed", "retrying"):
-            return True
-    return False
+def requirements_on_their_way(case: CaseDefinition, state: CaseState, name: str) -> bool:
+    """Whether some step the step requires hasn't completed, and each that hasn't has a run still
+    on its way, which the case shows itself: open, running, failed or retried. One that ended
+    without completing (cancelled, rejected) leaves nothing to wait for (the note, decisions 2
+    and 5)."""
+    unmet = [r for r in requirements(case)[name] if not requirements_met((r,), state)]
+    return bool(unmet) and all(on_its_way(latest_counted(state, r)) for r in unmet)
+
+
+def on_its_way(run: StepRun | None) -> bool:
+    """Whether a run is still on its way to completing, and shown: open in `waiting_for`, running,
+    failed in `needs_attention`, or retried by an operator."""
+    return run is not None and run.status in ("open", "running", "failed", "retrying")

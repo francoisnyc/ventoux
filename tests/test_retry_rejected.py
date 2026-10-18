@@ -185,15 +185,16 @@ def generated_case(seed: int) -> list[str]:
 
 
 # Seen failing on main, by the note's path (its table) at the first silent decision: each seed's
-# mark comes off with the slice that fixes its path (A and D in slice 2, C', F and I in slice 3,
-# K in slice 4). C and E' come only after another silent state, which stops the case first, so
-# their own tests are scripted, as are L and M, which need a refresh held across a person's act.
+# mark comes off with the slice that fixes its path (A and D in slice 2, C, E' and F in slice 3,
+# K in slice 4). L and M are scripted below: they need a refresh held across a person's act.
 SILENT_ON_MAIN = {
-    "A": {7, 79, 197, 229, 247, 254, 316, 384, 395, 440, 609, 638, 682, 762, 881},
+    "A": {7, 79, 197, 229, 247, 254, 316, 384, 394, 395, 440, 496, 541, 609, 638, 682, 762, 881},
     "D": {
+        16,
         31,
         32,
         50,
+        75,
         93,
         192,
         206,
@@ -207,14 +208,15 @@ SILENT_ON_MAIN = {
         598,
         654,
         673,
+        704,
         723,
         801,
         891,
         981,
     },
-    "C'": {16, 75, 313, 323, 369, 394, 451, 492, 496, 497, 541, 612, 704, 791, 858, 876, 907},
+    "C": {313, 369, 492, 497, 791},
+    "E'": {323, 876},
     "F": {71, 511},
-    "I": {73, 184, 340},
     "K": {393, 713, 753, 754},
 }
 
