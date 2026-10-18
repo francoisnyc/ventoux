@@ -7,9 +7,10 @@ sources are known in one pass (brief, D34) (brief, D36). See docs/layers/10-case
 
 from collections.abc import Collection, Mapping
 
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep, WorkflowStep
+from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
 from ventoux.case.types import case_types
 from ventoux.case.visibility import may_see, seen_by
+from ventoux.case.writers import case_sources
 from ventoux.core.before_activity import not_a_reference_to
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract, held_input
@@ -23,7 +24,6 @@ from ventoux.core.expressions import (
     check,
 )
 from ventoux.core.expressions.check import a_type
-from ventoux.core.output_sources import output_sources
 from ventoux.core.plan import Plan, set_by
 from ventoux.core.policy import OnlyFrom, Policy, refusal
 from ventoux.core.provenance import answering, fields_read, provenance
@@ -46,39 +46,6 @@ def what_to_do(policy: Policy) -> str:
     if isinstance(policy, OnlyFrom):
         return f"use a value {' or '.join(policy.systems)} gave"
     return "use a value a system or a person gave"
-
-
-def case_sources(
-    case: CaseDefinition, contracts: Mapping[str, Contract], opener: str
-) -> dict[str, frozenset[str]]:
-    """Where each value of `case` comes from, by the name an expression reads it with, when
-    `opener` opens it: the union of what each of its writers stamps (brief, D34)."""
-    # A field a task's form sets comes from whoever answers; any other, from the opening, which
-    # never gives a field a form sets.
-    answered: dict[str, set[str]] = {}
-    for name, step in case.steps.items():
-        if isinstance(step, TaskStep):
-            for outcome in step.outcomes.values():
-                for set_field in outcome.sets:
-                    answered.setdefault(set_field, set()).add(answering(name))
-    sources: dict[str, frozenset[str]] = {}
-    for name, field in case.fields.items():
-        writers = answered.get(name, {opener})
-        # A mark adds distrust, never removes it, whoever writes the field (brief, D12).
-        sources[name] = frozenset(writers | ({field.source} if field.source else set()))
-    for name, step in case.steps.items():
-        if isinstance(step, TaskStep):
-            sources[f"{name}.outcome"] = frozenset({answering(name)})
-        elif isinstance(step, PlanStep):
-            sources[f"{name}.outcome"] = frozenset({f"system:{step.plan}"})
-        elif name in contracts:
-            contract = contracts[name]
-            sources[f"{name}.outcome"] = frozenset({f"system:{contract.reference}"})
-            # An output carries its contract's source, never one the activity sends (brief, D29).
-            for output, source in output_sources(contract.output).items():
-                sources[f"{name}.{output}"] = frozenset({source})
-        # A step whose contract is missing gives nothing: reading it is already an issue (10b).
-    return sources
 
 
 def reference_issues(

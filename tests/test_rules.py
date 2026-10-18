@@ -321,6 +321,33 @@ def test_untrusted_data_cant_decide() -> None:
     assert not any("No concerns" in line for line in run.history)
 
 
+def test_an_unset_untrusted_field_still_cant_decide() -> None:
+    # The customer's notes are declared untrusted, and the case opens without them. The condition
+    # reads a field nobody has set: it still counts the sources any of its writers could give,
+    # here untrusted:customer, so it decides nothing (brief, D38) (brief, D39). Until 11b, the
+    # runtime skipped a field with no sources and reached the milestone, though validation said
+    # the rule never acts: the two now agree.
+    definition = with_rule(
+        on="opened",
+        when={"!": [{"exists": "notes"}]},
+        then={"reach": ["large"]},
+    )
+    definition["fields"]["notes"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's notes"},
+    }
+    run = run_case(definition, file={"order_id": "ord-1", "amount": 40}, answers=[], people=PEOPLE)
+    assert (
+        "flag_large#1 on opened: reaches nothing: its condition reads notes, from "
+        "untrusted:customer, and untrusted data can't decide"
+    ) in run.history
+    assert "reached large" not in run.history
+    assert [issue.code for issue in validate_case(parse_case(definition), CATALOG)] == [
+        "UNTRUSTED_TRIGGER"
+    ]
+
+
 def test_a_trusted_value_decides() -> None:
     # risk_score comes from system:kyc, which the KYC team's contract declares (brief, D29).
     run = run_case(

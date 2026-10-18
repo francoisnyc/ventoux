@@ -11,8 +11,9 @@ from ventoux.case.closing import close_held
 from ventoux.case.definition import CaseDefinition, Reached, Started
 from ventoux.case.state import CaseState, RuleFiring
 from ventoux.case.types import rule_problem
+from ventoux.case.writers import writers_of
 from ventoux.core.catalog import Catalog
-from ventoux.core.provenance import fields_read
+from ventoux.core.provenance import fields_read, is_trusted
 
 
 def said(moment: object) -> str:
@@ -59,7 +60,7 @@ def fire(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str, mo
         firing.status, firing.reason = "failed", str(unreadable)
         state.history.append(f"{entry} failed: {firing.reason}")
         return
-    act(case, state, firing, decided)
+    act(case, catalog, state, firing, decided)
 
 
 def read(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str) -> bool:
@@ -73,7 +74,9 @@ def read(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str) ->
     return when is None or holds(when, state.values, f"{name}'s condition")
 
 
-def act(case: CaseDefinition, state: CaseState, firing: RuleFiring, decided: bool) -> None:
+def act(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, firing: RuleFiring, decided: bool
+) -> None:
     """Do what the rule says, if its condition held and read only trusted values; say so either
     way."""
     firing.status, firing.reason = "done", ""
@@ -83,7 +86,7 @@ def act(case: CaseDefinition, state: CaseState, firing: RuleFiring, decided: boo
     # Untrusted data informs; it never decides. Reaching a milestone decides for the case, so a
     # condition reading an untrusted value stops it whatever it gave (brief, D38). The message
     # names the value and its source, never the value (brief, D30).
-    if (untrusted := untrusted_read(case, state, firing.rule)) is not None:
+    if (untrusted := untrusted_read(case, catalog, state, firing.rule)) is not None:
         state.history.append(
             f"{firing.entry} on {firing.moment}: reaches nothing: its condition reads {untrusted}, "
             "and untrusted data can't decide"
@@ -114,12 +117,21 @@ def nothing_decided(case: CaseDefinition, state: CaseState) -> str | None:
     return None
 
 
-def untrusted_read(case: CaseDefinition, state: CaseState, name: str) -> str | None:
-    """The first value the rule's condition reads from an untrusted source, said as
+def untrusted_read(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, name: str
+) -> str | None:
+    """The first value the rule's condition reads from a source the engine doesn't trust, said as
     `kyc.analyst_notes, from untrusted:llm`; None if it reads only trusted ones."""
     when = case.rules[name].when
+    could: dict[str, frozenset[str]] | None = None
     for field in [] if when is None else fields_read(when):
-        untrusted = sorted(s for s in state.sources.get(field, ()) if s.startswith("untrusted:"))
+        sources = state.sources.get(field)
+        if sources is None:
+            # Nobody has set it yet, so nothing recorded where it came from: it counts what any
+            # of its writers could give, never "no sources" (fail closed) (brief, D39).
+            could = could if could is not None else writers_of(case, catalog, state.opened_by)
+            sources = could.get(field, frozenset({f"no known source for {field}"}))
+        untrusted = sorted(source for source in sources if not is_trusted(source))
         if untrusted:
             return f"{field}, from {', '.join(untrusted)}"
     return None
@@ -133,4 +145,4 @@ def retry_rule(
     history's line for the retry, written once the condition is read."""
     decided = read(case, catalog, state, firing.rule)
     state.history.append(said)
-    act(case, state, firing, decided)
+    act(case, catalog, state, firing, decided)

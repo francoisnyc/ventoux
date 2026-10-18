@@ -68,6 +68,7 @@ from ventoux.case.state import (
 )
 from ventoux.case.types import expression_problem
 from ventoux.case.visibility import may_see, seen_by
+from ventoux.case.writers import OPENER
 from ventoux.core.approval import inputs_digest
 from ventoux.core.before_activity import (
     InputRefused,
@@ -96,8 +97,6 @@ from ventoux.core.roles import role_that_counts
 from ventoux.core.sensitive import Sensitive, plain
 from ventoux.core.sensitive_inputs import kept_sensitive, reads_sensitive
 
-# Where the case file's first values came from when a system opened the case (brief, D12).
-OPENER = "system:opener"
 # The outcome of an activity that did what it was asked, or of a plan that succeeded.
 DONE = "done"
 # The outcome of a plan step whose plan ended in a failed final state (brief, D28).
