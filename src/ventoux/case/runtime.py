@@ -497,6 +497,20 @@ def answer_approval(
             return
         state.given[approval.step] = GivenApproval(approval.entry, event.by, digest, approval.seen)
         return
+    latest = latest_run(state, approval.step)
+    if latest is not None and latest.status == "retrying":
+        # A rejected rescue resolves nothing: the failed run may or may not have acted, so it
+        # needs attention again, as the run it is, never a new one (brief, D17) (brief, D26).
+        latest.status = "failed"
+        latest.reason = (
+            f"{event.by} rejected {approval.entry}, the approval of its retry: retry it to ask "
+            "again, or close the case"
+        )
+        state.history.append(
+            f"{latest.entry} won't run: {event.by} rejected {approval.entry}, so it needs "
+            "attention again"
+        )
+        return
     # A rejection is an outcome: the step doesn't run (brief, D23).
     entry = next_entry(state, approval.step)
     proposal_spent(state, approval.step)  # the proposed run is over

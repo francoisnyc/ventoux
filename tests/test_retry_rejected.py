@@ -30,6 +30,7 @@ from ventoux.testing import (
     later,
     load_definition,
     propose,
+    retry,
     run_case,
     wrapped,
 )
@@ -138,10 +139,9 @@ def next_events(chance: random.Random, state: CaseState, at: int) -> list[Event]
     return events
 
 
-def generated_case(seed: int) -> list[str]:
+def generated_case(seed: int) -> CaseState:
     """Play one generated case of up to 25 turns, each an event or two days passing; the hook in
-    `conftest.py` checks the invariant after every decision. What was played, for the failure's
-    message."""
+    `conftest.py` checks the invariant after every decision. Where the case ended."""
     chance = random.Random(seed)  # a test's randomness, seeded: the engine reads none
     definition = generated_definition(
         fresh=chance.random() < 0.5,
@@ -181,43 +181,37 @@ def generated_case(seed: int) -> list[str]:
             played.append("  refused")
         except Silent as silent:
             raise Silent("\n".join([str(silent), *played])) from None
-    return played
+    return state
 
 
-# Seen failing on main, by the note's path (its table) at the first silent decision: each seed's
-# mark comes off with the slice that fixes its path (A and D in slice 2, C, E' and F in slice 3,
-# K in slice 4). L and M are scripted below: they need a refresh held across a person's act.
+def seeds(listed: str) -> set[int]:
+    """The seeds written in `listed`, separated by spaces: `"7 79 197"`."""
+    return {int(seed) for seed in listed.split()}
+
+
+# Silent before the fix, by the path of the note's table each seed is silent on now: its mark
+# comes off with the slice that fixes that path (C, E' and F in slice 3, K in slice 4). A seed
+# whose path is fixed may play on to another, as 229 did after A. L and M are scripted below:
+# they need a refresh held across a person's act.
 SILENT_ON_MAIN = {
-    "A": {7, 79, 197, 229, 247, 254, 316, 384, 394, 395, 440, 496, 541, 609, 638, 682, 762, 881},
-    "D": {
-        16,
-        31,
-        32,
-        50,
-        75,
-        93,
-        192,
-        206,
-        220,
-        333,
-        364,
-        486,
-        535,
-        554,
-        557,
-        598,
-        654,
-        673,
-        704,
-        723,
-        801,
-        891,
-        981,
-    },
-    "C": {313, 369, 492, 497, 791},
-    "E'": {323, 876},
-    "F": {71, 511},
-    "K": {393, 713, 753, 754},
+    "C": seeds("313 369 492 497 791"),
+    "E'": seeds("229 323 876"),
+    "F": seeds("71 511"),
+    "K": seeds("393 713 753 754"),
+}
+# The seeds that were silent on a path now fixed, with the line its fix writes: each must still
+# reach it, so a change to the generated cases can't drop the path unseen.
+FIXED = {
+    "A": (
+        seeds("7 79 197 229 247 254 316 384 394 395 440 496 541 609 638 682 762 881"),
+        "so it needs attention again",
+    ),
+    "D": (
+        seeds(
+            "16 31 32 50 75 93 192 206 220 333 364 486 535 554 557 598 654 673 704 723 801 891 981"
+        ),
+        "so it needs attention again",
+    ),
 }
 
 
@@ -238,6 +232,20 @@ def expected_to_fail(seed: int) -> Any:
 @pytest.mark.parametrize("seed", [expected_to_fail(seed) for seed in range(1000)])
 def test_generated_cases_show_what_is_pending(seed: int) -> None:
     generated_case(seed)
+
+
+@pytest.mark.parametrize("path", sorted(FIXED))
+def test_the_generated_cases_reach_the_paths(path: str) -> None:
+    # Each seed once silent on a fixed path now writes that fix's line; for D, while the close
+    # is held, after the audit reached the case's closes_when milestone.
+    found, line = FIXED[path]
+    still_silent = set().union(*SILENT_ON_MAIN.values())  # marked: they fail on another path
+    for seed in sorted(found - still_silent):
+        history = generated_case(seed).history
+        fixed = [i for i, said in enumerate(history) if line in said]
+        assert fixed, f"seed {seed} no longer reaches path {path}"
+        if path == "D":
+            assert "reached audited" in history[: fixed[0]], f"seed {seed}: the close isn't held"
 
 
 # --- Slice 1: the paths the generated cases can't reach, scripted ---
@@ -323,3 +331,69 @@ def test_a_proposal_waiting_when_the_close_is_held_is_dropped() -> None:
     ) in run.history
     assert run.state.waiting_to_start == []
     assert not any(line.startswith("scheduled pay") for line in run.history)
+
+
+# --- Slice 2: a rejected rescue goes back to failed ---
+
+
+def refund_retried(audited: bool = False) -> dict[str, Any]:
+    """The refund with a review that may be proposed again, and a close reason; `audited`: once
+    reviewed, an `audit` task reaches the case's only `closes_when` milestone."""
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    definition["close_reasons"] = {"duplicate": DUPLICATE}
+    if audited:
+        definition["milestones"] = {"audited": {"display": {"title": "Audited"}}}
+        definition["steps"]["audit"] = {
+            "kind": "task",
+            "display": {"title": "Audit the case"},
+            "roles": ["support"],
+            "requires": ["review"],
+            "outcomes": {"done": {"display": {"title": "Audited"}, "reaches": ["audited"]}},
+        }
+        definition["closes_when"] = ["audited"]
+    return definition
+
+
+def down_once(keys: list[str]) -> Any:
+    """A refund that fails on its first call, then pays; each call's key goes into `keys`."""
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        if len(keys) == 1:
+            raise ConnectionError("provider unreachable")
+        return {"refund_id": "refund-1"}
+
+    return refund
+
+
+# pay#1 fails paying 80, which needs no approval; the review is answered again for 250, and an
+# operator retries pay#1, which now asks for one.
+RESCUED = [
+    ("review", "approve", "ana", {"approved_amount": 80}),
+    propose("review", "ana"),
+    ("review#2", "approve", "ana", {"approved_amount": 250}),
+    retry("pay#1", "omar"),
+]
+REJECTED = [*RESCUED, ("pay.approval#1", "reject", "sam")]
+
+
+def test_a_rejected_retry_needs_attention_again() -> None:
+    # The bug's reproduction. The rescue's approval is rejected: the failure isn't resolved, since
+    # pay#1 may or may not have moved money, so it needs attention again, and there is no new run
+    # of pay (brief, D17, D26) (the note, decision 1).
+    run = run_case(
+        refund_retried(), FILE, REJECTED, PEOPLE, activities={"payments.refund@2": down_once([])}
+    )
+    assert (
+        run.history[-1]
+        == "pay#1 won't run: sam rejected pay.approval#1, so it needs attention again"
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: sam rejected pay.approval#1, the approval of its retry: retry it to ask "
+            "again, or close the case"
+        )
+    ]
+    assert [(r.entry, r.status) for r in run.state.runs if r.step == "pay"] == [("pay#1", "failed")]
+    assert run.status == "open"
