@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
@@ -353,6 +354,14 @@ def development_converter() -> DataConverter:
     reuse workflow IDs, and a case's key is never made twice (brief, D31)."""
     # Python: `mkdtemp` makes a new, empty directory under the system's temporary one.
     return data_converter(FileKeys(Path(tempfile.mkdtemp()) / "keys.json"))
+
+
+def fixture_converter(history: Path) -> DataConverter:
+    """Ventoux's data converter with the development key file recorded beside a history fixture
+    (`<name>.keys.json`), copied, so a fixture whose answers are sealed replays (brief, D31)."""
+    keys = Path(tempfile.mkdtemp()) / "keys.json"
+    shutil.copy(history.with_suffix(".keys.json"), keys)
+    return data_converter(FileKeys(keys))
 
 
 def load_definition(path: Path) -> dict[str, Any]:

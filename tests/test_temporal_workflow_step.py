@@ -50,6 +50,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentForget,
         DevelopmentPlans,
         development_converter,
+        fixture_converter,
         kyc_check,
         load_definition,
         run_case,
@@ -566,6 +567,18 @@ def test_a_case_history_with_its_workflow_type_changed_fails_replay() -> None:
     with pytest.raises(NondeterminismError):
         converter = development_converter()
         replay(checked_and_retried(converter), RetypedCases, converter)
+
+
+BEFORE_11C = Path(__file__).parent / "histories" / "before_11c_workflow_closed.json"
+
+
+def test_a_workflow_history_from_before_11c_replays() -> None:
+    # Recorded under 11b's driver: the check runs on through Ana's close, completes, and the case
+    # is flagged. 11c starts a workflow step so that it can be cancelled, which a step whose
+    # contract isn't cancellable never is, so the new worker replays it (brief, D29, D40). Ana's
+    # review is sealed with the case's key, kept beside the fixture.
+    history = WorkflowHistory.from_json("refund-1", BEFORE_11C.read_text())
+    replay(history, CasesWithKyc, fixture_converter(BEFORE_11C))
 
 
 def test_a_case_history_replays() -> None:

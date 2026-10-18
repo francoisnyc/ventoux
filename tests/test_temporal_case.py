@@ -68,6 +68,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentPlans,
         Outcome,
         development_converter,
+        fixture_converter,
         load_definition,
         run_case,
     )
@@ -1009,6 +1010,21 @@ def test_a_history_from_before_11b_replays() -> None:
     # (no form, no sensitive field), so it replays with no key.
     history = WorkflowHistory.from_json("refund-1", BEFORE_11B.read_text())
     replay(history, DevelopmentCases, development_converter())
+
+
+# --- Layer 11c: a history recorded before 11c still replays (brief, D17) ---
+
+BEFORE_11C = Path(__file__).parent / "histories" / "before_11c_plan_closed.json"
+
+
+def test_a_history_from_before_11c_replays() -> None:
+    # Recorded under 11b's driver: the refund's plan step waits for a team lead when Ana closes the
+    # case as a duplicate, so the case signals its child `stop` with no reason, and the plan ends
+    # cancelled. 11c gives the signal a reason whose default keeps that text, so the new worker
+    # replays it (brief, D28, D40). Ana's review is sealed with the case's key, so the
+    # fixture's development key is kept beside it, as a test server's would be.
+    history = WorkflowHistory.from_json("refund-1", BEFORE_11C.read_text())
+    replay(history, CasesWithPlans, fixture_converter(BEFORE_11C))
 
 
 # --- Layer 11b: a waiting start and a rule's record cross continue-as-new (brief, D27, D39) ---
