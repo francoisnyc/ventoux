@@ -8,7 +8,9 @@ day; 11a built, slices 0–7; Promises checked against the tests, 2026-10-17; th
 fix built test-first, and the Promises table names every test, the same day. 11b: the warm-up
 (learning question 32) answered "tell me", 2026-10-18; the mentor's review of the first proposal;
 the choices agreed in four groups the same day, all as recommended, one of them splitting 11b in
-two (see "The split").
+two (see "The split"); D39, the guides' 11b part and a draft Promises table written the same day,
+before building, then reviewed (fidelity, truth, proofs, style), which left three questions open
+for the user (see 11b, "Open").
 
 ## What this layer is for
 
@@ -19,7 +21,8 @@ customer high risk if the score is over 70". Layer 11 adds the **rule**: *when* 
 *if* a condition holds, *then* act on the case (brief, Simplifications, "one kind of rule"; D7).
 
 User-facing description: `docs/guides/cases.md`, "Rules" (11a's part written 2026-10-17, before
-building: the curriculum's "document first"); each later part adds to it. Decision: brief D38.
+building: the curriculum's "document first"); each later part adds to it. Decisions: brief D38
+(11a), D39 (11b).
 
 The `chartering` prototype is checked out in this session (`/home/user/chartering`, `197d519`). It
 splits rules into sentries, triggers and deadlines; drawn on below: `src/case/events.ts` (a
@@ -89,7 +92,7 @@ steps; it was split in two, so events, time, reading rules and patterns moved fr
 | Time as event data stamped from workflow time (D33); timers as pending work (D10), across continue-as-new (D27), on replay; staleness noticed by a timer (9d) | 11e |
 | Whether rules act once every `closes_when` milestone is reached (D34) | 11a (choice 7) |
 | What a close does to timers (D10: cancelled) | 11e |
-| `sla`, `reminder`, `four_eyes`, the renderer, teaching warnings, `ventoux simulate` | 11g, 11f, 11f, 11g, 11f (as in the table) |
+| `sla`, `reminder`, `four_eyes`, the renderer, teaching warnings, `ventoux simulate` | 11g, 11g, 11g, 11f, 11g, 11f (as in the table) |
 
 ---
 
@@ -398,46 +401,54 @@ Every test is in `tests/test_rules.py` unless said otherwise.
 
 ---
 
+
 ## 11b. Rules that start steps
 
 ### What this part is for
 
 A step starts by itself at most once; any other run needs a person to propose it (layer 8). That
-says "a person sends the review back", but not "when the check sends the review back, ask for it
-again": someone would have to remember to propose it. 11b lets a rule's `then` **start** steps:
-the engine proposes a run, as a person does, and admission decides. And it builds the half of
-design question 17 that 11a decided: a condition that lets a step start counts for its inputs'
-policies (brief, D38).
+says "a person sends the review back", but not "when the team lead sends the review back, ask
+for it again": someone would have to remember to propose it. 11b lets a rule's `then` **start**
+steps: the engine proposes a run, as a person does, and admission decides. And it builds the half
+of design question 17 that 11a decided: a condition that lets a step start counts for its inputs'
+policies (brief, D38, as D39 narrows it).
 
 The sketch, on the refund (the cases guide, "Rules that start steps"): a team lead checks each
 approved review, and a review sent back is asked again.
 
 ```json
 "rules": {
-  "check_review": {"display": {"title": "Check an approved review"},
+  "check_review": {"display": {"title": "Have an approved review checked"},
                    "on": {"answered": "review"},
                    "when": {"==": [{"var": "review.outcome"}, "approve"]},
-                   "then": {"start": ["check"]}},
+                   "then": {"start": ["lead_check"]}},
   "send_back":    {"display": {"title": "Send the review back"},
-                   "on": {"answered": "check"},
-                   "when": {"==": [{"var": "check.outcome"}, "send_back"]},
+                   "on": {"answered": "lead_check"},
+                   "when": {"==": [{"var": "lead_check.outcome"}, "send_back"]},
                    "then": {"start": ["review"]}}
 }
 ```
 
-`review` is repeatable; `check` is a task for `support-lead` that only the rule starts, whose
-`ok` reaches `checked`; `pay` also requires `checked`.
+`review` and `lead_check` are repeatable; `lead_check` is a task for `support-lead` that only a
+rule starts, whose `ok` reaches `lead_checked`; `pay` also requires `lead_checked`.
 
 ### How the session went
 
-The warm-up first (learning question 32, "tell me"; recorded in the log). The first proposal, all
-eleven choices in one message, went to a mentor review before the user answered (six lenses, a
-skeptic each; 77 findings kept, none refuted). It changed the proposal in four places: the moment
-(a task answered, not any step completing, which let a case loop with no person in it); option a
-as a separate check (merged, it loosened a policy); `stop` doing what a close does (it had left
-an approval standing); and a cancelled workflow always flagged. It also found three bugs in merged
-code, fixed in slice 0. The choices were then agreed in four groups, 2026-10-18, all as
-recommended, one of them splitting 11b in two: this part starts steps; 11c stops them.
+The warm-up first (learning question 32, "tell me"; recorded in the log), then a question: would a
+person have to write rules like these? No: they meet patterns through the builder, which expand
+into raw rules that `ventoux check` and the case map show (brief, D1, D7; layer 11g). The first
+proposal, all its choices in one message, went to a mentor review before the user answered. It
+changed four things: the moment (a task answered, not any step completing, which let a case loop
+with no person in it); option a as a separate check (merged, it loosened a policy); `stop` doing
+what a close does (it had left an approval standing); and a cancelled workflow always flagged. It
+also found three bugs in merged code, fixed in slice 0. The choices were then agreed in four
+groups, 2026-10-18, all as recommended, one of them splitting 11b in two: this part starts steps;
+11c stops them. A review of the drafts (fidelity, truth, proofs, style) then found three
+questions that need the user ("Open", below).
+
+Below, a choice the user agreed is unmarked; *(assistant's call)* marks what the assistant stated
+in the session without putting it as a question; *(added while drafting)* marks what came after
+the session, for the user to confirm with this note.
 
 ### Decided in the session
 
@@ -446,136 +457,187 @@ recommended, one of them splitting 11b in two: this part starts steps; 11c stops
 1. **A fourth moment, a task answered:** `{"answered": "<task>"}` fires each time a run of the task
    is answered, whatever the outcome, and names only a task. 11a set "a step answered" aside
    because a milestone says the same, but a milestone is reached once and `started` fires before
-   the answer exists, so a loop could never send work back twice. What brings a loop of rules
-   round again is then a person's answer (brief, design question 18). Set aside: `{"completed":
-   <step>}` for any step, which let `on completed pay, when declined, start pay` call the provider
-   for ever, with no person in between: a retry policy written by a case (brief, D17).
-2. **`start` is a proposal through admission** (row 10). `"then": {"start": ["check"]}`, a list of
-   step names like `reach`; the engine proposes, and admission decides as for a person: its
-   requirements, running or waiting for its approval, repeatable, its `when`, its fresh facts,
+   the answer exists, so a loop could never send work back twice. Set aside: `{"completed":
+   <step>}` for any step, with a runtime bound on how often rules start a step: `on completed
+   pay, when declined, start pay` would still call the provider again on each decline, up to the
+   bound, with no person in between: a retry policy written by a case (brief, D17). *Open:
+   whether every loop then comes round through a person ("Open", 1).*
+2. **`start` is a proposal through admission** (row 10). `"then": {"start": ["lead_check"]}`, a
+   list of step names like `reach`; the engine proposes, and admission decides as for a person:
+   its requirements, running or waiting for its approval, repeatable, its `when`, its fresh facts,
    its approval, its inputs; the close as in 11a. A start the engine can't make is never silent:
-   - **recorded, nothing runs:** the step's `when` is false; it is running or waiting for its
-     approval; it has run and isn't repeatable; its latest run needs attention;
+   - **recorded, nothing runs:** its `when` is false; it is running or waiting for its approval;
+     it has run and isn't repeatable; its latest run needs attention; and *(added while
+     drafting)*, following from "through admission": its requirements aren't met, or a start of
+     it already waits for a fact fetched again;
    - **waits:** a fact it needs fresh is stale and can be fetched again: accepted, the fact is
-     fetched, then everything is read again on the fresh value (the pending start);
+     fetched, then everything is read again on the fresh value (the waiting start);
    - **fails, needs attention,** as admission does: its condition can't be read, its contract is
      missing, an input is refused, a stale fact can't be fetched again.
+
    A person's proposal gets the same waiting start and the same refusal beside a failed run
-   (slice 0). A step a rule starts may leave out `proposed_by`, which keeps meaning which people
-   may propose it (row 10). Set aside: every refused start needing attention, which would fill the
-   operators' queue with ordinary "already running"s.
+   (slice 0). And the one loosening: a step a rule starts may leave out `proposed_by`, relaxing
+   layer 8's rule that a step that doesn't start by itself, or is repeatable, names it (its
+   reason, that nothing else could start it, no longer holds); `proposed_by` keeps meaning which
+   people may propose it, and with none, nobody may (row 10). Set aside: every refused start
+   needing attention, which would fill the operators' queue with ordinary "already running"s.
 3. **Who proposed, and who can't approve.** The proposer is the rule's entry (`send_back#1`), never
    a person. Whoever's answer the rule's `when` read can't approve the run it starts, as for a
    step's own `when` (brief, D11, D25). A rule remembers nothing, so the coming run keeps a record
    until it starts or is dropped: the rule's entry, those people, and the untrusted sources the
    `when` read; it crosses continue-as-new. The person whose answer only brought the moment is not
-   excluded: the same chain exists through `requires` (Sam proposes `check`, `pay` requires it,
-   Sam approves `pay`). Set aside: excluding them for rules only.
+   excluded: the same chain exists through `requires` (Sam proposes `check_order`, `pay` requires
+   it, and Sam may still approve `pay`). Set aside: excluding them for rules only.
 4. **Each decision ends** (row 11). A step a rule has started in a decision isn't started again by
    a rule in it, recorded: once 11c's `stop` can end a task's run inside a decision, two rules on
-   `started X`, one stopping it and one starting it, would loop. So a decision starts finitely many
-   runs: an event brings at most one `answered` moment, a milestone is reached once, and each step
-   gets at most one start from a rule, besides admission's and the event's own. Set aside:
-   refusing `stop` and `start` of one step anywhere in a definition, which shuts a later "restart".
+   `started X`, one stopping it and one starting it, would loop. *(Added while drafting: the
+   bounds, and where the guard sits.)* A decision then starts finitely many runs: the event brings
+   at most one `answered` moment and one run of its own; each milestone is reached once; each step
+   starts by itself at most once; each stale fact is fetched again at most once until its refresh
+   lands (brief, D33); each step has at most one waiting start, and one start by a rule. The guard
+   is read before admission's other refusals, so its line shows even for a step already running.
+   Set aside: refusing `stop` and `start` of one step anywhere in a definition, which shuts a later
+   "restart".
 
-**Untrusted data choosing what starts** (design question 17, option a; brief, D38):
+**Untrusted data choosing what starts** (design question 17, option a):
 
 5. **A separate check, and only untrusted sources count.** If the step's `when`, or the `when` of
    the rule that started it, read an untrusted (or unrecognised) source, each input whose policy
    refuses that source is refused, and the run fails naming the condition's field and source,
-   never the value. The input's own sources are checked as today. Never merged: merged, a literal
-   input would be credited with the condition's sources, and the guide's `NO_SOURCES` example
-   passed (the mentor's run). A plan step carries its condition's untrusted sources beside its
-   fields, never inside them. Set aside: counting every source the condition read, which refuses,
-   every time, an input taking a value from one system on a step whose `when` reads a person's
-   answer.
+   never the value. The input's own sources are checked as today. This narrows D38's "counts as
+   read by every input", which, taken as written, merges the sources: merged, an input given only
+   a literal would be credited with the condition's sources, so the plan field that `NO_SOURCES`
+   refuses today would pass (the mentor's run). A plan step carries its condition's untrusted
+   sources beside its fields, never inside them. Set aside: counting every source the condition
+   read, which refuses, every time, an input taking a value from one system on a step whose
+   `when` reads a person's answer.
 6. **The case-data guide's fresh refund moves to `orders.lookup@2`,** which declares `status` from
    `system:orders`: under option a, `@1`'s undeclared status would refuse `pay`'s inputs every
-   time. `@1` stays registered, and one test keeps showing that it refuses `pay`. The development
-   catalog gets no fake for `@2`: each test that runs it says what it returns, so an override left
-   on `@1` fails loudly instead of passing on a default.
+   time. `@1` stays registered, and one test keeps showing that it refuses `pay`. *(Added while
+   drafting:)* the development catalog gets no fake for `@2`: each test that runs it says what it
+   returns, so an override left on `@1` fails loudly instead of passing on a default.
 7. **A plan's own transitions are left open,** recorded in D39, under design question 17, in the
-   plans guide and in the doors note ("Found in 11b").
+   plans guide and as row 31 of the doors note.
 8. **A field a condition names that isn't set yet counts what any of its writers could give,**
    read from the definition with the real opener, as validation's sources are (fail closed). This
    corrects 11a's runtime (slice 0), where a rule on the opening with `!exists notes`, `notes` from
    `untrusted:customer`, reached its milestone though validation said it never acts.
-9. **An approval's `when` that read untrusted data asks anyway,** after being read as today (one
-   that can't be read stops the step: 11a's slice 3, "not acting is checked once the condition
-   could be read"); the history says why. `NEVER_REFRESHED` counts such an approval as always
-   needed. The forms test's order stays: the approval is asked, then the refused input fails.
-10. **Where the influence ends:** at the step the condition lets start; a rule on its start, or a
-    milestone its run reaches, may carry it further. D39 and the guide say so, and that a person
-    (an approval, a task) is the tool there; 11g's teaching warning will point at it.
+9. **An approval's `when` that read untrusted data asks anyway** *(assistant's call)*, after being
+   read as today: one that can't be read stops the step, as 11a's slice 3 has it ("not acting is
+   checked before acting, whatever the condition gave": the trust check runs once the condition
+   could be read). The history says why. `test_a_forms_values_land_in_the_case_file`
+   (`tests/test_case.py`) changes with it: its approval is now asked, and the refused input fails
+   once it is given; admission's order (approval, then inputs) stays. *(Added while drafting:)*
+   `NEVER_REFRESHED` counts such an approval as always needed.
+10. **Where the influence ends** *(assistant's call)*: at the step the condition lets start; a rule
+    on its start, or a milestone its run reaches, may carry it further. D39 and the guide say so,
+    and that a person (an approval, a task) is the tool there; 11g's teaching warning will point
+    at it *(added while drafting)*. *(Added while drafting:)* a rule that reaches a milestone and
+    reads untrusted data doesn't act at all, its starts included (D38: "it doesn't act").
 
-**Validation stays a proof** (brief, D34):
+**Validation stays a proof** (brief, D34; choices 11–16 are the assistant's call, stated in the
+session):
 
 11. **One answer to "who can start this step"**: it starts by itself, a person with a registered
     role proposes it, or a rule that can fire starts it; used by `can_happen`, `NEVER_RUNS`,
     `CLOSES_AT_OPENING` and the role checks (a misspelt `proposed_by` on a step a rule starts is
     still reported).
 12. **`NEVER_STARTS`** (error, at `rules.<name>.then.start`): a start refused every time the rule
-    fires, claimed only where proven: the rule fires on the opening and the step requires what the
-    opening can't reach, or the step requires what comes only after its own run. A step all of
-    whose starts are refused never runs (`NEVER_RUNS`); a step started only by a rule on its own
-    moment gets one issue, naming the circle, and no `NEVER_FIRES` beside it.
+    fires, claimed only where proven: the rule fires on the opening, its condition can't fail
+    there (a failed firing is retried later, on the case file as it is then), and the step
+    requires what the opening can't reach; or the step requires what comes only after its own
+    run. A step all of whose starts are refused never runs (`NEVER_RUNS`). *(Added while
+    drafting:)* a step started only by a rule on its own moment gets one issue, naming the circle,
+    and no `NEVER_FIRES` beside it.
 13. **`INPUT_POLICY` counts conditions:** at the step's input for its own `when`; at
-    `rules.<name>.then.start` for the rule's, through the same two openers (`OPENER_DECIDES` when
-    only one is refused), worded as a failure ("pay fails on its inputs every time this rule starts
-    it"); nothing at the rule when the step's input already has the issue.
+    `rules.<name>.then.start` for the rule's, worded as a failure ("pay fails on its inputs every
+    time this rule starts it"); nothing at the rule when the step's input already has the issue.
+    Who opens the case can't change it: the opener's source is trusted either way, so a condition
+    never gives `OPENER_DECIDES`.
 14. **`CLOSES_AT_OPENING`** counts a start by a rule on the opening (or one following it) when every
-    requirement of the step is among what the opening may reach; its message adds "or start one
-    from a rule on the opening".
-15. **Unknown moments fail closed:** the five places that read a moment (`rules.said`,
+    requirement of the step is among what the opening may reach; its message adds "start one from
+    a rule on the opening".
+15. **Unknown moments fail closed:** the places that read a moment (`rules.said`,
     `reach.moment_can_come`, the rule warnings, `never_fires`, the definition's name check) name
     every moment and refuse one they don't know, with a negative test.
-16. **`{"answered": "check"}` counts as waiting for `check`** for `MAY_BE_UNSET` and `SET_AFTER`.
-17. **A loop of starts:** `NEVER_CLOSES` (error) only when nothing could end it (no `when` on its
-    rules or steps, every step repeatable without an approval, no rule stopping it, entered in
-    every case, no reachable `closes_when`, no close reason with a registered role);
-    `CLOSED_ONLY_BY_A_PERSON` (warning) when a person or `closes_when` still can (brief, D10: "a
-    step that can always be restarted"). A later run counter bounds the loop, and the issue goes.
+16. **`{"answered": "lead_check"}` counts as waiting for `lead_check`** for `MAY_BE_UNSET` and
+    `SET_AFTER`.
+17. **A loop of starts:** `NEVER_CLOSES` (error) only when nothing in the case can end it, and
+    `LOOPS_UNTIL_CLOSED` (warning) when only a close reason or `closes_when` can (brief, D10: "a
+    step that can always be restarted"). *(Added while drafting, from the review's runs:)* "nothing
+    can end it" means: a loop that comes round on each answer, entered in every case, with no
+    `when` on its rules or steps, every requirement of its steps met whenever a rule of the loop
+    starts them (a refused start ends a loop), every step repeatable without an approval, and no
+    rule stopping it. A later run counter bounds the loop, and the issue goes (the doors note, row
+    11). The warning's name is the assistant's (the session named none).
 18. **`NEVER_CLOSES` says what it proves:** a forget request closes any case whose definition
     allows it (brief, D32), so the message says nothing but a forget request could close it.
-19. **What isn't claimed** is written down: a writer started only by rules on the reader's own
-    moment gives `MAY_BE_UNSET`, never `SET_AFTER`; a cycle through `started` may or may not loop,
-    depending on the order of events, and gets nothing.
+    *(Added while drafting:)* when its definition says `forgetting: never`, or no role that forgets
+    is registered, it says nothing could.
+19. **What isn't claimed** is written down *(added while drafting)*: a writer started only by rules
+    on the reader's own moment gives `MAY_BE_UNSET`, never `SET_AFTER`; a cycle through `started`
+    may or may not loop, depending on the order of events, and gets nothing.
 
 **And:**
 
-20. **The split:** 11b starts steps; 11c stops them (agreed below); events, time, reading rules and
+20. **The split:** 11b starts steps; 11c stops them (below); events, time, reading rules and
     patterns become 11d–11g.
-21. **D39,** drafted with this note; D38 keeps its text.
+21. **D39,** drafted with this note; D38 keeps its text, and D39 narrows it.
+
+### Open
+
+The review of the drafts found three questions only the user can answer:
+
+1. **A rule's start on a stale fact.** As agreed, it waits for the refresh. But a refresh lands
+   with no person in it, and the waiting start is then taken up: its run's `started` fires rules
+   that may start steps again. With reads slower than a `max_age`, two rules on `started` could
+   alternate for ever, each round waiting on a refresh, nobody in between: the loop choice 1 set
+   aside. Options: (a) *recommended:* a rule's start on a stale fact fails and needs attention, so
+   a person decides (an operator's retry refreshes it, as a retry does today), while a person's
+   proposal still waits; (b) it is recorded and nothing runs, which can quietly lose a start;
+   (c) it keeps waiting, the claim "a loop comes round through a person" is dropped, and a runtime
+   bound is added.
+2. **A person's proposal on a stale fact that can't be fetched again** (from a person, the
+   opening, a write, a workflow, a plan). Options: (a) *recommended:* refused, saying why, as a
+   proposal whose condition can't be read is refused today: the person is there to read it, and
+   nothing changes; (b) accepted, and it fails and needs attention, as a rule's start does.
+3. **A fourth bug, found by the truth review:** a person's proposal whose input is refused, whose
+   contract is missing, or whose high-risk step has no approval raises out of `decide` instead of
+   failing the step. In memory `run_case` raises; on Temporal the case's workflow task fails, the
+   report query times out, and the case stops deciding. Options: (a) *recommended:* fix it in
+   slice 0 (0d): the run fails and needs attention, as when the step starts by itself; (b) leave it
+   for its own pull request.
 
 ### Agreed for 11c, rules that stop steps
 
-Decided in this session, built in 11c (its own section, Promises and tutor review):
+Built in 11c, with its own section, Promises and tutor review. What the session settled:
 
-- **`stop` ends the run going on now; it doesn't keep the step from starting later** (row 3). A
-  list of step names now; an item may become `{"step": …, "<option>": …}` later, a plain name
-  keeping its meaning. A name that isn't a step is refused (row 1); so is one name in both `stop`
-  and `start` of a rule; inside one `then`: stop, then reach, then start. Stopping a step that
-  isn't repeatable means it never runs again; "never pay a high-risk customer" belongs in `pay`'s
-  `when`.
-- **What a close does, to one step.** An open approval is withdrawn and a given one lapses, and the
-  coming run is recorded `cancelled`; an open task is cancelled, saying why; a running activity
-  finishes, its run kept `running` with a "stop requested by …" marker, then ends `done`, its
-  outputs landing and its milestones reached, the case flagged (`pay#1 completed after stop_pay#1
-  asked to stop it`); one that fails after the stop needs attention; a plan gets D28's stop signal,
-  with a reason whose default keeps today's text; a failed run is never stopped. A run really
-  stopped ends `cancelled`, neither done nor failed (row 5); a stopped refresh counts for nothing,
-  and the step that needed it needs attention.
-- **One place stops every running child** (rows 2, 7, 8), used by closing and `stop`. A workflow
-  step is stopped by Temporal's cancellation if its contract declares `cancellable: true`, written
-  as three clauses its history shows (after a request it schedules nothing new; it ends only once
-  all it started has ended; it ends cancelled only if nothing it started completed after the
-  request), checked by the contract test; every stopped workflow that ends cancelled is flagged;
-  the driver waits for it (`WAIT_CANCELLATION_COMPLETED`); the reason names only the entry and the
-  rule; an undeclared `cancellable` leaves contract hashes as they are; closing cancels cancellable
-  workflow steps too. A workflow that doesn't declare it finishes, like an activity.
-- **On Temporal:** a history recorded under 11b's driver replays under 11c's; a child is never
-  cancelled twice; a run with a stop requested hasn't ended, and a stopped run's timers end with it
-  (row 19, for 11e).
+- **Agreed (group 2, A–C):** `stop` ends the run going on now and doesn't keep the step from
+  starting later; a repeatable step may be proposed or started again (row 3); a list of step names
+  now, an item may become `{"step": …, "<option>": …}` later, a plain name keeping its meaning. A
+  payment already running when the stop comes finishes, and the case records it as done (its
+  outputs land, its milestones are reached) and flags it for a person. A workflow step is stopped
+  by Temporal's cancellation only when its contract declares `cancellable: true`, the team's
+  promise, checked by a test; otherwise it runs to its end, like an activity; one that ends
+  cancelled after a stop is flagged for a person.
+- **Proposed in that group, not objected to:** an open approval is withdrawn and a given one
+  lapses, the coming run recorded `cancelled`; an open task is cancelled, saying why; one place
+  stops every running child, used by closing and `stop` (rows 2, 7, 8); `cancellable` written as
+  three clauses its history shows (after a request it schedules nothing new; it ends only once all
+  it started has ended; it ends cancelled only if nothing it started completed after the request);
+  `cancellable` left out of a contract's hash when false, declared or not, so existing hashes
+  don't change; closing cancels cancellable workflow steps too; a history recorded under 11b's
+  driver replays under 11c's; a child is never cancelled twice; a stopped refresh counts for
+  nothing; a failed run is never stopped; `stop` refuses a name that isn't a step (row 1); a run
+  really stopped ends `cancelled`, neither done nor failed (row 5).
+- **Temporal details, left to the assistant in the session:** the driver waits for a cancelled
+  child (`WAIT_CANCELLATION_COMPLETED`); a running activity keeps its run `running`, marked "stop
+  requested by …", until it ends; a plan's stop signal takes a reason whose default keeps today's
+  text, so old histories replay; a cancellation's reason names only the entry and the rule; a run
+  with a stop requested hasn't ended, and a stopped run's timers end with it (row 19, for 11e).
+- **Not discussed, to put to the user in 11c's session:** one name in both `stop` and `start` of a
+  rule refused; inside one `then`, stop, then reach, then start; the step that needed a stopped
+  refresh needing attention; one that fails after the stop needing attention.
 
 ### Where the code goes
 
@@ -584,9 +646,9 @@ Decided in this session, built in 11c (its own section, Promises and tutor revie
 - `case/rules.py`: `start`, its record, the per-decision guard; the trust check on what a
   condition reads, unset fields included.
 - `case/runtime.py`, `case/admission.py`: one gate for a person's proposal and a rule's start (the
-  pending start, refusal beside a failed run); the `answered` moment; the condition check before
+  waiting start, refusal beside a failed run); the `answered` moment; the condition check before
   scheduling and starting a plan.
-- `case/state.py`: the pending start and its record; the starts made by rules in the decision
+- `case/state.py`: the waiting start and its record; the starts made by rules in the decision
   (always empty between events, like `moments`).
 - `case/approvals.py`, `case/answers.py`: an approval asked anyway; exclusions from the record.
 - `core/before_activity.py`: the condition's untrusted sources, checked apart from the inputs'.
@@ -594,7 +656,7 @@ Decided in this session, built in 11c (its own section, Promises and tutor revie
   validation (`flow.case_sources` today), so neither depends on the other having run.
 - `case/reach.py`, `case/validate.py`, `case/warnings.py`, `case/registered.py`, `case/flow.py`:
   choices 11–19.
-- `temporal/carried.py`: the pending start crosses continue-as-new.
+- `temporal/carried.py`: the waiting start crosses continue-as-new.
 - `testing.py`, `contracts.lock.json`: `orders.lookup@2`.
 - The guides: cases ("Rules that start steps", the refusals, the codes), case data (the fresh
   refund, a proposal waiting), activities (`@2`), plans (the open half).
@@ -603,7 +665,7 @@ Decided in this session, built in 11c (its own section, Promises and tutor revie
 
 - Stopping steps, `cancellable` workflows and the one place that stops children (11c); events and
   `set` (11d); timers (11e); the renderer and `simulate` (11f); patterns and warnings (11g).
-- Option a inside a plan's own transitions (left open).
+- Option a inside a plan's own transitions (left open, doors row 31).
 - No new dependency.
 
 ### Seams the tests use
@@ -613,7 +675,7 @@ Decided in this session, built in 11c (its own section, Promises and tutor revie
 - `run_case(...)`: `history`, `needs_attention`, `waiting_for`, `closed`, `reached`; `propose`,
   `retry`, answers, `later`.
 - `validate_case(case, catalog)`: the issues above.
-- The Temporal test server: a pending start and a rule's record cross continue-as-new and replay;
+- The Temporal test server: a waiting start and a rule's record cross continue-as-new and replay;
   a history recorded before 11b, committed as a fixture, replays under the new worker.
 - The guides' examples, run as written.
 
@@ -621,13 +683,18 @@ Decided in this session, built in 11c (its own section, Promises and tutor revie
 
 Each starts with its negative test, seen failing for the right reason.
 
-0. **Three corrections, each in its own commit,** after recording the replay fixture under today's
+0. **The corrections, each in its own commit,** after recording the replay fixture under today's
    code:
-   - 0a. A proposal waits for its fresh facts. Negative: a proposed `pay` on a 3-day-old status is
-     not scheduled before `check_order#2`.
-   - 0b. Nothing starts beside a failed run. Negative: proposing `check_order` while
-     `check_order#1` needs attention is refused, and the operator's retry is scheduled.
+   - 0a. A proposal waits for its fresh facts. Negative: the fresh refund with `pay` made
+     `"automatic": false, "proposed_by": ["support"]`, proposed on a 3-day-old status, is not
+     scheduled before `check_order#2`.
+   - 0b. Nothing starts beside a failed run. Negative: with `check_order` repeatable, proposing it
+     while `check_order#1` needs attention is refused (today `check_order#2` is scheduled, and the
+     operator's retry of `check_order#1` is recorded but never scheduled), and the retry is
+     scheduled.
    - 0c. An unset untrusted field counts. Negative: the `!exists notes` rule reaches nothing.
+   - 0d, if the user agrees ("Open", 3). A proposal whose input is refused fails the step and the
+     case needs attention, instead of raising.
 1. **The shape.** Negative: `answered` naming a step that isn't a task, `start` naming what isn't a
    step, are refused when read; a step a rule starts reads without `proposed_by`.
 2. **Starting.** Negative: a rule's start of a step whose `when` is false runs nothing and says so.
@@ -637,7 +704,7 @@ Each starts with its negative test, seen failing for the right reason.
    condition's field. Then the rule's `when`, only untrusted sources counting, a plan step, an
    approval asked anyway, an unset field in a condition, `orders.lookup@2` and the fresh refund.
 4. **Validation.** Negative: `NEVER_STARTS`. Then choices 11–19, each shown with a run.
-5. **On Temporal.** The pending start and the record cross continue-as-new and replay; the fixture
+5. **On Temporal.** The waiting start and the record cross continue-as-new and replay; the fixture
    replays.
 6. **The guide and the promises.**
 
@@ -645,21 +712,20 @@ Each starts with its negative test, seen failing for the right reason.
 
 Drafted before building, from the choices above; each row's test is named here first and checked
 against the file before the pull request. Every test is in `tests/test_rules.py` unless said
-otherwise.
+otherwise. The rows for "Open" are added once the user answers.
 
 | Promise | Test that would fail |
 |---|---|
 | A proposal of a step whose fact is stale and can be fetched again waits for the refresh, then reads everything again | `test_a_proposal_waits_for_its_fresh_facts` (`tests/test_fresh_facts.py`) |
-| Nothing starts beside a failed run: a person's proposal is refused, and the operator's retry is scheduled | `test_nothing_starts_beside_a_failed_run` (`tests/test_case.py`) |
+| Nothing starts beside a failed run: a person's proposal of a repeatable step is refused, and the operator's retry is scheduled | `test_nothing_starts_beside_a_failed_run` (`tests/test_case.py`) |
 | A rule's condition naming an unset untrusted field doesn't act | `test_an_unset_untrusted_field_still_cant_decide` |
 | `answered` names only a task, and `start` only a step | `test_answered_names_a_task_and_start_a_step` |
-| A step a rule starts needs no `proposed_by`, and nobody may propose it | `test_a_step_only_a_rule_starts_is_proposed_by_nobody` |
+| A step a rule starts needs no `proposed_by`; with none, nobody may propose it | `test_a_step_only_a_rule_starts_is_proposed_by_nobody` |
 | `answered` fires on each answer, whatever the outcome | `test_answered_fires_on_each_answer` |
-| A rule's start whose `when` is false runs nothing, and says so | `test_a_start_whose_condition_is_false_runs_nothing` |
-| A start of a running step, one waiting for its approval, or one that has run and isn't repeatable is recorded, and nothing runs | `test_a_refused_start_is_recorded` |
+| A rule's start whose `when` is false, or whose requirements aren't met, runs nothing, and says so | `test_a_start_whose_condition_is_false_runs_nothing`, `test_a_start_whose_requirements_arent_met_runs_nothing` |
+| A start of a running step, one waiting for its approval or to start, or one that has run and isn't repeatable is recorded, and nothing runs | `test_a_refused_start_is_recorded` |
 | A rule's start beside a failed run is refused | `test_a_rule_starts_nothing_beside_a_failed_run` |
-| A rule's start on a stale fact waits for the refresh | `test_a_rules_start_waits_for_its_fresh_facts` |
-| A rule's start whose condition can't be read, or whose input is refused, needs attention | `test_a_start_that_cant_be_made_needs_attention` |
+| A rule's start whose condition can't be read, whose contract is missing, whose input is refused, or whose stale fact can't be fetched again needs attention | `test_a_start_that_cant_be_made_needs_attention` |
 | The rework loop runs as the guide shows | `test_the_guides_rework_loop_runs_as_shown` |
 | A step a rule started in a decision isn't started again by a rule in it | `test_a_rule_starts_a_step_once_per_decision` |
 | The proposer is the rule's entry, and whoever's answer its `when` read can't approve the run | `test_whoever_a_rules_condition_read_cant_approve_what_it_started` |
@@ -667,22 +733,26 @@ otherwise.
 | What the rule read is kept with the run: a value changed in between still excludes and still taints | `test_a_rules_record_outlives_the_case_file_changing` |
 | A step's untrusted `when` refuses an input whose policy refuses it, naming the field and source, never the value | `test_an_untrusted_condition_cant_choose_what_is_sent` |
 | A rule's untrusted `when` refuses the started step's input the same way | `test_a_rules_untrusted_condition_cant_choose_what_is_sent` |
-| Only untrusted sources count: a `when` reading a person's answer sends a value from one system | `test_a_trusted_condition_changes_nothing` |
+| Only untrusted sources count: an input taking a value from one system is sent when its step's `when` reads a person's answer | `test_a_trusted_condition_changes_nothing` |
 | A literal input is never credited with a condition's sources | `test_a_condition_never_vouches_for_a_literal` |
 | A plan step carries its condition's untrusted sources beside its fields | `test_a_plan_step_carries_its_conditions_sources` (`tests/test_plan_step.py`) |
+| A rule that reaches a milestone and reads untrusted data starts nothing either | `test_a_rule_that_cant_decide_starts_nothing` |
 | An approval whose `when` read untrusted data is asked whatever it gave, and says why; one that can't be read stops the step | `test_an_untrusted_approval_condition_asks_anyway` |
+| The forms test: the approval is now asked, and the refused input fails once it is given | `test_a_forms_values_land_in_the_case_file` (`tests/test_case.py`) |
 | `orders.lookup@1`'s undeclared status refuses the fresh refund's `pay`; `@2` runs it | `test_an_undeclared_status_cant_choose_a_payment` (`tests/test_fresh_facts.py`) |
+| The development catalog has no fake for `orders.lookup@2` | `test_a_contract_with_no_fake_fails_its_step` (`tests/test_fresh_facts.py`) |
 | Who can start a step counts rules: no `NEVER_RUNS` for a step a rule may start, and a misspelt `proposed_by` is still reported | `test_a_step_a_rule_may_start_can_run` (`tests/test_case_validation.py`) |
-| A start refused every time is `NEVER_STARTS`, and a step whose every start is refused never runs | `test_a_start_refused_every_time_is_never_starts` |
+| A start refused every time is `NEVER_STARTS`; a rule whose condition may fail at the opening gets none; a step whose every start is refused never runs | `test_a_start_refused_every_time_is_never_starts` |
 | A step started only by a rule on its own moment gets one issue | `test_a_step_started_only_on_its_own_moment_gets_one_issue` |
-| An untrusted condition gives `INPUT_POLICY` at the step and at the rule, through both openers | `test_input_policy_counts_conditions` (`tests/test_case_validation.py`) |
+| An untrusted condition gives `INPUT_POLICY` at the step and at the rule, whoever opens the case, and nothing at the rule when the step's input already has it | `test_input_policy_counts_conditions` (`tests/test_case_validation.py`) |
 | A rule on the opening that starts a step keeps the case from closing at once: no `CLOSES_AT_OPENING`, and the run waits | `test_a_step_a_rule_on_the_opening_starts_keeps_the_case_open` |
 | A moment a check doesn't know is refused, never read as the opening | `test_an_unknown_moment_fails_closed` |
 | `answered` counts as waiting for its task for `MAY_BE_UNSET` and `SET_AFTER` | `test_answered_waits_for_its_task` |
-| A loop nothing ends is `NEVER_CLOSES`; one a person can end is `CLOSED_ONLY_BY_A_PERSON` | `test_a_loop_of_starts_never_closes`, `test_a_loop_a_person_can_end_is_warned` |
-| `NEVER_CLOSES` says only a forget request could close the case | `test_the_guides_table_is_what_validate_case_says` (`tests/test_case_validation.py`) |
+| A loop nothing in the case can end is `NEVER_CLOSES`; the same loop a close reason or `closes_when` can close is `LOOPS_UNTIL_CLOSED`; a loop a refused start ends gets neither | `test_a_loop_of_starts_never_closes`, `test_a_loop_a_close_can_end_is_warned`, `test_a_loop_a_requirement_ends_gets_no_issue` |
+| `NEVER_CLOSES` says only a forget request could close the case, or, with no forgetting, that nothing could | `test_the_guides_table_is_what_validate_case_says` (`tests/test_case_validation.py`), `test_never_closes_says_nothing_could_without_forgetting` (`tests/test_case_validation.py`) |
+| What isn't claimed: a writer started only on the reader's own moment gives `MAY_BE_UNSET`, a cycle through `started` nothing | `test_what_rules_that_start_steps_dont_claim` |
 | An approval whose `when` always reads untrusted data is `NEVER_REFRESHED`'s "always needed" | `test_an_untrusted_approval_is_always_needed` (`tests/test_case_validation.py`) |
-| A pending start and a rule's record cross continue-as-new, and replay decides the same | `test_a_pending_start_crosses_continue_as_new` (`tests/test_temporal_case.py`) |
+| A waiting start and a rule's record cross continue-as-new, and replay decides the same | `test_a_waiting_start_crosses_continue_as_new` (`tests/test_temporal_case.py`) |
 | A history recorded before 11b replays under 11b's worker | `test_a_history_from_before_11b_replays` (`tests/test_temporal_case.py`) |
 | The runtime refuses what validation refuses, on nothing validation did | `test_an_untrusted_condition_cant_choose_what_is_sent`, `test_a_refused_start_is_recorded`: each calls only `run_case` |
 | No line or issue of 11b quotes a value from a case file | `test_no_start_line_or_issue_quotes_a_value` |

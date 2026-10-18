@@ -73,7 +73,8 @@ start now? That is **admission**:
 - its `requires` are met: each names a milestone the case has reached, or a step whose latest run
   is done;
 - its `when` holds, read from the case file;
-- it isn't running, and it hasn't run yet (or it is `repeatable`, and a person proposes it).
+- it isn't running, and it hasn't run yet (or it is `repeatable`, and a person proposes it or a
+  rule starts it).
 
 `sequence` is a shorthand: `["review", "pay"]` means `pay` requires `review`. The expansion is
 visible in `ventoux check`.
@@ -124,9 +125,9 @@ facts"). A step whose latest run needs attention isn't started again beside it (
 breaks").
 
 A **repeatable** step may run again, and only when proposed or started by a rule: it never starts
-itself a second time, or it would never stop. A task's `outcome` is then its latest answer, and a field its form sets
-holds the latest value (brief, D9). This is how a review is sent back for rework, with two keys
-added to `review`:
+itself a second time, or it would never stop. A task's `outcome` is then its latest answer, and a
+field its form sets holds the latest value (brief, D9). This is how a review is sent back for
+rework, with two keys added to `review`:
 
 ```json
 {"repeatable": true, "proposed_by": ["support"]}
@@ -149,7 +150,8 @@ as `0.1` is refused rather than guessed (brief, D20).
 ## Approvals in a case
 
 An approval guards a step, and is asked when the step is about to start: its requirements are
-met, its `when` holds, and the approval's own `when` holds now (`approved_amount > 100`).
+met, its `when` holds, and the approval's own `when` holds now (`approved_amount > 100`), or reads
+untrusted data, which can add an approval but never remove one ("Rules", below).
 
 **Someone else, computed** (brief, D11). Nobody lists who may not approve. Excluded are:
 whoever's answer flows into the step's inputs or its `when`, the person who opened the case, and
@@ -285,10 +287,11 @@ assert calls == ["memory/pay#1", "memory/pay#1"]
 assert retried.closed
 ```
 
-**Nothing starts beside a failed run.** While `pay#1` needs attention, proposing `pay` again is
-refused (`pay#1 needs attention: retry it, or close the case`), and so is a rule's start. A new
-run would get a new key, so a payment that went through before the failure could be made twice,
-and the failed run would be skipped by another name (brief, D17, D26).
+**Nothing starts beside a failed run.** Say `check_order` is `repeatable`. While `check_order#1`
+needs attention, proposing `check_order` again is refused (`check_order#1 needs attention: retry
+it, or close the case`), and so is a rule's start. A new run would skip the failed one by another
+name, and the operator's retry of it would never be scheduled; for a step with side effects, such
+as a payment, the new run's new key could make them happen twice (brief, D17, D26).
 
 ## Closing a case
 
@@ -535,72 +538,80 @@ flag_high_risk#1 on reached checked: not applied: checked is reached, so the cas
 ```
 
 **Rules that start steps.** A rule's `then` may `start` steps: the engine proposes a run, as a
-person does, and admission decides, exactly as for a person's proposal. This is how a case sends
+person does, and admission decides, as it does for a person's proposal. This is how a case sends
 work back by itself. Here a team lead checks each approved review of the refund, and a review
 sent back is asked again:
 
 ```json
 "rules": {
   "check_review": {
-    "display": {"title": "Check an approved review"},
+    "display": {"title": "Have an approved review checked"},
     "on": {"answered": "review"},
     "when": {"==": [{"var": "review.outcome"}, "approve"]},
-    "then": {"start": ["check"]}
+    "then": {"start": ["lead_check"]}
   },
   "send_back": {
     "display": {"title": "Send the review back"},
-    "on": {"answered": "check"},
-    "when": {"==": [{"var": "check.outcome"}, "send_back"]},
+    "on": {"answered": "lead_check"},
+    "when": {"==": [{"var": "lead_check.outcome"}, "send_back"]},
     "then": {"start": ["review"]}
   }
 }
 ```
 
 ```json
-"check": {
+"lead_check": {
   "kind": "task",
   "display": {"title": "Check the approved review"},
   "roles": ["support-lead"],
   "automatic": false,
+  "repeatable": true,
   "outcomes": {
-    "ok": {"display": {"title": "The review is right"}, "reaches": ["checked"]},
+    "ok": {"display": {"title": "The review is right"}, "reaches": ["lead_checked"]},
     "send_back": {"display": {"title": "Send it back for rework"}}
   }
 }
 ```
 
-`review` is `repeatable`, and `pay` also requires `checked`. Read aloud: when the review is
-approved, a team lead checks it; when the check sends it back, the review is asked again; the
-refund is paid once a check says the review is right.
+`review` and `lead_check` are `repeatable`, `lead_checked` is declared under `milestones`, like
+any other, and `pay` also requires `lead_checked`. Read aloud: when the review is approved, a team
+lead checks it; when the check sends it back, the review is asked again; the refund is paid once
+a check says the review is right.
 
 ```
 ana answered review#1 approve as support, setting approved_amount
-check_review#1 on answered review: starting check
-started check#1: waiting for ok or send_back by support-lead
-lea answered check#1 send_back as support-lead
-send_back#1 on answered check: starting review
+review#1 done
+check_review#1 on answered review: starting lead_check
+started lead_check#1: waiting for ok or send_back by support-lead
+lee answered lead_check#1 send_back as support-lead
+lead_check#1 done
+send_back#1 on answered lead_check: starting review
 started review#2: waiting for approve or reject by support
 ana answered review#2 approve as support, setting approved_amount
-check_review#2 on answered review: starting check
-started check#2: waiting for ok or send_back by support-lead
-lea answered check#2 ok as support-lead
-send_back#2 on answered check: its condition is false
-reached checked
+review#2 done
+check_review#2 on answered review: starting lead_check
+started lead_check#2: waiting for ok or send_back by support-lead
+lee answered lead_check#2 ok as support-lead
+lead_check#2 done
+reached lead_checked
+send_back#2 on answered lead_check: its condition is false
 ```
 
-`check` and `review` name no `proposed_by`: a step a rule starts needs none, and `proposed_by`
-still names which people may propose it. Proposing `check` is refused: `check is started only by
-a rule: nobody proposes it`.
+`lead_check` names no `proposed_by`: a step a rule starts needs none, and `proposed_by` still
+names which people may propose it, so proposing `lead_check` is refused: `lead_check is started
+only by a rule: nobody proposes it`. Here `review` has none either, so only the rule sends it
+back; keep `"proposed_by": ["support"]` from above to let support send it back by hand too.
 
 **The engine proposes; admission decides.** The proposer is the rule's entry, `send_back#1`, never
-a person. Its start is checked like a person's proposal: the step's requirements, its `when`,
+a person. Its start is checked as a person's proposal is: the step's requirements, its `when`,
 whether it is running, its fresh facts, its approval and its inputs. A start the engine can't
 make is never silent:
 
-- **recorded, and nothing runs,** when the step's `when` is false; it is already running, or
-  waiting for its approval; it has run and isn't repeatable; or its latest run needs attention.
-  Without `repeatable` on `review`: `send_back#1 on answered check: review not started: review has
-  run, and is not repeatable`;
+- **recorded, and nothing runs,** when the step's requirements aren't met, or its `when` is false;
+  it is already running, waiting for its approval, or waiting to start; it has run and isn't
+  repeatable; or its latest run needs attention. Without `repeatable` on `lead_check`:
+  `check_review#2 on answered review: lead_check not started: lead_check has run, and is not
+  repeatable`;
 - **waiting,** when a fact it needs fresh is stale and can be fetched again: the fact is fetched,
   then everything is read again on the fresh value;
 - **failed, needing attention,** as when a step starts by itself: its condition can't be read,
@@ -625,20 +636,22 @@ address the case was opened with:
 "when": {"==": [{"var": "kyc.analyst_notes"}, "send welcome"]}
 ```
 
-Each input on its own is trusted, but the model chose that the letter is sent. So what a
-condition reads counts for the step's input policies, as if its inputs read it, and the run
-fails:
+Each input on its own is trusted, but the model chose that the letter is sent. So the untrusted
+sources a condition reads are checked against each input's policy, apart from what the input
+itself reads, and the run fails:
 
 ```
 welcome#1 failed: letters.draft@2 takes to_customer only from a system or a person, never from untrusted data, and welcome's condition reads kyc.analyst_notes (untrusted:llm)
 ```
 
-The same goes for the `when` of a rule that starts a step. Only untrusted sources count: `pay`'s
-`when` reads Ana's answer, and `pay` may still send a value only one system gives. An approval
-whose `when` reads untrusted data is asked whatever it says: untrusted data can add an
-approval, never remove one. The influence ends at the step the condition lets start: a rule on
-that step's start can carry it further, so where untrusted data should weigh on what happens
-next, let a person decide, in a task or an approval.
+The same goes for the `when` of a rule that starts a step. Only untrusted sources count: an input
+that takes a value from one system only, such as `ledger.record@1`'s amount (only from the
+opener), is still sent when its step's `when` reads a person's answer. An approval whose `when`
+reads untrusted data is asked whatever it says: untrusted data can add an approval, never remove
+one. A rule that reaches a milestone still reaches nothing on untrusted data (above), and starts
+nothing either: it doesn't act at all. The influence ends at the step the condition lets start: a
+rule on that step's start can carry it further, so where untrusted data should weigh on what
+happens next, let a person decide, in a task or an approval.
 
 **What the check says about rules.** `ventoux check` reads rules too: a milestone a rule may
 reach counts as reachable, every `when` taken as possibly true, but proves nothing about what is
@@ -651,8 +664,10 @@ is type-checked, and counts for the input policies of the steps it starts (`INPU
 |---|---|---|---|
 | `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
 | `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone reads, in its `when`, a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
-| `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: the step's requirements can't be met at the rule's moment | `start_pay can never start pay: it fires when refund opens, and pay requires checked, which can't be reached by then: start it on a later moment, or remove the requirement` |
-| `CLOSED_ONLY_BY_A_PERSON` | warning | rules start steps in a loop no condition ends, so the case closes only when a person closes it, or `closes_when` does | `check_review and send_back start check and review again and again, and no condition ends it: refund closes only when a person closes it: give one of the rules a when that ends the loop` |
+| `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: the step's requirements can't be met when the rule fires, and the rule's condition can't fail and be retried later | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
+| `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition or requirement ends (the rework rules above, with their `when`s removed), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
+
+The rework loop above gets no issue: its rules' `when`s end it.
 
 ## Testing a case
 
@@ -695,8 +710,8 @@ Anything the engine won't accept is refused, with the reason:
 | the approval was withdrawn | `pay.approval#1 was withdrawn: review started again` |
 | a proposed step's requirements aren't met | `check_order requires review, which hasn't completed` |
 | nobody proposes a step that starts by itself | `pay starts by itself: nobody proposes it` |
-| nobody proposes a step only a rule starts | `check is started only by a rule: nobody proposes it` |
-| the step's latest run needs attention | `pay#1 needs attention: retry it, or close the case` |
+| nobody proposes a step only a rule starts | `lead_check is started only by a rule: nobody proposes it` |
+| the step's latest run needs attention | `check_order#1 needs attention: retry it, or close the case` |
 | the opening gives a field a person sets | `approved_amount is set by a person in review, never given at the opening` |
 | the person retrying has no operating role | `pay#1 is retried by an operating role (operations), and ana has support` |
 | the run hasn't failed | `pay#1 has not failed: nothing to retry` |
@@ -932,8 +947,8 @@ nothing. Whatever is left out can never happen. The order steps are written in d
 case has no position.
 
 **What it can't see.** The check reads `requires`, `reaches`, who may propose or start a step and
-how the case closes. It treats every `when` as possibly true, and every outcome as possible. So it proves
-what can *never* happen, and says nothing about what depends on values:
+how the case closes. It treats every `when` as possibly true, and every outcome as possible. So it
+proves what can *never* happen, and says nothing about what depends on values:
 
 | The check proves | It can't tell, since it depends on values or people |
 |---|---|
@@ -949,8 +964,8 @@ what can *never* happen, and says nothing about what depends on values:
 |---|---|---|---|
 | `DEADLOCK` | error | steps wait on each other, so none of them can run | as above |
 | `NEVER_RUNS` | error | a step's requirements can never all be met, or no person or rule may start it | `approve can never run: it requires reviewed, which no step or rule reaches: reach reviewed from a step or a rule, or remove the requirement` |
-| `CLOSES_AT_OPENING` | error | no step starts by itself when the case opens, so it closes at once and every proposal is refused | `nothing starts by itself when claim opens, so it closes at once and every proposal is refused: let a step start by itself with nothing required, or add stays_open` |
-| `NEVER_CLOSES` | error | nothing in the case's work or its close reasons can close it: it stays open, or rules restart its steps in a loop nothing ends; no close reason names a registered role; and `closes_when` is empty or can never be met. Only a forget request would close it (the case data guide) | `claim stays open, none of its close reasons' roles (supprt) is registered, and closes_when never closes it, so nothing but a forget request could close it: name a registered role in a close reason` |
+| `CLOSES_AT_OPENING` | error | no step starts by itself, or is started by a rule, when the case opens, so it closes at once and every proposal is refused | `nothing starts by itself when claim opens, so it closes at once and every proposal is refused: let a step start by itself with nothing required, start one from a rule on the opening, or add stays_open` |
+| `NEVER_CLOSES` | error | nothing in the case's work or its close reasons can close it: it stays open, or, in every case, rules restart its steps in a loop nothing ends; no close reason names a registered role; and `closes_when` is empty or can never be met. If its definition allows forgetting and a role that forgets is registered, only a forget request would close it (the case data guide); otherwise nothing could | `claim stays open, none of its close reasons' roles (supprt) is registered, and closes_when never closes it, so nothing but a forget request could close it: name a registered role in a close reason` |
 | `CLOSE_UNREACHABLE` | warning | a `closes_when` milestone can never be reached | as above |
 | `UNREACHABLE_MILESTONE` | warning | no step, outcome or rule reaches a milestone, and nothing requires it | `no step or rule reaches reviewed: reach it from a step, an outcome or a rule, or remove it` |
 
@@ -1061,8 +1076,10 @@ who.
 
 **What decides that a step runs counts too** (brief, D38, D39). A step's `when`, or the `when` of
 the rule that starts it, decides whether its inputs are sent at all. If it reads untrusted data,
-each input whose policy refuses that data is refused, as if the input read it ("Rules", above).
-Only the untrusted sources count, so a `when` reading a person's answer changes nothing.
+each input whose policy refuses that data is refused ("Rules", above). The check is separate: the
+condition's sources are never added to the input's own, so a value written in the definition still
+comes from nobody. Only the untrusted sources count, so a `when` reading a person's answer changes
+nothing.
 
 A plan step is followed into its plan: each of the plan's fields comes from what the case gives
 it, and each activity in the plan is checked with that. Sending the estimate through

@@ -1,12 +1,12 @@
 # Checkpoint: doors left open
 
-Status: drafted 2026-10-17, after 11a was merged and before 11b, so that 11b–11d can check each of
-their choices against it, as 11a's choice 10 did. A draft, not the checkpoint: the checkpoint
-itself (each blocked row unblocked, or recorded in the brief as a deliberate limit) stays where
-the curriculum puts it, before layer 12. No decision is changed here. *Renumbered 2026-10-18, in
-11b's session:* 11b was split into 11b (rules that start steps) and 11c (rules that stop steps),
-so events, time, reading rules and patterns became 11d to 11g; the table and the sections below
-use the new letters. Two things found in 11b are added at the end.
+Status: drafted 2026-10-17, after 11a was merged and before 11b, so that 11b–11d (11b–11e, as
+renumbered below) can check each of their choices against it, as 11a's choice 10 did. A draft, not
+the checkpoint: the checkpoint itself (each blocked row unblocked, or recorded in the brief as a
+deliberate limit) stays where the curriculum puts it, before layer 12. No decision is changed here.
+*Renumbered 2026-10-18, in 11b's session:* 11b was split into 11b (rules that start steps) and 11c
+(rules that stop steps), so events, time, reading rules and patterns became 11d to 11g; the table
+and the sections below use the new letters. Two things found in 11b are added as rows 31 and 32.
 
 ## What this note is for
 
@@ -54,7 +54,7 @@ what reading Flowable's tests again turned up.
 | 11 | **Repetition, and its counter** | Running a plan item again each time its entry fires, or while a condition holds, with a counter each run can read; a maximum count. `model/RepetitionRule.java`; `tests/itemcontrol/RepetitionRuleTest.java`, `testSimpleRepeatingTask`, `testCustomCounterVariable` and `testPlanItemLocalVariables` (`repetitionCounter` 1, 2, 3); `tests/itemcontrol/PlanItemRepetitionMaxCountTest.java` | **Built in part:** `repeatable` runs again when proposed (layer 8); each run is named by its entry (`review#2`, D27), in history and keys. **11b:** a rule restarting a step (the rework loop). **Not planned:** reading the run count in a condition: an entry is not a value (D35: "nothing else is a value") | **No.** A run count as a value (`review.runs`) would be new in D35's list of values, read by nothing that exists. A maximum would be a new optional key | 11b: the termination argument (11a, choice 4: "a decision starts finitely many runs") must hold with `start`, and `NEVER_CLOSES` for "a rule that restarts a step for ever" is claimed only where nothing could stop it (no `when`), so a later counter can bound a restart without turning an error into a non-error |
 | 12 | **User event listeners** | A button a person presses ("Kill active tasks B") whose only effect is to fire sentries; it never becomes active work. `model/UserEventListener.java`; `tests/eventlistener/UserEventListenerTest.java`, `testCaseWithoutFiringTheEvent`; `PlanItemExitSentryTest.testExitSentryTerminatingActiveTaskB` | **11d:** declared events with a source (D12). Today a person acts only by answering, proposing or closing | **No** | 11d: a declared event says who may send it. Leave room for a person as the sender, with roles checked as for a close reason (D10, D22) and the source `person:`, rather than making the declaration name only a system |
 | 13 | **Signal, generic and intent event listeners** | Reacting to something sent from outside the case, through the API or a signal. `tests/eventlistener/SignalEventListenerTest.java`, `GenericEventListenerTest.java` and `IntentEventListenerTest.java`, each `testSimpleEnableTask` | **11d:** `on: {"event": …}`, one Temporal signal for events | **No** | 11d: one event shape, one signal: a kind of sender is data on the declaration, never a new signal per kind |
-| 14 | **Variable event listeners** | Reacting when a case variable is created or changed. `tests/eventlistener/VariableEventListenerTest.java`, `testTriggerVariableEventListenerOnUpdate` | **Not planned.** Not one of D38's three moments | **No:** a new moment ("a field set") is a decision recorded in D38, without changing the shape (11a, choice 10) | 11d: if `set` comes with a "field set" moment, the termination argument must still hold: a rule setting a field on a field being set can loop within one decision |
+| 14 | **Variable event listeners** | Reacting when a case variable is created or changed. `tests/eventlistener/VariableEventListenerTest.java`, `testTriggerVariableEventListenerOnUpdate` | **Not planned.** Not one of the moments (D38's three, D39's `answered`) | **No:** a new moment ("a field set") is a decision recorded in the brief, as D39 recorded `answered`, without changing the shape (11a, choice 10) | 11d: if `set` comes with a "field set" moment, the termination argument must still hold: a rule setting a field on a field being set can loop within one decision |
 | 15 | **Timer event listeners**, started by another item | A timer set when something happens ("5 days after B starts"), firing once. `model/TimerEventListener.java`; `tests/eventlistener/TimerEventListenerTest.java`, `testTimerExpressionDuration` and `testTimerStartTrigger`; `testDateExpression` (a timer at a date read from a variable) | **11e:** `on: {"after": "5d", "since": <moment>}` | **No** | 11e: `since` takes D38's moment shape (`"opened"`, `{"started": …}`, `{"reached": …}`), so a new moment (a stage completed, row 1) is a timer anchor at once, and a later anchor on a date in the case file is one more shape, not a new reading of an existing one |
 | 16 | **Repeating timers** (every hour, three times, cron) | A timer that fires again and again. `tests/itemcontrol/RepetitionRuleTest.java`, `testRepeatingTimer`, `testLimitedRepeatingTimer` and `testRepeatingTimerWithCronExpression` | **11e:** a timer that re-arms itself is `NEVER_CLOSES` (D10, D34). A repeating timer as such: **not planned.** Cron: **after v1.0**, since it needs a calendar and time zones, while time is whole seconds on events (D33) | **No** | 11e: `after` keeps meaning one firing. A repeat, if it comes, is its own key (an "every", with a count), never a new reading of `after`'s text; durations keep the one format the case uses (`30m`, `12h`, `1d`, D33) |
 | 17 | **Available conditions** on event listeners | A listener that listens only while a condition holds. `tests/eventlistener/TimerEventListenerTest.java`, `testTimerWithAvailableCondition`; `VariableEventListenerTest.testVariableEventListenerWithAvailableCondition`; `tests/listener/AvailableConditionTest.java` | **Built in effect** for rules: a rule's `when` is read at its moment (D38). **11e** for timers | **No** | 11e: say when a timer's `when` is read. D38 says "once the moment has come", which for a timer is its firing, on the case file then. A condition on *setting* the timer would be a second, explicit key later, not a change of when `when` is read |
@@ -71,6 +71,8 @@ what reading Flowable's tests again turned up.
 | 28 | **Lifecycle listeners, task listeners, script tasks** | Code in the model, run on transitions. `tests/listener/TaskListenerTest.java`; `tests/task/CmmnScriptTaskTest.java`, `testSimpleScript` | **Out of scope:** "code inside definitions (scripts, listeners)" (brief, "Out of scope for v1.0"; non-negotiables: definitions are data) | **Yes, on purpose:** a non-negotiable | — |
 | 29 | **Decision tasks** (DMN decision tables) | Deciding a value from a table of rules, as one plan item. `model/DecisionTask.java`; `engine/behavior/impl/DecisionTaskActivityBehavior.java` (its tests live in Flowable's DMN modules, not cloned) | **Built in effect:** an expression (D20) or a `compute` activity (D20: "logic that doesn't fit becomes a registered activity with `effect: compute`") | **No:** a decision table as data would be a new step kind or a contract, recorded in the brief | — |
 | 30 | **Due dates on tasks and cases** | A date by which a task or a case should be done, shown and queried. `tests/task/CmmnTaskDueDateTest.java`, `testDueDateTypes`; `tests/runtime/CaseInstanceDueDateAndClaimTest.java`, `testSetCaseInstanceDueDate` | **11e and 11g:** timers, and `sla` from a step's latest start (D7). A due date shown in the inbox: not planned | **No** | 11e: a timer set on a task's run is the place a later due date reads from, so a shown due date is a view of a timer, never a second clock |
+| 31 | **Ventoux's own, found in 11b:** untrusted data steering a plan's own transitions | Design question 17 began with a plan's transition reading an untrusted field (`llm_says_refund`). 11b builds option a for a case's steps: the untrusted sources a condition reads are checked against its step's input policies, apart from what each input reads (D38, D39) | **Open:** a plan's transitions are unchanged (D39) | **Not yet; from layer 12, yes:** applying option a to plans after definitions are published would refuse plans accepted today | The checkpoint decides it before layer 12, or records it in the brief as a deliberate limit |
+| 32 | **Ventoux's own, found in 11b:** an output's `system:<name>` checked against the registered systems | A reference naming an unregistered system is refused (D30), but a contract may declare an output from `system:kyc` with `kyc` unregistered (`kyc.check@1` does; `catalog.py` checks only `untrusted:` labels) | **Not checked** | **No:** checking it later refuses only contracts naming a system nobody registered | The checkpoint decides whether to check it before layer 12 |
 
 ## What 11b to 11e must not close off
 
@@ -153,15 +155,5 @@ checkpoint, not fixed here:
 
 ## Found in 11b, for the checkpoint
 
-Not Flowable's rows: two things in Ventoux itself that 11b's session found open.
-
-- **Untrusted data steering a plan's own transitions** (design question 17). 11b builds option a
-  for a case's steps: a condition that lets a step start counts, for its input policies, as read
-  by its inputs (brief, D38, D39). A plan's own transition reading untrusted data is unchanged and
-  left open. **Not blocked, but a door to watch:** applying option a to plans after layer 12
-  would refuse plans accepted today, so the checkpoint decides it before then, or records it as a
-  deliberate limit.
-- **An output's `system:<name>` is never checked against the registered systems.** A reference
-  naming an unregistered system is refused (brief, D30), but a contract may declare an output
-  from `system:kyc` with `kyc` unregistered (`kyc.check@1` does). **Not blocked:** checking it
-  later refuses only contracts that name a system nobody registered.
+Two rows (31 and 32) are not Flowable's: they are open in Ventoux itself, found in 11b's session.
+Row 31 is the one to watch: it is not blocked today, but it would be once plans are published.

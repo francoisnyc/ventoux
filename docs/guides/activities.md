@@ -383,9 +383,10 @@ To catch an edit made in place, the catalog hashes each contract (everything exc
 
 ## Development activities
 
-`ventoux.testing` ships four activities and one workflow, with fake implementations that touch no
-real system, the source labels `customer`, `document`, `email`, `llm` and `web`, and the systems
-`crm`, `documents`, `orders` and `policies`:
+`ventoux.testing` ships five activities and one workflow, with fake implementations that touch no
+real system (all but `orders.lookup@2`, which each test that runs it gives its own), the source
+labels `customer`, `document`, `email`, `llm` and `web`, and the systems `crm`, `documents`,
+`orders` and `policies`:
 
 | Activity | Effect | Risk | Input policies | Notes |
 |---|---|---|---|---|
@@ -396,8 +397,9 @@ real system, the source labels `customer`, `document`, `email`, `llm` and `web`,
 | `letters.draft@3` | write | low | `customer`: trusted only, a `crm` reference | the contract above; fetches the address itself, only drafts |
 | `kyc.check@1` (a workflow) | read | low | `customer_id`: trusted only | the contract above; its outputs as declared there |
 
-Only `orders.lookup@2` declares an output source: its `status` comes from `system:orders`.
-Every other output the development activities give is `untrusted:undeclared`, as their
+Of the development activities, only `orders.lookup@2` declares an output source: its `status`
+comes from `system:orders` (`kyc.check@1`, a workflow, declares its own, above). Every other output
+the development activities give is `untrusted:undeclared`, as their
 contracts were written before output sources existed. `orders.lookup@1` stays registered beside
 `@2`: declaring a source is a new version (brief, D29), which a case adopts by naming it.
 

@@ -429,8 +429,8 @@ its `when` or its approval's `when`:
 An age is a whole number and a unit: `30m` (minutes), `12h` (hours) or `1d` (days).
 
 `orders.lookup@2` declares where `status` comes from: the orders system (`system:orders`).
-`orders.lookup@1` declared nothing, so its status counted as untrusted (brief, D29), and `pay`,
-whose `when` reads it, would fail on its inputs every time: a value nobody vouched for would
+`orders.lookup@1` declares no source for `status`, so it is `untrusted:undeclared` (brief, D29), and
+`pay`, whose `when` reads it, would fail on its inputs every time: a value nobody vouched for would
 decide whether a payment is sent (the cases guide, "Untrusted data can't choose what is sent").
 
 `pay` reads the status only once the lookup is `done`: a lookup that gives `not_found` gives no
@@ -458,9 +458,9 @@ than its `max_age`:
   answer the task again (propose it, if it is repeatable), then retry the step; or close the
   case.
 
-A step a person proposes, or a rule starts, is held to the same: the proposal is accepted and
-waits while the fact is fetched again, then the step starts, or doesn't, on the fresh value. A
-proposal never runs a step on a stale fact.
+A step a person proposes, or a rule starts, whose stale fact can be fetched again waits the same
+way: the proposal is accepted, the fact is fetched again, then the step starts, or doesn't, on
+the fresh value. A proposal never runs a step on a stale fact.
 
 A fact is fetched again **once for each need**, never in a loop:
 
