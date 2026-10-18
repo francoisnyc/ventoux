@@ -508,6 +508,41 @@ def test_a_second_proposal_of_a_waiting_step_is_refused() -> None:
     assert str(refused_approval.value) == "lee proposed pay, so cannot approve it"
 
 
+def test_a_proposal_on_a_fact_that_cant_be_fetched_is_refused() -> None:
+    # A person's answer can't be fetched again: a proposal that would need it fresher is refused,
+    # saying why, and changes nothing (brief, D33) (brief, D39). It never waits for a refresh
+    # that can't come.
+    definition = proposed_pay()
+    definition["steps"]["pay"]["max_age"] = {"review.outcome": "1d"}
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            definition,
+            file=FILE,
+            answers=[
+                ("review", "approve", "ana", {"approved_amount": 80}),
+                later("3d"),
+                propose("pay", "ana"),
+            ],
+            people=PEOPLE,
+        )
+    assert str(refused.value) == (
+        "review.outcome was obtained 3 days ago, and pay needs it at most 1 day old: it came "
+        "from a person, so it can't be fetched again"
+    )
+
+
+def test_a_contract_with_no_fake_raises() -> None:
+    # `orders.lookup@2` has no development fake: a test that runs it says what it returns, so no
+    # test reads a status nobody chose (layer 11b).
+    with pytest.raises(LookupError, match="^no implementation of orders.lookup@2 is available$"):
+        run_any_case(
+            refund_fresh(),
+            file=FILE,
+            answers=[("review", "approve", "ana", {"approved_amount": 80})],
+            people=PEOPLE,
+        )
+
+
 def load_plan() -> dict[str, Any]:
     """The plans guide's `refund-order` plan, its first JSON block, as stored data."""
     guide = (ROOT / "docs" / "guides" / "plans.md").read_text()

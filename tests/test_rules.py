@@ -993,6 +993,34 @@ def test_what_rules_that_start_steps_dont_claim() -> None:
     ) in run.history
 
 
+def test_no_start_line_or_issue_quotes_a_value() -> None:
+    # What the case file holds reaches people who may not see it: start lines, failures and the
+    # check's messages name values, never quote them (brief, D30). The values are distinctive, so
+    # a quoted one would show; "send welcome" is what the model's notes say.
+    values = ["ord-77401", "77403", "77404", "c-77402", "send welcome"]
+    file = {"order_id": "ord-77401", "amount": Decimal(77403)}
+    reviewed = ("review", "approve", "ana", {"approved_amount": Decimal(77404)})
+    rework = [reviewed, ("lead_check", "send_back", "sam"), reviewed, ("lead_check", "ok", "sam")]
+    runs: list[tuple[dict[str, Any], dict[str, Any], list[Any], dict[str, Any]]] = [
+        (guide_rework(), file, rework, {}),
+        (endless_rework(), file, rework, {}),
+        (starting_at_opening("pay"), file, [], {}),
+        (only_a_rule_starts(requires=["pay"]), file, [reviewed], {}),
+        (
+            with_welcome(SAYS_SEND),
+            {**welcome_file(), **file, "email": "c-77402@example.com"},
+            [],
+            {"kyc.check@1": notes_say_send},
+        ),
+    ]
+    for definition, opened_with, answers, workflows in runs:
+        run = run_case(
+            definition, file=opened_with, answers=answers, people=PEOPLE, workflows=workflows
+        )
+        said = run.history + run.needs_attention + [i.message for i in issues(definition)]
+        assert not [line for line in said if any(value in line for value in values)]
+
+
 # --- Slice 1: reaching ---
 
 
@@ -1732,6 +1760,41 @@ def test_the_guides_rework_loop_runs_as_shown() -> None:
     )
     assert appears_in_order(shown(4), run.history)
     assert run.reached("pay") and run.closed
+
+
+def guide_says(line: str) -> bool:
+    """Whether the Rules section quotes `line` as code, line breaks aside."""
+    return f"`{line}`" in " ".join(RULES_SECTION.split())
+
+
+def test_the_guides_start_lines_are_what_the_engine_says() -> None:
+    approved = ("review", "approve", "ana", {"approved_amount": 40})
+    people = {**PEOPLE, "lee": ["support-lead"]}
+    # Without `repeatable` on lead_check, the rule's second start is refused, and recorded.
+    once = guide_rework()
+    once["steps"]["lead_check"]["repeatable"] = False
+    answers = [approved, ("lead_check", "send_back", "lee"), approved]
+    run = run_case(once, file=SMALL, answers=answers, people=people)
+    has_run = (
+        "check_review#2 on answered review: lead_check not started: lead_check has run, and is "
+        "not repeatable"
+    )
+    assert has_run in run.history and guide_says(has_run)
+    # The per-decision guard: the guide gives the end of its line.
+    guard = only_a_rule_starts()
+    guard["rules"]["again"] = guard["rules"]["flag_large"] | {"display": {"title": "Again"}}
+    run = run_case(guard, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    said = " not started: a rule already started it in this decision"
+    assert any(line.endswith(said) for line in run.history) and guide_says(f"… review{said}")
+    # The welcome letter on a model's notes, with the guide's condition.
+    run = run_case(
+        with_welcome(guide_json(5)["when"]),
+        file=welcome_file(),
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+    )
+    assert appears_in_order(shown(5), run.history)
 
 
 def guide_rules_table() -> list[tuple[str, str, str]]:

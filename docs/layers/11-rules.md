@@ -11,7 +11,7 @@ the choices agreed in four groups the same day, all as recommended, one of them 
 two (see "The split"); D39, the guides' 11b part and a draft Promises table written the same day,
 before building, then reviewed (fidelity, truth, proofs, style), which left three questions open
 for the user, answered "Go" the same day, taken as the recommendations (see 11b, "Decided after the
-review").
+review"); 11b built, slices 0–6, and its Promises table checked against the tests, the same day.
 
 ## What this layer is for
 
@@ -722,11 +722,60 @@ Each starts with its negative test, seen failing for the right reason.
    replays.
 6. **The guide and the promises.**
 
+### Decided while building
+
+- **What a condition's message says** (slice 3): the refusal names only the untrusted sources the
+  condition read (`welcome's condition reads kyc.analyst_notes (untrusted:llm)`), never the
+  trusted ones beside them.
+- **`NEVER_STARTS`, in two proven forms** (slice 4a, choice 12):
+  - a rule on `opened` with no `when` (a `when` may fail, and a retry reads the case file later)
+    starting a step that requires a step (nothing has completed as the case opens) or a milestone
+    no rule on the opening reaches. Only `opened` counts as the opening: a rule on a milestone a
+    rule on the opening reaches may fire later, if a step reaches it instead;
+  - a rule on the step's own moment: on its start, refused while it runs (unless the rule's
+    `when` may fail and the step is repeatable: the retry may come once it is done); on its
+    answer, refused when it isn't repeatable. This is how the note's "requires what comes only
+    after its own run" was read.
+- **One cause, one issue, for a start** (slice 4a): no `NEVER_STARTS` when the step never runs
+  for its own requirements (its `NEVER_RUNS` says why). When it never runs because nobody can
+  start it, both: the rule's `NEVER_STARTS`, and the step's `NEVER_RUNS` pointing at it (`fix
+  start_lead_check first`). That `NEVER_RUNS` says how the step starts ("only when proposed", "when
+  a rule starts it", or both), then why each can't; 10a's message is unchanged when no rule starts
+  the step. Its path is `steps.<name>.proposed_by` when it names roles, else `steps.<name>`.
+- **`UNTRUSTED_TRIGGER` only for a rule that reaches** (slice 4b): a rule that only starts steps
+  acts, so its condition counts for their inputs instead (11a gave it `UNTRUSTED_TRIGGER`, with a
+  message ending "never reaches " and nothing after). One that reaches and starts gets only
+  `UNTRUSTED_TRIGGER`, which now says it starts nothing either. `INPUT_POLICY` for a condition
+  says what to do as `UNTRUSTED_TRIGGER` does: read a value a person or a trusted system gives.
+- **Not claimed: a plan step's condition against its plan's activities** (slice 4b). The runtime
+  checks it (slice 3); validation claims less.
+- **A 10d test changed its own contracts** (slice 4b): the `NEVER_REFRESHED` test read
+  `draft.draft_id` and `note.entry_id`, both undeclared, in `pay`'s condition, so under option a
+  `pay` fails every run and the warning gave way to that error. The test's write and compute
+  contracts now declare those outputs (`letters.file@1`, `refunds.note@1`); no guide example
+  changed.
+- **One refusal of an unknown moment** (slice 4c), `rules.unknown_moment`, used by `said`,
+  `moment_can_come`, the rule warnings and `NEVER_FIRES`. The definition's name check has none:
+  the typed moment refuses an unknown one before it runs. The test reaches the others through
+  `validate_case` and `decide`; the warnings' refusal sits behind `moment_can_come`'s, so it is a
+  second guard, never alone under test.
+- **The loop of starts** (slice 4d, choice 17) lives in `case/loops.py`. "Surely starts again"
+  means a rule on a task's answer with no `when`, starting a repeatable task with no `when` that
+  requires nothing but the task just answered; "entered in every case" means a task of the loop
+  starts by itself, with no `when` and nothing required. A loop only a person's proposal enters
+  claims nothing: it may never be entered. Its `NEVER_CLOSES` is at the first rule's
+  `then.start`, and a case that stays open with nobody to close it is said once, loop or not.
+  Only `NEVER_CLOSES` keeps the close reasons' roles from being checked again, never the
+  warning.
+- **`NEVER_CLOSES`'s words** (choice 18): "nothing but a forget request could close it" when the
+  definition lets the case be forgotten while open (`allowed` or `while_open`) and a role that
+  forgets is registered; otherwise "nothing could ever close it".
+
 ### Promises
 
-Drafted before building, from the choices above; each row's test is named here first and checked
-against the file before the pull request. Every test is in `tests/test_rules.py` unless said
-otherwise.
+Drafted before building, from the choices above; each row's test was named here first, and the
+table was checked against the files after slice 6, 2026-10-18: every test it names exists where it
+says. Every test is in `tests/test_rules.py` unless said otherwise.
 
 | Promise | Test that would fail |
 |---|---|
@@ -763,13 +812,13 @@ otherwise.
 | `orders.lookup@1`'s undeclared status refuses the fresh refund's `pay`; `@2` runs it | `test_an_undeclared_status_cant_choose_a_payment` (`tests/test_fresh_facts.py`) |
 | Running `orders.lookup@2` with no implementation given raises, naming it: the development catalog has no fake for it | `test_a_contract_with_no_fake_raises` (`tests/test_fresh_facts.py`) |
 | Who can start a step counts rules: no `NEVER_RUNS` for a step a rule may start, and a misspelt `proposed_by` is still reported | `test_a_step_a_rule_may_start_can_run` (`tests/test_case_validation.py`) |
-| A start refused every time is `NEVER_STARTS`; a rule whose condition may fail at the opening gets none; a step whose every start is refused never runs | `test_a_start_refused_every_time_is_never_starts` |
+| A start refused every time is `NEVER_STARTS`, on the opening or on the step's own start; a rule whose condition may fail at the opening gets none; a step whose every start is refused never runs | `test_a_start_refused_every_time_is_never_starts` |
 | A step started only by a rule on its own moment gets one issue | `test_a_step_started_only_on_its_own_moment_gets_one_issue` |
-| An untrusted condition gives `INPUT_POLICY` at the step and at the rule, whoever opens the case, and nothing at the rule when the step's input already has it | `test_input_policy_counts_conditions` (`tests/test_case_validation.py`) |
+| An untrusted condition gives `INPUT_POLICY` at the step and at the rule, whoever opens the case, and nothing at the rule when the step's input already has it; a rule that also reaches gets only `UNTRUSTED_TRIGGER`, saying it starts nothing | `test_input_policy_counts_conditions` (`tests/test_case_validation.py`) |
 | A rule on the opening that starts a step keeps the case from closing at once: no `CLOSES_AT_OPENING`, and the run waits | `test_a_step_a_rule_on_the_opening_starts_keeps_the_case_open` |
 | A moment a check doesn't know is refused, never read as the opening | `test_an_unknown_moment_fails_closed` |
 | `answered` counts as waiting for its task for `MAY_BE_UNSET` and `SET_AFTER` | `test_answered_waits_for_its_task` |
-| A loop nothing in the case can end is `NEVER_CLOSES`; the same loop a close reason or `closes_when` can close is `LOOPS_UNTIL_CLOSED`; a loop a refused start ends gets neither | `test_a_loop_of_starts_never_closes`, `test_a_loop_a_close_can_end_is_warned`, `test_a_loop_a_requirement_ends_gets_no_issue` |
+| A loop nothing in the case can end is `NEVER_CLOSES`; the same loop a close reason or `closes_when` can close is `LOOPS_UNTIL_CLOSED`, beside a misspelt close role; a loop a refused start ends, or only a person's proposal enters, gets neither | `test_a_loop_of_starts_never_closes`, `test_a_loop_a_close_can_end_is_warned`, `test_a_loop_a_requirement_ends_gets_no_issue` |
 | `NEVER_CLOSES` says only a forget request could close the case, or, with no forgetting, that nothing could | `test_the_guides_table_is_what_validate_case_says` (`tests/test_case_validation.py`), `test_never_closes_says_nothing_could_without_forgetting` (`tests/test_case_validation.py`) |
 | What isn't claimed: a writer started only on the reader's own moment gives `MAY_BE_UNSET`, a cycle through `started` nothing | `test_what_rules_that_start_steps_dont_claim` |
 | An approval whose `when` always reads untrusted data is `NEVER_REFRESHED`'s "always needed" | `test_an_untrusted_approval_is_always_needed` (`tests/test_case_validation.py`) |
@@ -777,4 +826,4 @@ otherwise.
 | A history recorded before 11b replays under 11b's worker | `test_a_history_from_before_11b_replays` (`tests/test_temporal_case.py`) |
 | The runtime refuses what validation refuses, on nothing validation did | `test_an_untrusted_condition_cant_choose_what_is_sent` (`INPUT_POLICY` fails the run), `test_a_start_whose_requirements_arent_met_runs_nothing` (`NEVER_STARTS` runs nothing): each calls only `run_case` |
 | No line or issue of 11b quotes a value from a case file | `test_no_start_line_or_issue_quotes_a_value` |
-| The guides' refusals and codes are what the engine says | `test_the_guides_refusals_are_what_the_engine_says` (`tests/test_case.py`), `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
+| The guides' refusals, start lines and codes are what the engine says | `test_the_guides_refusals_are_what_the_engine_says` (`tests/test_case.py`), `test_the_guides_start_lines_are_what_the_engine_says`, `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
