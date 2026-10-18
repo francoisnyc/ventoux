@@ -17,7 +17,7 @@ the others go on only if a person happens to act (proposes the review again) wit
 
 | | Path | What happened |
 |---|---|---|
-| A | The retry's approval is rejected | recorded on a new entry, `pay#2 won't run`; `pay#1` stays `retrying` |
+| A | The retry's approval is rejected | recorded on a new entry, `pay#2 won't run`; `pay#1` stays `retrying`; and a repeatable step can then run again under a new key, since the rejection is now its latest run, while nobody knows what `pay#1` did |
 | D | The same, while the close is held by `closes_when` | the same, and the retried run holds the close for ever |
 | C | The retry's approval is withdrawn (a review proposed again), and the review is then rejected, so the step's `when` is false | admission drops the run with no line |
 | F | The retry's stale fact is fetched again, and the new value makes its `when` false | the same |
@@ -33,7 +33,8 @@ the others go on only if a person happens to act (proposes the review again) wit
    side effect may or may not have happened (D26), so the case can't close on it. `pay#1` needs
    attention again, saying its retry's approval was rejected; an operator retries it again,
    which asks again, or closes the case with a reason. The rejection is recorded on the
-   approval's entry, never on a new run of the step: there is no `pay#2`.
+   approval's entry, never on a new run of the step: there is no `pay#2`. It is the same run, so
+   whoever may not approve it still may not (D25, D39), and nothing starts beside it (D39).
    - history: `pay#1 won't run: sam rejected pay.approval#1, so it needs attention again`
    - needs attention: `pay#1: sam rejected pay.approval#1, the approval of its retry: retry it to
      ask again, or close the case`
@@ -71,6 +72,9 @@ the others go on only if a person happens to act (proposes the review again) wit
    replays (a fixture shows one). A history in which the case was later brought back does not:
    - A, D: someone sent `retry pay#1` again: it was refused before the fix (`has not failed`),
      and is now accepted and schedules `pay#1`;
+   - A: a repeatable step was proposed again, or started by a rule, after the rejection: before
+     the fix it ran as a new run (`pay#3`, with a new key); now the proposal is refused, and the
+     rule's start says `… pay not started: pay#1 needs attention: retry it, or close the case`;
    - C, E′, L: someone proposed the review again, and pay then ran on the run or approval that
      was kept: the fix asks a person first;
    - F: an event came once the status was stale again, and it was fetched again: the fix leaves
@@ -137,6 +141,20 @@ findings held. What changed because of them:
   main were found again.
 - **The sentence on a retry's approval** said what the runtime doesn't do (corrected above).
 
+## From the review of slice 2
+
+Two readers (the runtime; the tests against the note, by mutating the runtime in a copy), and a
+skeptic per finding; all eight held, each fixed in slice 2:
+
+- **Nothing tested the guard that tells a rescue from an ordinary rejection,** nor that a rescue
+  keeps who may not approve its run when it failed before it started (only its proposal records
+  them): each now has a test, seen failing with the guard dropped or the proposal spent.
+- **On main, a rejected rescue let a repeatable step run again under a new key:** row A and
+  decision 4 say so, and a test refuses the proposal now.
+- **The reach test could pass checking no seed, and couldn't tell A from D;** the marks' reason
+  said "seen silent on main" for a seed that moved path; two helpers returned `Any`; a loop
+  variable shadowed `seeds`; `pytest.raises` had no comment.
+
 ## Where the code goes
 
 - `case/runtime.py`: `answer_approval` sends a rejected retry back to `failed`; `admit` sends a
@@ -197,6 +215,8 @@ Drafted before building, to be checked against the files once built. Every test 
 | Generated cases on the refund leave nothing pending unshown, and still reach the paths they were seen failing on | `test_generated_cases_show_what_is_pending` (seen failing on main), `test_the_generated_cases_reach_the_paths` |
 | A rejected retry goes back to `failed`, needing attention, saying so; there is no new run | `test_a_rejected_retry_needs_attention_again` |
 | Retried again, it asks again, and pays once with the first run's key | `test_a_rejected_retry_retried_again_asks_again` |
+| It is the same run: whoever may not approve it still may not, though it failed before it started; and nothing starts beside it | `test_a_rejected_retry_keeps_who_may_not_approve_it` (seen failing with the proposal spent), `test_nothing_new_starts_beside_a_rejected_rescue` |
+| A rejection of a step that isn't being retried is an outcome, as before: a new run recorded rejected | `test_an_ordinary_rejection_is_not_a_rescue` (seen failing with the guard dropped) |
 | A rejected retry while the close is held keeps holding it, shown, and the case closes once it is retried to completion | `test_a_rejected_retry_holds_the_close_and_says_so` |
 | A retry whose `when` turns false, before or after its fact is fetched again, needs attention again, naming the condition and never a value | `test_a_retry_whose_condition_turns_false_needs_attention`, `test_a_retry_whose_refreshed_fact_turns_it_false_needs_attention` |
 | A retry whose requirement a rule stopped needs attention again, saying which; one whose requirement is still on its way (proposed again, or a failed refresh) waits, and runs once it completes | `test_a_retry_whose_requirement_was_stopped_needs_attention`, `test_a_retry_waits_for_a_requirement_on_its_way` |

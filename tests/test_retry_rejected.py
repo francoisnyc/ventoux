@@ -13,7 +13,7 @@ import pytest
 from invariants import Silent
 
 from ventoux.case.definition import parse_case
-from ventoux.case.memory import Driver, no_plans
+from ventoux.case.memory import Activity, CaseRun, Driver, no_plans
 from ventoux.case.state import Answered, CaseState, CloseAsked, Event, Opened, Proposed, Retried
 from ventoux.core.sensitive import Sensitive
 from ventoux.testing import (
@@ -217,12 +217,12 @@ FIXED = {
 
 
 def expected_to_fail(seed: int) -> Any:
-    """The seed as a test parameter, marked if it was seen failing on main, naming its path.
+    """The seed as a test parameter, marked if it is still silent, naming the path it is on now.
     pytest: `pytest.param` gives one seed a mark; `xfail(strict=True, raises=Silent)` expects the
     invariant's own failure, and fails the run if the seed passes, or fails any other way."""
-    for path, seeds in SILENT_ON_MAIN.items():
-        if seed in seeds:
-            reason = f"path {path}, seen silent on main"
+    for path, marked in SILENT_ON_MAIN.items():
+        if seed in marked:
+            reason = f"path {path}, silent until its slice fixes it"
             return pytest.param(
                 seed, marks=pytest.mark.xfail(strict=True, raises=Silent, reason=reason)
             )
@@ -241,12 +241,14 @@ def test_the_generated_cases_reach_the_paths(path: str) -> None:
     # is held, after the audit reached the case's closes_when milestone.
     found, line = FIXED[path]
     still_silent = set().union(*SILENT_ON_MAIN.values())  # marked: they fail on another path
-    for seed in sorted(found - still_silent):
+    checked = sorted(found - still_silent)
+    assert checked, f"no seed left to show path {path}"
+    for seed in checked:
         history = generated_case(seed).history
         fixed = [i for i, said in enumerate(history) if line in said]
         assert fixed, f"seed {seed} no longer reaches path {path}"
-        if path == "D":
-            assert "reached audited" in history[: fixed[0]], f"seed {seed}: the close isn't held"
+        held = "reached audited" in history[: fixed[0]]
+        assert held == (path == "D"), f"seed {seed}: the close is {'' if held else 'not '}held"
 
 
 # --- Slice 1: the paths the generated cases can't reach, scripted ---
@@ -356,7 +358,7 @@ def refund_retried(audited: bool = False) -> dict[str, Any]:
     return definition
 
 
-def down_once(keys: list[str]) -> Any:
+def down_once(keys: list[str]) -> Activity:
     """A refund that fails on its first call, then pays; each call's key goes into `keys`."""
 
     def refund(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -424,7 +426,8 @@ def test_a_rejected_retry_holds_the_close_and_says_so() -> None:
     definition = refund_retried(audited=True)
     held = [*RESCUED[:3], ("audit", "done", "ana"), RESCUED[3], ("pay.approval#1", "reject", "sam")]
 
-    def played(script: list[Any]) -> Any:  # each run with its own refund, down on its first call
+    # Each run with its own refund, down on its first call.
+    def played(script: list[Any]) -> CaseRun:
         return run_case(
             definition, FILE, script, PEOPLE, activities={"payments.refund@2": down_once([])}
         )
@@ -435,6 +438,7 @@ def test_a_rejected_retry_holds_the_close_and_says_so() -> None:
     )
     assert run.needs_attention[0].startswith("pay#1: sam rejected pay.approval#1")
     assert run.status == "open"
+    # pytest: `raises` fails the test unless the block raises ProposalRefused; `why.value` is it.
     with pytest.raises(ProposalRefused) as why:
         played([*held, propose("review", "ana")])
     assert "the case closes once pay#1 is retried, or a person closes it" in str(why.value)
@@ -451,3 +455,72 @@ def test_a_rejected_retry_can_be_closed() -> None:
     )
     assert "cancelled pay#1: closed as duplicate by omar" in run.history
     assert run.history[-1] == "closed: duplicate, by omar"
+
+
+def test_a_rejected_retry_keeps_who_may_not_approve_it() -> None:
+    # Lee proposes pay, which fails before it starts: its approval's condition reads a limit
+    # nobody has set. Its run keeps no exclusions of its own, so the proposal is what refuses Lee.
+    # A rejected rescue is the same run, so Lee still can't approve the next retry's approval
+    # (brief, D25, D26).
+    definition = refund_retried()
+    definition["fields"]["limit"] = {"type": "number", "display": {"title": "Limit"}}
+    definition["steps"]["set_limit"] = {
+        "kind": "task",
+        "display": {"title": "Set the limit"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"set": {"display": {"title": "Set"}, "sets": ["limit"]}},
+    }
+    pay = definition["steps"]["pay"]
+    pay |= {"automatic": False, "proposed_by": ["support"]}
+    pay["approval"]["when"] = {">": [{"var": "approved_amount"}, {"var": "limit"}]}
+    definition["stays_open"] = True  # nothing else keeps it open while pay waits to be proposed
+    people = {**PEOPLE, "lee": ["support", "support-lead"]}
+    script = [
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        propose("pay", "lee"),  # limit unset: pay#1 fails before it starts
+        propose("set_limit", "ana"),
+        ("set_limit", "set", "ana", {"limit": 100}),
+        retry("pay#1", "omar"),  # asks pay.approval#1
+        ("pay.approval#1", "reject", "sam"),
+        retry("pay#1", "omar"),  # asks pay.approval#2
+        ("pay.approval#2", "approve", "lee"),
+    ]
+    with pytest.raises(AnswerRefused, match="lee proposed pay, so cannot approve it"):
+        run_case(definition, FILE, script, people, activities={"payments.refund@2": down_once([])})
+
+
+def test_an_ordinary_rejection_is_not_a_rescue() -> None:
+    # A rejection of a step that isn't being retried is an outcome, as before: a new run of the
+    # step is recorded rejected, and nothing needs attention (brief, D23).
+    definition = refund_retried()
+    definition["steps"]["pay"] |= {"proposed_by": ["support"], "repeatable": True}
+    definition["stays_open"] = True
+    script = [
+        ("review", "approve", "ana", {"approved_amount": 80}),  # pay#1 pays, unapproved
+        propose("review", "ana"),
+        ("review#2", "approve", "ana", {"approved_amount": 250}),
+        propose("pay", "ana"),  # pay#2 asks its approval
+        ("pay.approval#1", "reject", "sam"),
+    ]
+    run = run_case(definition, FILE, script, PEOPLE)
+    assert run.history[-1] == "pay#2 won't run: sam rejected pay.approval#1"
+    assert [(r.entry, r.status) for r in run.state.runs if r.step == "pay"] == [
+        ("pay#1", "done"),
+        ("pay#2", "rejected"),
+    ]
+    assert run.needs_attention == []
+
+
+def test_nothing_new_starts_beside_a_rejected_rescue() -> None:
+    # Before the fix, the rejection was a new run, pay#2, so a repeatable pay could be proposed
+    # again and run under a new key while nobody knew what pay#1 did. Now pay#1 is its latest run,
+    # failed, and nothing starts beside a failed run (brief, D26, D39).
+    definition = refund_retried()
+    definition["steps"]["pay"] |= {"proposed_by": ["support"], "repeatable": True}
+    script = [*REJECTED, propose("pay", "ana")]
+    with pytest.raises(
+        ProposalRefused, match="^pay#1 needs attention: retry it, or close the case$"
+    ):
+        run_case(definition, FILE, script, PEOPLE, activities={"payments.refund@2": down_once([])})
