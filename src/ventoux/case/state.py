@@ -49,6 +49,9 @@ class StepRun:
     # Whether it has started: a run that failed before it started hasn't, and starts for the first
     # time when an operator's retry runs it (brief, D38, as amended in 11b).
     started: bool = True
+    # The rule's firing that asked to stop it while it runs, such as `withdraw#1`; empty if none.
+    # A run whose stop is asked hasn't ended: it runs on, and is never asked twice (brief, D40).
+    stop_requested: str = ""
 
 
 @dataclass

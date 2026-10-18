@@ -44,6 +44,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
                 "excluded": dict(run.excluded),
                 "steered": [steering_as_data(steering) for steering in run.steered],
                 "started": run.started,
+                "stop_requested": run.stop_requested,
             }
             for run in state.runs
         ],
@@ -141,6 +142,8 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
                 # None in a state from before 11b: read as started, so a retry of such a run fires
                 # nothing, as it did when the state was written.
                 started=run.get("started", True),
+                # None in a state from before 11c: no rule could stop a run.
+                stop_requested=run.get("stop_requested", ""),
             )
             for run in data["runs"]
         ],

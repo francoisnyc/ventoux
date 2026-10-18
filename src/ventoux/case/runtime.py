@@ -137,7 +137,7 @@ def decide(
     elif isinstance(event, PlanCancelled):
         plan_cancelled(state, event)
     elif isinstance(event, Retried):
-        retry(case, catalog, state, event)
+        retry(case, catalog, state, event, commands)
     elif isinstance(event, Shown):
         record_shown(case, catalog, state, event)
     elif isinstance(event, ForgetApproved):
@@ -157,7 +157,7 @@ def decide(
         stop_plans(case, state, commands)
     # Moments left because the case is no longer open: each rule on them says it wasn't applied
     # (brief, D38).
-    fire_rules(case, catalog, state)
+    fire_rules(case, catalog, state, commands)
     left_unstarted(case, state)  # none is taken up once the case no longer decides (brief, D38)
     state.started_by_rules.clear()
     settle(case, state)
@@ -507,15 +507,22 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     state.obtained[f"{run.step}.outcome"] = Obtained(event.at, run.entry)  # by this run
     if event.outcome != DONE:
         state.history.append(f"{run.entry} gave {event.outcome}")
-        if state.phase == "closing":
-            flag(state, f"{run.entry} completed after the close was requested")
+        flag_if_stopping(state, run)
         return  # a step's milestones are reached only when it is done with `done`
     given = {} if isinstance(step, PlanStep) else write_outputs(state, run.step, contract, event)
     giving = "; ".join(f"{name} from {given[name]}" for name in sorted(given))
     state.history.append(f"{run.entry} done{f', giving {giving}' if giving else ''}")
     reach(state, step.reaches)
+    flag_if_stopping(state, run)
+
+
+def flag_if_stopping(state: CaseState, run: StepRun) -> None:
+    """Flag a run that completed though a close or a stop was asked: what it did stands, and a
+    person decides on a reversal (brief, D10) (brief, D40)."""
     if state.phase == "closing":
         flag(state, f"{run.entry} completed after the close was requested")
+    elif run.stop_requested:
+        flag(state, f"{run.entry} completed after its stop was requested by {run.stop_requested}")
 
 
 def write_outputs(
@@ -640,7 +647,13 @@ def operating_role(catalog: Catalog, event: Retried) -> str:
     return counted[0]
 
 
-def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retried) -> None:
+def retry(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    event: Retried,
+    commands: list[Command],
+) -> None:
     """An operator retries a failed run: it runs again as the same run, with the same key, once
     the step is checked again (brief, D26). Or `RetryRefused`."""
     # Who retried is written one way, before anything is checked against it (brief, D22).
@@ -652,7 +665,8 @@ def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retri
     if firing is not None and firing.status == "failed":
         role = operating_role(catalog, event)
         try:
-            retry_rule(case, catalog, state, firing, f"{event.by} retried {event.entry} as {role}")
+            retried = f"{event.by} retried {event.entry} as {role}"
+            retry_rule(case, catalog, state, firing, retried, commands)
         except StepStopped as unreadable:
             raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
         return
@@ -699,7 +713,8 @@ def admit(
     started = True
     while started:
         started = False
-        fire_rules(case, catalog, state)  # the moments that came, before any step is asked again
+        # The moments that came, before any step is asked again.
+        fire_rules(case, catalog, state, commands)
         # An open approval follows the case file (brief, D25), before any start is decided: a
         # start is refused only by an approval that still stands.
         follow(case, state)

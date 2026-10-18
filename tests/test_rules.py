@@ -2515,3 +2515,294 @@ def test_a_rule_on_the_opening_with_its_own_error_gets_no_closes_at_opening_besi
     definition["steps"]["review"]["requires"] = []
     definition["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
     assert [i.code for i in issues(definition)] == ["SET_AFTER"]
+
+
+# --- 11c, slice 2: stopping ---
+
+WITHDRAWAL_TASK = {
+    "kind": "task",
+    "display": {"title": "Log the customer's withdrawal"},
+    "roles": ["support"],
+    "automatic": False,
+    "proposed_by": ["support"],
+    "outcomes": {"logged": {"display": {"title": "Withdrawn"}, "reaches": ["withdrawn"]}},
+}
+
+
+def withdrawable(*stopped: str, **rule: Any) -> dict[str, Any]:
+    """The refund, with a support task that logs the customer's withdrawal, and a rule that stops
+    `stopped` (the review and the payment, unless said) once the withdrawal is logged."""
+    definition = copy.deepcopy(REFUND)
+    definition["milestones"] = {"withdrawn": {"display": {"title": "Withdrawn"}}}
+    definition["steps"]["log_withdrawal"] = copy.deepcopy(WITHDRAWAL_TASK)
+    definition["rules"] = {
+        "withdraw": {
+            "display": {"title": "Stop the refund when the customer withdraws"},
+            "on": {"reached": "withdrawn"},
+            "then": {"stop": list(stopped or ("review", "pay"))},
+        }
+        | rule
+    }
+    return definition
+
+
+WITHDRAWS = [propose("log_withdrawal", "ana"), ("log_withdrawal", "logged", "ana")]
+DUPLICATE = {"display": {"title": "Duplicate request"}, "roles": ["support"]}
+SMALL = {"order_id": "ord-1", "amount": 40}
+SMALL_REVIEW = ("review", "approve", "ana", {"approved_amount": 40})
+
+
+def unreachable(inputs: dict[str, Any]) -> dict[str, Any]:
+    raise RuntimeError("provider unreachable")
+
+
+def test_a_failed_run_is_never_stopped() -> None:
+    # A failed run waits for a person: a stop would skip it by another name (brief, D17, D26).
+    # The stop is recorded, and the run still needs attention (brief, D40).
+    run = run_case(
+        withdrawable(),
+        file=SMALL,
+        answers=[SMALL_REVIEW, *WITHDRAWS],
+        people=PEOPLE,
+        activities={"payments.refund@2": unreachable},
+    )
+    assert "withdraw#1 on reached withdrawn: stopping review and pay" in run.history
+    assert (
+        "withdraw#1 on reached withdrawn: pay not stopped: pay#1 needs attention, and a failed "
+        "run is never stopped"
+    ) in run.history
+    assert [line.split(":")[0] for line in run.needs_attention] == ["pay#1"]
+    assert run.status == "open"
+
+
+def test_a_stop_cancels_an_open_task() -> None:
+    # The customer withdraws while the review waits: the review is cancelled, saying which rule's
+    # entry stopped it, never a value; nothing is left to do, so the case closes (brief, D40).
+    run = run_case(withdrawable(), file=SMALL, answers=WITHDRAWS, people=PEOPLE)
+    assert run.history[-5:] == [
+        "reached withdrawn",
+        "withdraw#1 on reached withdrawn: stopping review and pay",
+        "cancelled review#1: stopped by withdraw#1",
+        "withdraw#1 on reached withdrawn: pay not stopped: no run of pay is going on",
+        "closed: nothing left to do",
+    ]
+    assert run.waiting_for == [] and run.needs_attention == []
+    # In a case that stays open, an answer to the cancelled review is refused: it is closed.
+    staying = withdrawable() | {"stays_open": True, "close_reasons": {"duplicate": DUPLICATE}}
+    with pytest.raises(AnswerRefused, match="^review#1 is closed$"):
+        late = ("review#1", "approve", "ana", {"approved_amount": 40})
+        run_case(staying, file=SMALL, answers=[*WITHDRAWS, late], people=PEOPLE)
+
+
+LARGE = {"order_id": "ord-1", "amount": 250}
+LARGE_REVIEW = ("review", "approve", "ana", {"approved_amount": 250})
+
+
+def test_a_stop_withdraws_an_approval() -> None:
+    # The refund waits for a team lead's approval when the customer withdraws: the approval is
+    # withdrawn and the coming run recorded cancelled, so the step doesn't start by itself again,
+    # and an answer to the approval is refused (brief, D25, D40).
+    staying = withdrawable() | {"stays_open": True, "close_reasons": {"duplicate": DUPLICATE}}
+    run = run_case(staying, file=LARGE, answers=[LARGE_REVIEW, *WITHDRAWS], people=PEOPLE)
+    assert run.history[-4:] == [
+        "withdraw#1 on reached withdrawn: stopping review and pay",
+        "withdraw#1 on reached withdrawn: review not stopped: no run of review is going on",
+        "cancelled pay.approval#1: stopped by withdraw#1",
+        "pay#1 cancelled: stopped by withdraw#1",
+    ]
+    assert run.waiting_for == [] and not run.reached("pay")
+    with pytest.raises(
+        AnswerRefused, match="^pay.approval#1 was withdrawn: stopped by withdraw#1$"
+    ):
+        run_case(
+            staying,
+            file=LARGE,
+            answers=[LARGE_REVIEW, *WITHDRAWS, ("pay.approval#1", "approve", "sam")],
+            people=PEOPLE,
+        )
+
+
+def test_a_stopped_activity_finishes_and_is_flagged() -> None:
+    # The payment is already running when the customer withdraws: a side effect can't be cut off
+    # halfway, so it finishes; it is recorded as done, its outputs landing, and the case is
+    # flagged for a person to decide on a reversal (brief, D10, D40).
+    run = run_case(
+        withdrawable(),
+        file=SMALL,
+        answers=[SMALL_REVIEW, *WITHDRAWS, finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+    )
+    stopped = run.history.index("pay#1: stop requested by withdraw#1")
+    assert run.history[stopped:] == [
+        "pay#1: stop requested by withdraw#1",
+        "pay#1 done, giving refund_id from untrusted:undeclared",
+        "flagged: pay#1 completed after its stop was requested by withdraw#1",
+        "closed: nothing left to do",
+    ]
+    assert run.flags == ["pay#1 completed after its stop was requested by withdraw#1"]
+    assert run.reached("pay")
+
+
+def test_a_stop_with_nothing_to_stop_is_recorded() -> None:
+    # A second rule stopping the same running payment asks nothing again: a run's stop is asked
+    # once, so a child is never cancelled twice (brief, D40).
+    twice = withdrawable("pay")
+    twice["rules"]["withdraw_again"] = twice["rules"]["withdraw"] | {
+        "display": {"title": "Stop the payment again"}
+    }
+    run = run_case(
+        twice, file=SMALL, answers=[SMALL_REVIEW, *WITHDRAWS], people=PEOPLE, held=["pay"]
+    )
+    assert run.history[-4:] == [
+        "withdraw#1 on reached withdrawn: stopping pay",
+        "pay#1: stop requested by withdraw#1",
+        "withdraw_again#1 on reached withdrawn: stopping pay",
+        "withdraw_again#1 on reached withdrawn: pay not stopped: its stop is already requested",
+    ]
+    # Nothing to stop: the review is done, and no run of pay ever started.
+    run = run_case(withdrawable(), file=SMALL, answers=WITHDRAWS, people=PEOPLE)
+    assert "withdraw#1 on reached withdrawn: pay not stopped: no run of pay is going on" in (
+        run.history
+    )
+
+
+def test_untrusted_data_cant_stop() -> None:
+    # Stopping decides for the case: an injected note could cancel every review. A rule whose
+    # condition reads untrusted data stops nothing, naming the value and its source, never the
+    # value (brief, D38, D40). Through run_case alone: the runtime refuses it, on nothing
+    # validation did (brief, D34).
+    definition = withdrawable("review", when={"==": [{"var": "notes"}, "withdraw"]})
+    definition["fields"]["notes"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's notes"},
+    }
+    run = run_case(definition, file=SMALL | {"notes": "withdraw"}, answers=WITHDRAWS, people=PEOPLE)
+    assert (
+        "withdraw#1 on reached withdrawn: stops nothing: its condition reads notes, from "
+        "untrusted:customer, and untrusted data can't decide"
+    ) in run.history
+    assert "cancelled review#1: stopped by withdraw#1" not in run.history
+    assert run.waiting_for == ["review by support"]
+    assert not any('"withdraw"' in line for line in run.history)  # the value is never quoted
+
+
+def test_stop_then_reach_then_start() -> None:
+    # Inside one `then`, the stop acts first, then the milestone is reached, then the start is
+    # proposed; and a rule after it on the same moment sees the stopped run: the review, stopped,
+    # may be started again, as a new run (brief, D40).
+    definition = withdrawable(
+        "review", then={"start": ["notify"], "reach": ["noted"], "stop": ["review"]}
+    )
+    definition["milestones"]["noted"] = {"display": {"title": "Withdrawal noted"}}
+    definition["steps"]["review"]["repeatable"] = True
+    definition["steps"]["review"]["proposed_by"] = ["support"]
+    definition["steps"]["notify"] = {
+        "kind": "task",
+        "display": {"title": "Tell the customer"},
+        "roles": ["support"],
+        "automatic": False,
+        "outcomes": {"told": {"display": {"title": "Told"}}},
+    }
+    definition["rules"]["ask_again"] = {
+        "display": {"title": "Review again"},
+        "on": {"reached": "withdrawn"},
+        "then": {"start": ["review"]},
+    }
+    run = run_case(definition, file=SMALL, answers=WITHDRAWS, people=PEOPLE)
+    first = run.history.index("withdraw#1 on reached withdrawn: stopping review")
+    assert run.history[first:] == [
+        "withdraw#1 on reached withdrawn: stopping review",
+        "cancelled review#1: stopped by withdraw#1",
+        "withdraw#1 on reached withdrawn: reaching noted",
+        "reached noted",
+        "withdraw#1 on reached withdrawn: starting notify",
+        "started notify#1: waiting for told by support",
+        "ask_again#1 on reached withdrawn: starting review",
+        "started review#2: waiting for approve or reject by support",
+    ]
+
+
+def test_a_stop_once_the_close_is_due_is_not_applied() -> None:
+    # Rules stop with the close: once every closes_when milestone is reached, no rule acts, a
+    # stop included; the close itself cancels what waits (brief, D38, D40).
+    definition = withdrawable("review") | {"closes_when": ["withdrawn"]}
+    run = run_case(definition, file=SMALL, answers=WITHDRAWS, people=PEOPLE)
+    assert (
+        "withdraw#1 on reached withdrawn: not applied: withdrawn is reached, so the case closes "
+        "and nothing new is decided"
+    ) in run.history
+    assert "cancelled review#1: the case closes when withdrawn is reached" in run.history
+    assert "cancelled review#1: stopped by withdraw#1" not in run.history
+
+
+def reviewed_again(**rule: Any) -> dict[str, Any]:
+    """The withdrawable refund whose review may be proposed again, and a team lead's check that
+    requires it, proposed by support."""
+    definition = withdrawable("review", **rule)
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    definition["steps"]["pay"]["automatic"] = False
+    definition["steps"]["pay"]["proposed_by"] = ["support"]
+    definition["steps"]["lead_check"] = {
+        "kind": "task",
+        "display": {"title": "Check the review"},
+        "roles": ["support-lead"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "requires": ["review"],
+        "outcomes": {"ok": {"display": {"title": "Right"}}},
+    }
+    return definition | {"stays_open": True, "close_reasons": {"duplicate": DUPLICATE}}
+
+
+def test_a_stopped_run_is_not_done() -> None:
+    # review#1 was done; review#2, asked again, is stopped. Its latest run is cancelled, neither
+    # done nor failed, so a step requiring the review waits for a later run of it to be done
+    # (brief, D40).
+    answers = [SMALL_REVIEW, propose("review", "ana"), *WITHDRAWS, propose("lead_check", "ana")]
+    with pytest.raises(
+        ProposalRefused, match="^lead_check requires review, which hasn't completed$"
+    ):
+        run_case(reviewed_again(), file=SMALL, answers=answers, people=PEOPLE)
+
+
+def test_a_stopped_step_may_start_again_only_if_asked() -> None:
+    # A stop ends the run going on now, and doesn't keep the step from starting later: proposed
+    # again, the review runs again. A step that starts by itself does so at most once: stopped, it
+    # doesn't start by itself again (brief, D40).
+    run = run_case(
+        reviewed_again(), file=SMALL, answers=[*WITHDRAWS, propose("review", "ana")], people=PEOPLE
+    )
+    assert run.history[-2:] == [
+        "ana proposed review as support",
+        "started review#2: waiting for approve or reject by support",
+    ]
+    run = run_case(reviewed_again(), file=SMALL, answers=WITHDRAWS, people=PEOPLE)
+    assert run.history[-1] == "cancelled review#1: stopped by withdraw#1"
+    assert run.waiting_for == []
+
+
+def test_stop_and_start_on_one_moment_end() -> None:
+    # Two rules on the review's start, one stopping it and one starting it: each decision still
+    # ends. The second start of the review in the decision is refused (brief, D39, D40).
+    definition = reviewed_again(on={"started": "review"})
+    definition["rules"]["restart"] = {
+        "display": {"title": "Start the review again"},
+        "on": {"started": "review"},
+        "then": {"start": ["review"]},
+    }
+    run = run_case(definition, file=SMALL, answers=[], people=PEOPLE)
+    assert run.history[1:] == [
+        "started review#1: waiting for approve or reject by support",
+        "withdraw#1 on started review: stopping review",
+        "cancelled review#1: stopped by withdraw#1",
+        "restart#1 on started review: starting review",
+        "started review#2: waiting for approve or reject by support",
+        "withdraw#2 on started review: stopping review",
+        "cancelled review#2: stopped by withdraw#2",
+        (
+            "restart#2 on started review: review not started: a rule already started it in this "
+            "decision"
+        ),
+    ]
