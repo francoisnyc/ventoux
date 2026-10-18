@@ -262,11 +262,12 @@ FILE = {"order_id": "ord-1", "amount": 300}
 DELIVERED = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}
 
 
-@pytest.mark.xfail(strict=True, raises=Silent, reason="path L, fixed in slice 5")
 def test_a_given_approval_lapses_with_its_requirement() -> None:
     # Path L. Sam approves pay while its fact is fetched again; the review is proposed again, the
     # fact lands, and a rule stops the review. Nothing can spend the approval now, so it lapses,
-    # saying why; once the review completes again, pay asks a new one (the note, decision 5).
+    # saying why; with nothing else to do, the case closes, as when an open approval is withdrawn
+    # (brief, D10). In a case that stays open, once the review completes again, pay asks a new
+    # approval (the note, decision 5).
     definition = generated_definition(fresh=True, audited=False)
     before = [
         finish("check_order#1"),
@@ -279,14 +280,17 @@ def test_a_given_approval_lapses_with_its_requirement() -> None:
         ("hold#1", "hold", "ana"),  # halt stops review#2
     ]
     run = run_case(definition, FILE, before, PEOPLE, activities=DELIVERED, held=["check_order"])
-    assert "lapsed pay.approval#1: pay requires review, which hasn't completed" in run.history
+    lapse = "lapsed pay.approval#1: pay requires review, which hasn't completed"
+    assert run.history[-2:] == [lapse, "closed: nothing left to do"]
     assert run.state.given == {}
+    definition["stays_open"] = True
     again = [
         *before,
         propose("review", "ana"),
         ("review#3", "approve", "ana", {"approved_amount": 250}),
     ]
     run = run_case(definition, FILE, again, PEOPLE, activities=DELIVERED, held=["check_order"])
+    assert lapse in run.history
     assert run.waiting_for == ["approval of pay by support-lead"]
 
 
@@ -804,12 +808,11 @@ def test_a_retry_reads_each_requirement_it_waits_for() -> None:
     ]
 
 
-@pytest.mark.xfail(strict=True, raises=Silent, reason="path L, fixed in slice 5")
 def test_a_retry_s_given_approval_lapses_with_its_requirement() -> None:
     # Path L, on a retry. pay#1's retry is approved while its fact is fetched again; the review
     # is proposed again, and a rule stops it. The approval lapses, and the retry fails again;
-    # once the review completes again, pay#1 asks a new approval, and nothing runs under a new
-    # key (the note, decisions 2 and 5) (brief, D26).
+    # once the review completes again, nothing runs under a new key, and the operator's next
+    # retry asks a new approval (the note, decisions 2 and 5) (brief, D26).
     keys: list[str] = []
     script = [
         finish("check_order#1"),
@@ -843,6 +846,16 @@ def test_a_retry_s_given_approval_lapses_with_its_requirement() -> None:
     assert run.history.index(lapse) < run.history.index(failed)
     assert [r.entry for r in run.state.runs if r.step == "pay"] == ["pay#1"]
     assert keys == ["memory/pay#1"]
+    # An operator retries pay#1 again: it asks a new approval, never spends the lapsed one.
+    run = run_case(
+        generated_definition(fresh=True, audited=False),
+        FILE,
+        [*script, retry("pay#1", "omar")],
+        PEOPLE,
+        activities={**DELIVERED, "payments.refund@2": down_once([])},
+        held=["check_order"],
+    )
+    assert run.waiting_for == ["approval of pay by support-lead"]
 
 
 def test_a_retry_whose_condition_reads_a_stale_fact_fetches_it_again() -> None:

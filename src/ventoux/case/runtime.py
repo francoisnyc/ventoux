@@ -16,8 +16,8 @@ from ventoux.case.admission import (
     ProposalRefused,
     RetryRefused,
     StepStopped,
+    ended_requirement,
     holds,
-    latest_counted,
     latest_run,
     proposal_refusal,
     requirements_met,
@@ -847,19 +847,6 @@ def let_go_while_held(case: CaseDefinition, state: CaseState, name: str) -> None
     if state.given.pop(name, None) is not None:
         state.history.append(f"{name} not started: {why}")
     drop_waiting(state, name, why)
-
-
-def ended_requirement(state: CaseState, required: tuple[str, ...]) -> str | None:
-    """A step or milestone the step requires that isn't met, and has nothing on its way to meet
-    it: its latest run ended without completing (cancelled, rejected), or there is none. None if
-    each unmet one is on its way: open, running, failed or retried, each shown by the case."""
-    for requirement in required:
-        if requirements_met((requirement,), state):
-            continue
-        latest = latest_counted(state, requirement)
-        if latest is None or latest.status not in ("open", "running", "failed", "retrying"):
-            return requirement
-    return None
 
 
 def retry_fails(state: CaseState, run: StepRun, why: str, then: str) -> None:

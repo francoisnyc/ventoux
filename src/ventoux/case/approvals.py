@@ -7,7 +7,13 @@ being admitted, or a value the step reads changes, and asked again with a new en
 is admitted again. Nobody approves values they didn't see (brief, D25).
 """
 
-from ventoux.case.admission import StepStopped, holds, latest_run, requirements_met
+from ventoux.case.admission import (
+    StepStopped,
+    ended_requirement,
+    holds,
+    latest_run,
+    requirements_met,
+)
 from ventoux.case.definition import CallStep, CaseDefinition
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState, GivenApproval, OpenApproval
@@ -71,7 +77,8 @@ def what_it_reads(step: CallStep, values: dict[str, object]) -> dict[str, object
 
 def follow(case: CaseDefinition, state: CaseState) -> None:
     """Withdraw each open approval whose step is no longer admitted, or whose values changed;
-    and lapse each given approval whose values a refresh changed."""
+    and lapse each given approval whose step requires one that ended without completing, or
+    whose values a refresh changed."""
     required = requirements(case)
     for name, approval in list(state.approvals.items()):
         step = case.steps[name]
@@ -82,6 +89,15 @@ def follow(case: CaseDefinition, state: CaseState) -> None:
     for name, given in list(state.given.items()):
         step = case.steps[name]
         assert isinstance(step, CallStep)  # only an activity or a workflow is approved
+        if (ended := ended_requirement(state, required[name])) is not None:
+            # Nothing is on its way that could let it be spent, so it lapses, saying why; a step
+            # it requires that is still on its way keeps it, tied to the values it saw
+            # (brief, D11) (brief, D26).
+            del state.given[name]
+            state.history.append(
+                f"lapsed {given.entry}: {name} requires {ended}, which hasn't completed"
+            )
+            continue
         if different := changed_fields(given, step, state):
             # The approver never saw the new value, so the approval lapses, and the step is
             # checked again from the start: asked again if it still needs one (brief, D33).

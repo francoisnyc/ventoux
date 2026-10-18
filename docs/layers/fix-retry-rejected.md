@@ -24,7 +24,7 @@ the others go on only if a person happens to act (proposes the review again) wit
 | E′ | The retry waits for a review proposed again, which a rule then stops | its requirement isn't met again unless someone proposes the review, and nothing is open |
 | C′, I | (Not stuck: shown through another entry, which waits for a person) the retry waits for a review proposed again, still open (C′); or for a step whose refresh failed, which needs attention (I) | `pay#1` runs once the review is answered, or the refresh is retried; left as it is (decision 2) |
 | K | (Found by the suite) an approval given while the close is held | given, never spent, and shown nowhere; the failed run holding the close is shown, so the case isn't stuck |
-| L | (Found in the review of slice 1) an approval given while its fact is fetched again, whose requirement (a review proposed again) a rule then stops | the approval is never spent unless someone proposes the review, and nothing is open. On a retry, between slices 3 and 5, the retry fails again and the approval stays: a review answered again would spend it on a new run, `pay#2`, under a new key, so the branch doesn't ship before slice 5 |
+| L | (Found in the review of slice 1) an approval given while its fact is fetched again, whose requirement (a review proposed again) a rule then stops | the approval is never spent unless someone proposes the review, and nothing is open. On a retry, once slice 3 failed the retry again, the approval stayed, and a review answered again would have spent it on a new run, `pay#2`, under a new key: fixed by decision 5, slice 5 |
 | M | (Found in the review of slice 1) a person's proposal waiting for its fact when the close becomes held | it never starts and shows nowhere, and a later close drops it with no line, against "starts the step or says why not" (D39) |
 
 ## Decided
@@ -95,8 +95,11 @@ the others go on only if a person happens to act (proposes the review again) wit
 5. **A given approval lapses with its requirement** (fixes L). An approval given, and not yet
    spent because its step waits for a fact, lapses when a step its step requires has ended
    without completing (its latest run cancelled or rejected): nothing is on its way that could
-   let it be spent. `lapsed pay.approval#1: pay requires review, which hasn't completed`; once
-   the requirement completes again, the step asks a new approval. While the requirement is still
+   let it be spent. `lapsed pay.approval#1: pay requires review, which hasn't completed`. With
+   nothing else to do, the case then closes, as it does when an open approval is withdrawn on the
+   same path (D10); if something keeps it open, the step asks a new approval once the requirement
+   completes again. On a retry, the approval lapses first, then the retry fails again (decision
+   2), and the operator's next retry asks a new one. While the requirement is still
    on its way (open, running, or failed and waiting for an operator), the approval stays, shown
    through it: it is tied to the values it saw (D11), and a review answered again with the same
    values changes none. Not "whenever its step stops being admitted", as an open approval is
@@ -266,7 +269,7 @@ Drafted before building, to be checked against the files once built. Every test 
 | A retry whose requirement a rule stopped, or whose approval was rejected, needs attention again, naming that one, wherever it is listed and beside one still on its way; one whose requirements are on their way (proposed again and open or running, or a failed refresh) waits, and runs once they complete, with its key | `test_a_retry_whose_requirement_was_stopped_needs_attention`, `test_a_retry_reads_each_requirement_it_waits_for`, `test_a_retry_waits_for_a_requirement_on_its_way` (each seen failing on a mutation of `ended_requirement`) |
 | An approval given while the close is held, or given before and waiting for its fact, starts nothing, says so in the decision that finds the close held, whatever its step's requirements, and isn't pending; only what is let go says so | `test_an_approval_answered_while_the_close_is_held_starts_nothing` (`tests/test_case.py`, as before, under the hook again), `test_an_approval_given_while_the_close_is_held_is_let_go` (`tests/test_case.py`, seen failing on main), `test_an_approval_waiting_for_its_fact_when_the_close_is_held_is_let_go`, `test_an_approval_whose_requirement_is_on_its_way_when_the_close_is_held_is_let_go` (seen failing first) |
 | A person's proposal waiting for its fact when the close becomes held is dropped then, before the fact lands, saying so | `test_a_proposal_waiting_when_the_close_is_held_is_dropped` (seen failing on main) |
-| A given approval whose requirement a rule stopped lapses, saying so, and the step asks again once it completes; one whose requirement is answered again with the same values is spent; on a retry, it lapses before the retry fails again, and nothing runs under a new key | `test_a_given_approval_lapses_with_its_requirement` (seen failing on main), `test_a_given_approval_survives_a_review_answered_the_same`, `test_a_retry_s_given_approval_lapses_with_its_requirement` |
+| A given approval whose requirement a rule stopped lapses, saying so, and the case closes if nothing else is left, or the step asks again once the requirement completes; one whose requirement is answered again with the same values is spent; on a retry, it lapses before the retry fails again, nothing runs under a new key, and the next retry asks again | `test_a_given_approval_lapses_with_its_requirement` (seen failing on main), `test_a_given_approval_survives_a_review_answered_the_same`, `test_a_retry_s_given_approval_lapses_with_its_requirement` |
 | A person may close a case whose rescue was rejected | `test_a_rejected_retry_can_be_closed` |
 | On Temporal, a rejected retry needs attention, and retried again pays once with its key | `test_a_rejected_retry_on_temporal` (`tests/test_temporal_case.py`) |
 | A history recorded under main with a rejected retry and a close replays | `test_a_history_with_a_rejected_retry_replays` (`tests/test_temporal_case.py`) |
