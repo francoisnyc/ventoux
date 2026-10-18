@@ -847,14 +847,18 @@ def proposed_call(step: dict[str, Any]) -> dict[str, Any]:
                 "activity": "letters.draft@2",
                 "inputs": {"to_customer": {"var": "suggested_email"}, "template": "welcome"},
             },
-            "letters.draft@2 takes to_customer only from a system or a person, never from "
-            "untrusted data, and this value comes from suggested_email (system:opener, "
-            "untrusted:llm)",
+            (
+                "letters.draft@2 takes to_customer only from a system or a person, never from "
+                "untrusted data, and this value comes from suggested_email (system:opener, "
+                "untrusted:llm)"
+            ),
         ),
         (
             {"activity": "orders.lookup@9", "inputs": {"order_id": {"var": "order_id"}}},
-            "orders.lookup@9 is not in the catalog. Registered: orders.lookup@1, "
-            "orders.lookup@2. Use a registered version, or register this one first.",
+            (
+                "orders.lookup@9 is not in the catalog. Registered: orders.lookup@1, "
+                "orders.lookup@2. Use a registered version, or register this one first."
+            ),
         ),
         (
             {
