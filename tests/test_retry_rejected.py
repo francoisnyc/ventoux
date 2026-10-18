@@ -738,10 +738,11 @@ def test_a_retry_waits_for_a_requirement_on_its_way() -> None:
     assert run.closed
 
 
-def verified() -> dict[str, Any]:
+def verified(fresh: bool = False) -> dict[str, Any]:
     """The refund with `hold`, and a `verify` lookup pay also requires, which needs a team
-    lead's approval and may be proposed again: a requirement that can be rejected, or running."""
-    definition = generated_definition(fresh=False, audited=False)
+    lead's approval and may be proposed again: a requirement that can be rejected, or running.
+    `fresh`: pay also requires the order looked up, at most a day old."""
+    definition = generated_definition(fresh=fresh, audited=False)
     definition["steps"]["verify"] = {
         "kind": "activity",
         "display": {"title": "Verify the order"},
@@ -751,7 +752,8 @@ def verified() -> dict[str, Any]:
         "proposed_by": ["support"],
         "approval": {"roles": ["support-lead"], "display": {"reason": "A lead verifies"}},
     }
-    definition["steps"]["pay"]["requires"] = ["verify"]  # and review, by the sequence
+    pay = definition["steps"]["pay"]
+    pay["requires"] = [*pay.get("requires", []), "verify"]  # and review, by the sequence
     return definition
 
 
@@ -921,3 +923,169 @@ def test_a_retry_isnt_taken_for_a_stale_fact_its_condition_doesnt_read() -> None
     refused = '^pay#1 can\'t be retried: review.outcome = "approve" is false now$'
     with pytest.raises(RetryRefused, match=refused):
         run_case(definition, FILE, script, PEOPLE, activities=activities)
+
+
+def restarting(moment: str) -> dict[str, Any]:
+    """The refund with the order looked up and `hold`, whose answer makes `halt` stop the review,
+    and a rule `again` that starts the review again in the same decision: on the hold's answer
+    too (`answered`), or once a follow-up task the hold leads to starts (`started`)."""
+    definition = generated_definition(fresh=True, audited=False)
+    on: dict[str, str] = {"answered": "hold"}
+    if moment == "started":
+        definition["steps"]["follow_up"] = {
+            "kind": "task",
+            "display": {"title": "Follow the hold up"},
+            "roles": ["support"],
+            "requires": ["hold"],
+            "outcomes": {"done": {"display": {"title": "Done"}}},
+        }
+        on = {"started": "follow_up"}
+    definition["rules"]["again"] = {
+        "display": {"title": "Review it again"},
+        "on": on,
+        "then": {"start": ["review"]},
+    }
+    return definition
+
+
+@pytest.mark.parametrize("moment", ["answered", "started"])
+def test_a_requirement_a_rule_starts_again_keeps_what_waits_for_it(moment: str) -> None:
+    # One rule stops the review, and another starts it again in the same decision: by the
+    # decision's end the review is on its way, so what waits for it is kept, read once admission
+    # has settled. A given approval stays, and is spent on the review answered with the values it
+    # saw; a retried run keeps waiting, and runs with its key (the note, decisions 2 and 5).
+    given = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        later("2d"),
+        ("pay.approval#1", "approve", "sam"),  # given; the status is fetched again, held
+        propose("review", "ana"),
+        finish("check_order#2"),
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),  # halt stops the review; again starts it
+        ("review", "approve", "ana", {"approved_amount": 250}),
+    ]
+    keys: list[str] = []
+    activities = {**DELIVERED, "payments.refund@2": down_once(keys)}
+    definition = restarting(moment)
+    run = run_case(definition, FILE, given, PEOPLE, activities=activities, held=["check_order"])
+    assert not any(line.startswith("lapsed pay.approval#1") for line in run.history)
+    assert "asked pay.approval#2: approval of pay by support-lead" not in run.history
+    assert keys == ["memory/pay#1"]  # pay#1 is paid on the approval Sam gave
+    retried = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 80}),  # pay#1 fails, unapproved
+        propose("review", "ana"),
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        retry("pay#1", "omar"),  # asks pay.approval#1
+        propose("review", "ana"),  # withdraws it: the retry waits for the review
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),  # halt stops the review; again starts it
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        ("pay.approval#2", "approve", "sam"),
+    ]
+    keys.clear()
+    run = run_case(definition, FILE, retried, PEOPLE, activities=activities, held=["check_order"])
+    assert not any(line.startswith("pay#1 failed again") for line in run.history)
+    assert keys == ["memory/pay#1", "memory/pay#1"]
+
+
+def paid(keys: list[str]) -> Activity:
+    """A refund that pays at once; each call's key goes into `keys`."""
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-1"}
+
+    return refund
+
+
+def test_a_given_approval_lapses_with_a_rejected_requirement() -> None:
+    # Path L, with a requirement rejected: verify, proposed again while pay's approval waits for
+    # its fact, is rejected, so nothing is on its way to meet it; the approval lapses then, and
+    # the case closes once the fact lands (the note, decision 5).
+    script = [
+        ("verify.approval#1", "approve", "sam"),
+        finish("verify#1"),
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 250}),  # pay asks its approval
+        later("2d"),
+        ("pay.approval#1", "approve", "sam"),  # given: the order's status is fetched again
+        propose("verify", "ana"),  # asks verify.approval#2
+        ("verify.approval#2", "reject", "sam"),  # verify#2 won't run
+        finish("check_order#2"),
+    ]
+    held = ["check_order", "verify"]
+    run = run_case(verified(fresh=True), FILE, script, PEOPLE, activities=DELIVERED, held=held)
+    assert run.history[-3:] == [
+        "lapsed pay.approval#1: pay requires verify, which hasn't completed",
+        "check_order#2 done, giving status from system:orders",
+        "closed: nothing left to do",
+    ]
+
+
+def test_a_given_approval_waits_for_a_requirement_on_its_way() -> None:
+    # A given approval stays while what its step requires is on its way: a refresh that failed
+    # and is retried, or a requirement running. It is spent on the first run's key, and nothing
+    # asks again (the note, decision 5) (brief, D11).
+    keys: list[str] = []
+    refresh_fails = [
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        later("2d"),
+        ("pay.approval#1", "approve", "sam"),  # given; check_order#2 fails, for an operator
+        retry("check_order#2", "omar"),  # lands: pay starts on the approval
+    ]
+    activities = {
+        "orders.lookup@2": looked_up("delivered", "down", "delivered"),
+        "payments.refund@2": paid(keys),
+    }
+    definition = generated_definition(fresh=True, audited=False)
+    run = run_case(definition, FILE, refresh_fails, PEOPLE, activities=activities)
+    assert keys == ["memory/pay#1"]
+    assert "asked pay.approval#2: approval of pay by support-lead" not in run.history
+    keys.clear()
+    running = [
+        ("verify.approval#1", "approve", "sam"),
+        finish("verify#1"),
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        later("2d"),
+        ("pay.approval#1", "approve", "sam"),  # given; check_order#2 fetches the status, held
+        propose("verify", "ana"),
+        ("verify.approval#2", "approve", "sam"),  # verify#2 runs, held
+        finish("check_order#2"),  # pay waits for verify#2, running
+        finish("verify#2"),  # pay starts on the approval
+    ]
+    activities = {**DELIVERED, "payments.refund@2": paid(keys)}
+    held = ["check_order", "verify"]
+    run = run_case(verified(fresh=True), FILE, running, PEOPLE, activities=activities, held=held)
+    assert keys == ["memory/pay#1"]
+    assert "asked pay.approval#2: approval of pay by support-lead" not in run.history
+
+
+def test_a_proposed_step_whose_approval_lapsed_asks_again_once_proposed_again() -> None:
+    # A step a person proposed whose approval lapsed starts nothing by itself once its
+    # requirement completes again, as after a withdrawn approval (brief, D25): a person proposes
+    # it again, and it asks a new approval (the note, decision 5).
+    definition = generated_definition(fresh=True, audited=False)
+    definition["steps"]["pay"] |= {"automatic": False, "proposed_by": ["support"]}
+    definition["stays_open"] = True
+    script = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        propose("pay", "ana"),  # asks pay.approval#1
+        later("2d"),
+        ("pay.approval#1", "approve", "sam"),  # given; the status is fetched again, held
+        propose("review", "ana"),
+        finish("check_order#2"),
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),  # halt stops review#2: the approval lapses
+        propose("review", "ana"),
+        ("review#3", "approve", "ana", {"approved_amount": 250}),
+    ]
+    run = run_case(definition, FILE, script, PEOPLE, activities=DELIVERED, held=["check_order"])
+    assert "lapsed pay.approval#1: pay requires review, which hasn't completed" in run.history
+    assert run.waiting_for == []
+    again = [*script, propose("pay", "ana")]
+    run = run_case(definition, FILE, again, PEOPLE, activities=DELIVERED, held=["check_order"])
+    assert run.waiting_for == ["approval of pay by support-lead"]

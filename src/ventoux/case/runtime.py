@@ -799,12 +799,7 @@ def admit(
                 let_go_while_held(case, state, name)
                 continue
             if not requirements_met(required[name], state):
-                # A retry waits for a step it requires while that step is on its way, which the
-                # case shows; one that ended without completing can't let it start.
-                ended = ended_requirement(state, required[name])
-                if retried is not None and ended is not None:
-                    why = f"{name} requires {ended}, which hasn't completed"
-                    retry_fails(state, retried, why, "retry it once it has")
+                # A retry or an approval given waits for it, until admission settles (below).
                 drop_waiting(state, name, "its requirements are no longer met")
                 continue
             try:
@@ -837,6 +832,27 @@ def admit(
                 taken_up(state, name)
                 fail(state, name, str(error))
             started = True
+    nothing_on_its_way(case, state, required)
+
+
+def nothing_on_its_way(
+    case: CaseDefinition, state: CaseState, required: dict[str, tuple[str, ...]]
+) -> None:
+    """Once admission has settled, what waits for a step's requirement that ended without
+    completing waits for nothing: an approval given lapses, then a retried run fails again, each
+    saying which. Read on the settled state, so a requirement a rule stopped and another started
+    again in this decision is on its way. A requirement still on its way keeps both: the approval
+    tied to the values it saw, the retry shown through it (brief, D11) (brief, D17) (brief, D26)."""
+    for name in case.steps:
+        ended = ended_requirement(state, required[name])
+        if ended is None:
+            continue
+        why = f"{name} requires {ended}, which hasn't completed"
+        if (given := state.given.pop(name, None)) is not None:
+            state.history.append(f"lapsed {given.entry}: {why}")
+        latest = latest_run(state, name)
+        if latest is not None and latest.status == "retrying":
+            retry_fails(state, latest, why, "retry it once it has")
 
 
 def let_go_while_held(case: CaseDefinition, state: CaseState, name: str) -> None:
