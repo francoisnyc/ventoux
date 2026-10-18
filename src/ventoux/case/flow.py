@@ -7,7 +7,7 @@ sources are known in one pass (brief, D34) (brief, D36). See docs/layers/10-case
 
 from collections.abc import Collection, Mapping
 
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
+from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, Then, WorkflowStep
 from ventoux.case.types import case_types
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.case.writers import case_sources, untrusted_of
@@ -336,7 +336,7 @@ def condition_issues(
                 issues.append(Issue(path, "INPUT_POLICY", why))
     given = {*said, *(issue.path for issue in issues)}
     for rule, written in case.rules.items():
-        if written.then.reach:
+        if written.then.reach or written.then.stop:
             continue  # on untrusted data it doesn't act at all: UNTRUSTED_TRIGGER says so
         for name in written.then.start:
             if name not in contracts or any(p.startswith(f"steps.{name}.inputs.") for p in given):
@@ -443,16 +443,24 @@ def plan_policy_issues(
     return issues
 
 
+def never_does(then: Then) -> str:
+    """What a rule that doesn't act never does, as its issue says it: `reaches high_risk or
+    starts lead_check`, `stops review`."""
+    acts = (("reaches", then.reach), ("starts", then.start), ("stops", then.stop))
+    return " or ".join(f"{verb} {' and '.join(names)}" for verb, names in acts if names)
+
+
 def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> list[Issue]:
-    """A rule whose condition reads a value from an untrusted source whoever writes it: the
-    runtime refuses to let it act every time, so it never does (`UNTRUSTED_TRIGGER`). Untrusted
-    data informs; it never decides (brief, D38). In 11a every value is untrusted always or never
-    (a field's mark stays whoever writes it, an output carries its contract's source), so any
-    untrusted source is a proof; a field only some writers make untrusted comes with `set`."""
+    """A rule that reaches a milestone or stops a step, whose condition reads a value from an
+    untrusted source whoever writes it: the runtime refuses to let it act every time, so it never
+    does (`UNTRUSTED_TRIGGER`). Untrusted data informs; it never decides (brief, D38)
+    (brief, D40). In 11a every value is untrusted always or never (a field's mark stays whoever
+    writes it, an output carries its contract's source), so any untrusted source is a proof; a
+    field only some writers make untrusted comes with `set`."""
     sources = case_sources(case, contracts, BY_A_SYSTEM)  # who opens it changes no trust
     found: list[Issue] = []
     for name, rule in case.rules.items():
-        if not rule.then.reach:
+        if not rule.then.reach and not rule.then.stop:
             continue  # a rule that only starts steps acts: its condition counts for their inputs
         for field in [] if rule.when is None else fields_read(rule.when):
             untrusted = sorted(s for s in sources.get(field, ()) if s.startswith("untrusted:"))
@@ -463,10 +471,8 @@ def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> l
                         "UNTRUSTED_TRIGGER",
                         f"{name}'s condition reads {field}, which comes from "
                         f"{', '.join(untrusted)} whoever writes it, and untrusted data can't "
-                        f"decide, so it never reaches {' and '.join(rule.then.reach)}"
-                        f"{' or starts ' + ' and '.join(rule.then.start) if rule.then.start else ''}"
-                        ": read a "
-                        "value a person or a trusted system gives, such as a task's answer",
+                        f"decide, so it never {never_does(rule.then)}: read a value a person or "
+                        "a trusted system gives, such as a task's answer",
                     )
                 )
                 break  # one cause, one issue

@@ -109,6 +109,9 @@ Rows touched: 1, 2, 3, 5, 7, 8, 19.
 - **A run has ended once it has its final status** (row 19): a run whose stop is asked and still
   running hasn't ended, and a stopped run's timers end with it.
 
+*Answered in 11c's session, 2026-10-18:* how each of these rows stays open is said in
+`docs/layers/11-rules.md`, 11c, "The doors left open", and in D40.
+
 ### 11d: events from outside
 
 Rows touched: 5, 6, 8, 12, 13, 14, 18, 25.

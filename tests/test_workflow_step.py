@@ -5,17 +5,40 @@ docs/guides/cases.md, "Workflow steps".
 """
 
 import copy
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import BaseModel
 
+from ventoux.case.definition import parse_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import (
+    Answered,
+    CancelWorkflow,
+    CaseState,
+    CloseAsked,
+    Opened,
+    Proposed,
+    WorkflowCancelled,
+)
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Display
 from ventoux.core.output_sources import source
 from ventoux.core.policy import trusted_only
 from ventoux.core.workflow_contract import WorkflowContract
-from ventoux.testing import CATALOG, AnswerRefused, close, finish, load_definition, retry, run_case
+from ventoux.testing import (
+    CATALOG,
+    START,
+    AnswerRefused,
+    close,
+    fake_kyc,
+    finish,
+    load_definition,
+    propose,
+    retry,
+    run_case,
+)
 
 GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "cases.md"
 
@@ -275,3 +298,159 @@ def test_a_workflow_finishing_after_the_close_flags_the_case() -> None:
     assert done in run.history
     assert run.flags == ["kyc#1 completed after the close was requested"]
     assert run.closed
+
+
+# --- Layer 11c: stopping a workflow step, cancellable or not (brief, D40) ---
+
+KYC_CANCELLABLE = "kyc.check@3"
+
+
+def with_cancellable_kyc() -> Catalog:
+    """The development catalog, and `kyc.check@3`: the same check, whose team promises it stops
+    cleanly when cancelled."""
+    catalog = copy.deepcopy(CATALOG)
+    kyc = catalog.workflow("kyc.check@1")
+    catalog.register(kyc.model_copy(update={"version": 3, "cancellable": True}))
+    return catalog
+
+
+def cancellable_kyc(**changes: Any) -> dict[str, Any]:
+    """The refund with its customer checked by `kyc.check@3`, a support task logging a
+    withdrawal, a rule stopping the check once it is logged, and a close reason."""
+    definition = with_kyc()
+    definition["steps"]["kyc"]["workflow"] = KYC_CANCELLABLE
+    definition["milestones"] = {"withdrawn": {"display": {"title": "Withdrawn"}}}
+    definition["steps"]["log_withdrawal"] = {
+        "kind": "task",
+        "display": {"title": "Log the customer's withdrawal"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"logged": {"display": {"title": "Withdrawn"}, "reaches": ["withdrawn"]}},
+    }
+    definition["rules"] = {
+        "withdraw": {
+            "display": {"title": "Stop the check when the customer withdraws"},
+            "on": {"reached": "withdrawn"},
+            "then": {"stop": ["kyc"]},
+        }
+    }
+    definition["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate request"}, "roles": ["support"]}
+    }
+    return definition | changes
+
+
+WITHDRAWS = [propose("log_withdrawal", "ana"), ("log_withdrawal", "logged", "ana")]
+
+
+def test_a_close_cancels_a_cancellable_workflow_step() -> None:
+    # Closed as a duplicate while the cancellable check runs: through the one place that stops
+    # every running child, it is cancelled, the case waits for it to end, and flags it, since what
+    # it did before the cancellation stands. Until 11c every workflow step finished (brief, D10,
+    # D29, D40); one that isn't cancellable still does (test_a_workflow_finishing_after_the_close_
+    # flags_the_case, above).
+    run = run_case(
+        cancellable_kyc(),
+        file=FILE,
+        answers=[close("duplicate", "ana")],
+        people=PEOPLE,
+        held=["kyc"],
+        catalog=with_cancellable_kyc(),
+        workflows={KYC_CANCELLABLE: fake_kyc},
+    )
+    assert run.history[-5:] == [
+        "ana closed the case as duplicate, as support",
+        "cancelled review#1: closed as duplicate by ana",
+        "kyc#1 cancelled: the case is closing",
+        "flagged: kyc#1 cancelled after the close was requested",
+        "closed: duplicate, by ana",
+    ]
+    assert run.flags == ["kyc#1 cancelled after the close was requested"]
+    assert not run.reached("kyc")
+    said = " ".join(GUIDE.read_text().split())  # the guide's lines, line breaks aside
+    assert "`kyc#1 cancelled: the case is closing`" in said
+    assert "`flagged: kyc#1 cancelled after the close was requested`" in said
+
+
+def test_a_stopped_workflow_step_is_cancelled_only_if_cancellable() -> None:
+    # A rule's stop goes through the same place: a cancellable check is cancelled and flagged; one
+    # that isn't runs to its end, its output landing, and is flagged (brief, D40).
+    cancelled = run_case(
+        cancellable_kyc(),
+        file=FILE,
+        answers=WITHDRAWS,
+        people=PEOPLE,
+        held=["kyc"],
+        catalog=with_cancellable_kyc(),
+        workflows={KYC_CANCELLABLE: fake_kyc},
+    )
+    stopping = cancelled.history.index("withdraw#1 on reached withdrawn: stopping kyc")
+    assert cancelled.history[stopping + 1 :] == [
+        "kyc#1: stop requested by withdraw#1",
+        "kyc#1 cancelled: stopped by withdraw#1",
+        "flagged: kyc#1 cancelled after its stop was requested by withdraw#1",
+    ]
+    assert cancelled.status == "open"  # the review still waits
+    said = " ".join(GUIDE.read_text().split())  # the guide quotes both, line breaks aside
+    assert "`kyc#1 cancelled: stopped by withdraw#1`" in said
+    assert "`flagged: kyc#1 cancelled after its stop was requested by withdraw#1`" in said
+    uncancellable = cancellable_kyc()
+    uncancellable["steps"]["kyc"]["workflow"] = "kyc.check@1"
+    finished = run_case(
+        uncancellable,
+        file=FILE,
+        answers=[*WITHDRAWS, finish("kyc#1")],
+        people=PEOPLE,
+        held=["kyc"],
+    )
+    stopping = finished.history.index("withdraw#1 on reached withdrawn: stopping kyc")
+    assert finished.history[stopping + 1 :] == [
+        "kyc#1: stop requested by withdraw#1",
+        (
+            "kyc#1 done, giving analyst_notes from untrusted:llm; contact_email from "
+            "untrusted:undeclared; risk_score from system:kyc; status from system:kyc"
+        ),
+        "flagged: kyc#1 completed after its stop was requested by withdraw#1",
+    ]
+
+
+def test_a_child_is_never_stopped_twice() -> None:
+    # Through `decide`, which gives the commands: the rule's stop asks for the check's
+    # cancellation once; the close that follows, while the check still runs, asks nothing again
+    # (brief, D40). In memory a cancelled child ends at once, so only `decide` shows it.
+    case = parse_case(cancellable_kyc())
+    catalog = with_cancellable_kyc()
+    exact = FILE | {"amount": Decimal(40)}  # as the API passes it on
+    roles = frozenset({"support"})
+    state, commands = decide(case, catalog, CaseState("t"), Opened(exact, None, at=START))
+    assert [type(command).__name__ for command in commands] == ["StartWorkflow"]
+    state, commands = decide(
+        case, catalog, state, Proposed("log_withdrawal", "ana", roles, at=START)
+    )
+    state, commands = decide(
+        case, catalog, state, Answered("log_withdrawal#1", "logged", "ana", roles, at=START)
+    )
+    assert commands == [CancelWorkflow("kyc#1", "stopped by withdraw#1")]
+    state, commands = decide(case, catalog, state, CloseAsked("duplicate", "ana", roles, at=START))
+    assert commands == [] and state.phase == "closing"
+    # Without the rule's stop, the close asks for it, once, with the close's reason.
+    state, _ = decide(case, catalog, CaseState("t"), Opened(exact, None, at=START))
+    state, commands = decide(case, catalog, state, CloseAsked("duplicate", "ana", roles, at=START))
+    assert commands == [CancelWorkflow("kyc#1", "the case is closing")]
+
+
+def test_a_cancellation_nobody_asked_for_needs_attention() -> None:
+    # Fail closed, in `decide` too: a workflow step that ends cancelled though the case asked
+    # nothing of it, neither a rule's stop nor a close, failed, and waits for a person; it is
+    # never read as a close (brief, D17, D40).
+    case = parse_case(cancellable_kyc())
+    catalog = with_cancellable_kyc()
+    exact = FILE | {"amount": Decimal(40)}  # as the API passes it on
+    state, _ = decide(case, catalog, CaseState("t"), Opened(exact, None, at=START))
+    state, _ = decide(case, catalog, state, WorkflowCancelled("kyc#1", at=START))
+    assert state.history[-1] == (
+        "kyc#1 failed: it ended cancelled, though the case asked nothing of it: retry it, or close "
+        "the case"
+    )
+    assert [run.status for run in state.runs if run.entry == "kyc#1"] == ["failed"]

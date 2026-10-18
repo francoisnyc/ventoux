@@ -13,6 +13,10 @@ def contract_hash(contract: Contract) -> str:
     promise = contract.model_dump(mode="json", exclude={"display", "input", "output"})
     promise["input"] = contract.input.model_json_schema()
     promise["output"] = contract.output.model_json_schema()
+    # Not cancellable is what every workflow contract promised before 11c, so it adds nothing:
+    # their hashes and contracts.lock.json stay as they were (brief, D40).
+    if promise.get("cancellable") is False:
+        del promise["cancellable"]
     # The outcomes are a set of answers: their order promises nothing. A workflow has none.
     if "outcomes" in promise:
         promise["outcomes"] = sorted(promise["outcomes"])

@@ -26,6 +26,12 @@ class WorkflowContract(Contract):
     # Pydantic: `Field(gt=0)` adds a check to the type: an int, and greater than 0.
     timeout: int = Field(gt=0)  # in seconds: the longest the workflow may run, so one that hangs,
     # or waits for a person, fails loudly
+    # The team's promise that it stops cleanly when cancelled: after the request it schedules
+    # nothing new, it ends only once all it started has ended, and it ends cancelled only if
+    # nothing it started completed after the request. A step running it is then cancelled when
+    # its case closes or a rule stops it; otherwise it runs to its end, like an activity
+    # (brief, D40). Checked by the contract test, never assumed.
+    cancellable: bool = False
 
     # Pydantic: a validator with `mode="before"` runs first, on the raw input (here a dict), before
     # any field is checked; this one runs before the one every contract has.

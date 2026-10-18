@@ -196,18 +196,34 @@ class PlanStep(Step):
 
 
 class Then(Shape):
-    """What a rule does when it fires: reach milestones (brief, D38), start steps (brief, D39)."""
+    """What a rule does when it fires: reach milestones (brief, D38), start steps (brief, D39),
+    stop steps (brief, D40). Done in that order: stop, then reach, then start."""
 
     reach: tuple[Name, ...] = ()  # milestones it reaches
     # Steps it proposes a run of: the engine proposes, admission decides (brief, D39).
     start: tuple[Name, ...] = ()
+    # Steps whose run going on now it stops, as a close would; a step may start again later
+    # (brief, D40). A list of names now; an item may become an object with options later.
+    stop: tuple[Name, ...] = ()
 
     # Pydantic: a validator with `mode="after"` runs on the whole object, once its fields passed.
     @model_validator(mode="after")
     def does_something(self) -> "Then":
         """A rule that does nothing is refused, so a typo never hides a rule."""
-        if not self.reach and not self.start:
-            raise ValueError("a rule reaches a milestone or starts a step, at least one")
+        if not self.reach and not self.start and not self.stop:
+            raise ValueError("a rule reaches a milestone, starts a step or stops one, at least one")
+        return self
+
+    @model_validator(mode="after")
+    def no_restart(self) -> "Then":
+        """A rule doesn't stop and start one step: that restart would mean one thing for a task,
+        cancelled at once, and another for an activity, which runs on (brief, D40)."""
+        for step in self.stop:
+            if step in self.start:
+                raise ValueError(
+                    f"{step} is both stopped and started: a rule can't restart a step; stop it "
+                    "here, and start it from another rule"
+                )
         return self
 
 
@@ -351,8 +367,9 @@ class CaseDefinition(Shape):
                 problems.append(f"rules.{name}.on.answered: {rule.on.answered} is not a task")
             problems += reaching(f"rules.{name}.then.reach", rule.then.reach, self)
             problems += [
-                f"rules.{name}.then.start: {step} is not a step"
-                for step in rule.then.start
+                f"rules.{name}.then.{action}: {step} is not a step"
+                for action, steps in (("start", rule.then.start), ("stop", rule.then.stop))
+                for step in steps
                 if step not in self.steps
             ]
         if problems:

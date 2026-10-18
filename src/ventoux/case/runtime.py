@@ -44,6 +44,7 @@ from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, sta
 from ventoux.case.rules import fire_rules, reach, retry_rule
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
+    CLOSING,
     Answered,
     CaseState,
     CloseAsked,
@@ -65,8 +66,9 @@ from ventoux.case.state import (
     StartPlan,
     StartWorkflow,
     StepRun,
-    StopPlan,
+    WorkflowCancelled,
 )
+from ventoux.case.stopping import stop_children
 from ventoux.case.types import expression_problem
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.case.writers import OPENER, read_sources, untrusted_of
@@ -109,6 +111,20 @@ class CaseRefused(Exception):
     """A case the engine won't open: what is wrong with its first values."""
 
 
+class StoppedRefresh(StepStopped):
+    """A step needs a fact whose refresh a rule stopped: it fails, and an operator's retry of
+    its run fetches the fact again; a person's proposal of it is refused (brief, D40)."""
+
+    def __init__(self, stopped: str, entry: str, refresh: str) -> None:
+        super().__init__(f"{stopped}; retry {entry} to fetch it again")
+        self.stopped = stopped  # what is wrong, without what to do
+        self.refresh = refresh  # the stopped refresh's run, such as `check_order#2`
+
+    def to_proposer(self, step: str) -> str:
+        """The refusal a person proposing `step` reads: nothing failed, so nothing is retried."""
+        return f"{self.stopped}; propose {step} again once {self.refresh} has landed"
+
+
 class ShownRefused(Exception):
     """A record shown that the case won't record, because it couldn't have been: why."""
 
@@ -136,8 +152,10 @@ def decide(
         failed(state, event)
     elif isinstance(event, PlanCancelled):
         plan_cancelled(state, event)
+    elif isinstance(event, WorkflowCancelled):
+        workflow_cancelled(state, event)
     elif isinstance(event, Retried):
-        retry(case, catalog, state, event)
+        retry(case, catalog, state, event, commands)
     elif isinstance(event, Shown):
         record_shown(case, catalog, state, event)
     elif isinstance(event, ForgetApproved):
@@ -154,10 +172,10 @@ def decide(
         admit(case, catalog, state, commands, event.at)  # nothing new starts once closing
         close_when_reached(case, state)  # a rule may have reached the last of closes_when
     if was_open and state.phase == "closing":
-        stop_plans(case, state, commands)
+        stop_children(case, catalog, state, commands)
     # Moments left because the case is no longer open: each rule on them says it wasn't applied
     # (brief, D38).
-    fire_rules(case, catalog, state)
+    fire_rules(case, catalog, state, commands, event.at)
     left_unstarted(case, state)  # none is taken up once the case no longer decides (brief, D38)
     state.started_by_rules.clear()
     settle(case, state)
@@ -357,6 +375,8 @@ def propose(
     if not isinstance(step, TaskStep):
         try:
             fresh = refresh_stale(case, catalog, state, event.step, step, event.at, commands)
+        except StoppedRefresh as stopped:
+            raise ProposalRefused(stopped.to_proposer(event.step)) from None
         except StepStopped as stale:
             raise ProposalRefused(str(stale)) from None
         if fresh != "fresh":
@@ -507,15 +527,22 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     state.obtained[f"{run.step}.outcome"] = Obtained(event.at, run.entry)  # by this run
     if event.outcome != DONE:
         state.history.append(f"{run.entry} gave {event.outcome}")
-        if state.phase == "closing":
-            flag(state, f"{run.entry} completed after the close was requested")
+        flag_if_stopping(state, run)
         return  # a step's milestones are reached only when it is done with `done`
     given = {} if isinstance(step, PlanStep) else write_outputs(state, run.step, contract, event)
     giving = "; ".join(f"{name} from {given[name]}" for name in sorted(given))
     state.history.append(f"{run.entry} done{f', giving {giving}' if giving else ''}")
     reach(state, step.reaches)
+    flag_if_stopping(state, run)
+
+
+def flag_if_stopping(state: CaseState, run: StepRun) -> None:
+    """Flag a run that completed though a close or a stop was asked: what it did stands, and a
+    person decides on a reversal (brief, D10) (brief, D40)."""
     if state.phase == "closing":
         flag(state, f"{run.entry} completed after the close was requested")
+    elif run.stop_requested:
+        flag(state, f"{run.entry} completed after its stop was requested by {run.stop_requested}")
 
 
 def write_outputs(
@@ -580,31 +607,51 @@ def failed(state: CaseState, event: Failed) -> None:
     the case is closing, nobody will retry it: it is cancelled, and the case is flagged."""
     run = next(run for run in state.runs if run.entry == event.entry)
     run.status, run.reason = "failed", event.reason
-    state.history.append(f"{run.entry} failed: {event.reason}")
+    # A run that fails after its stop was asked needs attention like any other: nobody knows what
+    # it did, and a later run would get a new key (brief, D17) (brief, D40).
+    after = f" after its stop was requested by {run.stop_requested}" if run.stop_requested else ""
+    state.history.append(f"{run.entry} failed{after}: {event.reason}")
     if state.phase == "closing":
         run.status = "cancelled"
         flag(state, f"{run.entry} failed after the close was requested: {event.reason}")
 
 
-def stop_plans(case: CaseDefinition, state: CaseState, commands: list[Command]) -> None:
-    """The case begins closing: stop each running plan step's plan. Its open waits are a
-    decision the close cancels, one level down; an activity running in it finishes, since it may
-    already have moved money (brief, D10) (brief, D28)."""
-    for run in state.runs:
-        if run.status == "running" and isinstance(case.steps[run.step], PlanStep):
-            commands.append(StopPlan(run.entry))
-
-
 def plan_cancelled(state: CaseState, event: PlanCancelled) -> None:
-    """A plan stopped by the close has ended: its step run is cancelled, and the case can close.
-    Each activity in it that finished or failed after the close flags the case, as a step's run
-    would (brief, D10): a payment made after a close never disappears into "cancelled"
-    (brief, D28)."""
+    """A plan stopped by the close or by a rule has ended: its step run is cancelled, and the case
+    can close. Each activity in it that finished or failed after the stop flags the case, as a
+    step's run would (brief, D10): a payment made after a close never disappears into
+    "cancelled" (brief, D28) (brief, D40)."""
     run = next(run for run in state.runs if run.entry == event.entry)
+    if run.status != "running":
+        return  # it ended before the stop reached it: what it gave is already recorded
     run.status = "cancelled"
-    state.history.append(f"{run.entry} cancelled: the case is closing")
+    state.history.append(f"{run.entry} cancelled: {stopped_because(run)}")
     for ended in event.after_stop:
         flag(state, f"{run.entry}: {ended}")
+
+
+def workflow_cancelled(state: CaseState, event: WorkflowCancelled) -> None:
+    """A cancellable workflow step, asked to stop, ended cancelled: its run is cancelled, and the
+    case is flagged, since what it did before the request stands (brief, D40)."""
+    run = next(run for run in state.runs if run.entry == event.entry)
+    if run.status != "running":
+        return  # it ended before the cancellation reached it: what it gave is already recorded
+    if not run.stop_requested and state.phase != "closing":
+        # Fail closed: the case asked nothing of it, so nothing explains it; never read as a close.
+        why = "it ended cancelled, though the case asked nothing of it: retry it, or close the case"
+        failed(state, Failed(run.entry, why, at=event.at))
+        return
+    run.status = "cancelled"
+    state.history.append(f"{run.entry} cancelled: {stopped_because(run)}")
+    if run.stop_requested:
+        flag(state, f"{run.entry} cancelled after its stop was requested by {run.stop_requested}")
+    else:
+        flag(state, f"{run.entry} cancelled after the close was requested")
+
+
+def stopped_because(run: StepRun) -> str:
+    """Why a run asked to stop ended cancelled: a rule's stop, naming its entry, or the close."""
+    return f"stopped by {run.stop_requested}" if run.stop_requested else CLOSING
 
 
 def flag(state: CaseState, why: str) -> None:
@@ -640,7 +687,13 @@ def operating_role(catalog: Catalog, event: Retried) -> str:
     return counted[0]
 
 
-def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retried) -> None:
+def retry(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    event: Retried,
+    commands: list[Command],
+) -> None:
     """An operator retries a failed run: it runs again as the same run, with the same key, once
     the step is checked again (brief, D26). Or `RetryRefused`."""
     # Who retried is written one way, before anything is checked against it (brief, D22).
@@ -652,7 +705,8 @@ def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retri
     if firing is not None and firing.status == "failed":
         role = operating_role(catalog, event)
         try:
-            retry_rule(case, catalog, state, firing, f"{event.by} retried {event.entry} as {role}")
+            retried = f"{event.by} retried {event.entry} as {role}"
+            retry_rule(case, catalog, state, firing, retried, commands, event.at)
         except StepStopped as unreadable:
             raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
         return
@@ -677,16 +731,18 @@ def retry(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Retri
             raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
         if not decided:
             raise RetryRefused(f"{event.entry} can't be retried: {render(step.when)} is false now")
-    run.status, run.reason = "retrying", ""
+    # A person decided to try again: no longer a run whose stop was asked (brief, D40).
+    run.status, run.reason, run.stop_requested = "retrying", "", ""
     state.history.append(f"{event.by} retried {event.entry} as {counted[0]}")
     # A person decided to try again: a fact the step needs fresh may be fetched again, unless a
-    # refresh of it is still on its way (brief, D33).
+    # refresh of it is still on its way (brief, D33). A stopped refresh counts for nothing, even
+    # while it runs on (brief, D40).
     for field in step.max_age if not isinstance(step, TaskStep) else {}:
         prior = state.refreshing.get(field)
-        if prior is not None and next(r for r in state.runs if r.entry == prior).status in (
-            "done",
-            "failed",
-        ):
+        if prior is None:
+            continue
+        refresh = next(r for r in state.runs if r.entry == prior)
+        if refresh.status in ("done", "failed") or refresh.stop_requested:
             del state.refreshing[field]
 
 
@@ -699,7 +755,8 @@ def admit(
     started = True
     while started:
         started = False
-        fire_rules(case, catalog, state)  # the moments that came, before any step is asked again
+        # The moments that came, before any step is asked again.
+        fire_rules(case, catalog, state, commands, at)
         # An open approval follows the case file (brief, D25), before any start is decided: a
         # start is refused only by an approval that still stands.
         follow(case, state)
@@ -767,6 +824,14 @@ def refresh_stale(
         prior = state.refreshing.get(stale.field)
         if prior is not None and prior != stale.run:  # fetched again, and still the old value
             run = next(run for run in state.runs if run.entry == prior)
+            if run.stop_requested and run.status == "running":
+                # A stopped refresh counts for nothing: what needed it fails, never waits and
+                # asks again, which could loop in one decision (brief, D39) (brief, D40).
+                stopped = (
+                    f"{said}, and {needed}: its refresh {prior} was stopped by "
+                    f"{run.stop_requested}, so it counts for nothing"
+                )
+                raise StoppedRefresh(stopped, coming_entry(state, name), prior)
             if run.status not in ("done", "failed"):
                 return "waiting"  # on its way: running, or retried by an operator
             gave = (
@@ -1168,6 +1233,14 @@ def coming_run(
     if run.started:  # a run that fails before it starts never started
         state.moments.append(f"started {name}")
     return run
+
+
+def coming_entry(state: CaseState, name: str) -> str:
+    """The entry the step's coming run takes: the run an operator retried, or a new one."""
+    latest = latest_run(state, name)
+    if latest is not None and latest.status == "retrying":
+        return latest.entry
+    return next_entry(state, name)
 
 
 def next_entry(state: CaseState, name: str) -> str:

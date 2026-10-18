@@ -128,7 +128,11 @@ class PlanWorkflow:
         self.opened: set[str] = set()  # every entry that has been open
         self.sent: list[Sent] = []  # answers to the open entry, not yet taken, in order
         self.waiting = False  # whether a wait is waiting for an answer now
-        self.stopping = False  # whether the case running this plan as a step is closing
+        self.stopping = False  # whether the case running this plan as a step is stopping it
+        self.stop_reason = CASE_CLOSING  # why: the case is closing, or a rule's entry stopped it
+        # Whether an activity failed after the stop: in a case that goes on, the step then needs
+        # attention, never cancelled (brief, D40).
+        self.failed_after_stop = False
         self.cancelled = False  # whether the run ended because its case closed
         self.after_stop: list[str] = []  # activities that ended after the stop, for the case
 
@@ -145,11 +149,13 @@ class PlanWorkflow:
             self.sent.append(sent)
 
     @workflow.signal(name="stop")
-    def stop(self) -> None:
-        """The case running this plan as a step is closing (brief, D28): the open wait is
-        cancelled, answers are refused, and nothing new starts; an activity already running
-        finishes (brief, D10)."""
+    def stop(self, reason: str = CASE_CLOSING) -> None:
+        """The case running this plan as a step is closing, or a rule stopped the step
+        (brief, D28) (brief, D40): the open wait is cancelled, answers are refused, and nothing new
+        starts; an activity already running finishes (brief, D10). Its reason names only the
+        entry that asked; a history recorded before 11c gave none, and reads as a close."""
         self.stopping = True
+        self.stop_reason = reason
 
     def refuse(self, sent: Sent) -> None:
         """Record `sent` as refused: its entry is closed, or hasn't opened."""
@@ -169,7 +175,7 @@ class PlanWorkflow:
         """How the run is going: its history so far, and the wait open for an answer, if any."""
         if self.cancelled:
             history = [str(event) for event in self.record.history]
-            return RunReport("cancelled", CASE_CLOSING, history, after_stop=self.after_stop)
+            return RunReport("cancelled", self.stop_reason, history, after_stop=self.after_stop)
         status = self.record.status or ("waiting" if self.waiting else None)
         return RunReport(
             status,
@@ -206,8 +212,13 @@ class PlanWorkflow:
             # workflow task, which Temporal retries until fixed code is deployed (brief, D17).
             raise ApplicationError(str(refused), type="RunRefused", non_retryable=True) from None
         self.close()  # an answer left for the last wait is refused, and recorded
-        # Cut short by the close: neither a failure nor a wait anyone will answer.
-        self.cancelled = self.stopping and self.record.status in ("waiting", "stopped")
+        # Cut short by the close or a rule's stop: neither a failure nor a wait anyone will answer.
+        # A rule stopped it in a case that goes on: an activity that failed after the stop is a
+        # failure, which a person looks at (brief, D17) (brief, D40).
+        failed = self.failed_after_stop and self.stop_reason != CASE_CLOSING
+        self.cancelled = (
+            self.stopping and self.record.status in ("waiting", "stopped") and not failed
+        )
         return self.report()
 
     def name(self) -> str:
@@ -219,7 +230,7 @@ class PlanWorkflow:
         """Schedule the activity, retried and timed out as its contract says (brief, D17)."""
         self.close()  # the run has moved on from its last wait
         if self.stopping:
-            raise CaseClosing(CASE_CLOSING)  # nothing new starts (brief, D10)
+            raise CaseClosing(self.stop_reason)  # nothing new starts (brief, D10)
         contract = self.catalog.get(reference)
         # Temporal: the result is recorded in history; on replay it is read back, never called
         # again.
@@ -241,10 +252,13 @@ class PlanWorkflow:
         return output
 
     def ended_after_stop(self, what: str, said: str | None = None) -> None:
-        """Note an activity that ended after the case began closing: it ran on, since it may have
-        moved money (brief, D10), and the case flags it, as it flags a step (brief, D28)."""
+        """Note an activity that ended after the case began closing, or a rule stopped the step:
+        it ran on, since it may have moved money (brief, D10), and the case flags it, as it flags
+        a step (brief, D28) (brief, D40). `said`: what a failure said."""
         if self.stopping:
-            line = f"{what} after the close was requested"
+            asked = "the close" if self.stop_reason == CASE_CLOSING else "the stop"
+            line = f"{what} after {asked} was requested"
+            self.failed_after_stop = self.failed_after_stop or said is not None
             # What the activity said is never recorded: it may quote a sensitive value (brief, D31).
             self.after_stop.append(line if said is None else f"{line}: {Sensitive(said)}")
 

@@ -11,7 +11,8 @@ from typing import NoReturn
 from ventoux.case.admission import StepStopped, holds
 from ventoux.case.closing import close_held
 from ventoux.case.definition import AnsweredTask, CaseDefinition, Reached, Started
-from ventoux.case.state import CaseState, RuleFiring, RuleStart
+from ventoux.case.state import CaseState, Command, RuleFiring, RuleStart
+from ventoux.case.stopping import stop_step
 from ventoux.case.types import rule_problem
 from ventoux.case.writers import read_sources, untrusted_of
 from ventoux.core.catalog import Catalog
@@ -48,17 +49,29 @@ def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
             state.moments.append(f"reached {milestone}")
 
 
-def fire_rules(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
+def fire_rules(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command], at: int
+) -> None:
     """Take each moment in the order it came, and fire the rules on it in the order they are
-    written. A milestone a rule reaches is a moment too, so rules can follow rules (brief, D38)."""
+    written. A milestone a rule reaches is a moment too, so rules can follow rules (brief, D38).
+    A stop may ask for a command: a plan's stop, a workflow's cancellation (brief, D40); `at`,
+    the time of the event being decided, is what a stop measures facts' ages against."""
     while state.moments:
         moment = state.moments.pop(0)
         for name, rule in case.rules.items():
             if said(rule.on) == moment:
-                fire(case, catalog, state, name, moment)
+                fire(case, catalog, state, name, moment, commands, at)
 
 
-def fire(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str, moment: str) -> None:
+def fire(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    moment: str,
+    commands: list[Command],
+    at: int,
+) -> None:
     """One firing: read the condition on the case file now, then act on what it says."""
     entry = f"{name}#{sum(1 for firing in state.firings if firing.rule == name) + 1}"
     firing = RuleFiring(entry, name, moment, "done")
@@ -74,7 +87,7 @@ def fire(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str, mo
         firing.status, firing.reason = "failed", str(unreadable)
         state.history.append(f"{entry} failed: {firing.reason}")
         return
-    act(case, catalog, state, firing, decided)
+    act(case, catalog, state, firing, decided, commands, at)
 
 
 def read(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str) -> bool:
@@ -89,31 +102,45 @@ def read(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str) ->
 
 
 def act(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, firing: RuleFiring, decided: bool
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    firing: RuleFiring,
+    decided: bool,
+    commands: list[Command],
+    at: int,
 ) -> None:
     """Do what the rule says, if its condition held and read only trusted values; say so either
-    way."""
+    way. Stop first, then reach, then start (brief, D40)."""
     firing.status, firing.reason = "done", ""
     if (stopped := nothing_decided(case, state)) is not None:  # a retry while the close is held
         state.history.append(f"{firing.entry} on {firing.moment}: not applied: {stopped}")
         return
     then = case.rules[firing.rule].then
-    # Untrusted data informs; it never decides. Reaching a milestone decides for the case, so a
-    # condition reading an untrusted value stops it whatever it gave, its starts included
-    # (brief, D38). A rule that only starts steps acts: what it read counts for their inputs'
-    # policies (brief, D39). The message names the value and its source, never the value
-    # (brief, D30).
+    # Untrusted data informs; it never decides. Reaching a milestone, or stopping a step, decides
+    # for the case, so a condition reading an untrusted value stops the rule whatever it gave, its
+    # starts included (brief, D38) (brief, D40). A rule that only starts steps acts: what it read
+    # counts for their inputs' policies (brief, D39). The message names the value and its source,
+    # never the value (brief, D30).
     untrusted = untrusted_read(case, catalog, state, firing.rule)
-    if then.reach and untrusted is not None:
-        does = "reaches and starts" if then.start else "reaches"
+    if (then.reach or then.stop) and untrusted is not None:
+        acts = (("reaches", then.reach), ("starts", then.start), ("stops", then.stop))
+        verbs = [verb for verb, does in acts if does]  # `reaches and starts`, `stops`
+        does = " and ".join([", ".join(verbs[:-1]), verbs[-1]] if len(verbs) > 1 else verbs)
         state.history.append(
-            f"{firing.entry} on {firing.moment}: {does} nothing: its condition reads {untrusted}, "
-            "and untrusted data can't decide"
+            f"{firing.entry} on {firing.moment}: {does} nothing: its condition reads "
+            f"{untrusted}, and untrusted data can't decide"
         )
         return
     if not decided:
         state.history.append(f"{firing.entry} on {firing.moment}: its condition is false")
         return
+    if then.stop:
+        # At once, so the rules after it and admission's next round see the stopped run.
+        said = f"{firing.entry} on {firing.moment}"
+        state.history.append(f"{said}: stopping {' and '.join(then.stop)}")
+        for step in then.stop:
+            stop_step(case, catalog, state, step, firing.entry, said, commands, at)
     if then.reach:
         state.history.append(
             f"{firing.entry} on {firing.moment}: reaching {' and '.join(then.reach)}"
@@ -167,11 +194,17 @@ def untrusted_read(
 
 
 def retry_rule(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, firing: RuleFiring, said: str
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    firing: RuleFiring,
+    said: str,
+    commands: list[Command],
+    at: int,
 ) -> None:
     """An operator retries a failed rule: its condition is read again, on the case file as it is
     now, for the same moment; `StepStopped` if it still can't be (brief, D26) (brief, D38). `said` is the
     history's line for the retry, written once the condition is read."""
     decided = read(case, catalog, state, firing.rule)
     state.history.append(said)
-    act(case, catalog, state, firing, decided)
+    act(case, catalog, state, firing, decided, commands, at)

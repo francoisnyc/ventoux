@@ -34,6 +34,7 @@ from ventoux.case.state import (
     Obtained,
     Opened,
     Proposed,
+    StepRun,
 )
 from ventoux.case.validate import validate_case
 from ventoux.core.before_activity import Steering
@@ -48,6 +49,7 @@ from ventoux.temporal.cases import (
     propose,
     report,
     retry,
+    signal_stop,
     start_case,
 )
 from ventoux.temporal.converter import ExactPayloadConverter
@@ -68,6 +70,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentPlans,
         Outcome,
         development_converter,
+        fixture_converter,
         load_definition,
         run_case,
     )
@@ -1011,6 +1014,21 @@ def test_a_history_from_before_11b_replays() -> None:
     replay(history, DevelopmentCases, development_converter())
 
 
+# --- Layer 11c: a history recorded before 11c still replays (brief, D17) ---
+
+BEFORE_11C = Path(__file__).parent / "histories" / "before_11c_plan_closed.json"
+
+
+def test_a_history_from_before_11c_replays() -> None:
+    # Recorded under 11b's driver: the refund's plan step waits for a team lead when Ana closes the
+    # case as a duplicate, so the case signals its child `stop` with no reason, and the plan ends
+    # cancelled. 11c gives the signal a reason whose default keeps that text, so the new worker
+    # replays it (brief, D28, D40). Ana's review is sealed with the case's key, so the
+    # fixture's development key is kept beside it, as a test server's would be.
+    history = WorkflowHistory.from_json("refund-1", BEFORE_11C.read_text())
+    replay(history, CasesWithPlans, fixture_converter(BEFORE_11C))
+
+
 # --- Layer 11b: a waiting start and a rule's record cross continue-as-new (brief, D27, D39) ---
 
 # The refund with the order looked up, and `pay` proposed by support only on a status at most a
@@ -1377,3 +1395,250 @@ def test_an_activity_failing_in_a_stopped_plan_flags_the_case() -> None:
     ]
     assert ended.needs_attention == []
     assert ended.history[-1] == "closed: duplicate, by ana"
+
+
+# --- Layer 11c: a rule stops a child plan (brief, D28, D40) ---
+
+WITHDRAWAL = {
+    "kind": "task",
+    "display": {"title": "Log the customer's withdrawal"},
+    "roles": ["support"],
+    "automatic": False,
+    "proposed_by": ["support"],
+    "outcomes": {"logged": {"display": {"title": "Withdrawn"}, "reaches": ["withdrawn"]}},
+}
+WITHDRAW = {
+    "display": {"title": "Stop the refund when the customer withdraws"},
+    "on": {"reached": "withdrawn"},
+    "then": {"stop": ["settle"]},
+}
+
+
+def withdrawn_plan(plan: str = "refund-order@1") -> dict[str, Any]:
+    """The refund settled by `plan`, with a support task logging a withdrawal and a rule that
+    stops the settlement once it is logged."""
+    definition = refund_with_plan(plan)
+    definition["milestones"] = {"withdrawn": {"display": {"title": "Withdrawn"}}}
+    definition["steps"]["log_withdrawal"] = copy.deepcopy(WITHDRAWAL)
+    definition["rules"] = {"withdraw": copy.deepcopy(WITHDRAW)}
+    return definition
+
+
+async def withdraw(case: Case) -> None:
+    """Ana logs the customer's withdrawal."""
+    await propose(case, "log_withdrawal", "ana", PEOPLE["ana"])
+    await reported(case, lambda now: "log_withdrawal#1" in now.waiting_at)
+    await answer(case, "log_withdrawal#1", "logged", "ana", PEOPLE["ana"])
+
+
+def test_a_rule_stops_a_child_plan() -> None:
+    # The child waits for a team lead when the customer withdraws: the rule's stop signals it,
+    # with the rule's entry as the reason; the plan ends cancelled saying so, Lee's approval after
+    # it pays nothing, and the case closes. The signal's default, the close's text, is what a
+    # history from before 11c replays with (test_a_history_from_before_11c_replays).
+    paid: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paid.append(inputs["idempotency_key"])
+        return {"refund_id": "refund-ord-1"}
+
+    async def scenario(client: Client) -> tuple[CaseReport, RunReport]:
+        case = await start_case(client, CasesWithPlans, withdrawn_plan(), LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+        await withdraw(case)
+        ended = await case.result()
+        try:
+            await plans.answer(plan, "approve_refund#1", "approve", "lee", PEOPLE["lee"])
+        except RPCError:
+            pass  # the child has ended: the answer can no longer be given
+        return ended, await plan.result()
+
+    ended, child = on_temporal(
+        scenario, {**FAKES, "payments.refund@2": refund}, cases=CasesWithPlans
+    )
+    assert paid == []
+    assert ended.history[-4:] == [
+        "withdraw#1 on reached withdrawn: stopping settle",
+        "settle#1: stop requested by withdraw#1",
+        "settle#1 cancelled: stopped by withdraw#1",
+        "closed: nothing left to do",
+    ]
+    assert (child.status, child.reason) == ("cancelled", "stopped by withdraw#1")
+
+
+async def withdraw_while_paying(
+    client: Client, paying: list[str], release: threading.Event
+) -> Case:
+    """Open the refund settled by `refund-order@4`; Lee approves inside the child; Ana logs the
+    customer's withdrawal while the payment runs; then the payment is released."""
+    case = await start_case(
+        client, CasesWithLetters, withdrawn_plan("refund-order@4"), LARGE, "refund-1", QUEUE
+    )
+    await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+    plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+    await plans.answer(plan, "approve_refund#1", "approve", "lee", PEOPLE["lee"])
+    for _ in range(100):  # until the payment runs inside the child
+        if paying:
+            break
+        await asyncio.sleep(0.05)
+    await withdraw(case)
+    await reported(case, lambda now: "settle#1: stop requested by withdraw#1" in now.history)
+    release.set()
+    return case
+
+
+def test_a_payment_in_a_plan_a_rule_stopped_completes_flagged_or_fails_for_a_person() -> None:
+    # The payment runs inside the child when the rule stops it: it finishes, since it may have
+    # moved money. Completed, the case is flagged and nothing after it starts in the plan; failed
+    # past its retries, the case goes on, so the step needs attention, never cancelled
+    # (brief, D10, D17, D40).
+    release = threading.Event()
+    paying: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paying.append(inputs["idempotency_key"])
+        release.wait(timeout=10)
+        return {"refund_id": "refund-ord-1"}
+
+    async def completing(client: Client) -> CaseReport:
+        return await (await withdraw_while_paying(client, paying, release)).result()
+
+    ended = on_temporal(completing, {**FAKES, "payments.refund@2": refund}, cases=CasesWithLetters)
+    assert ended.flags == ["settle#1: payments.refund@2 completed after the stop was requested"]
+    assert "settle#1 cancelled: stopped by withdraw#1" in ended.history
+    assert ended.history[-1] == "closed: nothing left to do"
+
+    release.clear()
+    paying.clear()
+
+    def unreachable(inputs: dict[str, Any]) -> dict[str, Any]:
+        paying.append(inputs["idempotency_key"])
+        release.wait(timeout=10)
+        raise ConnectionError("provider unreachable")
+
+    async def failing(environment: WorkflowEnvironment) -> CaseReport:
+        case = await withdraw_while_paying(environment.client, paying, release)
+        for _ in range(100):  # past the backoff between attempts, until the step fails
+            now = await report(case)
+            if now.needs_attention:
+                return now
+            await environment.sleep(timedelta(seconds=10))
+        raise AssertionError(f"the step never failed: {await report(case)}")
+
+    failed = skipping(failing, {**FAKES, "payments.refund@2": unreachable}, cases=CasesWithLetters)
+    assert failed.status == "open" and failed.flags == []
+    [line] = [line for line in failed.history if line.startswith("settle#1 failed")]
+    assert line.startswith("settle#1 failed after its stop was requested by withdraw#1: ")
+    assert [entry.split(":")[0] for entry in failed.needs_attention] == ["settle#1"]
+
+
+def test_a_stop_request_crosses_continue_as_new() -> None:
+    # A run whose stop a rule asked for runs on, and is never asked twice: that mark is state
+    # like the rest, so it crosses to the next run as data (brief, D27, D40). A state from before
+    # 11c reads every run as asked nothing.
+    definition = copy.deepcopy(REFUND)
+    definition["milestones"] = {"withdrawn": {"display": {"title": "Withdrawn"}}}
+    definition["steps"]["log_withdrawal"] = copy.deepcopy(WITHDRAWAL)
+    definition["rules"] = {"withdraw": copy.deepcopy(WITHDRAW) | {"then": {"stop": ["pay"]}}}
+    case = parse_case(definition)
+    roles = frozenset({"support"})
+    state = case_state(definition, SMALL, [("review#1", SMALL_FORM)])
+    for event in (
+        Proposed("log_withdrawal", "ana", roles, at=START),
+        Answered("log_withdrawal#1", "logged", "ana", roles, at=START),
+    ):
+        state, _ = decide(case, CATALOG, state, event)
+    [paying] = [run for run in state.runs if run.entry == "pay#1"]
+    assert (paying.status, paying.stop_requested) == ("running", "withdraw#1")
+    data = state_as_data(state)
+    back = state_from_data(data)
+    assert back == state
+    # Every field of a run crosses: one added later and forgotten would vanish at every switch.
+    assert set(data["runs"][0]) == {field.name for field in dataclasses.fields(StepRun)}
+    for run in data["runs"]:
+        del run["stop_requested"]
+    assert all(run.stop_requested == "" for run in state_from_data(data).runs)
+
+
+def test_a_retry_after_a_stop_runs_on_temporal() -> None:
+    # From the review: the payment in the plan a rule stopped fails, and an operator retries the
+    # step. The retry is a person's decision, so the driver forgets the stop: the retried child
+    # runs, and waits for a team lead again. Until the fix, it was stopped as it started, recorded
+    # as the case closing, and the case closed with nothing paid (brief, D26, D40).
+    release = threading.Event()
+    paying: list[str] = []
+    down = [True]
+
+    def flaky(inputs: dict[str, Any]) -> dict[str, Any]:
+        paying.append(inputs["idempotency_key"])
+        release.wait(timeout=10)
+        if down[0]:
+            raise ConnectionError("provider unreachable")
+        return {"refund_id": "refund-ord-1"}
+
+    async def scenario(environment: WorkflowEnvironment) -> CaseReport:
+        client = environment.client
+        case = await withdraw_while_paying(client, paying, release)
+        for _ in range(100):  # past the backoff between attempts, until the step fails
+            if (await report(case)).needs_attention:
+                break
+            await environment.sleep(timedelta(seconds=10))
+        down[0] = False
+        await retry(case, "settle#1", "omar", ["operations"])
+        await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+        return await report(case)
+
+    now = skipping(scenario, {**FAKES, "payments.refund@2": flaky}, cases=CasesWithLetters)
+    assert now.status == "open" and now.needs_attention == []
+    assert "settle#1 cancelled: the case is closing" not in now.history
+
+
+def with_a_rule_on_its_start(definition: dict[str, Any], step: str) -> dict[str, Any]:
+    """`definition` with a rule that stops `step` as each of its runs starts."""
+    definition["rules"] = {
+        "hold_back": {
+            "display": {"title": "Hold the step back"},
+            "on": {"started": step},
+            "then": {"stop": [step]},
+        }
+    }
+    return definition
+
+
+def test_a_plan_stopped_as_it_starts_is_stopped_on_temporal() -> None:
+    # From the review: a rule on the plan step's own start stops it in the decision that starts
+    # it, before the child exists. The driver keeps the stop, and signals the child once it has
+    # started; untested, its loss would leave the case waiting for ever (brief, D40).
+    async def scenario(client: Client) -> CaseReport:
+        definition = with_a_rule_on_its_start(refund_with_plan(), "settle")
+        case = await start_case(client, CasesWithPlans, definition, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        return await case.result()
+
+    ended = on_temporal(scenario, cases=CasesWithPlans)
+    assert "settle#1 cancelled: stopped by hold_back#1" in ended.history
+    assert ended.history[-1] == "closed: nothing left to do"
+
+
+class EndedChild:
+    """A child plan's handle whose signal fails as Temporal fails one to a workflow that has
+    ended, or with another failure."""
+
+    def __init__(self, failure: str) -> None:
+        self.failure = failure
+
+    async def signal(self, name: str, reason: str) -> None:
+        raise ApplicationError("the workflow has ended", type=self.failure)
+
+
+def test_a_stop_to_a_child_that_has_just_ended_is_dropped() -> None:
+    # From the review: a rule stops the plan step as its child ends, and the stop signal finds
+    # the child gone. Its result is already on its way, so nothing is left to stop. Until the fix
+    # the failed signal failed the whole case workflow; a race a close could hit before 11c, which
+    # every rule's stop of a plan now can (brief, D17, D40). Any other failure still raises: an
+    # engine bug is never lost.
+    ended = EndedChild("ExternalWorkflowExecutionNotFound")
+    asyncio.run(signal_stop(ended, "stopped by withdraw#1"))  # type: ignore[arg-type]
+    with pytest.raises(ApplicationError):
+        asyncio.run(signal_stop(EndedChild("Unexpected"), "stopped by withdraw#1"))  # type: ignore[arg-type]

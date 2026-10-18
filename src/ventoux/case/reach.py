@@ -201,8 +201,18 @@ def start_refused(case: CaseDefinition, rule: str, name: str) -> str | None:
     fires = f"{rule} can never start {name}: it fires on {said(on)}"
     if on == "opened" and not may_fail and (unmet := unmet_at_opening(case, name)) is not None:
         return f"{fires}, and {unmet}"
-    # On its own moment: a step's start comes while it runs, its answer once it has run.
-    if isinstance(on, Started) and on.started == name and not (may_fail and repeatable):
+    # On its own moment: a step's start comes while it runs, its answer once it has run. Unless
+    # a rule may stop it first and it is a task: a stopped task is cancelled at once, and the
+    # start is taken; anything else runs on through the decision (brief, D40).
+    stopped = isinstance(case.steps[name], TaskStep) and any(
+        name in written.then.stop for written in case.rules.values()
+    )
+    if (
+        isinstance(on, Started)
+        and on.started == name
+        and not (may_fail and repeatable)
+        and not stopped
+    ):
         return f"{fires}, while {name} is running: start it on another moment"
     if isinstance(on, AnsweredTask) and on.answered == name and not repeatable:
         return (

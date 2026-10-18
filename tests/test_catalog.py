@@ -742,6 +742,25 @@ def test_a_workflow_contract_is_in_the_catalog() -> None:
         labelled_catalog().register(kyc_workflow().model_copy(update={"timeout": 0}))
 
 
+# Layer 11c: a workflow that promises to stop cleanly when cancelled (brief, D40).
+
+
+def test_cancellable_false_leaves_the_hash() -> None:
+    # `cancellable` is a promise, so declaring it true is a new version; left false, declared or
+    # not, it adds nothing to the hash, so every contract written before 11c keeps its recorded
+    # hash and its line in contracts.lock.json (brief, D40).
+    unsaid = contract_hash(kyc_workflow())
+    assert contract_hash(kyc_workflow(cancellable=False)) == unsaid
+    assert contract_hash(kyc_workflow(cancellable=True)) != unsaid
+    assert kyc_workflow().cancellable is False  # the default: it runs to its end
+
+
+def test_an_activity_contract_has_no_cancellable() -> None:
+    # An activity is never cut off: a side effect can't be stopped halfway (brief, D10).
+    with pytest.raises(ValidationError, match="cancellable"):
+        lookup_contract(cancellable=True)
+
+
 # Layer 9a, slice 0: systems, and inputs that take a reference to one (brief, D30).
 
 

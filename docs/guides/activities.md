@@ -239,6 +239,20 @@ What it doesn't have, and why:
   this, so the `timeout` makes a workflow that waits fail loudly, and the contract test below
   catches it first.
 
+**Cancellable, if you promise it.** A running workflow step finishes when its case closes, or
+when a rule stops it, as an activity does. If your workflow can stop cleanly, declare
+`cancellable=True`: the case then cancels it through Temporal and waits for it to end. It is a
+promise in three parts, which your workflow's history must show:
+
+- after the cancellation is requested, it schedules nothing new (no activity, timer or child);
+- it ends only once everything it had started has ended;
+- it ends cancelled only if nothing it started completed after the request; otherwise it
+  completes or fails, and the case treats it so.
+
+Leaving it out, or `cancellable=False`, changes nothing: the contract's hash and its line in
+`contracts.lock.json` stay as they are. Declaring it true changes the hash, so it is a new version
+(`kyc.check@3`).
+
 Where it runs is a **binding**, given by the deployment, never the contract: its workflow type and
 task queue (see "Running a case on Temporal" in the cases guide).
 
@@ -271,6 +285,15 @@ promise:
 | returns a `score` the contract doesn't have | `kyc.check@1 gave score, which its contract doesn't declare` |
 | waits for a signal | `kyc.check@1 didn't finish within its timeout of 600s: a workflow step must not wait for people` |
 | raises `ApplicationError("documents unreadable")` | `kyc.check@1 failed: documents unreadable` |
+| declares `cancellable=True`, and starts a timer after the cancellation is requested | `kyc.check@3 is cancellable, and started a timer after its cancellation was requested` |
+| declares `cancellable=True`, and ends while an activity it started still runs | `kyc.check@3 is cancellable, and ended before everything it started had ended` |
+| declares `cancellable=True`, and ends cancelled though its activity completed after the request | `kyc.check@3 is cancellable, and ended cancelled though an activity completed after the request` |
+| declares `cancellable=True`, and ends before it can be cancelled | `kyc.check@3 is cancellable, and ended before its cancellation was requested, so the promise wasn't checked: give an input that keeps it running` |
+| declares `cancellable=True`, and runs a local activity after the cancellation is requested | `kyc.check@3 is cancellable, and ran a local activity after its cancellation was requested` |
+
+For a cancellable contract, the test also starts the workflow a second time, requests its
+cancellation once it has started, and reads its history for the three parts of the promise: give
+it an input that keeps the workflow running a while, or there is nothing to cancel.
 
 It checks the shape of what the workflow gives, not where each value really comes from: whether
 `risk_score` is the scoring system's is for code review. A field the case will never read still

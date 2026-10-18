@@ -14,6 +14,7 @@ from ventoux.case.closing import needs_attention
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.runtime import decide
 from ventoux.case.state import (
+    CancelWorkflow,
     CaseState,
     Completed,
     Event,
@@ -23,6 +24,7 @@ from ventoux.case.state import (
     StartPlan,
     StartWorkflow,
     StopPlan,
+    WorkflowCancelled,
 )
 from ventoux.case.visibility import ApprovalSheet, CaseView, case_view, sheet_of
 from ventoux.core.catalog import Catalog
@@ -147,6 +149,12 @@ class Driver:
                     # In memory a running plan step waits for an answer (its plan runs at once to
                     # its end or its first unanswered wait): nothing runs in it, so it ends now.
                     queue.append(PlanCancelled(command.entry, at=at))
+                elif isinstance(command, CancelWorkflow):
+                    # A held workflow step, cancelled, ends cancelled at once, as its contract
+                    # promises. One that isn't held has already ended: what it gave is on its
+                    # way, and the case reads it as done, as on Temporal (brief, D40).
+                    if self.held.pop(command.entry, None) is not None:
+                        queue.append(WorkflowCancelled(command.entry, at=at))
                 elif isinstance(command, StartPlan):
                     if (ended := self.plans(command, at)) is not None:
                         queue.append(ended)  # else it waits for an answer: the step runs on

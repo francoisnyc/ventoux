@@ -200,7 +200,11 @@ def loop_issues(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
     closers = {role for reason in case.close_reasons.values() for role in reason.roles}
     closes_when = bool(case.closes_when) and all(name in can for name in case.closes_when)
     found: list[Issue] = []
-    for loop in endless_loops(case):
+    # A rule that can fire and stops a task of the loop can end it (brief, D40).
+    stoppable = {
+        step for name, rule in case.rules.items() if name in can for step in rule.then.stop
+    }
+    for loop in endless_loops(case, stoppable):
         path = f"rules.{loop.rules[0]}.then.start"
         starts = "starts" if len(loop.rules) == 1 else "start"  # "send_back starts review"
         endless = (

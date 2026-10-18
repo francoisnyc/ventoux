@@ -458,3 +458,46 @@ def test_a_retried_plan_keeps_who_may_not_approve_in_it() -> None:
     )
     assert "omar retried settle#1 as operations" in run.history
     assert calls == ["memory/settle#1/pay#1"]  # Sam proposed it: his approval was refused
+
+
+# --- Layer 11c: a rule stops a plan step (brief, D40) ---
+
+
+def test_a_rule_stops_a_plan_step() -> None:
+    # The customer withdraws while the plan waits for a team lead: the rule's stop goes through
+    # the one place that stops a running child, as a close does. The plan stops taking answers,
+    # and its step run is cancelled, saying which rule's entry stopped it (brief, D28, D40).
+    definition = refund_with_plan()
+    definition["milestones"] = {"withdrawn": {"display": {"title": "Withdrawn"}}}
+    definition["steps"]["log_withdrawal"] = {
+        "kind": "task",
+        "display": {"title": "Log the customer's withdrawal"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"logged": {"display": {"title": "Withdrawn"}, "reaches": ["withdrawn"]}},
+    }
+    definition["rules"] = {
+        "withdraw": {
+            "display": {"title": "Stop the refund when the customer withdraws"},
+            "on": {"reached": "withdrawn"},
+            "then": {"stop": ["settle"]},
+        }
+    }
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[REVIEWED, propose("log_withdrawal", "ana"), ("log_withdrawal", "logged", "ana")],
+        people=PEOPLE,
+        plans={"refund-order@1": refund_order()},
+    )
+    stopping = run.history.index("withdraw#1 on reached withdrawn: stopping settle")
+    assert run.history[stopping + 1 :] == [
+        "settle#1: stop requested by withdraw#1",
+        "settle#1 cancelled: stopped by withdraw#1",
+        "closed: nothing left to do",
+    ]
+    assert not run.reached("settle") and run.flags == []
+    # The cases guide quotes the line, under "Plan steps" and "Rules that stop steps".
+    cases_guide = " ".join((PLANS_GUIDE.parent / "cases.md").read_text().split())
+    assert "`settle#1 cancelled: stopped by withdraw#1`" in cases_guide
