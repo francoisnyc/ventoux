@@ -359,7 +359,12 @@ def propose(
             raise ProposalRefused(str(unreadable)) from None  # fail closed: nothing starts
         if not decided:
             raise ProposalRefused(f"{event.step} doesn't run now: {render(step.when)} is false")
-    start(case, catalog, state, event.step, step, commands)
+    try:
+        start(case, catalog, state, event.step, step, commands)
+    except (StepStopped, InputRefused, NotInCatalog) as error:
+        # Accepted, and it can't be made: the run fails and waits for a person, as when the step
+        # starts by itself, never raised out of the decision (brief, D17) (brief, D39).
+        fail(state, event.step, str(error))
 
 
 def held_close_refusal(case: CaseDefinition, state: CaseState) -> str:

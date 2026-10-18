@@ -822,6 +822,64 @@ def test_nothing_starts_beside_a_failed_run() -> None:
     assert not any(line.startswith("scheduled check_order#2") for line in retried.history)
 
 
+def proposed_call(step: dict[str, Any]) -> dict[str, Any]:
+    """The guide's refund, with one more step support proposes, calling what `step` says."""
+    definition = guide_json(0)
+    definition["fields"]["suggested_email"] = {
+        "type": "string",
+        "source": "untrusted:llm",
+        "display": {"title": "An address a model suggested"},
+    }
+    definition["steps"]["extra"] = {
+        "kind": "activity",
+        "display": {"title": "Something support asks for"},
+        "automatic": False,
+        "proposed_by": ["support"],
+    } | step
+    return definition
+
+
+@pytest.mark.parametrize(
+    ("step", "reason"),
+    [
+        (
+            {
+                "activity": "letters.draft@2",
+                "inputs": {"to_customer": {"var": "suggested_email"}, "template": "welcome"},
+            },
+            "letters.draft@2 takes to_customer only from a system or a person, never from "
+            "untrusted data, and this value comes from suggested_email (system:opener, "
+            "untrusted:llm)",
+        ),
+        (
+            {"activity": "orders.lookup@9", "inputs": {"order_id": {"var": "order_id"}}},
+            "orders.lookup@9 is not in the catalog. Registered: orders.lookup@1, "
+            "orders.lookup@2. Use a registered version, or register this one first.",
+        ),
+        (
+            {
+                "activity": "payments.refund@2",
+                "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "amount"}},
+            },
+            "payments.refund@2 is high risk, and extra has no approval",
+        ),
+    ],
+)
+def test_a_proposal_that_cant_be_made_needs_attention(step: dict[str, Any], reason: str) -> None:
+    # A proposal accepted by admission whose step can't be scheduled fails its run, and the case
+    # needs attention, as when the step starts by itself (brief, D17) (brief, D39). Until 11b it
+    # raised out of the decision: on Temporal, the case stopped deciding.
+    run = run_case(
+        proposed_call(step),
+        file={**LARGE, "suggested_email": "someone@example.com"},
+        answers=[propose("extra", "ana")],
+        people=PEOPLE,
+    )
+    assert "ana proposed extra as support" in run.history
+    assert run.needs_attention == [f"extra#1: {reason}"]
+    assert not run.closed
+
+
 def pay_proposed_on_an_answer() -> dict[str, Any]:
     """The guide's refund, with `pay` proposed by support, and the approved amount needed at most a
     day old: a person's answer, which nothing can fetch again (brief, D33)."""
