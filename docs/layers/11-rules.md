@@ -10,7 +10,8 @@ fix built test-first, and the Promises table names every test, the same day. 11b
 the choices agreed in four groups the same day, all as recommended, one of them splitting 11b in
 two (see "The split"); D39, the guides' 11b part and a draft Promises table written the same day,
 before building, then reviewed (fidelity, truth, proofs, style), which left three questions open
-for the user (see 11b, "Open").
+for the user, answered "Go" the same day, taken as the recommendations (see 11b, "Decided after the
+review").
 
 ## What this layer is for
 
@@ -444,7 +445,7 @@ what a close does (it had left an approval standing); and a cancelled workflow a
 also found three bugs in merged code, fixed in slice 0. The choices were then agreed in four
 groups, 2026-10-18, all as recommended, one of them splitting 11b in two: this part starts steps;
 11c stops them. A review of the drafts (fidelity, truth, proofs, style) then found three
-questions that need the user ("Open", below).
+questions that needed the user ("Decided after the review", below).
 
 Below, a choice the user agreed is unmarked; *(assistant's call)* marks what the assistant stated
 in the session without putting it as a question; *(added while drafting)* marks what came after
@@ -460,8 +461,9 @@ the session, for the user to confirm with this note.
    the answer exists, so a loop could never send work back twice. Set aside: `{"completed":
    <step>}` for any step, with a runtime bound on how often rules start a step: `on completed
    pay, when declined, start pay` would still call the provider again on each decline, up to the
-   bound, with no person in between: a retry policy written by a case (brief, D17). *Open:
-   whether every loop then comes round through a person ("Open", 1).*
+   bound, with no person in between: a retry policy written by a case (brief, D17). With a
+   rule's start never waiting ("Decided after the review", 1), every loop of rules that crosses
+   decisions comes round through a person: an answer, a proposal or a retry.
 2. **`start` is a proposal through admission** (row 10). `"then": {"start": ["lead_check"]}`, a
    list of step names like `reach`; the engine proposes, and admission decides as for a person:
    its requirements, running or waiting for its approval, repeatable, its `when`, its fresh facts,
@@ -470,33 +472,39 @@ the session, for the user to confirm with this note.
      it has run and isn't repeatable; its latest run needs attention; and *(added while
      drafting)*, following from "through admission": its requirements aren't met, or a start of
      it already waits for a fact fetched again;
-   - **waits:** a fact it needs fresh is stale and can be fetched again: accepted, the fact is
-     fetched, then everything is read again on the fresh value (the waiting start);
+   - **waits** (a person's proposal only, once decided after the review): a fact it needs fresh is
+     stale and can be fetched again: accepted, the fact is fetched, then everything is read again
+     on the fresh value (the waiting start);
    - **fails, needs attention,** as admission does: its condition can't be read, its contract is
      missing, an input is refused, a stale fact can't be fetched again.
 
-   A person's proposal gets the same waiting start and the same refusal beside a failed run (slice
-   0); and, *added while drafting*, a person's proposal of a step whose start already waits is
-   refused, so its first proposer still can't approve the run (brief, D25). And the one loosening: a
-   step a rule starts may leave out `proposed_by`, relaxing layer 8's rule that a step that doesn't
-   start by itself, or is repeatable, names it (its reason, that nothing else could start it, no
-   longer holds); `proposed_by` keeps meaning which people may propose it, and with none, nobody may
-   (row 10). Set aside: every refused start needing attention, which would fill the operators' queue
-   with ordinary "already running"s. 3. **Who proposed, and who can't approve.** The proposer is the
-   rule's entry (`send_back#1`), never a person. Whoever's answer the rule's `when` read can't
-   approve the run it starts, as for a step's own `when` (brief, D11, D25). A rule remembers
-   nothing, so the coming run keeps a record until it starts or is dropped: the rule's entry, those
-   people, and the untrusted sources the `when` read; it crosses continue-as-new. The person whose
-   answer only brought the moment is not excluded: the same chain exists through `requires` (Sam
-   proposes `check_order`, `pay` requires it, and Sam may still approve `pay`). Set aside: excluding
-   them for rules only. 4. **Each decision ends** (row 11). A step a rule has started in a decision
-   isn't started again by a rule in it, recorded: once 11c's `stop` can end a task's run inside a
-   decision, two rules on `started X`, one stopping it and one starting it, would loop. *(Added
-   while drafting: the bounds, and where the guard sits.)* A decision then starts finitely many
-   runs: the event brings at most one `answered` moment and one run of its own; each milestone is
-   reached once; each step starts by itself at most once; each stale fact is fetched again at most
-   once until its refresh lands (brief, D33); each step has at most one waiting start, and one start
-   by a rule. The guard is read before admission's other refusals, so its line shows even for a step
+   A person's proposal gets the same waiting start and the same refusal beside a failed run
+   (slice 0). *Added while drafting:* a person's proposal of a step whose start already waits is
+   refused, so its first proposer still can't approve the run (brief, D25). *Decided after the
+   review* ("Decided after the review", 1 and 2): a rule's start never waits, so for a rule the
+   "waits" kind becomes "fails, needs attention" (an operator's retry fetches the fact again); and
+   a person's proposal on a stale fact that can't be fetched again is refused, saying why.
+
+   And the one loosening: a step a rule starts may leave out `proposed_by`, relaxing layer 8's rule
+   that a step that doesn't start by itself, or is repeatable, names it (its reason, that nothing
+   else could start it, no longer holds); `proposed_by` keeps meaning which people may propose it,
+   and with none, nobody may (row 10). Set aside: every refused start needing attention, which
+   would fill the operators' queue with ordinary "already running"s.
+3. **Who proposed, and who can't approve.** The proposer is the rule's entry (`send_back#1`), never
+   a person. Whoever's answer the rule's `when` read can't approve the run it starts, as for a
+   step's own `when` (brief, D11, D25). A rule remembers nothing, so the coming run keeps a record
+   until it starts or is dropped: the rule's entry, those people, and the untrusted sources the
+   `when` read; it crosses continue-as-new. The person whose answer only brought the moment is not
+   excluded: the same chain exists through `requires` (Sam proposes `check_order`, `pay` requires
+   it, and Sam may still approve `pay`). Set aside: excluding them for rules only.
+4. **Each decision ends** (row 11). A step a rule has started in a decision isn't started again by
+   a rule in it, recorded: once 11c's `stop` can end a task's run inside a decision, two rules on
+   `started X`, one stopping it and one starting it, would loop. *(Added while drafting: the
+   bounds, and where the guard sits.)* A decision then starts finitely many runs: the event brings
+   at most one `answered` moment and one run of its own; each milestone is reached once; each step
+   starts by itself at most once; each stale fact is fetched again at most once until its refresh
+   lands (brief, D33); each step has at most one waiting start (a person's), and one start by a
+   rule. The guard is read before admission's other refusals, so its line shows even for a step
    already running. Set aside: refusing `stop` and `start` of one step anywhere in a definition,
    which shuts a later "restart".
 
@@ -577,7 +585,8 @@ session):
     is registered, it says nothing could.
 19. **What isn't claimed** is written down *(added while drafting)*: a writer started only by rules
     on the reader's own moment gives `MAY_BE_UNSET`, never `SET_AFTER`; a cycle through `started`
-    may or may not loop, depending on the order of events, and gets nothing.
+    gets nothing: it can't loop by itself, since a rule's start never waits, so each of its rounds
+    begins with a person's event.
 
 **And:**
 
@@ -585,30 +594,28 @@ session):
     patterns become 11d–11g.
 21. **D39,** drafted with this note; D38 keeps its text, and D39 narrows it.
 
-### Open
+### Decided after the review
 
-The review of the drafts found three questions only the user can answer:
+The review of the drafts found three questions only the user could answer. Put to the user with a
+recommendation each, they were answered "Go", 2026-10-18, taken as the three recommendations:
 
-1. **A rule's start on a stale fact.** As agreed, it waits for the refresh. But a refresh lands
-   with no person in it, and the waiting start is then taken up: its run's `started` fires rules
-   that may start steps again. With reads slower than a `max_age`, two rules on `started` could
-   alternate for ever, each round waiting on a refresh, nobody in between: the loop choice 1 set
-   aside. Options: (a) *recommended:* a rule's start on a stale fact fails and needs attention, so
-   a person decides (an operator's retry refreshes it, as a retry does today), while a person's
-   proposal still waits; (b) it is recorded and nothing runs, which can quietly lose a start;
-   (c) it keeps waiting, the claim "a loop comes round through a person" is dropped, and a runtime
-   bound is added. Under (a) or (b) no rule's start waits, so no cycle through `started` comes
-   round with nobody in it, and choice 19's "may or may not loop" becomes "can't loop by itself".
-2. **A person's proposal on a stale fact that can't be fetched again** (from a person, the
-   opening, a write, a workflow, a plan). Options: (a) *recommended:* refused, saying why, as a
-   proposal whose condition can't be read is refused today: the person is there to read it, and
-   nothing changes; (b) accepted, and it fails and needs attention, as a rule's start does.
-3. **A fourth bug, found by the truth review:** a person's proposal whose input is refused, whose
-   contract is missing, or whose high-risk step has no approval raises out of `decide` instead of
-   failing the step. In memory `run_case` raises; on Temporal the case's workflow task fails, the
-   report query times out, and the case stops deciding. Options: (a) *recommended:* fix it in
-   slice 0 (0d): the run fails and needs attention, as when the step starts by itself; (b) leave it
-   for its own pull request.
+1. **A rule's start on a stale fact fails and needs attention, even if the fact could be fetched
+   again; a person's proposal still waits.** As first agreed, a rule's start waited for the
+   refresh. But a refresh lands with no person in it, and the waiting start is then taken up: its
+   run's `started` fires rules that may start steps again. With reads slower than a `max_age`, two
+   rules on `started` could alternate for ever, each round waiting on a refresh, nobody in
+   between: the loop choice 1 set aside. Now an operator's retry fetches the fact again, as a
+   retry does today. Set aside: recording it with nothing run, which can quietly lose a start; and
+   waiting with a runtime bound.
+2. **A person's proposal on a stale fact that can't be fetched again is refused,** saying why (from
+   a person, the opening, a write, a workflow, a plan), as a proposal whose condition can't be read
+   is refused today: the person is there to read it, and nothing changes. Set aside: accepting it,
+   and failing the run.
+3. **A fourth bug, fixed in slice 0d:** a person's proposal whose input is refused, whose contract
+   is missing, or whose high-risk step has no approval raised out of `decide` instead of failing
+   the step: in memory `run_case` raised; on Temporal the case's workflow task failed, the report
+   query timed out, and the case stopped deciding. Now the run fails and the case needs attention,
+   as when the step starts by itself. Set aside: its own pull request.
 
 ### Agreed for 11c, rules that stop steps
 
@@ -696,8 +703,8 @@ Each starts with its negative test, seen failing for the right reason.
      operator's retry of `check_order#1` is recorded but never scheduled), and the retry is
      scheduled.
    - 0c. An unset untrusted field counts. Negative: the `!exists notes` rule reaches nothing.
-   - 0d, if the user agrees ("Open", 3). A proposal whose input is refused fails the step and the
-     case needs attention, instead of raising.
+   - 0d. A proposal that can't be made fails the step. Negative: proposing a step whose input is
+     refused fails its run, and the case needs attention, instead of raising out of `decide`.
 1. **The shape.** Negative: `answered` naming a step that isn't a task, `start` naming what isn't a
    step, are refused when read; a step a rule starts reads without `proposed_by`. 11a's
    `test_an_unknown_moment_is_refused_in_one_line` and `test_a_rule_that_does_nothing_is_refused`
@@ -719,7 +726,7 @@ Each starts with its negative test, seen failing for the right reason.
 
 Drafted before building, from the choices above; each row's test is named here first and checked
 against the file before the pull request. Every test is in `tests/test_rules.py` unless said
-otherwise. The rows for "Open" are added once the user answers.
+otherwise.
 
 | Promise | Test that would fail |
 |---|---|
@@ -735,6 +742,9 @@ otherwise. The rows for "Open" are added once the user answers.
 | A person's proposal of a step whose start already waits is refused, and the first proposer still can't approve its run | `test_a_second_proposal_of_a_waiting_step_is_refused` (`tests/test_fresh_facts.py`) |
 | A rule's start beside a failed run is refused | `test_a_rule_starts_nothing_beside_a_failed_run` |
 | A rule's start whose condition can't be read, whose contract is missing, whose input is refused, or whose stale fact can't be fetched again needs attention | `test_a_start_that_cant_be_made_needs_attention` |
+| A rule's start on a stale fact that could be fetched again needs attention, and an operator's retry fetches it, then runs the step | `test_a_rules_start_never_waits_for_a_refresh` |
+| A person's proposal on a stale fact that can't be fetched again is refused, saying why | `test_a_proposal_on_a_fact_that_cant_be_fetched_is_refused` (`tests/test_fresh_facts.py`) |
+| A person's proposal whose input is refused, whose contract is missing, or whose high-risk step has no approval fails its run, and the case needs attention | `test_a_proposal_that_cant_be_made_needs_attention` (`tests/test_case.py`) |
 | The rework loop runs as the guide shows | `test_the_guides_rework_loop_runs_as_shown` |
 | A step a rule started in a decision isn't started again by a rule in it, and the line says so (a rule already started it in this decision) even while that run is still open | `test_a_rule_starts_a_step_once_per_decision` |
 | The proposer is the rule's entry, and whoever's answer its `when` read can't approve the run | `test_whoever_a_rules_condition_read_cant_approve_what_it_started` |

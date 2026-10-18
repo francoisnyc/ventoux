@@ -121,8 +121,9 @@ step whose requirements aren't met:
 
 If a fact the step needs fresh is stale and can be fetched again, the proposal is accepted and waits
 while the fact is fetched again; then the step starts, or doesn't, on the fresh value (the case data
-guide, "Fresh facts"). Proposing the step again while it waits is refused. A step whose latest run
-needs attention isn't started again beside it ("When something breaks").
+guide, "Fresh facts"). Proposing the step again while it waits is refused, and so is a proposal
+whose stale fact can't be fetched again, saying why. A step whose latest run needs attention isn't
+started again beside it ("When something breaks").
 
 A **repeatable** step may run again, and only when proposed or started by a rule: it never starts
 itself a second time, or it would never stop. A task's `outcome` is then its latest answer, and a
@@ -486,7 +487,7 @@ A rule's `on` names one moment:
 | `"opened"` | once, when the case opens, with its first values in the case file |
 | `{"reached": "checked"}` | once, when the milestone is reached: a milestone is never undone |
 | `{"started": "assess"}` | each time a run of the step starts: a task opening, an activity or workflow scheduled, a plan started, a stale fact fetched again. A retry is the same run, so it doesn't start again |
-| `{"answered": "review"}` | each time a run of the task is answered, whatever the outcome. It names a task: an activity, a workflow or a plan finishing is not a moment, so a loop through `answered` always passes through a person's answer |
+| `{"answered": "review"}` | each time a run of the task is answered, whatever the outcome. It names a task: an activity, a workflow or a plan finishing is not a moment, so a loop of rules always comes round through a person |
 
 `when` is optional, and reads the case file as it is at that moment, as a step's `when` does: it
 is checked against the case's values first, so a misspelt outcome is an error, never false. With
@@ -612,20 +613,21 @@ make is never silent:
   repeatable; or its latest run needs attention. Without `repeatable` on `lead_check`:
   `check_review#2 on answered review: lead_check not started: lead_check has run, and is not
   repeatable`;
-- **waiting,** when a fact it needs fresh is stale and can be fetched again: the fact is fetched,
-  then everything is read again on the fresh value;
 - **failed, needing attention,** as when a step starts by itself: its condition can't be read,
-  its contract is missing, an input is refused, or a stale fact can't be fetched again.
+  its contract is missing, an input is refused, or a fact it needs fresh is stale. A rule's start
+  never waits for a fact to be fetched again, as a person's proposal does: an operator's retry
+  fetches it, then the step runs.
 
 **Who can't approve it.** Whoever's answer the rule's `when` read can't approve the run it
 starts, as for a step's own `when` (brief, D11): the rule decided that the step runs, on their
 answer. The run keeps what its rule read until it starts, since the rule itself remembers
 nothing.
 
-**A loop comes round through a person.** A rule starts steps only on a moment, and what brings a
-loop through `answered` round again is a task being answered. A step finishing is not a moment, so a
-case can't call a payment provider again on each decline by itself: retrying is the contract's
-(brief, D17). And within one decision, a step a rule has started isn't started again by a rule: `…
+**A loop comes round through a person.** A rule starts steps only on a moment, a step finishing
+is not a moment, and a rule's start never waits for something to land: what brings a loop of
+rules round again is a person, answering a task, proposing a step or retrying one. So a case can't
+call a payment provider again on each decline by itself: retrying is the contract's (brief,
+D17). And within one decision, a step a rule has started isn't started again by a rule: `…
 review not started: a rule already started it in this decision`.
 
 **Untrusted data can't choose what is sent.** A condition that lets a step start decides that
@@ -709,6 +711,7 @@ Anything the engine won't accept is refused, with the reason:
 | the person opened the case | `ana opened the case, so cannot approve its steps` |
 | the approval was withdrawn | `pay.approval#1 was withdrawn: review started again` |
 | a proposed step's requirements aren't met | `check_order requires review, which hasn't completed` |
+| a proposed step's stale fact can't be fetched again | `approved_amount was obtained 3 days ago, and pay needs it at most 1 day old: it came from a person, so it can't be fetched again` |
 | nobody proposes a step that starts by itself | `pay starts by itself: nobody proposes it` |
 | nobody proposes a step only a rule starts | `lead_check is started only by a rule: nobody proposes it` |
 | the step's latest run needs attention | `check_order#1 needs attention: retry it, or close the case` |

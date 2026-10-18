@@ -1093,24 +1093,30 @@ text is kept.*
   it, whose reason (nothing else could start it) no longer holds once a rule may. `proposed_by`
   keeps meaning which people may propose it; with none, nobody may.
 - **A fourth moment: a task answered.** `{"answered": "<task>"}` fires each time a run of the task
-  is answered, whatever the outcome, and names only a task (D38: a moment is added by a decision). A
-  milestone is reached once and `started` fires before the answer exists, so a loop needs it. What
-  brings a loop through `answered` round again is then a person's answer, as a plan's loop passes
-  through a wait (design question 18). Set aside: a moment for any step finishing, with which a case
-  could call a payment provider again on each decline by itself, a retry policy that is the platform
-  team's (D17).
+  is answered, whatever the outcome, and names only a task (D38: a moment is added by a decision).
+  A milestone is reached once and `started` fires before the answer exists, so a loop needs it. A
+  rule's start never waits (below), so every loop of rules that crosses decisions then comes round
+  through a person (an answer, a proposal, a retry), as a plan's loop passes through a wait (design
+  question 18). Set aside: a moment for any step finishing, with which a case could call a payment
+  provider again on each decline by itself, a retry policy that is the platform team's (D17).
 - **A start the engine can't make is never silent.** It is recorded, and nothing runs, when the
   step's requirements aren't met or its `when` is false; it is running, waiting for its approval,
   or already waiting to start; it has run and isn't repeatable; or its latest run needs
-  attention. It waits when a fact it needs fresh is stale and can be fetched again. And it fails,
-  needing attention, as admission does, when its condition can't be read, its contract is
-  missing, an input is refused, or a stale fact can't be fetched again (D17, D35).
-- **A proposal waits for its fresh facts** (adds to D33). A step a person proposes, or a rule
-  starts, whose stale fact can be fetched again is accepted and waits: the fact is fetched, then
-  admission reads everything again on the fresh value, and starts the step or says why not. The
-  waiting start crosses continue-as-new (D27). A proposal of a step whose start already waits is
-  refused, so its first proposer still can't approve the run (D25). Until now a person's proposal
-  skipped the check and ran on the stale fact, against D33.
+  attention. And it fails, needing attention, as admission does, when its condition can't be
+  read, its contract is missing, an input is refused, or a fact it needs fresh is stale, whether
+  or not it could be fetched again (D17, D35): an operator's retry fetches it again (D26, D33).
+- **A person's proposal waits for its fresh facts** (adds to D33). A step a person proposes whose
+  stale fact can be fetched again is accepted and waits: the fact is fetched, then admission reads
+  everything again on the fresh value, and starts the step or says why not. The waiting start
+  crosses continue-as-new (D27). A proposal of a step whose start already waits is refused, so its
+  first proposer still can't approve the run (D25); and one whose stale fact can't be fetched again
+  is refused, saying why. Until now a person's proposal skipped the check and ran on the stale
+  fact, against D33. A rule's start doesn't wait: a refresh lands with no person in it, so a
+  waiting rule's start could bring a loop round with nobody in between.
+- **A proposal that can't be made fails the step** (adds to D17). A person's proposal whose input
+  is refused, whose contract is missing, or whose high-risk step has no approval fails the run,
+  and the case needs attention, as when the step starts by itself. Until now it raised out of the
+  decision: on Temporal the case stopped deciding.
 - **Nothing starts beside a failed run** (adds to D26). A step whose latest run needs attention is
   not started again, by a rule or a person's proposal: the failure would be skipped by another
   name (D17), and for a step with side effects the new run's new key could make them happen
@@ -1126,7 +1132,7 @@ text is kept.*
   starts it. A decision then starts finitely many runs: an event brings at most one `answered`
   moment and one run of its own; each milestone is reached once; each step starts by itself at
   most once; each stale fact is fetched again at most once until its refresh lands (D33); each
-  step has at most one waiting start, and one start by a rule.
+  step has at most one waiting start (a person's), and one start by a rule.
 - **An untrusted condition can't choose what is sent** (narrows D38's "counts as read by every
   input of that step", which, taken as written, merges the condition's sources into each
   input's; adds to D36). A separate check, never merged into an input's own sources: if the step's
@@ -1158,7 +1164,7 @@ text is kept.*
   stopping it), with no reachable `closes_when` and no close reason with a registered role, is
   `NEVER_CLOSES`. The same loop when a close reason or `closes_when` can still close the case is a
   warning, `LOOPS_UNTIL_CLOSED`, as D10 asks for "a step that can always be restarted". A cycle
-  through `started` gets nothing: whether it loops depends on the order of events.
+  through `started` gets nothing: a rule's start never waits, so it can't loop by itself.
 - **`NEVER_CLOSES` says what it proves** (adds to D34): an approved forget request closes any case
   whose definition allows it (D32), so the error says nothing in the case's work or its close
   reasons can close it, and, when its definition allows forgetting and a role that forgets is
