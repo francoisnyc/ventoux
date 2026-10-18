@@ -1194,10 +1194,10 @@ kept.*
   both `stop` and `start` of a rule is refused: in one rule it would mean a restart that depends on
   the step's kind. Inside one `then`, the stop acts first, then `reach`, then `start` (D38, D39).
 - **It does what a close does, to one step** (D10, D28). An open task is cancelled, saying why; an
-  open approval is withdrawn and a given one lapses; a person's start waiting for a fact is
-  dropped. Each such coming run is recorded `cancelled`. A running activity, or a workflow step
-  whose contract isn't cancellable, finishes, marked "stop requested"; done, it is recorded as done
-  and flagged. A plan step gets its plan's stop signal, with the rule's entry as the reason.
+  open approval is withdrawn and a given one lapses; a start waiting for a fact, a person's or
+  the step's own, is dropped. Each such coming run is recorded `cancelled`. A running activity,
+  or a workflow step whose contract isn't cancellable, finishes, marked "stop requested"; done,
+  it is recorded as done and flagged. A plan step gets its plan's stop signal, with the rule's entry as the reason.
   **A run really stopped ends `cancelled`,** neither done nor failed, so `requires` doesn't count
   it as done.
 - **A failed run is never stopped** (D17, D26), and a stop with nothing to stop, or already asked,
@@ -1205,9 +1205,10 @@ kept.*
 - **What fails after a stop needs attention** (adds to D17): a run that fails after its stop was
   requested is a failure like any other, retried with its key or closed by a person, never
   cancelled as a close would: a case that goes on could otherwise start the step again, with a new
-  key, while nobody knows what the failed run did (D39). A step that needed a refresh the stop
-  ended fails too, saying so, and an operator's retry fetches the fact again (D33): waiting and
-  refreshing again could loop inside one decision.
+  key, while nobody knows what the failed run did (D39). A refresh a stop asked to end counts
+  for nothing, though it runs on and what it gives lands: a step that waited for it fails, saying
+  so, and an operator's retry fetches the fact again (D33); waiting and refreshing again could
+  loop inside one decision.
 - **Untrusted data can't stop** (adds to D38). A rule whose condition reads an untrusted source
   stops nothing, and says which value and source, never the value; case validation's
   `UNTRUSTED_TRIGGER` covers a rule that stops as one that reaches.
@@ -1228,7 +1229,8 @@ kept.*
   starts holds as it was.
 - **Case validation stays a proof** (D34): a stop only takes paths away, so what may happen is
   still what may happen; the claims that something always happens are made only where no rule may
-  stop the step they rest on (a loop of starts, a start refused on the step's own start).
+  stop the step they rest on (a loop of starts, a start refused on the step's own start). A rule
+  that stops counts as any rule, and on always-untrusted data is `UNTRUSTED_TRIGGER`, alone.
 - **A run has ended once it has its final status;** a run whose stop is requested and still
   running hasn't, and a stopped run's timers end with it (layer 11e).
 

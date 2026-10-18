@@ -689,25 +689,31 @@ What a stop does depends on what it finds:
 | The step's run | What happens |
 |---|---|
 | an open task | cancelled: `cancelled review#1: stopped by withdraw#1` |
-| waiting for its approval, approved, or proposed and waiting for a fact | the approval is withdrawn, or lapses, or the waiting start is dropped, and the run is recorded: `pay#1 cancelled: stopped by withdraw#1` |
-| a running activity, or a workflow step that isn't cancellable | it finishes, since a payment can't be cut off halfway: `pay#1: stop requested by withdraw#1`; done, its outputs land and the case is flagged, `flagged: pay#1 completed after its stop was requested by withdraw#1`; failed, it needs attention like any failure |
-| a running plan step | its plan stops, as when the case closes, and the step is `cancelled` |
-| a cancellable workflow step | cancelled, the case waiting for it to end, and flagged |
-| failed, needing attention | never stopped: `pay not stopped: pay#1 needs attention, and a failed run is never stopped` |
-| none, or one already asked to stop | nothing happens, and the history says so |
+| about to start: waiting for its approval, approved, or waiting for a fact to be fetched again (proposed by a person, or starting by itself) | the approval is withdrawn, or lapses, or the waiting start is dropped, and the run is recorded: `pay#1 cancelled: stopped by withdraw#1`. A fact on its way still lands |
+| a running activity, or a workflow step that isn't cancellable | it finishes, since a payment can't be cut off halfway: `pay#1: stop requested by withdraw#1`. Done, its outputs land and the case is flagged: `flagged: pay#1 completed after its stop was requested by withdraw#1`. Failed, it needs attention like any failure: `pay#1 failed after its stop was requested by withdraw#1: …` |
+| a running plan step | its plan stops, as when the case closes: `settle#1 cancelled: stopped by withdraw#1`. An activity that was running in it finishes; completed, it flags the case, and failed, the step needs attention |
+| a cancellable workflow step | cancelled, the case waiting for it to end, and flagged: `kyc#1 cancelled: stopped by withdraw#1`, then `flagged: kyc#1 cancelled after its stop was requested by withdraw#1` |
+| failed, needing attention | never stopped: `… pay not stopped: pay#1 needs attention, and a failed run is never stopped` |
+| none | `… pay not stopped: no run of pay is going on` |
+| running, its stop already asked | asked nothing again: `… pay not stopped: its stop is already requested` |
 
 A stopped run is `cancelled`: neither done nor failed, so a step that requires `review` waits
 for a later run of it to be done. A stop ends only the run going on now: a repeatable step may be
-proposed or started again, and a step that starts by itself doesn't start by itself again. A step
-that was waiting for a fact a stopped run was fetching again fails, saying so (`pay#1 failed:
-check_order.status is stale, and its refresh check_order#2 was stopped by withdraw#1: retry pay#1
-to fetch it again`), and an operator's retry fetches it.
+proposed or started again, and a step that starts by itself doesn't start by itself again. An
+operator's retry of a run that failed after its stop is a person's decision: the run is no longer
+one whose stop was asked.
+
+A stopped look-up that was fetching a fact again counts for nothing, though it runs on and what
+it gives lands: a step that was waiting for that fact fails, saying which refresh was stopped and
+by which rule, rather than waiting and asking again, and an operator's retry fetches the fact
+again.
 
 Inside one `then`, the stop comes first, then `reach`, then `start`, and one rule can't both stop
-and start the same step. Like a rule that reaches, a rule whose condition reads untrusted data
-doesn't stop anything (`withdraw#1 on reached checked: stops nothing: its condition reads
-kyc.analyst_notes, from untrusted:llm, and untrusted data can't decide`), and once the case
-closes, no rule stops anything: closing stops what is running itself.
+and start the same step: `review is both stopped and started: a rule can't restart a step; stop
+it here, and start it from another rule`. Like a rule that reaches, a rule whose condition reads
+untrusted data doesn't stop anything (`… stops nothing: its condition reads kyc.analyst_notes,
+from untrusted:llm, and untrusted data can't decide`), and once the case closes, no rule stops
+anything: closing stops what is running itself.
 
 **What the check says about rules.** `ventoux check` reads rules too: a milestone a rule may
 reach counts as reachable, every `when` taken as possibly true, but proves nothing about what is
@@ -722,8 +728,8 @@ nothing ends, or a start refused on the step's own start; and these codes are it
 |---|---|---|---|
 | `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
 | `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone or stops a step reads, in its `when`, a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
-| `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: on the opening, the step requires what can't be met by then, and the rule's condition can't fail and be retried later; or it fires on the step's own start (unless its condition may fail and the step is repeatable: a retry may come once the step is done), or on its own answer when the step isn't repeatable | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
-| `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition or requirement ends (the rework rules above with their `when`s removed, on the refund with the `duplicate` close reason from "Closing a case"), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
+| `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: on the opening, the step requires what can't be met by then, and the rule's condition can't fail and be retried later; or it fires on the step's own start (unless its condition may fail and the step is repeatable: a retry may come once the step is done; or a rule may stop the step, which lets the start through), or on its own answer when the step isn't repeatable | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
+| `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition, requirement or rule's stop ends (the rework rules above with their `when`s removed, on the refund with the `duplicate` close reason from "Closing a case"), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
 
 The rework loop above gets no issue: its rules' `when`s end it.
 

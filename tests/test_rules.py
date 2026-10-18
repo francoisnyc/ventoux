@@ -3047,3 +3047,121 @@ def test_a_rule_that_stops_is_checked_like_any_rule() -> None:
     assert "SET_AFTER" in codes_of(early)
     run = run_case(early, file=SMALL, answers=[], people=PEOPLE)
     assert run.needs_attention[0].startswith("withdraw#1: withdraw's condition")
+
+
+def guide_withdraw() -> dict[str, Any]:
+    """The refund with the guide's `withdraw` rule, as "Rules that stop steps" writes it, and the
+    support task that reaches `withdrawn`."""
+    [text] = [block for block in guide_blocks("json") if block.lstrip().startswith('"withdraw"')]
+    definition = withdrawable()
+    definition["rules"] = json.loads("{" + text + "}", parse_float=Decimal)
+    return definition
+
+
+def test_the_guides_stop_lines_are_what_the_engine_says() -> None:
+    # Every line the guide's "Rules that stop steps" quotes, made by a run of its own rule.
+    run = run_case(guide_withdraw(), file=SMALL, answers=WITHDRAWS, people=PEOPLE)
+    [block] = [block for block in guide_blocks("") if "stopping review and pay" in block]
+    assert appears_in_order(block.splitlines(), run.history)
+    lines = list(run.history)
+    staying = guide_withdraw() | {"stays_open": True, "close_reasons": {"duplicate": DUPLICATE}}
+    lines += run_case(
+        staying, file=LARGE, answers=[LARGE_REVIEW, *WITHDRAWS], people=PEOPLE
+    ).history
+    held = [SMALL_REVIEW, *WITHDRAWS, finish("pay#1")]
+    lines += run_case(
+        guide_withdraw(), file=SMALL, answers=held, people=PEOPLE, held=["pay"]
+    ).history
+    failing = run_case(
+        guide_withdraw(),
+        file=SMALL,
+        answers=held,
+        people=PEOPLE,
+        held=["pay"],
+        activities={"payments.refund@2": unreachable},
+    )
+    lines += failing.history
+    failed_first = run_case(
+        guide_withdraw(),
+        file=SMALL,
+        answers=[SMALL_REVIEW, *WITHDRAWS],
+        people=PEOPLE,
+        activities={"payments.refund@2": unreachable},
+    )
+    lines += failed_first.history
+    twice = guide_withdraw()
+    twice["rules"]["again"] = twice["rules"]["withdraw"] | {"display": {"title": "Again"}}
+    lines += run_case(
+        twice, file=SMALL, answers=[SMALL_REVIEW, *WITHDRAWS], people=PEOPLE, held=["pay"]
+    ).history
+    quoted = [
+        "cancelled review#1: stopped by withdraw#1",
+        "pay#1 cancelled: stopped by withdraw#1",
+        "pay#1: stop requested by withdraw#1",
+        "flagged: pay#1 completed after its stop was requested by withdraw#1",
+    ]
+    for line in quoted:
+        assert line in lines and guide_says(line), line
+    ends = [
+        "pay not stopped: pay#1 needs attention, and a failed run is never stopped",
+        "pay not stopped: no run of pay is going on",
+        "pay not stopped: its stop is already requested",
+    ]
+    for end in ends:
+        assert any(line.endswith(end) for line in lines) and guide_says(f"… {end}"), end
+    started = "pay#1 failed after its stop was requested by withdraw#1: "
+    assert any(line.startswith(started) for line in lines) and guide_says(f"{started}…")
+    # The refusal of a restart, and an untrusted condition's line.
+    with pytest.raises(CaseInvalid) as refused:
+        parse_case(withdrawable(then={"stop": ["review"], "start": ["review"]}))
+    restart = str(refused.value).removeprefix("rules.withdraw.then: ")
+    assert guide_says(restart)
+    untrusted = with_kyc_rule(SAYS_SEND)
+    untrusted["rules"]["flag_high_risk"]["then"] = {"stop": ["review"]}
+    run = run_case(
+        untrusted,
+        file=KYC_FILE,
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+    )
+    said = (
+        " stops nothing: its condition reads kyc.analyst_notes, from untrusted:llm, and untrusted "
+        "data can't decide"
+    )
+    assert any(line.endswith(said) for line in run.history) and guide_says(f"…{said}")
+
+
+def test_no_stop_line_or_issue_quotes_a_value() -> None:
+    # A stop's lines and issues name entries, steps, fields and sources, never a value from the
+    # case file: they reach people who may not see it (brief, D30, D40).
+    definition = withdrawable(when={"==": [{"var": "notes"}, "withdraw"]})
+    definition["fields"]["notes"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's notes"},
+    }
+    file = {"order_id": "ord-7731", "amount": 4321}
+    review = ("review", "approve", "ana", {"approved_amount": 4321})
+    runs = [
+        run_case(
+            definition,
+            file=file | {"notes": "withdraw"},
+            answers=[review, *WITHDRAWS],
+            people=PEOPLE,
+        ),
+        run_case(withdrawable(), file=file | {"amount": 43}, answers=[*WITHDRAWS], people=PEOPLE),
+        run_case(
+            withdrawable("pay"),
+            file=file | {"amount": 43},
+            answers=[("review", "approve", "ana", {"approved_amount": 43}), *WITHDRAWS],
+            people=PEOPLE,
+            held=["pay"],
+        ),
+    ]
+    issues = validate_case(parse_case(definition), CATALOG)
+    said = [line for run in runs for line in run.history if "stop" in line or "cancelled" in line]
+    said += [issue.message for issue in issues]
+    assert said  # the runs stopped something, and said so
+    for value in ("ord-7731", "4321", '"withdraw"', " 43"):
+        assert not any(value in line for line in said), value

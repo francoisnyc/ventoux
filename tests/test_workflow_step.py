@@ -360,6 +360,9 @@ def test_a_close_cancels_a_cancellable_workflow_step() -> None:
     ]
     assert run.flags == ["kyc#1 cancelled after the close was requested"]
     assert not run.reached("kyc")
+    said = " ".join(GUIDE.read_text().split())  # the guide's lines, line breaks aside
+    assert "`kyc#1 cancelled: the case is closing`" in said
+    assert "`flagged: kyc#1 cancelled after the close was requested`" in said
 
 
 def test_a_stopped_workflow_step_is_cancelled_only_if_cancellable() -> None:
@@ -381,6 +384,9 @@ def test_a_stopped_workflow_step_is_cancelled_only_if_cancellable() -> None:
         "flagged: kyc#1 cancelled after its stop was requested by withdraw#1",
     ]
     assert cancelled.status == "open"  # the review still waits
+    said = " ".join(GUIDE.read_text().split())  # the guide quotes both, line breaks aside
+    assert "`kyc#1 cancelled: stopped by withdraw#1`" in said
+    assert "`flagged: kyc#1 cancelled after its stop was requested by withdraw#1`" in said
     uncancellable = cancellable_kyc()
     uncancellable["steps"]["kyc"]["workflow"] = "kyc.check@1"
     finished = run_case(

@@ -498,3 +498,6 @@ def test_a_rule_stops_a_plan_step() -> None:
         "closed: nothing left to do",
     ]
     assert not run.reached("settle") and run.flags == []
+    # The cases guide quotes the line, under "Plan steps" and "Rules that stop steps".
+    cases_guide = " ".join((PLANS_GUIDE.parent / "cases.md").read_text().split())
+    assert "`settle#1 cancelled: stopped by withdraw#1`" in cases_guide

@@ -18,7 +18,9 @@ review answered both, and its three items were built test-first the same day (se
 tutor review"). 11c: the warm-up (learning question 39's follow-up) answered "tell me", 2026-10-18;
 the four points 11b's session left undiscussed, and 11c's remaining choices, put with a
 recommendation each and answered "go with all recommendations" the same day; D40, the guides'
-11c part and a draft Promises table written the same day, before building.
+11c part and a draft Promises table written the same day, before building; then built, slices
+0–7, with a read of the code by six readers beside slice 2 (see 11c, "From the code map"), and
+the Promises table checked against the tests, the same day.
 
 ## What this layer is for
 
@@ -1044,7 +1046,8 @@ each, and answered "go with all recommendations", 2026-10-18. Below, "Agreed in 
    withdraw#1`.
 7. **A person's start waiting for a fact** *(this session)* is dropped as an approval is withdrawn:
    the coming run is recorded `cancelled`. The refresh on its way still lands, and changes the case
-   file as any read does.
+   file as any read does. *(Widened while building: so is a step about to start by itself once its
+   fact lands; see "From the code map".)*
 8. **A running activity, or a workflow step whose contract isn't cancellable,** finishes: a side
    effect can't be cut off halfway (brief, D10). Its run stays `running`, marked `stop requested by
    withdraw#1`, until it ends. Done, it is recorded as done (its outputs land, its milestones are
@@ -1081,7 +1084,11 @@ each, and answered "go with all recommendations", 2026-10-18. Below, "Agreed in 
     waiting and refreshing again, which loops inside one decision (a rule on `started
     check_order` stopping it: refresh, started, stopped, refresh…) and breaks 11b's bound "each
     stale fact fetched again at most once until its refresh lands" (brief, D39); and dropping the
-    waiter, which skips work nobody decided to skip (brief, D17).
+    waiter, which skips work nobody decided to skip (brief, D17). *(As built, the line reads
+    `pay#1 failed: check_order.status was obtained 3 days ago, and pay needs it at most 1 day old:
+    its refresh check_order#2 was stopped by stop_lookup#2, so it counts for nothing; retry it to
+    fetch it again`; and what the stopped look-up gives still lands. See "Decided while
+    building".)*
 
 **Who may stop:**
 
@@ -1185,6 +1192,91 @@ each, and answered "go with all recommendations", 2026-10-18. Below, "Agreed in 
     `cancellable` workflows and closing through it. D10, D28, D29, D38 and D39 keep their text;
     D40 adds to them.
 
+### Decided while building
+
+- **The order of the slices:** the Temporal slice (6) came before validation (5). The driver had
+  to carry `CancelWorkflow` before slice 4 could pass the type check, so the Temporal work was
+  built and tested next, then validation.
+- **The fixtures keep their key** (slice 0): Ana's review is an answer with a form, sealed with
+  the case's key (brief, D31), so a fixture replays only with it. Each fixture's development key
+  is committed beside it (`<name>.keys.json`, a key made by a test server for a fake case), and
+  `ventoux.testing.fixture_converter` reads it. 11b's fixture needed none: its case had no form.
+- **The before and after of every example** (slices 0 and 7): every `run_case` and `validate_case`
+  call the suite makes was recorded with its full result (status, history, flags, what needs
+  attention, what waits; every issue), before any code changed and again at the end: 783
+  records, all identical, and 48 new ones from 11c's tests. No example changed meaning, closing's
+  change included: no contract declares `cancellable`.
+- **Who stopped a run, on the run** (slice 2): `StepRun.stop_requested` holds the rule's entry
+  (`withdraw#1`). A close marks nothing: it happens once, and stops only runs no rule asked, so a
+  child is asked once either way. A `cancelled` line says `stopped by withdraw#1` or `the case is
+  closing`, from the run, never from what the child reports.
+- **The lines, as built:** `pay#1: stop requested by withdraw#1` for any running run;
+  `pay#1 cancelled: stopped by withdraw#1` for a coming run or a child that ended cancelled;
+  `flagged: … completed after its stop was requested by withdraw#1`, and `… cancelled after its
+  stop was requested by …` for a cancellable workflow (after a close: `… after the close was
+  requested`); `pay#1 failed after its stop was requested by withdraw#1: …`, its reason in
+  `needs_attention` unchanged. An activity in a stopped plan reports `… completed after the stop
+  was requested`, as it reports `… after the close was requested`.
+- **An operator's retry clears the stop request** (slice 3): a person decided to try again, so a
+  retried run that completes is not flagged as completing after a stop.
+- **A stopped refresh, as built** (slice 3): a look-up is an activity, so a stop leaves it running
+  and it finishes; what it gives lands, as any read does (choice 8). It counts for nothing for
+  what waited on it: the waiter fails at once. An operator's retry fetches the fact again even
+  while the stopped look-up still runs, so the failure's "retry it to fetch it again" holds.
+- **A plan stopped by a rule, on Temporal** (slice 6): an activity in it that fails after the stop
+  makes the plan end `stopped`, never `cancelled`, so the step fails and needs attention
+  (choice 13); while closing, it is flagged as before. The plan's `stop` signal is sent with no
+  argument for a close, as before 11c, so a close's history is unchanged; with the rule's entry
+  otherwise.
+- **A workflow step on Temporal** (slice 6) is started with `start_child_workflow` and
+  `WAIT_CANCELLATION_COMPLETED`, its handle kept; cancelling the handle sends the request, with
+  the reason, and the case waits. Neither changes the history of a step that isn't cancelled:
+  the fixture replays. A cancellation arriving after the run ended (in memory, a start and its
+  cancellation in one batch) is ignored, the run's result already recorded.
+- **The contract test's cancellation check** (slice 6), for a cancellable contract: a second run,
+  asked to cancel once its first workflow task has run, its history read for the three clauses.
+  An activity, a timer or a child workflow counts as something it starts (clauses 1 and 2); only
+  an activity or a child workflow completing counts for clause 3 (a timer firing is not work
+  done). A run that ended before the request is a problem: the promise wasn't checked, so the
+  team gives an input that keeps it running (fail closed).
+- **`NEVER_STARTS` on a step's own start** (slice 5) is claimed only when no rule in the
+  definition stops the step, which claims a little less than "no rule that can fire" (choice 24):
+  `start_refused` doesn't know what can fire, and claiming less never makes an error false.
+- **The guide's lines are the engine's** (slice 7): every stop line "Rules that stop steps" quotes
+  comes from a run (`test_the_guides_stop_lines_are_what_the_engine_says`); the plan's and the
+  workflow step's lines from their own tests.
+- **The driver's own "never twice"** (`stopping` in `temporal/cases.py`) is a second guard: the
+  case never asks twice, so it is never alone under test.
+
+### From the code map
+
+Six readers mapped the code 11c touches (the runtime, rules, validation, the in-memory driver,
+Temporal, contracts) while slice 2 was built, each running its claims against the code. What
+changed because of it:
+
+- **Five validation claims stop being proofs once a rule can stop a step,** each confirmed with a
+  run, then fixed test-first in slice 5 (choice 24 named two of them):
+  - the loop of starts (`NEVER_CLOSES`, `LOOPS_UNTIL_CLOSED`): D39's "no rule stopping it" was in
+    the brief and never in the code. Tasks a rule that can fire may stop are left out of the
+    restart graph before any loop is looked for, so a stoppable loop found first can't hide one
+    no rule stops;
+  - `NEVER_STARTS` on the step's own start;
+  - `UNTRUSTED_TRIGGER`, never said for a rule that only stops (the runtime refused it already);
+  - `INPUT_POLICY` at `rules.<name>.then.start` for a rule that stops and starts: on untrusted
+    data it doesn't act at all, so `UNTRUSTED_TRIGGER` alone says it (one cause, one issue).
+  The other checks stay proofs, each shown with a run
+  (`test_what_validation_claims_stays_true_with_stops`).
+- **A step about to start by itself once its fact lands** was invisible to a stop: no state
+  names it, so the stop said "no run going on" and the step started afterwards. Now its coming
+  run is recorded `cancelled` (choice 7, widened).
+- **A cancellation after its run ended** is ignored (above).
+- **A retried run waiting for its approval or its fact** (`retrying`, not yet running) counts as
+  the failed run it rescues: a stop leaves it alone, saying it needs attention.
+- **Found, not fixed, for the user:** a run that failed, retried, and whose approval is then
+  rejected stays `retrying` for ever and holds the close, while the rejection is recorded on a
+  new entry (`pay#2 won't run`). It is older than 11c and unrelated to stopping; it needs its own
+  test and fix.
+
 ### The doors left open (the checkpoint's 11c section)
 
 | Row | How 11c keeps it open |
@@ -1268,44 +1360,44 @@ Each starts with its negative test, seen failing for the right reason.
 
 ### Promises
 
-Drafted before building, from the choices above; each row's test named here first, to be checked
-against the files once built. Every test is in `tests/test_rules.py` unless said otherwise.
+Drafted before building, from the choices above, then checked against the files once built,
+2026-10-18: every test named here exists where it says. Every test is in `tests/test_rules.py`
+unless said otherwise.
 
 | Promise | Test that would fail |
 |---|---|
 | `stop` names only steps, and refuses a milestone or an unknown name | `test_stop_names_a_step` |
 | One name in both `stop` and `start` of a rule is refused | `test_a_rule_cant_stop_and_start_one_step` |
 | A rule that neither reaches, starts nor stops is refused | `test_a_rule_that_does_nothing_is_refused` |
-| `cancellable` left false, or not declared, leaves a contract's hash and the lock file as they were; true changes the hash | `test_cancellable_false_leaves_the_hash` (`tests/test_catalog.py`), `test_every_development_contract_matches_its_recorded_hash` (`tests/test_catalog.py`) |
-| A stopped open task is cancelled, saying which rule's entry stopped it, and the case may close | `test_a_stop_cancels_an_open_task` |
-| A stopped approval, open or given, is withdrawn or lapses, and the coming run is recorded `cancelled` | `test_a_stop_withdraws_an_approval` |
-| A stopped waiting start is dropped, its coming run recorded `cancelled`, and its refresh still lands | `test_a_stop_drops_a_waiting_start` (`tests/test_fresh_facts.py`) |
-| A stop with nothing to stop, or already asked, is recorded and does nothing else | `test_a_stop_with_nothing_to_stop_is_recorded` |
+| `cancellable` left false, or not declared, leaves a contract's hash and the lock file as they were; true changes the hash; an activity contract has none | `test_cancellable_false_leaves_the_hash` (`tests/test_catalog.py`), `test_every_development_contract_matches_its_recorded_hash` (`tests/test_catalog.py`, seen failing with the exclusion removed), `test_an_activity_contract_has_no_cancellable` (`tests/test_catalog.py`) |
+| A stopped open task is cancelled, saying which rule's entry stopped it, an answer to it is refused, and the case may close | `test_a_stop_cancels_an_open_task` |
+| A stopped approval is withdrawn, an answer to it refused saying why, and the coming run recorded `cancelled`, so the step doesn't start by itself again | `test_a_stop_withdraws_an_approval` |
+| A stopped waiting start, a person's or the step's own, is dropped and its coming run recorded `cancelled`; the fact on its way still lands | `test_a_stop_drops_a_waiting_start` (`tests/test_fresh_facts.py`), `test_a_stop_drops_a_step_waiting_for_its_own_fact` (`tests/test_fresh_facts.py`) |
+| A stop with nothing to stop, or already asked, is recorded and does nothing else | `test_a_stop_with_nothing_to_stop_is_recorded` (seen failing with the guard removed) |
 | A failed run is never stopped, and the stop says so | `test_a_failed_run_is_never_stopped` |
 | A running activity finishes when stopped: marked, then done, its outputs and milestones landing, and flagged | `test_a_stopped_activity_finishes_and_is_flagged` |
-| An activity failing after its stop needs attention, never `cancelled` | `test_a_run_failing_after_its_stop_needs_attention` |
-| A step waiting for a stopped refresh fails, saying so, and an operator's retry fetches the fact again | `test_a_step_needing_a_stopped_refresh_needs_attention` (`tests/test_fresh_facts.py`) |
+| An activity failing after its stop needs attention, never `cancelled`; an operator's retry runs it with the same key, and its completion isn't flagged | `test_a_run_failing_after_its_stop_needs_attention` |
+| A step waiting for a stopped refresh fails, saying so; once the look-up lands, a retry runs it; a retry while the look-up still runs fetches the fact again | `test_a_step_needing_a_stopped_refresh_needs_attention` (`tests/test_fresh_facts.py`), `test_a_retry_fetches_again_past_a_stopped_refresh` (`tests/test_fresh_facts.py`) |
 | Inside one `then`, the stop acts first, then reach, then start, and later rules on the moment see the stopped run | `test_stop_then_reach_then_start` |
 | A rule whose condition reads untrusted data stops nothing, naming the value and source, never the value | `test_untrusted_data_cant_stop` |
 | Once every `closes_when` milestone is reached, a rule's stop is not applied, and says why | `test_a_stop_once_the_close_is_due_is_not_applied` |
 | A stopped step's latest run isn't done: a step requiring it waits for a later run | `test_a_stopped_run_is_not_done` |
 | A step that starts by itself, stopped, doesn't start by itself again; a repeatable step may be proposed again | `test_a_stopped_step_may_start_again_only_if_asked` |
 | Two rules on a step's start, one stopping it and one starting it, restart it once per decision | `test_stop_and_start_on_one_moment_end` |
-| A plan step stopped by a rule ends `cancelled` with the rule's reason; an activity completing in it after the stop flags the case; one failing needs attention | `test_a_rule_stops_a_plan_step` (`tests/test_plan_step.py`) |
-| A cancellable workflow step is cancelled when stopped, and flagged; one that isn't cancellable runs to its end, and is flagged | `test_a_stopped_workflow_step_is_cancelled_only_if_cancellable` (`tests/test_workflow_step.py`) |
-| A close cancels a cancellable workflow step, through the same place, and lets any other finish | `test_a_close_cancels_a_cancellable_workflow_step` (`tests/test_workflow_step.py`) |
-| A child is never stopped twice: a close after a stop asks nothing again | `test_a_child_is_never_stopped_twice` (`tests/test_workflow_step.py`) |
-| A loop of starts a rule may stop is neither `NEVER_CLOSES` nor `LOOPS_UNTIL_CLOSED` | `test_a_loop_a_rule_can_stop_gets_no_issue` |
-| `NEVER_STARTS` on a step's own start isn't claimed when a rule may stop the step | `test_never_starts_isnt_claimed_when_a_rule_may_stop_the_step` |
-| Each check that claims something always happens is still a proof with rules that stop, each shown with a run | `test_what_validation_claims_stays_true_with_stops` (`tests/test_case_validation.py`) |
-| A rule that stops reads like any rule: its moment, its condition type-checked, `NEVER_FIRES` | `test_a_rule_that_stops_is_checked_like_any_rule` |
-| A rule that stops on always-untrusted data is `UNTRUSTED_TRIGGER` | `test_a_rule_stopping_on_untrusted_data_is_refused` |
-| The runtime refuses what validation refuses, on nothing validation did | `test_untrusted_data_cant_stop`, `test_a_failed_run_is_never_stopped`: each runs the case through `run_case` alone |
-| A cancellable workflow step stopped on Temporal is cancelled, and the case waits for it to end | `test_a_stopped_cancellable_workflow_is_cancelled_on_temporal` (`tests/test_temporal_workflow_step.py`) |
-| A plan step stopped on Temporal ends with the rule's reason; the signal's default keeps today's text | `test_a_rule_stops_a_child_plan` (`tests/test_temporal_case.py`) |
-| A child is never cancelled twice on Temporal | `test_a_child_is_cancelled_once_on_temporal` (`tests/test_temporal_workflow_step.py`) |
-| The contract test checks a cancellable workflow's three clauses, and reports each one broken | `test_the_contract_test_checks_cancellation` (`tests/test_temporal_workflow_step.py`) |
-| "Stop requested" crosses continue-as-new; a state from before 11c reads it as none | `test_a_stop_request_crosses_continue_as_new` (`tests/test_temporal_case.py`), `test_a_carried_state_reads_back_as_it_was` (`tests/test_temporal_case.py`) |
-| A history recorded under 11b's driver replays under 11c's | `test_a_history_from_before_11c_replays` (`tests/test_temporal_case.py`) |
+| A plan step stopped by a rule ends `cancelled` with the rule's entry as reason | `test_a_rule_stops_a_plan_step` (`tests/test_plan_step.py`), `test_a_rule_stops_a_child_plan` (`tests/test_temporal_case.py`) |
+| An activity in a plan a rule stopped that completes flags the case; one that fails makes the step need attention | `test_a_payment_in_a_plan_a_rule_stopped_completes_flagged_or_fails_for_a_person` (`tests/test_temporal_case.py`, its failing half seen failing with the plan's check removed) |
+| A cancellable workflow step is cancelled when stopped, and flagged; one that isn't runs to its end, and is flagged | `test_a_stopped_workflow_step_is_cancelled_only_if_cancellable` (`tests/test_workflow_step.py`) |
+| A close cancels a cancellable workflow step, through the same place, and lets any other finish | `test_a_close_cancels_a_cancellable_workflow_step` (`tests/test_workflow_step.py`), `test_a_workflow_finishing_after_the_close_flags_the_case` (`tests/test_workflow_step.py`) |
+| A child is never stopped twice: a close after a stop asks nothing again | `test_a_child_is_never_stopped_twice` (`tests/test_workflow_step.py`, seen failing with the skip removed), `test_a_child_is_cancelled_once_on_temporal` (`tests/test_temporal_workflow_step.py`) |
+| A cancellable workflow step stopped on Temporal is cancelled with the rule's entry as reason, and the case waits for it to end | `test_a_stopped_cancellable_workflow_is_cancelled_on_temporal` (`tests/test_temporal_workflow_step.py`) |
+| The contract test checks a cancellable workflow's three clauses, reports each one broken, and a run it couldn't cancel; a contract that isn't cancellable gets no second run | `test_the_contract_test_checks_cancellation` (`tests/test_temporal_workflow_step.py`), `test_the_contract_test_finds_each_broken_promise` (`tests/test_temporal_workflow_step.py`) |
+| A run's stop request crosses continue-as-new, every field of a run crosses, and a state from before 11c reads it as none | `test_a_stop_request_crosses_continue_as_new` (`tests/test_temporal_case.py`), `test_a_carried_state_reads_back_as_it_was` (`tests/test_temporal_case.py`) |
+| Histories recorded under 11b's driver, a plan step stopped by a close and a workflow step running through one, replay under 11c's | `test_a_history_from_before_11c_replays` (`tests/test_temporal_case.py`), `test_a_workflow_history_from_before_11c_replays` (`tests/test_temporal_workflow_step.py`) |
+| A loop of starts a rule may stop is neither `NEVER_CLOSES` nor `LOOPS_UNTIL_CLOSED`; one a rule stopping something else can't end still is | `test_a_loop_a_rule_can_stop_gets_no_issue` (seen wrong with a run first) |
+| `NEVER_STARTS` on a step's own start isn't claimed when a rule may stop the step, and still is when none does | `test_never_starts_isnt_claimed_when_a_rule_may_stop_the_step` (seen wrong with a run first) |
+| A rule that stops on always-untrusted data is `UNTRUSTED_TRIGGER`, saying it never stops; one that also starts gets that issue alone, no `INPUT_POLICY` at its start | `test_a_rule_stopping_on_untrusted_data_is_refused`, `test_a_rule_that_stops_and_starts_on_untrusted_data_gets_one_issue` (each seen wrong with a run first) |
+| The checks that claim something never or always happens stay proofs with rules that stop, each shown with a run: `NEVER_RUNS` after the close, `NEVER_CLOSES` from the settings, `CLOSES_AT_OPENING`, no `MAY_BE_UNSET` | `test_what_validation_claims_stays_true_with_stops` |
+| A rule that stops is checked like any rule: `NEVER_FIRES`, `EXPRESSION_INVALID`, `SET_AFTER`, and the run fails as it says | `test_a_rule_that_stops_is_checked_like_any_rule` |
+| The runtime refuses what validation refuses, on nothing validation did | `test_untrusted_data_cant_stop`, `test_a_failed_run_is_never_stopped`, `test_a_rule_stopping_on_untrusted_data_is_refused`: each runs the case through `run_case` alone |
 | No line or issue of 11c quotes a value from a case file | `test_no_stop_line_or_issue_quotes_a_value` |
-| The guides' stop lines, closing and workflow text are what the engine says | `test_the_guides_stop_lines_are_what_the_engine_says`, `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
+| The guides' stop lines, plan and workflow lines, refusals and codes are what the engine says | `test_the_guides_stop_lines_are_what_the_engine_says`, `test_a_rule_stops_a_plan_step` (`tests/test_plan_step.py`), `test_a_close_cancels_a_cancellable_workflow_step` (`tests/test_workflow_step.py`), `test_a_stopped_workflow_step_is_cancelled_only_if_cancellable` (`tests/test_workflow_step.py`), `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
