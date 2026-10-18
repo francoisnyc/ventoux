@@ -41,6 +41,11 @@ class StepRun:
     refresh: bool = (
         False  # run to fetch a stale fact again, not because the case asked (brief, D33)
     )
+    # A plan run's, kept for its retry, which starts the same run again (brief, D26): who may
+    # approve nothing in it, and why, and the untrusted values the conditions that let it start
+    # read (brief, D25) (brief, D39).
+    excluded: dict[str, str] = field(default_factory=dict)
+    steered: tuple[Steering, ...] = ()
 
 
 @dataclass

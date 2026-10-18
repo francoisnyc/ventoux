@@ -36,6 +36,7 @@ from ventoux.case.state import (
     Proposed,
 )
 from ventoux.case.validate import validate_case
+from ventoux.core.before_activity import Steering
 from ventoux.temporal import client as plans
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import (
@@ -1061,6 +1062,11 @@ def test_a_waiting_start_crosses_continue_as_new() -> None:
     for event in events:
         state, _ = decide(case, CATALOG, state, event)
     assert state.waiting_to_start == ["pay"] and state.proposers == {"pay": "ana"}
+    # What a plan run keeps for its retry crosses too: who may approve nothing in it, and the
+    # untrusted values that chose it ran.
+    kept = state.runs[0]
+    kept.excluded = {"sam": "sam set lead_check.outcome, which decided that settle_on#1 started it"}
+    kept.steered = (Steering("settle's condition reads note", frozenset({"untrusted:customer"})),)
     payload = ExactPayloadConverter().to_payload(state_as_data(state))
     assert payload is not None
     assert state_from_data(ExactPayloadConverter().from_payload(payload, dict)) == state

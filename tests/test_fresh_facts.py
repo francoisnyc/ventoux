@@ -543,6 +543,49 @@ def test_a_contract_with_no_fake_raises() -> None:
         )
 
 
+def test_a_start_of_an_approved_step_waiting_for_its_fact_is_refused() -> None:
+    # Pay is approved, and waits for its stale status to be fetched again. A rule's start of it
+    # then is refused and recorded, as one waiting for its approval is: it starts once the fact
+    # lands, on its approval (brief, D33) (brief, D39). Before the second review's fix, the
+    # start failed pay, took its approval, and the refresh landed to nothing.
+    definition = refund_fresh()
+    definition["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    definition["rules"] = {
+        "pay_on_note": {
+            "display": {"title": "Pay once noted"},
+            "on": {"answered": "note"},
+            "then": {"start": ["pay"]},
+        }
+    }
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[
+            finish("check_order#1"),
+            ("review", "approve", "ana", {"approved_amount": 250}),
+            later("3d"),
+            ("pay.approval#1", "approve", "sam"),
+            propose("note", "ana"),
+            ("note", "noted", "ana"),
+            finish("check_order#2"),
+        ],
+        people=PEOPLE,
+        held=["check_order"],
+    )
+    assert (
+        "pay_on_note#1 on answered note: pay not started: pay is approved, and waits to start: "
+        "pay.approval#1"
+    ) in run.history
+    assert run.needs_attention == [] and run.reached("pay")
+
+
 def load_plan() -> dict[str, Any]:
     """The plans guide's `refund-order` plan, its first JSON block, as stored data."""
     guide = (ROOT / "docs" / "guides" / "plans.md").read_text()

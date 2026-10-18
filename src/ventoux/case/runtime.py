@@ -59,6 +59,7 @@ from ventoux.case.state import (
     PlanCancelled,
     Proposed,
     Retried,
+    RuleStart,
     Schedule,
     Shown,
     StartPlan,
@@ -157,7 +158,7 @@ def decide(
     # Moments left because the case is no longer open: each rule on them says it wasn't applied
     # (brief, D38).
     fire_rules(case, catalog, state)
-    state.rule_starts.clear()  # none is taken up once the case no longer decides (brief, D38)
+    left_unstarted(case, state)  # none is taken up once the case no longer decides (brief, D38)
     state.started_by_rules.clear()
     settle(case, state)
     return state, commands
@@ -348,6 +349,8 @@ def propose(
         raise ProposalRefused(problem)
     state.history.append(f"{event.by} proposed {event.step} as {role}")
     state.proposers[event.step] = event.by  # never its approver (brief, D25)
+    # Hers is the proposal now: a rule's start whose approval was withdrawn is over (brief, D39).
+    state.proposed_by_rules.pop(event.step, None)
     # Freshness first, before the condition, the approval and the start, as for any start
     # (brief, D33): a stale read is fetched again and the proposal waits for it; a fact nothing
     # can fetch again refuses the proposal, saying why (brief, D39). A refusal changes nothing.
@@ -372,6 +375,27 @@ def propose(
         # Accepted, and it can't be made: the run fails and waits for a person, as when the step
         # starts by itself, never raised out of the decision (brief, D17) (brief, D39).
         fail(state, event.step, str(error))
+
+
+def proposed_by_a_rule(state: CaseState, asked: RuleStart) -> None:
+    """The step's coming run is the rule's proposal, with what its condition read, kept with the
+    run until it starts (brief, D38) (brief, D39). A person's earlier proposal, whose approval was
+    withdrawn, is over."""
+    state.proposed_by_rules[asked.step] = asked
+    state.proposers.pop(asked.step, None)
+
+
+def left_unstarted(case: CaseDefinition, state: CaseState) -> None:
+    """Record each start a rule asked for that no admission took up: the case stopped deciding
+    first, as when a retried rule reaches the last `closes_when` milestone. Never dropped in
+    silence (brief, D39)."""
+    for asked in state.rule_starts:
+        if case.closes_when and all(m in state.milestones for m in case.closes_when):
+            why = nothing_new(case, state)
+        else:
+            why = f"the case is {state.phase}, so nothing new starts"
+        state.history.append(f"{asked.entry} on {asked.moment}: {asked.step} not started: {why}")
+    state.rule_starts.clear()
 
 
 def nothing_new(case: CaseDefinition, state: CaseState) -> str:
@@ -669,10 +693,12 @@ def admit(
     while started:
         started = False
         fire_rules(case, catalog, state)  # the moments that came, before any step is asked again
+        # An open approval follows the case file (brief, D25), before any start is decided: a
+        # start is refused only by an approval that still stands.
+        follow(case, state)
         # The engine's proposals, from the rules that fired: admission decides (brief, D39).
         if start_from_rules(case, catalog, state, commands, at):
             started = True
-        follow(case, state)  # an open approval follows the case file (brief, D25)
         for name, step in case.steps.items():
             if not free_to_start(state, name, step):
                 continue
@@ -857,7 +883,7 @@ def start_from_rules(
                 if (problem := expression_problem(case, catalog, name)) is not None:
                     raise StepStopped(problem)
                 if not isinstance(step, TaskStep):
-                    never_waits(state, name, step, at)
+                    never_waits(case, catalog, state, name, step, at)
                 if step.when is not None and not holds(
                     step.when, state.values, f"{name}'s condition"
                 ):
@@ -867,7 +893,7 @@ def start_from_rules(
                 state.started_by_rules.append(name)
                 # Kept with the failed run: an operator's retry starts it on what the rule read,
                 # which still counts for its inputs and its approvers (brief, D38) (brief, D39).
-                state.proposed_by_rules[name] = asked
+                proposed_by_a_rule(state, asked)
                 fail(state, name, str(error))  # nothing is skipped: a person decides (brief, D17)
                 started = True
                 continue
@@ -876,7 +902,7 @@ def start_from_rules(
             continue
         state.history.append(f"{said}: starting {name}")
         state.started_by_rules.append(name)
-        state.proposed_by_rules[name] = asked  # what it read, kept with the run (brief, D38)
+        proposed_by_a_rule(state, asked)
         try:
             start(case, catalog, state, name, step, commands)
         except (StepStopped, InputRefused, NotInCatalog) as error:
@@ -885,17 +911,30 @@ def start_from_rules(
     return started
 
 
-def never_waits(state: CaseState, name: str, step: CallStep | PlanStep, at: int) -> None:
+def never_waits(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    step: CallStep | PlanStep,
+    at: int,
+) -> None:
     """`StepStopped` if a fact the step needs fresh is stale: a rule's start never waits for one to
     be fetched again, since the fetch lands with no person in it, and a loop of rules could come
-    round with nobody in between. An operator's retry fetches it (brief, D33) (brief, D39)."""
+    round with nobody in between. An operator's retry fetches it, if anything can; the line says
+    which (brief, D33) (brief, D39)."""
     for stale in stale_facts(step.max_age, state, at):
         if stale.age is None:  # fail closed: an age that can't be told is never fresh
             raise StepStopped(f"{stale.field} has no time obtained, so {name} can't tell its age")
-        raise StepStopped(
+        old = (
             f"{stale.field} was obtained {ago(stale.age)} ago, and {name} needs it at most "
-            f"{as_said(stale.limit)} old: a rule's start doesn't wait for it to be fetched again; "
-            "retry it to fetch it"
+            f"{as_said(stale.limit)} old"
+        )
+        fetched_by, why = refreshable(case, catalog, state, stale)
+        if fetched_by is None:
+            raise StepStopped(f"{old}: {why}")
+        raise StepStopped(
+            f"{old}: a rule's start doesn't wait for it to be fetched again; retry it to fetch it"
         )
 
 
@@ -1061,8 +1100,9 @@ def start_plan(
             raise InputRefused(f"{field} can't be evaluated: {error}") from None
     run = coming_run(state, name, "running")
     # Who may approve nothing in the plan crosses into it, or a plan step would be a way around
-    # them (brief, D25).
-    excluded: dict[str, str] = {}
+    # them (brief, D25). A retry starts the same run again, with what its first start kept
+    # (brief, D26).
+    excluded = dict(run.excluded)
     if state.opened_by is not None:
         excluded[state.opened_by] = (
             f"{state.opened_by} opened the case, so cannot approve its steps"
@@ -1074,6 +1114,9 @@ def start_plan(
     if (asked := state.proposed_by_rules.get(name)) is not None:
         for person, field in asked.read_from.items():
             excluded.setdefault(person, decided_by(person, field, asked))
+    # Read before the proposal is spent: the rule's record is part of it (brief, D39).
+    steered = tuple(dict.fromkeys((*run.steered, *steering(case, catalog, state, name, step))))
+    run.excluded, run.steered = excluded, steered
     proposal_spent(state, name)  # the proposed run has started
     plan_run = f"{state.case}/{run.entry}"
     state.history.append(
@@ -1083,7 +1126,6 @@ def start_plan(
     references = {
         field: given_as_reference(expression, types) for field, expression in step.inputs.items()
     }
-    steered = steering(case, catalog, state, name, step)
     commands.append(
         StartPlan(run.entry, step.plan, fields, plan_run, excluded, references, steered)
     )

@@ -29,6 +29,7 @@ from ventoux.testing import (
     RetryRefused,
     close,
     fake_kyc,
+    finish,
     later,
     load_definition,
     propose,
@@ -265,6 +266,41 @@ def test_a_refused_start_is_recorded() -> None:
         "flag_large#1 on answered note: pay not started: pay is waiting for its approval: "
         "pay.approval#1"
     ) in waiting.history
+    # Waiting to start: Ana proposed pay on a stale status, which is being fetched again.
+    fresh = copy.deepcopy(approval)
+    fresh["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    fresh["steps"]["pay"] |= {
+        "automatic": False,
+        "proposed_by": ["support"],
+        "requires": ["check_order"],
+        "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+        "max_age": {"check_order.status": "1d"},
+    }
+    del fresh["steps"]["pay"]["approval"]
+    fresh |= closable(fresh, "support") | {"stays_open": True}
+    proposed = run_case(
+        fresh,
+        file=SMALL,
+        answers=[
+            finish("check_order#1"),
+            APPROVED_40,
+            later("3d"),
+            propose("pay", "ana"),
+            ("note", "noted", "ana"),
+        ],
+        people=PEOPLE,
+        held=["check_order"],
+        activities={"orders.lookup@2": lambda inputs: {"status": "delivered"}},
+    )
+    assert (
+        "flag_large#1 on answered note: pay not started: pay is already proposed, and waits for "
+        "its facts to be fetched again"
+    ) in proposed.history
 
 
 def test_a_rule_starts_nothing_beside_a_failed_run() -> None:
@@ -326,6 +362,50 @@ def test_a_start_that_cant_be_made_needs_attention() -> None:
         (
             "lookup#1: orders.lookup@9 is not in the catalog. Registered: orders.lookup@1, "
             "orders.lookup@2. Use a registered version, or register this one first."
+        )
+    ]
+    # An input refused: the letter would go to an address the customer typed.
+    typed = with_rule(on={"answered": "review"}, then={"start": ["letter"]})
+    typed["rules"]["flag_large"]["when"] = None
+    typed["fields"]["email"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The address the customer typed"},
+    }
+    typed["steps"]["letter"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "email"}, "template": "refund"},
+        "automatic": False,
+    }
+    run = run_case(
+        typed, file={**SMALL, "email": "c@example.com"}, answers=[APPROVED_40], people=PEOPLE
+    )
+    [refused] = run.needs_attention
+    assert refused.startswith("letter#1: letters.draft@2 takes to_customer only from a system")
+    # A stale fact nothing can fetch again: a person's answer. The retry would fail the same way,
+    # so the line says so, as a person's proposal does (the second review).
+    stale = only_a_rule_starts(max_age={"review.outcome": "1d"}, when={"exists": "review.outcome"})
+    stale["steps"]["lead_check"] |= {"kind": "activity", "activity": "orders.lookup@1"}
+    del stale["steps"]["lead_check"]["roles"], stale["steps"]["lead_check"]["outcomes"]
+    stale["steps"]["lead_check"]["inputs"] = {"order_id": {"var": "order_id"}}
+    stale["rules"]["flag_large"]["on"] = {"answered": "note"}
+    stale["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    stale |= closable(stale, "support") | {"stays_open": True}
+    answers = [APPROVED_40, later("3d"), propose("note", "ana"), ("note", "noted", "ana")]
+    run = run_case(stale, file=SMALL, answers=answers, people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "lead_check#1: review.outcome was obtained 3 days ago, and lead_check needs it at most "
+            "1 day old: it came from a person, so it can't be fetched again"
         )
     ]
 
@@ -778,6 +858,34 @@ def test_a_rule_starts_nothing_once_the_case_closes() -> None:
         ) in run.history
         assert not any(line.startswith("scheduled lookup") for line in run.history)
         assert run.closed and run.flags == []
+    # A rule retried after it failed reaches checked, and the case begins closing before any
+    # start is decided: its start is recorded too, never dropped in silence (the second review).
+    retried = closing_on_checked(copy.deepcopy(one))
+    retried["rules"]["wrap"]["when"] = {"==": [{"var": "note.outcome"}, "noted"]}
+    retried["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    answers = [
+        ("review", "reject", "ana"),
+        propose("note", "ana"),
+        ("note", "noted", "ana"),
+        retry("wrap#1", "omar"),
+    ]
+    run = run_case(retried, file=SMALL, answers=answers, people=PEOPLE)
+    assert run.history[run.history.index("omar retried wrap#1 as operations") + 1 :] == [
+        "wrap#1 on answered review: reaching checked",
+        "reached checked",
+        (
+            "wrap#1 on answered review: lookup not started: checked is reached, so the case "
+            "closes and nothing new starts"
+        ),
+        "closed: checked reached",
+    ]
 
 
 def welcome_on_a_fresh_status() -> dict[str, Any]:
@@ -889,6 +997,57 @@ def test_a_rule_on_the_opening_that_may_fail_keeps_the_case_open() -> None:
     assert [i.code for i in issues(dead)] == ["NEVER_RUNS"]
     run = run_case(dead, file=SMALL, answers=[propose("review", "ana")], people=PEOPLE)
     assert run.waiting_for == ["review by support"] and not run.closed
+
+
+def test_a_rules_start_sees_the_approvals_that_stand() -> None:
+    # The review is answered again with a new amount: the goodwill refund's open approval reads it,
+    # so it is withdrawn in this decision, before the rule's start is decided, which then asks
+    # again (brief, D25) (brief, D39). Before the second review's fix, the start was refused by
+    # the approval being withdrawn, and nothing was asked.
+    definition = with_goodwill()
+    del definition["rules"]["flag_large"], definition["steps"]["lead_check"]
+    definition["rules"]["start_goodwill"]["on"] = {"answered": "review"}
+    definition["steps"]["goodwill"]["inputs"]["amount"] = {"var": "approved_amount"}
+    reworked = ("review", "approve", "ana", {"approved_amount": 30})
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[APPROVED_40, propose("review", "ana"), reworked],
+        people=LEADS,
+    )
+    second = run.history.index("review#2 done")
+    assert run.history[second + 1 : second + 4] == [
+        "withdrew goodwill.approval#1: approved_amount changed",
+        "start_goodwill#2 on answered review: starting goodwill",
+        "asked goodwill.approval#2: approval of goodwill by support-lead",
+    ]
+
+
+def test_a_new_proposal_replaces_a_withdrawn_one() -> None:
+    # The rule's start of the goodwill refund waits for its approval, which is withdrawn when the
+    # amount changes; the start is over. Ana then proposes it herself: hers is the proposal now,
+    # and Sam, whose check the rule read, may approve it (brief, D25) (brief, D39). Before the
+    # second review's fix, the rule's record stayed, and refused Sam naming a rule that no longer
+    # proposed anything.
+    definition = with_goodwill(CHECKED_OK)
+    definition["steps"]["goodwill"]["inputs"]["amount"] = {"var": "approved_amount"}
+    definition["steps"]["goodwill"]["proposed_by"] = ["support"]
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[
+            APPROVED_40,
+            ("lead_check", "ok", "sam"),
+            propose("review", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 30}),
+            propose("goodwill", "ana"),
+            ("goodwill.approval#2", "approve", "sam"),
+        ],
+        people=LEADS,
+    )
+    assert "withdrew goodwill.approval#1: approved_amount changed" in run.history
+    assert "sam answered goodwill.approval#2 approve as support-lead" in run.history
+    assert run.reached("goodwill")
 
 
 # --- 11b, slice 4: validation ---

@@ -18,6 +18,7 @@ from ventoux.case.state import (
     RuleStart,
     StepRun,
 )
+from ventoux.core.before_activity import Steering
 
 
 def state_as_data(state: CaseState) -> dict[str, Any]:
@@ -40,6 +41,8 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
                 "reason": run.reason,
                 "approved": None if run.approved is None else given_as_data(run.approved),
                 "refresh": run.refresh,
+                "excluded": dict(run.excluded),
+                "steered": [steering_as_data(steering) for steering in run.steered],
             }
             for run in state.runs
         ],
@@ -97,6 +100,14 @@ def rule_start_from_data(data: dict[str, Any]) -> RuleStart:
     )
 
 
+def steering_as_data(steering: Steering) -> dict[str, Any]:
+    return {"said": steering.said, "sources": sorted(steering.sources)}
+
+
+def steering_from_data(data: dict[str, Any]) -> Steering:
+    return Steering(data["said"], frozenset(data["sources"]))
+
+
 def given_as_data(given: GivenApproval) -> dict[str, Any]:
     return {"entry": given.entry, "by": given.by, "digest": given.digest, "seen": dict(given.seen)}
 
@@ -123,6 +134,9 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
                 run["reason"],
                 None if run["approved"] is None else GivenApproval(**run["approved"]),
                 run.get("refresh", False),  # none in a state from before layer 9d
+                # None in a state from before layer 11b: no plan run kept what it started on.
+                dict(run.get("excluded", {})),
+                tuple(steering_from_data(steering) for steering in run.get("steered", [])),
             )
             for run in data["runs"]
         ],
