@@ -161,7 +161,7 @@ def decide(
         stop_children(case, catalog, state, commands)
     # Moments left because the case is no longer open: each rule on them says it wasn't applied
     # (brief, D38).
-    fire_rules(case, catalog, state, commands)
+    fire_rules(case, catalog, state, commands, event.at)
     left_unstarted(case, state)  # none is taken up once the case no longer decides (brief, D38)
     state.started_by_rules.clear()
     settle(case, state)
@@ -685,7 +685,7 @@ def retry(
         role = operating_role(catalog, event)
         try:
             retried = f"{event.by} retried {event.entry} as {role}"
-            retry_rule(case, catalog, state, firing, retried, commands)
+            retry_rule(case, catalog, state, firing, retried, commands, event.at)
         except StepStopped as unreadable:
             raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
         return
@@ -735,7 +735,7 @@ def admit(
     while started:
         started = False
         # The moments that came, before any step is asked again.
-        fire_rules(case, catalog, state, commands)
+        fire_rules(case, catalog, state, commands, at)
         # An open approval follows the case file (brief, D25), before any start is decided: a
         # start is refused only by an approval that still stands.
         follow(case, state)

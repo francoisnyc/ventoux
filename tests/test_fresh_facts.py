@@ -1412,3 +1412,50 @@ def test_a_stop_drops_a_step_waiting_for_its_own_fact() -> None:
         "check_order#2 done, giving status from system:orders",
     ]
     assert not run.reached("pay") and run.closed
+
+
+def test_a_stop_of_a_step_not_about_to_start_cancels_nothing() -> None:
+    # From the review: a stop of pay, whose review isn't done, while another step, recheck, has
+    # the status fetched again. pay isn't about to start, so nothing of it is going on: the stop
+    # says so, and pay starts by itself once reviewed. Until the fix, its one start by itself was
+    # recorded cancelled, and the refund was never paid (brief, D40).
+    definition = refund_fresh()
+    definition["steps"]["triage"] = {
+        "kind": "task",
+        "display": {"title": "Triage"},
+        "roles": ["support"],
+        "outcomes": {"done": {"display": {"title": "Triaged"}}},
+    }
+    definition["steps"]["recheck"] = {
+        "kind": "activity",
+        "display": {"title": "Check the order again"},
+        "activity": "orders.lookup@2",
+        "requires": ["triage", "check_order"],
+        "max_age": {"check_order.status": "1h"},
+        "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    definition["rules"] = {
+        "stop_pay": {
+            "display": {"title": "Stop the payment whenever the order is looked up"},
+            "on": {"started": "check_order"},
+            "then": {"stop": ["pay"]},
+        }
+    }
+    run = run_case(
+        definition,
+        file=FILE,
+        answers=[
+            finish("check_order#1"),
+            later("3d"),
+            ("triage", "done", "ana"),  # recheck needs the status within the hour: refreshed
+            finish("check_order#2"),
+            ("review", "approve", "ana", {"approved_amount": 80}),
+        ],
+        people=PEOPLE,
+        held=["check_order"],
+    )
+    assert "stop_pay#2 on started check_order: pay not stopped: no run of pay is going on" in (
+        run.history
+    )
+    assert run.reached("pay")

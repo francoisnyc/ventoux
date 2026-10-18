@@ -5,8 +5,11 @@ a running activity finishes, since a side effect can't be cut off halfway (brief
 run is never stopped (brief, D17) (brief, D26). See docs/layers/11-rules.md (11c).
 """
 
-from ventoux.case.admission import latest_run
+from ventoux.case.admission import latest_run, requirements_met
+from ventoux.case.closing import close_held
 from ventoux.case.definition import CaseDefinition, PlanStep, TaskStep, WorkflowStep
+from ventoux.case.freshness import stale_facts
+from ventoux.case.sequence import requirements
 from ventoux.case.state import CLOSING, CancelWorkflow, CaseState, Command, StepRun, StopPlan
 from ventoux.core.catalog import Catalog
 
@@ -19,9 +22,11 @@ def stop_step(
     by: str,
     said: str,
     commands: list[Command],
+    at: int,
 ) -> None:
     """Stop the run of `name` going on now, for the rule's firing `by`; `said` begins the line
-    the history writes when there is nothing to stop. The step may start again later
+    the history writes when there is nothing to stop; `at` is the time of the event being
+    decided, against which facts' ages are measured. The step may start again later
     (brief, D40)."""
     latest = latest_run(state, name)
     if latest is not None and latest.status in ("failed", "retrying"):
@@ -42,11 +47,11 @@ def stop_step(
         del state.waiting[latest.entry]
         state.history.append(f"cancelled {latest.entry}: stopped by {by}")
         return
-    if not stop_coming_run(case, state, name, by):
+    if not stop_coming_run(case, state, name, by, at):
         state.history.append(f"{said}: {name} not stopped: no run of {name} is going on")
 
 
-def stop_coming_run(case: CaseDefinition, state: CaseState, name: str, by: str) -> bool:
+def stop_coming_run(case: CaseDefinition, state: CaseState, name: str, by: str, at: int) -> bool:
     """Stop the run about to start, if there is one: its approval asked is withdrawn, the
     approval given lapses, or a start waiting for a fact, a person's or the step's own, is
     dropped; and the run is recorded `cancelled`, so the step doesn't start by itself again
@@ -59,7 +64,7 @@ def stop_coming_run(case: CaseDefinition, state: CaseState, name: str, by: str) 
     elif name in state.waiting_to_start:
         state.waiting_to_start.remove(name)
         state.given.pop(name, None)  # approved and waiting for its fact: it lapses too
-    elif state.given.pop(name, None) is None and not waits_for_its_fact(case, state, name):
+    elif state.given.pop(name, None) is None and not waits_for_its_fact(case, state, name, at):
         return False
     entry = f"{name}#{sum(1 for run in state.runs if run.step == name) + 1}"
     state.runs.append(StepRun(entry, name, "cancelled", started=False))
@@ -115,11 +120,20 @@ def ask_to_stop(
         commands.append(CancelWorkflow(run.entry, reason))
 
 
-def waits_for_its_fact(case: CaseDefinition, state: CaseState, name: str) -> bool:
-    """Whether the step is about to start by itself, once a fact it needs fresh is fetched again:
-    it has never run, and a refresh of one of its facts is running (brief, D33)."""
+def waits_for_its_fact(case: CaseDefinition, state: CaseState, name: str, at: int) -> bool:
+    """Whether the step is about to start by itself once a fact it needs fresh is fetched again,
+    asked as admission asks it (brief, D33): it may start by itself, having never run; its
+    requirements are met and the close isn't held; and a fact it reads is too old for it now,
+    with a refresh of it running. A refresh another step asked for doesn't make it wait."""
     step = case.steps[name]
     if isinstance(step, TaskStep) or not step.automatic or latest_run(state, name) is not None:
         return False
-    fetching = {state.refreshing[field] for field in step.max_age if field in state.refreshing}
-    return any(run.entry in fetching and run.status == "running" for run in state.runs)
+    if not requirements_met(requirements(case)[name], state) or close_held(case, state):
+        return False
+    for stale in stale_facts(step.max_age, state, at):
+        prior = state.refreshing.get(stale.field)
+        if prior is not None and prior != stale.run:
+            refresh = next(run for run in state.runs if run.entry == prior)
+            if refresh.status == "running":
+                return True
+    return False

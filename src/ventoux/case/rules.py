@@ -50,16 +50,17 @@ def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
 
 
 def fire_rules(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command]
+    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command], at: int
 ) -> None:
     """Take each moment in the order it came, and fire the rules on it in the order they are
     written. A milestone a rule reaches is a moment too, so rules can follow rules (brief, D38).
-    A stop may ask for a command: a plan's stop, a workflow's cancellation (brief, D40)."""
+    A stop may ask for a command: a plan's stop, a workflow's cancellation (brief, D40); `at`,
+    the time of the event being decided, is what a stop measures facts' ages against."""
     while state.moments:
         moment = state.moments.pop(0)
         for name, rule in case.rules.items():
             if said(rule.on) == moment:
-                fire(case, catalog, state, name, moment, commands)
+                fire(case, catalog, state, name, moment, commands, at)
 
 
 def fire(
@@ -69,6 +70,7 @@ def fire(
     name: str,
     moment: str,
     commands: list[Command],
+    at: int,
 ) -> None:
     """One firing: read the condition on the case file now, then act on what it says."""
     entry = f"{name}#{sum(1 for firing in state.firings if firing.rule == name) + 1}"
@@ -85,7 +87,7 @@ def fire(
         firing.status, firing.reason = "failed", str(unreadable)
         state.history.append(f"{entry} failed: {firing.reason}")
         return
-    act(case, catalog, state, firing, decided, commands)
+    act(case, catalog, state, firing, decided, commands, at)
 
 
 def read(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str) -> bool:
@@ -106,6 +108,7 @@ def act(
     firing: RuleFiring,
     decided: bool,
     commands: list[Command],
+    at: int,
 ) -> None:
     """Do what the rule says, if its condition held and read only trusted values; say so either
     way. Stop first, then reach, then start (brief, D40)."""
@@ -137,7 +140,7 @@ def act(
         said = f"{firing.entry} on {firing.moment}"
         state.history.append(f"{said}: stopping {' and '.join(then.stop)}")
         for step in then.stop:
-            stop_step(case, catalog, state, step, firing.entry, said, commands)
+            stop_step(case, catalog, state, step, firing.entry, said, commands, at)
     if then.reach:
         state.history.append(
             f"{firing.entry} on {firing.moment}: reaching {' and '.join(then.reach)}"
@@ -197,10 +200,11 @@ def retry_rule(
     firing: RuleFiring,
     said: str,
     commands: list[Command],
+    at: int,
 ) -> None:
     """An operator retries a failed rule: its condition is read again, on the case file as it is
     now, for the same moment; `StepStopped` if it still can't be (brief, D26) (brief, D38). `said` is the
     history's line for the retry, written once the condition is read."""
     decided = read(case, catalog, state, firing.rule)
     state.history.append(said)
-    act(case, catalog, state, firing, decided, commands)
+    act(case, catalog, state, firing, decided, commands, at)
