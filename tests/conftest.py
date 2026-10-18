@@ -1,12 +1,14 @@
-"""Checks every in-memory test gets: after each decision, nothing pending is silent.
+"""After each decision, in every test: nothing pending is silent.
 
-See docs/layers/fix-retry-rejected.md, "The invariant".
+Checked after every decision the in-memory driver (`ventoux.case.memory.Driver`) makes, and every
+decision a test asks of `decide` itself. See docs/layers/fix-retry-rejected.md, "The invariant".
 """
 
-from collections.abc import Iterator
-
 import pytest
-from invariants import unshown
+
+# pytest puts tests/ on the import path (it has no __init__.py), so a helper there imports by
+# its name.
+from invariants import Silent, unshown
 
 import ventoux.case.memory
 from ventoux.case.definition import CaseDefinition
@@ -21,14 +23,18 @@ def checked(
     """`decide`, then the invariant on the state it gives: a silent pending item fails the test
     that made it, naming the event."""
     decided, commands = decide(case, catalog, state, event)
-    silent = unshown(case, decided)
-    assert not silent, f"after {type(event).__name__}, pending and shown nowhere: {silent}"
+    if silent := unshown(case, decided):
+        raise Silent(f"after {type(event).__name__}, pending and shown nowhere: {silent}")
     return decided, commands
 
 
-# pytest: `autouse` runs this fixture around every test; `monkeypatch` puts the in-memory
-# driver's `decide` back once the test ends.
+# pytest: `autouse` runs this fixture around every test; `monkeypatch` puts back what it replaced
+# once the test ends; `request.module` is the test's own module.
 @pytest.fixture(autouse=True)
-def every_decision_shows_what_is_pending(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def every_decision_shows_what_is_pending(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(ventoux.case.memory, "decide", checked)
-    yield
+    # A test module that imported `decide` itself calls it by its own name: wrapped there too.
+    if getattr(request.module, "decide", None) is decide:
+        monkeypatch.setattr(request.module, "decide", checked)

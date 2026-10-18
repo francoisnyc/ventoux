@@ -11,8 +11,11 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
+from invariants import Silent
 from pydantic import BaseModel
 
+import ventoux.case.memory
+import ventoux.case.runtime
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Opened
@@ -1693,12 +1696,8 @@ def test_the_failed_run_retried_closes_the_case() -> None:
     assert run.history[-1] == "closed: paid reached"
 
 
-# The invariant's hook finds the given approval pending and shown nowhere (the fix's K); the
-# mark comes off with its fix, slice 4.
-@pytest.mark.xfail(strict=True, reason="a given approval nobody sees")
-def test_an_approval_answered_while_the_close_is_held_starts_nothing() -> None:
-    # goodwill's approval is asked before paid is reached and answered after: it is given, and
-    # starts nothing; closing withdraws it once the letter is retried.
+def goodwill_while_held() -> tuple[dict[str, Any], dict[str, Activity]]:
+    """`held_close`, with a goodwill refund that asks its own approval once reviewed."""
     definition, fakes = held_close()
     definition["steps"]["goodwill"] = {
         "kind": "activity",
@@ -1708,6 +1707,18 @@ def test_an_approval_answered_while_the_close_is_held_starts_nothing() -> None:
         "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
         "approval": {"roles": ["support-lead"], "display": {"reason": "Goodwill needs a lead"}},
     }
+    return definition, fakes
+
+
+def test_an_approval_answered_while_the_close_is_held_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # goodwill's approval is asked before paid is reached and answered after: it is given, and
+    # starts nothing; closing withdraws it once the letter is retried. Run on the plain `decide`
+    # until the fix's slice 4: the invariant's hook finds the given approval shown nowhere (the
+    # next test), and this test's own checks must keep running meanwhile.
+    monkeypatch.setattr(ventoux.case.memory, "decide", ventoux.case.runtime.decide)
+    definition, fakes = goodwill_while_held()
     answers = [SMALL_REVIEW, ("goodwill", "approve", "sam")]
     run = run_case(definition, file=SMALL, answers=answers, people=OPERATORS, activities=fakes)
     assert run.history.index("reached paid") < run.history.index(
@@ -1724,6 +1735,15 @@ def test_an_approval_answered_while_the_close_is_held_starts_nothing() -> None:
     )
     assert not any(line.startswith("scheduled goodwill") for line in closed.history)
     assert closed.history[-1] == "closed: paid reached"
+
+
+# pytest: `xfail(strict=True, raises=Silent)` expects the invariant's own failure, and fails the
+# run if the test passes or fails any other way. The mark comes off with the fix's slice 4 (K).
+@pytest.mark.xfail(strict=True, raises=Silent, reason="path K, seen silent on main")
+def test_the_hook_finds_the_approval_given_while_the_close_is_held() -> None:
+    definition, fakes = goodwill_while_held()
+    answers = [SMALL_REVIEW, ("goodwill", "approve", "sam")]
+    run_case(definition, file=SMALL, answers=answers, people=OPERATORS, activities=fakes)
 
 
 # --- Layer 8d, slice 1: outputs into the case file ---

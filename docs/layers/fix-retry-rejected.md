@@ -7,21 +7,25 @@ last bullet) and left for its own pull request. Adds to D26 (brief), as an amend
 ## The bug
 
 An operator's retry makes a failed run `retrying`: the same run, with the same key, waiting to
-start again (D26). It may wait across decisions for two things only: its approval, asked again
-when the values it reads changed since the run was approved, and a fact it needs fresh, fetched
-again. Nothing ended a retry that stopped waiting for something else. Each case below stays open
-for ever, with nothing in `waiting_for` or `needs_attention`, against "nothing is skipped
-automatically" (D17) and "a waiting case says what it waits for" (D24):
+start again (D26). It may wait across decisions for two things only: its approval, asked when
+no approval was spent on its run (one that was spent still holds only while the inputs it saw
+are unchanged; otherwise the retry fails again, saying a new approval is needed, D23), and a fact
+it needs fresh, fetched again. Nothing ended a retry that stopped waiting for something else.
+Each case below is open, with nothing in `waiting_for` or `needs_attention`, against "nothing is
+skipped automatically" (D17) and "a waiting case says what it waits for" (D24). Some never close;
+the others go on only if a person happens to act (proposes the review again) without being told:
 
-| Path | What happened |
-|---|---|
-| The retry's approval is rejected | recorded on a new entry, `pay#2 won't run`; `pay#1` stays `retrying` |
-| The same, while the close is held by `closes_when` | the same, and the retried run holds the close for ever |
-| The retry's approval is withdrawn (a review proposed again), and the review is then rejected, so the step's `when` is false | admission drops the run with no line |
-| The retry's stale fact is fetched again, and the new value makes its `when` false | the same |
-| The retry waits for a review proposed again, which a rule then stops | its requirement is never met again, and nothing is open |
-| (Not stuck, shown only through another entry) the retry waits for a review proposed again, still open; or for a step whose refresh failed | `pay#1` itself shows nowhere |
-| (Found by the suite) an approval given while the close is held | given, never spent, and shown nowhere; the failed run holding the close is shown, so the case isn't stuck |
+| | Path | What happened |
+|---|---|---|
+| A | The retry's approval is rejected | recorded on a new entry, `pay#2 won't run`; `pay#1` stays `retrying` |
+| D | The same, while the close is held by `closes_when` | the same, and the retried run holds the close for ever |
+| C | The retry's approval is withdrawn (a review proposed again), and the review is then rejected, so the step's `when` is false | admission drops the run with no line |
+| F | The retry's stale fact is fetched again, and the new value makes its `when` false | the same |
+| E′ | The retry waits for a review proposed again, which a rule then stops | its requirement isn't met again unless someone proposes the review, and nothing is open |
+| C′, I | (Not stuck, shown only through another entry) the retry waits for a review proposed again, still open (C′); or for a step whose refresh failed (I) | `pay#1` itself shows nowhere |
+| K | (Found by the suite) an approval given while the close is held | given, never spent, and shown nowhere; the failed run holding the close is shown, so the case isn't stuck |
+| L | (Found in the review of slice 1) an approval given while its fact is fetched again, whose requirement (a review proposed again) a rule then stops | the approval is never spent unless someone proposes the review, and nothing is open |
+| M | (Found in the review of slice 1) a person's proposal waiting for its fact when the close becomes held | it never starts and shows nowhere, and a later close drops it with no line, against "starts the step or says why not" (D39) |
 
 ## Decided
 
@@ -47,36 +51,95 @@ automatically" (D17) and "a waiting case says what it waits for" (D24):
      completed: retry it once it has, or close the case`; for the condition, `… review.outcome
      == "approve" is false now: retry it once it holds, or close the case` (the condition as the
      definition writes it, never a value from the case file).
-3. **An approval answered while the close is held starts nothing, and isn't kept** (fixes K).
-   Once every `closes_when` milestone is reached, nothing new starts (D34); a given approval
-   that can't be spent was pending work nobody saw. The answer is recorded, then
-   `goodwill not started: paid is reached, so the case closes once notify#1 is retried, or a
-   person closes it: nothing new starts`. The retried run itself is the exception: it is what the
-   held close waits for, so its approval is spent as before.
+3. **While the close is held, nothing waits to start** (fixes K and M). Once every
+   `closes_when` milestone is reached, nothing new starts (D34); an approval given that can't be
+   spent, or a proposal waiting for a fact it can't use, was pending work nobody saw. Each is let
+   go, saying so, in the decision that finds the close held:
+   - an approval given (answered while the close is held, or given before and waiting for its
+     fact): `goodwill not started: paid is reached, so the case closes once notify#1 is retried,
+     or a person closes it: nothing new starts`;
+   - a person's proposal waiting for its fact: `dropped ana's proposal of pay: paid is reached,
+     so …: nothing new starts`, the line a proposal dropped for any other reason gets (D39).
+
+   The retried run itself is the exception: it is what the held close waits for, so its approval
+   is spent as before.
 4. **The replay gap is a known limit.** These paths schedule nothing different on the decision
    that changes, so a history recorded before the fix replays (a fixture shows one). A history in
    which someone then sent `retry pay#1` doesn't: before the fix that retry was refused (`has not
    failed`), after it the retry is accepted and schedules `pay#1`. Temporal refuses such a history
    and the case waits until the code is fixed, as 11b's note says of paths it decides differently
    (D17). Closing it would need a patch marker passed to `decide` as event data; not built.
+5. **A given approval lapses with its requirement** (fixes L). An approval given, and not yet
+   spent because its step waits for a fact, lapses when a step its step requires has ended
+   without completing (its latest run cancelled or rejected): nothing is on its way that could
+   let it be spent. `lapsed pay.approval#1: pay requires review, which hasn't completed`; once
+   the requirement completes again, the step asks a new approval. While the requirement is still
+   on its way (open, running, or failed and waiting for an operator), the approval stays, shown
+   through it: it is tied to the values it saw (D11), and a review answered again with the same
+   values changes none. Not "whenever its step stops being admitted", as an open approval is
+   withdrawn (D25): that would lapse an approval no value had changed, and decide differently a
+   recorded case that went on through a review answered again.
 
 ## The invariant
 
-After every decision, an open case that doesn't stay open has nothing pending, or shows every
-pending item: an open run or approval in `waiting_for`; a failed run or rule in `needs_attention`;
-a running run as running work; a retrying run by its approval in `waiting_for` or a refresh of
-its fact running; a given approval by a refresh of its fact running. Checked in the tests two
-ways: after every decision of every case the in-memory suite runs, and over generated scripts on
-the refund (proposals, retries, approvals and rejections, a rule's stop, time passing, closes).
+After every decision, an open case has nothing pending, or shows every pending item, whether or
+not it stays open:
+
+- an open run or approval: in `waiting_for`;
+- a failed run or rule: in `needs_attention`;
+- a running run: as running work;
+- a retrying run: by its approval in `waiting_for`, or, its requirements met, by a refresh of its
+  fact running (admission reads `requires` before freshness, so a refresh helps nothing else);
+- a given approval: by a refresh of its fact running, or by a step it requires that is on its way
+  (open, running, failed or retried), itself shown;
+- a person's proposal waiting to start: by a refresh of its fact running.
+
+A run status the check doesn't know fails it (fail closed). Checked in the tests three ways:
+after every decision the in-memory driver makes, and every decision a test asks of `decide`
+itself, in every test; over generated cases on the refund (proposals, retries, approvals and
+rejections, a rule's stop, a lookup that fails, time passing, closes, some cases that stay open);
+and by a scripted case for each path the generated cases can't reach (L and M need a refresh
+held across a person's act).
+
+## From the review of slice 1
+
+Four readers read slice 1, each with one lens (false negatives, false positives and the hook's
+reach, the generated cases' coverage, the conventions), and a skeptic reran each finding. All 20
+findings held. What changed because of them:
+
+- **Two paths the table lacked, L and M,** each decided above (decisions 3 and 5), with a
+  scripted test seen failing on main.
+- **The invariant skipped cases that stay open,** where a stuck retry is just as silent. It now
+  checks every open case.
+- **A retry with a requirement unmet counted as shown by a refresh running,** which it can't use.
+- **The hook reached only the in-memory driver;** it now also wraps `decide` where a test calls
+  it directly.
+- **The expected failures accepted any error,** so a crash in the fix would have read as expected.
+  The hook raises `Silent`, and every mark expects only that.
+- **K's mark turned off its test's own assertions** while slices 2 and 3 change the code they
+  guard. The test runs on the plain `decide` until slice 4, and a separate marked test shows the
+  hook finding K.
+- **The generated cases reached neither I nor K:** the lookup never failed, and pay was the only
+  step with an approval. The lookup now fails one time in five, cases that close on `audited`
+  have a goodwill refund with its own approval, and some cases stay open; the seeds that fail on
+  main were found again.
+- **The sentence on a retry's approval** said what the runtime doesn't do (corrected above).
 
 ## Where the code goes
 
-- `case/runtime.py`: `answer_approval` sends a rejected retry back to `failed`, and keeps no
-  approval given while the close is held; `admit` sends a retry it can't start back to `failed`.
+- `case/runtime.py`: `answer_approval` sends a rejected retry back to `failed`; `admit` sends a
+  retry it can't start back to `failed`, and lets go of an approval given or a proposal waiting
+  while the close is held.
+- `case/approvals.py`: `follow` lapses a given approval whose requirement ended without
+  completing.
 - `docs/BRIEF.md`: D26's amendment.
-- `tests/invariants.py` (new): the check, as a function of the definition and the state.
-- `tests/conftest.py` (new): the check after every decision of the in-memory driver.
-- `tests/test_retry_rejected.py` (new): the paths above, the generated scripts, and the replay.
+- `tests/invariants.py` (new): the check, as a function of the definition and the state, and
+  `Silent`, the one error it raises.
+- `tests/conftest.py` (new): the check after every decision, in every test.
+- `tests/test_retry_rejected.py` (new): the paths above, the generated cases, the scripted L and M.
+- `tests/test_case.py`: K's test, run on the plain `decide` until slice 4, and a marked test of
+  the hook finding K.
+- `tests/test_temporal_case.py`: the replay of the fixture, and the rejected retry on Temporal.
 - `tests/histories/before_fix_retry_rejected.json`, recorded under main.
 
 No new dependency.
@@ -87,7 +150,8 @@ No new dependency.
   `close`, `later`, answers.
 - The in-memory `Driver`, one event at a time, for the generated scripts (a refused event is
   skipped, as the API would refuse it).
-- `CaseState` after each decision, for the invariant: its runs, approvals and refreshes.
+- `CaseState` after each decision, for the invariant: its runs, approvals open and given,
+  refreshes, proposals waiting to start, and `waiting_for`.
 - The Temporal test server: the rejected retry, retried again, paying once with the key of
   `pay#1`; `replay` of the fixture.
 
@@ -97,14 +161,17 @@ Each starts with its negative test, seen failing for the right reason.
 
 0. **Before anything changes:** the fixture recorded under main (a retry whose approval is
    rejected, then a close), replayed.
-1. **The invariant.** Negative: the generated scripts find the stuck retry on main. The suite's
-   hook finds K.
+1. **The invariant.** Negative: the generated cases find the stuck retry on main; the suite's
+   hook finds K; the scripted L and M are found. Each is marked as a strict expected failure,
+   expecting the invariant's own error only, until its slice.
 2. **A rejected rescue.** Negative: the reproduction needs attention on `pay#1`, with no
    `pay#2`. Then: retried again, it asks again and pays once with its key; the held close.
 3. **Widened.** Negative: the retry whose `when` turns false. Then the requirement started again,
    stopped, and the failed refresh; the line never quotes a value.
-4. **K.** Negative: the approval given while the close is held is no longer pending.
-5. **On Temporal,** the brief's amendment, and the promises.
+4. **Nothing waits on a held close.** Negative: the approval given while the close is held is no
+   longer pending (K). Then the proposal waiting for its fact (M).
+5. **A given approval lapses with its requirement.** Negative: L.
+6. **On Temporal,** the brief's amendment, and the promises.
 
 ## Promises
 
@@ -113,14 +180,16 @@ Drafted before building, to be checked against the files once built. Every test 
 
 | Promise | Test that would fail |
 |---|---|
-| After every decision of every in-memory case, an open case that doesn't stay open shows each pending item | `tests/conftest.py`'s check, run by the whole suite |
-| Generated scripts on the refund leave nothing pending unshown | `test_generated_cases_show_what_is_pending` (seen failing on main) |
+| After every decision the in-memory driver makes, and every one a test asks of `decide`, an open case shows each pending item, whether or not it stays open; a run status the check doesn't know fails it | `every_decision_shows_what_is_pending` (`tests/conftest.py`), run by every test |
+| Generated cases on the refund leave nothing pending unshown, and still reach the paths they were seen failing on | `test_generated_cases_show_what_is_pending` (seen failing on main), `test_the_generated_cases_reach_the_paths` |
 | A rejected retry goes back to `failed`, needing attention, saying so; there is no new run | `test_a_rejected_retry_needs_attention_again` |
 | Retried again, it asks again, and pays once with the first run's key | `test_a_rejected_retry_retried_again_asks_again` |
 | A rejected retry while the close is held keeps holding it, shown, and the case closes once it is retried to completion | `test_a_rejected_retry_holds_the_close_and_says_so` |
 | A retry whose `when` turns false, before or after its fact is fetched again, needs attention again, naming the condition and never a value | `test_a_retry_whose_condition_turns_false_needs_attention`, `test_a_retry_whose_refreshed_fact_turns_it_false_needs_attention` |
 | A retry whose requirement started again, was stopped, or failed needs attention again, saying which | `test_a_retry_whose_requirement_isnt_met_needs_attention` |
-| An approval given while the close is held starts nothing, says so, and isn't pending | `test_an_approval_answered_while_the_close_is_held_starts_nothing` (`tests/test_case.py`, extended) |
+| An approval given while the close is held starts nothing, says so, and isn't pending | `test_an_approval_answered_while_the_close_is_held_starts_nothing` (`tests/test_case.py`, extended), `test_the_hook_finds_the_approval_given_while_the_close_is_held` (`tests/test_case.py`, seen failing on main) |
+| A person's proposal waiting for its fact when the close becomes held is dropped, saying so | `test_a_proposal_waiting_when_the_close_is_held_is_dropped` (seen failing on main) |
+| A given approval whose requirement a rule stopped lapses, saying so, and the step asks again once it completes; one whose requirement is answered again with the same values is spent | `test_a_given_approval_lapses_with_its_requirement` (seen failing on main), `test_a_given_approval_survives_a_review_answered_the_same` |
 | A person may close a case whose rescue was rejected | `test_a_rejected_retry_can_be_closed` |
 | On Temporal, a rejected retry needs attention, and retried again pays once with its key | `test_a_rejected_retry_on_temporal` (`tests/test_temporal_case.py`) |
 | A history recorded under main with a rejected retry and a close replays | `test_a_history_with_a_rejected_retry_replays` (`tests/test_temporal_case.py`) |
