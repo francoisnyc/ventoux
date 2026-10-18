@@ -111,6 +111,20 @@ class CaseRefused(Exception):
     """A case the engine won't open: what is wrong with its first values."""
 
 
+class StoppedRefresh(StepStopped):
+    """A step needs a fact whose refresh a rule stopped: it fails, and an operator's retry of
+    its run fetches the fact again; a person's proposal of it is refused (brief, D40)."""
+
+    def __init__(self, stopped: str, entry: str, refresh: str) -> None:
+        super().__init__(f"{stopped}; retry {entry} to fetch it again")
+        self.stopped = stopped  # what is wrong, without what to do
+        self.refresh = refresh  # the stopped refresh's run, such as `check_order#2`
+
+    def to_proposer(self, step: str) -> str:
+        """The refusal a person proposing `step` reads: nothing failed, so nothing is retried."""
+        return f"{self.stopped}; propose {step} again once {self.refresh} has landed"
+
+
 class ShownRefused(Exception):
     """A record shown that the case won't record, because it couldn't have been: why."""
 
@@ -361,6 +375,8 @@ def propose(
     if not isinstance(step, TaskStep):
         try:
             fresh = refresh_stale(case, catalog, state, event.step, step, event.at, commands)
+        except StoppedRefresh as stopped:
+            raise ProposalRefused(stopped.to_proposer(event.step)) from None
         except StepStopped as stale:
             raise ProposalRefused(str(stale)) from None
         if fresh != "fresh":
@@ -811,10 +827,11 @@ def refresh_stale(
             if run.stop_requested and run.status == "running":
                 # A stopped refresh counts for nothing: what needed it fails, never waits and
                 # asks again, which could loop in one decision (brief, D39) (brief, D40).
-                raise StepStopped(
+                stopped = (
                     f"{said}, and {needed}: its refresh {prior} was stopped by "
-                    f"{run.stop_requested}, so it counts for nothing; retry it to fetch it again"
+                    f"{run.stop_requested}, so it counts for nothing"
                 )
+                raise StoppedRefresh(stopped, coming_entry(state, name), prior)
             if run.status not in ("done", "failed"):
                 return "waiting"  # on its way: running, or retried by an operator
             gave = (
@@ -1216,6 +1233,14 @@ def coming_run(
     if run.started:  # a run that fails before it starts never started
         state.moments.append(f"started {name}")
     return run
+
+
+def coming_entry(state: CaseState, name: str) -> str:
+    """The entry the step's coming run takes: the run an operator retried, or a new one."""
+    latest = latest_run(state, name)
+    if latest is not None and latest.status == "retrying":
+        return latest.entry
+    return next_entry(state, name)
 
 
 def next_entry(state: CaseState, name: str) -> str:

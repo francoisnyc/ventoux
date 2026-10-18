@@ -3165,3 +3165,81 @@ def test_no_stop_line_or_issue_quotes_a_value() -> None:
     assert said  # the runs stopped something, and said so
     for value in ("ord-7731", "4321", '"withdraw"', " 43"):
         assert not any(value in line for line in said), value
+
+
+def test_a_stop_while_closing_is_not_applied() -> None:
+    # From the review: choice 16's other half. Ana closes the case while the payment runs; the
+    # payment finishes and reaches paid, whose rule would stop the letter. The case is closing,
+    # so no rule acts, a stop included: the close stops what runs itself (brief, D38, D40).
+    definition = withdrawable("review", on={"reached": "paid"})
+    definition["milestones"]["paid"] = {"display": {"title": "Paid"}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["close_reasons"] = {"duplicate": DUPLICATE}
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW, close("duplicate", "ana"), finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+    )
+    assert (
+        "withdraw#1 on reached paid: not applied: the case is closing, so nothing new is decided"
+    ) in run.history
+    assert run.history[-1] == "closed: duplicate, by ana"
+
+
+def test_never_starts_on_its_own_start_stays_claimed_for_what_a_stop_leaves_running() -> None:
+    # From the review: a stop lets a start on the step's own start through only for a task,
+    # cancelled at once. An activity, stopped, runs on in that decision, so the start is still
+    # refused every time, and the check still says so (brief, D39, D40).
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["pay"] |= {"repeatable": True}
+    definition["rules"] = {
+        "hold_pay": {
+            "display": {"title": "Hold the payment"},
+            "on": {"started": "pay"},
+            "then": {"stop": ["pay"]},
+        },
+        "pay_again": {
+            "display": {"title": "Pay again"},
+            "on": {"started": "pay"},
+            "then": {"start": ["pay"]},
+        },
+    }
+    issues = validate_case(parse_case(definition), CATALOG)
+    assert [i.code for i in issues if i.path == "rules.pay_again.then.start"] == ["NEVER_STARTS"]
+    run = run_case(definition, file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE, held=["pay"])
+    assert "pay_again#1 on started pay: pay not started: pay is already running: pay#1" in (
+        run.history
+    )
+
+
+def test_a_loop_is_claimed_unless_a_rule_that_can_fire_stops_it() -> None:
+    # From the review: the loop fix's two promises. A stop by a rule that can never fire ends no
+    # loop, so the loop is still claimed; and a loop through a task a rule may stop never hides
+    # another loop, found later, that no rule stops (brief, D39, D40).
+    never = withdrawable_loop("review", "lead_check")
+    never["rules"]["withdraw"]["on"] = {"reached": "lost"}
+    never["milestones"]["lost"] = {"display": {"title": "Lost"}}
+    assert "NEVER_CLOSES" in codes_of(never)
+    # review and lead_check restart each other, and each restarts check_again, which a rule may
+    # stop: the loops through check_again prove nothing, the one between review and lead_check
+    # still does.
+    hidden = withdrawable_loop("check_again")
+    hidden["steps"]["check_again"] = hidden["steps"]["lead_check"] | {
+        "display": {"title": "Check again"}
+    }
+    hidden["rules"] = {
+        "again_from_review": {
+            "display": {"title": "Check again"},
+            "on": {"answered": "review"},
+            "then": {"start": ["check_again"]},
+        },
+        "review_from_again": {
+            "display": {"title": "Review again"},
+            "on": {"answered": "check_again"},
+            "then": {"start": ["review"]},
+        },
+        **hidden["rules"],
+    }
+    assert "NEVER_CLOSES" in codes_of(hidden)

@@ -332,10 +332,12 @@ assert (await request.result()).status == "forgotten"
 The request is a small workflow of its own, `claim-7/forget`. Before anyone answers, it checks
 that the case exists, wasn't forgotten already, and may be forgotten (below). Then, in order:
 
-1. **The case closes as `forgotten`,** if it was open. Open tasks and approvals are cancelled;
-   steps already running (an activity, a plan step, a workflow step) finish, since a side effect
-   can't be cut off halfway. Anything that completes after the close is flagged, as with any
-   close: `pay completed after the close was requested`.
+1. **The case closes as `forgotten`,** if it was open, as any close does (the cases guide,
+   "Closing a case"). Open tasks and approvals are cancelled; an activity already running, or a
+   workflow step whose contract isn't cancellable, finishes, since a side effect can't be cut
+   off halfway; a plan step stops taking answers, and a cancellable workflow step is cancelled.
+   Anything that completes after the close is flagged, as with any close: `pay completed after
+   the close was requested`.
 2. **Once the case's workflow has ended,** and nothing of it still runs, **the key is destroyed.**
    Work still running needs the key to read its own values, so the key goes last.
 3. **The request records it:** `forget_report(request)` reads `forgotten`, with who proposed,

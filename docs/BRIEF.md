@@ -1223,7 +1223,9 @@ kept.*
   request. The contract test checks the three clauses on Temporal's test server. Left out of the
   hash when false, declared or not, so existing contracts keep their hashes. A cancellable workflow
   step, stopped or closed, is cancelled, the case waiting for it to end, and the case is flagged;
-  **a close now cancels it too,** where D10 and D29 let every workflow step finish.
+  **a close now cancels it too,** where D10 and D29 let every workflow step finish. A workflow
+  step that ends cancelled though the case asked nothing of it (cancelled from outside) failed,
+  and needs attention, as before (D17).
 - **Each decision still ends** (D39): a stop starts nothing, a stopped step starts by itself at
   most once, and a stopped refresh fails what waited for it, so the bound on the runs a decision
   starts holds as it was.

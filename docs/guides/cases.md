@@ -433,7 +433,8 @@ welcome#1 failed: letters.draft@2 takes to_customer only from a system or a pers
 The case needs attention, and nothing is drafted. The KYC team declares the field's source in
 `kyc.check@2`, or the case takes the address from somewhere it trusts.
 
-A workflow step that fails, or runs past its contract's `timeout`, fails: the case needs attention,
+A workflow step that fails, runs past its contract's `timeout`, or is cancelled from outside the
+case (by someone using Temporal's own tools), fails: the case needs attention,
 and an operator retries it, with the same key. A workflow contract the deployment hasn't bound, or
 a step naming an activity contract (or an activity step naming a workflow contract), fails the
 step too: nothing guesses where to run it. When the case begins closing, a running workflow step
@@ -728,7 +729,7 @@ nothing ends, or a start refused on the step's own start; and these codes are it
 |---|---|---|---|
 | `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
 | `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone or stops a step reads, in its `when`, a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
-| `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: on the opening, the step requires what can't be met by then, and the rule's condition can't fail and be retried later; or it fires on the step's own start (unless its condition may fail and the step is repeatable: a retry may come once the step is done; or a rule may stop the step, which lets the start through), or on its own answer when the step isn't repeatable | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
+| `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: on the opening, the step requires what can't be met by then, and the rule's condition can't fail and be retried later; or it fires on the step's own start (unless its condition may fail and the step is repeatable: a retry may come once the step is done; or the step is a task a rule may stop, which a stop cancels at once, letting the start through), or on its own answer when the step isn't repeatable | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
 | `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition, requirement or rule's stop ends (the rework rules above with their `when`s removed, on the refund with the `duplicate` close reason from "Closing a case"), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
 
 The rework loop above gets no issue: its rules' `when`s end it.

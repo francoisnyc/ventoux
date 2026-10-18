@@ -1346,7 +1346,7 @@ def test_a_step_needing_a_stopped_refresh_needs_attention() -> None:
         (
             "pay#1 failed: check_order.status was obtained 3 days ago, and pay needs it at most "
             "1 day old: its refresh check_order#2 was stopped by stop_lookup#2, so it counts for "
-            "nothing; retry it to fetch it again"
+            "nothing; retry pay#1 to fetch it again"
         ),
         "check_order#2 done, giving status from system:orders",
     ]
@@ -1459,3 +1459,104 @@ def test_a_stop_of_a_step_not_about_to_start_cancels_nothing() -> None:
         run.history
     )
     assert run.reached("pay")
+
+
+def test_a_stop_lapses_a_given_approval() -> None:
+    # From the review: pay is approved, and waits for its stale status to be fetched again, when
+    # a rule stops it. The approval lapses, and the coming run is recorded cancelled: once the
+    # status lands, nothing is paid on the old approval (brief, D11, D40).
+    definition = refund_fresh()
+    definition["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the withdrawal"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    definition["rules"] = {
+        "stop_on_note": {
+            "display": {"title": "Stop the payment once noted"},
+            "on": {"answered": "note"},
+            "then": {"stop": ["pay"]},
+        }
+    }
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[
+            finish("check_order#1"),
+            ("review", "approve", "ana", {"approved_amount": 250}),
+            later("3d"),
+            ("pay.approval#1", "approve", "sam"),
+            propose("note", "ana"),
+            ("note", "noted", "ana"),
+            finish("check_order#2"),
+        ],
+        people=PEOPLE,
+        held=["check_order"],
+    )
+    assert "pay#1 cancelled: stopped by stop_on_note#1" in run.history
+    assert not run.reached("pay") and run.needs_attention == []
+
+
+def test_a_stop_leaves_a_retried_run_alone() -> None:
+    # From the review: pay failed, and an operator retried it; the retry waits for the status to
+    # be fetched again when a rule stops pay. The retried run is the failed run being rescued: a
+    # stop leaves it alone, saying so (brief, D17, D26, D40).
+    people = {**PEOPLE, "omar": ["operations"]}
+    definition = stopped_lookup("pay")
+    definition["steps"]["pay"]["automatic"] = True
+    del definition["steps"]["pay"]["proposed_by"]
+
+    def unreachable(inputs: dict[str, Any]) -> dict[str, Any]:
+        raise ConnectionError("provider unreachable")
+
+    run = run_case(
+        definition,
+        file=FILE,
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 80}),
+            finish("check_order#1"),
+            later("3d"),
+            retry("pay#1", "omar"),
+        ],
+        people=people,
+        held=["check_order"],
+        activities={"payments.refund@2": unreachable},
+    )
+    assert (
+        "stop_lookup#2 on started check_order: pay not stopped: pay#1 is retried by an operator, "
+        "and a failed run is never stopped"
+    ) in run.history
+
+
+def test_a_proposal_on_a_stopped_refresh_is_refused_saying_what_to_do() -> None:
+    # From the review: while a stopped look-up runs on, a person proposes another step needing
+    # the same fact. Nothing has failed, so nothing is to be retried: the refusal says to propose
+    # it again once the look-up has landed (brief, D39, D40).
+    definition = stopped_lookup("check_order")
+    definition["steps"]["recheck"] = {
+        "kind": "activity",
+        "display": {"title": "Check the order again"},
+        "activity": "orders.lookup@2",
+        "automatic": False,
+        "proposed_by": ["support"],
+        "requires": ["check_order"],
+        "max_age": {"check_order.status": "1d"},
+        "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            definition,
+            file=FILE,
+            answers=[*WAITING, propose("recheck", "ana")],
+            people=PEOPLE,
+            held=["check_order"],
+        )
+    assert str(refused.value) == (
+        "check_order.status was obtained 3 days ago, and recheck needs it at most 1 day old: its "
+        "refresh check_order#2 was stopped by stop_lookup#2, so it counts for nothing; propose "
+        "recheck again once check_order#2 has landed"
+    )

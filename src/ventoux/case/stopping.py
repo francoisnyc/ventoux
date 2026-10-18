@@ -31,10 +31,10 @@ def stop_step(
     latest = latest_run(state, name)
     if latest is not None and latest.status in ("failed", "retrying"):
         # Nothing is skipped automatically: an operator retries it, or closes the case
-        # (brief, D17) (brief, D26).
+        # (brief, D17) (brief, D26). A run being retried is the failed run being rescued.
+        where = "needs attention" if latest.status == "failed" else "is retried by an operator"
         state.history.append(
-            f"{said}: {name} not stopped: {latest.entry} needs attention, and a failed run is "
-            "never stopped"
+            f"{said}: {name} not stopped: {latest.entry} {where}, and a failed run is never stopped"
         )
         return
     if latest is not None and latest.status == "running":
@@ -57,14 +57,17 @@ def stop_coming_run(case: CaseDefinition, state: CaseState, name: str, by: str, 
     dropped; and the run is recorded `cancelled`, so the step doesn't start by itself again
     (brief, D25) (brief, D40). Whether there was one. A refresh on its way for it still lands."""
     why = f"stopped by {by}"
-    if (approval := state.approvals.pop(name, None)) is not None:
+    waits = waits_for_its_fact(case, state, name, at)  # read before anything below changes
+    approval = state.approvals.pop(name, None)
+    if approval is not None:
         del state.waiting[approval.entry]
         state.withdrawn[approval.entry] = why  # an answer to it is refused, saying why
         state.history.append(f"cancelled {approval.entry}: {why}")
-    elif name in state.waiting_to_start:
+    given = state.given.pop(name, None)  # approved, and waiting for its fact: it lapses
+    proposed = name in state.waiting_to_start
+    if proposed:
         state.waiting_to_start.remove(name)
-        state.given.pop(name, None)  # approved and waiting for its fact: it lapses too
-    elif state.given.pop(name, None) is None and not waits_for_its_fact(case, state, name, at):
+    if approval is None and given is None and not proposed and not waits:
         return False
     entry = f"{name}#{sum(1 for run in state.runs if run.step == name) + 1}"
     state.runs.append(StepRun(entry, name, "cancelled", started=False))
