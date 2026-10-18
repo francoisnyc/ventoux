@@ -1465,7 +1465,8 @@ def closable(definition: dict[str, Any], *roles: str) -> dict[str, Any]:
 
 def test_a_loop_of_one_rule_says_it_starts() -> None:
     # The tutor's probe: one rule restarts the review on every answer. Its message agrees with
-    # one rule, "send_back starts review", as with several, "check_review and send_back start".
+    # one rule, "send_back starts review", as with several, "check_review and send_back start",
+    # and its fix names the rule: "give send_back a when".
     definition = copy.deepcopy(REFUND)
     definition["steps"]["review"]["repeatable"] = True
     definition["rules"] = {
@@ -1481,13 +1482,13 @@ def test_a_loop_of_one_rule_says_it_starts() -> None:
             "rules.send_back.then.start",
             "NEVER_CLOSES",
             looping + "has no close reason, and closes_when never closes it, so nothing but a "
-            "forget request could close it: give one of the rules a when that ends the loop",
+            "forget request could close it: give send_back a when that ends the loop",
         )
     ]
     warned = [i.message for i in issues(closable(definition, "support"))]
     assert warned == [
-        looping + "closes only through a close reason or closes_when: give one of the rules a "
-        "when that ends the loop"
+        looping + "closes only through a close reason or closes_when: give send_back a when "
+        "that ends the loop"
     ]
 
 

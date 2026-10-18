@@ -207,7 +207,8 @@ def loop_issues(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
             f"{listed(list(loop.rules))} {starts} {listed(list(loop.steps))} again on every "
             "answer, and nothing ends it"
         )
-        fix = "give one of the rules a when that ends the loop"
+        which = loop.rules[0] if len(loop.rules) == 1 else "one of the rules"
+        fix = f"give {which} a when that ends the loop"
         if closers & set(catalog.roles) or closes_when:
             found.append(
                 Issue(

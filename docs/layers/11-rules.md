@@ -874,8 +874,10 @@ The tutor review (at `18edafd`) found nothing that must change but one wording s
 the two questions; the user agreed with both answers, 2026-10-18. Built test-first:
 
 - **The loop's verb agrees with its rules:** `send_back starts review again on every answer`, and
-  `check_review and send_back start …` only when several rules are named. The guide's example
-  names two rules, so its table already read right.
+  `check_review and send_back start …` only when several rules are named; its fix, likewise,
+  names the one rule (`give send_back a when that ends the loop`), and says "one of the rules"
+  only of several (asked by the user after the tutor review). The guide's example names two
+  rules, so its table already read right.
 - **Cases open at deployment:** no gating; the three changed paths are carried to layer 12 ("Not
   in 11b").
 - **`started` fires the first time a run really starts,** whether admission, a proposal, a rule's
@@ -947,7 +949,7 @@ says. Every test is in `tests/test_rules.py` unless said otherwise.
 | A rule's record is kept with a run that fails before it starts: the retry is still refused on its inputs, and still excludes | `test_a_rules_record_survives_a_start_that_fails` |
 | A moment a check doesn't know is refused, never read as the opening | `test_an_unknown_moment_fails_closed` |
 | `answered` counts as waiting for its task for `MAY_BE_UNSET` and `SET_AFTER` | `test_answered_waits_for_its_task` |
-| A loop of one rule says it `starts` its step; several rules `start` theirs | `test_a_loop_of_one_rule_says_it_starts`, `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
+| A loop of one rule says it `starts` its step, and its fix names that rule; several rules `start` theirs, and the fix says "one of the rules" | `test_a_loop_of_one_rule_says_it_starts`, `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
 | A loop nothing in the case can end is `NEVER_CLOSES`; the same loop a close reason or `closes_when` can close is `LOOPS_UNTIL_CLOSED`, beside a misspelt close role; a loop a refused start ends, or only a person's proposal enters, gets neither | `test_a_loop_of_starts_never_closes`, `test_a_loop_a_close_can_end_is_warned`, `test_a_loop_a_requirement_ends_gets_no_issue` |
 | `NEVER_CLOSES` says only a forget request could close the case, or, with no forgetting, that nothing could | `test_the_guides_table_is_what_validate_case_says` (`tests/test_case_validation.py`), `test_never_closes_says_nothing_could_without_forgetting` (`tests/test_case_validation.py`) |
 | What isn't claimed: a writer started only on the reader's own moment gives `MAY_BE_UNSET`, a cycle through `started` nothing | `test_what_rules_that_start_steps_dont_claim` |
