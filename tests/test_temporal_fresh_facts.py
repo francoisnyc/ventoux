@@ -78,10 +78,14 @@ def skipping[T](
     scenario: Callable[[WorkflowEnvironment], Awaitable[T]],
     cases: type[CaseWorkflow] = DevelopmentCases,
     converter: DataConverter | None = None,
-    activities: Any = FAKES,
+    activities: Any = None,
 ) -> T:
     """Run `scenario` on Temporal's time-skipping test server, which moves workflow time on when
     the scenario sleeps: three days pass in an instant, and the case reads them from history."""
+
+    # The guide's fresh refund looks the order up with `orders.lookup@2`, which has no development
+    # fake (layer 11b): here the order is delivered, unless a test gives its own.
+    served = activities or {**FAKES, "orders.lookup@2": FAKES["orders.lookup@1"]}
 
     async def go() -> T:
         environment = await WorkflowEnvironment.start_time_skipping(
@@ -89,7 +93,7 @@ def skipping[T](
         )
         async with (
             environment,
-            case_worker(environment.client, QUEUE, cases, DevelopmentPlans, activities),
+            case_worker(environment.client, QUEUE, cases, DevelopmentPlans, served),
         ):
             return await asyncio.wait_for(scenario(environment), timeout=30)
 

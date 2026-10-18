@@ -2244,12 +2244,16 @@ def test_the_old_refund_fresh_reads_two_values_that_may_be_unset() -> None:
         file=SMALL,
         answers=[REVIEWED],
         people=PEOPLE,
-        activities={"orders.lookup@1": gives("not_found")},
+        activities={"orders.lookup@2": gives("not_found")},
     )
     [failed] = not_found.needs_attention
     assert failed.endswith("check_order.status has no value")
     rejected = run_case(
-        old_refund_fresh(), file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE
+        old_refund_fresh(),
+        file=SMALL,
+        answers=[("review", "reject", "ana")],
+        people=PEOPLE,
+        activities={"orders.lookup@2": lambda inputs: {"status": "delivered"}},
     )
     [failed] = rejected.needs_attention
     assert failed.endswith("approved_amount has no value")

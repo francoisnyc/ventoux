@@ -223,6 +223,32 @@ kyc_check = WorkflowContract(
     display=Display(title="Check a customer", description="Runs the KYC checks on a customer."),
 )
 
+
+class LookupOutputFromOrders(BaseModel):
+    status: Annotated[str, source("system:orders")]  # the orders system says it
+
+
+# @2 declares where `status` comes from, so a case may decide on it (brief, D29) (brief, D39); @1, which
+# declares nothing, stays: a case adopts @2 by naming it. No fake implements it: each test that
+# runs it says what it returns, so one left on @1 fails loudly.
+orders_lookup_2 = ActivityContract(
+    name="orders.lookup",
+    version=2,
+    input=LookupInput,
+    output=LookupOutputFromOrders,
+    risk="low",
+    effect="read",  # reads only, so no idempotency key
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,
+    outcomes=["not_found"],
+    display=Display(
+        title="Look up an order",
+        description="Reads an order's status from the orders system.",
+        outcomes={"not_found": "No such order"},
+    ),
+)
+
 # The development catalog: what a case can call in tests and the quickstart.
 CATALOG = Catalog()
 # The labels fields and outputs may be declared untrusted with: `untrusted:llm`. First, since a
@@ -232,7 +258,14 @@ for label in ("customer", "document", "email", "llm", "web"):
 # The systems references may name, before the contracts whose inputs name them (brief, D30).
 for system in ("crm", "documents", "orders", "policies"):
     CATALOG.register_system(system)
-for contract in (payments_refund, orders_lookup, letters_draft, letters_draft_3, kyc_check):
+for contract in (
+    payments_refund,
+    orders_lookup,
+    orders_lookup_2,
+    letters_draft,
+    letters_draft_3,
+    kyc_check,
+):
     CATALOG.register(contract)
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
 CATALOG.register_role("support")

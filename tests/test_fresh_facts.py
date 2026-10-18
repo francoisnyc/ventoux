@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.freshness import TimeRefused, ago, as_said
+from ventoux.case.memory import CaseRun
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Completed, Obtained, Opened, Schedule
 from ventoux.case.visibility import SheetRefused
@@ -29,9 +30,9 @@ from ventoux.testing import (
     load_definition,
     propose,
     retry,
-    run_case,
     shown,
 )
+from ventoux.testing import run_case as run_any_case
 
 ROOT = Path(__file__).parent.parent
 REFUND = load_definition(ROOT / "examples" / "refund" / "refund.json")
@@ -39,6 +40,16 @@ GUIDE = (ROOT / "docs" / "guides" / "case-data.md").read_text()
 FILE = {"order_id": "ord-1", "amount": Decimal(80)}
 PEOPLE = {"ana": ["support"], "sam": ["support-lead"]}
 HOUR = 60 * 60
+# The guide's fresh refund looks the order up with `orders.lookup@2`, which has no development
+# fake (layer 11b): each test says what it returns, and this is what the order says unless it
+# says otherwise.
+DELIVERED = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}
+
+
+def run_case(*args: Any, **options: Any) -> CaseRun:
+    """`run_case`, with `orders.lookup@2` answering "delivered" unless the test gives its own."""
+    options["activities"] = {**DELIVERED, **options.get("activities", {})}
+    return run_any_case(*args, **options)
 
 
 def refund_fresh() -> dict[str, Any]:
@@ -438,7 +449,7 @@ def test_a_refresh_without_a_fresh_value_needs_attention() -> None:
         file={"order_id": "ord-1", "amount": 80},
         answers=REVIEWED_ON_DAY_3,
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", Outcome("not_found"))},
+        activities={"orders.lookup@2": answers_in_turn("delivered", Outcome("not_found"))},
     )
     assert run.needs_attention == [
         (
@@ -461,10 +472,10 @@ def test_a_failed_refresh_needs_attention_and_is_retried() -> None:
         answers=[*REVIEWED_ON_DAY_3, retry("check_order#2", "omar")],
         people={**PEOPLE, "omar": ["operations"]},
         activities={
-            "orders.lookup@1": answers_in_turn("delivered", ConnectionError("down"), "delivered")
+            "orders.lookup@2": answers_in_turn("delivered", ConnectionError("down"), "delivered")
         },
     )
-    failed = "check_order#2 failed: orders.lookup@1 failed with ConnectionError: ‹sensitive›"
+    failed = "check_order#2 failed: orders.lookup@2 failed with ConnectionError: ‹sensitive›"
     assert run.history.index(failed) < run.history.index("omar retried check_order#2 as operations")
     assert run.needs_attention == []
     assert run.reached("pay")
@@ -484,7 +495,7 @@ def test_a_failed_refresh_is_never_made_again_for_the_same_need() -> None:
         file={"order_id": "ord-1", "amount": 80},
         answers=[*REVIEWED_ON_DAY_3, later("1h"), shown("order_id", "ana")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", ConnectionError("down"))},
+        activities={"orders.lookup@2": answers_in_turn("delivered", ConnectionError("down"))},
     )
     assert (
         "pay#1: check_order#2 failed, so check_order.status is still 3 days old, and pay "
@@ -579,7 +590,7 @@ def test_an_approval_is_asked_only_on_fresh_facts() -> None:
         file=LARGE,
         answers=[later("3d"), REVIEWED_LARGE],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", "delivered")},
+        activities={"orders.lookup@2": answers_in_turn("delivered", "delivered")},
     )
     refreshing = run.history.index(
         "refreshing check_order.status for pay: obtained 3 days ago, at most 1 day"
@@ -596,9 +607,9 @@ def test_an_unchanged_refresh_leaves_approvals_standing() -> None:
         file=LARGE,
         answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", "delivered")},
+        activities={"orders.lookup@2": answers_in_turn("delivered", "delivered")},
     )
-    assert "scheduled check_order#2: orders.lookup@1 (order_id from system:opener)" in run.history
+    assert "scheduled check_order#2: orders.lookup@2 (order_id from system:opener)" in run.history
     assert not any(line.startswith(("lapsed", "withdrew")) for line in run.history)
     assert run.reached("pay")
 
@@ -615,7 +626,7 @@ def test_a_changed_refresh_lapses_a_given_approval() -> None:
         file=LARGE,
         answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", "partly returned")},
+        activities={"orders.lookup@2": answers_in_turn("delivered", "partly returned")},
     )
     lapsed = run.history.index("lapsed pay.approval#1: check_order.status changed when refreshed")
     assert run.history.index("asked pay.approval#2: approval of pay by support-lead") > lapsed
@@ -632,7 +643,7 @@ def test_a_changed_refresh_that_stops_the_step_lapses_its_approval() -> None:
         file=LARGE,
         answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", "returned")},
+        activities={"orders.lookup@2": answers_in_turn("delivered", "returned")},
     )
     assert "lapsed pay.approval#1: check_order.status changed when refreshed" in run.history
     assert not run.reached("pay")
@@ -657,7 +668,7 @@ def test_a_changed_refresh_withdraws_another_steps_open_approval() -> None:
         file={"order_id": "ord-1", "amount": 80},
         answers=REVIEWED_ON_DAY_3,
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("delivered", "returned")},
+        activities={"orders.lookup@2": answers_in_turn("delivered", "returned")},
     )
     assert "withdrew notice.approval#1: check_order.status changed" in run.history
     assert "asked notice.approval#2: approval of notice by support-lead" in run.history
@@ -898,14 +909,14 @@ def test_the_guides_freshness_refusals_are_what_the_engine_says() -> None:
     attention(
         refund_fresh(),
         REVIEWED_ON_DAY_3,
-        activities={"orders.lookup@1": answers_in_turn("delivered", Outcome("not_found"))},
+        activities={"orders.lookup@2": answers_in_turn("delivered", Outcome("not_found"))},
     )
     reads_only = refund_fresh()
     reads_only["steps"]["pay"]["requires"] = ["review"]
     attention(
         reads_only,
         REVIEWED_ON_DAY_3,
-        activities={"orders.lookup@1": answers_in_turn("delivered", ConnectionError("x"))},
+        activities={"orders.lookup@2": answers_in_turn("delivered", ConnectionError("x"))},
     )
 
     credit = refund_fresh()
@@ -962,7 +973,7 @@ def test_freshness_is_checked_before_anything_else() -> None:
         file={"order_id": "ord-1", "amount": 80},
         answers=REVIEWED_ON_DAY_3,
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn("returned", "delivered")},
+        activities={"orders.lookup@2": answers_in_turn("returned", "delivered")},
     )
     assert run.reached("pay")
 
@@ -978,7 +989,7 @@ def test_freshness_lines_quote_no_value() -> None:
         file=LARGE,
         answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn(first, second)},
+        activities={"orders.lookup@2": answers_in_turn(first, second)},
     )
     assert any(line.startswith("lapsed pay.approval#1") for line in lapsed.history)
     stopped = copy.deepcopy(definition)
@@ -988,7 +999,7 @@ def test_freshness_lines_quote_no_value() -> None:
         file=LARGE,
         answers=[REVIEWED_LARGE, later("3d"), ("pay", "approve", "sam")],
         people=PEOPLE,
-        activities={"orders.lookup@1": answers_in_turn(first, second)},
+        activities={"orders.lookup@2": answers_in_turn(first, second)},
     )
     assert attention.needs_attention
     for line in [*lapsed.history, *attention.history, *attention.needs_attention]:
