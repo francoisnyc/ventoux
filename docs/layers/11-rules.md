@@ -11,7 +11,9 @@ the choices agreed in four groups the same day, all as recommended, one of them 
 two (see "The split"); D39, the guides' 11b part and a draft Promises table written the same day,
 before building, then reviewed (fidelity, truth, proofs, style), which left three questions open
 for the user, answered "Go" the same day, taken as the recommendations (see 11b, "Decided after the
-review"); 11b built, slices 0–6, and its Promises table checked against the tests, the same day.
+review"); 11b built, slices 0–6, and its Promises table checked against the tests, the same day;
+then two code reviews, whose fixes were built test-first (see 11b, "From the code review" and "From
+the second review"), with two questions left for the user.
 
 ## What this layer is for
 
@@ -755,10 +757,11 @@ Each starts with its negative test, seen failing for the right reason.
   contracts now declare those outputs (`letters.file@1`, `refunds.note@1`); no guide example
   changed.
 - **One refusal of an unknown moment** (slice 4c), `rules.unknown_moment`, used by `said`,
-  `moment_can_come`, the rule warnings and `NEVER_FIRES`. The definition's name check has none:
-  the typed moment refuses an unknown one before it runs. The test reaches the others through
-  `validate_case` and `decide`; the warnings' refusal sits behind `moment_can_come`'s, so it is a
-  second guard, never alone under test.
+  `moment_can_come` and the rule warnings; `NEVER_FIRES` reads the moment through `said`. The
+  definition's name check has none: the typed moment refuses an unknown one before it runs. The
+  test reaches `said` (through `decide`) and `moment_can_come` (through `validate_case`); the
+  warnings' refusal sits behind `moment_can_come`'s, so it is a second guard, never alone under
+  test (corrected after the second review, which found `NEVER_FIRES`'s own refusal unreachable).
 - **The loop of starts** (slice 4d, choice 17) lives in `case/loops.py`. "Surely starts again"
   means a rule on a task's answer with no `when`, starting a repeatable task with no `when` that
   requires nothing but the task just answered; "entered in every case" means a task of the loop
@@ -793,6 +796,46 @@ three, each fixed test-first, and one question for the user:
   moment (11a's "a retried run starts nothing again"). 11b makes that retry the way a rule's
   failed start goes on, so a rule on `started` never hears of that run.
 
+### From the second review
+
+A wider review followed: five reviewers (the runtime; determinism and Temporal; validation again;
+the documents against the code; the conventions), each finding put to a skeptic who tried to
+refute it. 27 findings, 18 kept (three were one bug). Each fix landed test-first:
+
+- **A plan step a rule starts** read the rule's record after it was spent, so the untrusted values
+  the rule's condition read never reached the plan, and the refund was paid on a customer's note.
+  Now read first. A retried plan, the same run started again (brief, D26), keeps who may approve
+  nothing in it and those values on its run (`StepRun.excluded`, `StepRun.steered`), carried
+  across continue-as-new: before, its retry let the person whose answer the rule read approve,
+  as it let a person who proposed the step (a gap since layer 8, closed with it).
+- **An open approval follows the case file before a rule's start is decided**, so a start is
+  refused only by an approval that still stands; before, a start was refused by the approval the
+  same decision withdrew, and nothing was asked again.
+- **A start of a step approved and waiting for a fact** is refused and recorded (`pay is approved,
+  and waits to start: pay.approval#1`); before, it failed the step and took its approval. A
+  person's proposal of it is refused the same way.
+- **A rule's start left when the case stops deciding** (a retried rule reaching the last
+  `closes_when` milestone) is recorded, never dropped in silence.
+- **A new proposal replaces what a withdrawn one left**, a person's or a rule's: before, a rule's
+  record outlived its withdrawn approval and refused the approver of a run a person proposed.
+- **A fact nothing can fetch again** fails a rule's start saying why (`it came from a person, so
+  it can't be fetched again`), not "retry it to fetch it". D39 gets a dated amendment, and the
+  guides say so.
+- **Validation:** a warning on an input (`OPENER_DECIDES`) no longer hides the condition's
+  `INPUT_POLICY`; `NEVER_REFRESHED` says a person's proposal is refused, where one may propose the
+  step; the guide's `NEVER_STARTS` row names the exception for a repeatable step's own start.
+- **Tests and promises:** the own-answer `NEVER_STARTS`, a refused input and a fact nothing can
+  fetch again, and a rule's start beside a waiting proposal are tested; two rows named tests that
+  checked only part of them. `NEVER_FIRES`'s unreachable refusal is gone, and the new
+  `writers.writers_of` is `could_come_from`, as the other `writers_of` returns writers.
+- **Left for the user: cases already open when 11b is deployed.** 11b decides some paths
+  differently from 11a (a proposal on a stale fact, a proposal beside a failed run, a condition
+  reading untrusted data). A case open on one of them stops on replay under the new worker:
+  Temporal refuses a history the code would decide differently, and the case waits until the code
+  is fixed (brief, D17). The fixture replays because its path is decided the same way, so its
+  promise says only that. Gating the changed paths (Temporal's `patched`, or a version stamped in
+  the state when a case opens) would keep them; changing open cases is layer 12's subject.
+
 ### Promises
 
 Drafted before building, from the choices above; each row's test was named here first, and the
@@ -810,9 +853,14 @@ says. Every test is in `tests/test_rules.py` unless said otherwise.
 | `answered` fires on each answer, whatever the outcome | `test_answered_fires_on_each_answer` |
 | A rule's start whose `when` is false, or whose requirements aren't met, runs nothing, and says so | `test_a_start_whose_condition_is_false_runs_nothing`, `test_a_start_whose_requirements_arent_met_runs_nothing` |
 | A start of a running step, one waiting for its approval or to start, or one that has run and isn't repeatable is recorded, and nothing runs | `test_a_refused_start_is_recorded` |
+| A start of a step approved and waiting for a fact is recorded, and the step starts on that approval once the fact lands | `test_a_start_of_an_approved_step_waiting_for_its_fact_is_refused` (`tests/test_fresh_facts.py`) |
+| A rule's start is decided after an open approval follows the case file | `test_a_rules_start_sees_the_approvals_that_stand` |
+| A new proposal replaces a withdrawn one's record: the person whose check the rule read may approve a run a person proposed | `test_a_new_proposal_replaces_a_withdrawn_one` |
+| A plan step a rule starts carries the rule's untrusted sources into its plan | `test_a_plan_step_a_rule_starts_carries_what_the_rule_read` (`tests/test_plan_step.py`) |
+| A retried plan keeps who may approve nothing in it | `test_a_retried_plan_keeps_who_may_not_approve_in_it` (`tests/test_plan_step.py`) |
 | A person's proposal of a step whose start already waits is refused, and the first proposer still can't approve its run | `test_a_second_proposal_of_a_waiting_step_is_refused` (`tests/test_fresh_facts.py`) |
 | A rule's start beside a failed run is refused | `test_a_rule_starts_nothing_beside_a_failed_run` |
-| A rule's start whose condition can't be read, whose contract is missing, whose input is refused, or whose stale fact can't be fetched again needs attention | `test_a_start_that_cant_be_made_needs_attention` |
+| A rule's start whose condition can't be read, whose contract is missing, whose input is refused, or whose stale fact can't be fetched again needs attention, saying why nothing can fetch it | `test_a_start_that_cant_be_made_needs_attention` |
 | A rule's start on a stale fact that could be fetched again needs attention, and an operator's retry fetches it, then runs the step | `test_a_rules_start_never_waits_for_a_refresh` |
 | A person's proposal on a stale fact that can't be fetched again is refused, saying why | `test_a_proposal_on_a_fact_that_cant_be_fetched_is_refused` (`tests/test_fresh_facts.py`) |
 | A person's proposal whose input is refused, whose contract is missing, or whose high-risk step has no approval fails its run, and the case needs attention | `test_a_proposal_that_cant_be_made_needs_attention` (`tests/test_case.py`) |
@@ -834,9 +882,9 @@ says. Every test is in `tests/test_rules.py` unless said otherwise.
 | `orders.lookup@1`'s undeclared status refuses the fresh refund's `pay`; `@2` runs it | `test_an_undeclared_status_cant_choose_a_payment` (`tests/test_fresh_facts.py`) |
 | Running `orders.lookup@2` with no implementation given raises, naming it: the development catalog has no fake for it | `test_a_contract_with_no_fake_raises` (`tests/test_fresh_facts.py`) |
 | Who can start a step counts rules: no `NEVER_RUNS` for a step a rule may start, and a misspelt `proposed_by` is still reported | `test_a_step_a_rule_may_start_can_run` (`tests/test_case_validation.py`) |
-| A start refused every time is `NEVER_STARTS`, on the opening or on the step's own start; a rule whose condition may fail at the opening gets none; a step whose every start is refused never runs | `test_a_start_refused_every_time_is_never_starts` |
+| A start refused every time is `NEVER_STARTS`, on the opening, on the step's own start (not when its condition may fail and the step is repeatable), or on its own answer when it isn't repeatable; a rule whose condition may fail at the opening gets none; a step whose every start is refused never runs | `test_a_start_refused_every_time_is_never_starts` |
 | A step started only by a rule on its own moment gets one issue | `test_a_step_started_only_on_its_own_moment_gets_one_issue` |
-| An untrusted condition gives `INPUT_POLICY` at the step and at the rule, whoever opens the case, and nothing at the rule when the step's input already has it; a rule that also reaches gets only `UNTRUSTED_TRIGGER`, saying it starts nothing | `test_input_policy_counts_conditions` (`tests/test_case_validation.py`) |
+| An untrusted condition gives `INPUT_POLICY` at the step and at the rule, whoever opens the case, and nothing at the rule when the step's input already has an error (a warning there hides nothing); a rule that also reaches gets only `UNTRUSTED_TRIGGER`, saying it starts nothing | `test_input_policy_counts_conditions` (`tests/test_case_validation.py`) |
 | A rule on the opening that starts a step keeps the case from closing at once: no `CLOSES_AT_OPENING`, and the run waits | `test_a_step_a_rule_on_the_opening_starts_keeps_the_case_open` |
 | A rule on the opening with a `when` gives no `CLOSES_AT_OPENING`: it may fail, and the case waits | `test_a_rule_on_the_opening_that_may_fail_keeps_the_case_open` |
 | Once every `closes_when` milestone is reached, a rule's start is refused and recorded, even one decided on that moment | `test_a_rule_starts_nothing_once_the_case_closes` |
@@ -847,8 +895,9 @@ says. Every test is in `tests/test_rules.py` unless said otherwise.
 | `NEVER_CLOSES` says only a forget request could close the case, or, with no forgetting, that nothing could | `test_the_guides_table_is_what_validate_case_says` (`tests/test_case_validation.py`), `test_never_closes_says_nothing_could_without_forgetting` (`tests/test_case_validation.py`) |
 | What isn't claimed: a writer started only on the reader's own moment gives `MAY_BE_UNSET`, a cycle through `started` nothing | `test_what_rules_that_start_steps_dont_claim` |
 | An approval whose `when` always reads untrusted data is `NEVER_REFRESHED`'s "always needed" | `test_an_untrusted_approval_is_always_needed` (`tests/test_case_validation.py`) |
+| `NEVER_REFRESHED` says a person's proposal is refused where one may propose the step, and that it needs attention where it starts by itself or by a rule | `test_never_refreshed_says_a_proposal_is_refused` (`tests/test_case_validation.py`) |
 | A waiting start and a rule's record cross continue-as-new, and replay decides the same | `test_a_waiting_start_crosses_continue_as_new` (`tests/test_temporal_case.py`) |
-| A history recorded before 11b replays under 11b's worker | `test_a_history_from_before_11b_replays` (`tests/test_temporal_case.py`) |
-| The runtime refuses what validation refuses, on nothing validation did | `test_an_untrusted_condition_cant_choose_what_is_sent` (`INPUT_POLICY` fails the run), `test_a_start_whose_requirements_arent_met_runs_nothing` (`NEVER_STARTS` runs nothing): each calls only `run_case` |
+| A history recorded before 11b, on a path 11b decides the same way, replays under 11b's worker (cases open on a changed path: see "From the second review") | `test_a_history_from_before_11b_replays` (`tests/test_temporal_case.py`) |
+| The runtime refuses what validation refuses, on nothing validation did | `test_an_untrusted_condition_cant_choose_what_is_sent` (`INPUT_POLICY` fails the run), `test_a_start_refused_every_time_is_never_starts` (the start `NEVER_STARTS` names is refused): each runs the case through `run_case` alone |
 | No line or issue of 11b quotes a value from a case file | `test_no_start_line_or_issue_quotes_a_value` |
 | The guides' refusals, start lines and codes are what the engine says | `test_the_guides_refusals_are_what_the_engine_says` (`tests/test_case.py`), `test_the_guides_start_lines_are_what_the_engine_says`, `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |

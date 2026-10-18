@@ -609,14 +609,16 @@ whether it is running, its fresh facts, its approval and its inputs. A start the
 make is never silent:
 
 - **recorded, and nothing runs,** when the step's requirements aren't met, or its `when` is false;
-  it is already running, waiting for its approval, or waiting to start; it has run and isn't
-  repeatable; or its latest run needs attention. Without `repeatable` on `lead_check`:
-  `check_review#2 on answered review: lead_check not started: lead_check has run, and is not
-  repeatable`;
+  it is already running, waiting for its approval, or waiting to start (approved, or proposed,
+  and waiting for a fact); it has run and isn't repeatable; or its latest run needs attention;
+  or every `closes_when` milestone is reached, even on the moment that reached the last.
+  Without `repeatable` on `lead_check`: `check_review#2 on answered review: lead_check not
+  started: lead_check has run, and is not repeatable`;
 - **failed, needing attention,** as when a step starts by itself: its condition can't be read,
   its contract is missing, an input is refused, or a fact it needs fresh is stale. A rule's start
   never waits for a fact to be fetched again, as a person's proposal does: an operator's retry
-  fetches it, then the step runs.
+  fetches it, then the step runs. A fact nothing can fetch again, such as a person's answer, is
+  said so, and a retry fails the same way.
 
 **Who can't approve it.** Whoever's answer the rule's `when` read can't approve the run it
 starts, as for a step's own `when` (brief, D11): the rule decided that the step runs, on their
@@ -667,7 +669,7 @@ on the opening with a `when`, which may fail and leave the case waiting for a pe
 |---|---|---|---|
 | `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
 | `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone reads, in its `when`, a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
-| `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: on the opening, the step requires what can't be met by then, and the rule's condition can't fail and be retried later; or it fires on the step's own start, or on its own answer when the step isn't repeatable | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
+| `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: on the opening, the step requires what can't be met by then, and the rule's condition can't fail and be retried later; or it fires on the step's own start (unless its condition may fail and the step is repeatable: a retry may come once the step is done), or on its own answer when the step isn't repeatable | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
 | `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition or requirement ends (the rework rules above with their `when`s removed, on the refund with the `duplicate` close reason from "Closing a case"), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
 
 The rework loop above gets no issue: its rules' `when`s end it.

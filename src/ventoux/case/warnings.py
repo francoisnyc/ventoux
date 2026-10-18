@@ -19,6 +19,7 @@ from ventoux.case.definition import (
     WorkflowStep,
 )
 from ventoux.case.known import DONE, Known, Read, Reading, reads, set_by_outcomes
+from ventoux.case.reach import starters
 from ventoux.case.rules import said as moment_said
 from ventoux.case.rules import unknown_moment
 from ventoux.case.runtime import listed
@@ -369,12 +370,25 @@ def refresh_issues(
                         f"steps.{name}.max_age.{value}",
                         "NEVER_REFRESHED",
                         f"{value} comes from {why}: whenever it is older than {name}'s max_age "
-                        f"allows, {name} needs attention: keep it only if a person should decide "
-                        "each time",
+                        f"allows, {when_stale(case, name)}: keep it only if a person should "
+                        "decide each time",
                         "warning",
                     )
                 )
     return found
+
+
+def when_stale(case: CaseDefinition, name: str) -> str:
+    """What happens to the step `name` on a stale fact nothing can fetch again, for each way it
+    starts: by itself or by a rule, it needs attention; a person's proposal is refused, saying why
+    (brief, D33) (brief, D39)."""
+    step = case.steps[name]
+    alone = step.automatic or bool(starters(case, name))
+    if alone and step.proposed_by:
+        return f"{name} needs attention, and a proposal of it is refused"
+    if step.proposed_by:
+        return f"a proposal of {name} is refused"
+    return f"{name} needs attention"
 
 
 def never_fetched(

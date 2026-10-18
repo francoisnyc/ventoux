@@ -1115,6 +1115,32 @@ def test_a_start_refused_every_time_is_never_starts() -> None:
             "on another moment",
         )
     ]
+    # Unless its condition may fail and the step is repeatable: the retry may come once the step
+    # is done.
+    may_retry = guide_rework()
+    may_retry["rules"]["again"] = {
+        "display": {"title": "Review it again"},
+        "on": {"started": "review"},
+        "when": {">": [{"var": "approved_amount"}, 10]},
+        "then": {"start": ["review"]},
+    }
+    assert not [i for i in issues(may_retry) if i.code == "NEVER_STARTS"]
+    # On its own answer, a step that isn't repeatable has run by then.
+    answered = with_rule(on={"answered": "review"}, when=None, then={"start": ["review"]})
+    del answered["milestones"]
+    assert [i for i in issues(answered) if i.code == "NEVER_STARTS"] == [
+        Issue(
+            "rules.flag_large.then.start",
+            "NEVER_STARTS",
+            "flag_large can never start review: it fires on answered review, once review has "
+            "run, and review is not repeatable: make review repeatable, or start it on another "
+            "moment",
+        )
+    ]
+    run = run_case(answered, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert (
+        "flag_large#1 on answered review: review not started: review has run, and is not repeatable"
+    ) in run.history
 
 
 def test_a_step_started_only_on_its_own_moment_gets_one_issue() -> None:
@@ -1180,12 +1206,11 @@ def test_an_unknown_moment_fails_closed() -> None:
     # wherever a moment is read: never read as the opening, nor as one that can come (fail
     # closed).
     refused = "^'closed' is not a moment Ventoux knows$"
-    for when in ({">": [{"var": "amount"}, 1000]}, None):  # a condition is read by more checks
-        case = parse_case(with_rule(when=when))
-        rule = case.rules["flag_large"].model_copy(update={"on": "closed"})
-        unknown = case.model_copy(update={"rules": {"flag_large": rule}})
-        with pytest.raises(ValueError, match=refused):
-            validate_case(unknown, CATALOG)
+    case = parse_case(with_rule(when=None))
+    rule = case.rules["flag_large"].model_copy(update={"on": "closed"})
+    unknown = case.model_copy(update={"rules": {"flag_large": rule}})
+    with pytest.raises(ValueError, match=refused):
+        validate_case(unknown, CATALOG)
     with pytest.raises(ValueError, match=refused):
         decide(
             unknown,

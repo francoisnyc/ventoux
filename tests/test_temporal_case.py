@@ -1001,10 +1001,12 @@ BEFORE_11B = Path(__file__).parent / "histories" / "before_11b_proposal.json"
 
 def test_a_history_from_before_11b_replays() -> None:
     # Recorded under 11a's code: a case where a person proposed check_order, which ran, and the
-    # case was closed as a duplicate. 11b changes what `decide` does with a proposal (it may wait
-    # for a fresh fact, or be refused beside a failed run); a case already open with such a
-    # history must still replay under the new worker, or it would stop on a non-determinism
-    # error. No part of it is sealed (no form, no sensitive field), so it replays with no key.
+    # case was closed as a duplicate. 11b decides this path the same way, so the new worker
+    # replays it: its new state fields read back empty from an old run. It shows no more: on a path
+    # 11b decides differently (a proposal on a stale fact, beside a failed run, a condition
+    # reading untrusted data), Temporal refuses the history, and the case waits until the code is
+    # fixed (brief, D17); see the note, 11b, "From the second review". No part of it is sealed
+    # (no form, no sensitive field), so it replays with no key.
     history = WorkflowHistory.from_json("refund-1", BEFORE_11B.read_text())
     replay(history, DevelopmentCases, development_converter())
 

@@ -461,8 +461,9 @@ than its `max_age`:
 A step a person proposes whose stale fact can be fetched again waits the same way: the proposal
 is accepted, the fact is fetched again, then the step starts, or doesn't, on the fresh value. If
 the fact can't be fetched again, the proposal is refused, saying why. A rule's start doesn't wait:
-the step needs attention, and an operator's retry fetches the fact again. Nothing proposed runs on
-a stale fact.
+the step needs attention, and an operator's retry fetches the fact again, if anything can; if
+nothing can, the step's line says why, as a refused proposal does. Nothing proposed runs on a
+stale fact.
 
 A fact is fetched again **once for each need**, never in a loop:
 

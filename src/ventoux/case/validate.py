@@ -44,7 +44,7 @@ from ventoux.case.reach import (
     waited_on,
 )
 from ventoux.case.registered import role_issues_of, source_issues_of, system_issues_of
-from ventoux.case.rules import said, unknown_moment
+from ventoux.case.rules import said
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
 from ventoux.case.types import case_types
@@ -86,7 +86,9 @@ def validate_case(
     found += reference_issues(case, contracts, supplied, {issue.path for issue in found})
     said = {issue.path for issue in found}
     found += policy_issues(case, contracts, said) + no_sources_issues(case, supplied, said)
-    found += condition_issues(case, contracts, {issue.path for issue in found})
+    # Only an error on the input is the cause: a warning (OPENER_DECIDES) never hides the
+    # condition's refusal, which holds whoever opens the case.
+    found += condition_issues(case, contracts, {i.path for i in found if i.severity == "error"})
     found += type_issues(case, catalog, contracts, supplied, {issue.path for issue in found})
     found += plan_policy_issues(case, catalog, contracts, supplied, {i.path for i in found})
     found += sensitive_issues(case, contracts, {issue.path for issue in found})
@@ -457,7 +459,7 @@ def never_fires(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
         ):
             continue
         on = rule.on
-        moment = said(on)
+        moment = said(on)  # fail closed: a moment Ventoux doesn't know is refused here
         if acts_after_close(case, name):
             assert isinstance(on, Reached)
             why = (
@@ -471,7 +473,8 @@ def never_fires(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
                 f"{name} can never fire: it fires on {moment}, which can never run: fix {step} "
                 "first"
             )
-        elif isinstance(on, Reached):
+        else:
+            assert isinstance(on, Reached)  # the opening always comes, and said() knows no other
             reachers = reached_by(case, on.reached) + rules_reaching(case, on.reached)
             if reachers:
                 one = len(reachers) == 1
@@ -486,7 +489,5 @@ def never_fires(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
                     f"{name} can never fire: it fires on {moment}, which no step or rule reaches: "
                     f"reach {on.reached} from a step or a rule, or fire it on another moment"
                 )
-        else:
-            unknown_moment(on)  # fail closed: the opening always comes, so it is never here
         found.append(Issue(f"rules.{name}.on", "NEVER_FIRES", why))
     return found

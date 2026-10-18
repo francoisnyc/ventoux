@@ -2691,6 +2691,34 @@ def test_a_read_behind_an_approval_needs_attention_when_stale() -> None:
     assert fetched.reached("pay")
 
 
+def test_never_refreshed_says_a_proposal_is_refused() -> None:
+    # A person's proposal on a stale fact nothing can fetch again is refused, saying why; a start
+    # by itself or by a rule needs attention (brief, D39). The warning says which happens.
+    proposed = paying_fresh("review.outcome")
+    proposed["steps"]["pay"] |= {"automatic": False, "proposed_by": ["support"]}
+    done = {"display": {"title": "Done"}, "roles": ["support"]}
+    proposed |= {"stays_open": True, "close_reasons": {"done": done}}
+    assert never_refreshed(proposed) == [
+        (
+            "review.outcome comes from a person, in review, and can't be fetched again: whenever it "
+            "is older than pay's max_age allows, a proposal of pay is refused: keep it only if a "
+            "person should decide each time"
+        )
+    ]
+    with pytest.raises(ProposalRefused, match="it came from a person, so it can't be fetched"):
+        run_case(
+            proposed,
+            file=SMALL,
+            answers=[REVIEWED, later("3d"), propose("pay", "ana")],
+            people=PEOPLE,
+        )
+    both = copy.deepcopy(proposed)
+    both["steps"]["pay"]["automatic"] = True
+    both["steps"]["pay"]["repeatable"] = True
+    [said] = never_refreshed(both)
+    assert "allows, pay needs attention, and a proposal of it is refused:" in said
+
+
 def test_an_untrusted_approval_is_always_needed() -> None:
     # An approval whose condition reads untrusted data is asked whatever it gives (brief, D39), so
     # for a refresh, which never asks for one, it is always needed: the read isn't fetched again.
@@ -3041,6 +3069,25 @@ def test_input_policy_counts_conditions() -> None:
     own = welcomed_by_a_rule()
     own["steps"]["welcome"]["inputs"]["to_customer"] = {"var": "kyc.analyst_notes"}
     assert [issue.path for issue in issues(own)] == ["steps.welcome.inputs.to_customer"]
+    # A warning on the input's own sources is another cause: it never hides the condition's
+    # error. `ledger.record@1` takes the amount only from the opener, so a person opening the case
+    # would be refused too (OPENER_DECIDES); the model's notes refuse it whoever opens it (the
+    # second review).
+    recorded = with_welcome(SAYS_SEND)
+    del recorded["steps"]["welcome"]
+    recorded["steps"]["record"] = {
+        "kind": "activity",
+        "display": {"title": "Record the request"},
+        "activity": "ledger.record@1",
+        "requires": ["checked"],
+        "when": SAYS_SEND,
+        "inputs": {"amount": {"var": "amount"}},
+    }
+    found = validate_case(parse_case(recorded), with_ledger())
+    assert [(i.path, i.code) for i in found] == [
+        ("steps.record.inputs.amount", "OPENER_DECIDES"),
+        ("steps.record.inputs.amount", "INPUT_POLICY"),
+    ]
 
 
 def without_forgetters() -> Catalog:

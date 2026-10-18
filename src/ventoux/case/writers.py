@@ -53,7 +53,7 @@ def case_sources(
     return sources
 
 
-def writers_of(
+def could_come_from(
     case: CaseDefinition, catalog: Catalog, opened_by: str | None
 ) -> dict[str, frozenset[str]]:
     """Where each value of a case `opened_by` opened (None: a system) could come from, with the
@@ -80,7 +80,7 @@ def read_sources(
     for field in [] if expression is None else fields_read(expression):
         sources = state.sources.get(field)
         if sources is None:
-            could = could if could is not None else writers_of(case, catalog, state.opened_by)
+            could = could if could is not None else could_come_from(case, catalog, state.opened_by)
             sources = could.get(field, frozenset({f"no known source for {field}"}))
         read.setdefault(field, sources)
     return read

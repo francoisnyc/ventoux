@@ -1169,6 +1169,12 @@ text is kept.*
   whose definition allows it (D32), so the error says nothing in the case's work or its close
   reasons can close it, and, when its definition allows forgetting and a role that forgets is
   registered, that only a forget request would; otherwise, that nothing could.
+- **Amended 2026-10-18, after the code reviews** (the text above stands; this narrows it):
+  - an operator's retry fetches a stale fact again only if something can. A fact nothing can
+    fetch again (a person's answer, the opening) fails the rule's start saying so, as it refuses
+    a person's proposal, and a retry fails the same way;
+  - a start of a step that is approved and waiting for a fact is recorded, and nothing runs, as
+    one waiting to start is: the step starts on that approval once the fact lands.
 
 ### Simplifications adopted
 
