@@ -985,6 +985,21 @@ def test_rule_firings_cross_continue_as_new_and_replay() -> None:
     replay(history, SwitchingCases, converter)
 
 
+# --- Layer 11b: a history recorded before 11b still replays (brief, D17) ---
+
+BEFORE_11B = Path(__file__).parent / "histories" / "before_11b_proposal.json"
+
+
+def test_a_history_from_before_11b_replays() -> None:
+    # Recorded under 11a's code: a case where a person proposed check_order, which ran, and the
+    # case was closed as a duplicate. 11b changes what `decide` does with a proposal (it may wait
+    # for a fresh fact, or be refused beside a failed run); a case already open with such a
+    # history must still replay under the new worker, or it would stop on a non-determinism
+    # error. No part of it is sealed (no form, no sensitive field), so it replays with no key.
+    history = WorkflowHistory.from_json("refund-1", BEFORE_11B.read_text())
+    replay(history, DevelopmentCases, development_converter())
+
+
 # --- Slice 8: the guide, as the engine does it ---
 
 CASES_GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
