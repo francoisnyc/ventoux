@@ -1741,6 +1741,8 @@ def test_an_approval_given_while_the_close_is_held_is_let_go() -> None:
         "a person closes it: nothing new starts"
     )
     assert run.state.given == {}
+    # Only what is let go says so: no line for a step with nothing pending.
+    assert [line for line in run.history if " not started: " in line] == [run.history[-1]]
 
 
 # --- Layer 8d, slice 1: outputs into the case file ---

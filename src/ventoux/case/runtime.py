@@ -793,6 +793,11 @@ def admit(
                 continue
             latest = latest_run(state, name)
             retried = latest if latest is not None and latest.status == "retrying" else None
+            # Once the close is only held by a failed run, nothing new starts, whatever the
+            # step's requirements: only the run an operator retries (brief, D34).
+            if close_held(case, state) and retried is None:
+                let_go_while_held(case, state, name)
+                continue
             if not requirements_met(required[name], state):
                 # A retry waits for a step it requires while that step is on its way, which the
                 # case shows; one that ended without completing can't let it start.
@@ -801,11 +806,6 @@ def admit(
                     why = f"{name} requires {ended}, which hasn't completed"
                     retry_fails(state, retried, why, "retry it once it has")
                 drop_waiting(state, name, "its requirements are no longer met")
-                continue
-            # Once the close is only held by a failed run, nothing new starts: only the run an
-            # operator retries (brief, D34).
-            if close_held(case, state) and retried is None:
-                let_go_while_held(case, state, name)
                 continue
             try:
                 # Every expression it reads is checked over the case's types first, so a misspelt
