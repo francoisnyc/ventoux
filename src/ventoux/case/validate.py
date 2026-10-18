@@ -25,6 +25,7 @@ from ventoux.case.flow import (
     trigger_issues,
     type_issues,
 )
+from ventoux.case.loops import endless_loops
 from ventoux.case.reach import (
     Through,
     acts_after_close,
@@ -66,8 +67,11 @@ def validate_case(
         )
     can = can_happen(case, catalog)
     found: list[Issue] = []
-    nobody_closes = never_closes(case, catalog, can)
-    found += never_run(case, catalog, can) + never_fires(case, catalog, can) + nobody_closes
+    # A case that stays open with nobody to close it is said once, loop or not: one cause, one
+    # issue.
+    closing = never_closes(case, catalog, can) or loop_issues(case, catalog, can)
+    nobody_closes = any(issue.code == "NEVER_CLOSES" for issue in closing)
+    found += never_run(case, catalog, can) + never_fires(case, catalog, can) + closing
     found += never_starts(case, catalog, can)
     contracts, unknown_contracts = called_contracts(case, catalog)
     supplied, unknown_plans = supplied_plans(case, plans or {})
@@ -167,8 +171,8 @@ def close_unreachable(case: CaseDefinition, can: set[str]) -> list[Issue]:
 def never_closes(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Issue]:
     """A case that stays open closes when a person closes it with a reason, or by `closes_when`,
     which closes it too (layer 8b). If no reason names a registered role and `closes_when` can
-    never be met, nobody ever can (brief, D10). A role nobody registered counts for nothing
-    (brief, D22)."""
+    never be met, nothing in its work or its close reasons can (brief, D10). A role nobody
+    registered counts for nothing (brief, D22)."""
     closers = {role for reason in case.close_reasons.values() for role in reason.roles}
     if not case.stays_open or closers & set(catalog.roles):
         return []
@@ -181,10 +185,62 @@ def never_closes(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[
             "close_reasons",
             "NEVER_CLOSES",
             f"{case.case} stays open, none of its close reasons' roles ({roles}) is registered, "
-            "and closes_when never closes it, so nobody could ever close it: name a registered "
-            "role in a close reason",
+            f"and closes_when never closes it, so {only_forgetting(case, catalog)}: name a "
+            "registered role in a close reason",
         )
     ]
+
+
+def loop_issues(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Issue]:
+    """Each loop of starts nothing in the case ends (brief, D39): `NEVER_CLOSES` if no close
+    reason names a registered role and `closes_when` can never be met, since nothing in the case
+    could close it then; `LOOPS_UNTIL_CLOSED`, a warning, if one of them can (brief, D10)."""
+    closers = {role for reason in case.close_reasons.values() for role in reason.roles}
+    closes_when = bool(case.closes_when) and all(name in can for name in case.closes_when)
+    found: list[Issue] = []
+    for loop in endless_loops(case):
+        path = f"rules.{loop.rules[0]}.then.start"
+        endless = (
+            f"{listed(list(loop.rules))} start {listed(list(loop.steps))} again on every answer, "
+            "and nothing ends it"
+        )
+        fix = "give one of the rules a when that ends the loop"
+        if closers & set(catalog.roles) or closes_when:
+            found.append(
+                Issue(
+                    path,
+                    "LOOPS_UNTIL_CLOSED",
+                    f"{endless}: {case.case} closes only through a close reason or closes_when: "
+                    f"{fix}",
+                    "warning",
+                )
+            )
+            continue
+        # The roles are named here, so no UNKNOWN_ROLE repeats them: one cause, one issue.
+        if closers:
+            nobody = (
+                f"none of its close reasons' roles ({', '.join(sorted(closers))}) is registered"
+            )
+        else:
+            nobody = f"{case.case} has no close reason"
+        found.append(
+            Issue(
+                path,
+                "NEVER_CLOSES",
+                f"{endless}: {nobody}, and closes_when never closes it, so "
+                f"{only_forgetting(case, catalog)}: {fix}",
+            )
+        )
+    return found
+
+
+def only_forgetting(case: CaseDefinition, catalog: Catalog) -> str:
+    """What could still close a case nothing in its work or close reasons can: a forget request,
+    if its definition lets it be forgotten while open and a role that forgets is registered
+    (brief, D32); otherwise nothing."""
+    if case.forgetting != "never" and catalog.forgetters:
+        return "nothing but a forget request could close it"
+    return "nothing could ever close it"
 
 
 def closes_at_opening(case: CaseDefinition) -> bool:

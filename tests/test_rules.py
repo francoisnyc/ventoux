@@ -870,6 +870,129 @@ def test_an_unknown_moment_fails_closed() -> None:
         )
 
 
+def endless_rework() -> dict[str, Any]:
+    """The guide's rework loop with its rules' conditions removed: each answer starts the other
+    task again."""
+    definition = guide_rework()
+    for rule in definition["rules"].values():
+        del rule["when"]
+    return definition
+
+
+ENDLESS = "check_review and send_back start lead_check and review again on every answer, and "
+
+
+def test_a_loop_of_starts_never_closes() -> None:
+    # The review starts as the case opens, and each answer starts the other task again: nothing in
+    # the case ends it, and it has no close reason, so only a forget request could close it
+    # (brief, D10) (brief, D39).
+    assert [i for i in issues(endless_rework()) if i.severity == "error"] == [
+        Issue(
+            "rules.check_review.then.start",
+            "NEVER_CLOSES",
+            ENDLESS + "nothing ends it: refund has no close reason, and closes_when never closes "
+            "it, so nothing but a forget request could close it: give one of the rules a when "
+            "that ends the loop",
+        )
+    ]
+    reviewed = ("review", "approve", "ana", {"approved_amount": 40})
+    run = run_case(
+        endless_rework(),
+        file=SMALL,
+        answers=[reviewed, ("lead_check", "ok", "sam"), reviewed, ("lead_check", "ok", "sam")],
+        people=PEOPLE,
+    )
+    assert run.reached("pay") and not run.closed
+    assert run.waiting_for == ["review by support"]
+
+
+def closable(definition: dict[str, Any], *roles: str) -> dict[str, Any]:
+    """`definition` with the guide's `duplicate` close reason ("Closing a case"), for `roles`."""
+    reason = {"display": {"title": "Duplicate request"}, "roles": list(roles)}
+    return definition | {"close_reasons": {"duplicate": reason}}
+
+
+def test_a_loop_a_close_can_end_is_warned() -> None:
+    # A person can still close it with a reason, or closes_when can: a warning (brief, D10:
+    # "a step that can always be restarted").
+    warned = Issue(
+        "rules.check_review.then.start",
+        "LOOPS_UNTIL_CLOSED",
+        ENDLESS + "nothing ends it: refund closes only through a close reason or closes_when: "
+        "give one of the rules a when that ends the loop",
+        "warning",
+    )
+    assert issues(closable(endless_rework(), "support")) == [warned]
+    closing_on_paid = endless_rework() | {"closes_when": ["paid"]}
+    closing_on_paid["milestones"]["paid"] = {"display": {"title": "Refund paid"}}
+    closing_on_paid["steps"]["pay"]["reaches"] = ["paid"]
+    assert issues(closing_on_paid) == [warned]
+    # A misspelt role beside a registered one is still said: it closes nothing (brief, D22).
+    misspelt = [i.code for i in issues(closable(endless_rework(), "support", "supprt"))]
+    assert misspelt == ["LOOPS_UNTIL_CLOSED", "UNKNOWN_ROLE"]
+    run = run_case(
+        closable(endless_rework(), "support"),
+        file=SMALL,
+        answers=[APPROVED_40, ("lead_check", "ok", "sam"), close("duplicate", "ana")],
+        people=PEOPLE,
+    )
+    assert run.closed
+
+
+def test_a_loop_a_requirement_ends_gets_no_issue() -> None:
+    # A refused start ends a loop: lead_check needs the refund flagged large, which only a rule
+    # on the opening may reach, so for a small refund the loop never comes round (brief, D39).
+    definition = endless_rework()
+    definition["milestones"]["large"] = {"display": {"title": "Large refund"}}
+    definition["rules"]["flag_large"] = {
+        "display": {"title": "Flag a large refund"},
+        "on": "opened",
+        "when": {">": [{"var": "amount"}, 1000]},
+        "then": {"reach": ["large"]},
+    }
+    definition["steps"]["lead_check"]["requires"] = ["large"]
+    assert not [i for i in issues(definition) if i.path.startswith("rules.check_review")]
+    run = run_case(definition, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert (
+        "check_review#1 on answered review: lead_check not started: lead_check requires large, "
+        "which hasn't been reached"
+    ) in run.history
+    assert run.closed
+    # A task that can't run again ends it too.
+    once = endless_rework()
+    once["steps"]["review"]["repeatable"] = False
+    assert not [i for i in issues(once) if i.code in ("NEVER_CLOSES", "LOOPS_UNTIL_CLOSED")]
+    # And a loop only a person's proposal enters may never be entered: nothing is claimed.
+    proposed = closable(endless_rework(), "support") | {"stays_open": True}
+    proposed["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    assert issues(proposed) == []
+
+
+def test_what_rules_that_start_steps_dont_claim() -> None:
+    # The check claims less, never more (brief, D34). A value whose writer only a rule on the
+    # reader's own moment starts is never set when it is read, but only MAY_BE_UNSET says so,
+    # never SET_AFTER.
+    noted = guide_rework()
+    noted["milestones"]["noted"] = {"display": {"title": "Noted"}}
+    noted["rules"]["note_check"] = {
+        "display": {"title": "Note the check"},
+        "on": {"answered": "review"},
+        "when": {"==": [{"var": "lead_check.outcome"}, "ok"]},
+        "then": {"reach": ["noted"]},
+    }
+    assert [i.code for i in issues(noted)] == ["MAY_BE_UNSET"]
+    # A circle through `started` gets nothing: a rule's start never waits, so it can't come
+    # round by itself, and each round begins with a person's event (brief, D39).
+    started = endless_rework()
+    started["rules"]["check_review"]["on"] = {"started": "review"}
+    started["rules"]["send_back"]["on"] = {"started": "lead_check"}
+    assert issues(started) == []
+    run = run_case(started, file=SMALL, answers=[], people=PEOPLE)
+    assert (
+        "send_back#1 on started lead_check: review not started: review is already running: review#1"
+    ) in run.history
+
+
 # --- Slice 1: reaching ---
 
 
@@ -1625,6 +1748,7 @@ def test_the_guides_table_of_rule_codes_is_what_validate_case_says() -> None:
         "NEVER_FIRES": closing_on_checked,
         "UNTRUSTED_TRIGGER": untrusted,
         "NEVER_STARTS": starting_at_opening("pay"),
+        "LOOPS_UNTIL_CLOSED": closable(endless_rework(), "support"),
     }
     rows = guide_rules_table()
     assert [code for code, _, _ in rows] == list(examples)

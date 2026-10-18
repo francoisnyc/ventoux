@@ -328,7 +328,8 @@ NEVER_CLOSES = Issue(
     "close_reasons",
     "NEVER_CLOSES",
     "claim stays open, none of its close reasons' roles (supprt) is registered, and closes_when "
-    "never closes it, so nobody could ever close it: name a registered role in a close reason",
+    "never closes it, so nothing but a forget request could close it: name a registered role in "
+    "a close reason",
 )
 
 
@@ -338,7 +339,8 @@ def test_a_case_nobody_can_close_is_refused() -> None:
     # Since 10b, the role nobody registered is said: it can never close the case (brief, D35).
     misspelt = unknown_role("close_reasons.duplicate.roles", "supprt")
     assert issues(staying_open(guide_json(0))) == [misspelt]
-    # With paid unreachable, or no closes_when at all, nobody could ever close it. The issue
+    # With paid unreachable, or no closes_when at all, only a forget request could close it
+    # (brief, D32), as 11b's wording says (it said "nobody could ever close it"). The issue
     # names the roles, and no UNKNOWN_ROLE repeats them: one cause, one issue.
     assert NEVER_CLOSES in issues(staying_open(deadlocked_claim()))
     assert misspelt not in issues(staying_open(deadlocked_claim()))
@@ -2689,6 +2691,39 @@ def test_a_read_behind_an_approval_needs_attention_when_stale() -> None:
     assert fetched.reached("pay")
 
 
+def test_an_untrusted_approval_is_always_needed() -> None:
+    # An approval whose condition reads untrusted data is asked whatever it gives (brief, D39), so
+    # for a refresh, which never asks for one, it is always needed: the read isn't fetched again.
+    when = {"!": [{"exists": "notes"}]}
+    approval = {**TEAM_LEAD, "when": when}
+    untrusted = paying_fresh("check_order.status", check_order={**LOOKUP, "approval": approval})
+    untrusted["fields"]["notes"] = {
+        "type": "string",
+        "source": "untrusted:customer",
+        "display": {"title": "The customer's notes"},
+    }
+    assert never_refreshed(untrusted) == [
+        (
+            "check_order.status comes from check_order, a read that always needs an approval, which "
+            "a refresh never asks for: whenever it is older than pay's max_age allows, pay needs "
+            "attention: keep it only if a person should decide each time"
+        )
+    ]
+    run = run_case(
+        untrusted,
+        file=SMALL,
+        answers=[("check_order", "approve", "sam"), later("3d"), REVIEWED],
+        people=PEOPLE,
+        activities=DELIVERED,
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: check_order.status was obtained 3 days ago, and pay needs it at most 1 day "
+            "old: check_order needs an approval to run, so it isn't run again unasked"
+        )
+    ]
+
+
 # --- 10d, slice 5: an approval that guards a neighbouring value ---
 
 
@@ -3006,3 +3041,35 @@ def test_input_policy_counts_conditions() -> None:
     own = welcomed_by_a_rule()
     own["steps"]["welcome"]["inputs"]["to_customer"] = {"var": "kyc.analyst_notes"}
     assert [issue.path for issue in issues(own)] == ["steps.welcome.inputs.to_customer"]
+
+
+def without_forgetters() -> Catalog:
+    """The development catalog, with no role that may forget a case."""
+    catalog = Catalog()
+    for label in CATALOG.labels:
+        catalog.register_label(label)
+    for system in CATALOG.systems:
+        catalog.register_system(system)
+    for role, approves in CATALOG.roles.items():
+        if role not in CATALOG.forgetters:
+            catalog.register_role(role, approves, operates=role in CATALOG.operators)
+    for contract in CATALOG.contracts():
+        catalog.register(contract)
+    return catalog
+
+
+def test_never_closes_says_nothing_could_without_forgetting() -> None:
+    # A forget request closes any case its definition lets be forgotten (brief, D32): without
+    # one, nothing could close it, and the issue says so.
+    never = staying_open(guide_json(0))
+    del never["closes_when"]
+    nothing_could = Issue(
+        "close_reasons",
+        "NEVER_CLOSES",
+        "claim stays open, none of its close reasons' roles (supprt) is registered, and "
+        "closes_when never closes it, so nothing could ever close it: name a registered role in "
+        "a close reason",
+    )
+    assert issues(never) == [NEVER_CLOSES]
+    assert validate_case(parse_case(never), without_forgetters()) == [nothing_could]
+    assert issues(never | {"forgetting": "never"}) == [nothing_could]

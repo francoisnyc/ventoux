@@ -23,6 +23,7 @@ from ventoux.case.rules import said as moment_said
 from ventoux.case.rules import unknown_moment
 from ventoux.case.runtime import listed
 from ventoux.case.types import expressions_of
+from ventoux.case.writers import OPENER, case_sources, untrusted_of
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions.model import (
     Add,
@@ -399,10 +400,22 @@ def never_fetched(
         return f"{writer}, which computes it (compute), so running it again gives nothing new"
     if contract.effect != "read":
         return f"{writer}, which has side effects ({contract.effect}), and can't be run again"
-    if step.approval is not None and step.approval.when is None:
+    if step.approval is not None and always_asked(case, contracts, step.approval.when):
         # A refresh passes the same gate as any start, and never asks for an approval.
         return f"{writer}, a read that always needs an approval, which a refresh never asks for"
     return None
+
+
+def always_asked(
+    case: CaseDefinition, contracts: Mapping[str, Contract], when: Expression | None
+) -> bool:
+    """Whether an approval with the condition `when` is asked every time: it has none, or it
+    reads untrusted data, which can add an approval, never remove one (brief, D39). The opener is
+    trusted either way."""
+    if when is None:
+        return True
+    sources = case_sources(case, contracts, OPENER)
+    return bool(untrusted_of({name: sources.get(name, frozenset()) for name in fields_read(when)}))
 
 
 def elsewhere_issues(case: CaseDefinition, refused: Collection[str]) -> list[Issue]:
