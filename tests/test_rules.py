@@ -17,6 +17,7 @@ from ventoux.case.validate import validate_case
 from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
+    ProposalRefused,
     RetryRefused,
     close,
     fake_kyc,
@@ -84,10 +85,11 @@ def test_a_rule_names_one_of_three_moments(on: object) -> None:
 
 
 @pytest.mark.parametrize(
-    "on", ["closed", {"answered": "review"}, {"started": "pay", "reached": "large"}]
+    "on", ["closed", {"completed": "review"}, {"started": "pay", "reached": "large"}]
 )
 def test_an_unknown_moment_is_refused_in_one_line(on: object) -> None:
-    moments = '"opened", {"started": <step>} or {"reached": <milestone>}'
+    # Four moments since 11b: `answered` is one (brief, D39).
+    moments = '"opened", {"started": <step>}, {"reached": <milestone>} or {"answered": <task>}'
     with pytest.raises(CaseInvalid, match=f"^rules.flag_large.on: a moment is {moments}$"):
         parse_case(with_rule(on=on))
 
@@ -100,13 +102,69 @@ def test_a_rule_without_a_title_is_refused() -> None:
         parse_case(definition)
 
 
-@pytest.mark.parametrize("then", [{"reach": []}, {}])
+@pytest.mark.parametrize("then", [{"reach": []}, {}, {"reach": [], "start": []}])
 def test_a_rule_that_does_nothing_is_refused(then: dict[str, Any]) -> None:
-    with pytest.raises(CaseInvalid, match="^rules.flag_large.then.reach: "):
+    # Since 11b a rule may start steps instead of reaching milestones (brief, D39): one that does
+    # neither would do nothing, so a typo never hides a rule.
+    with pytest.raises(
+        CaseInvalid,
+        match="^rules.flag_large.then: a rule reaches a milestone or starts a step, at least one$",
+    ):
         parse_case(with_rule(then=then))
-    if then:
-        with pytest.raises(CaseInvalid, match="a rule reaches at least one milestone$"):
-            parse_case(with_rule(then=then))
+
+
+# --- 11b, slice 1: the shape of a rule that starts steps ---
+
+
+def test_answered_names_a_task_and_start_a_step() -> None:
+    # `answered` is a task's moment: an activity, a workflow or a plan finishing is not one, so a
+    # loop of rules always comes round through a person (brief, D39).
+    with pytest.raises(CaseInvalid, match="^rules.flag_large.on.answered: pay is not a task$"):
+        parse_case(with_rule(on={"answered": "pay"}))
+    with pytest.raises(CaseInvalid, match="^rules.flag_large.on.answered: revew is not a task$"):
+        parse_case(with_rule(on={"answered": "revew"}))
+    with pytest.raises(CaseInvalid, match="^rules.flag_large.then.start: lage is not a step$"):
+        parse_case(with_rule(then={"start": ["lage"]}))
+    parse_case(with_rule(on={"answered": "review"}, then={"start": ["pay"]}))
+    parse_case(with_rule(then={"reach": ["large"], "start": ["pay"]}))
+
+
+def only_a_rule_starts(**step: Any) -> dict[str, Any]:
+    """The refund with a team lead's check of the review, `lead_check`, changed by `step`, which a
+    rule starts once the review is approved."""
+    definition = with_rule(
+        on={"answered": "review"},
+        when={"==": [{"var": "review.outcome"}, "approve"]},
+        then={"start": ["lead_check"]},
+    )
+    definition["steps"]["lead_check"] = {
+        "kind": "task",
+        "display": {"title": "Check the approved review"},
+        "roles": ["support-lead"],
+        "automatic": False,
+        "outcomes": {"ok": {"display": {"title": "The review is right"}}},
+    } | step
+    return definition
+
+
+def test_a_step_only_a_rule_starts_is_proposed_by_nobody() -> None:
+    # The one loosening of 11b: a step that doesn't start by itself, or is repeatable, needed
+    # `proposed_by`, since nothing else could start it; a rule may now (brief, D39).
+    parse_case(only_a_rule_starts())
+    parse_case(only_a_rule_starts(repeatable=True))
+    unstarted = only_a_rule_starts()
+    del unstarted["rules"]
+    with pytest.raises(CaseInvalid, match="a step that doesn't start by itself names proposed_by"):
+        parse_case(unstarted)
+    # `proposed_by` still names which people may propose it: with none, nobody may.
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            only_a_rule_starts(),
+            file={"order_id": "ord-1", "amount": 40},
+            answers=[propose("lead_check", "sam")],
+            people=PEOPLE,
+        )
+    assert str(refused.value) == "lead_check is started only by a rule: nobody proposes it"
 
 
 # --- Slice 1: reaching ---

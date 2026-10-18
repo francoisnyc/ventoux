@@ -324,7 +324,10 @@ def propose(
         raise ProposalRefused(f"{event.step} is not a step of {case.case}")
     step = case.steps[event.step]
     if not step.proposed_by:
-        raise ProposalRefused(f"{event.step} starts by itself: nobody proposes it")
+        # A step that doesn't start by itself and names nobody is started only by a rule: the
+        # definition is refused otherwise (brief, D39).
+        how = "starts by itself" if step.automatic else "is started only by a rule"
+        raise ProposalRefused(f"{event.step} {how}: nobody proposes it")
     role = role_that_counts(step.proposed_by, event.roles, catalog.roles)
     if role is None:
         counted = sorted(r for r in event.roles if r in catalog.roles)

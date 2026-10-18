@@ -8,7 +8,7 @@ See docs/layers/11-rules.md.
 
 from ventoux.case.admission import StepStopped, holds
 from ventoux.case.closing import close_held
-from ventoux.case.definition import CaseDefinition, Reached, Started
+from ventoux.case.definition import AnsweredTask, CaseDefinition, Reached, Started
 from ventoux.case.state import CaseState, RuleFiring
 from ventoux.case.types import rule_problem
 from ventoux.case.writers import writers_of
@@ -17,12 +17,18 @@ from ventoux.core.provenance import fields_read, is_trusted
 
 
 def said(moment: object) -> str:
-    """A rule's moment as the history says it: `opened`, `started pay`, `reached checked`."""
+    """A rule's moment as the history says it: `opened`, `started pay`, `reached checked`,
+    `answered review`. A moment it doesn't know is an error, never read as the opening (fail
+    closed)."""
     if isinstance(moment, Started):
         return f"started {moment.started}"
     if isinstance(moment, Reached):
         return f"reached {moment.reached}"
-    return "opened"
+    if isinstance(moment, AnsweredTask):
+        return f"answered {moment.answered}"
+    if moment == "opened":
+        return "opened"
+    raise ValueError(f"{moment!r} is not a moment Ventoux knows")
 
 
 def reach(state: CaseState, milestones: tuple[str, ...]) -> None:

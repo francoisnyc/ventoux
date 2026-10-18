@@ -135,15 +135,15 @@ def test_a_step_nobody_can_start_is_refused() -> None:
     with pytest.raises(
         CaseInvalid,
         match="^steps.pay: a step that doesn't start by itself names proposed_by, who may "
-        "propose it$",
+        "propose it, or a rule starts it$",
     ):
         parse_case(manual)
     again = refund()
     again["steps"]["review"]["repeatable"] = True
     with pytest.raises(
         CaseInvalid,
-        match="^steps.review: a repeatable step runs again only when proposed: name "
-        "proposed_by, who may propose it$",
+        match="^steps.review: a repeatable step runs again only when proposed or started by a "
+        "rule: name proposed_by, who may propose it$",
     ):
         parse_case(again)
 
@@ -895,6 +895,24 @@ def pay_proposed_on_an_answer() -> dict[str, Any]:
     return definition
 
 
+def guide_rework_by_rules() -> dict[str, Any]:
+    """The guide's refund, with its rules sending the review back ("Rules that start steps"): the
+    rules and the team lead's check as the guide writes them, `review` repeatable, the milestone
+    declared, and `pay` requiring it."""
+    json_blocks = blocks("json")
+    rules = next(block for block in json_blocks if '"check_review"' in block)
+    check = next(block for block in json_blocks if block.lstrip().startswith('"lead_check": {'))
+    definition = guide_json(0)
+    definition |= json.loads("{" + rules + "}", parse_float=Decimal)
+    definition["steps"] |= json.loads("{" + check + "}", parse_float=Decimal)
+    definition["steps"]["review"]["repeatable"] = True
+    definition.setdefault("milestones", {})["lead_checked"] = {
+        "display": {"title": "Checked by a team lead"}
+    }
+    definition["steps"]["pay"]["requires"] = ["lead_checked"]
+    return definition
+
+
 def refusal(run: Any) -> str:
     """What the engine says when it refuses `run`."""
     try:
@@ -945,6 +963,9 @@ GUIDE_REFUSALS: dict[str, Any] = {
     ),
     "nobody proposes a step that starts by itself": lambda: run_case(
         guide_json(0), file=LARGE, answers=[REVIEWED, propose("pay", "ana")], people=PEOPLE
+    ),
+    "nobody proposes a step only a rule starts": lambda: run_case(
+        guide_rework_by_rules(), file=LARGE, answers=[propose("lead_check", "sam")], people=PEOPLE
     ),
     "the step's latest run needs attention": lambda: run_case(
         repeatable_check_order(),

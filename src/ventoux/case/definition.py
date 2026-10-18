@@ -195,17 +195,20 @@ class PlanStep(Step):
         return data
 
 
-def some_milestones(names: tuple[str, ...]) -> tuple[str, ...]:
-    """A rule that reaches nothing would do nothing: refused, so a typo never hides a rule."""
-    if not names:
-        raise ValueError("a rule reaches at least one milestone")
-    return names
-
-
 class Then(Shape):
-    """What a rule does when it fires (brief, D38)."""
+    """What a rule does when it fires: reach milestones (brief, D38), start steps (brief, D39)."""
 
-    reach: Annotated[tuple[Name, ...], AfterValidator(some_milestones)]  # milestones it reaches
+    reach: tuple[Name, ...] = ()  # milestones it reaches
+    # Steps it proposes a run of: the engine proposes, admission decides (brief, D39).
+    start: tuple[Name, ...] = ()
+
+    # Pydantic: a validator with `mode="after"` runs on the whole object, once its fields passed.
+    @model_validator(mode="after")
+    def does_something(self) -> "Then":
+        """A rule that does nothing is refused, so a typo never hides a rule."""
+        if not self.reach and not self.start:
+            raise ValueError("a rule reaches a milestone or starts a step, at least one")
+        return self
 
 
 class Started(Shape):
@@ -220,11 +223,22 @@ class Reached(Shape):
     reached: Name  # the milestone
 
 
+class AnsweredTask(Shape):
+    """The moment a run of a task is answered, whatever the outcome: each answer (brief, D39)."""
+
+    answered: Name  # the task
+
+
+# The moments named by a step or a milestone. A closed list: a new moment is a decision recorded in
+# the brief, like an operator (brief, D38) (brief, D39).
+KINDS_OF_MOMENT = ("started", "reached", "answered")
+
+
 def moment_of(on: object) -> str | None:
     """The kind of moment `on` names, which picks its shape; None if it names none."""
     if on == "opened":
         return "opened moment"
-    if isinstance(on, dict) and len(on) == 1 and next(iter(on)) in ("started", "reached"):
+    if isinstance(on, dict) and len(on) == 1 and next(iter(on)) in KINDS_OF_MOMENT:
         return f"{next(iter(on))} moment"
     return None
 
@@ -234,19 +248,20 @@ def moment_of(on: object) -> str | None:
 type Moment = Annotated[
     Annotated[Literal["opened"], Tag("opened moment")]
     | Annotated[Started, Tag("started moment")]
-    | Annotated[Reached, Tag("reached moment")],
+    | Annotated[Reached, Tag("reached moment")]
+    | Annotated[AnsweredTask, Tag("answered moment")],
     Discriminator(moment_of),
 ]
 
-MOMENTS = '"opened", {"started": <step>} or {"reached": <milestone>}'
+MOMENTS = '"opened", {"started": <step>}, {"reached": <milestone>} or {"answered": <task>}'
 
 
 class Rule(Shape):
     """On a moment, when a condition holds, then act on the case (brief, D38)."""
 
     display: Display
-    # The moment it reacts to: the case opened, a step's run started, a milestone reached. A closed
-    # list: a new moment is a decision recorded in the brief (brief, D38).
+    # The moment it reacts to: the case opened, a step's run started, a milestone reached, a task
+    # answered. A closed list: a new moment is a decision recorded in the brief (brief, D38).
     on: Moment
     when: PlanExpression | None = None  # read once the moment has come, on the case file then
     then: Then
@@ -319,8 +334,9 @@ class CaseDefinition(Shape):
             for name, field in self.fields.items()
             if field.sensitive and field.visible_to is None
         ]
+        started_by_rules = {step for rule in self.rules.values() for step in rule.then.start}
         for name, step in self.steps.items():
-            problems += step_problems(f"steps.{name}", step, self)
+            problems += step_problems(f"steps.{name}", step, self, name in started_by_rules)
         for name, rule in self.rules.items():
             # A rule's firings are entries beside step runs (`flag_large#1`), so no name is shared.
             if name in self.steps or name in self.milestones:
@@ -329,16 +345,26 @@ class CaseDefinition(Shape):
                 problems.append(f"rules.{name}.on.started: {rule.on.started} is not a step")
             if isinstance(rule.on, Reached):
                 problems += reaching(f"rules.{name}.on.reached", (rule.on.reached,), self)
+            if isinstance(rule.on, AnsweredTask) and not isinstance(
+                self.steps.get(rule.on.answered), TaskStep
+            ):
+                problems.append(f"rules.{name}.on.answered: {rule.on.answered} is not a task")
             problems += reaching(f"rules.{name}.then.reach", rule.then.reach, self)
+            problems += [
+                f"rules.{name}.then.start: {step} is not a step"
+                for step in rule.then.start
+                if step not in self.steps
+            ]
         if problems:
             raise ValueError("\n".join(problems))
         return self
 
 
 def step_problems(
-    path: str, step: TaskStep | CallStep | PlanStep, case: CaseDefinition
+    path: str, step: TaskStep | CallStep | PlanStep, case: CaseDefinition, rule_starts: bool
 ) -> list[str]:
-    """What `step` names that `case` doesn't declare, and whether anyone can start it."""
+    """What `step` names that `case` doesn't declare, and whether anyone can start it: itself, a
+    person who proposes it, or a rule (`rule_starts`)."""
     problems = [
         f"{path}.requires: {name} is neither a milestone nor a step"
         for name in step.requires
@@ -356,17 +382,20 @@ def step_problems(
             problems += reaching(f"{where}.reaches", outcome.reaches, case)
     if not isinstance(step, TaskStep):
         problems += stale_names(path, step)
-    # A step nobody may propose and that doesn't start by itself could never run.
-    if not step.automatic and not step.proposed_by:
-        problems.append(
-            f"{path}: a step that doesn't start by itself names proposed_by, who may propose it"
-        )
-    # A step starts by itself at most once, so a step runs again only when someone proposes it.
-    elif step.repeatable and not step.proposed_by:
-        problems.append(
-            f"{path}: a repeatable step runs again only when proposed: name proposed_by, who may "
-            "propose it"
-        )
+    # A step nobody may propose and that doesn't start by itself could never run; and a step starts
+    # by itself at most once, so a repeatable one runs again only when proposed. Unless a rule
+    # starts it: 11b's one loosening (brief, D39).
+    if not step.proposed_by and not rule_starts:
+        if not step.automatic:
+            problems.append(
+                f"{path}: a step that doesn't start by itself names proposed_by, who may propose "
+                "it, or a rule starts it"
+            )
+        elif step.repeatable:
+            problems.append(
+                f"{path}: a repeatable step runs again only when proposed or started by a rule: "
+                "name proposed_by, who may propose it"
+            )
     return problems
 
 
