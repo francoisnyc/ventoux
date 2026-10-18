@@ -26,7 +26,15 @@ from temporalio.workflow import NondeterminismError
 
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, CaseState, Obtained, Opened
+from ventoux.case.state import (
+    Answered,
+    CaseState,
+    Completed,
+    Event,
+    Obtained,
+    Opened,
+    Proposed,
+)
 from ventoux.case.validate import validate_case
 from ventoux.temporal import client as plans
 from ventoux.temporal.carried import state_as_data, state_from_data
@@ -44,7 +52,7 @@ from ventoux.temporal.cases import (
 from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.temporal.worker import SANDBOX, case_worker
 from ventoux.temporal.workflow import PlanWorkflow, RunReport
-from ventoux.testing import CATALOG, START
+from ventoux.testing import CATALOG, DAY, START
 from ventoux.tooling.keys import KeyRefused
 
 # Temporal: this module defines a workflow (`CasesWithPlans`, below), so the workflow sandbox
@@ -998,6 +1006,88 @@ def test_a_history_from_before_11b_replays() -> None:
     # error. No part of it is sealed (no form, no sensitive field), so it replays with no key.
     history = WorkflowHistory.from_json("refund-1", BEFORE_11B.read_text())
     replay(history, DevelopmentCases, development_converter())
+
+
+# --- Layer 11b: a waiting start and a rule's record cross continue-as-new (brief, D27, D39) ---
+
+# The refund with the order looked up, and `pay` proposed by support only on a status at most a
+# day old.
+PROPOSED_FRESH = copy.deepcopy(REFUND)
+PROPOSED_FRESH["steps"]["check_order"] = {
+    "kind": "activity",
+    "display": {"title": "Look the order up"},
+    "activity": "orders.lookup@2",
+    "inputs": {"order_id": {"var": "order_id"}},
+}
+PROPOSED_FRESH["steps"]["pay"] |= {
+    "automatic": False,
+    "proposed_by": ["support"],
+    "requires": ["check_order"],
+    "when": {
+        "and": [
+            {"==": [{"var": "review.outcome"}, "approve"]},
+            {"==": [{"var": "check_order.status"}, "delivered"]},
+        ]
+    },
+    "max_age": {"check_order.status": "1d"},
+}
+PROPOSED_FRESH |= {"stays_open": True, "close_reasons": {"duplicate": DUPLICATE}}
+
+# The refund with `pay` started by a rule once the review is approved, and by nothing else.
+PAID_BY_A_RULE = copy.deepcopy(REFUND)
+PAID_BY_A_RULE["steps"]["pay"]["automatic"] = False
+PAID_BY_A_RULE["rules"] = {
+    "pay_approved": {
+        "display": {"title": "Pay an approved refund"},
+        "on": {"answered": "review"},
+        "when": {"==": [{"var": "review.outcome"}, "approve"]},
+        "then": {"start": ["pay"]},
+    }
+}
+
+
+def test_a_waiting_start_crosses_continue_as_new() -> None:
+    # A proposal waiting for its fact to be fetched again, and what a rule read for the run it
+    # started, are state like the rest: they cross to the next run as data (brief, D27)
+    # (brief, D39).
+    case = parse_case(PROPOSED_FRESH)
+    events: list[Event] = [
+        Opened(SMALL, None, at=START),
+        Completed("check_order#1", {"status": "delivered"}, at=START),
+        Answered("review#1", "approve", "ana", frozenset({"support"}), SMALL_FORM, at=START),
+        Proposed("pay", "ana", frozenset({"support"}), at=START + 3 * DAY),
+    ]
+    state = CaseState("refund-1/run")
+    for event in events:
+        state, _ = decide(case, CATALOG, state, event)
+    assert state.waiting_to_start == ["pay"] and state.proposers == {"pay": "ana"}
+    payload = ExactPayloadConverter().to_payload(state_as_data(state))
+    assert payload is not None
+    assert state_from_data(ExactPayloadConverter().from_payload(payload, dict)) == state
+
+    # On Temporal the switch waits while the refresh runs (layer 8c), so what crosses a live
+    # switch is a rule's record: Sam's answer decided that pay runs, so after the switch he still
+    # can't approve it; Lee does. The last run, started from the carried state, replays.
+    async def scenario(client: Client) -> tuple[CaseReport, tuple[str, str], WorkflowHistory]:
+        case = await start_case(client, SwitchingCases, PAID_BY_A_RULE, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "sam", PEOPLE["sam"], REVIEW_FORM)
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
+        await answer(case, "pay.approval#1", "approve", "lee", PEOPLE["lee"])
+        ended = await case.result()
+        return ended, await runs_of(client, "refund-1"), await case.fetch_history()
+
+    converter = development_converter()
+    ended, (first, last), history = on_temporal(scenario, cases=SwitchingCases, converter=converter)
+    assert last != first  # the case continued as new with the approval open
+    assert "pay_approved#1 on answered review: starting pay" in ended.history
+    assert (
+        "refused sam's answer approve to pay.approval#1: sam set review.outcome, which decided "
+        "that pay_approved#1 started pay, so cannot approve it"
+    ) in ended.history
+    assert "lee answered pay.approval#1 approve as support-lead" in ended.history
+    assert ended.status == "closed"
+    replay(history, SwitchingCases, converter)
 
 
 # --- Slice 8: the guide, as the engine does it ---
