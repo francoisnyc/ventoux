@@ -96,7 +96,7 @@ from ventoux.core.form import fits
 from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
-from ventoux.core.provenance import NoSources, Sourced, provenance
+from ventoux.core.provenance import NoSources, Sourced, fields_read, provenance
 from ventoux.core.references import unregistered
 from ventoux.core.roles import role_that_counts
 from ventoux.core.sensitive import Sensitive, plain
@@ -744,7 +744,9 @@ def retry(
             decided = holds(step.when, state.values, f"{run.step}'s condition")
         except StepStopped as unreadable:
             raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
-        if not decided:
+        # A stale fact is fetched again, never trusted to refuse: the retry is taken, and
+        # admission fetches the fact before it reads the condition again (brief, D18) (brief, D33).
+        if not decided and not reads_a_stale_fact(step, state, event.at):
             raise RetryRefused(f"{event.entry} can't be retried: {render(step.when)} is false now")
     # A person decided to try again: no longer a run whose stop was asked (brief, D40).
     run.status, run.reason, run.stop_requested = "retrying", "", ""
@@ -759,6 +761,14 @@ def retry(
         refresh = next(r for r in state.runs if r.entry == prior)
         if refresh.status in ("done", "failed") or refresh.stop_requested:
             del state.refreshing[field]
+
+
+def reads_a_stale_fact(step: TaskStep | CallStep | PlanStep, state: CaseState, at: int) -> bool:
+    """Whether the step's condition reads a fact the step needs fresh that is too old at `at`."""
+    if isinstance(step, TaskStep) or step.when is None:
+        return False
+    read = fields_read(step.when)
+    return any(stale.field in read for stale in stale_facts(step.max_age, state, at))
 
 
 def admit(

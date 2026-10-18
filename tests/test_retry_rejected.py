@@ -792,3 +792,46 @@ def test_a_retry_s_given_approval_lapses_with_its_requirement() -> None:
     assert run.history.index(lapse) < run.history.index(failed)
     assert [r.entry for r in run.state.runs if r.step == "pay"] == ["pay#1"]
     assert keys == ["memory/pay#1"]
+
+
+def test_a_retry_whose_condition_reads_a_stale_fact_fetches_it_again() -> None:
+    # After F, two days pass: the status pay's condition read is stale. The operator's retry
+    # isn't refused on it, since a stale fact is fetched again, never trusted (brief, D18, D33);
+    # admission fetches it, then starts pay#1, with its key, or fails it again, saying so
+    # (the note, decision 2).
+    definition = generated_definition(fresh=True, audited=False)
+    after_f = [
+        ("review", "approve", "ana", {"approved_amount": 80}),
+        later("2d"),
+        retry("pay#1", "omar"),  # check_order#2 says cancelled: pay#1 fails again
+        later("2d"),
+        retry("pay#1", "omar"),  # the status is two days old: fetched again
+    ]
+    keys: list[str] = []
+    activities = {
+        "orders.lookup@2": looked_up("delivered", "cancelled", "delivered"),
+        "payments.refund@2": down_once(keys),
+    }
+    run = run_case(definition, FILE, after_f, PEOPLE, activities=activities)
+    assert (
+        "refreshing check_order.status for pay: obtained 2 days ago, at most 1 day" in run.history
+    )
+    assert keys == ["memory/pay#1", "memory/pay#1"]
+    assert run.closed
+    activities = {
+        "orders.lookup@2": looked_up("delivered", "cancelled", "cancelled"),
+        "payments.refund@2": down_once([]),
+    }
+    run = run_case(definition, FILE, after_f, PEOPLE, activities=activities)
+    assert run.history[-1] == (
+        'pay#1 failed again: its retry can\'t start: review.outcome = "approve" and '
+        'check_order.status = "delivered" is false now'
+    )
+    # The same retry while the status is still fresh is refused: it isn't stale, so it is read.
+    fresh = [*after_f[:3], retry("pay#1", "omar")]
+    activities = {
+        "orders.lookup@2": looked_up("delivered", "cancelled"),
+        "payments.refund@2": down_once([]),
+    }
+    with pytest.raises(RetryRefused, match="^pay#1 can't be retried: .* is false now$"):
+        run_case(definition, FILE, fresh, PEOPLE, activities=activities)
