@@ -6,8 +6,8 @@ run is never stopped (brief, D17) (brief, D26). See docs/layers/11-rules.md (11c
 """
 
 from ventoux.case.admission import latest_run
-from ventoux.case.definition import CaseDefinition
-from ventoux.case.state import CaseState, Command, StepRun
+from ventoux.case.definition import CaseDefinition, PlanStep, WorkflowStep
+from ventoux.case.state import CLOSING, CancelWorkflow, CaseState, Command, StepRun, StopPlan
 from ventoux.core.catalog import Catalog
 
 
@@ -79,10 +79,37 @@ def stop_running(
     said: str,
     commands: list[Command],
 ) -> None:
-    """Ask a running run to stop, by the mechanism its kind declares. An activity does nothing
-    but finish: a side effect can't be cut off halfway (brief, D10). Asked once, never twice."""
+    """A rule's stop of a running run: marked, so it is asked once and never twice, then asked to
+    stop as its kind declares. It hasn't ended until it has its final status (brief, D40)."""
     if run.stop_requested:
         state.history.append(f"{said}: {run.step} not stopped: its stop is already requested")
         return
     run.stop_requested = by
     state.history.append(f"{run.entry}: stop requested by {by}")
+    ask_to_stop(case, catalog, run, f"stopped by {by}", commands)
+
+
+def stop_children(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, commands: list[Command]
+) -> None:
+    """The case begins closing: ask each running run to stop, as its kind declares, unless a rule
+    asked already (brief, D10) (brief, D28) (brief, D40)."""
+    for run in state.runs:
+        if run.status == "running" and not run.stop_requested:
+            ask_to_stop(case, catalog, run, CLOSING, commands)
+
+
+def ask_to_stop(
+    case: CaseDefinition, catalog: Catalog, run: StepRun, reason: str, commands: list[Command]
+) -> None:
+    """The one place that stops a running child, for a close and for a rule's stop, each by the
+    mechanism its kind declares: a plan by its stop signal, whose open waits are a decision one
+    level down (brief, D28); a workflow whose contract declares it cancellable, by Temporal's
+    cancellation (brief, D40). An activity, or a workflow that isn't cancellable, is asked
+    nothing: it finishes, since a side effect can't be cut off halfway (brief, D10). A later kind
+    of child adds its mechanism here."""
+    step = case.steps[run.step]
+    if isinstance(step, PlanStep):
+        commands.append(StopPlan(run.entry, reason))
+    elif isinstance(step, WorkflowStep) and catalog.workflow(step.workflow).cancellable:
+        commands.append(CancelWorkflow(run.entry, reason))

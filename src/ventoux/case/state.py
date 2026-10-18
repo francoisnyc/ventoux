@@ -236,6 +236,15 @@ class PlanCancelled:
 
 
 @dataclass(frozen=True)
+class WorkflowCancelled:
+    """A cancellable workflow step ended cancelled, after the case asked, closing or stopping it:
+    its team's promise is that nothing it started completed after the request (brief, D40)."""
+
+    entry: str  # the step run, such as `kyc#1`
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
 class Shown:
     """A person was shown the record a reference field names, by its system's resolver: recorded,
     never its content (brief, D16)."""
@@ -270,6 +279,7 @@ type Event = (
     | Retried
     | CloseAsked
     | PlanCancelled
+    | WorkflowCancelled
     | Shown
     | ForgetApproved
 )
@@ -315,12 +325,28 @@ class StartPlan:
     steered: tuple[Steering, ...] = ()
 
 
+# Why a child is stopped when its case closes: the reason a plan's stop signal gives by default,
+# so a history recorded before 11c, whose signal gave none, replays the same (brief, D40).
+CLOSING = "the case is closing"
+
+
 @dataclass(frozen=True)
 class StopPlan:
-    """Stop a plan step's plan, because the case is closing: cancel its open waits, start
-    nothing new in it, and let an activity running inside it finish (brief, D10) (brief, D28)."""
+    """Stop a plan step's plan, because the case is closing or a rule stops it: cancel its open
+    waits, start nothing new in it, and let an activity running inside it finish (brief, D10)
+    (brief, D28) (brief, D40)."""
 
     entry: str  # the step run, such as `settle#1`
+    reason: str = CLOSING  # why, naming only the entry that asked: `stopped by withdraw#1`
 
 
-type Command = Schedule | StartWorkflow | StartPlan | StopPlan
+@dataclass(frozen=True)
+class CancelWorkflow:
+    """Cancel a workflow step whose contract declares it cancellable, because the case is closing
+    or a rule stops it; the case waits for it to end (brief, D40)."""
+
+    entry: str  # the step run, such as `kyc#1`
+    reason: str  # why, naming only the entry that asked: `stopped by withdraw#1`
+
+
+type Command = Schedule | StartWorkflow | StartPlan | StopPlan | CancelWorkflow

@@ -44,6 +44,7 @@ from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, sta
 from ventoux.case.rules import fire_rules, reach, retry_rule
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
+    CLOSING,
     Answered,
     CaseState,
     CloseAsked,
@@ -65,8 +66,9 @@ from ventoux.case.state import (
     StartPlan,
     StartWorkflow,
     StepRun,
-    StopPlan,
+    WorkflowCancelled,
 )
+from ventoux.case.stopping import stop_children
 from ventoux.case.types import expression_problem
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.case.writers import OPENER, read_sources, untrusted_of
@@ -136,6 +138,8 @@ def decide(
         failed(state, event)
     elif isinstance(event, PlanCancelled):
         plan_cancelled(state, event)
+    elif isinstance(event, WorkflowCancelled):
+        workflow_cancelled(state, event)
     elif isinstance(event, Retried):
         retry(case, catalog, state, event, commands)
     elif isinstance(event, Shown):
@@ -154,7 +158,7 @@ def decide(
         admit(case, catalog, state, commands, event.at)  # nothing new starts once closing
         close_when_reached(case, state)  # a rule may have reached the last of closes_when
     if was_open and state.phase == "closing":
-        stop_plans(case, state, commands)
+        stop_children(case, catalog, state, commands)
     # Moments left because the case is no longer open: each rule on them says it wasn't applied
     # (brief, D38).
     fire_rules(case, catalog, state, commands)
@@ -596,25 +600,37 @@ def failed(state: CaseState, event: Failed) -> None:
         flag(state, f"{run.entry} failed after the close was requested: {event.reason}")
 
 
-def stop_plans(case: CaseDefinition, state: CaseState, commands: list[Command]) -> None:
-    """The case begins closing: stop each running plan step's plan. Its open waits are a
-    decision the close cancels, one level down; an activity running in it finishes, since it may
-    already have moved money (brief, D10) (brief, D28)."""
-    for run in state.runs:
-        if run.status == "running" and isinstance(case.steps[run.step], PlanStep):
-            commands.append(StopPlan(run.entry))
-
-
 def plan_cancelled(state: CaseState, event: PlanCancelled) -> None:
-    """A plan stopped by the close has ended: its step run is cancelled, and the case can close.
-    Each activity in it that finished or failed after the close flags the case, as a step's run
-    would (brief, D10): a payment made after a close never disappears into "cancelled"
-    (brief, D28)."""
+    """A plan stopped by the close or by a rule has ended: its step run is cancelled, and the case
+    can close. Each activity in it that finished or failed after the stop flags the case, as a
+    step's run would (brief, D10): a payment made after a close never disappears into
+    "cancelled" (brief, D28) (brief, D40)."""
     run = next(run for run in state.runs if run.entry == event.entry)
+    if run.status != "running":
+        return  # it ended before the stop reached it: what it gave is already recorded
     run.status = "cancelled"
-    state.history.append(f"{run.entry} cancelled: the case is closing")
+    state.history.append(f"{run.entry} cancelled: {stopped_because(run)}")
     for ended in event.after_stop:
         flag(state, f"{run.entry}: {ended}")
+
+
+def workflow_cancelled(state: CaseState, event: WorkflowCancelled) -> None:
+    """A cancellable workflow step, asked to stop, ended cancelled: its run is cancelled, and the
+    case is flagged, since what it did before the request stands (brief, D40)."""
+    run = next(run for run in state.runs if run.entry == event.entry)
+    if run.status != "running":
+        return  # it ended before the cancellation reached it: what it gave is already recorded
+    run.status = "cancelled"
+    state.history.append(f"{run.entry} cancelled: {stopped_because(run)}")
+    if run.stop_requested:
+        flag(state, f"{run.entry} cancelled after its stop was requested by {run.stop_requested}")
+    else:
+        flag(state, f"{run.entry} cancelled after the close was requested")
+
+
+def stopped_because(run: StepRun) -> str:
+    """Why a run asked to stop ended cancelled: a rule's stop, naming its entry, or the close."""
+    return f"stopped by {run.stop_requested}" if run.stop_requested else CLOSING
 
 
 def flag(state: CaseState, why: str) -> None:
