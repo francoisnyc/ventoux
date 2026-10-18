@@ -288,6 +288,24 @@ assert calls == ["memory/pay#1", "memory/pay#1"]
 assert retried.closed
 ```
 
+**A retry waits only for what can still let it start** (brief, D26, as amended): its approval,
+a fact fetched again, or a step it requires that is still on its way and shown. Anything else
+sends it back to needing attention, as the run it is, saying why and what to do:
+
+- its approval is rejected: `pay#1 won't run: sam rejected pay.approval#1, so it needs attention
+  again`, and it needs attention as `pay#1: sam rejected pay.approval#1, the approval of its
+  retry: retry it to ask again, or close the case`. Its side effect may or may not have happened,
+  so the case can't close on it; there is no new run of `pay`;
+- its condition is false now: `pay#1 failed again: its retry can't start: review.outcome =
+  "approve" is false now`, the condition as the engine writes it, never a value from the case
+  file;
+- a step it requires ended without completing (a rule stopped it, or its approval was
+  rejected): `pay#1 failed again: its retry can't start: pay requires review, which hasn't
+  completed`.
+
+A retry is never refused on a condition that reads a fact the step needs fresh and has gone
+stale: the fact is fetched again first, then the condition is read.
+
 **Nothing starts beside a failed run.** Say `check_order` is `repeatable`. While `check_order#1`
 needs attention, proposing `check_order` again is refused (`check_order#1 needs attention: retry
 it, or close the case`), and so is a rule's start. A new run would skip the failed one by another
@@ -303,8 +321,9 @@ case whose steps all wait to be proposed needs `stays_open`: otherwise nothing i
 opens, and it closes at once. `closes_when` never cancels a step that needs attention: the case
 waits until an operator retries it, or a person closes the case with a reason. Meanwhile nothing
 new starts: a step waiting for `paid` doesn't start, a proposal is refused (`paid is reached, so
-the case closes once notify#1 is retried, or a person closes it: nothing new starts`), and an
-approval given meanwhile starts nothing; the retried run still runs, and closes the case when it
+the case closes once notify#1 is retried, or a person closes it: nothing new starts`), an
+approval given meanwhile is let go, saying so (`goodwill not started: paid is reached, …`), and a
+proposal waiting for a fact is dropped; the retried run still runs, and closes the case when it
 completes.
 
 A person closes a case with a **close reason** the definition declares, with who may use it:

@@ -238,7 +238,8 @@ finding; all seven held, each fixed in slice 5:
   retry (decision 2) and for an approval given (decision 5).
 - `case/runtime.py`, once admission has settled: `nothing_on_its_way` lapses an approval given
   and fails a retry whose requirement ended.
-- `docs/BRIEF.md`: D26's amendment.
+- `docs/BRIEF.md`: D26's amendment. `docs/guides/cases.md`: a retry that can't start, and what a
+  held close lets go.
 - `tests/invariants.py` (new): the check, as a function of the definition and the state, and
   `Silent`, the one error it raises.
 - `tests/conftest.py` (new): the check after every decision, in every test.
@@ -286,7 +287,7 @@ Each starts with its negative test, seen failing for the right reason.
 ## Promises
 
 Drafted before building, then checked against the files once built, 2026-10-18: every test
-named here exists where it says (33 tests). Every test is in `tests/test_retry_rejected.py`
+named here exists where it says (34 tests). Every test is in `tests/test_retry_rejected.py`
 unless said otherwise.
 
 | Promise | Test that would fail |
@@ -307,5 +308,6 @@ unless said otherwise.
 | A given approval whose requirement is on its way stays, and is spent on the first run's key, asking nothing again: the review answered again with the same values, a refresh that failed and is retried, a requirement running | `test_a_given_approval_survives_a_review_answered_the_same`, `test_a_given_approval_waits_for_a_requirement_on_its_way` (each seen failing on a mutation that lapses it) |
 | A requirement one rule stopped and another started again in the same decision, on the same moment or a later one, is on its way: a given approval stays and is spent with the first key; a retry keeps waiting, and runs with its key | `test_a_requirement_a_rule_starts_again_keeps_what_waits_for_it` (seen failing first) |
 | A person may close a case whose rescue was rejected | `test_a_rejected_retry_can_be_closed` |
+| The cases guide's lines for a retry that can't start, and for a held close, are what the engine says | `test_the_guides_retry_lines_are_what_the_engine_says` |
 | On Temporal, a rejected retry needs attention, and retried again pays once with its key | `test_a_rejected_retry_on_temporal` (`tests/test_temporal_case.py`, seen failing on main's runtime) |
 | A history recorded under main with a rejected retry and a close replays; one that then retried again replays while that retry asks an approval, and doesn't once it would start unasked (the known limit) | `test_a_history_with_a_rejected_retry_replays`, `test_a_history_that_retried_a_rejected_retry_again_replays_if_it_asks_again`, `test_a_history_whose_retry_again_would_start_unasked_doesnt_replay` (each `tests/test_temporal_case.py`) |

@@ -1089,3 +1089,49 @@ def test_a_proposed_step_whose_approval_lapsed_asks_again_once_proposed_again() 
     again = [*script, propose("pay", "ana")]
     run = run_case(definition, FILE, again, PEOPLE, activities=DELIVERED, held=["check_order"])
     assert run.waiting_for == ["approval of pay by support-lead"]
+
+
+# --- Slice 6: the guide, as the engine does it ---
+
+CASES_GUIDE = (ROOT / "docs" / "guides" / "cases.md").read_text()
+
+
+def in_the_guide(line: str) -> bool:
+    """Whether the guide quotes `line`, read across the guide's own line breaks."""
+    return line in " ".join(CASES_GUIDE.split())
+
+
+def test_the_guides_retry_lines_are_what_the_engine_says() -> None:
+    # Each line the guide quotes for a retry that can't start, played: the guide can't drift
+    # from the engine.
+    rejected = run_case(
+        refund_retried(), FILE, REJECTED, PEOPLE, activities={"payments.refund@2": down_once([])}
+    )
+    turned_false = [*RESCUED, propose("review", "ana"), ("review#3", "reject", "ana")]
+    false_now = run_case(
+        refund_retried(),
+        FILE,
+        turned_false,
+        PEOPLE,
+        activities={"payments.refund@2": down_once([])},
+    )
+    stopped = [
+        *RESCUED,
+        propose("review", "ana"),
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),
+    ]
+    ended = run_case(
+        generated_definition(fresh=False, audited=False),
+        FILE,
+        stopped,
+        PEOPLE,
+        activities={"payments.refund@2": down_once([])},
+    )
+    for line in [
+        rejected.history[-1],
+        rejected.needs_attention[0],
+        false_now.history[-1],
+        ended.history[-1],
+    ]:
+        assert in_the_guide(line), line
