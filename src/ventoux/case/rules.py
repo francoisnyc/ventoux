@@ -6,6 +6,8 @@ state holds is a step's `requires` and `when`, which admission reads after every
 See docs/layers/11-rules.md.
 """
 
+from typing import NoReturn
+
 from ventoux.case.admission import StepStopped, holds
 from ventoux.case.closing import close_held
 from ventoux.case.definition import AnsweredTask, CaseDefinition, Reached, Started
@@ -27,6 +29,13 @@ def said(moment: object) -> str:
         return f"answered {moment.answered}"
     if moment == "opened":
         return "opened"
+    unknown_moment(moment)
+
+
+def unknown_moment(moment: object) -> NoReturn:
+    """Refuse a moment Ventoux doesn't know, wherever one is read: never read as the opening, or
+    as one that can come (fail closed). `parse_case` refuses it first; this is for a definition
+    that didn't come through it."""
     raise ValueError(f"{moment!r} is not a moment Ventoux knows")
 
 

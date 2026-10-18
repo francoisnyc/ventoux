@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from ventoux.case.definition import (
     ActivityStep,
+    AnsweredTask,
     CallStep,
     CaseDefinition,
     PlanStep,
@@ -19,6 +20,7 @@ from ventoux.case.definition import (
 )
 from ventoux.case.known import DONE, Known, Read, Reading, reads, set_by_outcomes
 from ventoux.case.rules import said as moment_said
+from ventoux.case.rules import unknown_moment
 from ventoux.case.runtime import listed
 from ventoux.case.types import expressions_of
 from ventoux.core.contract import ActivityContract, Contract
@@ -76,8 +78,9 @@ def rule_unset_issues(
     """Each value a rule's condition reads that may not be set when its moment comes: the rule
     then fails and needs attention (brief, D37) (brief, D38). Its moment stands for a step's
     requirements: the opening knows nothing has run; a milestone reached, what reaching it
-    proves; a step started, what that step required. Proven, so an error (`SET_AFTER`), only on
-    the opening, where nothing has run: the check claims less, never more."""
+    proves; a step started, what that step required; a task answered, that it ended, as
+    requiring it does (brief, D39). Proven, so an error (`SET_AFTER`), only on the opening, where
+    nothing has run: the check claims less, never more."""
     found: list[Issue] = []
     for name, rule in reading.case.rules.items():
         path = f"rules.{name}.when"
@@ -88,8 +91,12 @@ def rule_unset_issues(
             known = reading.met(on.reached, frozenset())
         elif isinstance(on, Started):
             known = reading.before(on.started)
+        elif isinstance(on, AnsweredTask):
+            known = reading.met(on.answered, frozenset())
+        elif on == "opened":
+            known = Known()  # nothing has run
         else:
-            known = Known()  # the opening: nothing has run
+            unknown_moment(on)  # fail closed: never read as the opening
         for value, at, always in reads(rule.when, known, reading):
             if value.partition(".")[0] in missing or reading.surely_set(value, at):
                 continue

@@ -17,7 +17,7 @@ from ventoux.case.definition import (
     TaskStep,
     WorkflowStep,
 )
-from ventoux.case.rules import said
+from ventoux.case.rules import said, unknown_moment
 from ventoux.case.sequence import requirements
 from ventoux.core.catalog import Catalog, NotInCatalog
 
@@ -69,7 +69,9 @@ def moment_can_come(moment: object, can: set[str]) -> bool:
         return moment.started in can
     if isinstance(moment, AnsweredTask):
         return moment.answered in can
-    return True
+    if moment == "opened":
+        return True
+    unknown_moment(moment)  # fail closed: never one that can come
 
 
 def acts_after_close(case: CaseDefinition, name: str) -> bool:

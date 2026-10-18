@@ -300,7 +300,8 @@ def test_a_case_that_closes_at_opening_is_refused() -> None:
             "steps",
             "CLOSES_AT_OPENING",
             "nothing starts by itself when claim opens, so it closes at once and every proposal "
-            "is refused: let a step start by itself with nothing required, or add stays_open",
+            "is refused: let a step start by itself with nothing required, start one from a rule "
+            "on the opening, or add stays_open",
         )
     ]
 

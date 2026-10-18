@@ -811,6 +811,65 @@ def test_a_step_started_only_on_its_own_moment_gets_one_issue() -> None:
     assert not any(line.startswith(("flag_large", "started lead_check")) for line in run.history)
 
 
+def test_a_step_a_rule_on_the_opening_starts_keeps_the_case_open() -> None:
+    # The review starts only when proposed, and nothing starts by itself, but a rule on the
+    # opening starts it: the case waits for it instead of closing at once (brief, D39).
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    definition["rules"] = {
+        "ask_review": {
+            "display": {"title": "Ask for a review"},
+            "on": "opened",
+            "then": {"start": ["review"]},
+        }
+    }
+    assert issues(definition) == []
+    run = run_case(definition, file=SMALL, answers=[], people=PEOPLE)
+    assert run.waiting_for == ["review by support"] and not run.closed
+
+
+def test_answered_waits_for_its_task() -> None:
+    # A task's answer comes once the task has ended: a rule on it reads its outcome set, as a step
+    # requiring the task does (brief, D39). Before, the check read it as the opening.
+    assert issues(guide_rework()) == []
+    # What only one of its outcomes sets may still be unset.
+    amount = guide_rework()
+    amount["rules"]["check_review"]["when"] = {">": [{"var": "approved_amount"}, 100]}
+    assert issues(amount) == [
+        Issue(
+            "rules.check_review.when",
+            "MAY_BE_UNSET",
+            "check_review reads approved_amount, which may not be set when answered review "
+            "comes: then check_review fails and needs attention: read it only when it is set, or "
+            "fire it on another moment",
+            "warning",
+        )
+    ]
+    run = run_case(amount, file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE)
+    [failed] = run.needs_attention
+    assert failed.startswith("check_review#1: ") and failed.endswith("approved_amount has no value")
+
+
+def test_an_unknown_moment_fails_closed() -> None:
+    # `parse_case` refuses a moment Ventoux doesn't know. One that comes another way is refused
+    # wherever a moment is read: never read as the opening, nor as one that can come (fail
+    # closed).
+    refused = "^'closed' is not a moment Ventoux knows$"
+    for when in ({">": [{"var": "amount"}, 1000]}, None):  # a condition is read by more checks
+        case = parse_case(with_rule(when=when))
+        rule = case.rules["flag_large"].model_copy(update={"on": "closed"})
+        unknown = case.model_copy(update={"rules": {"flag_large": rule}})
+        with pytest.raises(ValueError, match=refused):
+            validate_case(unknown, CATALOG)
+    with pytest.raises(ValueError, match=refused):
+        decide(
+            unknown,
+            CATALOG,
+            CaseState("t"),
+            Opened({**SMALL, "amount": Decimal(40)}, None, at=START),
+        )
+
+
 # --- Slice 1: reaching ---
 
 

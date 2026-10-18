@@ -43,7 +43,7 @@ from ventoux.case.reach import (
     waited_on,
 )
 from ventoux.case.registered import role_issues_of, source_issues_of, system_issues_of
-from ventoux.case.rules import said
+from ventoux.case.rules import said, unknown_moment
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
 from ventoux.case.types import case_types
@@ -111,8 +111,8 @@ def validate_case(
                 "steps",
                 "CLOSES_AT_OPENING",
                 f"nothing starts by itself when {case.case} opens, so it closes at once and every "
-                "proposal is refused: let a step start by itself with nothing required, or add "
-                "stays_open",
+                "proposal is refused: let a step start by itself with nothing required, start one "
+                "from a rule on the opening, or add stays_open",
             ),
         )
     return found
@@ -189,13 +189,15 @@ def never_closes(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[
 
 def closes_at_opening(case: CaseDefinition) -> bool:
     """Whether the case closes the moment it opens: only what rules on the opening may reach is
-    reached yet, so only a step that starts by itself with every requirement among those can
-    start, and with none, nothing is pending (brief, D10). A case that stays open waits for a
-    person instead."""
+    reached yet, so only a step that starts by itself, or that one of those rules starts, with
+    every requirement among those can start, and with none, nothing is pending (brief, D10)
+    (brief, D39). A case that stays open waits for a person instead."""
     required = requirements(case)
     reached = opening_reaches(case)
+    started = {step for rule in opening_fired(case) for step in case.rules[rule].then.start}
     return not case.stays_open and not any(
-        step.automatic and set(required[name]) <= reached for name, step in case.steps.items()
+        (step.automatic or name in started) and set(required[name]) <= reached
+        for name, step in case.steps.items()
     )
 
 
@@ -407,8 +409,7 @@ def never_fires(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
                 f"{name} can never fire: it fires on {moment}, which can never run: fix {step} "
                 "first"
             )
-        else:
-            assert isinstance(on, Reached)  # the opening always comes
+        elif isinstance(on, Reached):
             reachers = reached_by(case, on.reached) + rules_reaching(case, on.reached)
             if reachers:
                 one = len(reachers) == 1
@@ -423,5 +424,7 @@ def never_fires(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
                     f"{name} can never fire: it fires on {moment}, which no step or rule reaches: "
                     f"reach {on.reached} from a step or a rule, or fire it on another moment"
                 )
+        else:
+            unknown_moment(on)  # fail closed: the opening always comes, so it is never here
         found.append(Issue(f"rules.{name}.on", "NEVER_FIRES", why))
     return found
