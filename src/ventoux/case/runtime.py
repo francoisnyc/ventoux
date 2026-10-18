@@ -374,6 +374,15 @@ def propose(
         fail(state, event.step, str(error))
 
 
+def nothing_new(case: CaseDefinition, state: CaseState) -> str:
+    """Why nothing new starts once every `closes_when` milestone is reached: the case closes,
+    now or once what failed is retried (brief, D34)."""
+    if any(run.status in ("failed", "retrying") for run in state.runs):
+        return held_close_refusal(case, state)
+    verb = "is" if len(case.closes_when) == 1 else "are"
+    return f"{listed(list(case.closes_when))} {verb} reached, so the case closes and nothing new starts"
+
+
 def held_close_refusal(case: CaseDefinition, state: CaseState) -> str:
     """Why nothing starts while a failed run holds the close: what was reached, and what the case
     waits for before it closes (brief, D34)."""
@@ -837,6 +846,10 @@ def start_from_rules(
         # decision (brief, D39).
         if name in state.started_by_rules:
             refusal: str | None = "a rule already started it in this decision"
+        elif close_held(case, state):
+            # Once every closes_when milestone is reached, nothing new starts, a rule's start
+            # included, even one decided on the moment that reached the last (brief, D34).
+            refusal = nothing_new(case, state)
         else:
             refusal = proposal_refusal(case, name, required[name], state)
         if refusal is None:
@@ -852,6 +865,9 @@ def start_from_rules(
             except StepStopped as error:
                 state.history.append(f"{said}: starting {name}")
                 state.started_by_rules.append(name)
+                # Kept with the failed run: an operator's retry starts it on what the rule read,
+                # which still counts for its inputs and its approvers (brief, D38) (brief, D39).
+                state.proposed_by_rules[name] = asked
                 fail(state, name, str(error))  # nothing is skipped: a person decides (brief, D17)
                 started = True
                 continue

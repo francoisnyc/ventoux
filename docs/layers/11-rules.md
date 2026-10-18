@@ -771,6 +771,28 @@ Each starts with its negative test, seen failing for the right reason.
   definition lets the case be forgotten while open (`allowed` or `while_open`) and a role that
   forgets is registered; otherwise "nothing could ever close it".
 
+### From the code review
+
+One reviewer, after slice 6, built definitions where an error and a run disagree, by hand and with
+a random generator over rules on all four moments (about 8,000 definitions read and run). It found
+three, each fixed test-first, and one question for the user:
+
+- **A rule's start once the close is due** (runtime): with every `closes_when` milestone
+  reached, `start_from_rules` still started a step, decided on the same moment, and the case was
+  flagged; validation's `NEVER_RUNS` for that step was right. Now refused and recorded: `lookup
+  not started: checked is reached, so the case closes and nothing new starts`.
+- **A rule's record kept with a run that fails before it starts** (runtime): a start failing on a
+  stale fact or an unreadable condition dropped what the rule read, so the operator's retry sent
+  the letter a model's notes chose, and let the person whose answer decided approve the run.
+  Validation's `INPUT_POLICY` at the rule was right.
+- **`CLOSES_AT_OPENING` beside a rule on the opening with a `when`** (validation, a gap from 11a):
+  such a rule may fail, whatever the check says of what it reads (the opener may leave a field
+  out, or the value is read only once a dead step ran), and the case then waits for a person. Not
+  claimed any more.
+- **Left for the user:** a run that failed before it started, retried, fires no `started`
+  moment (11a's "a retried run starts nothing again"). 11b makes that retry the way a rule's
+  failed start goes on, so a rule on `started` never hears of that run.
+
 ### Promises
 
 Drafted before building, from the choices above; each row's test was named here first, and the
@@ -816,6 +838,9 @@ says. Every test is in `tests/test_rules.py` unless said otherwise.
 | A step started only by a rule on its own moment gets one issue | `test_a_step_started_only_on_its_own_moment_gets_one_issue` |
 | An untrusted condition gives `INPUT_POLICY` at the step and at the rule, whoever opens the case, and nothing at the rule when the step's input already has it; a rule that also reaches gets only `UNTRUSTED_TRIGGER`, saying it starts nothing | `test_input_policy_counts_conditions` (`tests/test_case_validation.py`) |
 | A rule on the opening that starts a step keeps the case from closing at once: no `CLOSES_AT_OPENING`, and the run waits | `test_a_step_a_rule_on_the_opening_starts_keeps_the_case_open` |
+| A rule on the opening with a `when` gives no `CLOSES_AT_OPENING`: it may fail, and the case waits | `test_a_rule_on_the_opening_that_may_fail_keeps_the_case_open` |
+| Once every `closes_when` milestone is reached, a rule's start is refused and recorded, even one decided on that moment | `test_a_rule_starts_nothing_once_the_case_closes` |
+| A rule's record is kept with a run that fails before it starts: the retry is still refused on its inputs, and still excludes | `test_a_rules_record_survives_a_start_that_fails` |
 | A moment a check doesn't know is refused, never read as the opening | `test_an_unknown_moment_fails_closed` |
 | `answered` counts as waiting for its task for `MAY_BE_UNSET` and `SET_AFTER` | `test_answered_waits_for_its_task` |
 | A loop nothing in the case can end is `NEVER_CLOSES`; the same loop a close reason or `closes_when` can close is `LOOPS_UNTIL_CLOSED`, beside a misspelt close role; a loop a refused start ends, or only a person's proposal enters, gets neither | `test_a_loop_of_starts_never_closes`, `test_a_loop_a_close_can_end_is_warned`, `test_a_loop_a_requirement_ends_gets_no_issue` |

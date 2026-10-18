@@ -658,8 +658,9 @@ happens next, let a person decide, in a task or an approval.
 **What the check says about rules.** `ventoux check` reads rules too: a milestone a rule may
 reach counts as reachable, every `when` taken as possibly true, but proves nothing about what is
 set; a step a rule may start can run; a step that a rule on the opening may let start, or start,
-keeps the case from closing at once, so no `CLOSES_AT_OPENING` is given for it; a rule's `when`
-is type-checked, and counts for the input policies of the steps it starts (`INPUT_POLICY`, at
+keeps the case from closing at once, so no `CLOSES_AT_OPENING` is given for it, nor beside a rule
+on the opening with a `when`, which may fail and leave the case waiting for a person; a rule's
+`when` is type-checked, and counts for the input policies of the steps it starts (`INPUT_POLICY`, at
 `rules.<name>.then.start`); and these codes are its own:
 
 | Code | Kind | What is wrong | Example message |

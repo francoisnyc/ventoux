@@ -247,10 +247,16 @@ def closes_at_opening(case: CaseDefinition) -> bool:
     """Whether the case closes the moment it opens: only what rules on the opening may reach is
     reached yet, so only a step that starts by itself, or that one of those rules starts, with
     every requirement among those can start, and with none, nothing is pending (brief, D10)
-    (brief, D39). A case that stays open waits for a person instead."""
+    (brief, D39). A case that stays open waits for a person instead. So does one whose rule on
+    the opening has a condition: it may fail, whatever the check says of what it reads (the
+    opener may leave a field out), and then the case needs attention instead of closing
+    (brief, D34)."""
+    fired = opening_fired(case)
+    if any(case.rules[rule].when is not None for rule in fired):
+        return False
     required = requirements(case)
     reached = opening_reaches(case)
-    started = {step for rule in opening_fired(case) for step in case.rules[rule].then.start}
+    started = {step for rule in fired for step in case.rules[rule].then.start}
     return not case.stays_open and not any(
         (step.automatic or name in started) and set(required[name]) <= reached
         for name, step in case.steps.items()

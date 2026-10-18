@@ -725,6 +725,172 @@ def test_an_unset_field_in_a_steps_condition_counts_its_writers() -> None:
     ]
 
 
+# --- 11b, from the code review ---
+
+
+def closing_on_checked(rules: dict[str, Any]) -> dict[str, Any]:
+    """The refund closing on `checked`, with a look-up that requires it, and `rules`."""
+    definition = copy.deepcopy(REFUND)
+    definition["milestones"] = {"checked": {"display": {"title": "Checked"}}}
+    definition["closes_when"] = ["checked"]
+    definition["steps"]["lookup"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "automatic": False,
+        "requires": ["checked"],
+    }
+    definition["rules"] = rules
+    return definition
+
+
+def test_a_rule_starts_nothing_once_the_case_closes() -> None:
+    # Once every closes_when milestone is reached, nothing new starts (layer 8b), a rule's start
+    # included, even one decided on the same moment (brief, D34) (brief, D39). Validation said
+    # lookup never runs; before the review's fix, a rule ran it, and the case was flagged.
+    one = {
+        "wrap": {
+            "display": {"title": "Wrap up"},
+            "on": {"answered": "review"},
+            "then": {"reach": ["checked"], "start": ["lookup"]},
+        }
+    }
+    two = {
+        "begin": {
+            "display": {"title": "Look it up"},
+            "on": {"answered": "review"},
+            "then": {"start": ["lookup"]},
+        },
+        "finish": {
+            "display": {"title": "Checked"},
+            "on": {"answered": "review"},
+            "then": {"reach": ["checked"]},
+        },
+    }
+    for rules, entry in ((one, "wrap#1"), (two, "begin#1")):
+        definition = closing_on_checked(rules)
+        assert [i.code for i in issues(definition)] == ["NEVER_RUNS"]
+        run = run_case(definition, file=SMALL, answers=[("review", "reject", "ana")], people=PEOPLE)
+        assert (
+            f"{entry} on answered review: lookup not started: checked is reached, so the case "
+            "closes and nothing new starts"
+        ) in run.history
+        assert not any(line.startswith("scheduled lookup") for line in run.history)
+        assert run.closed and run.flags == []
+
+
+def welcome_on_a_fresh_status() -> dict[str, Any]:
+    """The welcome letter started by a rule on the model's notes, once the review is answered,
+    drafted only on an order status at most a day old."""
+    definition = with_welcome({"==": [{"var": "check_order.status"}, "delivered"]})
+    definition["steps"]["welcome"] |= {
+        "automatic": False,
+        "requires": ["checked", "check_order"],
+        "max_age": {"check_order.status": "1d"},
+    }
+    definition["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    definition["rules"]["send_welcome"] = {
+        "display": {"title": "Send a welcome letter"},
+        "on": {"answered": "review"},
+        "when": SAYS_SEND,
+        "then": {"start": ["welcome"]},
+    }
+    return definition
+
+
+def test_a_rules_record_survives_a_start_that_fails() -> None:
+    # A rule's start that fails before its run starts (a stale fact, a condition not readable
+    # yet) is retried by an operator: what the rule read is kept with the run until it starts,
+    # so it still counts for the inputs and still excludes (brief, D38) (brief, D39). Before the
+    # review's fix, the retry drafted the letter the model's notes chose.
+    run = run_case(
+        welcome_on_a_fresh_status(),
+        file=welcome_file(),
+        answers=[later("3d"), ("review", "reject", "ana"), retry("welcome#1", "omar")],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+        activities={"orders.lookup@2": lambda inputs: {"status": "delivered"}},
+    )
+    assert "omar retried welcome#1 as operations" in run.history
+    assert not any(line.startswith("scheduled welcome") for line in run.history)
+    assert run.needs_attention == [
+        (
+            "welcome#1: letters.draft@2 takes to_customer only from a system or a person, never "
+            "from untrusted data, and send_welcome#1's condition, which started welcome, reads "
+            "kyc.analyst_notes (untrusted:llm)"
+        )
+    ]
+    # The goodwill refund fails on a condition not readable yet: retried once the note is in,
+    # Sam, whose check the rule read, still can't approve it.
+    definition = with_goodwill(CHECKED_OK)
+    definition["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    definition["steps"]["goodwill"]["when"] = {"==": [{"var": "note.outcome"}, "noted"]}
+    noted = [
+        APPROVED_40,
+        ("lead_check", "ok", "sam"),
+        propose("note", "ana"),
+        ("note", "noted", "ana"),
+        retry("goodwill#1", "omar"),
+    ]
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            definition,
+            file=SMALL,
+            answers=[*noted, ("goodwill.approval#1", "approve", "sam")],
+            people=LEADS,
+        )
+    assert str(refused.value) == (
+        "sam set lead_check.outcome, which decided that start_goodwill#1 started goodwill, so "
+        "cannot approve it"
+    )
+
+
+def test_a_rule_on_the_opening_that_may_fail_keeps_the_case_open() -> None:
+    # A rule on the opening whose condition can't be read fails, and the case waits for a
+    # person instead of closing, whatever the check says of the value it reads: the opener may
+    # leave a field out, and a value read only once a dead step ran is never set. So a condition
+    # there makes CLOSES_AT_OPENING unproven (brief, D34). A gap from 11a, found in 11b's review.
+    unopened = with_rule()
+    unopened["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    assert not [i for i in issues(unopened) if i.code == "CLOSES_AT_OPENING"]
+    run = run_case(unopened, file={"order_id": "ord-1"}, answers=[], people=PEOPLE)
+    assert not run.closed
+    assert run.needs_attention == [
+        "flag_large#1: flag_large's condition amount > 1000 can't be evaluated: amount has no value"
+    ]
+    dead = copy.deepcopy(REFUND)
+    dead["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    dead["milestones"] = {
+        "noted": {"display": {"title": "Noted"}},
+        "never": {"display": {"title": "Never reached"}},
+    }
+    dead["steps"]["call_customer"]["requires"] = ["never"]
+    dead["rules"] = {
+        "note_call": {
+            "display": {"title": "Note the call"},
+            "on": "opened",
+            "when": {"==": [{"var": "call_customer.outcome"}, "called"]},
+            "then": {"reach": ["noted"]},
+        }
+    }
+    assert [i.code for i in issues(dead)] == ["NEVER_RUNS"]
+    run = run_case(dead, file=SMALL, answers=[propose("review", "ana")], people=PEOPLE)
+    assert run.waiting_for == ["review by support"] and not run.closed
+
+
 # --- 11b, slice 4: validation ---
 
 
