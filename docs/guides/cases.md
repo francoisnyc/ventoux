@@ -315,7 +315,8 @@ A person closes a case with a **close reason** the definition declares, with who
 
 Closing puts the case in **closing**: open tasks and approvals are cancelled, saying why; nothing
 new starts; activities already running finish, since a payment can't be safely cut off halfway.
-Then the case is **closed**. If something completed while closing, the case is **flagged**, so a
+A running plan step is stopped, and a running workflow step finishes too, unless its contract
+declares it `cancellable` (see "Workflow steps"). Then the case is **closed**. If something completed while closing, the case is **flagged**, so a
 person can decide whether to reverse it:
 
 ```
@@ -390,6 +391,9 @@ A team lead's approval that arrives after the close can't pay the refund (brief,
 that was already running, and finished or failed after the close, flags the case, as a step does:
 `settle#1: payments.refund@2 completed after the close was requested`.
 
+A rule can stop a plan step too (see "Rules that stop steps"): the plan stops the same way, and
+the history says which rule's entry stopped it, `settle#1 cancelled: stopped by withdraw#1`.
+
 ## Workflow steps
 
 A **workflow step** runs an existing Temporal workflow, written by another team in any SDK
@@ -434,7 +438,10 @@ and an operator retries it, with the same key. A workflow contract the deploymen
 a step naming an activity contract (or an activity step naming a workflow contract), fails the
 step too: nothing guesses where to run it. When the case begins closing, a running workflow step
 finishes, as an activity does; if it completes after the close, its output still lands, and the
-case is flagged.
+case is flagged. A workflow whose contract declares `cancellable: true` (see the activities guide)
+is cancelled instead, and the case waits for it to end: `kyc#1 cancelled: the case is closing`,
+then `flagged: kyc#1 cancelled after the close was requested`, since what it did before the
+cancellation stands. A rule's stop does the same to it.
 
 A workflow step never waits for people: put the human work in a task step before or after it.
 
@@ -493,7 +500,7 @@ A rule's `on` names one moment:
 is checked against the case's values first, so a misspelt outcome is an error, never false. With
 its `when` false, a rule does nothing, and the history says so: `flag_high_risk#1 on reached
 checked: its condition is false`. `then` lists the milestones it reaches, the steps it starts
-(below), or both.
+and the steps it stops (below): at least one of them.
 
 **A rule reacts to a moment, never to a state.** It remembers nothing: when its moment comes, it
 reads the case file then, once. To start something as soon as a state holds, and whenever it
@@ -657,18 +664,64 @@ nothing either: it doesn't act at all. The influence ends at the step the condit
 rule on that step's start can carry it further, so where untrusted data should weigh on what
 happens next, let a person decide, in a task or an approval.
 
+**Rules that stop steps.** A rule's `then` may `stop` steps: it does to each one what a close
+does to the whole case, and the case goes on. Here a customer who withdraws the request stops the
+review and the payment; `withdrawn` is reached by a support task answered when the customer calls:
+
+```json
+"withdraw": {
+  "display": {"title": "Stop the refund when the customer withdraws"},
+  "on": {"reached": "withdrawn"},
+  "then": {"stop": ["review", "pay"]}
+}
+```
+
+```
+reached withdrawn
+withdraw#1 on reached withdrawn: stopping review and pay
+cancelled review#1: stopped by withdraw#1
+withdraw#1 on reached withdrawn: pay not stopped: no run of pay is going on
+closed: nothing left to do
+```
+
+What a stop does depends on what it finds:
+
+| The step's run | What happens |
+|---|---|
+| an open task | cancelled: `cancelled review#1: stopped by withdraw#1` |
+| waiting for its approval, approved, or proposed and waiting for a fact | the approval is withdrawn, or lapses, or the waiting start is dropped, and the run is recorded: `pay#1 cancelled: stopped by withdraw#1` |
+| a running activity, or a workflow step that isn't cancellable | it finishes, since a payment can't be cut off halfway: `pay#1: stop requested by withdraw#1`; done, its outputs land and the case is flagged, `flagged: pay#1 completed after its stop was requested by withdraw#1`; failed, it needs attention like any failure |
+| a running plan step | its plan stops, as when the case closes, and the step is `cancelled` |
+| a cancellable workflow step | cancelled, the case waiting for it to end, and flagged |
+| failed, needing attention | never stopped: `pay not stopped: pay#1 needs attention, and a failed run is never stopped` |
+| none, or one already asked to stop | nothing happens, and the history says so |
+
+A stopped run is `cancelled`: neither done nor failed, so a step that requires `review` waits
+for a later run of it to be done. A stop ends only the run going on now: a repeatable step may be
+proposed or started again, and a step that starts by itself doesn't start by itself again. A step
+that was waiting for a fact a stopped run was fetching again fails, saying so (`pay#1 failed:
+check_order.status is stale, and its refresh check_order#2 was stopped by withdraw#1: retry pay#1
+to fetch it again`), and an operator's retry fetches it.
+
+Inside one `then`, the stop comes first, then `reach`, then `start`, and one rule can't both stop
+and start the same step. Like a rule that reaches, a rule whose condition reads untrusted data
+doesn't stop anything (`withdraw#1 on reached checked: stops nothing: its condition reads
+kyc.analyst_notes, from untrusted:llm, and untrusted data can't decide`), and once the case
+closes, no rule stops anything: closing stops what is running itself.
+
 **What the check says about rules.** `ventoux check` reads rules too: a milestone a rule may
 reach counts as reachable, every `when` taken as possibly true, but proves nothing about what is
 set; a step a rule may start can run; a step that a rule on the opening may let start, or start,
 keeps the case from closing at once, so no `CLOSES_AT_OPENING` is given for it, nor beside a rule
 on the opening with a `when`, which may fail and leave the case waiting for a person; a rule's
 `when` is type-checked, and counts for the input policies of the steps it starts (`INPUT_POLICY`, at
-`rules.<name>.then.start`); and these codes are its own:
+`rules.<name>.then.start`); a rule that may stop a step keeps the check from claiming a loop
+nothing ends, or a start refused on the step's own start; and these codes are its own:
 
 | Code | Kind | What is wrong | Example message |
 |---|---|---|---|
 | `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
-| `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone reads, in its `when`, a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
+| `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone or stops a step reads, in its `when`, a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
 | `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: on the opening, the step requires what can't be met by then, and the rule's condition can't fail and be retried later; or it fires on the step's own start (unless its condition may fail and the step is repeatable: a retry may come once the step is done), or on its own answer when the step isn't repeatable | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
 | `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition or requirement ends (the rework rules above with their `when`s removed, on the refund with the `duplicate` close reason from "Closing a case"), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
 

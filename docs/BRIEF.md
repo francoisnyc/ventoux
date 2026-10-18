@@ -1182,6 +1182,56 @@ text is kept.*
   - a start of a step that is approved and waiting for a fact is recorded, and nothing runs, as
     one waiting to start is: the step starts on that approval once the fact lands.
 
+### D40. Rules that stop steps: what a close does, to one step, through one place
+
+*Drafted 2026-10-18, in layer 11c. Adds to D6, D10, D17, D28, D29, D38 and D39, whose text is
+kept.*
+
+- **`stop` ends the run going on now, and doesn't keep the step from starting later.** `"then":
+  {"stop": ["review"]}` lists steps, and refuses any other name; an item may later become an object
+  (`{"step": …, "<option>": …}`), a plain name keeping its meaning. A repeatable step may be
+  proposed or started again; a step that starts by itself still does so at most once. One name in
+  both `stop` and `start` of a rule is refused: in one rule it would mean a restart that depends on
+  the step's kind. Inside one `then`, the stop acts first, then `reach`, then `start` (D38, D39).
+- **It does what a close does, to one step** (D10, D28). An open task is cancelled, saying why; an
+  open approval is withdrawn and a given one lapses; a person's start waiting for a fact is
+  dropped. Each such coming run is recorded `cancelled`. A running activity, or a workflow step
+  whose contract isn't cancellable, finishes, marked "stop requested"; done, it is recorded as done
+  and flagged. A plan step gets its plan's stop signal, with the rule's entry as the reason.
+  **A run really stopped ends `cancelled`,** neither done nor failed, so `requires` doesn't count
+  it as done.
+- **A failed run is never stopped** (D17, D26), and a stop with nothing to stop, or already asked,
+  is recorded and does nothing else.
+- **What fails after a stop needs attention** (adds to D17): a run that fails after its stop was
+  requested is a failure like any other, retried with its key or closed by a person, never
+  cancelled as a close would: a case that goes on could otherwise start the step again, with a new
+  key, while nobody knows what the failed run did (D39). A step that needed a refresh the stop
+  ended fails too, saying so, and an operator's retry fetches the fact again (D33): waiting and
+  refreshing again could loop inside one decision.
+- **Untrusted data can't stop** (adds to D38). A rule whose condition reads an untrusted source
+  stops nothing, and says which value and source, never the value; case validation's
+  `UNTRUSTED_TRIGGER` covers a rule that stops as one that reaches.
+- **One place stops every running child, for a stop and for a close.** Each by the mechanism its
+  kind declares: a plan by its stop signal (D28), a cancellable workflow step by Temporal's
+  cancellation, an activity or another workflow step by nothing (it finishes). A child is never
+  stopped twice. Later kinds (a child case, a workflow that waits for people) add theirs there;
+  a later rule that closes the case would begin closing, which stops children through it.
+- **`cancellable` workflows** (adds to D6, D29): a workflow contract may declare `cancellable:
+  true`, the team's promise that after a cancellation request it schedules nothing new, ends only
+  once all it started has ended, and ends cancelled only if nothing it started completed after the
+  request. The contract test checks the three clauses on Temporal's test server. Left out of the
+  hash when false, declared or not, so existing contracts keep their hashes. A cancellable workflow
+  step, stopped or closed, is cancelled, the case waiting for it to end, and the case is flagged;
+  **a close now cancels it too,** where D10 and D29 let every workflow step finish.
+- **Each decision still ends** (D39): a stop starts nothing, a stopped step starts by itself at
+  most once, and a stopped refresh fails what waited for it, so the bound on the runs a decision
+  starts holds as it was.
+- **Case validation stays a proof** (D34): a stop only takes paths away, so what may happen is
+  still what may happen; the claims that something always happens are made only where no rule may
+  stop the step they rest on (a loop of starts, a start refused on the step's own start).
+- **A run has ended once it has its final status;** a run whose stop is requested and still
+  running hasn't, and a stopped run's timers end with it (layer 11e).
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
