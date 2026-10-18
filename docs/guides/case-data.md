@@ -511,6 +511,7 @@ run = run_case(
     file={"order_id": "ord-1", "amount": 250},
     answers=[("review", "approve", "ana", {"approved_amount": 250})],
     people=PEOPLE,
+    activities={"orders.lookup@2": lambda inputs: {"status": "delivered"}},
 )
 sheet = run.approval_sheet("pay.approval#1", roles=["support-lead"], at=START + 3 * DAY)
 assert "check_order.status: delivered, obtained 3 days ago" in sheet.lines

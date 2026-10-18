@@ -1093,12 +1093,12 @@ text is kept.*
   it, whose reason (nothing else could start it) no longer holds once a rule may. `proposed_by`
   keeps meaning which people may propose it; with none, nobody may.
 - **A fourth moment: a task answered.** `{"answered": "<task>"}` fires each time a run of the task
-  is answered, whatever the outcome, and names only a task (D38: a moment is added by a decision).
-  A milestone is reached once and `started` fires before the answer exists, so a loop needs it.
-  What brings a loop of rules round again is then a person's answer, as a plan's loop passes
-  through a wait (design question 18). Set aside: a moment for any step finishing, with which a
-  case could call a payment provider again on each decline by itself, a retry policy that is the
-  platform team's (D17).
+  is answered, whatever the outcome, and names only a task (D38: a moment is added by a decision). A
+  milestone is reached once and `started` fires before the answer exists, so a loop needs it. What
+  brings a loop through `answered` round again is then a person's answer, as a plan's loop passes
+  through a wait (design question 18). Set aside: a moment for any step finishing, with which a case
+  could call a payment provider again on each decline by itself, a retry policy that is the platform
+  team's (D17).
 - **A start the engine can't make is never silent.** It is recorded, and nothing runs, when the
   step's requirements aren't met or its `when` is false; it is running, waiting for its approval,
   or already waiting to start; it has run and isn't repeatable; or its latest run needs
@@ -1108,8 +1108,9 @@ text is kept.*
 - **A proposal waits for its fresh facts** (adds to D33). A step a person proposes, or a rule
   starts, whose stale fact can be fetched again is accepted and waits: the fact is fetched, then
   admission reads everything again on the fresh value, and starts the step or says why not. The
-  waiting start crosses continue-as-new (D27). Until now a person's proposal skipped the check and
-  ran on the stale fact, against D33.
+  waiting start crosses continue-as-new (D27). A proposal of a step whose start already waits is
+  refused, so its first proposer still can't approve the run (D25). Until now a person's proposal
+  skipped the check and ran on the stale fact, against D33.
 - **Nothing starts beside a failed run** (adds to D26). A step whose latest run needs attention is
   not started again, by a rule or a person's proposal: the failure would be skipped by another
   name (D17), and for a step with side effects the new run's new key could make them happen

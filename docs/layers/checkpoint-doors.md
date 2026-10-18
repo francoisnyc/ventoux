@@ -37,7 +37,7 @@ Flowable's words (stage, plan item, sentry, event listener) stay in the first tw
 ## The table
 
 The first six rows are the curriculum's list; the others are what the layer 11 research found, or
-what reading Flowable's tests again turned up.
+what reading Flowable's tests again turned up; rows 31 and 32 are Ventoux's own, found in 11b.
 
 | # | Flowable offers | What it is for (and where it comes from) | Ventoux today | Blocked by a decision so far? | What keeps it open |
 |---|---|---|---|---|---|

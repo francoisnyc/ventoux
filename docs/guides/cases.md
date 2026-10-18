@@ -119,10 +119,10 @@ step whose requirements aren't met:
 }
 ```
 
-If a fact the step needs fresh is stale, the proposal is accepted and waits while the fact is
-fetched again; then the step starts, or doesn't, on the fresh value (the case data guide, "Fresh
-facts"). A step whose latest run needs attention isn't started again beside it ("When something
-breaks").
+If a fact the step needs fresh is stale and can be fetched again, the proposal is accepted and waits
+while the fact is fetched again; then the step starts, or doesn't, on the fresh value (the case data
+guide, "Fresh facts"). Proposing the step again while it waits is refused. A step whose latest run
+needs attention isn't started again beside it ("When something breaks").
 
 A **repeatable** step may run again, and only when proposed or started by a rule: it never starts
 itself a second time, or it would never stop. A task's `outcome` is then its latest answer, and a
@@ -486,7 +486,7 @@ A rule's `on` names one moment:
 | `"opened"` | once, when the case opens, with its first values in the case file |
 | `{"reached": "checked"}` | once, when the milestone is reached: a milestone is never undone |
 | `{"started": "assess"}` | each time a run of the step starts: a task opening, an activity or workflow scheduled, a plan started, a stale fact fetched again. A retry is the same run, so it doesn't start again |
-| `{"answered": "check"}` | each time a run of the task is answered, whatever the outcome. It names a task: an activity, a workflow or a plan finishing is not a moment, so a loop of rules always passes through a person's answer |
+| `{"answered": "review"}` | each time a run of the task is answered, whatever the outcome. It names a task: an activity, a workflow or a plan finishing is not a moment, so a loop through `answered` always passes through a person's answer |
 
 `when` is optional, and reads the case file as it is at that moment, as a step's `when` does: it
 is checked against the case's values first, so a misspelt outcome is an error, never false. With
@@ -623,10 +623,10 @@ answer. The run keeps what its rule read until it starts, since the rule itself 
 nothing.
 
 **A loop comes round through a person.** A rule starts steps only on a moment, and what brings a
-loop of rules round again is a task being answered. A step finishing is not a moment, so a case
-can't call a payment provider again on each decline by itself: retrying is the contract's
-(brief, D17). And within one decision, a step a rule has started isn't started again by a rule:
-`… review not started: a rule already started it in this decision`.
+loop through `answered` round again is a task being answered. A step finishing is not a moment, so a
+case can't call a payment provider again on each decline by itself: retrying is the contract's
+(brief, D17). And within one decision, a step a rule has started isn't started again by a rule: `…
+review not started: a rule already started it in this decision`.
 
 **Untrusted data can't choose what is sent.** A condition that lets a step start decides that
 its inputs are sent at all. Say the welcome letter is drafted when a model's notes say so, to an
@@ -665,7 +665,7 @@ is type-checked, and counts for the input policies of the steps it starts (`INPU
 | `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
 | `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone reads, in its `when`, a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
 | `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: the step's requirements can't be met when the rule fires, and the rule's condition can't fail and be retried later | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
-| `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition or requirement ends (the rework rules above, with their `when`s removed), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
+| `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition or requirement ends (the rework rules above with their `when`s removed, on the refund with the `duplicate` close reason from "Closing a case"), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
 
 The rework loop above gets no issue: its rules' `when`s end it.
 
@@ -956,7 +956,7 @@ proves what can *never* happen, and says nothing about what depends on values:
 | a step requiring a milestone nothing reaches | a review answered `deny`, so `paid` is never reached: that is a path, not a deadlock |
 | a step that waits for every milestone `closes_when` names, which the case closes on before the step could start: nothing new starts once they are reached, even while a failed step holds the close. It may require them, or steps that surely reach them, or come after such a step in `sequence`: `thank can never run: it runs only after draft, which reaches sent, …` | a rejected approval, or whether an operator retries a failed step; a step that only *may* reach a milestone (an activity that can end `declined`, a plan that can fail) |
 | a case that closes the moment it opens | whether anyone eligible is there to answer or approve |
-| a case nobody could ever close | |
+| a case nothing in its work or its close reasons can close (`NEVER_CLOSES`, below) | |
 
 ### What the check says about structure
 
