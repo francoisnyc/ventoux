@@ -777,6 +777,51 @@ def guide_with_close_reasons() -> dict[str, Any]:
     return guide_json(0) | guide_json(4)
 
 
+def repeatable_check_order() -> dict[str, Any]:
+    """The guide's refund with its proposed `check_order`, made repeatable."""
+    definition = with_guides_check_order()
+    definition["steps"]["check_order"]["repeatable"] = True
+    return definition
+
+
+def down_then_up() -> Activity:
+    """An order lookup that fails once, then answers."""
+    calls: list[str] = []
+
+    def lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs["order_id"])
+        if len(calls) == 1:
+            raise ConnectionError("orders system down")
+        return {"status": "delivered"}
+
+    return lookup
+
+
+def test_nothing_starts_beside_a_failed_run() -> None:
+    # While check_order#1 needs attention, a new run would skip it by another name, and the
+    # operator's retry of it would never be scheduled (brief, D17, D26, D39). So proposing the
+    # step again is refused; the operator retries the failed run, which runs as itself.
+    failed_first = [REVIEWED, propose("check_order", "ana")]
+    with pytest.raises(ProposalRefused) as refused:
+        run_case(
+            repeatable_check_order(),
+            file=LARGE,
+            answers=[*failed_first, propose("check_order", "ana")],
+            people=OPERATORS,
+            activities={"orders.lookup@1": down_then_up()},
+        )
+    assert str(refused.value) == "check_order#1 needs attention: retry it, or close the case"
+    retried = run_case(
+        repeatable_check_order(),
+        file=LARGE,
+        answers=[*failed_first, retry("check_order#1", "omar")],
+        people=OPERATORS,
+        activities={"orders.lookup@1": down_then_up()},
+    )
+    assert "check_order#1 done, giving status from untrusted:undeclared" in retried.history
+    assert not any(line.startswith("scheduled check_order#2") for line in retried.history)
+
+
 def pay_proposed_on_an_answer() -> dict[str, Any]:
     """The guide's refund, with `pay` proposed by support, and the approved amount needed at most a
     day old: a person's answer, which nothing can fetch again (brief, D33)."""
@@ -838,6 +883,13 @@ GUIDE_REFUSALS: dict[str, Any] = {
     ),
     "nobody proposes a step that starts by itself": lambda: run_case(
         guide_json(0), file=LARGE, answers=[REVIEWED, propose("pay", "ana")], people=PEOPLE
+    ),
+    "the step's latest run needs attention": lambda: run_case(
+        repeatable_check_order(),
+        file=LARGE,
+        answers=[REVIEWED, propose("check_order", "ana"), propose("check_order", "ana")],
+        people=OPERATORS,
+        activities={"orders.lookup@1": down_then_up()},
     ),
     "the opening gives a field a person sets": lambda: run_case(
         guide_json(0), file={**LARGE, "approved_amount": 250}, answers=[], people=PEOPLE
