@@ -2860,3 +2860,38 @@ def test_an_or_guards_what_all_its_parts_agree_on() -> None:
     )
     [failed] = escalated.needs_attention
     assert failed.endswith("approved_amount has no value")
+
+
+# --- 11b: rules that start steps ---
+
+
+def rechecked(*roles: str) -> dict[str, Any]:
+    """The guide's claim with `recheck`, which a rule starts once the customer is checked, and
+    which only `roles` may propose."""
+    recheck = {
+        **NOTIFY,
+        "display": {"title": "Check the customer again"},
+        "requires": ["checked"],
+        "automatic": False,
+        "proposed_by": list(roles),
+    }
+    claim = claim_with(recheck=recheck)
+    claim["rules"] = {
+        "recheck_checked": {
+            "display": {"title": "Have the check looked at again"},
+            "on": {"reached": "checked"},
+            "then": {"start": ["recheck"]},
+        }
+    }
+    return claim
+
+
+def test_a_step_a_rule_may_start_can_run() -> None:
+    # Who can start a step is one answer: it starts by itself, a person with a registered role
+    # proposes it, or a rule that can fire starts it (brief, D39). Before 11b, a step only a rule
+    # started was NEVER_RUNS.
+    assert issues(rechecked()) == []
+    run = run_case(rechecked(), file=CLAIM_FILE, answers=[], people=CLAIM_PEOPLE)
+    assert "recheck_checked#1 on reached checked: starting recheck" in run.history
+    # A rule starts it, so its misspelt role is said: it counts for nothing (brief, D22).
+    assert issues(rechecked("supprt")) == [unknown_role("steps.recheck.proposed_by", "supprt")]

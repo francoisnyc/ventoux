@@ -13,7 +13,7 @@ from ventoux.case.calls import (
     plan_input_issues,
     supplied_plans,
 )
-from ventoux.case.definition import CaseDefinition, Reached, Started, TaskStep
+from ventoux.case.definition import AnsweredTask, CaseDefinition, Reached, Started, TaskStep
 from ventoux.case.flow import (
     approver_issues,
     no_sources_issues,
@@ -29,14 +29,20 @@ from ventoux.case.reach import (
     acts_after_close,
     can_happen,
     can_start,
+    on_own_moment,
+    opening_fired,
+    opening_reaches,
     reachable,
     reached_before,
     reached_by,
     rules_reaching,
     shortest_circle,
+    start_refused,
+    starters,
     waited_on,
 )
 from ventoux.case.registered import role_issues_of, source_issues_of, system_issues_of
+from ventoux.case.rules import said
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
 from ventoux.case.types import case_types
@@ -60,7 +66,8 @@ def validate_case(
     can = can_happen(case, catalog)
     found: list[Issue] = []
     nobody_closes = never_closes(case, catalog, can)
-    found += never_run(case, catalog, can) + never_fires(case, can) + nobody_closes
+    found += never_run(case, catalog, can) + never_fires(case, catalog, can) + nobody_closes
+    found += never_starts(case, catalog, can)
     contracts, unknown_contracts = called_contracts(case, catalog)
     supplied, unknown_plans = supplied_plans(case, plans or {})
     found += unknown_contracts + unknown_plans
@@ -79,7 +86,7 @@ def validate_case(
     found += sensitive_issues(case, contracts, {issue.path for issue in found})
     found += approver_issues(case, catalog, contracts)
     found += trigger_issues(case, contracts)
-    found += role_issues_of(case, catalog, closing=not nobody_closes)
+    found += role_issues_of(case, catalog, can, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     found += close_unreachable(case, can) + unreachable_milestones(case)
     # What a definition may mean but surprises its author when a case runs (10d).
@@ -190,31 +197,6 @@ def closes_at_opening(case: CaseDefinition) -> bool:
     )
 
 
-def opening_fired(case: CaseDefinition) -> list[str]:
-    """The rules that may fire as the case opens: those on the opening, then those on a milestone
-    one of them may reach, and so on, every `when` taken as possibly true (brief, D38)."""
-    fired: list[str] = []
-    reached: set[str] = set()
-    while True:
-        more = [
-            name
-            for name, rule in case.rules.items()
-            if name not in fired
-            and (
-                rule.on == "opened" or (isinstance(rule.on, Reached) and rule.on.reached in reached)
-            )
-        ]
-        if not more:  # a round added nothing: it ends, over finitely many rules
-            return fired
-        fired += more
-        reached |= {m for name in more for m in case.rules[name].then.reach}
-
-
-def opening_reaches(case: CaseDefinition) -> set[str]:
-    """Every milestone a rule may reach as the case opens."""
-    return {m for name in opening_fired(case) for m in case.rules[name].then.reach}
-
-
 def never_run(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Issue]:
     """A step left out of `can`, what the case can ever reach, can never run, on any path: one
     `DEADLOCK` for each group of steps that wait on each other, a `NEVER_RUNS` for any other."""
@@ -226,7 +208,7 @@ def never_run(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Iss
     first = {
         name: unmet[0]
         for name in dead
-        if can_start(case.steps[name], catalog.roles)
+        if can_start(case, catalog, name, can)
         and (unmet := [r for r in required[name] if r not in can])
     }
     waits = {name: waited_on(case, first[name]) if name in first else [] for name in dead}
@@ -236,16 +218,8 @@ def never_run(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Iss
         if name in in_a_circle:
             continue  # one cause, one issue: its group's DEADLOCK names it
         path = f"steps.{name}.requires"
-        if not can_start(step := case.steps[name], catalog.roles):
-            roles = ", ".join(step.proposed_by)
-            found.append(
-                Issue(
-                    f"steps.{name}.proposed_by",
-                    "NEVER_RUNS",
-                    f"{name} can never run: it starts only when proposed, and none of its "
-                    f"proposed_by roles ({roles}) is registered: name a registered role",
-                )
-            )
+        if not can_start(case, catalog, name, can):
+            found.append(nobody_starts(case, name))
             continue
         if name not in first:
             found.append(Issue(path, "NEVER_RUNS", after_close(case, catalog, name)))
@@ -259,6 +233,53 @@ def never_run(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Iss
             other for other in reachable(name, waits) if name in reachable(other, waits)
         }
         found.append(Issue(path, "DEADLOCK", deadlock(case, circle, first)))
+    return found
+
+
+def nobody_starts(case: CaseDefinition, name: str) -> Issue:
+    """Why nobody can ever start the step `name`: none of its `proposed_by` roles is registered,
+    and each rule starting it can't, as its own issue says, or fires only once the step has run.
+    That last is one cause, said here only, with no `NEVER_FIRES` beside it (brief, D39)."""
+    roles, rules = case.steps[name].proposed_by, starters(case, name)
+    own = [rule for rule in rules if on_own_moment(case, rule, name)]
+    others = [rule for rule in rules if rule not in own]
+    how = {(True, False): "proposed", (False, True): "a rule starts it"}.get(
+        (bool(roles), bool(rules)), "proposed or a rule starts it"
+    )
+    why, fixes = [], []
+    if roles:
+        why.append(f"none of its proposed_by roles ({', '.join(roles)}) is registered")
+        fixes.append("name a registered role")
+    for rule in own:
+        why.append(
+            f"{rule} fires on {said(case.rules[rule].on)}, which comes only once {name} has run"
+        )
+    if own:
+        fixes.append("start it from a rule on another moment")
+    if len(others) == 1:
+        why.append(f"{others[0]} can never start it")
+    elif others:
+        why.append(f"none of {listed(others)} can ever start it")
+    if others:
+        fixes.append(f"fix {others[0]} first")
+    path = f"steps.{name}.proposed_by" if roles else f"steps.{name}"
+    message = f"{name} can never run: it starts only when {how}, and {joined(why)}"
+    return Issue(path, "NEVER_RUNS", f"{message}: {', or '.join(fixes)}")
+
+
+def never_starts(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Issue]:
+    """A rule's start refused every time the rule fires (brief, D39). Said only for a rule that
+    can fire, of a step whose own issue doesn't already say why it never runs: one cause, one
+    issue."""
+    found: list[Issue] = []
+    for rule, written in case.rules.items():
+        if rule not in can:
+            continue
+        for name in written.then.start:
+            if name not in can and can_start(case, catalog, name, can):
+                continue  # its requirements are the cause, and its own issue says so
+            if (why := start_refused(case, rule, name)) is not None:
+                found.append(Issue(f"rules.{rule}.then.start", "NEVER_STARTS", why))
     return found
 
 
@@ -356,28 +377,33 @@ def why_never(case: CaseDefinition, name: str, waits_on: str) -> str:
     )
 
 
-def never_fires(case: CaseDefinition, can: set[str]) -> list[Issue]:
+def never_fires(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Issue]:
     """A rule left out of `can`: its moment can never come, or comes only once every
     `closes_when` milestone is reached, when nothing new is decided (brief, D38). An error, not
     the teaching warning "rules that can never fire" (brief, D7): it is proven for every case
-    (brief, D34)."""
+    (brief, D34). A rule that would start the step whose own run brings its moment, which nothing
+    else starts, is said by that step's issue: one cause, one issue (brief, D39)."""
     found: list[Issue] = []
     for name, rule in case.rules.items():
-        if name in can:
+        if name in can or any(
+            on_own_moment(case, name, step) and not can_start(case, catalog, step, can)
+            for step in rule.then.start
+        ):
             continue
         on = rule.on
-        said = f"reached {on.reached}" if isinstance(on, Reached) else ""
+        moment = said(on)
         if acts_after_close(case, name):
             assert isinstance(on, Reached)
             why = (
-                f"{name} can never act: it fires on {said}, and {case.case} closes once "
+                f"{name} can never act: it fires on {moment}, and {case.case} closes once "
                 f"{on.reached} is reached, when nothing new is decided: fire it on an earlier "
                 f"moment, or remove {on.reached} from closes_when"
             )
-        elif isinstance(on, Started):
+        elif isinstance(on, Started | AnsweredTask):
+            step = on.started if isinstance(on, Started) else on.answered
             why = (
-                f"{name} can never fire: it fires on started {on.started}, which can never run: "
-                f"fix {on.started} first"
+                f"{name} can never fire: it fires on {moment}, which can never run: fix {step} "
+                "first"
             )
         else:
             assert isinstance(on, Reached)  # the opening always comes
@@ -385,14 +411,14 @@ def never_fires(case: CaseDefinition, can: set[str]) -> list[Issue]:
             if reachers:
                 one = len(reachers) == 1
                 why = (
-                    f"{name} can never fire: it fires on {said}, which only {listed(reachers)} "
+                    f"{name} can never fire: it fires on {moment}, which only {listed(reachers)} "
                     f"{'reaches' if one else 'reach'}, and "
                     f"{'it can never' if one else 'none of them can ever'} happen: fix "
                     f"{reachers[0]} first"
                 )
             else:
                 why = (
-                    f"{name} can never fire: it fires on {said}, which no step or rule reaches: "
+                    f"{name} can never fire: it fires on {moment}, which no step or rule reaches: "
                     f"reach {on.reached} from a step or a rule, or fire it on another moment"
                 )
         found.append(Issue(f"rules.{name}.on", "NEVER_FIRES", why))

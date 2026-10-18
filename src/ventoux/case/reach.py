@@ -10,14 +10,14 @@ from typing import Literal
 
 from ventoux.case.definition import (
     ActivityStep,
-    CallStep,
+    AnsweredTask,
     CaseDefinition,
-    PlanStep,
     Reached,
     Started,
     TaskStep,
     WorkflowStep,
 )
+from ventoux.case.rules import said
 from ventoux.case.sequence import requirements
 from ventoux.core.catalog import Catalog, NotInCatalog
 
@@ -34,7 +34,8 @@ def can_happen(case: CaseDefinition, catalog: Catalog) -> set[str]:
 
     A rule whose moment can come adds itself and the milestones it reaches, its condition taken as
     possibly true (brief, D38). Rule names are unlike step and milestone names, so they share the
-    set; there are finitely many rules too, so it still ends.
+    set; there are finitely many rules too, so it still ends. A rule in the set may start a step
+    too, unless its start is refused every time (brief, D39).
     """
     can: set[str] = set()
     required = requirements(case)
@@ -48,7 +49,7 @@ def can_happen(case: CaseDefinition, catalog: Catalog) -> set[str]:
             ):
                 can |= {name, *rule.then.reach}
         for name, step in case.steps.items():
-            if not can_start(step, catalog.roles) or after_the_close(case, catalog, name):
+            if not can_start(case, catalog, name, can) or after_the_close(case, catalog, name):
                 continue
             if name not in can and all(requirement in can for requirement in required[name]):
                 can |= {name, *step.reaches}
@@ -61,11 +62,13 @@ def can_happen(case: CaseDefinition, catalog: Catalog) -> set[str]:
 
 def moment_can_come(moment: object, can: set[str]) -> bool:
     """Whether a rule's moment can come, given what can happen so far: the opening always; a
-    milestone, or a step's start, once it is in `can`."""
+    milestone, a step's start or a task's answer, once it is in `can`."""
     if isinstance(moment, Reached):
         return moment.reached in can
     if isinstance(moment, Started):
         return moment.started in can
+    if isinstance(moment, AnsweredTask):
+        return moment.answered in can
     return True
 
 
@@ -166,10 +169,102 @@ def reached_before(case: CaseDefinition, catalog: Catalog, name: str) -> dict[st
     return found
 
 
-def can_start(step: TaskStep | CallStep | PlanStep, roles: Collection[str]) -> bool:
-    """Whether anyone can start the step: it starts by itself, or a registered role may propose
-    it. A role nobody registered counts for nothing, as when the case runs (brief, D22)."""
-    return step.automatic or any(role in roles for role in step.proposed_by)
+def can_start(case: CaseDefinition, catalog: Catalog, name: str, can: Collection[str]) -> bool:
+    """Whether anyone can start the step `name`, given what can happen so far: it starts by
+    itself, a registered role may propose it, or a rule in `can` starts it, its start not refused
+    every time (brief, D39). The one answer every check asks. A role nobody registered counts for
+    nothing, as when the case runs (brief, D22)."""
+    step = case.steps[name]
+    return (
+        step.automatic
+        or any(role in catalog.roles for role in step.proposed_by)
+        or any(
+            rule in can and start_refused(case, rule, name) is None for rule in starters(case, name)
+        )
+    )
+
+
+def starters(case: CaseDefinition, name: str) -> list[str]:
+    """The rules that start the step `name`, in order."""
+    return [rule for rule, written in case.rules.items() if name in written.then.start]
+
+
+def start_refused(case: CaseDefinition, rule: str, name: str) -> str | None:
+    """Why the rule's start of the step `name` is refused every time it fires, as the check says
+    it, or None if it may be taken. Claimed only where proven (brief, D34): a failed firing is
+    retried later, on the case file as it is then, so a condition that may fail proves nothing
+    that later could change."""
+    on, may_fail = case.rules[rule].on, case.rules[rule].when is not None
+    repeatable = case.steps[name].repeatable
+    fires = f"{rule} can never start {name}: it fires on {said(on)}"
+    if on == "opened" and not may_fail and (unmet := unmet_at_opening(case, name)) is not None:
+        return f"{fires}, and {unmet}"
+    # On its own moment: a step's start comes while it runs, its answer once it has run.
+    if isinstance(on, Started) and on.started == name and not (may_fail and repeatable):
+        return f"{fires}, while {name} is running: start it on another moment"
+    if isinstance(on, AnsweredTask) and on.answered == name and not repeatable:
+        return (
+            f"{fires}, once {name} has run, and {name} is not repeatable: make {name} "
+            "repeatable, or start it on another moment"
+        )
+    return None
+
+
+def unmet_at_opening(case: CaseDefinition, name: str) -> str | None:
+    """The first requirement of the step `name` that can't be met as the case opens, with the
+    fix, or None. Nothing has completed then, and only what rules on the opening reach is reached."""
+    reached = opening_reaches(case)
+    for requirement in requirements(case)[name]:
+        if requirement in case.steps and requirement not in case.steps[name].requires:
+            return (
+                f"{name} comes after {requirement} in sequence, and {requirement} can't have "
+                "completed by then: start it on a later moment"
+            )
+        if requirement in case.steps:
+            why = "which can't have completed by then"
+        elif requirement not in reached:
+            why = "which nothing can reach by then"
+        else:
+            continue
+        return (
+            f"{name} requires {requirement}, {why}: start it on a later moment, or remove the "
+            "requirement"
+        )
+    return None
+
+
+def on_own_moment(case: CaseDefinition, rule: str, name: str) -> bool:
+    """Whether the rule fires on the step `name` starting or being answered: a moment that comes
+    only once the step runs."""
+    on = case.rules[rule].on
+    return (isinstance(on, Started) and on.started == name) or (
+        isinstance(on, AnsweredTask) and on.answered == name
+    )
+
+
+def opening_fired(case: CaseDefinition) -> list[str]:
+    """The rules that may fire as the case opens: those on the opening, then those on a milestone
+    one of them may reach, and so on, every `when` taken as possibly true (brief, D38)."""
+    fired: list[str] = []
+    reached: set[str] = set()
+    while True:
+        more = [
+            name
+            for name, rule in case.rules.items()
+            if name not in fired
+            and (
+                rule.on == "opened" or (isinstance(rule.on, Reached) and rule.on.reached in reached)
+            )
+        ]
+        if not more:  # a round added nothing: it ends, over finitely many rules
+            return fired
+        fired += more
+        reached |= {m for name in more for m in case.rules[name].then.reach}
+
+
+def opening_reaches(case: CaseDefinition) -> set[str]:
+    """Every milestone a rule may reach as the case opens."""
+    return {m for name in opening_fired(case) for m in case.rules[name].then.reach}
 
 
 def surely_reached(case: CaseDefinition, catalog: Catalog, name: str) -> tuple[str, ...]:

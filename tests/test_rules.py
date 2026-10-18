@@ -725,6 +725,92 @@ def test_an_unset_field_in_a_steps_condition_counts_its_writers() -> None:
     ]
 
 
+# --- 11b, slice 4: validation ---
+
+
+def starting_at_opening(step: str, **rule: Any) -> dict[str, Any]:
+    """The guide's rework loop, with a rule `start_<step>` that starts `step` as the case opens,
+    changed by `rule`."""
+    definition = guide_rework()
+    definition["rules"][f"start_{step}"] = {
+        "display": {"title": "Start it at once"},
+        "on": "opened",
+        "then": {"start": [step]},
+    } | rule
+    return definition
+
+
+def test_a_start_refused_every_time_is_never_starts() -> None:
+    # A rule on the opening fires once, before anything is done: a step requiring what the opening
+    # can't reach is refused, and the rule never fires again. Only proven when its condition can't
+    # fail: a failed firing is retried later, on the case file as it is then (brief, D34)
+    # (brief, D39).
+    assert [i for i in issues(starting_at_opening("pay")) if i.code == "NEVER_STARTS"] == [
+        Issue(
+            "rules.start_pay.then.start",
+            "NEVER_STARTS",
+            "start_pay can never start pay: it fires on opened, and pay requires lead_checked, "
+            "which nothing can reach by then: start it on a later moment, or remove the "
+            "requirement",
+        )
+    ]
+    run = run_case(starting_at_opening("pay"), file=SMALL, answers=[], people=PEOPLE)
+    assert [line for line in run.history if line.startswith("start_pay#1")] == [
+        (
+            "start_pay#1 on opened: pay not started: pay requires lead_checked, which hasn't "
+            "been reached"
+        )
+    ]
+    may_fail = starting_at_opening("pay", when={"exists": "approved_amount"})
+    assert not [i for i in issues(may_fail) if i.code == "NEVER_STARTS"]
+    # A step whose every start is refused never runs, and says which rule can't start it.
+    only_at_opening = starting_at_opening("lead_check")
+    del only_at_opening["rules"]["check_review"]
+    only_at_opening["steps"]["lead_check"]["requires"] = ["review"]
+    assert [i for i in issues(only_at_opening) if i.path.startswith("steps.lead_check")] == [
+        Issue(
+            "steps.lead_check",
+            "NEVER_RUNS",
+            "lead_check can never run: it starts only when a rule starts it, and start_lead_check "
+            "can never start it: fix start_lead_check first",
+        )
+    ]
+    # Or the rule fires on the step's own run, which isn't repeatable: refused every time too.
+    own_run = guide_rework()
+    own_run["rules"]["again"] = {
+        "display": {"title": "Pay again"},
+        "on": {"started": "pay"},
+        "then": {"start": ["pay"]},
+    }
+    assert [i for i in issues(own_run) if i.code == "NEVER_STARTS"] == [
+        Issue(
+            "rules.again.then.start",
+            "NEVER_STARTS",
+            "again can never start pay: it fires on started pay, while pay is running: start it "
+            "on another moment",
+        )
+    ]
+
+
+def test_a_step_started_only_on_its_own_moment_gets_one_issue() -> None:
+    # Nothing starts lead_check but a rule on its own answer: it never runs, and the rule never
+    # fires, for one cause. One issue names the circle, with no NEVER_FIRES beside it (brief, D39).
+    circle = only_a_rule_starts()
+    circle["rules"]["flag_large"] |= {"on": {"answered": "lead_check"}, "when": None}
+    del circle["milestones"]  # `large`, which nothing reaches here
+    assert issues(circle) == [
+        Issue(
+            "steps.lead_check",
+            "NEVER_RUNS",
+            "lead_check can never run: it starts only when a rule starts it, and flag_large fires "
+            "on answered lead_check, which comes only once lead_check has run: start it from a "
+            "rule on another moment",
+        )
+    ]
+    run = run_case(circle, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert not any(line.startswith(("flag_large", "started lead_check")) for line in run.history)
+
+
 # --- Slice 1: reaching ---
 
 
@@ -1476,7 +1562,11 @@ def test_the_guides_table_of_rule_codes_is_what_validate_case_says() -> None:
     closing_on_checked = guide_case() | {"closes_when": ["checked"]}
     untrusted = guide_case()
     untrusted["rules"]["flag_high_risk"] |= guide_json(2)
-    examples = {"NEVER_FIRES": closing_on_checked, "UNTRUSTED_TRIGGER": untrusted}
+    examples = {
+        "NEVER_FIRES": closing_on_checked,
+        "UNTRUSTED_TRIGGER": untrusted,
+        "NEVER_STARTS": starting_at_opening("pay"),
+    }
     rows = guide_rules_table()
     assert [code for code, _, _ in rows] == list(examples)
     for code, kind, message in rows:
