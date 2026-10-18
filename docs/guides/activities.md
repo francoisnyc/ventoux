@@ -285,9 +285,14 @@ promise:
 | returns a `score` the contract doesn't have | `kyc.check@1 gave score, which its contract doesn't declare` |
 | waits for a signal | `kyc.check@1 didn't finish within its timeout of 600s: a workflow step must not wait for people` |
 | raises `ApplicationError("documents unreadable")` | `kyc.check@1 failed: documents unreadable` |
+| declares `cancellable=True`, and starts a timer after the cancellation is requested | `kyc.check@2 is cancellable, and started a timer after its cancellation was requested` |
+| declares `cancellable=True`, and ends while an activity it started still runs | `kyc.check@2 is cancellable, and ended before everything it started had ended` |
+| declares `cancellable=True`, and ends cancelled though its activity completed after the request | `kyc.check@2 is cancellable, and ended cancelled though an activity completed after the request` |
+| declares `cancellable=True`, and ends before it can be cancelled | `kyc.check@2 is cancellable, and ended before its cancellation was requested, so the promise wasn't checked: give an input that keeps it running` |
 
 For a cancellable contract, the test also starts the workflow a second time, requests its
-cancellation once it has started, and reads its history for the three parts of the promise.
+cancellation once it has started, and reads its history for the three parts of the promise: give
+it an input that keeps the workflow running a while, or there is nothing to cancel.
 
 It checks the shape of what the workflow gives, not where each value really comes from: whether
 `risk_score` is the scoring system's is for code review. A field the case will never read still
