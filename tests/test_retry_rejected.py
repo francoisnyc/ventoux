@@ -549,3 +549,128 @@ def test_a_retry_whose_condition_turns_false_needs_attention() -> None:
             "it holds, or close the case"
         )
     ]
+
+
+def looked_up(*answers: str) -> Activity:
+    """An order lookup that gives each status in turn; `down` for a call that fails."""
+    given = iter(answers)
+
+    def lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        status = next(given)
+        if status == "down":
+            raise ConnectionError("orders system down")
+        return {"status": status}
+
+    return lookup
+
+
+def test_a_retry_whose_refreshed_fact_turns_it_false_needs_attention() -> None:
+    # Path F. pay#1 fails; two days on, an operator retries it, its order status is fetched again
+    # and says the order was cancelled: pay's condition is false now, so the retry fails again,
+    # naming the condition, never the value the lookup gave (the note, decision 2).
+    activities = {
+        "orders.lookup@2": looked_up("delivered", "cancelled"),
+        "payments.refund@2": down_once([]),
+    }
+    script = [
+        ("review", "approve", "ana", {"approved_amount": 80}),
+        later("2d"),
+        retry("pay#1", "omar"),
+    ]
+    definition = generated_definition(fresh=True, audited=False)
+    run = run_case(definition, FILE, script, PEOPLE, activities=activities)
+    condition = 'review.outcome = "approve" and check_order.status = "delivered"'
+    assert run.history[-2:] == [
+        "check_order#2 done, giving status from system:orders",
+        f"pay#1 failed again: its retry can't start: {condition} is false now",
+    ]
+    assert run.needs_attention == [
+        (
+            f"pay#1: its retry can't start: {condition} is false now: retry it once it holds, or "
+            "close the case"
+        )
+    ]
+    assert "cancelled" not in run.needs_attention[0]  # what the case file holds is never quoted
+
+
+def test_a_retry_whose_requirement_was_stopped_needs_attention() -> None:
+    # Path E'. While pay#1's retry waits for its approval, the review is proposed again, so the
+    # retry waits for it; then a rule stops that review. Nothing is on its way to meet pay's
+    # requirement now, so the retry fails again, saying which (the note, decision 2).
+    definition = generated_definition(fresh=False, audited=False)  # with `hold`, which stops review
+    script = [
+        *RESCUED,
+        propose("review", "ana"),  # withdraws pay.approval#1; the retry waits for review#3
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),  # halt stops review#3
+    ]
+    run = run_case(
+        definition, FILE, script, PEOPLE, activities={"payments.refund@2": down_once([])}
+    )
+    assert "cancelled review#3: stopped by halt#1" in run.history
+    assert run.history[-1] == (
+        "pay#1 failed again: its retry can't start: pay requires review, which hasn't completed"
+    )
+    assert run.needs_attention == [
+        (
+            "pay#1: its retry can't start: pay requires review, which hasn't completed: retry it "
+            "once it has, or close the case"
+        )
+    ]
+
+
+def test_a_retry_waits_for_a_requirement_on_its_way() -> None:
+    # Paths C' and I: a step pay requires is on its way, and the case shows it, so the retry
+    # waits, and runs once it completes, as the same run with its key (the note, decision 2).
+    # C': the review proposed again, open in waiting_for.
+    keys: list[str] = []
+    waiting = [*RESCUED, propose("review", "ana")]
+    activities = {"payments.refund@2": down_once(keys)}
+    run = run_case(refund_retried(), FILE, waiting, PEOPLE, activities=activities)
+    assert [(r.entry, r.status) for r in run.state.runs if r.step == "pay"] == [
+        ("pay#1", "retrying")
+    ]
+    assert run.waiting_for == ["review by support"]
+    assert run.needs_attention == []
+    keys.clear()
+    paid = [
+        *waiting,
+        ("review#3", "approve", "ana", {"approved_amount": 250}),
+        ("pay.approval#2", "approve", "sam"),
+    ]
+    run = run_case(refund_retried(), FILE, paid, PEOPLE, activities=activities)
+    assert keys == ["memory/pay#1", "memory/pay#1"]
+    assert run.reached("pay")
+    # I: the retry's refresh fails, and needs attention itself; retried, it lands, and pay runs.
+    definition = generated_definition(fresh=True, audited=False)
+    looked = [
+        ("review", "approve", "ana", {"approved_amount": 80}),
+        later("2d"),
+        retry("pay#1", "omar"),
+    ]
+    run = run_case(
+        definition,
+        FILE,
+        looked,
+        PEOPLE,
+        activities={
+            "orders.lookup@2": looked_up("delivered", "down"),
+            "payments.refund@2": down_once([]),
+        },
+    )
+    assert run.needs_attention == [
+        "check_order#2: orders.lookup@2 failed with ConnectionError: ‹sensitive›"
+    ]
+    keys.clear()
+    run = run_case(
+        definition,
+        FILE,
+        [*looked, retry("check_order#2", "omar")],
+        PEOPLE,
+        activities={
+            "orders.lookup@2": looked_up("delivered", "down", "delivered"),
+            "payments.refund@2": down_once(keys),
+        },
+    )
+    assert keys == ["memory/pay#1", "memory/pay#1"]
+    assert run.closed

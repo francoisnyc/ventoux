@@ -48,8 +48,8 @@ the others go on only if a person happens to act (proposes the review again) wit
      completed`
    - needs attention: `pay#1: its retry can't start: pay requires review, which hasn't
      completed: retry it once it has, or close the case`; for the condition, `… review.outcome
-     == "approve" is false now: retry it once it holds, or close the case` (the condition as the
-     definition writes it, never a value from the case file).
+     = "approve" is false now: retry it once it holds, or close the case` (the condition as the
+     engine writes it from the definition, never a value from the case file).
 
    *Changed 2026-10-18, after the review of slice 1:* first agreed as "a retry lives only while
    it waits for its own approval or its own fact", which failed C′ and I at once. Both go on by
