@@ -20,6 +20,8 @@ from ventoux.testing import (
     AnswerRefused,
     CaseRefused,
     ProposalRefused,
+    close,
+    finish,
     later,
     load_definition,
     propose,
@@ -577,3 +579,46 @@ def test_a_set_sensitive_value_stays_wrapped() -> None:
     assert plain(risk_band) == "band-190101-1234"
     assert not any("190101" in line for line in run.history)
     assert run.view(["support"]).values.get("risk_band") is None
+
+
+# --- Slice 6: the close ---
+
+
+def test_set_stops_with_the_close() -> None:
+    # Once every closes_when milestone is reached, nothing new is decided, a set included, even
+    # on the moment that reached the last one (brief, D38, D42).
+    definition = with_owed(closes_when=["paid"])
+    definition["milestones"] = {"paid": {"display": {"title": "Paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["rules"]["work_out_owed"] |= {"on": {"reached": "paid"}}
+    del definition["rules"]["work_out_owed"]["when"]
+    run = run_case(definition, file=FILE, answers=[APPROVED], people=PEOPLE)
+    assert run.closed
+    assert "owed" not in run.state.values
+    assert (
+        "work_out_owed#1 on reached paid: not applied: paid is reached, so the case closes and "
+        "nothing new is decided"
+    ) in run.history
+
+
+def test_set_doesnt_act_while_the_case_closes() -> None:
+    definition = with_owed()
+    definition["close_reasons"] = {
+        "duplicate": {"display": {"title": "A duplicate"}, "roles": ["support"]}
+    }
+    definition["milestones"] = {"paid": {"display": {"title": "Paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["rules"]["work_out_owed"] |= {"on": {"reached": "paid"}}
+    del definition["rules"]["work_out_owed"]["when"]
+    run = run_case(
+        definition,
+        file=FILE,
+        answers=[APPROVED, close("duplicate", "ana"), finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+    )
+    assert "owed" not in run.state.values
+    assert (
+        "work_out_owed#1 on reached paid: not applied: the case is closing, so nothing new is "
+        "decided"
+    ) in run.history
