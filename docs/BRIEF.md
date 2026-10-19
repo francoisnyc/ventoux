@@ -654,14 +654,19 @@ be erased on request), has size limits, and a second copy of business records go
     sends it back to failed, saying why and what to do. Read once admission has settled, so a
     requirement a rule stopped and another started again in the same decision is on its way;
   - a retry is not refused on a false condition that reads a fact the step needs fresh that is
-    stale: the fact is fetched again first (D33);
+    stale: the fact is fetched again first, if anything can fetch it; if nothing can, the run
+    fails at once on its age (D33);
+  - a refresh of a step, run for another step's fact, is not the run anyone proposed: it spends
+    no proposal, so its proposer still may not approve the run (D25);
   - while every `closes_when` milestone is reached and a failed run holds the close, an approval
     given for any other step is let go, and a person's proposal waiting for its fact is dropped,
     each saying so: nothing waits to start (D34);
   - an approval given and not yet spent lapses when a step its step requires ended without
     completing, saying so; one on its way keeps it, tied to the values it saw (D11);
-  - a history recorded before this amendment in which the case was later brought back by hand (a
-    retry again that now starts at once, a review proposed again, a fact fetched again) may not
+  - a history recorded before this amendment in which the case later went on (a retry sent
+    again that now starts at once; a review proposed again, or a step started again by a rule,
+    and run on what was kept; a retry once refused on a stale fact and now taken; or, once a
+    retry's condition was false, any later event after a fact it needs fresh went stale) may not
     replay: Temporal refuses it, and the case waits until the code is fixed (D17).
 
 ### D27. A case continues as new, keeping its keys (design question 18)

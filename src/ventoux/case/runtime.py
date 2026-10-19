@@ -745,7 +745,8 @@ def retry(
         except StepStopped as unreadable:
             raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
         # A stale fact is fetched again, never trusted to refuse: the retry is taken, and
-        # admission fetches the fact before it reads the condition again (brief, D18) (brief, D33).
+        # admission fetches the fact, if anything can, before it reads the condition again; if
+        # nothing can, the run fails at once on its age (brief, D18) (brief, D33).
         if not decided and not reads_a_stale_fact(step, state, event.at):
             raise RetryRefused(f"{event.entry} can't be retried: {render(step.when)} is false now")
     # A person decided to try again: no longer a run whose stop was asked (brief, D40).
@@ -1133,6 +1134,10 @@ def start(
     if given is not None:
         lapsed(state, name, step, given)
     schedule(case, catalog, state, name, step, given, commands)
+    # The proposed run has started. Spent here, never in `schedule`: a refresh of the step for
+    # another step's fact isn't the run anyone proposed, and its proposer still may not approve
+    # it (brief, D25).
+    proposal_spent(state, name)
 
 
 def schedule(
@@ -1165,7 +1170,6 @@ def schedule(
     run = coming_run(state, name, "running")
     run.approved, run.steered = approved, steered
     run.excluded = may_not_approve(state, name, run)  # read before the proposal is spent
-    proposal_spent(state, name)  # the proposed run has started
     if isinstance(step, WorkflowStep):
         # The run's name names its child workflow on Temporal, as a plan step's does.
         state.history.append(

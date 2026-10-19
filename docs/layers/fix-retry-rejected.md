@@ -13,7 +13,9 @@ are unchanged; otherwise the retry fails again, saying a new approval is needed,
 it needs fresh, fetched again. Nothing ended a retry that stopped waiting for something else.
 Each case below is open, with nothing in `waiting_for` or `needs_attention`, against "nothing is
 skipped automatically" (D17) and "a waiting case says what it waits for" (D24). Some never close;
-the others go on only if a person happens to act (proposes the review again) without being told:
+the others go on only if a person happens to act (proposes the review again) without being told,
+or, on C and F where the step needs a fact fresh, by themselves at any later event once that
+fact is stale again, which fetches it again for the retry:
 
 | | Path | What happened |
 |---|---|---|
@@ -58,9 +60,10 @@ the others go on only if a person happens to act (proposes the review again) wit
 
    *Added 2026-10-18, after the review of slice 3:* an operator's retry is not refused on a
    condition that is false and reads a fact the step needs fresh that is now too old, whatever
-   part of it is false (the engine doesn't tell which): the retry is taken, and admission fetches the fact again before it reads the condition, then
-   starts the run or fails it again, saying so. A stale fact is fetched again, never trusted to
-   refuse (D18, D33). Without it, F's "retry it once it holds" could never be followed once the
+   part of it is false (the engine doesn't tell which): the retry is taken, and admission fetches
+   the fact again, if anything can, before it reads the condition, then starts the run or fails
+   it again, saying so; if nothing can (a person's answer), the run fails at once on the fact's
+   age, as any start does. A stale fact is fetched again, never trusted to refuse (D18, D33). Without it, F's "retry it once it holds" could never be followed once the
    status had aged: `retry` read the condition on the stale value, and only a close was left.
 3. **While the close is held, nothing waits to start** (fixes K and M). Once every
    `closes_when` milestone is reached, nothing new starts (D34); an approval given that can't be
@@ -72,32 +75,41 @@ the others go on only if a person happens to act (proposes the review again) wit
    - a person's proposal waiting for its fact: `dropped ana's proposal of pay: paid is reached,
      so …: nothing new starts`, the line a proposal dropped for any other reason gets (D39).
 
+   The same holds in a decision where a rule reaches the last `closes_when` milestone with
+   nothing holding the close: the case begins closing, and what waits is let go, saying so
+   (`pay not started: audited is reached, so the case closes and nothing new starts`).
+
    The retried run itself is the exception: it is what the held close waits for, so its approval
    is spent as before.
 4. **What no longer replays is a known limit.** The decision that changes schedules nothing
    different on each path, so a history recorded before the fix up to it, or closed after it,
-   replays (a fixture shows one). A history in which the case was later brought back does not:
-   - A, D: someone sent `retry pay#1` again: it was refused before the fix (`has not failed`),
-     and is now taken. If it asks an approval, as it does when nothing changed, that is state, not
-     a command, and the history still replays; if it needs none (the review answered again for
-     less), it schedules `pay#1` at once, and the history doesn't. A fixture recorded under main
-     shows each;
+   replays (a fixture shows one). A history in which the case later went on may not:
+   - A, D, and C, F once the retry failed again on its condition: someone sent `retry pay#1`
+     again: it was refused before the fix (`has not failed`), and is now taken, or refused on its
+     condition. Refused, or taken and asking an approval, as it does when nothing changed, it
+     schedules nothing, and the history still replays; taken and needing no approval (the review
+     answered again for less), or with a fact it needs fresh gone stale, it schedules at once,
+     and the history doesn't. A fixture recorded under main shows each of the first two;
    - A: a repeatable step was proposed again, or started by a rule, after the rejection: before
      the fix it ran as a new run (`pay#3`, with a new key); now the proposal is refused, and the
      rule's start says `… pay not started: pay#1 needs attention: retry it, or close the case`;
    - C, E′, and L on a retry or in a case something keeps open: someone proposed the review
-     again, and pay then ran on the run or approval that was kept: the fix asks a person first
-     (an operator's retry, or a new approval);
-   - L with nothing else open: the fix closes the case at the stop (decision 5), so the review
-     proposed again is refused (`the case is closed: nothing starts`);
-   - F: an event came once the status was stale again, and it was fetched again: the fix leaves
-     the retry failed instead;
+     again, or a rule started it again in a later decision, and pay then ran on the run or
+     approval that was kept: the fix asks a person first (an operator's retry, or a new approval);
+   - L with nothing else open: the fix closes the case at the stop (decision 5). If the review
+     was then proposed again and pay ran, the history doesn't replay; if pay hadn't run yet, it
+     replays, and the case closes at the stop;
+   - C and F, on a step that needs a fact fresh: any event came once the fact was stale, and it
+     was fetched again for the retry, by itself: the fix has left the retry failed, and schedules
+     nothing;
    - any step: a retry refused because its condition was false on a fact it needs fresh that was
-     stale: it is now taken, and the fact is fetched again.
+     stale: it is now taken, and the fact fetched again, or, if nothing can fetch it, the run
+     fails at once on its age.
 
    Temporal refuses such a history, and the case waits until the code is fixed, as 11b's note
-   says of the paths it decided differently (D17). C′, I, K and M decide as before. Closing the
-   gap would need a patch marker passed to `decide` as event data; not built.
+   says of the paths it decided differently (D17). On C′, I, K and M the fix schedules as before
+   (on K and M, decision 3 changes only what is pending and the history), so their histories
+   replay. Closing the gap would need a patch marker passed to `decide` as event data; not built.
 5. **A given approval lapses with its requirement** (fixes L). An approval given, and not yet
    spent because its step waits for a fact, lapses when a step its step requires has ended
    without completing (its latest run cancelled or rejected): nothing is on its way that could
@@ -112,8 +124,8 @@ the others go on only if a person happens to act (proposes the review again) wit
    review answered again with the same values changes none. Both this lapse and decision 2's
    failure of a retry on a requirement that ended are read once admission has settled, at the end
    of the decision: a requirement a rule stopped and another rule started again in the same
-   decision is on its way, never read as ended. Not "whenever its step stops being admitted", as an open approval is
-   withdrawn (D25): that would lapse an approval no value had changed, and decide differently a
+   decision is on its way, never read as ended. Not "whenever its step stops being admitted", as
+   an open approval is withdrawn (D25): that would lapse an approval no value had changed, and decide differently a
    recorded case that went on through a review answered again.
 
 ## The invariant
@@ -229,6 +241,29 @@ finding; all seven held, each fixed in slice 5:
   step that starts by itself: both now say what happens.
 - **`follow`'s docstring** said only a refresh's change lapses an approval; any change does.
 
+## From the final review
+
+Four readers over the whole branch (the documents against the code; the runtime against main;
+the tests and conventions, mutating every hunk of the source diff; a broader generator of its
+own, 5,000 cases with runs held across events) and a skeptic per finding; 19 held, 2 were
+refuted. What changed:
+
+- **A refresh spent the proposal of the step it re-ran:** a proposal of that step waiting for its
+  own fact then raised `KeyError` out of `decide` when dropped (on main already; the branch added
+  a way to reach it), and its proposer could have approved the run. Only `start` spends a
+  proposal now. Seen failing first.
+- **The invariant** let a refresh show a given approval whose requirement had ended, and didn't
+  count a refresh an operator retried, which the runtime does. Both fixed, each with a test seen
+  failing on the earlier check.
+- **Decision 4 and the brief** said only a person's act brings a case back; on C and F any later
+  event does, once the fact is stale. They now list each way, as the fixtures show.
+- **Promises with no test,** each tested now: a run status the check doesn't know; a requirement
+  itself retried; a step with an earlier run nobody retried; a close due mid-decision; a step a
+  rule started asking again; a stale fact nothing can fetch; the guide's held-close line.
+- **Open, for the user:** two paths the review found are decisions, not fixes, and are left as
+  they are: a retry of a failed run its step has run again since (path N), and a retry failed
+  on a requirement whose refresh is running.
+
 ## Where the code goes
 
 - `case/runtime.py`: `answer_approval` sends a rejected retry back to `failed`; `admit` sends a
@@ -237,7 +272,8 @@ finding; all seven held, each fixed in slice 5:
 - `case/admission.py`: `ended_requirement`, a requirement with nothing on its way, read for a
   retry (decision 2) and for an approval given (decision 5).
 - `case/runtime.py`, once admission has settled: `nothing_on_its_way` lapses an approval given
-  and fails a retry whose requirement ended.
+  and fails a retry whose requirement ended. `start`, not `schedule`, spends a proposal: a refresh
+  of the step isn't the run anyone proposed.
 - `docs/BRIEF.md`: D26's amendment. `docs/guides/cases.md`: a retry that can't start, and what a
   held close lets go.
 - `tests/invariants.py` (new): the check, as a function of the definition and the state, and
@@ -287,12 +323,12 @@ Each starts with its negative test, seen failing for the right reason.
 ## Promises
 
 Drafted before building, then checked against the files once built, 2026-10-18: every test
-named here exists where it says (34 tests). Every test is in `tests/test_retry_rejected.py`
-unless said otherwise.
+named here exists where it says (44 tests, checked again after the final review). Every test is
+in `tests/test_retry_rejected.py` unless said otherwise.
 
 | Promise | Test that would fail |
 |---|---|
-| After every decision the in-memory driver makes, and every one a test asks of `decide`, an open case shows each pending item, whether or not it stays open; a run status the check doesn't know fails it | `every_decision_shows_what_is_pending` (`tests/conftest.py`), run by every test |
+| After every decision the in-memory driver makes, and every one a test asks of `decide`, an open case shows each pending item, whether or not it stays open; a retry waiting for a refresh an operator retried is shown through it, and a given approval isn't shown by a refresh it can't use; a run status the check doesn't know fails it | `every_decision_shows_what_is_pending` (`tests/conftest.py`), run by every test; `test_a_retry_waiting_for_a_retried_refresh_is_shown_through_it`, `test_a_given_approval_is_not_shown_by_a_refresh_it_cant_use` (each seen failing on the earlier check), `test_a_run_status_the_check_doesnt_know_fails_it` |
 | Generated cases on the refund leave nothing pending unshown, and still reach the paths they were seen failing on | `test_generated_cases_show_what_is_pending` (seen failing on main), `test_the_generated_cases_reach_the_paths` |
 | A rejected retry goes back to `failed`, needing attention, saying so; there is no new run | `test_a_rejected_retry_needs_attention_again` |
 | Retried again, it asks again, and pays once with the first run's key | `test_a_rejected_retry_retried_again_asks_again` |
@@ -300,11 +336,13 @@ unless said otherwise.
 | A rejection of a step that isn't being retried is an outcome, as before: a new run recorded rejected | `test_an_ordinary_rejection_is_not_a_rescue` (seen failing with the guard dropped) |
 | A rejected retry while the close is held keeps holding it, shown, and the case closes once it is retried to completion | `test_a_rejected_retry_holds_the_close_and_says_so` |
 | A retry whose `when` turns false, before or after its fact is fetched again, needs attention again, naming the condition and never a value | `test_a_retry_whose_condition_turns_false_needs_attention`, `test_a_retry_whose_refreshed_fact_turns_it_false_needs_attention` |
-| A retry whose condition is false and reads a fact it needs fresh that is stale is taken, and the fact fetched again: then it runs with its key, or fails again; on a fresh fact, or a stale one its condition doesn't read, it is refused | `test_a_retry_whose_condition_reads_a_stale_fact_fetches_it_again` (seen failing first), `test_a_retry_isnt_taken_for_a_stale_fact_its_condition_doesnt_read` |
-| A retry whose requirement a rule stopped, or whose approval was rejected, needs attention again, naming that one, wherever it is listed and beside one still on its way; one whose requirements are on their way (proposed again and open or running, or a failed refresh) waits, and runs once they complete, with its key | `test_a_retry_whose_requirement_was_stopped_needs_attention`, `test_a_retry_reads_each_requirement_it_waits_for`, `test_a_retry_waits_for_a_requirement_on_its_way` (each seen failing on a mutation of `ended_requirement`) |
-| An approval given while the close is held, or given before and waiting for its fact, starts nothing, says so in the decision that finds the close held, whatever its step's requirements, and isn't pending; only what is let go says so | `test_an_approval_answered_while_the_close_is_held_starts_nothing` (`tests/test_case.py`, as before, under the hook again), `test_an_approval_given_while_the_close_is_held_is_let_go` (`tests/test_case.py`, seen failing on main), `test_an_approval_waiting_for_its_fact_when_the_close_is_held_is_let_go`, `test_an_approval_whose_requirement_is_on_its_way_when_the_close_is_held_is_let_go` (seen failing first) |
+| A retry whose condition is false and reads a fact it needs fresh that is stale is taken, and the fact fetched again: then it runs with its key, or fails again; on a fresh fact, or a stale one its condition doesn't read, it is refused; a stale fact nothing can fetch fails the run at once on its age | `test_a_retry_whose_condition_reads_a_stale_fact_fetches_it_again` (seen failing first), `test_a_retry_isnt_taken_for_a_stale_fact_its_condition_doesnt_read`, `test_a_retry_on_a_stale_fact_nothing_can_fetch_fails_at_once_on_its_age` |
+| A refresh of a step, run for another step's fact, spends no proposal: a proposal of that step waiting for its own fact is dropped, saying whose it was, never an error | `test_a_refresh_spends_no_proposal` (seen failing first, with a `KeyError` out of `decide`) |
+| A retry whose requirement a rule stopped, or whose approval was rejected, needs attention again, naming that one, wherever it is listed and beside one still on its way; one whose requirements are on their way (proposed again and open or running, or a failed refresh) waits, and runs once they complete, with its key | `test_a_retry_whose_requirement_was_stopped_needs_attention`, `test_a_retry_reads_each_requirement_it_waits_for`, `test_a_retry_waits_for_a_requirement_on_its_way`, `test_a_retry_waits_for_a_requirement_itself_retried` (each seen failing on a mutation of `ended_requirement`) |
+| Only a retried run fails again or starts while the close is held: a step whose earlier run nobody retried starts nothing new while the close is held, and its done run isn't failed by its condition | `test_a_step_with_an_earlier_run_starts_nothing_while_the_close_is_held`, `test_a_run_nobody_retried_isnt_failed_by_its_condition` |
+| An approval given while the close is held, or given before and waiting for its fact, starts nothing, says so in the decision that finds the close held, whatever its step's requirements, and isn't pending; only what is let go says so | `test_an_approval_answered_while_the_close_is_held_starts_nothing` (`tests/test_case.py`, as before, under the hook again), `test_an_approval_given_while_the_close_is_held_is_let_go` (`tests/test_case.py`, seen failing on main), `test_an_approval_waiting_for_its_fact_when_the_close_is_held_is_let_go`, `test_an_approval_whose_requirement_is_on_its_way_when_the_close_is_held_is_let_go` (seen failing first); and when a rule reaches the last milestone with nothing holding the close, it is let go saying the case closes: `test_a_close_due_mid_decision_lets_an_approval_go_saying_the_case_closes` |
 | A person's proposal waiting for its fact when the close becomes held is dropped then, before the fact lands, saying so | `test_a_proposal_waiting_when_the_close_is_held_is_dropped` (seen failing on main) |
-| A given approval whose requirement a rule stopped, or was rejected, lapses, saying so, and the case closes if nothing else is left, or the step asks again once admitted again (by itself once the requirement completes, if it starts by itself; once proposed again, if a person proposed it); on a retry, it lapses before the retry fails again, nothing runs under a new key, and the next retry asks again | `test_a_given_approval_lapses_with_its_requirement` (seen failing on main), `test_a_retry_s_given_approval_lapses_with_its_requirement` (seen failing on main), `test_a_given_approval_lapses_with_a_rejected_requirement`, `test_a_proposed_step_whose_approval_lapsed_asks_again_once_proposed_again` |
+| A given approval whose requirement a rule stopped, or was rejected, lapses, saying so, and the case closes if nothing else is left, or the step asks again once admitted again (by itself once the requirement completes, if it starts by itself; once proposed again, if a person proposed it); on a retry, it lapses before the retry fails again, nothing runs under a new key, and the next retry asks again | `test_a_given_approval_lapses_with_its_requirement` (seen failing on main), `test_a_retry_s_given_approval_lapses_with_its_requirement` (seen failing on main), `test_a_given_approval_lapses_with_a_rejected_requirement`, `test_a_proposed_step_whose_approval_lapsed_asks_again_once_proposed_again`, `test_a_step_a_rule_started_asks_again_once_its_rule_fires_again` |
 | A given approval whose requirement is on its way stays, and is spent on the first run's key, asking nothing again: the review answered again with the same values, a refresh that failed and is retried, a requirement running | `test_a_given_approval_survives_a_review_answered_the_same`, `test_a_given_approval_waits_for_a_requirement_on_its_way` (each seen failing on a mutation that lapses it) |
 | A requirement one rule stopped and another started again in the same decision, on the same moment or a later one, is on its way: a given approval stays and is spent with the first key; a retry keeps waiting, and runs with its key | `test_a_requirement_a_rule_starts_again_keeps_what_waits_for_it` (seen failing first) |
 | A person may close a case whose rescue was rejected | `test_a_rejected_retry_can_be_closed` |

@@ -48,9 +48,7 @@ def unshown(case: CaseDefinition, state: CaseState) -> list[str]:
         if approval.entry not in state.waiting:
             silent.append(f"{approval.entry} is open, and waiting_for doesn't list it")
     for name, given in state.given.items():
-        if not fact_on_its_way(case, state, name) and not requirements_on_their_way(
-            case, state, name
-        ):
+        if not waits_for_what_can_let_it_start(case, state, name):
             silent.append(f"{given.entry} is given, and {name} waits for no fact or requirement")
     for name in state.waiting_to_start:
         if not fact_on_its_way(case, state, name):
@@ -66,22 +64,44 @@ def retry_waits_for_its_own(case: CaseDefinition, state: CaseState, name: str) -
     approval = state.approvals.get(name)
     if approval is not None and approval.entry in state.waiting:
         return True
+    return waits_for_what_can_let_it_start(case, state, name)
+
+
+def waits_for_what_can_let_it_start(
+    case: CaseDefinition, state: CaseState, name: str, followed: frozenset[str] = frozenset()
+) -> bool:
+    """Its requirements met, whether a fact it needs fresh is on its way; otherwise whether each
+    requirement that hasn't completed is. Admission reads `requires` before freshness, so a
+    refresh helps only once the requirements are met (the note, decisions 2 and 5). `followed`:
+    the steps already followed through a retried refresh."""
     if requirements_met(requirements(case)[name], state):
-        return fact_on_its_way(case, state, name)
+        return fact_on_its_way(case, state, name, followed)
     return requirements_on_their_way(case, state, name)
 
 
-def fact_on_its_way(case: CaseDefinition, state: CaseState, name: str) -> bool:
-    """Whether a fact the step needs fresh is being fetched again: its refresh is running."""
+def fact_on_its_way(
+    case: CaseDefinition, state: CaseState, name: str, followed: frozenset[str] = frozenset()
+) -> bool:
+    """Whether a fact the step needs fresh is being fetched again: its refresh is running, or an
+    operator retried it and it waits, in turn, for what can let it start, as admission counts it
+    (`refresh_stale`). Never back through a step already followed: two refreshes waiting for each
+    other wait for nothing."""
     step = case.steps[name]
     if isinstance(step, TaskStep):
         return False  # a task needs no fact fresh
     runs = {run.entry: run for run in state.runs}
-    return any(
-        runs[entry].status == "running"
-        for field, entry in state.refreshing.items()
-        if field in step.max_age and entry in runs
-    )
+    for field, entry in state.refreshing.items():
+        if field not in step.max_age or entry not in runs:
+            continue
+        refresh = runs[entry]
+        if refresh.status == "running":
+            return True
+        retried = refresh.status == "retrying" and refresh.step not in followed | {name}
+        if retried and waits_for_what_can_let_it_start(
+            case, state, refresh.step, followed | {name}
+        ):
+            return True
+    return False
 
 
 def requirements_on_their_way(case: CaseDefinition, state: CaseState, name: str) -> bool:

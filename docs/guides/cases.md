@@ -304,7 +304,10 @@ sends it back to needing attention, as the run it is, saying why and what to do:
   completed`.
 
 A retry is never refused on a condition that reads a fact the step needs fresh and has gone
-stale: the fact is fetched again first, then the condition is read.
+stale: the fact is fetched again first, if anything can fetch it, then the condition is read. If
+nothing can (a person's answer, say), the retry fails at once on the fact's age, as any start
+does, saying why: `pay#1 failed: review.outcome was obtained 2 days ago, and pay needs it at most
+1 day old: it came from a person, so it can't be fetched again`.
 
 **Nothing starts beside a failed run.** Say `check_order` is `repeatable`. While `check_order#1`
 needs attention, proposing `check_order` again is refused (`check_order#1 needs attention: retry

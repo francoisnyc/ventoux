@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from invariants import Silent
+from invariants import Silent, unshown
+from test_case import OPERATORS, SMALL, SMALL_REVIEW, goodwill_while_held
 
 from ventoux.case.definition import parse_case
 from ventoux.case.memory import Activity, CaseRun, Driver, no_plans
@@ -765,7 +766,8 @@ def test_a_retry_reads_each_requirement_it_waits_for() -> None:
         ("verify.approval#1", "approve", "sam"),
         finish("verify#1"),
         *RESCUED,  # asks pay.approval#1
-        propose("verify", "ana"),  # withdraws it: the retry waits for verify#2's approval
+        # Asks verify.approval#2; pay.approval#1 stays open until verify#2 is rejected or runs.
+        propose("verify", "ana"),
     ]
 
     def played(script: list[Any], keys: list[str]) -> CaseRun:
@@ -1102,8 +1104,8 @@ def in_the_guide(line: str) -> bool:
 
 
 def test_the_guides_retry_lines_are_what_the_engine_says() -> None:
-    # Each line the guide quotes for a retry that can't start, played: the guide can't drift
-    # from the engine.
+    # Each line the guide quotes for a retry that can't start, and for an approval a held close
+    # lets go, played: the guide can't drift from the engine.
     rejected = run_case(
         refund_retried(), FILE, REJECTED, PEOPLE, activities={"payments.refund@2": down_once([])}
     )
@@ -1128,10 +1130,367 @@ def test_the_guides_retry_lines_are_what_the_engine_says() -> None:
         PEOPLE,
         activities={"payments.refund@2": down_once([])},
     )
+    unfetchable = refund_retried()
+    unfetchable["steps"]["pay"]["max_age"] = {"review.outcome": "1d"}
+    aged: list[Any] = [*turned_false[:1], propose("review", "ana"), ("review#2", "reject", "ana")]
+    aged += [later("2d"), retry("pay#1", "omar")]
+    stale = run_case(
+        unfetchable, FILE, aged, PEOPLE, activities={"payments.refund@2": down_once([])}
+    )
     for line in [
         rejected.history[-1],
         rejected.needs_attention[0],
         false_now.history[-1],
         ended.history[-1],
+        stale.history[-1],
     ]:
         assert in_the_guide(line), line
+    # And the line for an approval a held close lets go, which the guide shortens.
+    definition, fakes = goodwill_while_held()
+    answers = [SMALL_REVIEW, ("goodwill", "approve", "sam")]
+    let_go = run_case(definition, SMALL, answers, OPERATORS, activities=fakes)
+    quoted = "goodwill not started: paid is reached, "
+    assert let_go.history[-1].startswith(quoted), let_go.history[-1]
+    assert in_the_guide(f"`{quoted}…`")
+
+
+# --- The final review: what the branch promised and no test showed ---
+
+
+def test_a_run_status_the_check_doesnt_know_fails_it() -> None:
+    # The invariant fails closed: a status its `match` doesn't name is an error, never "shown".
+    definition = refund_retried()
+    run = run_case(definition, FILE, [], PEOPLE)
+    run.state.runs[0].status = "paused"  # type: ignore[assignment]
+    with pytest.raises(AssertionError) as raised:
+        unshown(parse_case(definition), run.state)
+    assert not isinstance(raised.value, Silent)  # a run it can't read, not a silent one
+
+
+def test_a_retry_waits_for_a_requirement_itself_retried() -> None:
+    # pay#1's retry waits for verify; verify#2 fails, and once its fact is stale an operator
+    # retries it, so it waits for the order's status fetched again. A requirement retried is on
+    # its way: pay#1 keeps waiting, and runs once verify#2 lands (the note, decision 2).
+    definition = verified(fresh=True)
+    definition["steps"]["verify"] |= {
+        "requires": ["check_order"],
+        "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+        "max_age": {"check_order.status": "1d"},
+    }
+    script = [
+        finish("check_order#1"),
+        ("verify.approval#1", "approve", "sam"),
+        finish("verify#1"),
+        *RESCUED,  # retried, pay#1 asks pay.approval#1
+        propose("verify", "ana"),
+        ("verify.approval#2", "approve", "sam"),  # verify#2 runs, held
+        finish("verify#2"),  # the lookup is down: verify#2 fails, for an operator
+        later("2d"),
+        retry("verify#2", "omar"),  # its status is stale: check_order#2 fetches it, held
+    ]
+    held = ["check_order", "verify"]
+
+    def played(more: list[Any], keys: list[str]) -> CaseRun:
+        activities = {
+            "orders.lookup@2": looked_up(
+                "delivered", "delivered", "down", "delivered", "delivered"
+            ),
+            "payments.refund@2": down_once(keys),
+        }
+        return run_case(
+            definition, FILE, [*script, *more], PEOPLE, activities=activities, held=held
+        )
+
+    run = played([], [])
+    assert [(r.entry, r.status) for r in run.state.runs if r.step in ("pay", "verify")] == [
+        ("verify#1", "done"),
+        ("pay#1", "retrying"),
+        ("verify#2", "retrying"),
+    ]
+    assert run.needs_attention == []
+    keys: list[str] = []
+    run = played(
+        [finish("check_order#2"), finish("verify#2"), ("pay.approval#2", "approve", "sam")], keys
+    )
+    assert keys == ["memory/pay#1", "memory/pay#1"]
+    assert run.closed
+
+
+def test_a_step_with_an_earlier_run_starts_nothing_while_the_close_is_held() -> None:
+    # pay#1 paid; pay, repeatable, is proposed again and asks its approval; then the close is
+    # held. The approval given now is let go: pay#1 isn't being retried, so nothing new starts
+    # (the note, decision 3).
+    definition = held_by_a_rule()
+    definition["steps"]["pay"] |= {"proposed_by": ["support"], "repeatable": True}
+    script = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 80}),  # pay#1 pays, unapproved
+        propose("review", "ana"),
+        ("review#2", "approve", "ana", {"approved_amount": 250}),
+        propose("pay", "ana"),  # asks pay.approval#1
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),  # broken#1 fails
+        ("audit", "done", "ana"),  # the close is held by broken#1
+        ("pay.approval#1", "approve", "sam"),
+    ]
+    run = run_case(definition, FILE, script, PEOPLE, activities=DELIVERED, held=["check_order"])
+    assert run.history[-1] == f"pay not started: {HELD}"
+    assert not any(line.startswith("scheduled pay#2") for line in run.history)
+
+
+def test_a_run_nobody_retried_isnt_failed_by_its_condition() -> None:
+    # pay#1 paid; pay, repeatable, is proposed again and waits for its fact, which says the
+    # order was cancelled: the proposal is dropped, and pay#1, which nobody retried, stays done
+    # (the note, decision 2: only a retried run fails again).
+    definition = held_by_a_rule()
+    definition["steps"]["pay"] |= {"proposed_by": ["support"], "repeatable": True}
+    definition["stays_open"] = True
+    script = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 80}),  # pay#1 pays, unapproved
+        later("2d"),
+        propose("pay", "ana"),  # waits for the status, fetched again: check_order#2, held
+        finish("check_order#2"),  # cancelled: pay's condition is false now
+    ]
+    activities = {"orders.lookup@2": looked_up("delivered", "cancelled")}
+    run = run_case(definition, FILE, script, PEOPLE, activities=activities, held=["check_order"])
+    assert [(r.entry, r.status) for r in run.state.runs if r.step == "pay"] == [("pay#1", "done")]
+    assert run.needs_attention == []
+
+
+def test_a_close_due_mid_decision_lets_an_approval_go_saying_the_case_closes() -> None:
+    # A rule reaches the case's only closes_when milestone while pay's approval waits for its
+    # fact, and nothing holds the close: the approval is let go, saying the case closes, in that
+    # decision (the note, decision 3).
+    definition = generated_definition(fresh=True, audited=False)
+    definition["milestones"] = {"audited": {"display": {"title": "Audited"}}}
+    definition["closes_when"] = ["audited"]
+    definition["rules"]["audit_on_hold"] = {
+        "display": {"title": "Audited once held"},
+        "on": {"answered": "hold"},
+        "then": {"reach": ["audited"]},
+    }
+    script = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        later("2d"),
+        ("pay.approval#1", "approve", "sam"),  # given; the status is fetched again, held
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),  # audit_on_hold reaches audited
+    ]
+    run = run_case(definition, FILE, script, PEOPLE, activities=DELIVERED, held=["check_order"])
+    assert (
+        "pay not started: audited is reached, so the case closes and nothing new starts"
+        in run.history
+    )
+
+
+def test_a_step_a_rule_started_asks_again_once_its_rule_fires_again() -> None:
+    # pay is started by a rule on a nudge's answer; its approval lapses with its requirement. The
+    # review completing again starts nothing by itself; the nudge answered again does, and pay
+    # asks a new approval (the note, decision 5) (brief, D25).
+    definition = generated_definition(fresh=True, audited=False)
+    definition["steps"]["pay"] |= {"automatic": False}
+    definition["steps"]["nudge"] = {
+        "kind": "task",
+        "display": {"title": "Nudge the payment"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "repeatable": True,
+        "outcomes": {"go": {"display": {"title": "Go"}}},
+    }
+    definition["rules"]["go"] = {
+        "display": {"title": "Pay once nudged"},
+        "on": {"answered": "nudge"},
+        "then": {"start": ["pay"]},
+    }
+    definition["stays_open"] = True
+    script = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        propose("nudge", "ana"),
+        ("nudge#1", "go", "ana"),  # go starts pay: asks pay.approval#1
+        later("2d"),
+        ("pay.approval#1", "approve", "sam"),  # given; the status is fetched again, held
+        propose("review", "ana"),
+        finish("check_order#2"),
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),  # halt stops review#2: the approval lapses
+        propose("review", "ana"),
+        ("review#3", "approve", "ana", {"approved_amount": 250}),
+    ]
+    run = run_case(definition, FILE, script, PEOPLE, activities=DELIVERED, held=["check_order"])
+    assert "lapsed pay.approval#1: pay requires review, which hasn't completed" in run.history
+    assert run.waiting_for == []
+    again = [*script, propose("nudge", "ana"), ("nudge#2", "go", "ana")]
+    run = run_case(definition, FILE, again, PEOPLE, activities=DELIVERED, held=["check_order"])
+    assert run.waiting_for == ["approval of pay by support-lead"]
+
+
+def test_a_retry_on_a_stale_fact_nothing_can_fetch_fails_at_once_on_its_age() -> None:
+    # The fact pay needs fresh came from a person, so nothing can fetch it again: the retry is
+    # taken, and fails at once on the fact's age, as any start does, saying why; nothing is
+    # fetched, and nothing paid (the note, decision 2) (brief, D33).
+    definition = refund_retried()
+    definition["steps"]["pay"]["max_age"] = {"review.outcome": "1d"}
+    script = [
+        ("review", "approve", "ana", {"approved_amount": 80}),  # pay#1 fails
+        propose("review", "ana"),
+        ("review#2", "reject", "ana"),  # pay's condition is false now
+        later("2d"),  # review.outcome is stale
+        retry("pay#1", "omar"),
+    ]
+    keys: list[str] = []
+    run = run_case(
+        definition, FILE, script, PEOPLE, activities={"payments.refund@2": down_once(keys)}
+    )
+    assert "omar retried pay#1 as operations" in run.history
+    assert run.needs_attention == [
+        (
+            "pay#1: review.outcome was obtained 2 days ago, and pay needs it at most 1 day old: "
+            "it came from a person, so it can't be fetched again"
+        )
+    ]
+    assert not any(line.startswith("refreshing") for line in run.history)
+    assert keys == ["memory/pay#1"]
+
+
+def test_a_refresh_spends_no_proposal() -> None:
+    # check_order is proposed by Ana and waits for its own fact; meanwhile pay's need fetches
+    # check_order again. A refresh is not the proposed run, so Ana's proposal stays hers: once
+    # its fact says the order was cancelled, it is dropped, saying whose it was, never an error
+    # out of the decision (fail closed).
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["check_customer"] = {
+        "kind": "activity",
+        "display": {"title": "Check the customer"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    definition["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "requires": ["check_customer"],
+        "repeatable": True,
+        "proposed_by": ["support"],
+        "when": {"==": [{"var": "check_customer.status"}, "delivered"]},
+        "max_age": {"check_customer.status": "1d"},
+    }
+    definition["steps"]["pay"] |= {
+        "requires": ["review", "check_order"],
+        "when": {
+            "and": [
+                {"==": [{"var": "review.outcome"}, "approve"]},
+                {"==": [{"var": "check_order.status"}, "delivered"]},
+            ]
+        },
+        "max_age": {"check_order.status": "1d"},
+    }
+    script = [
+        finish("check_customer#1"),
+        finish("check_order#1"),
+        later("2d"),
+        propose("check_order", "ana"),  # its fact is stale: check_customer#2, held
+        ("review#1", "approve", "ana", {"approved_amount": 80}),  # pay: check_order#2, held
+        finish("check_order#2"),  # delivered: pay runs
+        finish("check_customer#2"),  # cancelled: Ana's proposal no longer holds
+    ]
+    lookup = looked_up("delivered", "delivered", "delivered", "cancelled")
+    run = run_case(
+        definition,
+        FILE,
+        script,
+        PEOPLE,
+        activities={"orders.lookup@2": lookup},
+        held=["check_customer", "check_order"],
+    )
+    dropped = [line for line in run.history if line.startswith("dropped ana's proposal")]
+    assert dropped == [
+        'dropped ana\'s proposal of check_order: check_customer.status = "delivered" is false'
+    ]
+
+
+def chained() -> dict[str, Any]:
+    """The refund whose pay reads the order's status, fresh, without requiring the lookup that
+    gives it, a lookup that itself needs the customer's status fresh."""
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["check_customer"] = {
+        "kind": "activity",
+        "display": {"title": "Check the customer"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    definition["steps"]["check_order"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "requires": ["check_customer"],
+        "when": {"==": [{"var": "check_customer.status"}, "delivered"]},
+        "max_age": {"check_customer.status": "1d"},
+    }
+    definition["steps"]["pay"] |= {
+        "when": {
+            "and": [
+                {"==": [{"var": "review.outcome"}, "approve"]},
+                {"==": [{"var": "check_order.status"}, "delivered"]},
+            ]
+        },
+        "max_age": {"check_order.status": "1d"},
+    }
+    return definition
+
+
+def test_a_retry_waiting_for_a_retried_refresh_is_shown_through_it() -> None:
+    # pay#1's retry waits for the order's status fetched again, check_order#2, which failed and
+    # an operator retried; it waits in turn for the customer's status, fetched again. The
+    # runtime counts a retried refresh as on its way, so the invariant does too, and the case
+    # goes on by itself once the customer's status lands (the note, "The invariant").
+    script = [
+        finish("check_customer#1"),  # check_order#1 runs
+        ("review", "approve", "ana", {"approved_amount": 80}),  # pay#1 fails
+        later("2d"),
+        retry(
+            "pay#1", "omar"
+        ),  # check_order#2 fetches the status again: it fails, and so does pay#1
+        retry("check_order#2", "omar"),  # its own fact is stale: check_customer#2, held
+        retry("pay#1", "omar"),  # waits for check_order#2, retried
+    ]
+    keys: list[str] = []
+    activities = {
+        "orders.lookup@2": looked_up("delivered", "delivered", "down", "delivered", "delivered"),
+        "payments.refund@2": down_once(keys),
+    }
+    run = run_case(
+        chained(),
+        FILE,
+        [*script, finish("check_customer#2")],
+        PEOPLE,
+        activities=activities,
+        held=["check_customer"],
+    )
+    assert keys == ["memory/pay#1", "memory/pay#1"]
+    assert run.closed
+
+
+def test_a_given_approval_is_not_shown_by_a_refresh_it_cant_use() -> None:
+    # A given approval whose requirement ended can't be spent, so a refresh of its fact still
+    # running doesn't show it: admission reads `requires` before freshness. Read on a state the
+    # runtime now never leaves (it lapses the approval), so the invariant can't pass it either.
+    definition = generated_definition(fresh=True, audited=False)
+    script = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        later("2d"),
+        ("pay.approval#1", "approve", "sam"),  # given; check_order#2 runs, held
+        propose("review", "ana"),  # review#2 opens: the approval is shown through it
+    ]
+    run = run_case(definition, FILE, script, PEOPLE, activities=DELIVERED, held=["check_order"])
+    assert unshown(parse_case(definition), run.state) == []
+    next(r for r in run.state.runs if r.entry == "review#2").status = "cancelled"
+    assert unshown(parse_case(definition), run.state) == [
+        "pay.approval#1 is given, and pay waits for no fact or requirement"
+    ]
