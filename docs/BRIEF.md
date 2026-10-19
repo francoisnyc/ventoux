@@ -1210,6 +1210,11 @@ text is kept.*
     a person's proposal, and a retry fails the same way;
   - a start of a step that is approved and waiting for a fact is recorded, and nothing runs, as
     one waiting to start is: the step starts on that approval once the fact lands.
+- **Amended 2026-10-19, by D43** (the text above stands; this narrows it): the influence doesn't
+  end at the step the condition lets start. Its run keeps what steered it, and its start, its
+  outcome, its outputs and the steps requiring it carry it on; a rule on its start that reaches
+  or stops doesn't act, and the run itself reaches nothing unless it is a task, whose answer is a
+  person's. A person in a task is where it ends; an approval is not.
 
 ### D40. Rules that stop steps: what a close does, to one step, through one place
 
@@ -1383,6 +1388,53 @@ text is kept.*
   value an approval saw withdraws or lapses it, as any change does (D25, D33).
 - **Known limit:** a milestone a rule reaches on a field narrowed by `visible_to` is seen by
   everyone, as before 11e; recorded for the checkpoint before layer 12.
+- **Amended 2026-10-19, by D43** (the text above stands; this narrows it): "the moment doesn't
+  count" holds for who may approve, not for trust. A rule on the start of a run that untrusted
+  data steered sets a value that carries what steered it, as if its condition had read it.
+
+### D43. A run carries what steered it, and passes it on
+
+*Decided 2026-10-19, in the fix of the untrusted moment (`docs/layers/fix-untrusted-moment.md`).
+Adds to D29, D38, D39, D40, D41 and D42, whose text is kept.*
+
+- **The bug it fixes.** Untrusted data decided without being read as a value. A rule could start
+  a step on what a customer typed (D39 allows it: its inputs' policies are checked), and a second
+  rule on that step's start, reading nothing untrusted, reached the milestone that closed the
+  case. The same went through the step's own `when`, the run's own `reaches`, its outcome read
+  later, a step requiring it, a wait, a stop, a `set` and a start made on that moment; and case
+  validation said nothing. D38 says untrusted data never decides; D39's "a rule on that step's
+  start may carry it further" left the door open.
+- **A run keeps what steered its start:** the untrusted (or unrecognised) sources of every
+  condition that let it start: its own `when`; the `when` of the rule that started it, and what
+  that rule's moment carried; and what steered the latest done run of each step it requires,
+  unless that step is a task. A refresh also keeps what steered the step it fetches for. Every
+  kind of step keeps it, a task and a wait included, for its retry and across continue-as-new.
+- **A run's start carries it on.** A rule on its `started` moment counts it as read by its
+  condition: a rule that reaches or stops doesn't act (D38, D40), saying what steered the start,
+  never a value; a value it sets carries it (narrows D42's "the moment doesn't count"); a step it
+  starts has it checked against each input's policy (D39), and carries it on in turn. A failed
+  firing keeps it for its retry.
+- **What only untrusted data made exist is untrusted** (adds to D29). A steered activity's,
+  workflow's or plan's outcome and outputs carry what steered the run, beside their contract's
+  or plan's source.
+- **A steered run reaches nothing.** An activity, a workflow, a plan or a wait run that untrusted
+  data steered is done, and its `reaches` aren't applied, saying why. So a milestone is reached
+  only by a trusted decision or a person, and never carries what steered anything.
+- **A person is where it ends** (D12, D39). A task's answer, its outcome, its form, its
+  `reaches` and its `answered` moment come from the person who answered, who is the safe tool
+  D39 names. An approval is not: it approves the run's inputs (D11), its approver may never see
+  what steered the start, and whether it is asked may hang on its own `when`'s threshold. An
+  event's arrival and the opening are facts (D41): their moments carry nothing.
+- **Case validation stays a proof** (D34). How each step's runs may be steered is grown in 11e's
+  fixpoint (D42) with the case file's sources, since each feeds the other: from the step's own
+  `when` and what it requires, and from each way it starts (by itself, a person's proposal, each
+  rule that may start it, with its condition and its moment). `UNTRUSTED_TRIGGER` is claimed
+  where every way is steered whoever writes what it reads, `WRITER_DECIDES` warns where only some
+  are, at a rule on such a start, a steered run's `reaches`, and every value read from a steered
+  outcome or output; `INPUT_POLICY` at a start made on such a moment.
+- **Cases already open** on a path the fix decides differently replay differently, and wait until
+  the code is fixed (D17), as 11b's did: carried to layer 12. A later moment a run brings (11f's
+  timers `since` a start) carries what steered the run too.
 
 ### Simplifications adopted
 

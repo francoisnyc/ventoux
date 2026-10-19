@@ -691,9 +691,25 @@ that takes a value from one system only, such as `ledger.record@1`'s amount (onl
 opener), is still sent when its step's `when` reads a person's answer. An approval whose `when`
 reads untrusted data is asked whatever it says: untrusted data can add an approval, never remove
 one. A rule that reaches a milestone still reaches nothing on untrusted data (above), and starts
-nothing either: it doesn't act at all. The influence ends at the step the condition lets start: a
-rule on that step's start can carry it further, so where untrusted data should weigh on what
-happens next, let a person decide, in a task or an approval.
+nothing either: it doesn't act at all.
+
+**The influence goes on with the run.** A run keeps what steered its start, and passes it on: a
+rule on its start counts it as read by its condition, so one that reaches or stops doesn't act,
+here on the start of a goodbye call a rule began because of what the customer wrote:
+
+```
+close_it#1 on started goodbye: reaches nothing: its moment comes from untrusted data: say_goodbye#1's condition, which started goodbye, reads cancelled.note (untrusted:customer), and untrusted data can't decide
+```
+
+A value such a rule sets carries it, and a step it starts has it checked against each input's
+policy. A steered activity, workflow, plan or wait is done but reaches nothing; its outcome and
+outputs carry what steered it, and so does every step that requires it. A person is where it ends:
+a task's answer, its outcome's milestones and a rule on that answer decide. An approval doesn't
+end it: the approver approves what the step is sent, not what follows, and may never see what
+steered the start. So where untrusted data should weigh on what happens next, let a person
+decide in a task, and give that task an outcome that says no. `ventoux check` says so first:
+`UNTRUSTED_TRIGGER` where every way the step starts is steered, `WRITER_DECIDES` where only some
+are, and `INPUT_POLICY` for a step started on such a moment.
 
 **Rules that stop steps.** A rule's `then` may `stop` steps: it does to each one what a close
 does to the whole case, and the case goes on. Here a customer who withdraws the request stops the
@@ -758,7 +774,7 @@ nothing ends, or a start refused on the step's own start; and these codes are it
 | Code | Kind | What is wrong | Example message |
 |---|---|---|---|
 | `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
-| `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone or stops a step reads, in its `when`, a value that is untrusted whoever writes it, so it never acts | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
+| `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone or stops a step reads, in its `when`, a value that is untrusted whoever writes it, or fires on the start of a step untrusted data steers however it starts, so it never acts; or a call, plan or wait step every start of which is steered so reaches milestones it never will | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
 | `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: on the opening, the step requires what can't be met by then, and the rule's condition can't fail and be retried later; or it fires on the step's own start (unless its condition may fail and the step is repeatable: a retry may come once the step is done; or the step is a task a rule may stop, which a stop cancels at once, letting the start through), or on its own answer when the step isn't repeatable | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
 | `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition, requirement or rule's stop ends (the rework rules above with their `when`s removed, on the refund with the `duplicate` close reason from "Closing a case"), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
 

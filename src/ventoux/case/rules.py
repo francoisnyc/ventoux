@@ -11,10 +11,11 @@ from typing import NoReturn
 from ventoux.case.admission import StepStopped, holds
 from ventoux.case.closing import close_held
 from ventoux.case.definition import AnsweredTask, CaseDefinition, EventArrived, Reached, Started
-from ventoux.case.state import CaseState, Command, Obtained, RuleFiring, RuleStart
+from ventoux.case.state import CaseState, Command, Moment, Obtained, RuleFiring, RuleStart
 from ventoux.case.stopping import stop_step
 from ventoux.case.types import rule_problem
 from ventoux.case.writers import read_sources, untrusted_of
+from ventoux.core.before_activity import Steering
 from ventoux.core.catalog import Catalog
 from ventoux.core.expressions import ExpressionError, OutcomeType, a_kind, evaluate, render
 from ventoux.core.expressions.check import a_type
@@ -53,7 +54,7 @@ def reach(state: CaseState, milestones: tuple[str, ...]) -> None:
         if milestone not in state.milestones:
             state.milestones.append(milestone)
             state.history.append(f"reached {milestone}")
-            state.moments.append(f"reached {milestone}")
+            state.moments.append(Moment(f"reached {milestone}"))
 
 
 def fire_rules(
@@ -66,7 +67,7 @@ def fire_rules(
     while state.moments:
         moment = state.moments.pop(0)
         for name, rule in case.rules.items():
-            if said(rule.on) == moment:
+            if said(rule.on) == moment.said:
                 fire(case, catalog, state, name, moment, commands, at)
 
 
@@ -75,16 +76,19 @@ def fire(
     catalog: Catalog,
     state: CaseState,
     name: str,
-    moment: str,
+    moment: Moment,
     commands: list[Command],
     at: int,
 ) -> None:
-    """One firing: read the condition on the case file now, then act on what it says."""
+    """One firing: read the condition on the case file now, then act on what it says. A run's
+    start brings what steered the run, kept with the firing for its retry (brief, D43)."""
     entry = f"{name}#{sum(1 for firing in state.firings if firing.rule == name) + 1}"
-    firing = RuleFiring(entry, name, moment, "done")
+    started = next((run for run in state.runs if run.entry == moment.run), None)
+    steered = started.steered if started is not None else ()
+    firing = RuleFiring(entry, name, moment.said, "done", steered=steered)
     state.firings.append(firing)
     if (stopped := nothing_decided(case, state)) is not None:
-        state.history.append(f"{entry} on {moment}: not applied: {stopped}")
+        state.history.append(f"{entry} on {moment.said}: not applied: {stopped}")
         return
     try:
         decided, computed = read(case, catalog, state, name)
@@ -161,6 +165,12 @@ def act(
     # values it sets (brief, D42). The message names the value and its source,
     # never the value (brief, D30).
     untrusted = untrusted_read(case, catalog, state, firing.rule)
+    # What steered the start the rule fires on counts as read by its condition: a run started on
+    # untrusted data passes it on, so no rule on its start decides on it either (brief, D43).
+    if untrusted is None and firing.steered:
+        untrusted = f"its moment comes from untrusted data: {said_steered(firing.steered)}"
+    elif untrusted is not None:
+        untrusted = f"its condition reads {untrusted}"
     if (then.reach or then.stop) and untrusted is not None:
         acts = (
             ("reaches", then.reach),
@@ -171,8 +181,8 @@ def act(
         verbs = [verb for verb, does in acts if does]  # `reaches and starts`, `stops`
         does = " and ".join([", ".join(verbs[:-1]), verbs[-1]] if len(verbs) > 1 else verbs)
         state.history.append(
-            f"{firing.entry} on {firing.moment}: {does} nothing: its condition reads "
-            f"{untrusted}, and untrusted data can't decide"
+            f"{firing.entry} on {firing.moment}: {does} nothing: {untrusted}, and untrusted data "
+            "can't decide"
         )
         return
     if not decided:
@@ -196,7 +206,14 @@ def act(
     read = read_sources(case, catalog, state, case.rules[firing.rule].when)
     for step in then.start:
         state.rule_starts.append(
-            RuleStart(firing.entry, firing.moment, step, people_in(read), untrusted_of(read))
+            RuleStart(
+                firing.entry,
+                firing.moment,
+                step,
+                people_in(read),
+                untrusted_of(read),
+                firing.steered,
+            )
         )
 
 
@@ -210,15 +227,16 @@ def write(
     at: int,
 ) -> None:
     """Write a value the rule set: it comes from everything its rule read, its value and its
-    condition, plus the field's mark; it is as old as the oldest fact it read, obtained by the
-    firing, never "now" (brief, D33) (brief, D42). The line names the field and the sources, never
-    the value (brief, D30)."""
+    condition, plus the field's mark, and what steered the start it fired on; it is as old as the
+    oldest fact it read, obtained by the firing, never "now" (brief, D33) (brief, D42)
+    (brief, D43). The line names the field and the sources, never the value (brief, D30)."""
     rule = case.rules[firing.rule]
     read: dict[str, frozenset[str]] = {}
     for expression in (rule.then.set[field], rule.when):
         read |= read_sources(case, catalog, state, expression)
     mark = case.fields[field].source
-    sources = frozenset().union(*read.values(), {mark} if mark else set())
+    steered = (steering.sources for steering in firing.steered)
+    sources = frozenset().union(*read.values(), *steered, {mark} if mark else set())
     ages = [state.obtained[name].at for name in read if name in state.obtained]
     state.values[field] = value
     state.sources[field] = sources
@@ -243,6 +261,13 @@ def nothing_decided(case: CaseDefinition, state: CaseState) -> str | None:
     if state.phase != "open":
         return f"the case is {state.phase}, so nothing new is decided"
     return None
+
+
+def said_steered(steered: tuple[Steering, ...]) -> str:
+    """What first steered a start, as a line says it: `say_goodbye#1's condition, which started
+    goodbye, reads cancelled.note (untrusted:customer)`; never a value (brief, D30)."""
+    first = steered[0]
+    return f"{first.said} ({', '.join(sorted(first.sources))})"
 
 
 def people_in(read: dict[str, frozenset[str]]) -> dict[str, str]:

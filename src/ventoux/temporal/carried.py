@@ -12,6 +12,7 @@ from typing import Any
 from ventoux.case.state import (
     CaseState,
     GivenApproval,
+    Moment,
     Obtained,
     OpenApproval,
     RuleFiring,
@@ -74,10 +75,13 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
                 "moment": f.moment,
                 "status": f.status,
                 "reason": f.reason,
+                # What steered the start it fired on, for its retry (brief, D43).
+                "steered": [steering_as_data(steering) for steering in f.steered],
             }
             for f in state.firings
         ],
-        "moments": list(state.moments),  # always empty between events (brief, D38)
+        # Always empty between events (brief, D38).
+        "moments": [{"said": m.said, "run": m.run} for m in state.moments],
         "rule_starts": [rule_start_as_data(asked) for asked in state.rule_starts],  # the same
         "started_by_rules": list(state.started_by_rules),  # the same
     }
@@ -90,6 +94,7 @@ def rule_start_as_data(asked: RuleStart) -> dict[str, Any]:
         "step": asked.step,
         "read_from": dict(asked.read_from),
         "untrusted": {name: sorted(sources) for name, sources in asked.untrusted.items()},
+        "steered": [steering_as_data(steering) for steering in asked.steered],
     }
 
 
@@ -100,6 +105,8 @@ def rule_start_from_data(data: dict[str, Any]) -> RuleStart:
         data["step"],
         dict(data["read_from"]),
         {name: frozenset(sources) for name, sources in data["untrusted"].items()},
+        # None in a state from before the fix of the untrusted moment: nothing steered a moment.
+        tuple(steering_from_data(steering) for steering in data.get("steered", [])),
     )
 
 
@@ -172,10 +179,22 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         flags=list(data["flags"]),
         history=list(data["history"]),
         # None in a state from before layer 11a: no rule had fired.
-        firings=[RuleFiring(**firing) for firing in data.get("firings", [])],
-        moments=list(data.get("moments", [])),
+        firings=[firing_from_data(firing) for firing in data.get("firings", [])],
+        moments=[Moment(m["said"], m["run"]) for m in data.get("moments", [])],
         rule_starts=[rule_start_from_data(asked) for asked in data.get("rule_starts", [])],
         started_by_rules=list(data.get("started_by_rules", [])),
+    )
+
+
+def firing_from_data(data: dict[str, Any]) -> RuleFiring:
+    return RuleFiring(
+        data["entry"],
+        data["rule"],
+        data["moment"],
+        data["status"],
+        data["reason"],
+        # None in a state from before the fix of the untrusted moment: nothing steered a moment.
+        tuple(steering_from_data(steering) for steering in data.get("steered", [])),
     )
 
 

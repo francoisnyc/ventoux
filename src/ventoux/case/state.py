@@ -43,7 +43,7 @@ class StepRun:
     )
     # Kept for its retry, which starts the same run again (brief, D26): who may approve nothing in
     # it, and why, and the untrusted values the conditions that let it start read (brief, D25)
-    # (brief, D39).
+    # (brief, D39); kept for every kind of step, since its start passes them on (brief, D43).
     excluded: dict[str, str] = field(default_factory=dict)
     steered: tuple[Steering, ...] = ()
     # Whether it has started: a run that failed before it started hasn't, and starts for the first
@@ -66,6 +66,18 @@ class RuleFiring:
     # waited (brief, D10).
     status: Literal["done", "failed", "cancelled"]
     reason: str = ""  # why it failed
+    # What steered the start of the run its moment came from: untrusted data that let it start
+    # counts as read by its condition, for its retry too (brief, D43).
+    steered: tuple[Steering, ...] = ()
+
+
+@dataclass(frozen=True)
+class Moment:
+    """A moment come in the decision being made, as the history says it, and, for a run's start,
+    which run started: what steered it goes with the moment (brief, D38) (brief, D43)."""
+
+    said: str  # `opened`, `started pay`, `reached checked`, `answered review`, `event cancelled`
+    run: str = ""  # the run that started, such as `goodbye#1`; empty for any other moment
 
 
 @dataclass(frozen=True)
@@ -82,6 +94,9 @@ class RuleStart:
     # Each value the condition read from a source the engine doesn't trust, with those sources:
     # they count for the step's input policies (brief, D38) (brief, D39).
     untrusted: dict[str, frozenset[str]] = field(default_factory=dict[str, frozenset[str]])
+    # What steered the start its moment came from: it counts for the step's input policies too,
+    # and goes on with the run (brief, D43).
+    steered: tuple[Steering, ...] = ()
 
 
 @dataclass
@@ -144,7 +159,7 @@ class CaseState:
     firings: list[RuleFiring] = field(default_factory=list[RuleFiring])  # every rule's, in order
     # The moments that came in the decision being made, waiting for their rules: always empty
     # between events, so nothing about them crosses continue-as-new (brief, D38).
-    moments: list[str] = field(default_factory=list[str])
+    moments: list[Moment] = field(default_factory=list[Moment])
     # The starts the rules fired in this decision asked for, waiting for admission; and the steps
     # a rule has started in it, which no rule starts again in it (brief, D39). Always empty
     # between events, like `moments`.
