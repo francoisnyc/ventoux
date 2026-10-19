@@ -150,3 +150,14 @@ def test_arrivals_cross_continue_as_new() -> None:
         "cancelled#1 from portal",
         "cancelled#2 from portal",
     ]
+
+
+def test_an_event_to_an_id_no_case_has_is_refused_at_the_client() -> None:
+    async def scenario(client: Client) -> None:
+        nobody = case_handle(client, DevelopmentCases, "refund-E-404")
+        with pytest.raises(
+            EventRefused, match="^refund-E-404 is not a case: no workflow has its ID$"
+        ):
+            await send_event(nobody, "cancelled", {"note": "please cancel"}, by="system:portal")
+
+    on_temporal(scenario)

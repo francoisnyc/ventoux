@@ -200,6 +200,9 @@ assert run.waiting_for == ["review by support"]
 assert not run.closed
 ```
 
+A step waiting for an event from outside is listed the same way, with who sends it:
+`receipt_sent from portal` ("Events from outside", below).
+
 ## When a system says no
 
 A business failure is an answer, not an error (brief, D17). `payments.refund@2` declares the
