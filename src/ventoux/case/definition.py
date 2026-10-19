@@ -20,7 +20,8 @@ from pydantic import (
 )
 
 from ventoux.case.freshness import seconds_in
-from ventoux.core.expressions import ListType
+from ventoux.core.before_activity import given_as_reference
+from ventoux.core.expressions import FieldType, ListType, ReferenceType
 from ventoux.core.plan import (
     ActivityReference,
     DeclaredType,
@@ -278,9 +279,12 @@ class PlanStep(Step):
 
 
 class Then(Shape):
-    """What a rule does when it fires: reach milestones (brief, D38), start steps (brief, D39),
-    stop steps (brief, D40). Done in that order: stop, then reach, then start."""
+    """What a rule does when it fires: stop steps (brief, D40), set fields (brief, D42), reach
+    milestones (brief, D38), start steps (brief, D39). Done in that order."""
 
+    # Fields of the case file it sets, each from an expression read on the case file as it was
+    # when the condition was read (brief, D42).
+    set: dict[Name, PlanExpression] = {}
     reach: tuple[Name, ...] = ()  # milestones it reaches
     # Steps it proposes a run of: the engine proposes, admission decides (brief, D39).
     start: tuple[Name, ...] = ()
@@ -292,8 +296,10 @@ class Then(Shape):
     @model_validator(mode="after")
     def does_something(self) -> "Then":
         """A rule that does nothing is refused, so a typo never hides a rule."""
-        if not self.reach and not self.start and not self.stop:
-            raise ValueError("a rule reaches a milestone, starts a step or stops one, at least one")
+        if not self.reach and not self.start and not self.stop and not self.set:
+            raise ValueError(
+                "a rule reaches a milestone, starts a step, stops one or sets a field, at least one"
+            )
         return self
 
     @model_validator(mode="after")
@@ -472,6 +478,7 @@ class CaseDefinition(Shape):
             if isinstance(rule.on, EventArrived) and rule.on.event not in self.events:
                 problems.append(f"rules.{name}.on.event: {rule.on.event} is not an event")
             problems += reaching(f"rules.{name}.then.reach", rule.then.reach, self)
+            problems += set_problems(f"rules.{name}", rule, self)
             problems += [
                 f"rules.{name}.then.{action}: {step} is not a step"
                 for action, steps in (("start", rule.then.start), ("stop", rule.then.stop))
@@ -525,6 +532,63 @@ def step_problems(
                 "name proposed_by, who may propose it"
             )
     return problems
+
+
+def set_problems(path: str, rule: Rule, case: CaseDefinition) -> list[str]:
+    """What a rule's `set` names that it may not set (brief, D42)."""
+    problems: list[str] = []
+    read = [*rule.then.set.values(), *([rule.when] if rule.when is not None else [])]
+    if rule.then.set and not any(fields_read(expression) for expression in read):
+        # A value comes from everything its rule read; reading nothing, it would come from
+        # nobody, which no value of a case file does (brief, D36, D42).
+        problems.append(
+            f"{path}.then.set: {path.removeprefix('rules.')} reads no field, so what it sets would "
+            "come from nobody: read a field in its when or its values, or reach a milestone "
+            "instead"
+        )
+    answered = form_fields(case)
+    for name in rule.then.set:
+        field = case.fields.get(name)
+        if field is None:
+            problems.append(f"{path}.then.set: {name} is not a field")
+        elif isinstance(field.declared, ListType):
+            problems.append(
+                f"{path}.then.set.{name}: {name} is a list, and a rule never sets a list yet: a "
+                "list comes once a list value can be checked"
+            )
+        elif isinstance(field.declared, ReferenceType) and (
+            given_as_reference(rule.then.set[name], declared_types(case))[0]
+            != field.declared.system
+        ):
+            # A reference goes only where its system is expected, read as it is (brief, D30).
+            system = field.declared.system
+            problems.append(
+                f"{path}.then.set.{name}: {name} is a reference to {system}, and is set only "
+                f"from a reference field of {system}, read as it is"
+            )
+        elif name in answered:
+            # One kind of writer per field: a rule never undoes a person's answer (brief, D9).
+            problems.append(
+                f"{path}.then.set.{name}: {name} is set by a person in {answered[name]}, so a rule "
+                f"never sets it: set another field, and read {name} there"
+            )
+    return problems
+
+
+def declared_types(case: CaseDefinition) -> dict[str, FieldType]:
+    """Each field of the case file, and its declared type."""
+    return {name: field.declared for name, field in case.fields.items()}
+
+
+def form_fields(case: CaseDefinition) -> dict[str, str]:
+    """Each field a task's form sets, and the first task that sets it."""
+    found: dict[str, str] = {}
+    for name, step in case.steps.items():
+        if isinstance(step, TaskStep):
+            for outcome in step.outcomes.values():
+                for field in outcome.sets:
+                    found.setdefault(field, name)
+    return found
 
 
 def stale_names(path: str, step: CallStep | PlanStep) -> list[str]:
