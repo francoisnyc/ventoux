@@ -41,6 +41,8 @@ from ventoux.case.definition import (
     TaskStep,
     WaitStep,
     WorkflowStep,
+    form_fields,
+    rule_fields,
 )
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
@@ -352,7 +354,8 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
     """Refuse a case whose references name systems nobody registered, or whose fields are
     declared untrusted with labels nobody registered, and first values that aren't the case's
     fields, of their types, given at the opening."""
-    setters = set_by(case)
+    setters = form_fields(case)
+    computed = rule_fields(case)
     declared_types = {name: field.declared for name, field in case.fields.items()}
     problems = unregistered(declared_types, catalog.systems)
     # A label the engine doesn't know is refused, never taken as a new kind of untrusted
@@ -382,6 +385,10 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
             problems.append(
                 f"{name} is set by a person in {setters[name]}, never given at the opening"
             )
+        elif name in computed:
+            problems.append(
+                f"{name} is set by rules, in {computed[name]}, never given at the opening"
+            )
         elif not fits(plain(value), declared := case.fields[name].declared):
             # The type, never the value: refusals reach people who may not see it (brief, D30).
             problems.append(f"{name} is {a_type(declared)}, and the opening gives {a_kind(value)}")
@@ -408,17 +415,6 @@ def kept(case: CaseDefinition, name: str, value: object) -> object:
     """A form's value as the case file keeps it: wrapped for a sensitive field, plain otherwise.
     The client wraps every value of a form, since it can't tell which are sensitive."""
     return value if name in case.fields and case.fields[name].sensitive else plain(value)
-
-
-def set_by(case: CaseDefinition) -> dict[str, str]:
-    """Each field a task's form sets, and the first task that sets it."""
-    found: dict[str, str] = {}
-    for name, step in case.steps.items():
-        if isinstance(step, TaskStep):
-            for outcome in step.outcomes.values():
-                for field in outcome.sets:
-                    found.setdefault(field, name)
-    return found
 
 
 def marked(case: CaseDefinition, name: str, origin: str) -> frozenset[str]:

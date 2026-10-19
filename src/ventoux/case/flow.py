@@ -8,20 +8,17 @@ sources are known in one pass (brief, D34) (brief, D36). See docs/layers/10-case
 from collections.abc import Collection, Mapping
 
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, Then, WorkflowStep
-from ventoux.case.types import case_types
+from ventoux.case.types import case_types, fits_type
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.case.writers import case_sources, untrusted_of
 from ventoux.core.before_activity import not_a_reference_to
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract, held_input
 from ventoux.core.expressions import (
-    BooleanType,
     Expression,
     FieldType,
-    NumberType,
     OutcomeType,
     ReferenceType,
-    StringType,
     check,
 )
 from ventoux.core.expressions.check import a_type
@@ -122,24 +119,6 @@ def as_said(wanted: FieldType) -> str:
     if isinstance(wanted, OutcomeType):
         return f"one of {' or '.join(wanted.outcomes)}"
     return a_type(wanted)
-
-
-def fits_type(given: FieldType, wanted: FieldType) -> bool | None:
-    """Whether a value of the type `given` always fits `wanted` (True), never does (False), or
-    only depends on the value (None), as the runtime's `fits` and strict validation read it."""
-    if isinstance(wanted, StringType):
-        # A string, an outcome and a reference are all texts.
-        return isinstance(given, StringType | OutcomeType | ReferenceType)
-    if isinstance(wanted, OutcomeType):
-        if isinstance(given, OutcomeType):
-            # Every outcome it may give is one the field takes, or some aren't.
-            return True if set(given.outcomes) <= set(wanted.outcomes) else None
-        # A text, or a reference, may be one of them or not: that depends on the value.
-        return None if isinstance(given, StringType | ReferenceType) else False
-    if isinstance(wanted, NumberType | BooleanType):
-        return type(given) is type(wanted)
-    # Fail closed: a type the runtime's `fits` doesn't know (a list, for now) fits nothing.
-    return False
 
 
 def type_issues(

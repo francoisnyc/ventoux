@@ -540,7 +540,7 @@ def set_problems(path: str, rule: Rule, case: CaseDefinition) -> list[str]:
     read = [*rule.then.set.values(), *([rule.when] if rule.when is not None else [])]
     if rule.then.set and not any(fields_read(expression) for expression in read):
         # A value comes from everything its rule read; reading nothing, it would come from
-        # nobody, which no value of a case file does (brief, D36, D42).
+        # nobody, which no value of a case file does (brief, D36) (brief, D42).
         problems.append(
             f"{path}.then.set: {path.removeprefix('rules.')} reads no field, so what it sets would "
             "come from nobody: read a field in its when or its values, or reach a milestone "
@@ -578,6 +578,15 @@ def set_problems(path: str, rule: Rule, case: CaseDefinition) -> list[str]:
 def declared_types(case: CaseDefinition) -> dict[str, FieldType]:
     """Each field of the case file, and its declared type."""
     return {name: field.declared for name, field in case.fields.items()}
+
+
+def rule_fields(case: CaseDefinition) -> dict[str, str]:
+    """Each field a rule sets, and the first rule that sets it (brief, D42)."""
+    found: dict[str, str] = {}
+    for name, rule in case.rules.items():
+        for field in rule.then.set:
+            found.setdefault(field, name)
+    return found
 
 
 def form_fields(case: CaseDefinition) -> dict[str, str]:
