@@ -42,7 +42,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.freshness import TimeRefused
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
-    from ventoux.case.runtime import CaseRefused, ShownRefused, decide
+    from ventoux.case.runtime import CaseRefused, EventRefused, ShownRefused, decide
     from ventoux.case.state import (
         Answered,
         CancelWorkflow,
@@ -58,6 +58,7 @@ with workflow.unsafe.imports_passed_through():
         Proposed,
         Retried,
         Schedule,
+        Sent,
         Shown,
         StartPlan,
         StartWorkflow,
@@ -116,6 +117,17 @@ class CaseAnswer:
     # replay decides as the first run did, whatever their roles are now (brief, D22).
     roles: list[str]
     form: dict[str, Any] | None = None  # the values the outcome sets, if any
+
+
+@dataclass
+class CaseEvent:
+    """An event from outside, as the Ventoux API sends it to a case: one shape for every event,
+    whoever sends it (brief, D41)."""
+
+    event: str  # the declared event, such as `cancelled`
+    payload: dict[str, Any]  # each value it carries, by its payload field
+    by: str  # who sent it: `system:portal`, or a person's identifier, such as `ana`
+    roles: list[str]  # a person's roles, as the API states them (brief, D22); none for a system
 
 
 @dataclass
@@ -222,6 +234,13 @@ class CaseWorkflow:
     def shown(self, sent: CaseRequest) -> None:
         self.inbox.append(Shown(sent.what, sent.by, frozenset(sent.roles), at=now()))
 
+    # One signal for every event, whoever sends it: the sender is data (brief, D41).
+    @workflow.signal(name="event")
+    def event(self, sent: CaseEvent) -> None:
+        self.inbox.append(
+            Sent(sent.event, dict(sent.payload), sent.by, frozenset(sent.roles), at=now())
+        )
+
     # Temporal: a query reads a workflow's state without changing it, and isn't recorded.
     @workflow.query(name="report")
     def report(self) -> CaseReport:
@@ -297,6 +316,7 @@ class CaseWorkflow:
                 CloseRefused,
                 ShownRefused,
                 ForgetRefused,
+                EventRefused,
             ) as refused:
                 # In memory a refusal raises to the test; here nobody is there to catch it. It is
                 # recorded, and the case waits on as if it hadn't come: `decide` changed nothing
@@ -584,6 +604,8 @@ def asked(event: Event) -> str:
         return f"the record of {event.field} shown to {event.by}"
     if isinstance(event, ForgetApproved):
         return f"forgetting the case, approved by {event.approved_by}"
+    if isinstance(event, Sent):
+        return f"{event.event} from {event.by}"  # who sent it, never what it carries
     return type(event).__name__  # only people's requests are refused; anything else is a bug
 
 
@@ -678,6 +700,35 @@ async def shown(
     """Record that the person `by` was shown the record behind the reference `field`, as the API
     does after asking its system's resolver (brief, D16)."""
     await case.signal(CaseWorkflow.shown, CaseRequest(field, by, sorted(roles)))
+
+
+async def send_event(
+    case: WorkflowHandle[CaseWorkflow, CaseReport],
+    event: str,
+    payload: Mapping[str, Any],
+    by: str,
+    roles: list[str] | None = None,
+) -> None:
+    """Send the case the event `event`, carrying `payload`, as `by`: `system:portal` for a
+    system, or a person's identifier with their `roles`. The caller vouches for who sent it: only
+    the Ventoux API may send events (brief, D19). The case's own refusals are recorded in its
+    history; a closed case refuses here, raising `EventRefused`: an event never opens a case
+    again (brief, D41)."""
+    sent = CaseEvent(event, dict(payload), by, sorted(roles or []))
+    try:
+        # Temporal: never signal-with-start, which would start a workflow for a case that ended.
+        await case.signal(CaseWorkflow.event, sent)
+    except RPCError as error:
+        if error.status != RPCStatusCode.NOT_FOUND:
+            raise
+        # Temporal says the same of a workflow that ended and of one that never was: asked which.
+        try:
+            await case.describe()
+        except RPCError as missing:
+            if missing.status == RPCStatusCode.NOT_FOUND:
+                raise EventRefused(f"{case.id} is not a case: no workflow has its ID") from None
+            raise
+        raise EventRefused(f"{case.id} is closed: it takes no more events") from None
 
 
 async def view(case: WorkflowHandle[CaseWorkflow, CaseReport], roles: list[str]) -> CaseView:

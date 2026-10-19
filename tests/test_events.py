@@ -6,6 +6,7 @@ See docs/layers/11-rules.md (11d) and docs/guides/cases.md, "Events from outside
 """
 
 import copy
+import json
 from pathlib import Path
 from typing import Any
 
@@ -780,3 +781,165 @@ def test_what_a_rule_on_an_event_reaches_can_close_the_case() -> None:
     run = run_case(definition, file=SMALL, answers=[CANCEL], people=PEOPLE)
     assert run.closed
     assert run.history[-1] == "closed: withdrawn reached"
+
+
+# --- Slice 8: the guide, as the engine does it ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+EVENTS_SECTION = GUIDE.split("## Events from outside\n")[1].split("\n## ")[0]
+
+
+def guide_blocks(language: str) -> list[str]:
+    """The section's code blocks in `language` (`""` for plain ones), in order."""
+    found: list[str] = []
+    opened: str | None = None
+    body: list[str] = []
+    for line in EVENTS_SECTION.splitlines():
+        if not line.startswith("```"):
+            body.append(line)
+        elif opened is None:
+            opened, body = line.removeprefix("```"), []
+        else:
+            if opened == language:
+                found.append("\n".join(body))
+            opened = None
+    return found
+
+
+def guide_json(index: int) -> dict[str, Any]:
+    """The section's JSON block `index`, a fragment (`"name": {...}`) read as an object."""
+    loaded: dict[str, Any] = json.loads("{" + guide_blocks("json")[index] + "}")
+    return loaded
+
+
+def shown(index: int) -> list[str]:
+    """The section's plain block `index`, as history lines."""
+    return guide_blocks("")[index].splitlines()
+
+
+def test_the_guides_definitions_are_these_tests() -> None:
+    assert guide_json(0) == {"events": {"cancelled": CANCELLED}}
+    assert guide_json(1) == {"withdraw_on_cancel": WITHDRAW}
+    assert guide_json(2) == {"wait_for_receipt": WAIT_FOR_RECEIPT}
+    assert guide_json(3) == {"receipt_sent": RECEIPT_SENT}
+
+
+def test_the_guides_histories_are_what_the_engine_records() -> None:
+    cancelled = run_case(cancellable(), file=SMALL, answers=[CANCEL], people=PEOPLE)
+    assert appears_in_order(shown(0), cancelled.history)
+    untrusted = cancellable()
+    untrusted["rules"]["withdraw_on_cancel"]["when"] = SAYS_CANCEL
+    decided = run_case(untrusted, file=SMALL, answers=[CANCEL], people=PEOPLE)
+    assert appears_in_order(shown(1), decided.history)
+    waited = run_case(
+        waiting_for_a_receipt(), file=SMALL, answers=[APPROVED, RECEIPT], people=PEOPLE
+    )
+    assert appears_in_order(shown(2), waited.history)
+    closing = cancellable()
+    closing["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate request"}, "roles": ["support"]}
+    }
+    held = run_case(
+        closing,
+        file=SMALL,
+        answers=[APPROVED, close("duplicate", "ana"), CANCEL, finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+    )
+    assert appears_in_order(shown(3), held.history)
+
+
+def refusal(play: Any) -> str:
+    """What the engine says when `play` runs into a refusal."""
+    try:
+        play()
+    except (EventRefused, AnswerRefused) as refused:
+        return str(refused)
+    raise AssertionError("nothing was refused")
+
+
+def sent(*events: Any, answers: tuple[Any, ...] = ()) -> Any:
+    """A run of the refund taking a call too, playing `answers` then `events`."""
+    return lambda: run_case(with_a_call(), file=SMALL, answers=[*answers, *events], people=PEOPLE)
+
+
+GUIDE_REFUSALS: dict[str, Any] = {
+    "the case declares no such event": lambda: run_case(
+        cancellable(), file=SMALL, answers=[send("refunded", {}, "system:portal")], people=PEOPLE
+    ),
+    "another system sends it": sent(send("cancelled", {"note": "x"}, "system:crm")),
+    "a person sends a system's event": sent(send("cancelled", {"note": "x"}, "ana")),
+    "the person has none of its roles": sent(
+        send("customer_called", {"wants_refund": True}, "eve")
+    ),
+    "a payload field is missing": sent(send("cancelled", {}, "system:portal")),
+    "it carries a field it doesn't declare": sent(
+        send("cancelled", {"note": "x", "tone": "angry"}, "system:portal")
+    ),
+    "a field is of another type": sent(send("cancelled", {"note": 3}, "system:portal")),
+    "the case is closed": sent(CANCEL, answers=(REJECTED,)),
+}
+
+
+def guide_refusal_rows() -> list[tuple[str, str]]:
+    """The rows of the section's table "An event is refused when | Example", code unquoted."""
+    table = EVENTS_SECTION.split("| An event is refused when | Example |")[1].split("\n\n")[0]
+    rows = [line.split("|") for line in table.splitlines()[2:] if line.startswith("| ")]
+    return [(when.strip(), example.strip().strip("`")) for _, when, example, _ in rows]
+
+
+@pytest.mark.parametrize(("when", "example"), guide_refusal_rows())
+def test_the_guides_refusals_are_what_the_engine_says(when: str, example: str) -> None:
+    assert when in GUIDE_REFUSALS, f"the guide's row {when!r} has no test"
+    assert refusal(GUIDE_REFUSALS[when]) == example
+
+
+def test_every_refusal_in_the_guide_is_tested() -> None:
+    assert [when for when, _ in guide_refusal_rows()] == list(GUIDE_REFUSALS)
+
+
+def test_the_guides_answer_to_a_wait_is_refused_as_it_says() -> None:
+    said = refusal(
+        lambda: run_case(
+            waiting_for_a_receipt(),
+            file=SMALL,
+            answers=[APPROVED, ("wait_for_receipt#1", "done", "ana")],
+            people=PEOPLE,
+        )
+    )
+    assert f"`{said}`" in " ".join(EVENTS_SECTION.split())  # the guide wraps its lines
+
+
+def test_no_event_line_or_issue_quotes_a_value() -> None:
+    # What an event carries reaches the history and its refusals only by name and source: people
+    # who may not see a value read them (brief, D30).
+    secret = "SECRET-NOTE-42"
+    runs = [
+        run_case(
+            cancellable(),
+            file=SMALL,
+            answers=[send("cancelled", {"note": secret}, "system:portal")],
+            people=PEOPLE,
+        ),
+        run_case(
+            cancellable() | {"rules": {"withdraw_on_cancel": WITHDRAW | {"when": SAYS_CANCEL}}},
+            file=SMALL,
+            answers=[send("cancelled", {"note": secret}, "system:portal")],
+            people=PEOPLE,
+        ),
+    ]
+    for run in runs:
+        assert not any(secret in line for line in [*run.history, *run.flags, *run.needs_attention])
+    with pytest.raises(EventRefused) as wrong_type:
+        run_case(
+            cancellable(),
+            file=SMALL,
+            answers=[send("cancelled", {"note": 42}, "system:portal")],
+            people=PEOPLE,
+        )
+    assert "42" not in str(wrong_type.value)
+    definition = cancellable()
+    definition["rules"]["withdraw_on_cancel"]["when"] = {"==": [{"var": "cancelled.note"}, secret]}
+    # A literal the author wrote may be quoted where it is the mistake (brief, D35); this one
+    # isn't, so no issue quotes it.
+    assert not any(secret in issue.message for issue in issues(definition))
