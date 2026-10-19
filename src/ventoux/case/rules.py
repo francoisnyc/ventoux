@@ -11,11 +11,16 @@ from typing import NoReturn
 from ventoux.case.admission import StepStopped, holds
 from ventoux.case.closing import close_held
 from ventoux.case.definition import AnsweredTask, CaseDefinition, EventArrived, Reached, Started
-from ventoux.case.state import CaseState, Command, RuleFiring, RuleStart
+from ventoux.case.state import CaseState, Command, Obtained, RuleFiring, RuleStart
 from ventoux.case.stopping import stop_step
 from ventoux.case.types import rule_problem
 from ventoux.case.writers import read_sources, untrusted_of
 from ventoux.core.catalog import Catalog
+from ventoux.core.expressions import ExpressionError, OutcomeType, a_kind, evaluate, render
+from ventoux.core.expressions.check import a_type
+from ventoux.core.form import fits
+from ventoux.core.sensitive import Sensitive, plain
+from ventoux.core.sensitive_inputs import reads_sensitive
 
 
 def said(moment: object) -> str:
@@ -82,25 +87,53 @@ def fire(
         state.history.append(f"{entry} on {moment}: not applied: {stopped}")
         return
     try:
-        decided = read(case, catalog, state, name)
+        decided, computed = read(case, catalog, state, name)
     except StepStopped as unreadable:
         # Fail closed: a condition that can't be read is never false. The rule acts on nothing
         # and waits for a person, keeping the case open (brief, D17) (brief, D38).
         firing.status, firing.reason = "failed", str(unreadable)
         state.history.append(f"{entry} failed: {firing.reason}")
         return
-    act(case, catalog, state, firing, decided, commands, at)
+    act(case, catalog, state, firing, decided, computed, commands, at)
 
 
-def read(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str) -> bool:
-    """Whether the rule's condition holds on the case file now (no condition: it does), or
-    `StepStopped` saying why it can't be read."""
+def read(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, name: str
+) -> tuple[bool, dict[str, object]]:
+    """Whether the rule's condition holds on the case file now (no condition: it does), and, if it
+    does, each value it sets; or `StepStopped` saying why it can't be read. Every value is computed
+    before anything acts, so a rule acts whole or not at all (brief, D42)."""
     # Checked over the case's types first, so a misspelt outcome fails it instead of reading as
     # false (brief, D35).
     if (problem := rule_problem(case, catalog, name)) is not None:
         raise StepStopped(problem)
-    when = case.rules[name].when
-    return when is None or holds(when, state.values, f"{name}'s condition")
+    rule = case.rules[name]
+    if rule.when is not None and not holds(rule.when, state.values, f"{name}'s condition"):
+        return False, {}
+    # Read on the case file as the condition saw it, so the order of `set`'s keys doesn't matter.
+    return True, {field: computed(case, state.values, name, field) for field in rule.then.set}
+
+
+def computed(case: CaseDefinition, values: dict[str, object], name: str, field: str) -> object:
+    """The value the rule `name` sets `field` to, or `StepStopped`: one that can't be read, or isn't
+    of the field's type, is never written (fail closed). Messages name the field and the kind of
+    value, never the value (brief, D30)."""
+    expression = case.rules[name].then.set[field]
+    whose = f"{name}'s {field}"
+    try:
+        value = evaluate(expression, values)
+    except ExpressionError as error:
+        raise StepStopped(f"{whose} {render(expression)} can't be evaluated: {error}") from None
+    declared = case.fields[field].declared
+    if not fits(plain(value), declared):
+        if isinstance(declared, OutcomeType) and isinstance(plain(value), str):
+            outcomes = " or ".join(declared.outcomes)
+            raise StepStopped(f"{whose} gives a text that is none of its outcomes: {outcomes}")
+        raise StepStopped(f"{whose} gives {a_kind(value)}, and {field} is {a_type(declared)}")
+    # Kept wrapped if it is sensitive, or computed from a sensitive value (brief, D31).
+    if case.fields[field].sensitive or reads_sensitive(expression, values):
+        return value if isinstance(value, Sensitive) else Sensitive(value)
+    return value
 
 
 def act(
@@ -109,11 +142,13 @@ def act(
     state: CaseState,
     firing: RuleFiring,
     decided: bool,
+    computed: dict[str, object],
     commands: list[Command],
     at: int,
 ) -> None:
     """Do what the rule says, if its condition held and read only trusted values; say so either
-    way. Stop first, then reach, then start (brief, D40)."""
+    way. Stop first, then set, then reach, then start (brief, D40) (brief, D42). `computed` holds
+    each value it sets, read before anything acts."""
     firing.status, firing.reason = "done", ""
     if (stopped := nothing_decided(case, state)) is not None:  # a retry while the close is held
         state.history.append(f"{firing.entry} on {firing.moment}: not applied: {stopped}")
@@ -121,12 +156,18 @@ def act(
     then = case.rules[firing.rule].then
     # Untrusted data informs; it never decides. Reaching a milestone, or stopping a step, decides
     # for the case, so a condition reading an untrusted value stops the rule whatever it gave, its
-    # starts included (brief, D38) (brief, D40). A rule that only starts steps acts: what it read
-    # counts for their inputs' policies (brief, D39). The message names the value and its source,
+    # starts and sets included (brief, D38) (brief, D40). A rule that only starts steps or sets
+    # fields acts: what it read counts for their inputs' policies (brief, D39), and goes with the
+    # values it sets (brief, D42). The message names the value and its source,
     # never the value (brief, D30).
     untrusted = untrusted_read(case, catalog, state, firing.rule)
     if (then.reach or then.stop) and untrusted is not None:
-        acts = (("reaches", then.reach), ("starts", then.start), ("stops", then.stop))
+        acts = (
+            ("reaches", then.reach),
+            ("sets", tuple(then.set)),
+            ("starts", then.start),
+            ("stops", then.stop),
+        )
         verbs = [verb for verb, does in acts if does]  # `reaches and starts`, `stops`
         does = " and ".join([", ".join(verbs[:-1]), verbs[-1]] if len(verbs) > 1 else verbs)
         state.history.append(
@@ -143,6 +184,8 @@ def act(
         state.history.append(f"{said}: stopping {' and '.join(then.stop)}")
         for step in then.stop:
             stop_step(case, catalog, state, step, firing.entry, said, commands, at)
+    for field, value in computed.items():
+        write(case, catalog, state, firing, field, value, at)
     if then.reach:
         state.history.append(
             f"{firing.entry} on {firing.moment}: reaching {' and '.join(then.reach)}"
@@ -155,6 +198,34 @@ def act(
         state.rule_starts.append(
             RuleStart(firing.entry, firing.moment, step, people_in(read), untrusted_of(read))
         )
+
+
+def write(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    firing: RuleFiring,
+    field: str,
+    value: object,
+    at: int,
+) -> None:
+    """Write a value the rule set: it comes from everything its rule read, its value and its
+    condition, plus the field's mark; it is as old as the oldest fact it read, obtained by the
+    firing, never "now" (brief, D33) (brief, D42). The line names the field and the sources, never
+    the value (brief, D30)."""
+    rule = case.rules[firing.rule]
+    read: dict[str, frozenset[str]] = {}
+    for expression in (rule.then.set[field], rule.when):
+        read |= read_sources(case, catalog, state, expression)
+    mark = case.fields[field].source
+    sources = frozenset().union(*read.values(), {mark} if mark else set())
+    ages = [state.obtained[name].at for name in read if name in state.obtained]
+    state.values[field] = value
+    state.sources[field] = sources
+    state.obtained[field] = Obtained(min(ages, default=at), firing.entry)
+    state.history.append(
+        f"{firing.entry} on {firing.moment}: setting {field}, from {', '.join(sorted(sources))}"
+    )
 
 
 def nothing_decided(case: CaseDefinition, state: CaseState) -> str | None:
@@ -207,6 +278,6 @@ def retry_rule(
     """An operator retries a failed rule: its condition is read again, on the case file as it is
     now, for the same moment; `StepStopped` if it still can't be (brief, D26) (brief, D38). `said` is the
     history's line for the retry, written once the condition is read."""
-    decided = read(case, catalog, state, firing.rule)
+    decided, computed = read(case, catalog, state, firing.rule)
     state.history.append(said)
-    act(case, catalog, state, firing, decided, commands, at)
+    act(case, catalog, state, firing, decided, computed, commands, at)

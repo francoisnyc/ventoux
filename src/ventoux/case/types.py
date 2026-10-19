@@ -78,6 +78,24 @@ def output_type(info: FieldInfo, system: str | None) -> FieldType | None:
     return None
 
 
+def fits_type(given: FieldType, wanted: FieldType) -> bool | None:
+    """Whether a value of the type `given` always fits `wanted` (True), never does (False), or
+    only depends on the value (None), as the runtime's `fits` and strict validation read it."""
+    if isinstance(wanted, StringType):
+        # A string, an outcome and a reference are all texts.
+        return isinstance(given, StringType | OutcomeType | ReferenceType)
+    if isinstance(wanted, OutcomeType):
+        if isinstance(given, OutcomeType):
+            # Every outcome it may give is one the field takes, or some aren't.
+            return True if set(given.outcomes) <= set(wanted.outcomes) else None
+        # A text, or a reference, may be one of them or not: that depends on the value.
+        return None if isinstance(given, StringType | ReferenceType) else False
+    if isinstance(wanted, NumberType | BooleanType):
+        return type(given) is type(wanted)
+    # Fail closed: a type the runtime's `fits` doesn't know (a list, for now) fits nothing.
+    return False
+
+
 def expressions_of(
     step: TaskStep | CallStep | PlanStep | WaitStep,
 ) -> list[tuple[str, Expression, bool]]:
@@ -126,6 +144,28 @@ def expression_problem(case: CaseDefinition, catalog: Catalog, name: str) -> str
 def rule_problem(case: CaseDefinition, catalog: Catalog, name: str) -> str | None:
     """Why the rule `name` can't read its condition, or None, said as `flag_large.when can't be
     read: …`: asked before it is read, as for a step (brief, D35) (brief, D38)."""
-    when = case.rules[name].when
-    problem = None if when is None else type_problem(when, case_types(case, catalog), True)
-    return None if problem is None else f"{name}.when can't be read: {problem}"
+    rule = case.rules[name]
+    types = case_types(case, catalog)
+    problem = None if rule.when is None else type_problem(rule.when, types, True)
+    if problem is not None:
+        return f"{name}.when can't be read: {problem}"
+    for field, expression in rule.then.set.items():
+        problem = set_problem(expression, types, case.fields[field].declared, field)
+        if problem is not None:
+            return f"{name}.then.set.{field} can't be read: {problem}"
+    return None
+
+
+def set_problem(
+    expression: Expression, types: dict[str, FieldType], wanted: FieldType, field: str
+) -> str | None:
+    """Why `expression` can't set `field`, of the type `wanted`, or None: it doesn't check, or it
+    never gives a value of the field's type (brief, D42). One that may, depending on the value
+    (a text for an outcome field), is checked when it is written."""
+    try:
+        found = check(expression, types)
+    except ExpressionInvalid as refused:
+        return str(refused)
+    if fits_type(found, wanted) is False:
+        return f"{field} is {a_type(wanted)}, and this gives {a_type(found)}: set it from {a_type(wanted)}"
+    return None

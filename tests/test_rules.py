@@ -119,13 +119,14 @@ def test_a_rule_without_a_title_is_refused() -> None:
     "then", [{"reach": []}, {}, {"reach": [], "start": []}, {"reach": [], "stop": []}]
 )
 def test_a_rule_that_does_nothing_is_refused(then: dict[str, Any]) -> None:
-    # Since 11b a rule may start steps, and since 11c stop them, instead of reaching milestones
-    # (brief, D39, D40): one that does none of them would do nothing, so a typo never hides a rule.
+    # Since 11b a rule may start steps, since 11c stop them, and since 11e set fields, instead of
+    # reaching milestones (brief, D39, D40, D42): one that does none of them would do nothing, so
+    # a typo never hides a rule.
     with pytest.raises(
         CaseInvalid,
         match=(
-            "^rules.flag_large.then: a rule reaches a milestone, starts a step or stops one, "
-            "at least one$"
+            "^rules.flag_large.then: a rule reaches a milestone, starts a step, stops one or sets "
+            "a field, at least one$"
         ),
     ):
         parse_case(with_rule(then=then))

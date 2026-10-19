@@ -5,29 +5,33 @@ sources are known in one pass (brief, D34) (brief, D36). See docs/layers/10-case
 (10c) and docs/guides/cases.md.
 """
 
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, Then, WorkflowStep
-from ventoux.case.types import case_types
+from ventoux.case.definition import (
+    CallStep,
+    CaseDefinition,
+    PlanStep,
+    Rule,
+    Then,
+    WorkflowStep,
+)
+from ventoux.case.types import case_types, fits_type
 from ventoux.case.visibility import may_see, seen_by
-from ventoux.case.writers import case_sources, untrusted_of
+from ventoux.case.writers import always, case_sources, untrusted_of, writer_decides
 from ventoux.core.before_activity import not_a_reference_to
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract, held_input
 from ventoux.core.expressions import (
-    BooleanType,
     Expression,
     FieldType,
-    NumberType,
     OutcomeType,
     ReferenceType,
-    StringType,
     check,
 )
 from ventoux.core.expressions.check import a_type
 from ventoux.core.plan import Plan, set_by
 from ventoux.core.policy import OnlyFrom, Policy, refusal
-from ventoux.core.provenance import answering, fields_read, provenance
+from ventoux.core.provenance import answering, fields_read, is_trusted, provenance
 from ventoux.core.references import references
 from ventoux.core.validate import Issue, refused_inputs
 
@@ -122,24 +126,6 @@ def as_said(wanted: FieldType) -> str:
     if isinstance(wanted, OutcomeType):
         return f"one of {' or '.join(wanted.outcomes)}"
     return a_type(wanted)
-
-
-def fits_type(given: FieldType, wanted: FieldType) -> bool | None:
-    """Whether a value of the type `given` always fits `wanted` (True), never does (False), or
-    only depends on the value (None), as the runtime's `fits` and strict validation read it."""
-    if isinstance(wanted, StringType):
-        # A string, an outcome and a reference are all texts.
-        return isinstance(given, StringType | OutcomeType | ReferenceType)
-    if isinstance(wanted, OutcomeType):
-        if isinstance(given, OutcomeType):
-            # Every outcome it may give is one the field takes, or some aren't.
-            return True if set(given.outcomes) <= set(wanted.outcomes) else None
-        # A text, or a reference, may be one of them or not: that depends on the value.
-        return None if isinstance(given, StringType | ReferenceType) else False
-    if isinstance(wanted, NumberType | BooleanType):
-        return type(given) is type(wanted)
-    # Fail closed: a type the runtime's `fits` doesn't know (a list, for now) fits nothing.
-    return False
 
 
 def type_issues(
@@ -288,14 +274,58 @@ def policy_issue(
     return None
 
 
+class Refusals:
+    """Whether a policy refuses what an expression reads, for a case `opener` opens: whichever
+    rule wrote each value it reads (`always`), or only when some did (`sometimes`) (brief, D42)."""
+
+    def __init__(self, case: CaseDefinition, contracts: Mapping[str, Contract], opener: str):
+        self.case, self.contracts, self.opener = case, contracts, opener
+        self.sources = case_sources(case, contracts, opener)
+        self.found: dict[int, frozenset[str]] = {}
+
+    def refused(self, policy: Policy) -> Callable[[frozenset[str]], bool]:
+        return lambda sources: policy.refuses(sources) is not None
+
+    def always(self, policy: Policy, expression: Expression) -> bool:
+        """Whether `policy` refuses `expression`'s value every time. A value read from nothing
+        has no sources, which some policies refuse; any other comes from the union of what it
+        reads, none of them empty, so it is refused whenever one of them always is."""
+        read = fields_read(expression)
+        if not read:
+            return policy.refuses(frozenset()) is not None
+        if id(policy) not in self.found:
+            self.found[id(policy)] = always(
+                self.case, self.contracts, self.opener, self.refused(policy)
+            )
+        return any(field in self.found[id(policy)] for field in read)
+
+    def sometimes(self, policy: Policy, expression: Expression) -> str | None:
+        """The first value `expression` reads that `policy` refuses only when some rules wrote
+        it, said with which; None if there is none."""
+        if self.always(policy, expression):
+            return None
+        for field in fields_read(expression):
+            own = self.sources.get(field, frozenset())
+            if policy.refuses(own) is not None:
+                refused = self.refused(policy)
+                labels = ", ".join(sorted(s for s in own if refused(frozenset({s}))))
+                when = writer_decides(self.case, self.contracts, self.opener, field, refused)
+                return (
+                    f"{field} comes from {labels} {when}: whether {{step}} is refused "
+                    f"depends on which rule set {field} last: set {field} only from values the "
+                    "policy takes"
+                )
+        return None
+
+
 def policy_issues(
     case: CaseDefinition, contracts: Mapping[str, Contract], said: Collection[str]
 ) -> list[Issue]:
     """Each activity and workflow step's input against its contract's input policies, which say
     where it may come from (brief, D21). An input at a path in `said` already has its issue (one
     cause, one issue)."""
-    by_a_system = case_sources(case, contracts, BY_A_SYSTEM)
-    by_a_person = case_sources(case, contracts, BY_A_PERSON)
+    by_a_system = Refusals(case, contracts, BY_A_SYSTEM)
+    by_a_person = Refusals(case, contracts, BY_A_PERSON)
     issues: list[Issue] = []
     for name, contract in contracts.items():
         step = case.steps[name]
@@ -305,16 +335,28 @@ def policy_issues(
             if path in said:
                 continue
             for policy in contract.policies(field):
+                # Claimed only where refused whichever rule wrote what it reads (brief, D42).
                 refused = (
-                    policy.refuses(provenance(expression, by_a_system)) is not None,
-                    policy.refuses(provenance(expression, by_a_person)) is not None,
+                    by_a_system.always(policy, expression),
+                    by_a_person.always(policy, expression),
                 )
-                message = refusal(contract.reference, field, policy, expression, by_a_person, named)
+                message = refusal(
+                    contract.reference, field, policy, expression, by_a_person.sources, named
+                )
                 issue = policy_issue(path, message, policy, field, refused)
+                sometimes = by_a_person.sometimes(policy, expression)
+                if issue is None and sometimes is not None:
+                    issue = writer_issue(path, message, sometimes.format(step=name))
                 if issue is not None:
                     issues.append(issue)
                     break  # one issue per input: the first the runtime meets
     return issues
+
+
+def writer_issue(path: str, message: str, which: str) -> Issue:
+    """A refusal that holds only when some rules wrote a value: whether the step is refused
+    depends on which rule wrote last, which the check can't know (brief, D42)."""
+    return Issue(path, "WRITER_DECIDES", f"{message}: {which}", "warning")
 
 
 def condition_issues(
@@ -324,16 +366,17 @@ def condition_issues(
     step start reads: untrusted data can't choose what is sent (brief, D39). Its own `when` is said
     at the input; a rule's, at the rule, as a failure. An input at a path in `said` already has
     its issue, which is the cause: one cause, one issue. The opener is trusted whoever it is, so
-    who opens the case changes nothing: always an error."""
-    sources = case_sources(case, contracts, BY_A_SYSTEM)
+    who opens the case changes nothing; which rule wrote what the condition reads may, and then
+    it is a warning, `WRITER_DECIDES` (brief, D42)."""
+    steering = Steering(case, contracts)
     issues: list[Issue] = []
     for name, contract in contracts.items():
         step = case.steps[name]
         assert isinstance(step, CallStep)  # only a call step has a contract
         for field in step.inputs:
             path = f"steps.{name}.inputs.{field}"
-            if path not in said and (why := steered(contract, field, sources, name, step.when)):
-                issues.append(Issue(path, "INPUT_POLICY", why))
+            if path not in said and (found := steering.issue(path, contract, field, name, step)):
+                issues.append(found)
     given = {*said, *(issue.path for issue in issues)}
     for rule, written in case.rules.items():
         if written.then.reach or written.then.stop:
@@ -344,16 +387,63 @@ def condition_issues(
             started = case.steps[name]
             assert isinstance(started, CallStep)  # only a call step has a contract
             for field in started.inputs:
-                if why := steered(contracts[name], field, sources, rule, written.when):
-                    issues.append(
-                        Issue(
-                            f"rules.{rule}.then.start",
-                            "INPUT_POLICY",
-                            f"{name} fails on its inputs every time {rule} starts it: {why}",
-                        )
-                    )
+                found = steering.issue(
+                    f"rules.{rule}.then.start", contracts[name], field, rule, written, name
+                )
+                if found:
+                    issues.append(found)
                     break  # one issue per start: the first input the runtime meets
     return issues
+
+
+class Steering:
+    """Whether the untrusted data a condition reads is refused by an input's policy: whichever
+    rule wrote it (an error), or only when some did (a warning) (brief, D39) (brief, D42)."""
+
+    def __init__(self, case: CaseDefinition, contracts: Mapping[str, Contract]):
+        self.case, self.contracts = case, contracts
+        self.sources = case_sources(case, contracts, BY_A_SYSTEM)
+
+    def issue(
+        self,
+        path: str,
+        contract: Contract,
+        field: str,
+        who: str,
+        deciding: CallStep | Rule,
+        started: str | None = None,
+    ) -> Issue | None:
+        """The issue at `path`, if the condition of `who` (a step, or a rule starting `started`)
+        steers `field` into a policy that refuses what it reads; None if it doesn't."""
+        found = steered(contract, field, self.sources, who, deciding.when)
+        if found is None:
+            return None
+        why, value, policy = found
+
+        def refused(sources: frozenset[str]) -> bool:
+            untrusted = frozenset(source for source in sources if not is_trusted(source))
+            return bool(untrusted) and policy.refuses(untrusted) is not None
+
+        if value in always(self.case, self.contracts, BY_A_SYSTEM, refused):
+            if started is None:
+                return Issue(path, "INPUT_POLICY", why)
+            return Issue(
+                path,
+                "INPUT_POLICY",
+                f"{started} fails on its inputs every time {who} starts it: {why}",
+            )
+        when = writer_decides(self.case, self.contracts, BY_A_SYSTEM, value, refused)
+        step = started if started is not None else who
+        refusal_said = why.removesuffix(
+            ": read a value a person or a trusted system gives, such as a task's answer"
+        )
+        return Issue(
+            path,
+            "WRITER_DECIDES",
+            f"{refusal_said}: {value} is untrusted {when}: whether {step} is refused depends on "
+            f"which rule set {value} last: set {value} only from trusted values",
+            "warning",
+        )
 
 
 def steered(
@@ -362,18 +452,19 @@ def steered(
     sources: Mapping[str, frozenset[str]],
     who: str,
     when: Expression | None,
-) -> str | None:
+) -> tuple[str, str, Policy] | None:
     """Why the input `field` is refused by what `who`'s condition `when` reads, as the runtime
-    says it, with what to do; None if it isn't."""
+    says it, with what to do; the value read; and the policy refusing it. None if it isn't."""
     read = {name: sources.get(name, frozenset()) for name in fields_read(when)} if when else {}
     for policy in contract.policies(field):
         for value, untrusted in untrusted_of(read).items():
             if policy.refuses(untrusted) is not None:
-                return (
+                why = (
                     f"{contract.reference} takes {field} {policy.describe()}, and {who}'s "
                     f"condition reads {value} ({', '.join(sorted(untrusted))}): read a value a "
                     "person or a trusted system gives, such as a task's answer"
                 )
+                return why, value, policy
     return None
 
 
@@ -402,19 +493,15 @@ def plan_policy_issues(
     """Each plan step's inputs carried into its plan: each activity in the plan checked with the
     sources the case gives its fields, at the case's input, before the plan runs (brief, D36). A
     step with an input issue already is left out (one cause, one issue)."""
-    by_a_system = case_sources(case, contracts, BY_A_SYSTEM)
-    by_a_person = case_sources(case, contracts, BY_A_PERSON)
+    by_a_system = Refusals(case, contracts, BY_A_SYSTEM)
+    by_a_person = Refusals(case, contracts, BY_A_PERSON)
     issues: list[Issue] = []
     for name, plan in plans.items():
         step = case.steps[name]
         assert isinstance(step, PlanStep)  # only a plan step runs a plan
         if any(path.startswith(f"steps.{name}.inputs") for path in said):
             continue
-        when_a_system_opens = plan_fields_sources(step, plan, by_a_system)
-        when_a_person_opens = plan_fields_sources(step, plan, by_a_person)
-        refused_anyway = {
-            (r.state, r.field) for r in refused_inputs(plan, catalog, when_a_system_opens)
-        }
+        when_a_person_opens = plan_fields_sources(step, plan, by_a_person.sources)
         given: set[str] = set()
         # A person opening refuses whatever a system opening does, and more.
         for refused in refused_inputs(plan, catalog, when_a_person_opens):
@@ -422,7 +509,6 @@ def plan_policy_issues(
             message = refusal(
                 reference, field, policy, refused.expression, when_a_person_opens, named
             )
-            refused_when = ((refused.state, field) in refused_anyway, True)  # system, person
             # At each case input that feeds a refused field of the plan, once.
             for plan_field in fields_read(refused.expression):
                 path = f"steps.{name}.inputs.{plan_field}"
@@ -430,13 +516,17 @@ def plan_policy_issues(
                     continue
                 if policy.refuses(when_a_person_opens[plan_field]) is None:
                     continue
-                issue = policy_issue(
-                    path,
-                    f"{step.plan}, in its state {refused.state}: {message}",
-                    policy,
-                    plan_field,
-                    refused_when,
+                # Claimed only where refused whichever rule wrote what it reads (brief, D42).
+                expression = step.inputs[plan_field]
+                refused_when = (
+                    by_a_system.always(policy, expression),
+                    by_a_person.always(policy, expression),
                 )
+                said_here = f"{step.plan}, in its state {refused.state}: {message}"
+                issue = policy_issue(path, said_here, policy, plan_field, refused_when)
+                sometimes = by_a_person.sometimes(policy, expression)
+                if issue is None and sometimes is not None:
+                    issue = writer_issue(path, said_here, sometimes.format(step=name))
                 if issue is not None:
                     given.add(plan_field)
                     issues.append(issue)
@@ -446,34 +536,61 @@ def plan_policy_issues(
 def never_does(then: Then) -> str:
     """What a rule that doesn't act never does, as its issue says it: `reaches high_risk or
     starts lead_check`, `stops review`."""
-    acts = (("reaches", then.reach), ("starts", then.start), ("stops", then.stop))
+    acts = (
+        ("reaches", then.reach),
+        ("sets", tuple(then.set)),
+        ("starts", then.start),
+        ("stops", then.stop),
+    )
     return " or ".join(f"{verb} {' and '.join(names)}" for verb, names in acts if names)
 
 
 def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> list[Issue]:
     """A rule that reaches a milestone or stops a step, whose condition reads a value from an
-    untrusted source whoever writes it: the runtime refuses to let it act every time, so it never
-    does (`UNTRUSTED_TRIGGER`). Untrusted data informs; it never decides (brief, D38)
-    (brief, D40). In 11a every value is untrusted always or never (a field's mark stays whoever
-    writes it, an output carries its contract's source), so any untrusted source is a proof; a
-    field only some writers make untrusted comes with `set`."""
+    untrusted source: the runtime refuses to let it act whenever it does. Untrusted data informs;
+    it never decides (brief, D38) (brief, D40). An error (`UNTRUSTED_TRIGGER`) only for a value
+    untrusted whichever writer wrote it, since it then never acts; a warning (`WRITER_DECIDES`)
+    for a value only some rules make untrusted, since whether it acts depends on which rule wrote
+    last (brief, D42)."""
     sources = case_sources(case, contracts, BY_A_SYSTEM)  # who opens it changes no trust
+    untrusted = always(case, contracts, BY_A_SYSTEM, is_untrusted)
     found: list[Issue] = []
     for name, rule in case.rules.items():
         if not rule.then.reach and not rule.then.stop:
             continue  # a rule that only starts steps acts: its condition counts for their inputs
         for field in [] if rule.when is None else fields_read(rule.when):
-            untrusted = sorted(s for s in sources.get(field, ()) if s.startswith("untrusted:"))
-            if untrusted:
+            labels = ", ".join(sorted(s for s in sources.get(field, ()) if not is_trusted(s)))
+            if not labels:
+                continue
+            path = f"rules.{name}.when"
+            if field in untrusted:
                 found.append(
                     Issue(
-                        f"rules.{name}.when",
+                        path,
                         "UNTRUSTED_TRIGGER",
-                        f"{name}'s condition reads {field}, which comes from "
-                        f"{', '.join(untrusted)} whoever writes it, and untrusted data can't "
-                        f"decide, so it never {never_does(rule.then)}: read a value a person or "
-                        "a trusted system gives, such as a task's answer",
+                        f"{name}'s condition reads {field}, which comes from {labels} whoever "
+                        f"writes it, and untrusted data can't decide, so it never "
+                        f"{never_does(rule.then)}: read a value a person or a trusted system "
+                        "gives, such as a task's answer",
                     )
                 )
-                break  # one cause, one issue
+            else:
+                when = writer_decides(case, contracts, BY_A_SYSTEM, field, is_untrusted)
+                found.append(
+                    Issue(
+                        path,
+                        "WRITER_DECIDES",
+                        f"{name}'s condition reads {field}, which comes from {labels} {when}, and "
+                        f"untrusted data can't decide, so whether it {never_does(rule.then)} "
+                        f"depends on which rule set {field} last: set {field} only from trusted "
+                        "values",
+                        "warning",
+                    )
+                )
+            break  # one cause, one issue
     return found
+
+
+def is_untrusted(sources: frozenset[str]) -> bool:
+    """Whether `sources` hold one the engine doesn't trust: what lets no rule decide (brief, D38)."""
+    return any(not is_trusted(source) for source in sources)

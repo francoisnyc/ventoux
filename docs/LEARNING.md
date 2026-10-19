@@ -1041,6 +1041,16 @@ and record the key points. A question is closed once you can explain the answer 
     Sam clicked "accept suggestion", he is the proposer, and someone else must approve.
   In one line: the advisor can make a step run only through a proposal that admission and
   someone else's approval check, and it can never choose the values.
+- Retrieval (layer 11e warm-up, 2026-10-19), the follow-up: "can't remember". Walked through
+  again in plain words, the same four parts: the proposer is whoever the API names, holding a
+  role in `proposed_by`, with `review` done; nothing runs until a `support-lead` approves; the
+  amount is the case file's `amount`, since `Proposed(step, by, roles)` has no place for a value,
+  and "VIP" is untrusted content that informs a person; the approver is a `support-lead` other
+  than the proposer, the opener, and anyone whose answer feeds the step. Then a question: is
+  `goodwill` a step? Yes: an activity step calling `payments.refund@2`, `automatic: false` (it
+  never starts by itself), its amount written in the definition, behind a team lead's approval.
+  Tied to 11e: `set` is a new way values reach the case file, still an expression in the
+  definition, and a value computed from Ana's answer still keeps Ana from approving (brief, D42).
 - Status: open, until the proposer's checks and the exclusions come back from memory.
 
 
