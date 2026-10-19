@@ -12,7 +12,7 @@ from collections.abc import Mapping
 
 from ventoux.case.admission import latest_run
 from ventoux.case.called import called
-from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
+from ventoux.case.definition import CallStep, CaseDefinition, TaskStep, rule_fields
 from ventoux.case.state import Answered, CaseState, RuleStart
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.approval import approver_role, not_someone_else, risk_refusal
@@ -97,17 +97,18 @@ def judge_approval(
     latest = latest_run(state, name)
     if latest is not None and latest.status == "retrying" and answer.by in latest.excluded:
         raise AnswerRefused(latest.excluded[answer.by])
-    refuse_unless(someone_else(state.sources, answer.by, name, step))
+    refuse_unless(someone_else(case, state.sources, answer.by, name, step))
     return approver
 
 
 def someone_else(
-    sources: Mapping[str, frozenset[str]], by: str, name: str, step: CallStep
+    case: CaseDefinition, sources: Mapping[str, frozenset[str]], by: str, name: str, step: CallStep
 ) -> str | None:
     """Why `by` may not approve the step: their answer flows into its inputs or its `when`
     (brief, D11). None: they are someone else."""
     conditions = [step.when] if step.when is not None else []
-    return not_someone_else(by, name, list(step.inputs.values()), conditions, sources)
+    inputs = list(step.inputs.values())
+    return not_someone_else(by, name, inputs, conditions, sources, computed=rule_fields(case))
 
 
 def unseen(

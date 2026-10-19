@@ -156,12 +156,18 @@ def act(
     then = case.rules[firing.rule].then
     # Untrusted data informs; it never decides. Reaching a milestone, or stopping a step, decides
     # for the case, so a condition reading an untrusted value stops the rule whatever it gave, its
-    # starts included (brief, D38) (brief, D40). A rule that only starts steps acts: what it read
-    # counts for their inputs' policies (brief, D39). The message names the value and its source,
+    # starts and sets included (brief, D38) (brief, D40). A rule that only starts steps or sets
+    # fields acts: what it read counts for their inputs' policies (brief, D39), and goes with the
+    # values it sets (brief, D42). The message names the value and its source,
     # never the value (brief, D30).
     untrusted = untrusted_read(case, catalog, state, firing.rule)
     if (then.reach or then.stop) and untrusted is not None:
-        acts = (("reaches", then.reach), ("starts", then.start), ("stops", then.stop))
+        acts = (
+            ("reaches", then.reach),
+            ("sets", tuple(then.set)),
+            ("starts", then.start),
+            ("stops", then.stop),
+        )
         verbs = [verb for verb, does in acts if does]  # `reaches and starts`, `stops`
         does = " and ".join([", ".join(verbs[:-1]), verbs[-1]] if len(verbs) > 1 else verbs)
         state.history.append(

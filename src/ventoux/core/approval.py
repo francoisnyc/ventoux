@@ -7,7 +7,7 @@ someone else; and the digest of the inputs it saw.
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract, Contract
@@ -87,13 +87,21 @@ def not_someone_else(
     inputs: list[Expression],
     conditions: list[Expression],
     sources: Mapping[str, frozenset[str]],
+    computed: Collection[str] = (),
 ) -> str | None:
-    """Why `person` may not approve `step`: their answer set a value it uses, or one that decides
-    whether it runs (brief, D11). None: they are someone else."""
-    if (field := set_by_them(person, inputs, sources)) is not None:
-        return f"{person} set {field}, which {step} uses, so cannot approve it"
-    if (field := set_by_them(person, conditions, sources)) is not None:
-        return f"{person} set {field}, which decides whether {step} runs, so cannot approve it"
+    """Why `person` may not approve `step`: their answer is in a value it uses, or one that decides
+    whether it runs (brief, D11). None: they are someone else. A field in `computed` was set by a
+    case's rule from what it read, so their answer is in it without their having set it
+    (brief, D42)."""
+    for read, does in ((inputs, f"{step} uses"), (conditions, f"decides whether {step} runs")):
+        if (field := set_by_them(person, read, sources)) is None:
+            continue
+        if field in computed:
+            return (
+                f"{person}'s answer is in {field}, which a rule computes and {does}, so cannot "
+                "approve it"
+            )
+        return f"{person} set {field}, which {does}, so cannot approve it"
     return None
 
 

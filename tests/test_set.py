@@ -13,7 +13,15 @@ import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.state import Obtained
-from ventoux.testing import START, CaseRefused, load_definition, retry, run_case
+from ventoux.testing import (
+    START,
+    AnswerRefused,
+    CaseRefused,
+    load_definition,
+    retry,
+    run_case,
+    send,
+)
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "omar": ["operations"]}
@@ -282,3 +290,133 @@ def test_a_retried_set_reads_again() -> None:
     )
     assert run.needs_attention == []
     assert run.state.values["owed"] == Decimal(35)
+
+
+# --- Slice 3: provenance at work ---
+
+
+def with_large_claim() -> dict[str, Any]:
+    """The refund, with the customer's own estimate (untrusted), `large_claim` set from it on the
+    opening, and a milestone a second rule reaches on `large_claim`."""
+    definition = with_owed()
+    definition["fields"] |= {
+        "estimate": {
+            "type": "number",
+            "source": "untrusted:customer",
+            "display": {"title": "Customer's own estimate"},
+        },
+        "large_claim": {"type": "boolean", "display": {"title": "A large claim"}},
+    }
+    definition["milestones"] = {"large": {"display": {"title": "A large claim"}}}
+    definition["rules"] |= {
+        "size_up": {
+            "display": {"title": "Mark a large claim"},
+            "on": "opened",
+            "when": {">": [{"var": "estimate"}, 5000]},
+            "then": {"set": {"large_claim": True}},
+        },
+        "flag_large": {
+            "display": {"title": "Flag a large claim"},
+            "on": "opened",
+            "when": {"==": [{"var": "large_claim"}, True]},
+            "then": {"reach": ["large"]},
+        },
+    }
+    return definition
+
+
+def test_a_constant_under_an_untrusted_condition_is_untrusted() -> None:
+    # `true` is written by the definition, but the customer's estimate chose it: the value comes
+    # from what the condition read. Setting informs, so the rule acts (brief, D42).
+    run = run_case(with_large_claim(), file=FILE | {"estimate": 9000}, answers=[], people=PEOPLE)
+    assert run.state.values["large_claim"] is True
+    assert run.state.sources["large_claim"] == {"system:opener", "untrusted:customer"}
+    assert (
+        "size_up#1 on opened: setting large_claim, from system:opener, untrusted:customer"
+        in run.history
+    )
+
+
+def test_untrusted_data_cant_decide_through_a_set_field() -> None:
+    # Without the condition's sources, `large_claim` would launder the estimate into a trusted
+    # milestone (brief, D38, D42).
+    run = run_case(with_large_claim(), file=FILE | {"estimate": 9000}, answers=[], people=PEOPLE)
+    assert "large" not in run.state.milestones
+    assert (
+        "flag_large#1 on opened: reaches nothing: its condition reads large_claim, from "
+        "untrusted:customer, and untrusted data can't decide"
+    ) in run.history
+
+
+def test_a_rule_that_sets_and_reaches_on_untrusted_data_doesnt_act() -> None:
+    definition = with_large_claim()
+    definition["rules"]["size_up"]["then"]["reach"] = ["large"]
+    run = run_case(definition, file=FILE | {"estimate": 9000}, answers=[], people=PEOPLE)
+    assert "large_claim" not in run.state.values
+    assert "large" not in run.state.milestones
+    assert (
+        "size_up#1 on opened: reaches and sets nothing: its condition reads estimate, from "
+        "untrusted:customer, and untrusted data can't decide"
+    ) in run.history
+
+
+def test_an_input_policy_refuses_a_value_computed_from_untrusted_data() -> None:
+    # payments.refund@2 takes amount only from a system or a person: a value computed from the
+    # customer's estimate is refused, as the estimate itself is (brief, D36, D42).
+    definition = with_owed()
+    definition["fields"]["estimate"] = with_large_claim()["fields"]["estimate"]
+    definition["rules"]["work_out_owed"]["then"]["set"] = {
+        "owed": {"-": [{"var": "estimate"}, {"var": "fee"}]}
+    }
+    definition["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    run = run_case(definition, file=FILE | {"estimate": 50}, answers=[APPROVED], people=PEOPLE)
+    assert not run.reached("pay")
+    assert run.needs_attention == [
+        (
+            "pay#1: payments.refund@2 takes amount only from a system or a person, never from "
+            "untrusted data, and this value comes from owed (person:ana, system:opener, "
+            "untrusted:customer)"
+        )
+    ]
+
+
+def test_whose_answer_a_set_value_carries_cant_approve() -> None:
+    # Sam's answer is in what is owed, so Sam can't approve paying it: four eyes hold through the
+    # computation (brief, D11, D42).
+    definition = with_owed()
+    definition["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    big = ("review", "approve", "sam", {"approved_amount": 500})
+    with pytest.raises(
+        AnswerRefused,
+        match="^sam's answer is in owed, which a rule computes and pay uses, so cannot approve it$",
+    ):
+        run_case(definition, file=FILE, answers=[big, ("pay", "approve", "sam")], people=PEOPLE)
+
+
+def test_a_set_changing_what_an_approval_saw_withdraws_it() -> None:
+    # Nobody approves values they didn't see: a rule changing what is owed while its approval is
+    # open withdraws it, and a new one is asked (brief, D25, D42).
+    definition = with_owed()
+    definition["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    definition["events"] = {
+        "fee_changed": {
+            "display": {"title": "The fee changes"},
+            "sent_by": {"system": "portal"},
+            "payload": {"fee": {"type": "number", "display": {"title": "The new fee"}}},
+        }
+    }
+    definition["rules"]["refigure"] = {
+        "display": {"title": "Work out what is owed again"},
+        "on": {"event": "fee_changed"},
+        "then": {"set": {"owed": {"-": [{"var": "approved_amount"}, {"var": "fee_changed.fee"}]}}},
+    }
+    big = ("review", "approve", "ana", {"approved_amount": 500})
+    run = run_case(
+        definition,
+        file=FILE,
+        answers=[big, send("fee_changed", {"fee": 50}, "system:portal")],
+        people=PEOPLE,
+    )
+    assert "withdrew pay.approval#1: owed changed" in run.history
+    assert run.waiting_for == ["approval of pay by support-lead"]
+    assert run.state.values["owed"] == Decimal(450)
