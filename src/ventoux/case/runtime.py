@@ -363,6 +363,16 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
         if field.source is not None
         and field.source.removeprefix("untrusted:") not in catalog.labels
     ]
+    # So for what an event says of itself: its sender and its marks (brief, D30) (brief, D41).
+    for name, event in case.events.items():
+        if event.sent_by.system is not None and event.sent_by.system not in catalog.systems:
+            problems.append(f"{name} is sent by {event.sent_by.system}, a system nobody registered")
+        problems += [
+            f"{name}.{field} is declared {carried.source}, a label nobody registered"
+            for field, carried in event.payload.items()
+            if carried.source is not None
+            and carried.source.removeprefix("untrusted:") not in catalog.labels
+        ]
     for name, value in file.items():
         if name not in case.fields:
             fields = listed(sorted(case.fields))

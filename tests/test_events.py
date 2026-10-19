@@ -11,11 +11,18 @@ from typing import Any
 
 import pytest
 
+# pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
+from test_rules import LEDGER, with_ledger
+
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.state import Obtained
+from ventoux.case.validate import validate_case
+from ventoux.core.validate import Issue
 from ventoux.testing import (
+    CATALOG,
     START,
     AnswerRefused,
+    CaseRefused,
     EventRefused,
     ProposalRefused,
     close,
@@ -538,3 +545,238 @@ def test_a_stale_value_an_event_carried_is_never_fetched_again() -> None:
             answers=[CANCEL, later("2h"), propose("goodbye", "ana")],
             people=PEOPLE,
         )
+
+
+# --- Slice 6: validation stays a proof ---
+
+
+def issues(definition: dict[str, Any]) -> list[Issue]:
+    return validate_case(parse_case(definition), CATALOG)
+
+
+def test_the_guides_events_get_no_issue() -> None:
+    assert issues(cancellable()) == []
+    assert issues(waiting_for_a_receipt()) == []
+
+
+def test_a_rule_deciding_on_untrusted_content_is_refused() -> None:
+    definition = cancellable()
+    definition["rules"]["withdraw_on_cancel"]["when"] = SAYS_CANCEL
+    assert issues(definition) == [
+        Issue(
+            "rules.withdraw_on_cancel.when",
+            "UNTRUSTED_TRIGGER",
+            "withdraw_on_cancel's condition reads cancelled.note, which comes from "
+            "untrusted:customer whoever writes it, and untrusted data can't decide, so it never "
+            "stops review: read a value a person or a trusted system gives, such as a task's "
+            "answer",
+        )
+    ]
+    # The runtime refuses the same, on nothing validation did (brief, D34): shown above, in
+    # test_untrusted_content_cant_decide.
+
+
+def correcting() -> dict[str, Any]:
+    """The refund, where support sends the corrected amount, which is recorded in the ledger once
+    it arrives: `ledger.record@1` takes an amount only the opener gave."""
+    definition = copy.deepcopy(REFUND)
+    definition["events"] = {
+        "amount_corrected": {
+            "display": {"title": "Support corrects the amount"},
+            "sent_by": {"roles": ["support"]},
+            "payload": {"amount": {"type": "number", "display": {"title": "Corrected amount"}}},
+        }
+    }
+    definition["steps"]["wait_for_correction"] = {
+        "kind": "wait",
+        "display": {"title": "Wait for the corrected amount"},
+        "event": "amount_corrected",
+    }
+    definition["steps"]["record"] = {
+        "kind": "activity",
+        "display": {"title": "Record the corrected amount"},
+        "activity": "ledger.record@1",
+        "requires": ["wait_for_correction"],
+        "inputs": {"amount": {"var": "amount_corrected.amount"}},
+    }
+    return definition
+
+
+def test_a_persons_payload_is_refused_where_only_a_system_may_give_it() -> None:
+    [issue] = validate_case(parse_case(correcting()), with_ledger())
+    assert (issue.path, issue.code, issue.severity) == (
+        "steps.record.inputs.amount",
+        "INPUT_POLICY",
+        "error",
+    )
+    assert issue.message.startswith("ledger.record@1 takes amount only from opener")
+    # The runtime refuses it on its own (brief, D34).
+    run = run_case(
+        correcting(),
+        file=SMALL,
+        answers=[send("amount_corrected", {"amount": 35}, "ana")],
+        people=PEOPLE,
+        catalog=with_ledger(),
+        activities=LEDGER,
+    )
+    [failed] = run.needs_attention
+    assert failed.startswith("record#1: ledger.record@1 takes amount only from opener")
+
+
+def test_a_payload_read_where_nothing_waits_for_it_may_be_unset() -> None:
+    definition = with_a_goodbye_support_proposes()
+    del definition["steps"]["goodbye"]["max_age"]
+    assert issues(definition) == [
+        Issue(
+            "steps.goodbye.inputs.template",
+            "MAY_BE_UNSET",
+            "goodbye reads cancelled.note, which only the event cancelled carries, and goodbye "
+            "doesn't wait for it: if goodbye runs before it arrives, it fails and needs attention: "
+            "require a wait for cancelled",
+            "warning",
+        )
+    ]
+
+
+def test_a_payload_is_surely_set_after_its_wait_and_in_a_rule_on_its_event() -> None:
+    # After its wait: `correcting` reads the amount only once the wait is done.
+    assert validate_case(parse_case(correcting()), with_ledger()) != []  # its policy issue only
+    assert [i.code for i in validate_case(parse_case(correcting()), with_ledger())] == [
+        "INPUT_POLICY"
+    ]
+    # In a rule on its event: the event has just arrived. A trusted note, so the rule may decide.
+    definition = cancellable()
+    del definition["events"]["cancelled"]["payload"]["note"]["source"]
+    definition["rules"]["withdraw_on_cancel"]["when"] = SAYS_CANCEL
+    assert issues(definition) == []
+
+
+def test_a_payload_read_as_the_case_opens_is_never_set_after() -> None:
+    # No step writes it, so nothing proves it fails every time: a warning, never SET_AFTER,
+    # whose proof is a step that waits for its reader (brief, D37) (brief, D41).
+    definition = cancellable()
+    definition["rules"]["withdraw_on_cancel"] |= {
+        "on": "opened",
+        "when": {"!": [{"var": "cancelled.note"}]},
+    }
+    definition["events"]["cancelled"]["payload"]["note"] = {
+        "type": "boolean",
+        "display": {"title": "Cancelled by mistake"},
+    }
+    [issue] = issues(definition)
+    assert (issue.path, issue.code, issue.severity) == (
+        "rules.withdraw_on_cancel.when",
+        "MAY_BE_UNSET",
+        "warning",
+    )
+
+
+def test_a_max_age_on_a_payload_is_never_refreshed() -> None:
+    found = issues(with_a_goodbye_support_proposes())
+    assert [i.code for i in found] == ["MAY_BE_UNSET", "NEVER_REFRESHED"]
+    assert found[1] == Issue(
+        "steps.goodbye.max_age.cancelled.note",
+        "NEVER_REFRESHED",
+        "cancelled.note comes from the event cancelled, sent from outside, and can't be fetched "
+        "again: whenever it is older than goodbye's max_age allows, a proposal of goodbye is "
+        "refused: keep it only if a person should decide each time",
+        "warning",
+    )
+
+
+def test_what_an_event_names_is_registered() -> None:
+    definition = with_a_call()
+    definition["events"]["cancelled"]["sent_by"] = {"system": "helpdesk"}
+    definition["events"]["cancelled"]["payload"]["note"]["source"] = "untrusted:chat"
+    definition["events"]["customer_called"]["sent_by"] = {"roles": ["suport"]}
+    assert [(i.path, i.code) for i in issues(definition)] == [
+        ("events.customer_called.sent_by.roles", "UNKNOWN_ROLE"),
+        ("events.cancelled.payload.note.source", "UNKNOWN_SOURCE"),
+        ("events.cancelled.sent_by.system", "UNKNOWN_SYSTEM"),
+    ]
+
+
+def test_a_case_naming_an_unregistered_sender_or_label_doesnt_open() -> None:
+    # The runtime's own refusal, on nothing validation did (brief, D34).
+    definition = cancellable()
+    definition["events"]["cancelled"]["sent_by"] = {"system": "helpdesk"}
+    definition["events"]["cancelled"]["payload"]["note"]["source"] = "untrusted:chat"
+    with pytest.raises(
+        CaseRefused,
+        match="^cancelled is sent by helpdesk, a system nobody registered\n"
+        "cancelled.note is declared untrusted:chat, a label nobody registered$",
+    ):
+        run_case(definition, file=SMALL, answers=[], people=PEOPLE)
+
+
+def test_a_misspelt_payload_field_is_refused_and_fails_its_rule() -> None:
+    definition = cancellable()
+    definition["rules"]["withdraw_on_cancel"]["when"] = {
+        "==": [{"var": "cancelled.notes"}, "please cancel"]
+    }
+    [issue] = issues(definition)
+    assert (issue.path, issue.code) == ("rules.withdraw_on_cancel.when", "EXPRESSION_INVALID")
+    run = run_case(definition, file=SMALL, answers=[CANCEL], people=PEOPLE)
+    [failed] = run.needs_attention
+    assert failed.startswith("withdraw_on_cancel#1: withdraw_on_cancel.when can't be read")
+
+
+def test_a_wait_open_as_the_case_opens_keeps_it_from_closing_at_once() -> None:
+    # Without its wait, the refund with no review would close as it opens: CLOSES_AT_OPENING.
+    definition = waiting_for_a_receipt()
+    definition["steps"] = {"wait_for_receipt": definition["steps"]["wait_for_receipt"]}
+    definition["steps"]["wait_for_receipt"]["requires"] = []
+    definition["sequence"] = []
+    assert issues(definition) == []
+    run = run_case(definition, file=SMALL, answers=[], people=PEOPLE)
+    assert run.waiting_for == ["receipt_sent from portal"]
+
+
+def test_a_loop_that_comes_round_through_an_event_is_not_claimed() -> None:
+    # Whether an event comes again is its sender's, not the case's: nothing proves the loop goes
+    # on, so neither NEVER_CLOSES nor LOOPS_UNTIL_CLOSED (brief, D39) (brief, D41).
+    definition = with_a_call()
+    definition["stays_open"] = True
+    definition["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate request"}, "roles": ["suport"]}
+    }
+    definition["steps"]["review"] |= {"repeatable": True}
+    definition["rules"] = {
+        "review_again": {
+            "display": {"title": "Review again after a call"},
+            "on": {"event": "customer_called"},
+            "then": {"start": ["review"]},
+        }
+    }
+    codes = [issue.code for issue in issues(definition)]
+    assert "LOOPS_UNTIL_CLOSED" not in codes
+    assert codes == ["NEVER_CLOSES"]  # its close reason's role is misspelt: nothing else
+
+
+def test_a_sender_is_a_role_the_case_names() -> None:
+    # Anyone holding a role the case names sees its ordinary values (brief, D30): a sender too.
+    definition = with_a_call()
+    definition["events"]["customer_called"]["sent_by"] = {"roles": ["fraud"]}
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[send("customer_called", {"wants_refund": True}, "fay")],
+        people={**PEOPLE, "fay": ["fraud"]},
+    )
+    assert run.view(["fraud"]).values["customer_called.wants_refund"] is True
+
+
+def test_what_a_rule_on_an_event_reaches_can_close_the_case() -> None:
+    # A case that stays open, whose one close reason names no registered role, closed only by
+    # what a rule on an event reaches: no NEVER_CLOSES, no CLOSE_UNREACHABLE, no NEVER_FIRES
+    # (brief, D34) (brief, D41).
+    definition = cancellable(stays_open=True, closes_when=["withdrawn"])
+    definition["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate request"}, "roles": ["suport"]}
+    }
+    definition["milestones"] = {"withdrawn": {"display": {"title": "Withdrawn"}}}
+    definition["rules"]["withdraw_on_cancel"]["then"] = {"stop": ["review"], "reach": ["withdrawn"]}
+    assert [issue.code for issue in issues(definition)] == ["UNKNOWN_ROLE"]
+    run = run_case(definition, file=SMALL, answers=[CANCEL], people=PEOPLE)
+    assert run.closed
+    assert run.history[-1] == "closed: withdrawn reached"

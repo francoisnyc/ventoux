@@ -260,7 +260,8 @@ CATALOG = Catalog()
 for label in ("customer", "document", "email", "llm", "web"):
     CATALOG.register_label(label)
 # The systems references may name, before the contracts whose inputs name them (brief, D30).
-for system in ("crm", "documents", "orders", "policies"):
+# `portal`, the customer portal, sends the cases guide's events (brief, D41).
+for system in ("crm", "documents", "orders", "policies", "portal"):
     CATALOG.register_system(system)
 for contract in (
     payments_refund,

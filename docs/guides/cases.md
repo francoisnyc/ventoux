@@ -1269,7 +1269,7 @@ Anything else is not a value: reading it is an error.
 | `ENGINE_INPUT` | error | a step gives the input the engine fills: the idempotency key | `idempotency_key is filled by the engine, never by a definition: remove it` |
 | `UNKNOWN_ROLE` | error | a role nobody registered: it counts for nothing when the case runs | `supprt is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead; use one of them, or ask the platform team to register it` |
 | `UNKNOWN_SOURCE` | error | a field is declared untrusted with a label nobody registered | `untrusted:custmer has a label nobody registered: the labels are customer, document, email, llm, web; use one of them, or ask the platform team to register it` |
-| `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are crm, documents, orders, policies; use one of them, or ask the platform team to register it` |
+| `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are crm, documents, orders, policies, portal; use one of them, or ask the platform team to register it` |
 | `EXPRESSION_INVALID` | error | an expression reads something that isn't a value, mixes types, or names an outcome that can't happen | as above |
 | `APPROVAL_REQUIRED` | error | a high-risk step has no approval | `payments.refund@2 is high risk, and pay has no approval: add one` |
 | `APPROVAL_ROLE` | error | a role on an approval may not approve the step's risk | `adjuster may approve no risk, and payments.refund@2 is high risk: name a role that may approve high risk` |

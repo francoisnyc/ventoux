@@ -12,6 +12,7 @@ from ventoux.case.definition import (
     AnsweredTask,
     CallStep,
     CaseDefinition,
+    EventArrived,
     PlanStep,
     Reached,
     Started,
@@ -95,6 +96,10 @@ def rule_unset_issues(
             known = reading.before(on.started)
         elif isinstance(on, AnsweredTask):
             known = reading.met(on.answered, frozenset())
+        elif isinstance(on, EventArrived):
+            # The event has just arrived: what it carries is set (brief, D41).
+            payload = reading.case.events[on.event].payload
+            known = Known(present=frozenset(f"{on.event}.{field}" for field in payload))
         elif on == "opened":
             known = Known()  # nothing has run
         else:
@@ -317,6 +322,13 @@ def unset_message(reading: Reading, name: str, value: str, known: Known) -> str:
     """Why `value` may not be set where `name` reads it, what happens then, and what to do."""
     fails = f"then {name} fails and needs attention"
     step, _, part = value.partition(".")
+    if part and step in reading.case.events:
+        # Nothing in the case decides when it arrives: only a wait for it says it has.
+        return (
+            f"{name} reads {value}, which only the event {step} carries, and {name} doesn't "
+            f"wait for it: if {name} runs before it arrives, it fails and needs attention: "
+            f"require a wait for {step}"
+        )
     if part and step in reading.case.steps:
         if step not in known.ended:
             return not_waited(name, value, step, "gives it")
@@ -397,6 +409,8 @@ def never_fetched(
     """Why `value` can never be fetched again, as the runtime's `refreshable` says; None if it
     is a read that can be."""
     writer = value.partition(".")[0]
+    if writer in case.events:
+        return f"the event {writer}, sent from outside, and can't be fetched again"
     step = case.steps.get(writer)
     if step is None:
         setters = set_by_outcomes(case).get(value)

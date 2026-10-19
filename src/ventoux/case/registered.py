@@ -35,22 +35,31 @@ def role_issues_of(
             issues += role_issues(f"close_reasons.{name}.roles", reason.roles, catalog)
     for name, field in case.fields.items():
         issues += role_issues(f"fields.{name}.visible_to", field.visible_to or (), catalog)
+    for name, event in case.events.items():
+        issues += role_issues(f"events.{name}.sent_by.roles", event.sent_by.roles or (), catalog)
     return issues
 
 
 def source_issues_of(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
-    """Each field declared untrusted with a label nobody registered (brief, D12)."""
+    """Each field, or value an event carries, declared untrusted with a label nobody registered
+    (brief, D12) (brief, D41)."""
+    declared = [(f"fields.{name}.source", field.source) for name, field in case.fields.items()]
+    declared += [
+        (f"events.{name}.payload.{field}.source", carried.source)
+        for name, event in case.events.items()
+        for field, carried in event.payload.items()
+    ]
     issues: list[Issue] = []
-    for name, field in case.fields.items():
-        if field.source is None:
+    for path, source in declared:
+        if source is None:
             continue
-        label = field.source.removeprefix("untrusted:")  # parse_case let only `untrusted:` through
+        label = source.removeprefix("untrusted:")  # parse_case let only `untrusted:` through
         if label not in catalog.labels:
             issues.append(
                 Issue(
-                    f"fields.{name}.source",
+                    path,
                     "UNKNOWN_SOURCE",
-                    f"{field.source} has a label nobody registered: the labels are "
+                    f"{source} has a label nobody registered: the labels are "
                     f"{', '.join(catalog.labels)}; use one of them, or ask the platform team to "
                     "register it",
                 )
@@ -59,8 +68,20 @@ def source_issues_of(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
 
 
 def system_issues_of(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
-    """Each reference, in a field or in a list's records, naming a system nobody registered
-    (brief, D30): the runtime's own check, which refuses such a case when it opens."""
+    """Each reference, in a field or in a list's records, and each event's sender, naming a
+    system nobody registered (brief, D30) (brief, D41): the runtime's own check, which refuses such
+    a case when it opens."""
+    senders = [
+        Issue(
+            f"events.{name}.sent_by.system",
+            "UNKNOWN_SYSTEM",
+            f"{name} is sent by {event.sent_by.system}, a system nobody registered: the systems "
+            f"are {', '.join(catalog.systems)}; use one of them, or ask the platform team to "
+            "register it",
+        )
+        for name, event in case.events.items()
+        if event.sent_by.system is not None and event.sent_by.system not in catalog.systems
+    ]
     return [
         Issue(
             f"fields.{name}",
@@ -70,4 +91,4 @@ def system_issues_of(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
         )
         for name, field in case.fields.items()
         for problem in unregistered({name: field.declared}, catalog.systems)
-    ]
+    ] + senders
