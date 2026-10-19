@@ -38,6 +38,7 @@ from ventoux.case.definition import (
     CaseDefinition,
     DeclaredEvent,
     PlanStep,
+    Step,
     TaskStep,
     WaitStep,
     WorkflowStep,
@@ -59,6 +60,7 @@ from ventoux.case.state import (
     Failed,
     ForgetApproved,
     GivenApproval,
+    Moment,
     Obtained,
     OpenApproval,
     Opened,
@@ -246,7 +248,7 @@ def arrive(case: CaseDefinition, state: CaseState, event: Sent, role: str | None
     )
     giving = f", giving {'; '.join(given)}" if given else ""
     state.history.append(f"{entry} {who}{giving}")
-    state.moments.append(f"event {name}")
+    state.moments.append(Moment(f"event {name}"))
     # Each wait open for it is done: only an arrival after a wait opens ends it (brief, D41).
     for run in state.runs:
         waits = case.steps[run.step]
@@ -347,7 +349,7 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
         state.sources[name] = marked(case, name, origin)
         state.obtained[name] = Obtained(event.at, None)  # from the opening, by no step run
     state.history.append(f"opened by {event.by or OPENER}, with {listed(sorted(event.file))}")
-    state.moments.append("opened")
+    state.moments.append(Moment("opened"))
 
 
 def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, object]) -> None:
@@ -607,7 +609,8 @@ def answer_task(
     setting = f", setting {listed(list(sets))}" if sets else ""
     state.history.append(f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}")
     state.history.append(f"{run.entry} done")
-    state.moments.append(f"answered {run.step}")  # each answer, whatever the outcome (brief, D39)
+    # Each answer, whatever the outcome (brief, D39).
+    state.moments.append(Moment(f"answered {run.step}"))
     reach(state, (*step.outcomes[event.outcome].reaches, *step.reaches))
 
 
@@ -1272,13 +1275,17 @@ def start(
     if isinstance(step, WaitStep):
         # Open until the event's next arrival: pending work, listed with what it waits for
         # (brief, D10) (brief, D24) (brief, D41).
-        entry = coming_run(state, name, "open").entry
+        run = coming_run(state, name, "open")
+        run.steered = steering(case, catalog, state, name, step)  # read before it is spent
+        entry = run.entry
         proposal_spent(state, name)  # a wait has no approval: the proposed run has started
         state.waiting[entry] = f"{step.event} {sent_by(case.events[step.event])}"
         state.history.append(f"started {entry}: waiting for {state.waiting[entry]}")
         return
     if isinstance(step, TaskStep):
-        entry = coming_run(state, name, "open").entry
+        run = coming_run(state, name, "open")
+        run.steered = steering(case, catalog, state, name, step)  # read before it is spent
+        entry = run.entry
         proposal_spent(state, name)  # a task has no approval: the proposed run has started
         state.waiting[entry] = f"{name} by {' or '.join(step.roles)}"
         state.history.append(
@@ -1357,11 +1364,11 @@ def steering(
     catalog: Catalog,
     state: CaseState,
     name: str,
-    step: CallStep | PlanStep,
+    step: Step,
 ) -> tuple[Steering, ...]:
     """What decided that the step runs, and the untrusted values it read: its own `when`, read
-    now, and the `when` of the rule that started it, as it read it then (brief, D38)
-    (brief, D39)."""
+    now, and the `when` of the rule that started it, as it read it then, with what steered the
+    start that rule fired on (brief, D38) (brief, D39) (brief, D43)."""
     steered = [
         Steering(f"{name}'s condition reads {field}", sources)
         for field, sources in untrusted_of(read_sources(case, catalog, state, step.when)).items()
@@ -1371,6 +1378,7 @@ def steering(
             Steering(f"{asked.entry}'s condition, which started {name}, reads {field}", sources)
             for field, sources in asked.untrusted.items()
         ]
+        steered += asked.steered
     return tuple(steered)
 
 
@@ -1468,12 +1476,12 @@ def coming_run(
         # amended in 11b).
         if status != "failed" and not latest.started:
             latest.started = True
-            state.moments.append(f"started {name}")
+            state.moments.append(Moment(f"started {name}", latest.entry))
         return latest
     run = StepRun(next_entry(state, name), name, status, started=status != "failed")
     state.runs.append(run)
     if run.started:  # a run that fails before it starts never started
-        state.moments.append(f"started {name}")
+        state.moments.append(Moment(f"started {name}", run.entry))
     return run
 
 
