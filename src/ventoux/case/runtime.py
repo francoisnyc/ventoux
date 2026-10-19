@@ -18,6 +18,7 @@ from ventoux.case.admission import (
     StepStopped,
     ended_requirement,
     holds,
+    latest_counted,
     latest_run,
     proposal_refusal,
     requirements_met,
@@ -47,7 +48,7 @@ from ventoux.case.definition import (
 )
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
-from ventoux.case.rules import fire_rules, reach, retry_rule
+from ventoux.case.rules import fire_rules, reach, retry_rule, said_steered
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     CLOSING,
@@ -256,7 +257,7 @@ def arrive(case: CaseDefinition, state: CaseState, event: Sent, role: str | None
             run.status = "done"
             del state.waiting[run.entry]
             state.history.append(f"{run.entry} done: {entry} arrived")
-            reach(state, waits.reaches)
+            reach_unless_steered(state, run, waits.reaches)
 
 
 def sent_by(declared: DeclaredEvent) -> str:
@@ -661,7 +662,8 @@ def answer_approval(
 def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Completed) -> None:
     """A scheduled activity, a workflow or a plan finished: its outcome lands in the case file,
     tagged with the contract (or plan) that declares it, and so does an activity's or a workflow's
-    output, each field tagged with its contract's source (brief, D29)."""
+    output, each field tagged with its contract's source (brief, D29). A run untrusted data
+    steered adds what steered it to each, and reaches nothing (brief, D43)."""
     run = next(run for run in state.runs if run.entry == event.entry)
     step = case.steps[run.step]
     assert isinstance(step, CallStep | PlanStep)  # only an activity, a workflow or a plan completes
@@ -676,18 +678,39 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     run.status = "done"
     state.values[f"{run.step}.outcome"] = event.outcome
     # Trusted: the contract, owned by the platform team, or the reviewed plan, declares the
-    # outcomes (brief, D12).
-    state.sources[f"{run.step}.outcome"] = frozenset({f"system:{declares}"})
+    # outcomes (brief, D12). But what only untrusted data made exist is untrusted: a steered
+    # run's outcome and outputs carry what steered it (brief, D43).
+    steered = frozenset().union(*(steering.sources for steering in run.steered))
+    state.sources[f"{run.step}.outcome"] = frozenset({f"system:{declares}"}) | steered
     state.obtained[f"{run.step}.outcome"] = Obtained(event.at, run.entry)  # by this run
     if event.outcome != DONE:
         state.history.append(f"{run.entry} gave {event.outcome}")
         flag_if_stopping(state, run)
         return  # a step's milestones are reached only when it is done with `done`
-    given = {} if isinstance(step, PlanStep) else write_outputs(state, run.step, contract, event)
+    given = (
+        {}
+        if isinstance(step, PlanStep)
+        else write_outputs(state, run.step, contract, event, steered)
+    )
     giving = "; ".join(f"{name} from {given[name]}" for name in sorted(given))
     state.history.append(f"{run.entry} done{f', giving {giving}' if giving else ''}")
-    reach(state, step.reaches)
+    reach_unless_steered(state, run, step.reaches)
     flag_if_stopping(state, run)
+
+
+def reach_unless_steered(state: CaseState, run: StepRun, milestones: tuple[str, ...]) -> None:
+    """Reach the milestones a done run reaches, unless untrusted data steered its start: then it
+    reaches nothing, and says what steered it, never a value. Untrusted data informs; it never
+    decides (brief, D38) (brief, D43). A task's run never comes here: its answer is a person's."""
+    if not milestones:
+        return
+    if run.steered:
+        state.history.append(
+            f"{run.entry} reaches nothing: {said_steered(run.steered)}, and untrusted data "
+            "can't decide"
+        )
+        return
+    reach(state, milestones)
 
 
 def flag_if_stopping(state: CaseState, run: StepRun) -> None:
@@ -700,20 +723,26 @@ def flag_if_stopping(state: CaseState, run: StepRun) -> None:
 
 
 def write_outputs(
-    state: CaseState, step: str, contract: Contract, event: Completed
+    state: CaseState,
+    step: str,
+    contract: Contract,
+    event: Completed,
+    steered: frozenset[str] = frozenset(),
 ) -> dict[str, str]:
     """Each field the contract declares lands in the case file as `<step>.<field>`, tagged with
-    the source the contract declares for it, never one the activity sends back (brief, D29).
-    Gives each field's source, for the history."""
+    the source the contract declares for it, never one the activity sends back (brief, D29), and
+    what steered the run, if anything did (brief, D43). Gives each field's sources, for the
+    history."""
     # Pydantic: `model_validate` checks a dict against the model's fields and builds the model; a
     # field the model doesn't declare is left out, so it never reaches the case file.
     given = contract.output.model_validate(event.output)
-    sources = output_sources(contract.output)
-    for name, source in sources.items():
+    said: dict[str, str] = {}
+    for name, source in output_sources(contract.output).items():
         state.values[f"{step}.{name}"] = getattr(given, name)
-        state.sources[f"{step}.{name}"] = frozenset({source})
+        state.sources[f"{step}.{name}"] = frozenset({source}) | steered
         state.obtained[f"{step}.{name}"] = Obtained(event.at, event.entry)  # by this run
-    return sources
+        said[name] = ", ".join(sorted(state.sources[f"{step}.{name}"]))
+    return said
 
 
 def plan_outcome_problem(step: PlanStep, event: Completed) -> str | None:
@@ -1072,7 +1101,10 @@ def refresh_stale(
         )
         refreshing = case.steps[source]
         assert isinstance(refreshing, ActivityStep)  # only a read-only activity is refreshed
-        schedule(case, catalog, state, source, refreshing, None, commands)  # a new run: its own key
+        # A new run, with its own key; what steered the step it fetches for steers it too, as
+        # its start is a moment (brief, D43).
+        needing = required_steering(case, state, name)
+        schedule(case, catalog, state, source, refreshing, None, commands, needing)
         run = state.runs[-1]
         run.refresh = True
         state.refreshing[stale.field] = run.entry
@@ -1322,10 +1354,12 @@ def schedule(
     step: CallStep,
     approved: GivenApproval | None,
     commands: list[Command],
+    also_steered: tuple[Steering, ...] = (),
 ) -> None:
     """Check the inputs against the real sources (layer 5), then schedule the activity, or start
     the workflow, with a key naming the case and the step run (brief, D17). A workflow step is
-    checked exactly as an activity step is (brief, D6)."""
+    checked exactly as an activity step is (brief, D6). `also_steered` is what else steered the
+    run: for a refresh, what steered the step it fetches for (brief, D43)."""
     contract = called(catalog, step)  # fail closed: a contract the catalog lacks stops it
     # Checked again at runtime, on nothing case validation did (learning question 34).
     if contract.risk == "high" and step.approval is None:
@@ -1337,7 +1371,9 @@ def schedule(
     types = {name: field.declared for name, field in case.fields.items()}
     # A retry starts the same run again, with what its first start kept (brief, D26).
     kept = latest.steered if latest is not None and latest.status == "retrying" else ()
-    steered = tuple(dict.fromkeys((*kept, *steering(case, catalog, state, name, step))))
+    steered = tuple(
+        dict.fromkeys((*kept, *steering(case, catalog, state, name, step), *also_steered))
+    )
     inputs = checked_inputs(contract, step.inputs, state.values, state.sources, key, types, steered)
     if isinstance(step, WorkflowStep):
         refuse_sensitive_inputs(contract.reference, step.inputs, state.values)
@@ -1379,7 +1415,24 @@ def steering(
             for field, sources in asked.untrusted.items()
         ]
         steered += asked.steered
-    return tuple(steered)
+    return (*steered, *required_steering(case, state, name))
+
+
+def required_steering(case: CaseDefinition, state: CaseState, name: str) -> tuple[Steering, ...]:
+    """What steered the done run of each step `name` requires: a step its run lets start is
+    steered by it too, unless it is a task, whose answer is a person's, who is where untrusted
+    data's influence ends (brief, D43)."""
+    found: list[Steering] = []
+    for required in requirements(case)[name]:
+        if required not in case.steps or isinstance(case.steps[required], TaskStep):
+            continue  # a milestone is reached only by a trusted decision or a person
+        done = latest_counted(state, required)
+        if done is not None and done.status == "done":
+            found += [
+                Steering(f"{name} requires {required}, and {steering.said}", steering.sources)
+                for steering in done.steered
+            ]
+    return tuple(found)
 
 
 def refuse_sensitive_inputs(
