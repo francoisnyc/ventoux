@@ -17,9 +17,12 @@ from ventoux.testing import (
     START,
     AnswerRefused,
     EventRefused,
+    ProposalRefused,
     close,
+    finish,
     later,
     load_definition,
+    propose,
     run_case,
     send,
 )
@@ -426,3 +429,112 @@ def test_a_stop_or_a_close_cancels_a_wait() -> None:
     )
     assert "cancelled wait_for_receipt#1: closed as duplicate by ana" in closed.history
     assert closed.closed and closed.waiting_for == []
+
+
+# --- Slice 4: events and the close ---
+
+REJECTED = ("review", "reject", "ana")
+CANCEL = send("cancelled", {"note": "please cancel"}, "system:portal")
+
+
+def test_a_closed_case_refuses_an_event() -> None:
+    with pytest.raises(EventRefused, match="^the case is closed: it takes no more events$"):
+        run_case(cancellable(), file=SMALL, answers=[REJECTED, CANCEL], people=PEOPLE)
+
+
+def test_a_closing_case_refuses_an_event_and_is_flagged() -> None:
+    definition = cancellable()
+    definition["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate request"}, "roles": ["support"]}
+    }
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[APPROVED, close("duplicate", "ana"), CANCEL, finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+    )
+    assert appears_in_order(
+        [
+            "refused cancelled from portal: the case is closing, so it takes no more events",
+            "flagged: cancelled from portal arrived while the case was closing, and was refused",
+        ],
+        run.history,
+    )
+    assert "cancelled from portal arrived while the case was closing, and was refused" in run.flags
+    assert "cancelled.note" not in run.state.values  # nothing it carried landed
+    assert not any(line.startswith("withdraw_on_cancel#") for line in run.history)
+    assert run.closed
+
+
+def appears_in_order(lines: list[str], history: list[str]) -> bool:
+    """Whether `lines` appear in `history` one after the other."""
+    return any(history[at : at + len(lines)] == lines for at in range(len(history)))
+
+
+def unreachable_payment(inputs: dict[str, Any]) -> dict[str, Any]:
+    raise ConnectionError("provider unreachable")
+
+
+def test_while_a_failed_run_holds_the_close_an_event_lands_and_no_rule_acts() -> None:
+    definition = cancellable()
+    definition["events"]["receipt_sent"] = copy.deepcopy(RECEIPT_SENT)
+    definition["milestones"] = {"confirmed": {"display": {"title": "Confirmed"}}}
+    definition["closes_when"] = ["confirmed"]
+    definition["steps"]["confirm"] = {
+        "kind": "task",
+        "display": {"title": "Confirm the refund"},
+        "roles": ["support"],
+        "outcomes": {"confirmed": {"display": {"title": "Confirmed"}, "reaches": ["confirmed"]}},
+    }
+    definition["steps"]["wait_for_receipt"] = copy.deepcopy(WAIT_FOR_RECEIPT) | {"requires": []}
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[APPROVED, ("confirm", "confirmed", "ana"), RECEIPT, CANCEL],
+        people=PEOPLE,
+        activities={"payments.refund@2": unreachable_payment},
+    )
+    assert run.needs_attention[0].startswith("pay#1: payments.refund@2 failed")  # holds the close
+    assert "wait_for_receipt#1 done: receipt_sent#1 arrived" in run.history  # the wait it ends
+    assert run.state.values["cancelled.note"] == "please cancel"  # what it carries lands
+    assert run.history[-1] == (
+        "withdraw_on_cancel#1 on event cancelled: not applied: confirmed is reached, so the case "
+        "closes and nothing new is decided"
+    )
+    assert run.status == "open"
+
+
+# --- Slice 5: time stays data ---
+
+
+def with_a_goodbye_support_proposes() -> dict[str, Any]:
+    """The cancellable refund with a goodbye letter, quoting the customer's note, that support
+    proposes, needing the note at most an hour old."""
+    definition = cancellable()
+    definition["fields"]["email"] = {"type": "string", "display": {"title": "Email"}}
+    definition["rules"] = {}
+    definition["steps"]["goodbye"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a goodbye letter"},
+        "activity": "letters.draft@2",
+        "automatic": False,
+        "proposed_by": ["support"],
+        "inputs": {"to_customer": {"var": "email"}, "template": {"var": "cancelled.note"}},
+        "max_age": {"cancelled.note": "1h"},
+    }
+    return definition
+
+
+def test_a_stale_value_an_event_carried_is_never_fetched_again() -> None:
+    with pytest.raises(
+        ProposalRefused,
+        match="^cancelled.note was obtained 2 hours ago, and goodbye needs it at most 1 hour old: "
+        "it came from the event cancelled#1, sent from outside, so it can't be fetched again$",
+    ):
+        run_case(
+            with_a_goodbye_support_proposes(),
+            file=SMALL | {"email": "c@example.com"},
+            answers=[CANCEL, later("2h"), propose("goodbye", "ana")],
+            people=PEOPLE,
+        )

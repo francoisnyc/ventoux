@@ -201,6 +201,22 @@ def receive(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Sen
     declared = case.events[event.event]
     role = sender_role(catalog, event.event, declared, event)  # who sent it, before what it carries
     refuse_payload(event.event, declared, event.payload)
+    # An event is never a way back into a closed case (brief, D41). On Temporal its workflow has
+    # ended, so the client's send is refused first; this holds on nothing it did.
+    if state.phase == "closed":
+        raise EventRefused("the case is closed: it takes no more events")
+    if state.phase == "closing":
+        # Refused, and the case flagged: a signal has no reply, so nobody would hear of it
+        # otherwise (brief, D41). Nothing it carries lands; no rule hears it.
+        sender = event.by.removeprefix("system:")
+        state.history.append(
+            f"refused {event.event} from {sender}: the case is closing, so it takes no more events"
+        )
+        flag(
+            state,
+            f"{event.event} from {sender} arrived while the case was closing, and was refused",
+        )
+        return
     arrive(case, state, event, role)
 
 
@@ -1060,6 +1076,12 @@ def refreshable(
 ) -> tuple[str | None, str]:
     """The step whose run obtained the stale fact, if running it again is safe: an activity whose
     contract only reads (brief, D33). Otherwise None, and why it can't be fetched again."""
+    if stale.run is not None and stale.run.partition("#")[0] in case.events:
+        # Sent from outside: nothing in the case can ask its sender again (brief, D41).
+        return (
+            None,
+            f"it came from the event {stale.run}, sent from outside, so it can't be fetched again",
+        )
     run = next((run for run in state.runs if run.entry == stale.run), None)
     if run is None:
         # Not from a run: from a person (their answer, or the opening a person made), or from the
