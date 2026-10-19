@@ -1088,6 +1088,9 @@ def refreshable(
             None,
             f"it came from the event {stale.run}, sent from outside, so it can't be fetched again",
         )
+    if stale.run is not None and stale.run.partition("#")[0] in case.rules:
+        # Computed by a rule, which doesn't fire again because a fact was refreshed (brief, D42).
+        return None, f"it was computed by {stale.run}, so it can't be fetched again"
     run = next((run for run in state.runs if run.entry == stale.run), None)
     if run is None:
         # Not from a run: from a person (their answer, or the opening a person made), or from the

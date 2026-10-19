@@ -14,10 +14,14 @@ import pytest
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.state import Obtained
 from ventoux.testing import (
+    DAY,
     START,
     AnswerRefused,
     CaseRefused,
+    ProposalRefused,
+    later,
     load_definition,
+    propose,
     retry,
     run_case,
     send,
@@ -420,3 +424,47 @@ def test_a_set_changing_what_an_approval_saw_withdraws_it() -> None:
     assert "withdrew pay.approval#1: owed changed" in run.history
     assert run.waiting_for == ["approval of pay by support-lead"]
     assert run.state.values["owed"] == Decimal(450)
+
+
+# --- Slice 4: time ---
+
+
+def with_settle() -> dict[str, Any]:
+    """The refund with what is owed, and `settle`, which support proposes to pay what is owed, at
+    most a day old."""
+    definition = with_owed()
+    definition["steps"]["settle"] = {
+        "kind": "activity",
+        "display": {"title": "Pay what is owed"},
+        "activity": "payments.refund@2",
+        "automatic": False,
+        "proposed_by": ["support"],
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "owed"}},
+        "max_age": {"owed": "1d"},
+    }
+    return definition
+
+
+def test_a_set_value_is_as_old_as_its_oldest_fact() -> None:
+    # The fee was given at the opening, the approved amount two days later: what is owed is as old
+    # as the fee, never "obtained now" (brief, D33, D42).
+    run = run_case(with_settle(), file=FILE, answers=[later("2d"), APPROVED], people=PEOPLE)
+    assert run.state.obtained["approved_amount"].at == START + 2 * DAY
+    assert run.state.obtained["owed"] == Obtained(START, "work_out_owed#1")
+
+
+def test_a_stale_set_value_is_never_fetched_again() -> None:
+    # A rule doesn't fire again because a fact was refreshed, so a computed value can never be
+    # fetched again, and the refusal says it was computed (brief, D33, D42).
+    with pytest.raises(
+        ProposalRefused,
+        match="^owed was obtained 2 days ago, and settle needs it at most 1 day old: it was "
+        "computed by work_out_owed#1, so it can't be fetched again$",
+    ):
+        run_case(
+            with_settle(),
+            file=FILE,
+            answers=[later("2d"), APPROVED, propose("settle", "ana")],
+            people=PEOPLE,
+            held=["pay"],  # the case stays open while the refund runs
+        )
