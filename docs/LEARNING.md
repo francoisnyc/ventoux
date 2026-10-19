@@ -937,6 +937,19 @@ and record the key points. A question is closed once you can explain the answer 
   the same split: a `max_age` naming a field its step doesn't read is refused when the
   definition is read (for the author), while a stale fact from a person is found at runtime and
   the case needs attention (for an operator).
+- Retrieval (layer 11d warm-up, 2026-10-19), the follow-up: "because it catches if all paths are
+  valid. It's better than failing at runtime." **Every path** came back a second time. "Better
+  than failing at runtime" is the right instinct; what makes it better is two things:
+  - **Who hears of it.** The static issue reaches the *author*, at `ventoux check` or in the pull
+    request, and the author is the one person who can change the definition. The runtime refusal
+    reaches an *operator*: a case needs attention, a customer waits, and the person looking at it
+    can't change the definition. In 11d's terms: a person's event payload given to an input that
+    takes `only_from("payments")` is an error the author fixes with one edit; at runtime it is a
+    refund stuck in someone's queue.
+  - **What fixing it costs.** Before release, an edit; after, a new release, and the open cases
+    still on the old one (layer 12).
+  In one line: the static check prevents, for the author, on every path; the runtime check
+  enforces, for this value, on this path. Neither replaces the other.
 - Status: open, until "who hears of it" comes back from memory.
 
 
