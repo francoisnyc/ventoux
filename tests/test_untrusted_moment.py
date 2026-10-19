@@ -11,7 +11,9 @@ from typing import Any
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_events import PEOPLE, SMALL, cancellable
 
-from ventoux.testing import later, propose, retry, run_case, send
+from ventoux.case.definition import parse_case
+from ventoux.case.validate import validate_case
+from ventoux.testing import CATALOG, later, propose, retry, run_case, send
 
 PLEASE = "please cancel"  # the note that steers: what a customer typed
 UNTRUSTED_NOTE = {"==": [{"var": "cancelled.note"}, PLEASE]}
@@ -349,3 +351,206 @@ def test_a_refresh_for_a_step_a_steered_run_admits_is_steered_by_it() -> None:
         "close_it#2 on started check: reaches nothing: its moment comes from untrusted data: "
         f"confirm requires lookup, and {STEERED_LOOKUP}, and untrusted data can't decide"
     ) in run.history
+
+
+# --- Slice 4: case validation stays a proof ---
+
+
+TRUST = ("UNTRUSTED_TRIGGER", "WRITER_DECIDES", "INPUT_POLICY")
+
+
+def issues(definition: dict[str, Any]) -> list[tuple[str, str, str, str]]:
+    """What `ventoux check` says of a definition about trust: each issue's path, code, severity
+    and message. Other issues of these small definitions (an outcome nobody reads) are left out."""
+    return [
+        (issue.path, issue.code, issue.severity, issue.message)
+        for issue in validate_case(parse_case(definition), CATALOG)
+        if issue.code in TRUST
+    ]
+
+
+STEERED_GOODBYE = "which untrusted data steers however goodbye starts (untrusted:customer)"
+WHAT_TO_DO = "start goodbye only on trusted data, or let a person decide in a task"
+
+
+def test_check_refuses_a_rule_on_a_start_untrusted_data_always_steers() -> None:
+    # The tutor review's script: on main, `ventoux check` said nothing.
+    assert issues(say_goodbye()) == [
+        (
+            "rules.close_it.on",
+            "UNTRUSTED_TRIGGER",
+            "error",
+            (
+                f"close_it fires on started goodbye, {STEERED_GOODBYE}, and untrusted data can't "
+                f"decide, so it never reaches withdrawn: {WHAT_TO_DO}"
+            ),
+        )
+    ]
+    stopping = say_goodbye({"stop": ["review"]})
+    assert [(path, code) for path, code, *_ in issues(stopping)] == [
+        ("rules.close_it.on", "UNTRUSTED_TRIGGER")
+    ]
+
+
+def test_check_warns_when_only_some_starts_are_steered() -> None:
+    # A person may also propose the call: then the rule on its start reaches `withdrawn`.
+    definition = say_goodbye()
+    definition["steps"]["goodbye"]["proposed_by"] = ["support"]
+    assert issues(definition) == [
+        (
+            "rules.close_it.on",
+            "WRITER_DECIDES",
+            "warning",
+            (
+                "close_it fires on started goodbye, which untrusted data steers (untrusted:customer) "
+                "when say_goodbye starts it, and not when a person proposes it, and untrusted data "
+                "can't decide, so whether it reaches withdrawn depends on how goodbye started: "
+                f"{WHAT_TO_DO}"
+            ),
+        )
+    ]
+
+
+def test_check_finds_a_start_steered_by_its_own_condition() -> None:
+    definition = say_goodbye()
+    definition["steps"]["goodbye"] |= {"automatic": True, "when": UNTRUSTED_NOTE}
+    definition["steps"]["goodbye"]["requires"] = ["review"]  # once the note can be in
+    del definition["rules"]["say_goodbye"]
+    found = issues(definition)
+    assert ("rules.close_it.on", "UNTRUSTED_TRIGGER") in [(p, c) for p, c, *_ in found]
+
+
+def test_check_refuses_a_steered_runs_reaches() -> None:
+    lookup = starting("lookup", {"lookup": LOOKUP | {"reaches": ["withdrawn"]}})
+    assert issues(lookup) == [
+        (
+            "steps.lookup.reaches",
+            "UNTRUSTED_TRIGGER",
+            "error",
+            (
+                "lookup reaches withdrawn when it is done, and untrusted data steers it however it "
+                "starts (untrusted:customer), and untrusted data can't decide, so it never reaches "
+                "withdrawn: start lookup only on trusted data, or reach withdrawn from a task's answer"
+            ),
+        )
+    ]
+    listen = {
+        "kind": "wait",
+        "display": {"title": "Listen for the customer again"},
+        "event": "cancelled",
+        "automatic": False,
+        "reaches": ["withdrawn"],
+    }
+    found = issues(starting("listen", {"listen": listen}))
+    assert [(path, code) for path, code, *_ in found] == [
+        ("steps.listen.reaches", "UNTRUSTED_TRIGGER")
+    ]
+    # A task's own reaches come from a person's answer: nothing to say.
+    goodbye = say_goodbye()
+    del goodbye["rules"]["close_it"]
+    goodbye["steps"]["goodbye"]["reaches"] = ["withdrawn"]
+    assert issues(goodbye) == []
+
+
+def test_check_follows_a_steered_runs_outcome_and_what_requires_it() -> None:
+    close_on_review = rule(
+        {"answered": "review"},
+        {"reach": ["withdrawn"]},
+        {"==": [{"var": "lookup.outcome"}, "done"]},
+    )
+    outcome = starting("lookup", {"lookup": LOOKUP}, {"close_on_review": close_on_review})
+    assert issues(outcome) == [
+        (
+            "rules.close_on_review.when",
+            "UNTRUSTED_TRIGGER",
+            "error",
+            (
+                "close_on_review's condition reads lookup.outcome, which comes from "
+                "untrusted:customer whoever writes it, and untrusted data can't decide, so it never "
+                "reaches withdrawn: read a value a person or a trusted system gives, such as a task's "
+                "answer"
+            ),
+        )
+    ]
+    after = {
+        "kind": "task",
+        "display": {"title": "Follow up"},
+        "roles": ["support"],
+        "requires": ["lookup"],
+        "outcomes": {"done": {"display": {"title": "Done"}}},
+    }
+    close_on_after = rule({"started": "after"}, {"reach": ["withdrawn"]})
+    requiring = starting("lookup", {"lookup": LOOKUP, "after": after}, {"close": close_on_after})
+    assert [(path, code) for path, code, *_ in issues(requiring)] == [
+        ("rules.close.on", "UNTRUSTED_TRIGGER")
+    ]
+
+
+def test_check_follows_what_a_steered_start_passes_on() -> None:
+    # A start made on it: the letter fails on its input every time.
+    letter = say_goodbye({"start": ["letter"]}, steps={"letter": LETTER})
+    assert issues(letter) == [
+        (
+            "rules.close_it.then.start",
+            "INPUT_POLICY",
+            "error",
+            (
+                "letter fails on its inputs every time close_it starts it: letters.draft@2 takes "
+                "to_customer only from a system or a person, never from untrusted data, and close_it "
+                "fires on started goodbye, which untrusted data steers (untrusted:customer): "
+                f"{WHAT_TO_DO}"
+            ),
+        )
+    ]
+    # A value set on it: a rule reading it can never decide.
+    marked = say_goodbye({"set": {"leaving": {">": [{"var": "amount"}, 0]}}})
+    marked["fields"]["leaving"] = {"type": "boolean", "display": {"title": "Leaving"}}
+    marked["rules"]["close_on_review"] = rule(
+        {"answered": "review"}, {"reach": ["withdrawn"]}, {"var": "leaving"}
+    )
+    assert [(path, code) for path, code, *_ in issues(marked)] == [
+        ("rules.close_on_review.when", "UNTRUSTED_TRIGGER")
+    ]
+    # And on: a start of a start, grown until nothing changes.
+    chained = say_goodbye({"start": ["again"]})
+    chained["steps"]["again"] = copy.deepcopy(GOODBYE) | {"display": {"title": "Call again"}}
+    chained["rules"]["close_again"] = rule({"started": "again"}, {"reach": ["withdrawn"]})
+    assert [(path, code) for path, code, *_ in issues(chained)] == [
+        ("rules.close_again.on", "UNTRUSTED_TRIGGER")
+    ]
+
+
+def test_check_says_nothing_of_a_start_nothing_untrusted_steers() -> None:
+    definition = say_goodbye()
+    del definition["rules"]["say_goodbye"]["when"]
+    assert issues(definition) == []
+    lookup = starting("lookup", {"lookup": LOOKUP | {"reaches": ["withdrawn"]}})
+    del lookup["rules"]["say_goodbye"]["when"]
+    assert issues(lookup) == []
+
+
+def test_a_step_requiring_a_steered_run_cant_send_what_its_policy_refuses() -> None:
+    # The letter starts by itself once the lookup the note started is done: whenever it runs,
+    # the note steered it, so its address is refused, and the check says so first.
+    letter = LETTER | {"automatic": True, "requires": ["lookup"]}
+    definition = starting("lookup", {"lookup": LOOKUP, "letter": letter})
+    run = run_case(definition, file=SMALL, answers=[cancelled()], people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "letter#1: letters.draft@2 takes to_customer only from a system or a person, never "
+            f"from untrusted data, and letter requires lookup, and {STEERED_LOOKUP}"
+        )
+    ]
+    assert issues(definition) == [
+        (
+            "steps.letter.inputs.to_customer",
+            "INPUT_POLICY",
+            "error",
+            (
+                "letters.draft@2 takes to_customer only from a system or a person, never from "
+                "untrusted data, and letter requires lookup, which untrusted data steers "
+                "(untrusted:customer): start lookup only on trusted data, or let a person decide "
+                "in a task"
+            ),
+        )
+    ]

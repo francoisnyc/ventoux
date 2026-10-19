@@ -2434,16 +2434,18 @@ def test_a_step_that_can_be_proposed_still_fails_every_time() -> None:
 
 
 def test_a_condition_reads_only_the_branch_of_an_if_it_takes() -> None:
-    # notify's condition reads the refund's ID only after an approved review: a rejected one
-    # starts nothing, and the case closes.
+    # notify's condition reads how the payment ended only after an approved review: a rejected
+    # one starts nothing, and the case closes. (The payment's outcome, which its contract vouches
+    # for: the refund's ID is untrusted, and pay, requiring notify, would then be refused on its
+    # inputs whenever it ran, brief, D43.)
     catalog = noting()
-    noted = {"==": [{"var": "pay.refund_id"}, "r-1"]}
+    noted = {"==": [{"var": "pay.outcome"}, "done"]}
     definition = noting_before_paying(when={"if": [APPROVED, noted, False]})
     assert validate_case(parse_case(definition), catalog) == [
         Issue(
             "steps.notify.when",
             "MAY_BE_UNSET",
-            "notify reads pay.refund_id, which only pay gives, and pay runs only after notify: "
+            "notify reads pay.outcome, which only pay gives, and pay runs only after notify: "
             "when notify reads it, it fails and needs attention: read it in a step that comes "
             "after pay",
             "warning",

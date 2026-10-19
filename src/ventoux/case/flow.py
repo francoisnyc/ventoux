@@ -12,12 +12,23 @@ from ventoux.case.definition import (
     CaseDefinition,
     PlanStep,
     Rule,
+    Started,
     Then,
+    WaitStep,
     WorkflowStep,
 )
 from ventoux.case.types import case_types, fits_type
 from ventoux.case.visibility import may_see, seen_by
-from ventoux.case.writers import always, case_sources, untrusted_of, writer_decides
+from ventoux.case.writers import (
+    always,
+    case_sources,
+    how_started,
+    rule_reads,
+    start_of,
+    steered_by_itself,
+    untrusted_of,
+    writer_decides,
+)
 from ventoux.core.before_activity import not_a_reference_to
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract, held_input
@@ -373,9 +384,11 @@ def condition_issues(
     for name, contract in contracts.items():
         step = case.steps[name]
         assert isinstance(step, CallStep)  # only a call step has a contract
+        # Its own condition, and what steered the runs it requires (brief, D43).
+        reads = sorted(steered_by_itself(case, name))
         for field in step.inputs:
             path = f"steps.{name}.inputs.{field}"
-            if path not in said and (found := steering.issue(path, contract, field, name, step)):
+            if path not in said and (found := steering.issue(path, contract, field, name, reads)):
                 issues.append(found)
     given = {*said, *(issue.path for issue in issues)}
     for rule, written in case.rules.items():
@@ -386,9 +399,11 @@ def condition_issues(
                 continue
             started = case.steps[name]
             assert isinstance(started, CallStep)  # only a call step has a contract
+            # Its condition, and what steered the start it fires on (brief, D43).
+            reads = sorted(rule_reads(written))
             for field in started.inputs:
                 found = steering.issue(
-                    f"rules.{rule}.then.start", contracts[name], field, rule, written, name
+                    f"rules.{rule}.then.start", contracts[name], field, rule, reads, name
                 )
                 if found:
                     issues.append(found)
@@ -410,15 +425,17 @@ class Steering:
         contract: Contract,
         field: str,
         who: str,
-        deciding: CallStep | Rule,
+        reads: list[str],
         started: str | None = None,
     ) -> Issue | None:
-        """The issue at `path`, if the condition of `who` (a step, or a rule starting `started`)
-        steers `field` into a policy that refuses what it reads; None if it doesn't."""
-        found = steered(contract, field, self.sources, who, deciding.when)
+        """The issue at `path`, if what steers `who` (a step, or a rule starting `started`), its
+        condition's `reads` and what steered its moment or requirements, steers `field` into a
+        policy that refuses it; None if it doesn't."""
+        found = steered(self.case, contract, field, self.sources, who, reads)
         if found is None:
             return None
-        why, value, policy = found
+        said, to_do, value, policy = found
+        why = f"{said}: {to_do}"
 
         def refused(sources: frozenset[str]) -> bool:
             untrusted = frozenset(source for source in sources if not is_trusted(source))
@@ -434,38 +451,60 @@ class Steering:
             )
         when = writer_decides(self.case, self.contracts, BY_A_SYSTEM, value, refused)
         step = started if started is not None else who
-        refusal_said = why.removesuffix(
-            ": read a value a person or a trusted system gives, such as a task's answer"
-        )
+        if value.startswith("started "):
+            steered_step = value.removeprefix("started ")
+            return Issue(
+                path,
+                "WRITER_DECIDES",
+                f"{said} {when}: whether {step} is refused depends on how {steered_step} "
+                f"started: {to_do}",
+                "warning",
+            )
         return Issue(
             path,
             "WRITER_DECIDES",
-            f"{refusal_said}: {value} is untrusted {when}: whether {step} is refused depends on "
+            f"{said}: {value} is untrusted {when}: whether {step} is refused depends on "
             f"which rule set {value} last: set {value} only from trusted values",
             "warning",
         )
 
 
 def steered(
+    case: CaseDefinition,
     contract: Contract,
     field: str,
     sources: Mapping[str, frozenset[str]],
     who: str,
-    when: Expression | None,
-) -> tuple[str, str, Policy] | None:
-    """Why the input `field` is refused by what `who`'s condition `when` reads, as the runtime
-    says it, with what to do; the value read; and the policy refusing it. None if it isn't."""
-    read = {name: sources.get(name, frozenset()) for name in fields_read(when)} if when else {}
+    reads: list[str],
+) -> tuple[str, str, str, Policy] | None:
+    """Why the input `field` is refused by what steers `who`, as the runtime says it; what to do;
+    the value read (a field, or a step's start); and the policy refusing it. None if it isn't.
+    `reads` are what its condition reads, and the starts that steer it (brief, D43)."""
+    read = {name: sources.get(name, frozenset()) for name in reads}
     for policy in contract.policies(field):
         for value, untrusted in untrusted_of(read).items():
             if policy.refuses(untrusted) is not None:
-                why = (
-                    f"{contract.reference} takes {field} {policy.describe()}, and {who}'s "
-                    f"condition reads {value} ({', '.join(sorted(untrusted))}): read a value a "
-                    "person or a trusted system gives, such as a task's answer"
-                )
-                return why, value, policy
+                labels = ", ".join(sorted(untrusted))
+                said = f"{contract.reference} takes {field} {policy.describe()}, and "
+                if not value.startswith("started "):
+                    said += f"{who}'s condition reads {value} ({labels})"
+                    to_do = (
+                        "read a value a person or a trusted system gives, such as a task's answer"
+                    )
+                    return said, to_do, value, policy
+                step = value.removeprefix("started ")
+                rule = case.rules.get(who)
+                if rule is not None and isinstance(rule.on, Started) and rule.on.started == step:
+                    said += f"{who} fires on {value}, which untrusted data steers ({labels})"
+                else:
+                    said += f"{who} requires {step}, which untrusted data steers ({labels})"
+                return said, steered_to_do(step), value, policy
     return None
+
+
+def steered_to_do(step: str) -> str:
+    """What an author can do about a start untrusted data steers (brief, D43)."""
+    return f"start {step} only on trusted data, or let a person decide in a task"
 
 
 def plan_fields_sources(
@@ -558,6 +597,7 @@ def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> l
     for name, rule in case.rules.items():
         if not rule.then.reach and not rule.then.stop:
             continue  # a rule that only starts steps acts: its condition counts for their inputs
+        said = len(found)
         for field in [] if rule.when is None else fields_read(rule.when):
             labels = ", ".join(sorted(s for s in sources.get(field, ()) if not is_trusted(s)))
             if not labels:
@@ -588,6 +628,83 @@ def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> l
                     )
                 )
             break  # one cause, one issue
+        if len(found) == said and isinstance(rule.on, Started):
+            found += moment_issues(case, contracts, name, rule, rule.on.started)
+    return found + reach_issues(case, contracts)
+
+
+def moment_issues(
+    case: CaseDefinition, contracts: Mapping[str, Contract], name: str, rule: Rule, step: str
+) -> list[Issue]:
+    """A rule that reaches or stops, on the start of a step untrusted data steers: what steered
+    the start counts as read by its condition, so it never acts on it (brief, D43). An error
+    where every way the step starts is steered, whoever writes what it reads; a warning where
+    only some are."""
+    sources = case_sources(case, contracts, BY_A_SYSTEM)
+    labels = ", ".join(sorted(sources.get(start_of(step), ())))
+    if not labels:
+        return []
+    to_do = steered_to_do(step)
+    if start_of(step) in always(case, contracts, BY_A_SYSTEM, is_untrusted):
+        return [
+            Issue(
+                f"rules.{name}.on",
+                "UNTRUSTED_TRIGGER",
+                f"{name} fires on started {step}, which untrusted data steers however {step} "
+                f"starts ({labels}), and untrusted data can't decide, so it never "
+                f"{never_does(rule.then)}: {to_do}",
+            )
+        ]
+    how = how_started(case, contracts, BY_A_SYSTEM, step, is_untrusted)
+    return [
+        Issue(
+            f"rules.{name}.on",
+            "WRITER_DECIDES",
+            f"{name} fires on started {step}, which untrusted data steers ({labels}) {how}, and "
+            f"untrusted data can't decide, so whether it {never_does(rule.then)} depends on how "
+            f"{step} started: {to_do}",
+            "warning",
+        )
+    ]
+
+
+def reach_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> list[Issue]:
+    """A call, plan or wait step that reaches milestones, whose start untrusted data steers: its
+    run reaches nothing (brief, D43). An error where every way it starts is steered, a warning
+    where only some are. A task's answer is a person's, so its `reaches` stand."""
+    sources = case_sources(case, contracts, BY_A_SYSTEM)
+    untrusted = always(case, contracts, BY_A_SYSTEM, is_untrusted)
+    found: list[Issue] = []
+    for name, step in case.steps.items():
+        if not step.reaches or not isinstance(step, CallStep | PlanStep | WaitStep):
+            continue
+        labels = ", ".join(sorted(sources.get(start_of(name), ())))
+        if not labels:
+            continue
+        reaches = " and ".join(step.reaches)
+        to_do = f"start {name} only on trusted data, or reach {reaches} from a task's answer"
+        if start_of(name) in untrusted:
+            found.append(
+                Issue(
+                    f"steps.{name}.reaches",
+                    "UNTRUSTED_TRIGGER",
+                    f"{name} reaches {reaches} when it is done, and untrusted data steers it "
+                    f"however it starts ({labels}), and untrusted data can't decide, so it never "
+                    f"reaches {reaches}: {to_do}",
+                )
+            )
+            continue
+        how = how_started(case, contracts, BY_A_SYSTEM, name, is_untrusted)
+        found.append(
+            Issue(
+                f"steps.{name}.reaches",
+                "WRITER_DECIDES",
+                f"{name} reaches {reaches} when it is done, and untrusted data steers it "
+                f"({labels}) {how}, and untrusted data can't decide, so whether it reaches "
+                f"{reaches} depends on how it started: {to_do}",
+                "warning",
+            )
+        )
     return found
 
 
