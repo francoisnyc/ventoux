@@ -761,6 +761,168 @@ nothing ends, or a start refused on the step's own start; and these codes are it
 
 The rework loop above gets no issue: its rules' `when`s end it.
 
+## Events from outside
+
+Everything so far comes from inside the case: a person's answer, an activity's result, a retry, a
+close. An **event** is how the world outside tells a case that something happened: the customer
+cancels in the portal, a receipt is uploaded, a support agent logs a call. A case declares each
+event it takes under `events`: who may send it, and what it carries.
+
+```json
+"events": {
+  "cancelled": {
+    "display": {"title": "The customer cancels"},
+    "sent_by": {"system": "portal"},
+    "payload": {
+      "note": {
+        "type": "string",
+        "display": {"title": "What the customer wrote"},
+        "source": "untrusted:customer"
+      }
+    }
+  }
+}
+```
+
+A rule reacts to it with `"on": {"event": "cancelled"}`:
+
+```json
+"withdraw_on_cancel": {
+  "display": {"title": "Stop the review when the customer cancels"},
+  "on": {"event": "cancelled"},
+  "then": {"stop": ["review"]}
+}
+```
+
+Read aloud: when the customer cancels in the portal, the review stops. The refund then has
+nothing left to do, and closes:
+
+```
+cancelled#1 from portal, giving note from system:portal, untrusted:customer
+withdraw_on_cancel#1 on event cancelled: stopping review
+cancelled review#1: stopped by withdraw_on_cancel#1
+closed: nothing left to do
+```
+
+Each arrival is an entry, `cancelled#1`, then `cancelled#2`: an event's name is unlike any step's,
+milestone's or rule's.
+
+**Who may send it.** `sent_by` names one sender: a system the platform team registered
+(`{"system": "portal"}`), or people holding one of some roles (`{"roles": ["support"]}`), checked
+as for a close reason. The Ventoux API, the only caller allowed to send events (brief, D19),
+states who sent it. Two systems sending the same news are two events. Anything else is refused,
+and nothing changes in the case:
+
+| Refused when | Example |
+|---|---|
+| the case declares no such event | `refunded is not an event of refund: its events are cancelled` |
+| another system sends it | `cancelled is sent by portal, and this one comes from system:crm` |
+| a person sends a system's event | `cancelled is sent by portal, and this one comes from ana` |
+| the person has none of its roles | `customer_called is sent by support, and eve has no role` |
+| a payload field is missing | `cancelled's payload has no note` |
+| it carries a field it doesn't declare | `cancelled's payload has no field tone: its fields are note` |
+| a field is of another type | `cancelled.note is a string, and the event gives a number` |
+| the case is closed | `the case is closed: it takes no more events` |
+
+**What it carries.** Each payload field lands in the case file as `<event>.<field>`, from the
+latest arrival, as an activity's output does: `cancelled.note`. Every field is given on every
+arrival, as a number, a text, a boolean, an outcome or a reference; a list isn't taken yet. It
+comes from its sender, `system:portal` or the person who sent it (`person:ana`), and a field's
+`source` adds to that whoever sends it. That is why `note` is `untrusted:customer`: the portal
+carries it, but a customer typed it, and provenance follows the content, not the system that
+carries it (brief, D12). Each value is obtained when its event reaches the case, from the workflow's
+time, and nothing can fetch it again.
+
+**Arrival is a fact; content is not.** The API vouches that the portal sent `cancelled`, so a
+rule may act on the arrival. What the customer wrote is untrusted: a rule that reaches or stops,
+whose `when` reads it, does nothing, as for any untrusted value. With `"when": {"==": [{"var":
+"cancelled.note"}, "please cancel"]}` on the rule above, the review stays open:
+
+```
+withdraw_on_cancel#1 on event cancelled: stops nothing: its condition reads cancelled.note, from untrusted:customer, and untrusted data can't decide
+```
+
+`ventoux check` refuses that rule (`UNTRUSTED_TRIGGER`). A rule that only starts steps may read
+it: what it read counts for the started step's input policies, as above.
+
+**Listening is not waiting.** A rule on an event never keeps the case open: a refund nobody
+cancels still closes once it is paid. To wait for an event, write a step that waits for it, of
+the kind `wait`:
+
+```json
+"wait_for_receipt": {
+  "kind": "wait",
+  "display": {"title": "Wait for the customer's receipt"},
+  "event": "receipt_sent",
+  "requires": ["review"]
+}
+```
+
+with the event it waits for under `events`:
+
+```json
+"receipt_sent": {
+  "display": {"title": "The customer uploads a receipt"},
+  "sent_by": {"system": "portal"},
+  "payload": {
+    "receipt": {"type": "reference", "system": "documents", "display": {"title": "The receipt"}}
+  }
+}
+```
+
+and `pay` requiring `wait_for_receipt`. Read aloud: once reviewed, the refund waits for the
+customer's receipt, then pays. A wait starts as any step does, by itself once its requirements are
+met, when proposed, or by a rule. Its run is open until the event's next arrival, which makes it
+done:
+
+```
+started wait_for_receipt#1: waiting for receipt_sent from portal
+receipt_sent#1 from portal, giving receipt from system:portal
+wait_for_receipt#1 done: receipt_sent#1 arrived
+```
+
+While it waits, it is pending work, and the case says so: `waiting_for` lists `receipt_sent from
+portal`, beside the tasks and approvals. A stop cancels it, as it cancels an open task, and so
+does a close. An answer to it is refused: `wait_for_receipt#1 waits for receipt_sent: it is sent,
+never answered`. Only an arrival after it opens counts: one that came before is already in the
+case file, and a `when` can let the step skip the wait, `{"!": [{"exists": "receipt_sent.receipt"}]}`.
+A wait has no inputs, approval or `max_age`; `reaches` names what it reaches once done.
+
+**When the case closes.** An event that reaches a closing case is refused, and the case is
+flagged, since nobody would hear of it otherwise:
+
+```
+refused cancelled from portal: the case is closing, so it takes no more events
+flagged: cancelled from portal arrived while the case was closing, and was refused
+```
+
+A closed case's workflow has ended: sending it an event raises `EventRefused`, and never opens it
+again. While a failed step holds the close (every `closes_when` milestone reached), an event's
+payload still lands and a wait it ends is done, but no rule acts on it.
+
+**Sending one.** On Temporal, `send_event` signals the case's workflow, by its ID:
+
+```python
+from ventoux.temporal.cases import send_event
+
+await send_event(case, "cancelled", {"note": "please cancel"}, by="system:portal")
+await send_event(case, "customer_called", {}, by="ana", roles=["support"])
+```
+
+Every event is the same signal, whoever sends it. In a test, the script says `send(event,
+payload, by)`: `send("cancelled", {"note": "please cancel"}, "system:portal")`, or a person's name,
+whose roles come from `people`.
+
+**What the check says about events.** A rule on an event may fire whenever the case is open, so
+what it reaches counts as reachable; a payload field is a value of its declared type, so a
+misspelt one is `EXPRESSION_INVALID`; a rule that reaches or stops on a payload field declared
+untrusted is `UNTRUSTED_TRIGGER`; a person's payload given to an input that takes only a system's
+value is `INPUT_POLICY`. A payload field is surely set in a rule on its event, and in a step
+requiring a wait for it that is done: read anywhere else, it may not be set yet (`MAY_BE_UNSET`).
+A `max_age` on it is `NEVER_REFRESHED`. A system, role or label an event names that nobody
+registered is `UNKNOWN_SYSTEM`, `UNKNOWN_ROLE` or `UNKNOWN_SOURCE`, as anywhere else, and a case
+naming a system nobody registered is refused when it opens.
+
 ## Testing a case
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`
