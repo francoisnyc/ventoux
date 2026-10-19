@@ -98,8 +98,11 @@ def test_a_rule_names_one_of_three_moments(on: object) -> None:
     "on", ["closed", {"completed": "review"}, {"started": "pay", "reached": "large"}]
 )
 def test_an_unknown_moment_is_refused_in_one_line(on: object) -> None:
-    # Four moments since 11b: `answered` is one (brief, D39).
-    moments = '"opened", {"started": <step>}, {"reached": <milestone>} or {"answered": <task>}'
+    # Five moments since 11d: `answered` is one (brief, D39), and `event` (brief, D41).
+    moments = (
+        '"opened", {"started": <step>}, {"reached": <milestone>}, {"answered": <task>} or '
+        '{"event": <event>}'
+    )
     with pytest.raises(CaseInvalid, match=f"^rules.flag_large.on: a moment is {moments}$"):
         parse_case(with_rule(on=on))
 

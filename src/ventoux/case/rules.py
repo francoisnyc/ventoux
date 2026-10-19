@@ -10,7 +10,7 @@ from typing import NoReturn
 
 from ventoux.case.admission import StepStopped, holds
 from ventoux.case.closing import close_held
-from ventoux.case.definition import AnsweredTask, CaseDefinition, Reached, Started
+from ventoux.case.definition import AnsweredTask, CaseDefinition, EventArrived, Reached, Started
 from ventoux.case.state import CaseState, Command, RuleFiring, RuleStart
 from ventoux.case.stopping import stop_step
 from ventoux.case.types import rule_problem
@@ -20,14 +20,16 @@ from ventoux.core.catalog import Catalog
 
 def said(moment: object) -> str:
     """A rule's moment as the history says it: `opened`, `started pay`, `reached checked`,
-    `answered review`. A moment it doesn't know is an error, never read as the opening (fail
-    closed)."""
+    `answered review`, `event cancelled`. A moment it doesn't know is an error, never read as the
+    opening (fail closed)."""
     if isinstance(moment, Started):
         return f"started {moment.started}"
     if isinstance(moment, Reached):
         return f"reached {moment.reached}"
     if isinstance(moment, AnsweredTask):
         return f"answered {moment.answered}"
+    if isinstance(moment, EventArrived):
+        return f"event {moment.event}"
     if moment == "opened":
         return "opened"
     unknown_moment(moment)

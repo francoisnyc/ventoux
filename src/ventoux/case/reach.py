@@ -12,6 +12,7 @@ from ventoux.case.definition import (
     ActivityStep,
     AnsweredTask,
     CaseDefinition,
+    EventArrived,
     Reached,
     Started,
     TaskStep,
@@ -62,14 +63,15 @@ def can_happen(case: CaseDefinition, catalog: Catalog) -> set[str]:
 
 def moment_can_come(moment: object, can: set[str]) -> bool:
     """Whether a rule's moment can come, given what can happen so far: the opening always; a
-    milestone, a step's start or a task's answer, once it is in `can`."""
+    milestone, a step's start or a task's answer, once it is in `can`; an event from outside
+    whenever the case is open, since nothing in the case decides when it comes (brief, D41)."""
     if isinstance(moment, Reached):
         return moment.reached in can
     if isinstance(moment, Started):
         return moment.started in can
     if isinstance(moment, AnsweredTask):
         return moment.answered in can
-    if moment == "opened":
+    if moment == "opened" or isinstance(moment, EventArrived):
         return True
     unknown_moment(moment)  # fail closed: never one that can come
 

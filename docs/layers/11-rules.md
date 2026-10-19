@@ -20,7 +20,11 @@ the four points 11b's session left undiscussed, and 11c's remaining choices, put
 recommendation each and answered "go with all recommendations" the same day; D40, the guides'
 11c part and a draft Promises table written the same day, before building; then built, slices
 0–7, with a read of the code by six readers beside slice 2 (see 11c, "From the code map"), and
-the Promises table checked against the tests, the same day.
+the Promises table checked against the tests, the same day. 11d: the warm-up (learning question
+34's follow-up) answered, 2026-10-19; 23 choices and a split put with a recommendation each, and
+"build" taken as all of them, the split included, so `set` became 11e (see 11d, "The split"); the
+guide's part and D41 written before building; built, slices 0–8, once the fix of a rejected retry
+was merged; the Promises table checked against the tests, the same day.
 
 ## What this layer is for
 
@@ -65,7 +69,7 @@ From `11-research.md`, five findings shape the design (each is argued there, wit
 
 ## The split
 
-Layer 11 lands as seven pull requests, each with its section in this note, its own Promises table
+Layer 11 lands as eight pull requests, each with its section in this note, its own Promises table
 and its own tutor review, as layers 8–10 did. Each part's choices are decided in its own session.
 
 | PR | Builds | Codes (proposed) |
@@ -73,18 +77,19 @@ and its own tutor review, as layers 8–10 did. Each part's choices are decided 
 | **11a: the raw rule, inside the case** | `rules` in the definition: `on` (the case opened, a milestone reached, a step started), `when`, `then: reach`; when rules run in `decide`; a rule that can't be read needs attention; untrusted data can't decide (design question 17 decided); rules and the close; case validation kept true | `NEVER_FIRES`, `UNTRUSTED_TRIGGER` |
 | **11b: rules that start steps** | `then: start` (the engine proposes, through admission: the rework loop), and the moment a task is answered; the half of design question 17 that steers which step starts, built; validation: a step a rule starts can run; a rule that restarts a step for ever | `NEVER_STARTS`, `NEVER_CLOSES` extended, `LOOPS_UNTIL_CLOSED` |
 | **11c: rules that stop steps** | `then: stop` (what a close does, to one step; never a failed run); one place in the case that stops every running child; `cancellable` workflows (D29), stopped by Temporal's cancellation; closing through that place | |
-| **11d: events from outside** | declared events with a typed payload and a source (D12); `on: {"event": ...}`; `then: set` (update the case file), which brings back the provenance fixpoint (D34, D36); listening is not waiting, and a step explicitly waiting for an event (D10); "arrival is a fact, content is not"; an event as a signal on Temporal | `UNTRUSTED_TRIGGER` for event content; `UNKNOWN_EVENT` |
-| **11e: time** | timers, `on: {"after": "5d", "since": <moment>}`: set on their moment, pending work (D10), fired as an event stamped with its own due time (D33), never a clock `decide` reads; cancelled by their rule's purpose ending and by any close; crossing continue-as-new exactly (D27), replaying the same; staleness noticed by a timer (9d's carried note); reports list set timers (D24) | `NEVER_CLOSES` for a timer that re-arms itself |
-| **11f: reading rules** | the plain-language renderer for every rule; `ventoux simulate`: a story on a timeline, with simulated time, showing when each rule fires; stories as tests | |
-| **11g: patterns and teaching warnings** | `sla` (from the latest start; `since=first_start` explicitly), `reminder`, `four_eyes` (`count=2`, D11, D23), each expanding into raw rules visible in validation and views, each with a story test; D7's teaching warnings (a timer anchored on the first start of a repeatable step, a rule whose condition reads untrusted data, what is left of "rules that can never fire" once 11a's error has taken the proven ones) | warnings |
+| **11d: events from outside** | declared events with a typed payload and one sender (D12); `on: {"event": ...}`; listening is not waiting, and a step explicitly waiting for an event (D10); "arrival is a fact, content is not"; an event as a signal on Temporal | `UNTRUSTED_TRIGGER` for event content (no new code: see 11d, choice 15) |
+| **11e: rules that update the case file** | `then: set`, which brings back the provenance fixpoint (D34, D36); who may write a field; what "surely set" and `SET_AFTER` claim then | `WRITER_DECIDES` (proposed) |
+| **11f: time** | timers, `on: {"after": "5d", "since": <moment>}`: set on their moment, pending work (D10), fired as an event stamped with its own due time (D33), never a clock `decide` reads; cancelled by their rule's purpose ending and by any close; crossing continue-as-new exactly (D27), replaying the same; staleness noticed by a timer (9d's carried note); reports list set timers (D24) | `NEVER_CLOSES` for a timer that re-arms itself |
+| **11g: reading rules** | the plain-language renderer for every rule; `ventoux simulate`: a story on a timeline, with simulated time, showing when each rule fires; stories as tests | |
+| **11h: patterns and teaching warnings** | `sla` (from the latest start; `since=first_start` explicitly), `reminder`, `four_eyes` (`count=2`, D11, D23), each expanding into raw rules visible in validation and views, each with a story test; D7's teaching warnings (a timer anchored on the first start of a repeatable step, a rule whose condition reads untrusted data, what is left of "rules that can never fire" once 11a's error has taken the proven ones) | warnings |
 
 **Why this order.** 11a is the smallest rule that *acts*, and it brings the two things every later
 part stands on: where rules run in `decide`, and case validation kept true once something other
 than a step reaches a milestone (brief, D34). Starting steps (11b) needs that loop and reuses
-admission; stopping them (11c) reuses closing. Events (11d) bring outside content, so trust and
-the update action belong there, with the provenance fixpoint they need. Timers (11e) need moments
-to anchor on (11a) and events (11d), since a timer firing is an event with its own time. The
-renderer and `simulate` (11f) need every kind of rule to exist; the patterns (11g) are written in
+admission; stopping them (11c) reuses closing. Events (11d) bring outside content, so trust
+belongs there; the update action (11e) brings the provenance fixpoint it needs. Timers (11f) need
+moments to anchor on (11a) and events (11d), since a timer firing is an event with its own time.
+The renderer and `simulate` (11g) need every kind of rule to exist; the patterns (11h) are written in
 raw rules and tested as stories, so they come last, as D7 says: "raw rules are the engine's
 concept, not the first one people meet".
 
@@ -92,17 +97,23 @@ concept, not the first one people meet".
 steps; it was split in two, so events, time, reading rules and patterns moved from 11c–11f to
 11d–11g. 11a's section below keeps the letters it was written with, where "11b" meant both.
 
+*Renumbered again 2026-10-19, in 11d's session:* 11d, as planned, held both events and `then:
+set`; it was split in two (see 11d, "The split"), so `set` is 11e, and time, reading rules and
+patterns moved to 11f–11h. The table, "Why this order" and the table below use the new letters;
+11a's, 11b's and 11c's sections keep the letters they were written with, as does the brief
+(brief, D41).
+
 **Carried into layer 11, and where each lands:**
 
 | Carried | Where |
 |---|---|
-| Case validation stays true once rules reach milestones and start or stop steps (`can_happen`, `NEVER_RUNS`, `CLOSES_AT_OPENING`, `NEVER_CLOSES`, `SET_AFTER`, the 10d warnings) | 11a for `reach`, 11b for `start`, 11c for `stop`, 11d for `set` |
-| Provenance: a rule computing fields from fields brings the fixpoint back (D34, D36) | 11d, with `set` |
+| Case validation stays true once rules reach milestones and start or stop steps (`can_happen`, `NEVER_RUNS`, `CLOSES_AT_OPENING`, `NEVER_CLOSES`, `SET_AFTER`, the 10d warnings) | 11a for `reach`, 11b for `start`, 11c for `stop`, 11d for events, 11e for `set` |
+| Provenance: a rule computing fields from fields brings the fixpoint back (D34, D36) | 11e, with `set` |
 | `UNTRUSTED_TRIGGER` and design question 17 | decided in 11a; built in 11a (a condition that decides) and 11b (a condition that steers which step starts); event content in 11d |
-| Time as event data stamped from workflow time (D33); timers as pending work (D10), across continue-as-new (D27), on replay; staleness noticed by a timer (9d) | 11e |
+| Time as event data stamped from workflow time (D33); timers as pending work (D10), across continue-as-new (D27), on replay; staleness noticed by a timer (9d) | 11f |
 | Whether rules act once every `closes_when` milestone is reached (D34) | 11a (choice 7) |
-| What a close does to timers (D10: cancelled) | 11e |
-| `sla`, `reminder`, `four_eyes`, the renderer, teaching warnings, `ventoux simulate` | 11g, 11g, 11g, 11f, 11g, 11f (as in the table) |
+| What a close does to timers (D10: cancelled) | 11f |
+| `sla`, `reminder`, `four_eyes`, the renderer, teaching warnings, `ventoux simulate` | 11h, 11h, 11h, 11g, 11h, 11g (as in the table) |
 
 ---
 
@@ -1459,3 +1470,306 @@ unless said otherwise.
 | The runtime refuses what validation refuses, on nothing validation did | `test_untrusted_data_cant_stop`, `test_a_failed_run_is_never_stopped`, `test_a_rule_stopping_on_untrusted_data_is_refused`: each runs the case through `run_case` alone |
 | No line or issue of 11c quotes a value from a case file | `test_no_stop_line_or_issue_quotes_a_value` |
 | The guides' stop lines, plan and workflow lines, refusals and codes are what the engine says | `test_the_guides_stop_lines_are_what_the_engine_says`, `test_a_rule_stops_a_plan_step` (`tests/test_plan_step.py`), `test_a_close_cancels_a_cancellable_workflow_step` (`tests/test_workflow_step.py`), `test_a_stopped_workflow_step_is_cancelled_only_if_cancellable` (`tests/test_workflow_step.py`), `test_the_guides_table_of_rule_codes_is_what_validate_case_says` |
+
+## 11d. Events from outside
+
+### What this part is for
+
+Until 11d everything a case reacts to comes from inside it: a person's answer, an activity's
+result, a retry, a close. 11d lets the world outside tell a case that something happened (the
+customer cancels in the portal, a receipt is uploaded, support logs a call), lets rules react to
+it, and lets a step wait for it. The lesson is the curriculum's check-yourself: **arrival is a
+fact, content is not.** The Ventoux API vouches for who sent an event, so a rule may act on its
+arrival; what the event says is only as trusted as its sources.
+
+A sketch, the cases guide's (`docs/guides/cases.md`, "Events from outside"):
+
+```json
+"events": {
+  "cancelled": {
+    "display": {"title": "The customer cancels"},
+    "sent_by": {"system": "portal"},
+    "payload": {"note": {"type": "string", "display": {"title": "What the customer wrote"},
+                         "source": "untrusted:customer"}}
+  }
+},
+"rules": {
+  "withdraw_on_cancel": {
+    "display": {"title": "Stop the review when the customer cancels"},
+    "on": {"event": "cancelled"},
+    "then": {"stop": ["review"]}
+  }
+}
+```
+
+```
+cancelled#1 from portal, giving note from system:portal, untrusted:customer
+withdraw_on_cancel#1 on event cancelled: stopping review
+cancelled review#1: stopped by withdraw_on_cancel#1
+closed: nothing left to do
+```
+
+User-facing description: `docs/guides/cases.md`, "Events from outside", written before building.
+Decision: brief, D41.
+
+### How the session went
+
+The warm-up first (learning question 34's follow-up, recorded in the log), 2026-10-19. The design
+was put to the user in 23 choices with a recommendation each, and a split; the user answered the
+warm-up and said "build", taken as all recommendations agreed, the split included (as 11b's "Go"
+was). 11d's code waited for the fix of a retried run stuck after its approval was rejected
+(`docs/layers/fix-retry-rejected.md`, pull request #28), so it builds on that fix, and its
+invariant (every pending item shown) covers 11d's new pending work: an open wait.
+
+### The split
+
+11d, as planned, held two lessons: events from outside, and `then: set` with the provenance
+fixpoint it brings back. Events on their own keep provenance one pass: with one sender per event
+(choice 2), each value an event carries has one writer, as every value has today (brief, D34). So
+11d builds events, and **11e** builds `set`, the fixpoint, who may write a field, the warning 11a
+promised for a field only some writers make untrusted (`WRITER_DECIDES`, proposed), and what
+"surely set" and `SET_AFTER` claim then (choices 16–23 of the session, carried to 11e unbuilt).
+Time, reading rules and patterns move to 11f–11h ("The split", above; brief, D41).
+
+### Decided in the session
+
+All as recommended, 2026-10-19.
+
+**Declaring an event:**
+
+1. **Shape.** `events.<name>` is `{display, sent_by, payload}`. An event is not named like a step,
+   a milestone or a rule: its arrivals are entries (`cancelled#1`) beside step runs and firings,
+   and its values are read as `<event>.<field>` beside a step's outputs.
+2. **One sender:** `{"system": "<a registered system>"}`, or `{"roles": [...]}`, people holding
+   one of them, checked as for a close reason (brief, D10, D22). Never both, never neither. Room
+   is left for a later kind of sender (a child case, doors row 8) as one more key of the object.
+3. **Where a payload value comes from:** its sender (`system:portal`, `person:ana`), and the
+   field's `untrusted:<label>`, added whoever sends it, as for the opening's values (brief, D12).
+   Set aside: an undeclared field read as `untrusted:undeclared`, as an output is (brief, D29):
+   an output is another team's code, while an event's sender is stated by the trusted caller,
+   as the opener is, and a developer could then never make a system's event trusted.
+4. **Its types:** the case's scalar types; every field given on every arrival, checked strictly
+   (`fits`, as the opening's values are). A list is refused when the definition is read, since
+   `fits` can't check a list value yet: never packed into a text meanwhile (doors row 6). No
+   payload field is sensitive or narrows who sees it yet: a payload field says only its type,
+   title and source.
+5. **Where it lands:** as `<event>.<field>`, the latest arrival's, as an output does.
+
+**What a rule may read of an event:**
+
+6. **A fifth moment, `{"event": "<name>"}`,** each arrival (brief, D41, adding to D38's closed
+   list). A rule may act on the arrival itself. Its `when` reads the case file as always: a
+   payload value decides only as any value does, through its sources. Untrusted, it can't reach
+   or stop (brief, D38, D40), and it steers a start only through the started step's input
+   policies (brief, D39).
+
+**Listening and waiting** (doors rows 5, 18):
+
+7. **A rule on an event is never pending work** (brief, D10).
+8. **The explicit wait is a step of the kind `wait`,** naming its `event`. It starts as any step
+   does; its run is open until the event's next arrival, which makes it done and reaches its
+   `reaches`. It is pending work, listed in `waiting_for` as `receipt_sent from portal` or
+   `customer_called by support` (adds to D24). A stop or a close cancels it as an open task; an
+   answer to it is refused. It takes no inputs, approval or `max_age`. Only an arrival after it
+   opens ends it. It is the one place a later `required` can build on (doors row 5).
+
+**Closing** (doors row 25):
+
+9. **While closing,** an event is refused, recorded and flagged: a signal has no reply.
+10. **Once closed,** the workflow has ended: the client's send raises `EventRefused`, and never
+    starts a workflow to deliver it.
+11. **While a failed run holds the close** (brief, D34), payload lands and a wait it ends is done,
+    but no rule acts (brief, D38).
+
+**Time** (brief, D33):
+
+12. **An arrival is stamped from workflow time** as it reaches the case; its values are obtained
+    then, by its entry. Nothing can fetch them again, and the line says so.
+
+**On Temporal** (doors rows 8, 13):
+
+13. **One `event` signal,** `CaseEvent(event, payload, by, roles)`, `by` being `system:<name>` or a
+    person's identifier (which never holds a `:`, brief, D22), addressed to the workflow ID
+    (brief, D27). An open wait is only state, like an open task: it doesn't hold back
+    continue-as-new.
+
+**Validation stays a proof** (brief, D34):
+
+14. **Each check that reads moments or writers, checked again with a run:** `can_happen` counts a
+    rule on an event as able to fire whenever the case is open; a payload value is surely set in a
+    rule on its event and once a wait for it is done; never `SET_AFTER`; a loop through an event
+    is never claimed; a person's payload given to an `only_from` input is `INPUT_POLICY`.
+15. **No new code.** `UNKNOWN_EVENT` already means something else: plan validation gives it for
+    a transition on an outcome a state never gives (`core/validate.py`). An undeclared event
+    name is refused when the definition is read, as a step's or a milestone's is, and an event
+    the runtime doesn't know is refused (`EventRefused`). `UNTRUSTED_TRIGGER` covers payload that
+    is untrusted whoever sends it.
+
+### Decided while building
+
+- **A wait gives no value.** Its run ends only `done`, so `<wait>.outcome` says nothing a
+  `requires` doesn't; it is left out of the case's values, and reading it is `EXPRESSION_INVALID`.
+  The event's payload is the event's, read as `<event>.<field>`.
+- **The guide said a `when` could let a wait be skipped** once its event had arrived. Writing the
+  test showed it wrong: a step that requires the wait would then never start. The sentence is
+  gone; the guide says the wait waits for the next arrival.
+- **The development catalog registers `portal`,** the guide's sender. Three messages that list
+  the registered systems now end with it (the activities guide, the cases guide, a test).
+- **The guide's refusal table has its own header** (`An event is refused when`): the cases guide's
+  test reads the first table headed `Refused when`. And `send_event` is said in prose: that test
+  runs every Python block outside "Running a case on Temporal", and a top-level `await` can't run.
+- **What was found failing, or failing closed,** each fixed test-first:
+  - `said`, `can_happen` and the 10d warnings raised on the new moment: fail closed, never read
+    as the opening (brief, D38), until each knew it;
+  - `UNTRUSTED_TRIGGER` and `INPUT_POLICY` missed a payload value until `case_sources` stamped it
+    with its sender and mark: no error was claimed falsely, but one was missed;
+  - **the check that silently stopped saying something:** `surely_set` read any value that is
+    neither a step's nor set by a form as "given at the opening (assumed)", so a payload value
+    read where nothing waits for it got no `MAY_BE_UNSET`. A warning is no proof, but this one
+    would never have been said;
+  - `refreshable` and `never_fetched` said a stale payload value "came from the opening": a line
+    that lied. They now say it came from the event, sent from outside.
+- **Every place that read "not a task" as "a call or a plan step"** (freshness, inputs, the
+  invariant's facts, which steps call something) now asks for a call or a plan step: mypy found
+  each one once `wait` was a kind.
+- **A refused event on Temporal names who sent it** (`refused cancelled from system:crm: …`),
+  never what it carries; the client tells a case that has ended from an ID no case has, since
+  Temporal says `NOT_FOUND` of both.
+
+### From the tutor review
+
+Reviewed at `18f047a`, 2026-10-19: one change needed, and one optional nit, both built test-first.
+
+- **A signal that came with the close was lost unrecorded.** This note listed it as a known limit,
+  and it contradicted D41 as written, which promises two outcomes for an event that comes too late
+  (refused, recorded and flagged while closing; `EventRefused` at the client once closed): a
+  third existed, the client's send succeeding and the case recording nothing. The review showed
+  it with a run (the closing answer and an event, both sent before any worker runs, land in the
+  case's first workflow task: the loop decides the answer, the case closes, and the loop ends with
+  the event still in its inbox), and in a plain race (8 cases of 12 recorded neither the event nor
+  its refusal). Decided: **once the loop ends, each item still in the inbox is refused and
+  recorded, `refused cancelled from system:portal: the case is closed`, and the inbox cleared,
+  before the workflow returns.** It adds a line of history and no command, so replay decides the
+  same; and Temporal fails a completion that a newer signal overtakes, retrying it with that
+  signal, so every signal accepted before the close is recorded. Answers, proposals, retries,
+  close and forget requests were lost the same way on `main`; the same lines cover them. The two
+  runs were seen failing first, the history ending at `closed: nothing left to do`. Added to D41,
+  dated.
+- **Optional: an event's people naming no role** were refused with plan validation's message, "a
+  wait or an approval names at least one role that may answer it", which now reads as if it were
+  about the new step. It has its own: `an event sent by people names at least one role that may
+  send it`.
+
+### Known limits
+
+- **No sensitive payload, no list payload, no `visible_to` on a payload field:** each is refused,
+  never read another way, so adding it later changes no definition's meaning.
+
+### The doors left open (the checkpoint's 11d section)
+
+| Row | How 11d keeps it open |
+|---|---|
+| 5 Required items | the explicit wait is a step (choice 8), so one `required` flag later can serve it and every other step |
+| 6 One step per item of a list | a list payload is refused (choice 4), never packed into a text, so a later list type reads nothing differently |
+| 8 Child cases | events are addressed to the case's workflow ID (choice 13), and `sent_by` takes a later kind of sender as one more key (choice 2) |
+| 12 User event listeners | a person may send an event, roles checked as for a close reason, source `person:` (choice 2) |
+| 13 Signal and generic listeners | one event shape and one signal, the sender data on the declaration (choice 13) |
+| 14 Variable listeners | 11d brings no "field set" moment; `set` (11e) decides whether it comes with one, keeping each decision finite |
+| 18 Completion-neutral items | listening is never pending work (choice 7); only a wait is (choice 8) |
+| 25 Case reactivation | an event reaching a closed case is refused at the client, never delivered by starting a workflow (choice 10) |
+
+### Where the code goes
+
+- `case/definition.py`: `SentBy`, `PayloadField`, `DeclaredEvent`, `events`; the moment
+  `EventArrived`; `WaitStep`; names unlike steps, milestones and rules.
+- `case/state.py`: the event `Sent`; `arrived`, the arrivals' counts; `Obtained.run` may name an
+  arrival.
+- `case/runtime.py`: `receive` (sender, payload, the close), `arrive` (the values, the moment, the
+  waits it ends); a wait's start; an answer to a wait refused; `refreshable` on an arrival; the
+  case refused when it names an unregistered sender or label.
+- `case/rules.py`: the moment said. `case/types.py`: payload types. `case/writers.py`: payload
+  sources. `case/reach.py`: an event may come. `case/known.py`, `case/warnings.py`: surely set,
+  `MAY_BE_UNSET`, `NEVER_REFRESHED`. `case/registered.py`: senders, roles, labels.
+  `case/visibility.py`: a sender's roles are named. `case/stopping.py`, `case/validate.py`: a wait
+  is not a call step.
+- `temporal/cases.py`: `CaseEvent`, the `event` signal, `send_event`, refusals recorded.
+  `temporal/carried.py`: `arrived`. `testing.py`: `send`, `portal` registered.
+
+### Seams the tests use
+
+- `parse_case(data)`: `CaseInvalid` for each shape refused.
+- `run_case(...)` with `send(event, payload, by)` in the script: `history`, `waiting_for`,
+  `needs_attention`, `flags`, `status`, `state`, `view`; `EventRefused`, `AnswerRefused`,
+  `ProposalRefused`, `CaseRefused`.
+- `validate_case(case, catalog)`: the issues above.
+- The Temporal test server: `start_case`, `send_event`, `answer`, `report`, `view`, a case that
+  continues as new.
+- The guide's section, read as the engine runs it.
+
+### Slices, in order
+
+Each started with its negative test, seen failing for the right reason.
+
+0. **The docs first:** the guide's section and D41.
+1. **The shape.** Negative: a rule on an undeclared event (seen refused as an unknown moment).
+2. **An arrival, in memory.** Negative: an undeclared event (seen failing closed on the moment,
+   then taken in silence). Then the sender, the payload, the values landing, arrival and content.
+3. **A wait.** Negative: an answer to a wait (seen crashing on a wait treated as a call step).
+   Then it holds the case, ends on its event, is stopped and closed.
+4. **The close.** Negative: an event to a closed case (seen taken). Then closing, and a held close.
+5. **Time.** Negative: a stale payload value (seen said to come from the opening).
+6. **Validation.** Negative: `validate_case` on the guide's case (seen failing closed). Then each
+   check of choice 14, each seen missing or wrong first where it was.
+7. **On Temporal.** Negative: an event to a closed case (seen raising Temporal's `NOT_FOUND`).
+   Then a refusal recorded (seen hanging), a wait, exact values, continue-as-new (seen failing
+   with the count left out of the carried state).
+8. **The guide, as the engine does it, and the promises.**
+9. **From the tutor review.** Negative: an event, then a person's proposal, each sent with the
+   closing answer before any worker runs (each seen lost). Then the sender's own message.
+
+### Promises
+
+Every test is in `tests/test_events.py` unless said otherwise. Checked against the files once
+built, 2026-10-19: every test named here exists where it says.
+
+| Promise | Test that would fail |
+|---|---|
+| A rule on an undeclared event, a wait naming one, and an event named like a step are refused when the definition is read | `test_a_rule_on_an_event_the_case_doesnt_declare_is_refused`, `test_a_wait_names_a_declared_event`, `test_an_event_is_not_named_like_a_step` |
+| An event has one sender, a system or people, never both or neither; its people name a role, said in its own words | `test_an_event_is_sent_by_one_sender`, `test_an_events_people_name_a_role` |
+| A payload carries no list, and says only its type, title and source | `test_an_event_carries_no_list`, `test_a_payload_field_says_only_its_type_title_and_source` |
+| A wait takes no inputs, approval or `max_age`; events and a wait read | `test_a_wait_takes_no_inputs_approval_or_max_age`, `test_events_and_a_wait_read` |
+| An event the case doesn't declare is refused, naming its events | `test_an_event_the_case_doesnt_declare_is_refused` |
+| Only its sender sends an event: another system, a person for a system's event, a system for people's, a person without a role, a misspelt person, are refused | `test_only_its_sender_sends_an_event` |
+| An event carries exactly its payload: a field missing, one undeclared, one of another type, refused, naming the type, never the value | `test_an_event_carries_exactly_its_payload`, `test_no_event_line_or_issue_quotes_a_value` |
+| An arrival lands each value as `<event>.<field>`, from its sender and its mark, obtained then by its entry, and its rule acts on the arrival | `test_an_arrival_lands_its_payload_and_its_rule_acts` |
+| A person's event comes from them, and listening holds nothing | `test_a_persons_event_comes_from_them` |
+| Each arrival is its own entry, and the latest payload stands | `test_each_arrival_is_its_own_entry_and_the_latest_payload_stands` |
+| Untrusted content can't decide: a rule reading it stops nothing, saying which value and source, never the value | `test_untrusted_content_cant_decide` |
+| A start on the arrival alone is made; one on untrusted content is refused by the started step's input policy | `test_untrusted_content_cant_choose_what_is_sent` |
+| A wait is never answered | `test_a_wait_is_never_answered`, `test_the_guides_answer_to_a_wait_is_refused_as_it_says` |
+| A wait is pending work, listed in `waiting_for` with its sender, until its event arrives, which makes it done | `test_a_wait_holds_the_case_until_its_event_arrives`, `test_a_wait_sent_by_people_says_who_sends_it` |
+| Only an arrival after a wait opens ends it | `test_only_an_arrival_after_a_wait_opens_ends_it` |
+| A stop or a close cancels a wait | `test_a_stop_or_a_close_cancels_a_wait` |
+| A closed case refuses an event; a closing one refuses it, records it and is flagged, nothing landing | `test_a_closed_case_refuses_an_event`, `test_a_closing_case_refuses_an_event_and_is_flagged` |
+| While a failed run holds the close, an event lands and ends a wait, and no rule acts | `test_while_a_failed_run_holds_the_close_an_event_lands_and_no_rule_acts` |
+| A stale value an event carried is never fetched again, and the refusal says it came from the event | `test_a_stale_value_an_event_carried_is_never_fetched_again` |
+| The guide's events get no issue; a rule on an event may fire whenever the case is open, and what it reaches can close the case | `test_the_guides_events_get_no_issue`, `test_what_a_rule_on_an_event_reaches_can_close_the_case` |
+| A rule deciding on untrusted content is `UNTRUSTED_TRIGGER`, and the runtime refuses the same on its own | `test_a_rule_deciding_on_untrusted_content_is_refused`, `test_untrusted_content_cant_decide` |
+| A person's payload given where only a system may give it is `INPUT_POLICY`, and the runtime refuses it on its own | `test_a_persons_payload_is_refused_where_only_a_system_may_give_it` |
+| A payload read where nothing waits for it warns `MAY_BE_UNSET`; after its wait, or in a rule on its event, it is surely set; it is never `SET_AFTER` | `test_a_payload_read_where_nothing_waits_for_it_may_be_unset`, `test_a_payload_is_surely_set_after_its_wait_and_in_a_rule_on_its_event`, `test_a_payload_read_as_the_case_opens_is_never_set_after` |
+| A `max_age` on a payload value is `NEVER_REFRESHED`, saying it came from the event | `test_a_max_age_on_a_payload_is_never_refreshed` |
+| A sender, role or label nobody registered is `UNKNOWN_SYSTEM`, `UNKNOWN_ROLE` or `UNKNOWN_SOURCE`; a case naming such a sender or label doesn't open | `test_what_an_event_names_is_registered`, `test_a_case_naming_an_unregistered_sender_or_label_doesnt_open` |
+| A misspelt payload field is `EXPRESSION_INVALID`, and fails its rule at runtime | `test_a_misspelt_payload_field_is_refused_and_fails_its_rule` |
+| A wait open at the opening keeps the case from closing at once: no `CLOSES_AT_OPENING` | `test_a_wait_open_as_the_case_opens_keeps_it_from_closing_at_once` |
+| A loop that comes round through an event is never claimed | `test_a_loop_that_comes_round_through_an_event_is_not_claimed` |
+| A sender's roles are roles the case names, and give sight of its ordinary values | `test_a_sender_is_a_role_the_case_names` |
+| On Temporal, a closed case refuses an event at the client, and so does an ID no case has, each saying which; nothing starts a workflow | `test_a_closed_case_refuses_an_event_at_the_client`, `test_an_event_to_an_id_no_case_has_is_refused_at_the_client` (both `tests/test_temporal_events.py`) |
+| On Temporal, an event is decided as in memory, and a refusal is recorded, naming its sender, while the case waits on | `test_an_event_on_temporal_is_decided_as_in_memory` (`tests/test_temporal_events.py`) |
+| On Temporal, a wait holds the case until its event arrives | `test_a_wait_on_temporal_holds_the_case_until_its_event_arrives` (`tests/test_temporal_events.py`) |
+| A person's event crosses Temporal with exact values | `test_a_persons_event_crosses_with_exact_values` (`tests/test_temporal_events.py`) |
+| Arrival counts cross continue-as-new; every field of the state crosses | `test_arrivals_cross_continue_as_new` (`tests/test_temporal_events.py`, seen failing with the count left out), `test_a_carried_state_reads_back_as_it_was` (`tests/test_temporal_case.py`) |
+| On Temporal, a signal that comes with the close, an event or a person's request, is refused and recorded after the closed line, never lost; nothing it carries lands | `test_an_event_that_comes_with_the_close_is_refused_and_recorded`, `test_a_persons_request_that_comes_with_the_close_is_refused_and_recorded` (both `tests/test_temporal_events.py`, seen failing first) |
+| A history recorded before 11d replays: the new signal changes nothing that was recorded | `test_a_history_from_before_11c_replays` (`tests/test_temporal_case.py`), `test_a_workflow_history_from_before_11c_replays` (`tests/test_temporal_workflow_step.py`) |
+| Every decision of every in-memory test shows each pending item, an open wait included | the invariant, `tests/conftest.py` and `tests/invariants.py`, run after every decision of the tests above |
+| The guide's definitions, histories and refusals are what the engine does | `test_the_guides_definitions_are_these_tests`, `test_the_guides_histories_are_what_the_engine_records`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |
+| No line, refusal or issue of 11d quotes a value an event carried | `test_no_event_line_or_issue_quotes_a_value` |

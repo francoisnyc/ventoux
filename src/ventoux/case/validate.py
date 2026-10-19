@@ -13,7 +13,14 @@ from ventoux.case.calls import (
     plan_input_issues,
     supplied_plans,
 )
-from ventoux.case.definition import AnsweredTask, CaseDefinition, Reached, Started, TaskStep
+from ventoux.case.definition import (
+    AnsweredTask,
+    CallStep,
+    CaseDefinition,
+    PlanStep,
+    Reached,
+    Started,
+)
 from ventoux.case.flow import (
     approver_issues,
     condition_issues,
@@ -77,7 +84,7 @@ def validate_case(
     supplied, unknown_plans = supplied_plans(case, plans or {})
     found += unknown_contracts + unknown_plans
     found += contract_input_issues(case, contracts) + plan_input_issues(case, supplied)
-    calling = {name for name, step in case.steps.items() if not isinstance(step, TaskStep)}
+    calling = {name for name, step in case.steps.items() if isinstance(step, CallStep | PlanStep)}
     missing = calling - set(contracts) - set(supplied)
     found += expression_issues(case, case_types(case, catalog), missing)
     found += approval_issues(case, catalog, contracts)

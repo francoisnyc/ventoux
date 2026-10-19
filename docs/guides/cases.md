@@ -200,6 +200,9 @@ assert run.waiting_for == ["review by support"]
 assert not run.closed
 ```
 
+A step waiting for an event from outside is listed the same way, with who sends it:
+`receipt_sent from portal` ("Events from outside", below).
+
 ## When a system says no
 
 A business failure is an answer, not an error (brief, D17). `payments.refund@2` declares the
@@ -761,6 +764,164 @@ nothing ends, or a start refused on the step's own start; and these codes are it
 
 The rework loop above gets no issue: its rules' `when`s end it.
 
+## Events from outside
+
+Everything so far comes from inside the case: a person's answer, an activity's result, a retry, a
+close. An **event** is how the world outside tells a case that something happened: the customer
+cancels in the portal, a receipt is uploaded, a support agent logs a call. A case declares each
+event it takes under `events`: who may send it, and what it carries.
+
+```json
+"events": {
+  "cancelled": {
+    "display": {"title": "The customer cancels"},
+    "sent_by": {"system": "portal"},
+    "payload": {
+      "note": {
+        "type": "string",
+        "display": {"title": "What the customer wrote"},
+        "source": "untrusted:customer"
+      }
+    }
+  }
+}
+```
+
+A rule reacts to it with `"on": {"event": "cancelled"}`:
+
+```json
+"withdraw_on_cancel": {
+  "display": {"title": "Stop the review when the customer cancels"},
+  "on": {"event": "cancelled"},
+  "then": {"stop": ["review"]}
+}
+```
+
+Read aloud: when the customer cancels in the portal, the review stops. The refund then has
+nothing left to do, and closes:
+
+```
+cancelled#1 from portal, giving note from system:portal, untrusted:customer
+withdraw_on_cancel#1 on event cancelled: stopping review
+cancelled review#1: stopped by withdraw_on_cancel#1
+closed: nothing left to do
+```
+
+Each arrival is an entry, `cancelled#1`, then `cancelled#2`: an event's name is unlike any step's,
+milestone's or rule's.
+
+**Who may send it.** `sent_by` names one sender: a system the platform team registered
+(`{"system": "portal"}`), or people holding one of some roles (`{"roles": ["support"]}`), checked
+as for a close reason. The Ventoux API, the only caller allowed to send events (brief, D19),
+states who sent it. Two systems sending the same news are two events. Anything else is refused,
+and nothing changes in the case:
+
+| An event is refused when | Example |
+|---|---|
+| the case declares no such event | `refunded is not an event of refund: its events are cancelled` |
+| another system sends it | `cancelled is sent by portal, and this one comes from system:crm` |
+| a person sends a system's event | `cancelled is sent by portal, and this one comes from ana` |
+| the person has none of its roles | `customer_called is sent by support, and eve has no role` |
+| a payload field is missing | `cancelled's payload has no note` |
+| it carries a field it doesn't declare | `cancelled's payload has no field tone: its fields are note` |
+| a field is of another type | `cancelled.note is a string, and the event gives a number` |
+| the case is closed | `the case is closed: it takes no more events` |
+
+**What it carries.** Each payload field lands in the case file as `<event>.<field>`, from the
+latest arrival, as an activity's output does: `cancelled.note`. Every field is given on every
+arrival, as a number, a text, a boolean, an outcome or a reference; a list isn't taken yet. It
+comes from its sender, `system:portal` or the person who sent it (`person:ana`), and a field's
+`source` adds to that whoever sends it. That is why `note` is `untrusted:customer`: the portal
+carries it, but a customer typed it, and provenance follows the content, not the system that
+carries it (brief, D12). Each value is obtained when its event reaches the case, from the workflow's
+time, and nothing can fetch it again.
+
+**Arrival is a fact; content is not.** The API vouches that the portal sent `cancelled`, so a
+rule may act on the arrival. What the customer wrote is untrusted: a rule that reaches or stops,
+whose `when` reads it, does nothing, as for any untrusted value. With `"when": {"==": [{"var":
+"cancelled.note"}, "please cancel"]}` on the rule above, the review stays open:
+
+```
+withdraw_on_cancel#1 on event cancelled: stops nothing: its condition reads cancelled.note, from untrusted:customer, and untrusted data can't decide
+```
+
+`ventoux check` refuses that rule (`UNTRUSTED_TRIGGER`). A rule that only starts steps may read
+it: what it read counts for the started step's input policies, as above.
+
+**Listening is not waiting.** A rule on an event never keeps the case open: a refund nobody
+cancels still closes once it is paid. To wait for an event, write a step that waits for it, of
+the kind `wait`:
+
+```json
+"wait_for_receipt": {
+  "kind": "wait",
+  "display": {"title": "Wait for the customer's receipt"},
+  "event": "receipt_sent",
+  "requires": ["review"]
+}
+```
+
+with the event it waits for under `events`:
+
+```json
+"receipt_sent": {
+  "display": {"title": "The customer uploads a receipt"},
+  "sent_by": {"system": "portal"},
+  "payload": {
+    "receipt": {"type": "reference", "system": "documents", "display": {"title": "The receipt"}}
+  }
+}
+```
+
+and `pay` requiring `wait_for_receipt`. Read aloud: once reviewed, the refund waits for the
+customer's receipt, then pays. A wait starts as any step does, by itself once its requirements are
+met, when proposed, or by a rule. Its run is open until the event's next arrival, which makes it
+done:
+
+```
+started wait_for_receipt#1: waiting for receipt_sent from portal
+receipt_sent#1 from portal, giving receipt from system:portal
+wait_for_receipt#1 done: receipt_sent#1 arrived
+```
+
+While it waits, it is pending work, and the case says so: `waiting_for` lists `receipt_sent from
+portal`, beside the tasks and approvals. A stop cancels it, as it cancels an open task, and so
+does a close. An answer to it is refused: `wait_for_receipt#1 waits for receipt_sent: it is sent,
+never answered`. Only an arrival after it opens counts: one that came before is already in the
+case file, but the wait waits for the next. A wait has no inputs, approval or `max_age`; `reaches`
+names what it reaches once done.
+
+**When the case closes.** An event that reaches a closing case is refused, and the case is
+flagged, since nobody would hear of it otherwise:
+
+```
+refused cancelled from portal: the case is closing, so it takes no more events
+flagged: cancelled from portal arrived while the case was closing, and was refused
+```
+
+A closed case's workflow has ended: sending it an event raises `EventRefused`, and never opens it
+again. An event that reaches the case with the very answer that closes it is refused and recorded
+after the closed line, `refused cancelled from system:portal: the case is closed`, as is anything a
+person sends then. While a failed step holds the close (every `closes_when` milestone reached), an event's
+payload still lands and a wait it ends is done, but no rule acts on it.
+
+**Sending one.** On Temporal, `send_event(case, event, payload, by, roles)`, from
+`ventoux.temporal.cases`, signals the case's workflow by its ID, as `answer` does: `by` is
+`"system:portal"` for a system, or a person's identifier with their `roles`. Every event is the
+same signal, whoever sends it. In a test, the script says `send(event,
+payload, by)`: `send("cancelled", {"note": "please cancel"}, "system:portal")`, or a person's name,
+whose roles come from `people`.
+
+**What the check says about events.** A rule on an event may fire whenever the case is open, so
+what it reaches counts as reachable; a payload field is a value of its declared type, so a
+misspelt one is `EXPRESSION_INVALID`; a rule that reaches or stops on a payload field declared
+untrusted is `UNTRUSTED_TRIGGER`; a person's payload given to an input that takes only a system's
+value is `INPUT_POLICY`. A payload field is surely set in a rule on its event, and in a step
+requiring a wait for it that is done: read anywhere else, it may not be set yet (`MAY_BE_UNSET`).
+A `max_age` on it is `NEVER_REFRESHED`. A system, role or label an event names that nobody
+registered is `UNKNOWN_SYSTEM`, `UNKNOWN_ROLE` or `UNKNOWN_SOURCE`, as anywhere else, and a case
+naming a system nobody registered is refused when it opens.
+
 ## Testing a case
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`
@@ -1113,7 +1274,7 @@ Anything else is not a value: reading it is an error.
 | `ENGINE_INPUT` | error | a step gives the input the engine fills: the idempotency key | `idempotency_key is filled by the engine, never by a definition: remove it` |
 | `UNKNOWN_ROLE` | error | a role nobody registered: it counts for nothing when the case runs | `supprt is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead; use one of them, or ask the platform team to register it` |
 | `UNKNOWN_SOURCE` | error | a field is declared untrusted with a label nobody registered | `untrusted:custmer has a label nobody registered: the labels are customer, document, email, llm, web; use one of them, or ask the platform team to register it` |
-| `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are crm, documents, orders, policies; use one of them, or ask the platform team to register it` |
+| `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are crm, documents, orders, policies, portal; use one of them, or ask the platform team to register it` |
 | `EXPRESSION_INVALID` | error | an expression reads something that isn't a value, mixes types, or names an outcome that can't happen | as above |
 | `APPROVAL_REQUIRED` | error | a high-risk step has no approval | `payments.refund@2 is high risk, and pay has no approval: add one` |
 | `APPROVAL_ROLE` | error | a role on an approval may not approve the step's risk | `adjuster may approve no risk, and payments.refund@2 is high risk: name a role that may approve high risk` |

@@ -115,7 +115,7 @@ def changed(change: str) -> dict[str, Any]:
     [
         (
             "kind",
-            "steps.pay.kind: a step is a task, an activity, a plan or a workflow, and this one is 'script'",
+            "steps.pay.kind: a step is a task, an activity, a plan, a workflow or a wait, and this one is 'script'",
         ),
         ("sequence", "sequence: pya is not a step"),
         ("requires", "steps.pay.requires: reviwe is neither a milestone nor a step"),

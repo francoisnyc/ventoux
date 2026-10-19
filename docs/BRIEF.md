@@ -1265,6 +1265,67 @@ kept.*
 - **A run has ended once it has its final status;** a run whose stop is requested and still
   running hasn't, and a stopped run's timers end with it (layer 11e).
 
+### D41. Events from outside: declared with one sender, a fact on arrival, and a step that waits for one
+
+*Drafted 2026-10-19, in layer 11d. Adds to D10, D12, D13, D24, D27, D33, D34 and D38, whose text
+is kept.*
+
+- **A case declares each event it takes,** under `events`: a title, one sender, and a typed
+  payload. The sender is a system the platform team registered (`"sent_by": {"system":
+  "portal"}`, D30), or people holding one of some roles (`{"roles": ["support"]}`), checked as
+  for a close reason (D10, D22). Only the Ventoux API sends events (D19), and it states who sent
+  each one. An event the case doesn't declare, another sender, a person without one of the roles,
+  or a payload that isn't exactly the declared one is refused, and nothing changes. A case naming
+  a system nobody registered as a sender, or a label nobody registered on a payload field, is
+  refused when it opens. One sender, so each payload value comes from one writer, and where it
+  comes from is still known in one pass (D34, D36) until a rule computes fields from fields
+  (layer 11e). Two systems sending the same news are two events.
+- **Its payload lands as an output does** (D29): each field as `<event>.<field>`, the latest
+  arrival's, every field given on every arrival, of one of the case's scalar types (a number, a
+  text, a boolean, an outcome, a reference). A list waits until a list value can be checked,
+  never packed into a text meanwhile; no payload field is sensitive yet. Each value comes from
+  its sender, `system:<name>` or `person:<who>`, and a field's declared `untrusted:<label>` is
+  added whoever sends it, as for the opening's values (D12): provenance follows the content, not
+  the system that carries it.
+- **Time stays data** (D33): an arrival is stamped as it reaches the case, from the workflow's
+  time, and its values are obtained then, by its entry (`cancelled#1`), so nothing can fetch them
+  again: stale, a step needing one fresh needs attention.
+- **A fifth moment: an event arrived** (adds to D38's closed list). `{"event": "<name>"}` fires on
+  each arrival. **Arrival is a fact, content is not:** the sender, vouched for by the API, is
+  trusted as that sender is, so a rule may act on the arrival itself; what the payload says
+  decides only as any value does, through its sources (D38, D39, D40).
+- **Listening is not waiting** (D10): a rule on an event is never pending work. **A step may wait
+  for one:** a fifth kind of step, `{"kind": "wait", "event": "<name>"}` (adds to the
+  Simplifications' kinds of step, and to D13's choice among them: `wait` when the case waits for
+  news from outside, never for a person, who answers a task). It starts as any step does; its run is open until the event's next arrival, which makes
+  it done. It is pending work, and `waiting_for` lists it in the inbox's words, `receipt_sent from
+  portal` or `customer_called by support` (adds to D24: a waiting case says what it waits for,
+  from people or from outside). A stop or a close cancels it, as an open task (D10, D40); an
+  answer to it is refused. It takes no inputs, approval or `max_age`.
+- **A closing case refuses events; a closed one is never reopened by one.** While the case is
+  closing, an event is refused, recorded and flagged, since a signal has no reply and nobody
+  would hear of it otherwise. Once closed, its workflow has ended, and sending to it raises
+  `EventRefused` at the client: the client never starts a workflow to deliver one. While a failed
+  run holds the close (D34), an event's payload lands and a wait it ends is done, but no rule acts
+  (D38).
+- **On Temporal, one signal for every event,** `event`, addressed to the case's workflow ID
+  (D27): a kind of sender is data on the declaration, never a signal of its own. What has arrived
+  crosses continue-as-new with the rest of the state.
+- **Case validation counts events** (D34): a rule on an event may fire whenever the case is open;
+  a payload value is surely set in a rule on its event and once a wait for it is done, and is
+  never `SET_AFTER`, which only a step's writing can prove; a `max_age` on one is
+  `NEVER_REFRESHED`; senders, roles and labels are checked as registered, as anywhere else.
+- **Layer 11's later parts move one letter** (11d's session): `then: set` and the provenance
+  fixpoint become 11e, time 11f, reading rules 11g, patterns 11h. Texts written before keep the
+  letters they were written with, as D40's "layer 11e" for timers does.
+- **Amended 2026-10-19, in 11d's tutor review** (the text above stands; this adds to it): a signal
+  that reaches the case with its close is refused and recorded, never lost. Once the case's
+  workflow has decided the event that closes it, each signal still waiting to be decided, an
+  event or a person's request, is recorded as refused (`refused cancelled from system:portal: the
+  case is closed`) before the workflow returns. So an event sent too late has the outcomes above
+  and no third: until now the client's send could succeed and the case record nothing. A line of
+  history and no command, so replay decides the same.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step

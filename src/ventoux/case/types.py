@@ -9,7 +9,7 @@ from decimal import Decimal
 from pydantic.fields import FieldInfo
 
 from ventoux.case.called import called
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
+from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep, WaitStep
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import (
@@ -32,11 +32,18 @@ FAILED = "failed"  # how a plan ending in a failed final state ends (brief, D28)
 
 def case_types(case: CaseDefinition, catalog: Catalog) -> dict[str, FieldType]:
     """Every value `case` holds, by the name an expression reads it with, and its type: each field;
-    each step's outcome, a closed list (brief, D9); each output its contract declares (brief, D29).
+    each step's outcome, a closed list (brief, D9); each output its contract declares (brief, D29);
+    each value an event carries (brief, D41).
     A step whose contract the catalog can't give has no values here, so reading one is an error
     (fail closed)."""
     types: dict[str, FieldType] = {name: field.declared for name, field in case.fields.items()}
+    # Each value an event from outside carries, as its payload declares it (brief, D41).
+    for name, event in case.events.items():
+        for field, carried in event.payload.items():
+            types[f"{name}.{field}"] = carried.declared
     for name, step in case.steps.items():
+        if isinstance(step, WaitStep):
+            continue  # a wait gives no value: its event's payload is the event's
         if isinstance(step, TaskStep):
             types[f"{name}.outcome"] = OutcomeType(outcomes=tuple(step.outcomes))
         elif isinstance(step, PlanStep):
@@ -71,7 +78,9 @@ def output_type(info: FieldInfo, system: str | None) -> FieldType | None:
     return None
 
 
-def expressions_of(step: TaskStep | CallStep | PlanStep) -> list[tuple[str, Expression, bool]]:
+def expressions_of(
+    step: TaskStep | CallStep | PlanStep | WaitStep,
+) -> list[tuple[str, Expression, bool]]:
     """Each expression the step reads, where it is in the step, and whether it is a condition:
     its `when`, its approval's `when`, its inputs."""
     found: list[tuple[str, Expression, bool]] = []
@@ -79,7 +88,7 @@ def expressions_of(step: TaskStep | CallStep | PlanStep) -> list[tuple[str, Expr
         found.append(("when", step.when, True))
     if isinstance(step, CallStep) and step.approval is not None and step.approval.when is not None:
         found.append(("approval.when", step.approval.when, True))
-    if not isinstance(step, TaskStep):
+    if isinstance(step, CallStep | PlanStep):  # a task and a wait take no inputs
         found += [(f"inputs.{name}", expression, False) for name, expression in step.inputs.items()]
     return found
 

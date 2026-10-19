@@ -11,7 +11,7 @@ from decimal import Decimal
 from functools import reduce
 from typing import NamedTuple
 
-from ventoux.case.definition import ActivityStep, CaseDefinition, PlanStep, TaskStep
+from ventoux.case.definition import ActivityStep, CaseDefinition, PlanStep, TaskStep, WaitStep
 from ventoux.case.sequence import requirements
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions.model import (
@@ -112,6 +112,14 @@ class Reading:
         # Nothing reaches it: the step can never run (NEVER_RUNS says so), so know nothing.
         return reduce(either, ways) if ways else Known()
 
+    def waits_for(self, event: str) -> list[str]:
+        """The steps that wait for `event`: each is done only once it has arrived."""
+        return [
+            name
+            for name, step in self.case.steps.items()
+            if isinstance(step, WaitStep) and step.event == event
+        ]
+
     def reachers(self, milestone: str) -> dict[str, frozenset[str]]:
         """Each step that reaches the milestone, and how it ended to reach it: an activity, a
         workflow or a plan only when done; a task with any outcome, or the outcomes that reach it."""
@@ -165,10 +173,14 @@ class Reading:
 
     def surely_set(self, name: str, known: Known) -> bool:
         """Whether the value is surely set: given at the opening, an `exists` said so, or what
-        has surely ended set it every way it may have ended."""
+        has surely ended set it every way it may have ended. A value an event carries is set
+        once it has arrived: in a rule on it (`present`), or once a wait for it is done; never
+        assumed given at the opening (brief, D41)."""
         if name in known.present:
             return True
         step, _, value = name.partition(".")
+        if value and step in self.case.events:
+            return any(wait in known.ended for wait in self.waits_for(step))
         if value and step in self.case.steps:
             if value == "outcome":
                 return step in known.ended  # set whichever way it ended

@@ -24,7 +24,8 @@ class SheetRefused(Exception):
 
 
 def roles_named(case: CaseDefinition) -> tuple[str, ...]:
-    """Every role the case names, in order: who answers, approves, proposes, closes or sees."""
+    """Every role the case names, in order: who answers, approves, proposes, closes, sends an
+    event (brief, D41) or sees."""
     named: set[str] = set()
     for step in case.steps.values():
         named.update(step.proposed_by)
@@ -34,6 +35,8 @@ def roles_named(case: CaseDefinition) -> tuple[str, ...]:
             named.update(step.approval.roles)
     for reason in case.close_reasons.values():
         named.update(reason.roles)
+    for event in case.events.values():
+        named.update(event.sent_by.roles or ())
     for field in case.fields.values():
         named.update(field.visible_to or ())
     return tuple(sorted(named))

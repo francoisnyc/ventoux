@@ -98,9 +98,9 @@ class Obtained:
     """When a value of the case file was obtained, and by which step run (brief, D33)."""
 
     at: int  # in whole seconds since the epoch: the time of the event that brought it
-    run: (
-        str | None
-    )  # the step run that gave it, such as `check_order#1`; None: the opening, a person
+    # The step run that gave it, such as `check_order#1`, or the event's arrival, such as
+    # `cancelled#1` (brief, D41); None: the opening, a person.
+    run: str | None
 
 
 @dataclass
@@ -130,6 +130,9 @@ class CaseState:
     # Each step a rule started whose run hasn't started yet (waiting for its approval), with what
     # the rule read: like `proposers`, for the engine (brief, D39).
     proposed_by_rules: dict[str, RuleStart] = field(default_factory=dict[str, RuleStart])
+    # How many times each event from outside has arrived, which names its next arrival:
+    # `cancelled#2` (brief, D41).
+    arrived: dict[str, int] = field(default_factory=dict[str, int])
     # What waits on people, in the order it opened: entry, and how it reads (brief, D24).
     waiting: dict[str, str] = field(default_factory=dict[str, str])
     opened_by: str | None = None  # the person who opened the case, if a person did
@@ -270,6 +273,18 @@ class ForgetApproved:
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
+@dataclass(frozen=True)
+class Sent:
+    """An event from outside reaches the case: the declared event, what it carries, and who sent
+    it, as the Ventoux API states (brief, D19) (brief, D41)."""
+
+    event: str  # the declared event, such as `cancelled`
+    payload: Mapping[str, object]  # each value it carries, by its payload field
+    by: str  # who sent it: `system:portal`, or a person's identifier, such as `ana`
+    roles: frozenset[str]  # a person's roles, stated with it (brief, D22); none for a system
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
 type Event = (
     Opened
     | Answered
@@ -282,6 +297,7 @@ type Event = (
     | WorkflowCancelled
     | Shown
     | ForgetApproved
+    | Sent
 )
 
 

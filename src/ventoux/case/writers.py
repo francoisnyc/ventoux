@@ -20,6 +20,12 @@ from ventoux.core.provenance import answering, fields_read, is_trusted
 OPENER = "system:opener"
 
 
+def sending(event: str) -> str:
+    """The static check's source for a value a person sends with `event`: a person, trusted,
+    though nobody knows who until it arrives. At runtime it is who sent it, `person:ana`."""
+    return f"person:sending {event}"
+
+
 def case_sources(
     case: CaseDefinition, contracts: Mapping[str, Contract], opener: str
 ) -> dict[str, frozenset[str]]:
@@ -38,6 +44,14 @@ def case_sources(
         writers = answered.get(name, {opener})
         # A mark adds distrust, never removes it, whoever writes the field (brief, D12).
         sources[name] = frozenset(writers | ({field.source} if field.source else set()))
+    # Each value an event carries comes from its one sender, and its field's mark adds to that
+    # whoever sends it (brief, D12) (brief, D41).
+    for name, event in case.events.items():
+        system = event.sent_by.system
+        sender = sending(name) if system is None else f"system:{system}"
+        for carried_as, carried in event.payload.items():
+            mark = {carried.source} if carried.source else set()
+            sources[f"{name}.{carried_as}"] = frozenset({sender} | mark)
     for name, step in case.steps.items():
         if isinstance(step, TaskStep):
             sources[f"{name}.outcome"] = frozenset({answering(name)})
