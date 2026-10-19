@@ -1362,10 +1362,13 @@ text is kept.*
   needs attention.
 - **Case-file provenance is a fixpoint** (as D34 foresaw; replaces its "one pass" once a rule sets
   a field). Each field's sources are grown from nothing until a round changes nothing, and it
-  ends because they only grow, over finitely many fields and sources. Two are kept: the sources
-  some write may carry, and those every write carries. An error claims only what every write
-  carries (D34); what holds for some writers and not others is a warning, **`WRITER_DECIDES`**,
-  as `OPENER_DECIDES` is for who opens the case (D36). The runtime tags each written value from
+  ends because they only grow, over finitely many fields and sources. A check asks two
+  questions of a value: may a write of it carry a source it refuses, and does every write? A
+  refusal looks for one source it refuses, and a set value comes from the union of what its rule
+  read, so a rule's write is always refused when its field's mark is, or a value it reads always
+  is; that answer too is grown from nothing. An error claims only what is refused whichever rule
+  wrote each value (D34); what is refused for some writers and not others is a warning,
+  **`WRITER_DECIDES`**, as `OPENER_DECIDES` is for who opens the case (D36). The runtime tags each written value from
   what it actually read, and a field not set yet from what its writers could give (D39), on
   nothing validation did.
 - **What the check claims of a set field** (adds to D37): it is surely set only behind a

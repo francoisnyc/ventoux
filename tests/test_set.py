@@ -5,6 +5,7 @@ See docs/layers/11-rules.md (11e) and docs/guides/cases.md, "Rules that update t
 """
 
 import copy
+import json
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ import pytest
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_case_validation import PLANS, settled
+from test_case_validation import guide_json as claim_section_json
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.state import Obtained
@@ -998,3 +1000,109 @@ def test_a_rule_that_reaches_and_sets_on_untrusted_data_never_sets_either() -> N
         "size_up's condition reads estimate, which comes from untrusted:customer whoever writes "
         "it, and untrusted data can't decide, so it never reaches large or sets large_claim"
     )
+
+
+# --- Slice 9: the guide, as the engine does it ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+SET_SECTION = GUIDE.split("## Rules that update the case file\n")[1].split("\n## ")[0]
+
+
+def guide_blocks(language: str) -> list[str]:
+    """The section's code blocks in `language` (`""` for plain ones), in order."""
+    found: list[str] = []
+    opened: str | None = None
+    body: list[str] = []
+    for line in SET_SECTION.splitlines():
+        if not line.startswith("```"):
+            body.append(line)
+        elif opened is None:
+            opened, body = line.removeprefix("```"), []
+        else:
+            if opened == language:
+                found.append("\n".join(body))
+            opened = None
+    return found
+
+
+def guide_json(index: int) -> dict[str, Any]:
+    loaded: dict[str, Any] = json.loads(
+        "{" + guide_blocks("json")[index] + "}", parse_float=Decimal
+    )
+    return loaded
+
+
+def guide_claim() -> dict[str, Any]:
+    """The check section's claim, with the estimate, the section's three fields, its two rules,
+    and `pay` given what is owed."""
+    claim = claim_section_json(0)
+    claim["fields"]["estimate"] = {
+        "type": "number",
+        "source": "untrusted:customer",
+        "display": {"title": "Customer's own estimate"},
+    }
+    claim["fields"] |= guide_json(0)
+    claim["rules"] = guide_json(1) | guide_json(2)
+    claim["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    return claim
+
+
+CLAIM_FILE = {"customer_id": "cus-1", "order_id": "ord-1", "excess": 50, "estimate": 9000}
+ASSESSED = ("assess", "accept", "ana", {"payout": 500})
+ADJUSTERS = {"ana": ["adjuster"], "sam": ["support-lead"]}
+
+
+def test_the_guides_set_runs_as_shown() -> None:
+    run = run_case(guide_claim(), file=CLAIM_FILE, answers=[ASSESSED], people=ADJUSTERS)
+    for shown in guide_blocks(""):
+        lines = shown.splitlines()
+        assert any(run.history[at : at + len(lines)] == lines for at in range(len(run.history)))
+    assert run.state.values["owed"] == Decimal(450)
+
+
+def test_the_guides_writer_decides_is_what_validate_case_says() -> None:
+    claim = guide_claim()
+    claim["rules"] |= guide_json(3)
+    row = SET_SECTION.split("| `WRITER_DECIDES` | warning |")[1].splitlines()[0]
+    shown = row.split("| `")[-1].removesuffix("` |")
+    assert [i.message for i in coded(claim, "WRITER_DECIDES")] == [shown]
+
+
+def test_the_guides_set_refusals_are_what_the_engine_says() -> None:
+    claim = guide_claim()
+    said: list[str] = []
+    with pytest.raises(CaseRefused) as opening:
+        run_case(claim, file=CLAIM_FILE | {"owed": 1}, answers=[], people=ADJUSTERS)
+    said.append(str(opening.value))
+    for change in (
+        {"set": {"payout": {"var": "excess"}}},
+        {"set": {"owed": 0}},
+    ):
+        changed = guide_claim()
+        rule = changed["rules"]["work_out_owed"]
+        rule["then"] = change
+        with pytest.raises(CaseInvalid) as refused:
+            parse_case(changed)
+        said.append(str(refused.value).split(": ", 1)[1])
+    for line in said:
+        assert f"`{line}`" in " ".join(SET_SECTION.split())
+
+
+def test_no_set_line_or_issue_quotes_a_value() -> None:
+    # Lines and issues name fields, kinds and sources, never a value: they reach people who may
+    # not see it (brief, D30, D42). 7319 and 6143 appear nowhere in a definition.
+    file = FILE | {"fee": 7319}
+    approved = ("review", "approve", "ana", {"approved_amount": 6143})
+    runs = [
+        run_case(with_owed(), file=file, answers=[approved], people=PEOPLE),
+        run_case(
+            with_owed(), file={"order_id": "ord-1", "amount": 40}, answers=[approved], people=PEOPLE
+        ),
+    ]
+    typed = with_owed()
+    typed["rules"]["work_out_owed"]["then"]["set"] = {"owed": {"string": [{"var": "fee"}]}}
+    runs.append(run_case(typed, file=file, answers=[approved], people=PEOPLE))
+    said = [line for run in runs for line in (*run.history, *run.needs_attention)]
+    said += [issue.message for issue in issues(with_owed_from_the_estimate())]
+    assert any("setting owed" in line for line in said)
+    assert not any(value in line for line in said for value in ("7319", "6143", "-1176"))

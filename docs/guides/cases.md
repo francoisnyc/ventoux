@@ -925,12 +925,14 @@ naming a system nobody registered is refused when it opens.
 ## Rules that update the case file
 
 A rule's `then` may `set` fields of the case file, each from an expression over the case file.
-Take the claim from "What `ventoux check` proves" below, with two more fields: the excess the
-policy deducts, given when the case opens, and what is owed once the claim is assessed.
+Take the claim from "What `ventoux check` proves" below, with the customer's own `estimate` from
+"Where each value comes from", and three more fields: the excess the policy deducts, given when
+the case opens; what is owed once the claim is assessed; and whether the claim is a large one.
 
 ```json
 "excess": {"type": "number", "display": {"title": "Policy excess"}},
-"owed": {"type": "number", "display": {"title": "What is owed"}}
+"owed": {"type": "number", "display": {"title": "What is owed"}},
+"large_claim": {"type": "boolean", "display": {"title": "A large claim"}}
 ```
 
 ```json
@@ -955,8 +957,9 @@ The line names the field and where its value comes from, never the value.
 
 **What a rule may set.** A field declared under `fields`, and only one that rules alone write: a
 field is given at the opening, set by people's forms, or set by rules, never two of these. The
-opening giving a field a rule sets is refused (`owed is set by rules, never given at the
-opening`), and so is a rule setting a field a form sets. Several rules may set one field, as
+opening giving a field a rule sets is refused (`owed is set by rules, in work_out_owed, never
+given at the opening`), and so is a rule setting a field a form sets (`payout is set by a person
+in assess, so a rule never sets it: set another field, and read payout there`). Several rules may set one field, as
 several tasks may. A step's outputs and outcome, and what an event carries, belong to whoever
 gave them and are never set by a rule. A list field is never set (its value can't be checked
 yet); a reference field is set only from a reference field of the same system, read as it is.
@@ -969,7 +972,9 @@ their order doesn't matter; and inside one `then` the stop comes first, then `se
 rule sets can't be read, the rule fails as a whole: it stops, sets, reaches and starts nothing.
 
 A rule must read something: `"set": {"owed": 0}` with no `when` is refused, since the value would
-come from nobody. A fact without data is a milestone.
+come from nobody (`work_out_owed reads no field, so what it sets would come from nobody: read a
+field in its when or its values, or reach a milestone instead`). A fact without data is a
+milestone.
 
 **Where a set value comes from.** From everything its rule read: each field its expression names,
 and each field its `when` names. A rule that writes a constant under a condition still says what
@@ -991,8 +996,8 @@ size_up#1 on opened: setting large_claim, from system:opener, untrusted:customer
 `large_claim` is `true` because of the customer's own estimate, so it is as untrusted as the
 estimate. Setting a field informs; it never decides, so the rule acts, and the value carries
 where it came from: a rule that reaches a milestone on `large_claim` reaches nothing (`its
-condition reads large_claim, from system:opener, untrusted:customer, and untrusted data can't
-decide`), and an input whose policy refuses untrusted data refuses it. A rule that both sets and
+condition reads large_claim, from untrusted:customer, and untrusted data can't decide`), and an
+input whose policy refuses untrusted data refuses it. A rule that both sets and
 reaches, or stops, on untrusted data doesn't act at all. The same follows a person: a value
 computed from Ana's answer comes from Ana, so Ana can't approve a step that is given it.
 
@@ -1021,13 +1026,23 @@ case is open and not every `closes_when` milestone is reached.
 
 **What the check says about set fields.** Where a value comes from is worked out by going round
 the rules until nothing changes, as what a case can reach is: `flagged` set from `large_claim`, in
-a rule written before the one that sets `large_claim`, comes from the customer too. A field set by
-several rules may come from untrusted data from some of them and not others; whatever is refused
-then is said as a warning, since it depends on which rule wrote last:
+a rule written before the one that sets `large_claim`, comes from the customer too. An error
+claims only what holds whichever rule wrote each value. A field several rules set may come from
+untrusted data from some of them and not others; whatever is refused then is said as a warning,
+since it depends on which rule wrote last. Say a second rule sets what is owed from the customer's
+estimate, and `pay` is given `owed`:
+
+```json
+"owe_the_estimate": {
+  "display": {"title": "Owe what the customer estimates"},
+  "on": {"reached": "checked"},
+  "then": {"set": {"owed": {"var": "estimate"}}}
+}
+```
 
 | Code | Kind | What is wrong | Example message |
 |---|---|---|---|
-| `WRITER_DECIDES` | warning | a value is refused (by an input's policy, or a rule that can't decide on it) when some of its writers set it, and not when others do | `pay takes amount only from a system or a person, and owed comes from untrusted:customer when size_owed sets it, and not when work_out_owed does: whether pay is refused depends on which rule set it last; set owed only from trusted values` |
+| `WRITER_DECIDES` | warning | a value is refused (by an input's policy, a condition steering what is sent, or a rule that can't decide on it) when some of the rules setting it wrote it, and not when others did | `payments.refund@2 takes amount only from a system or a person, never from untrusted data, and this value comes from owed (person:answering assess, the opener, untrusted:customer): owed comes from untrusted:customer when owe_the_estimate sets it, and not when work_out_owed does: whether pay is refused depends on which rule set owed last: set owed only from values the policy takes` |
 
 A value only rules set is surely set only where a step requires a milestone that only rules
 setting it reach, or a guard says so; read anywhere else, it may not be set yet
@@ -1408,6 +1423,7 @@ who stamps it, whatever they read to make it:
 | a task's answer, its outcome and its form | the person who answers |
 | an activity, a workflow or a plan step's outcome | the contract or plan |
 | an output | the source its contract declares for it, or `untrusted:undeclared` |
+| a rule's `set` | everything the rule read, its condition included ("Rules that update the case file") |
 
 A field declared `untrusted:<label>` keeps that label whoever writes it. An input reading several
 fields comes from all of them, a condition inside it included. That is exactly what the runtime

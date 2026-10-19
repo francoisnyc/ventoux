@@ -27,7 +27,8 @@ guide's part and D41 written before building; built, slices 0–8, once the fix 
 was merged; the Promises table checked against the tests, the same day. 11e: the warm-up
 (learning question 36's follow-up) answered "can't remember", 2026-10-19; 14 choices put with a
 recommendation each, answered "all as recommended, one pull request" the same day; the guide's
-part, D42 and a draft Promises table written before building.
+part, D42 and a draft Promises table written before building; built, slices 0–9, and the Promises
+table checked against the tests, the same day (see 11e, "Decided while building").
 
 ## What this layer is for
 
@@ -1934,7 +1935,8 @@ All as recommended, 2026-10-19.
 - `case/types.py`: a set expression's type against its field. `case/known.py`, `case/warnings.py`:
   surely set, `MAY_BE_UNSET`, `SET_AFTER`, `NEVER_REFRESHED`, `OUTCOME_UNREAD` with set
   expressions. `case/flow.py`: errors on *surely*, `WRITER_DECIDES` on *may*.
-- `temporal/`: nothing new expected; a test proves set values cross and replay.
+- `temporal/`: nothing new; `tests/test_temporal_set.py` proves set values cross and replay.
+- `core/approval.py`: D11's refusal says truthfully when a rule computed the value.
 - `docs/guides/cases.md`: "Rules that update the case file", and `WRITER_DECIDES` in its table.
 
 ### Seams the tests use
@@ -1968,33 +1970,74 @@ Each starts with its negative test, seen failing for the right reason.
 8. **On Temporal.** A set value crosses continue-as-new and replays the same.
 9. **The guide, as the engine does it, and the promises.**
 
+### Decided while building
+
+- **"Surely" is a question, not a set** (slice 7; corrects choice 10 and D42's draft). The note
+  had *surely* sources as the intersection over a field's writers. That would have weakened an
+  existing proof: a field two tasks' forms set is stamped `person:answering t1` by one and
+  `person:answering t2` by the other, so the intersection is empty, and an `only_from` input
+  reading it would have dropped from an error to a warning. What a check needs is "refused
+  whichever writer wrote it". Every policy refuses a set of sources when one of them is refused,
+  and a set value comes from the union of what its rule read, so a rule's write is always
+  refused when its field's mark is, or a value it reads always is. That answer is grown from
+  nothing too (`writers.always`), once per policy and opener. A value with no sources at all (a
+  literal) is asked directly, since `only_from` refuses it. D42 is worded so, before merging.
+- **Each place that claimed an error on sources now asks the same two questions:**
+  `UNTRUSTED_TRIGGER`, `INPUT_POLICY` at an input, at a condition steering what is sent (11b),
+  and at a plan step's input; `NEVER_REFRESHED`'s "always needs an approval". Each was seen
+  claiming a false error first. `OPENER_DECIDES` comes before `WRITER_DECIDES`, one issue per
+  place.
+- **Two lines that lied, as the note foresaw:** `refreshable` said a stale computed value "came
+  from a person"; `NEVER_REFRESHED` said it came "from the opening". Both now say it was computed,
+  by which firing or which rule. And D11's refusal said `sam set owed` of a value a rule computed
+  from Sam's answer; it now says `sam's answer is in owed, which a rule computes and pay uses, so
+  cannot approve it` (plans keep their wording: nothing computes their fields).
+- **What a rule doesn't do on untrusted data** names its sets too: `reaches and sets nothing`,
+  and `UNTRUSTED_TRIGGER`'s "it never reaches large or sets large_claim".
+- **A value set on an outcome field from a text** is checked as it is written: whether the text
+  is one of the outcomes depends on the value. The message names the outcomes, never the text.
+- **`fits_type` moved from `flow.py` to `types.py`,** so the runtime's rule check and validation
+  share it; `set_by` in the runtime gave way to `definition.form_fields`, beside `rule_fields`.
+- **The Temporal test has its own file,** `tests/test_temporal_set.py`, where the draft named
+  `tests/test_temporal_case.py`; it also replays the new run's history.
+- **Seen passing at once, as the note predicted:** an approval following a set value (`follow`
+  compares values whoever changed them), `set` stopping with the close (`nothing_decided`), and
+  `NEVER_FIRES`, `CLOSES_AT_OPENING`, `SENSITIVE_TO_WORKFLOW`, `REFERENCE`, `INPUT_TYPE` and
+  `APPROVER_CANT_SEE` with set fields, each kept as a test. A probe found a rule that never
+  fires still getting `MAY_BE_UNSET` for its condition beside `NEVER_FIRES`, as before 11e; left
+  as it is (not this layer's).
+
 ### Promises
 
-Drafted before building, 2026-10-19; checked against the tests once built. Every test is in
-`tests/test_set.py` unless said otherwise.
+Every test is in `tests/test_set.py` unless said otherwise. Checked against the files once built,
+2026-10-19: every test named here exists where it says.
 
 | Promise | Test that would fail |
 |---|---|
-| `set` names declared fields only; a list field, a field a form or the opening writes, and a set reading nothing are refused when read | `test_set_names_a_field_of_the_case_file`, `test_a_list_field_is_never_set`, `test_a_field_has_one_kind_of_writer`, `test_a_set_reading_nothing_is_refused` |
-| A reference field is set only from a reference field of its system | `test_a_reference_is_set_only_from_its_systems_reference` |
+| `set` names declared fields only; a list field, a field a form writes, and a set reading nothing are refused when read; a constant under a condition is taken | `test_set_names_a_field_of_the_case_file`, `test_a_list_field_is_never_set`, `test_a_field_has_one_kind_of_writer`, `test_a_set_reading_nothing_is_refused`, `test_a_constant_set_under_a_condition_comes_from_what_the_condition_read` |
+| A reference field is set only from a reference field of its system, read as it is | `test_a_reference_is_set_only_from_its_systems_reference`, `test_a_reference_is_set_from_its_systems_reference_read_as_it_is` |
 | The opening giving a field a rule sets is refused | `test_the_opening_never_gives_a_rules_field` |
-| A set value lands with the sources of everything its rule read, and the line names the field and the sources, never the value | `test_a_set_value_comes_from_everything_its_rule_read`, `test_no_set_line_or_issue_quotes_a_value` |
-| A value that can't be read, or isn't of its field's type, fails the rule, and nothing in its `then` acts; a retry reads it again | `test_a_set_that_cant_be_read_fails_the_whole_rule`, `test_a_set_of_another_type_fails_the_rule`, `test_a_retried_set_reads_again` |
-| Values are read on the case file as the condition saw it; stop, set, reach, start, in that order | `test_set_values_are_read_together`, `test_a_milestone_a_rule_reaches_sees_what_it_set` |
+| A set value lands with the sources of everything its rule read, obtained by the firing, and the line names the field and the sources, never the value | `test_a_set_value_comes_from_everything_its_rule_read`, `test_no_set_line_or_issue_quotes_a_value` |
+| A value that can't be read, or isn't of its field's type, fails the rule, and nothing in its `then` acts; a retry reads it again | `test_a_set_that_cant_be_read_fails_the_whole_rule`, `test_a_set_of_another_type_fails_the_rule`, `test_a_text_set_on_an_outcome_field_is_checked_when_written`, `test_a_retried_set_reads_again` |
+| Values are read on the case file as the condition saw it; set comes before reach | `test_set_values_are_read_together`, `test_a_milestone_a_rule_reaches_sees_what_it_set` |
 | The latest write stands; two rules in one decision set in order, both recorded | `test_the_latest_write_stands` |
-| A constant set under an untrusted condition is untrusted; a rule that only sets acts; one that also reaches doesn't; a rule reaching on the set value doesn't act | `test_a_constant_under_an_untrusted_condition_is_untrusted`, `test_untrusted_data_cant_decide_through_a_set_field` |
+| A constant set under an untrusted condition is untrusted; a rule that only sets acts; one that also reaches doesn't act at all; a rule reaching on the set value doesn't act | `test_a_constant_under_an_untrusted_condition_is_untrusted`, `test_a_rule_that_sets_and_reaches_on_untrusted_data_doesnt_act`, `test_untrusted_data_cant_decide_through_a_set_field` |
 | An input policy refuses a value computed from untrusted data | `test_an_input_policy_refuses_a_value_computed_from_untrusted_data` |
-| A person whose answer a set value carries can't approve a step given it | `test_whose_answer_a_set_value_carries_cant_approve` |
-| A set changing what an approval saw withdraws or lapses it | `test_a_set_changing_what_an_approval_saw_withdraws_it` |
+| A person whose answer a set value carries can't approve a step given it, and the refusal says so truthfully | `test_whose_answer_a_set_value_carries_cant_approve` |
+| A set changing what an approval saw withdraws it | `test_a_set_changing_what_an_approval_saw_withdraws_it` |
 | A set value is as old as the oldest fact it read; stale, it is never fetched again, saying it was computed | `test_a_set_value_is_as_old_as_its_oldest_fact`, `test_a_stale_set_value_is_never_fetched_again` |
-| A value computed from a sensitive field is set only on a sensitive field, and kept wrapped | `test_a_value_from_a_sensitive_field_is_set_only_on_a_sensitive_one`, `test_a_set_sensitive_value_stays_wrapped` |
-| A set field is seen by no role that can't see what it was computed from | `test_a_set_field_is_seen_by_no_one_its_sources_hide_from` |
-| No `set` acts once `closes_when` is complete, while a failed run holds the close, or while closing | `test_set_stops_with_the_close` |
-| Sources are a fixpoint: a case one pass in written order gets wrong is right | `test_sources_go_round_until_nothing_changes` (seen failing with one pass) |
-| A field some writers make untrusted gives `WRITER_DECIDES`, never a false error; one every writer makes untrusted stays an error | `test_a_field_only_some_writers_make_untrusted_warns`, `test_a_field_every_writer_makes_untrusted_is_refused` |
-| A value only rules set is surely set only behind a milestone only they reach, or a guard; elsewhere `MAY_BE_UNSET`; `SET_AFTER` only where proven; `NEVER_REFRESHED` on a `max_age` | `test_a_value_rules_set_may_be_unset`, `test_a_value_rules_set_is_surely_set_behind_their_milestone`, `test_set_after_a_rule_is_claimed_only_where_proven`, `test_a_max_age_on_a_set_value_is_never_refreshed` |
-| A set expression is type-checked, and counts as a reader | `test_a_set_expression_is_type_checked`, `test_a_set_expression_reads_an_outcome` |
-| Each other check that reads writers or sources stays a proof | named once built, one test per check in "Stated" |
-| A set value crosses continue-as-new and replays the same | `test_a_set_value_crosses_continue_as_new` (`tests/test_temporal_case.py`) |
-| Every decision shows each pending item | the invariant, `tests/conftest.py` and `tests/invariants.py` |
-| The guide's section is what the engine does | `test_the_guides_set_runs_as_shown`, `test_the_guides_set_refusals_are_what_the_engine_says` |
+| A value computed from a sensitive field, by its value or its condition, is set only on a sensitive field, and kept wrapped | `test_a_value_from_a_sensitive_field_is_set_only_on_a_sensitive_one`, `test_a_condition_on_a_sensitive_field_counts_too`, `test_a_set_sensitive_value_stays_wrapped` |
+| A set field is seen by no role that can't see what it was computed from; it may hide more | `test_a_set_field_is_seen_by_no_one_its_sources_hide_from`, `test_a_set_field_may_hide_more_than_its_sources` |
+| No `set` acts once `closes_when` is complete, or while the case closes | `test_set_stops_with_the_close`, `test_set_doesnt_act_while_the_case_closes` |
+| Sources go round until nothing changes: a case one pass in written order gets wrong is right | `test_sources_go_round_until_nothing_changes` (seen failing with one pass) |
+| A value some writers make untrusted gives `WRITER_DECIDES`, never a false error; one every writer makes untrusted stays an error: at a rule's condition, an input, a steering condition, a plan step | `test_a_field_only_some_writers_make_untrusted_warns`, `test_a_field_every_writer_makes_untrusted_is_refused`, `test_an_input_given_a_value_only_some_writers_make_untrusted_warns`, `test_an_input_given_a_value_every_writer_makes_untrusted_is_refused`, `test_a_condition_steering_on_a_set_field_is_claimed_only_where_proven`, `test_a_plan_step_given_a_set_field_is_claimed_only_where_proven` (each seen claiming the false error first) |
+| A value only rules set is never assumed given at the opening: `MAY_BE_UNSET` where nothing ensures it, and the run fails so | `test_a_value_rules_set_may_be_unset`, `test_a_rule_reading_a_value_rules_set_may_find_it_unset` (both seen silent first) |
+| It is surely set behind a milestone only rules setting it reach | `test_a_value_rules_set_is_surely_set_behind_their_milestone` (seen failing with the milestone proving nothing) |
+| `SET_AFTER` only where every setting rule fires after the reader is done; a set on the opening reading what a person sets fails every time | `test_set_after_a_rule_is_claimed_only_where_proven`, `test_a_set_reading_on_the_opening_what_a_person_sets_fails_every_time`, `test_a_set_guarded_by_its_condition_is_not_warned` |
+| A `max_age` on a set value is `NEVER_REFRESHED`, saying it was computed | `test_a_max_age_on_a_set_value_is_never_refreshed` (seen saying "the opening" first) |
+| A set expression is type-checked, and counts as a reader of outcomes | `test_a_set_expression_is_type_checked`, `test_a_set_expression_reads_an_outcome` |
+| The other checks hold with set fields: `NEVER_FIRES`, `CLOSES_AT_OPENING`, `SENSITIVE_TO_WORKFLOW`, `REFERENCE`, `INPUT_TYPE`, `APPROVER_CANT_SEE`; `UNTRUSTED_TRIGGER` names the sets | `test_a_set_only_rule_whose_moment_never_comes_never_fires`, `test_a_rule_setting_on_the_opening_doesnt_keep_the_case_open`, `test_a_workflow_step_given_a_value_computed_from_a_sensitive_one_is_refused`, `test_a_reference_a_rule_copies_goes_where_its_system_is_expected`, `test_an_input_given_a_set_field_of_another_type_is_refused`, `test_an_approver_who_cant_see_a_set_field_is_warned`, `test_a_rule_that_reaches_and_sets_on_untrusted_data_never_sets_either` |
+| A rule that does nothing is refused, `set` counting as doing something | `test_a_rule_that_does_nothing_is_refused` (`tests/test_rules.py`) |
+| A set value crosses continue-as-new, a sensitive one encrypted; a rule sets again in the new run; the new run replays the same | `test_a_set_value_crosses_continue_as_new` (`tests/test_temporal_set.py`), `test_a_carried_state_reads_back_as_it_was` (`tests/test_temporal_case.py`) |
+| Every decision shows each pending item | the invariant, `tests/conftest.py` and `tests/invariants.py`, run after every decision of the tests above |
+| The guide's section, its `WRITER_DECIDES` row and its quoted refusals are what the engine does | `test_the_guides_set_runs_as_shown`, `test_the_guides_writer_decides_is_what_validate_case_says`, `test_the_guides_set_refusals_are_what_the_engine_says` |
