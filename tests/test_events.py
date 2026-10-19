@@ -90,6 +90,18 @@ def test_an_event_is_sent_by_one_sender(sent_by: dict[str, Any]) -> None:
         parse_case(definition)
 
 
+def test_an_events_people_name_a_role() -> None:
+    # Its own message, not a wait's or an approval's (tutor review of 11d).
+    definition = cancellable()
+    definition["events"]["cancelled"]["sent_by"] = {"roles": []}
+    with pytest.raises(
+        CaseInvalid,
+        match="^events.cancelled.sent_by.roles: an event sent by people names at least one role "
+        "that may send it$",
+    ):
+        parse_case(definition)
+
+
 def test_an_event_carries_no_list() -> None:
     definition = cancellable()
     definition["events"]["cancelled"]["payload"]["lines"] = {

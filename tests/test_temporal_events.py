@@ -6,11 +6,13 @@ See docs/layers/11-rules.md (11d) and docs/guides/cases.md, "Events from outside
 
 import asyncio
 import copy
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 
 import pytest
 from temporalio.client import Client
+from temporalio.testing import WorkflowEnvironment
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_events import CANCELLED, RECEIPT_SENT, WAIT_FOR_RECEIPT, WITHDRAW
@@ -25,8 +27,23 @@ from test_temporal_case import (
     runs_of,
 )
 
-from ventoux.temporal.cases import answer, case_handle, send_event, start_case, view
-from ventoux.testing import DevelopmentCases, EventRefused
+from ventoux.temporal.cases import (
+    CaseReport,
+    answer,
+    case_handle,
+    propose,
+    send_event,
+    start_case,
+    view,
+)
+from ventoux.temporal.worker import case_worker
+from ventoux.testing import (
+    FAKES,
+    DevelopmentCases,
+    DevelopmentPlans,
+    EventRefused,
+    development_converter,
+)
 
 
 def cancellable() -> dict[str, Any]:
@@ -161,3 +178,52 @@ def test_an_event_to_an_id_no_case_has_is_refused_at_the_client() -> None:
             await send_event(nobody, "cancelled", {"note": "please cancel"}, by="system:portal")
 
     on_temporal(scenario)
+
+
+# --- From the tutor review: a signal that comes with the close is recorded ---
+
+
+def before_the_worker(id: str, signals: Callable[[Case], Awaitable[None]]) -> CaseReport:
+    """Open a case and send it `signals` before any worker runs, then start one: every signal
+    sent before then lands in the case's first workflow task, with its opening."""
+
+    async def go() -> CaseReport:
+        environment = await WorkflowEnvironment.start_time_skipping(
+            data_converter=development_converter()
+        )
+        async with environment:
+            client = environment.client
+            case = await opened(client, cancellable(), id)
+            await signals(case)
+            async with case_worker(client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES):
+                return await asyncio.wait_for(case.result(), timeout=20)
+
+    return asyncio.run(go())
+
+
+def test_an_event_that_comes_with_the_close_is_refused_and_recorded() -> None:
+    # The answer closes the case, and the loop ends with the event still in its inbox: it is
+    # refused and recorded, never lost while the client's send succeeded (brief, D41).
+    async def signals(case: Case) -> None:
+        await answer(case, "review#1", "reject", by="ana", roles=["support"])
+        await send_event(case, "cancelled", {"note": "please cancel"}, by="system:portal")
+
+    ended = before_the_worker("refund-E-6", signals)
+    assert ended.history[-2:] == [
+        "closed: nothing left to do",
+        "refused cancelled from system:portal: the case is closed",
+    ]
+    assert not any(line.startswith("cancelled#") for line in ended.history)
+
+
+def test_a_persons_request_that_comes_with_the_close_is_refused_and_recorded() -> None:
+    # The same for anything a person sends: a proposal here (layer 8b).
+    async def signals(case: Case) -> None:
+        await answer(case, "review#1", "reject", by="ana", roles=["support"])
+        await propose(case, "review", by="ana", roles=["support"])
+
+    ended = before_the_worker("refund-E-7", signals)
+    assert ended.history[-2:] == [
+        "closed: nothing left to do",
+        "refused ana's proposal of review: the case is closed",
+    ]

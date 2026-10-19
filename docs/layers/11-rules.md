@@ -1636,13 +1636,32 @@ All as recommended, 2026-10-19.
   never what it carries; the client tells a case that has ended from an ID no case has, since
   Temporal says `NOT_FOUND` of both.
 
+### From the tutor review
+
+Reviewed at `18f047a`, 2026-10-19: one change needed, and one optional nit, both built test-first.
+
+- **A signal that came with the close was lost unrecorded.** This note listed it as a known limit,
+  and it contradicted D41 as written, which promises two outcomes for an event that comes too late
+  (refused, recorded and flagged while closing; `EventRefused` at the client once closed): a
+  third existed, the client's send succeeding and the case recording nothing. The review showed
+  it with a run (the closing answer and an event, both sent before any worker runs, land in the
+  case's first workflow task: the loop decides the answer, the case closes, and the loop ends with
+  the event still in its inbox), and in a plain race (8 cases of 12 recorded neither the event nor
+  its refusal). Decided: **once the loop ends, each item still in the inbox is refused and
+  recorded, `refused cancelled from system:portal: the case is closed`, and the inbox cleared,
+  before the workflow returns.** It adds a line of history and no command, so replay decides the
+  same; and Temporal fails a completion that a newer signal overtakes, retrying it with that
+  signal, so every signal accepted before the close is recorded. Answers, proposals, retries,
+  close and forget requests were lost the same way on `main`; the same lines cover them. The two
+  runs were seen failing first, the history ending at `closed: nothing left to do`. Added to D41,
+  dated.
+- **Optional: an event's people naming no role** were refused with plan validation's message, "a
+  wait or an approval names at least one role that may answer it", which now reads as if it were
+  about the new step. It has its own: `an event sent by people names at least one role that may
+  send it`.
+
 ### Known limits
 
-- **A signal that lands in the activation that closes the case is lost unrecorded.** The loop ends
-  once the case is closed, with the inbox not empty. This is so for every signal, on `main`
-  already; for events, D41's "refused and reported" holds for every event the loop reaches. To
-  close before layer 12: record a refusal for each event left in the inbox before the workflow
-  returns.
 - **No sensitive payload, no list payload, no `visible_to` on a payload field:** each is refused,
   never read another way, so adding it later changes no definition's meaning.
 
@@ -1705,6 +1724,8 @@ Each started with its negative test, seen failing for the right reason.
    Then a refusal recorded (seen hanging), a wait, exact values, continue-as-new (seen failing
    with the count left out of the carried state).
 8. **The guide, as the engine does it, and the promises.**
+9. **From the tutor review.** Negative: an event, then a person's proposal, each sent with the
+   closing answer before any worker runs (each seen lost). Then the sender's own message.
 
 ### Promises
 
@@ -1714,7 +1735,7 @@ built, 2026-10-19: every test named here exists where it says.
 | Promise | Test that would fail |
 |---|---|
 | A rule on an undeclared event, a wait naming one, and an event named like a step are refused when the definition is read | `test_a_rule_on_an_event_the_case_doesnt_declare_is_refused`, `test_a_wait_names_a_declared_event`, `test_an_event_is_not_named_like_a_step` |
-| An event has one sender, a system or people, never both or neither | `test_an_event_is_sent_by_one_sender` |
+| An event has one sender, a system or people, never both or neither; its people name a role, said in its own words | `test_an_event_is_sent_by_one_sender`, `test_an_events_people_name_a_role` |
 | A payload carries no list, and says only its type, title and source | `test_an_event_carries_no_list`, `test_a_payload_field_says_only_its_type_title_and_source` |
 | A wait takes no inputs, approval or `max_age`; events and a wait read | `test_a_wait_takes_no_inputs_approval_or_max_age`, `test_events_and_a_wait_read` |
 | An event the case doesn't declare is refused, naming its events | `test_an_event_the_case_doesnt_declare_is_refused` |
@@ -1747,6 +1768,7 @@ built, 2026-10-19: every test named here exists where it says.
 | On Temporal, a wait holds the case until its event arrives | `test_a_wait_on_temporal_holds_the_case_until_its_event_arrives` (`tests/test_temporal_events.py`) |
 | A person's event crosses Temporal with exact values | `test_a_persons_event_crosses_with_exact_values` (`tests/test_temporal_events.py`) |
 | Arrival counts cross continue-as-new; every field of the state crosses | `test_arrivals_cross_continue_as_new` (`tests/test_temporal_events.py`, seen failing with the count left out), `test_a_carried_state_reads_back_as_it_was` (`tests/test_temporal_case.py`) |
+| On Temporal, a signal that comes with the close, an event or a person's request, is refused and recorded after the closed line, never lost; nothing it carries lands | `test_an_event_that_comes_with_the_close_is_refused_and_recorded`, `test_a_persons_request_that_comes_with_the_close_is_refused_and_recorded` (both `tests/test_temporal_events.py`, seen failing first) |
 | A history recorded before 11d replays: the new signal changes nothing that was recorded | `test_a_history_from_before_11c_replays` (`tests/test_temporal_case.py`), `test_a_workflow_history_from_before_11c_replays` (`tests/test_temporal_workflow_step.py`) |
 | Every decision of every in-memory test shows each pending item, an open wait included | the invariant, `tests/conftest.py` and `tests/invariants.py`, run after every decision of the tests above |
 | The guide's definitions, histories and refusals are what the engine does | `test_the_guides_definitions_are_these_tests`, `test_the_guides_histories_are_what_the_engine_records`, `test_the_guides_refusals_are_what_the_engine_says`, `test_every_refusal_in_the_guide_is_tested` |

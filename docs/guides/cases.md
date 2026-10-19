@@ -900,7 +900,9 @@ flagged: cancelled from portal arrived while the case was closing, and was refus
 ```
 
 A closed case's workflow has ended: sending it an event raises `EventRefused`, and never opens it
-again. While a failed step holds the close (every `closes_when` milestone reached), an event's
+again. An event that reaches the case with the very answer that closes it is refused and recorded
+after the closed line, `refused cancelled from system:portal: the case is closed`, as is anything a
+person sends then. While a failed step holds the close (every `closes_when` milestone reached), an event's
 payload still lands and a wait it ends is done, but no rule acts on it.
 
 **Sending one.** On Temporal, `send_event(case, event, payload, by, roles)`, from

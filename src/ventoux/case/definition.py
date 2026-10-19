@@ -89,12 +89,19 @@ class CaseField(Shape):
 SystemName = Annotated[str, matching(r"[a-z][a-z0-9-]*", 'a system name looks like "portal"')]
 
 
+def some_senders(roles: tuple[str, ...]) -> tuple[str, ...]:
+    """No roles would let nobody send it, or be read as anyone: refused (brief, D22)."""
+    if not roles:
+        raise ValueError("an event sent by people names at least one role that may send it")
+    return roles
+
+
 class SentBy(Shape):
     """Who may send an event: one sender, a system or people, never both (brief, D41)."""
 
     system: SystemName | None = None  # a system the platform team registered, such as `portal`
     # People holding one of these roles, checked as for a close reason (brief, D10) (brief, D22).
-    roles: Roles | None = None
+    roles: Annotated[tuple[RoleName, ...], AfterValidator(some_senders)] | None = None
 
     # Pydantic: a validator with `mode="after"` runs on the whole object, once its fields passed.
     @model_validator(mode="after")

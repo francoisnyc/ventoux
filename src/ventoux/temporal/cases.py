@@ -322,6 +322,13 @@ class CaseWorkflow:
                 # recorded, and the case waits on as if it hadn't come: `decide` changed nothing
                 # (8b, slice 0). Never queued for later (layer 6).
                 self.state.history.append(f"refused {asked(event)}: {refused}")
+        # What came with the close, still in the inbox, is refused and recorded, never dropped
+        # while its sender's send succeeded (brief, D41, as added in 11d's tutor review). Only a
+        # line of history, no command, so replay decides the same; and Temporal fails a
+        # completion that a newer signal overtakes, so this run records that signal too.
+        for event in self.inbox:
+            self.state.history.append(f"refused {asked(event)}: the case is closed")
+        self.inbox.clear()
         return self.report()
 
     def time_to_switch(self) -> bool:

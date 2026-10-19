@@ -1318,6 +1318,13 @@ is kept.*
 - **Layer 11's later parts move one letter** (11d's session): `then: set` and the provenance
   fixpoint become 11e, time 11f, reading rules 11g, patterns 11h. Texts written before keep the
   letters they were written with, as D40's "layer 11e" for timers does.
+- **Amended 2026-10-19, in 11d's tutor review** (the text above stands; this adds to it): a signal
+  that reaches the case with its close is refused and recorded, never lost. Once the case's
+  workflow has decided the event that closes it, each signal still waiting to be decided, an
+  event or a person's request, is recorded as refused (`refused cancelled from system:portal: the
+  case is closed`) before the workflow returns. So an event sent too late has the outcomes above
+  and no third: until now the client's send could succeed and the case record nothing. A line of
+  history and no command, so replay decides the same.
 
 ### Simplifications adopted
 
