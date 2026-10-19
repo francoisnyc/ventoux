@@ -1326,6 +1326,61 @@ is kept.*
   and no third: until now the client's send could succeed and the case record nothing. A line of
   history and no command, so replay decides the same.
 
+### D42. Rules that update the case file: a value comes from everything its rule read
+
+*Drafted 2026-10-19, in layer 11e. Adds to D9, D12, D30, D31, D33, D34, D36, D37 and D38, whose
+text is kept.*
+
+- **`set` writes declared fields from expressions.** `"then": {"set": {"owed": <expression>}}`
+  writes fields of the case file, never a step's outputs or outcome or an event's payload, which
+  belong to whoever gave them. Every expression is read on the case file as it was when the
+  rule's condition was read; inside one `then` the stop comes first, then `set`, then `reach`,
+  then `start` (adds to D40). A rule acts whole or not at all: if a value it sets can't be read,
+  or isn't of its field's type, it fails and needs attention (D17, D38), and nothing in its
+  `then` acts. A list field is never set yet; a reference field only from a reference field of
+  its system, read as it is (D30).
+- **One kind of writer per field** (adds to D9). A field is given at the opening, set by people's
+  forms, or set by rules: never two of these. Several rules may set one field, as several tasks
+  may; the latest write stands, and every write is a line of history naming the field and its
+  sources, never the value. Why: a rule overwriting a person's answer would silently undo what a
+  named person confirmed (D9); two fields say the same openly.
+- **A value comes from everything its rule read** (adds to D12, D36): each field its expression
+  names and each field its `when` names, both branches of an `if` included, as for an input, plus
+  the field's own mark. The moment doesn't count, as it doesn't exclude an approver (D39). So a
+  constant set under an untrusted condition is untrusted. A rule that reads nothing sets nothing:
+  refused when the definition is read, since its value would come from nobody (D36).
+- **Setting informs; it never decides** (adds to D38). A rule that only sets acts on untrusted
+  data, and its value carries it; a rule that also reaches or stops doesn't act at all on
+  untrusted data, as D39 says of starts.
+- **What a value reveals and its age follow it too, the condition included.** A value computed
+  from a sensitive field is set only on a sensitive field (D31), computed in the worker and kept
+  wrapped. A set field is seen by no role that can't see every field it was computed from (D30):
+  a view may hide more than its source, never less. Both are refused when the definition is read.
+  A computed value was obtained when the oldest fact it read was, by the rule's firing, never
+  "now" (D33); a `max_age` on it bounds the age of every fact it was computed from, and it can
+  never be fetched again, since a rule doesn't fire again on a refresh: stale, the step needing it
+  needs attention.
+- **Case-file provenance is a fixpoint** (as D34 foresaw; replaces its "one pass" once a rule sets
+  a field). Each field's sources are grown from nothing until a round changes nothing, and it
+  ends because they only grow, over finitely many fields and sources. Two are kept: the sources
+  some write may carry, and those every write carries. An error claims only what every write
+  carries (D34); what holds for some writers and not others is a warning, **`WRITER_DECIDES`**,
+  as `OPENER_DECIDES` is for who opens the case (D36). The runtime tags each written value from
+  what it actually read, and a field not set yet from what its writers could give (D39), on
+  nothing validation did.
+- **What the check claims of a set field** (adds to D37): it is surely set only behind a
+  milestone that only rules setting it reach, or a guard; elsewhere `MAY_BE_UNSET`; `SET_AFTER`
+  only where every rule setting it fires after the reading step is done; any `max_age` on it is
+  `NEVER_REFRESHED`.
+- **No "field set" moment.** Setting a field queues no moment and starts nothing, so each
+  decision still ends as D39 bounds it. A later moment for a field being set would fire at most
+  once per field in a decision, so a rule setting a field when another is set would still end.
+- **Two rules setting one field in one decision** set it in order, moments as they come and rules
+  as written, so replay decides the same; the latest stands and both are recorded. A change to a
+  value an approval saw withdraws or lapses it, as any change does (D25, D33).
+- **Known limit:** a milestone a rule reaches on a field narrowed by `visible_to` is seen by
+  everyone, as before 11e; recorded for the checkpoint before layer 12.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step

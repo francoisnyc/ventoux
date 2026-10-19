@@ -135,6 +135,11 @@ Rows touched: 5, 6, 8, 12, 13, 14, 18, 25.
 `docs/layers/11-rules.md`, 11d, "The doors left open", and in D41. Row 14 ("a field set" moment)
 is 11e's to decide, with `set`.
 
+*Answered in 11e's session, 2026-10-19:* `set` brings no "field set" moment; a later one would fire
+at most once per field in a decision, so each decision stays finite (`docs/layers/11-rules.md`, 11e,
+"The doors left open"; brief, D42). Found there, for the checkpoint: a milestone a rule reaches on
+a field narrowed by `visible_to` is seen by everyone (brief, D42, known limit).
+
 ### 11f: time
 
 Rows touched: 15, 16, 17, 19, 30.
