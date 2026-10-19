@@ -13,6 +13,7 @@ import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.state import Obtained
+from ventoux.core.sensitive import Sensitive, plain
 from ventoux.testing import (
     DAY,
     START,
@@ -468,3 +469,111 @@ def test_a_stale_set_value_is_never_fetched_again() -> None:
             people=PEOPLE,
             held=["pay"],  # the case stays open while the refund runs
         )
+
+
+# --- Slice 5: sensitive and visible ---
+
+
+def with_national_id() -> dict[str, Any]:
+    """The refund with a national ID only fraud sees, and a risk band a rule sets from it."""
+    definition = with_owed()
+    definition["fields"] |= {
+        "national_id": {
+            "type": "string",
+            "sensitive": True,
+            "visible_to": ["fraud"],
+            "display": {"title": "National ID"},
+        },
+        "risk_band": {
+            "type": "string",
+            "sensitive": True,
+            "visible_to": ["fraud"],
+            "display": {"title": "Risk band"},
+        },
+    }
+    definition["rules"]["band"] = {
+        "display": {"title": "Work out the risk band"},
+        "on": "opened",
+        "then": {"set": {"risk_band": {"cat": ["band-", {"var": "national_id"}]}}},
+    }
+    return definition
+
+
+def test_a_value_from_a_sensitive_field_is_set_only_on_a_sensitive_one() -> None:
+    # A value computed from a sensitive one is sensitive too (brief, D31, D42).
+    definition = with_national_id()
+    definition["fields"]["risk_band"]["sensitive"] = False
+    with pytest.raises(
+        CaseInvalid,
+        match="^rules.band.then.set.risk_band: risk_band is set from national_id, which is "
+        "sensitive: declare risk_band sensitive$",
+    ):
+        parse_case(definition)
+
+
+def test_a_condition_on_a_sensitive_field_counts_too() -> None:
+    definition = with_national_id()
+    definition["fields"]["risk_band"]["sensitive"] = False
+    definition["rules"]["band"]["when"] = {"==": [{"var": "national_id"}, "x"]}
+    definition["rules"]["band"]["then"]["set"] = {"risk_band": {"var": "risk_band_given"}}
+    definition["fields"]["risk_band_given"] = {"type": "string", "display": {"title": "Given"}}
+    with pytest.raises(
+        CaseInvalid,
+        match="^rules.band.then.set.risk_band: risk_band is set from "
+        "national_id, which is sensitive: declare risk_band sensitive$",
+    ):
+        parse_case(definition)
+
+
+@pytest.mark.parametrize(
+    ("seen_by", "said"),
+    [(None, "every role of the case"), (["support", "fraud"], "support or fraud")],
+    ids=["everyone", "a wider list"],
+)
+def test_a_set_field_is_seen_by_no_one_its_sources_hide_from(
+    seen_by: list[str] | None, said: str
+) -> None:
+    # A field only fraud sees can't be copied into one support sees: a view may hide more than
+    # its source, never less (brief, D30, D42).
+    definition = with_owed()
+    definition["fields"] |= {
+        "fraud_score": {
+            "type": "number",
+            "visible_to": ["fraud"],
+            "display": {"title": "Fraud score"},
+        },
+        "escalate": {"type": "boolean", "display": {"title": "Escalate"}},
+    }
+    if seen_by is not None:
+        definition["fields"]["escalate"]["visible_to"] = seen_by
+    definition["rules"]["escalation"] = {
+        "display": {"title": "Escalate a risky refund"},
+        "on": "opened",
+        "when": {">": [{"var": "fraud_score"}, 70]},
+        "then": {"set": {"escalate": {"var": "fraud_score_known"}}},
+    }
+    definition["fields"]["fraud_score_known"] = {"type": "boolean", "display": {"title": "Known"}}
+    with pytest.raises(
+        CaseInvalid,
+        match=f"^rules.escalation.then.set.escalate: escalate is seen by {said}, and is set from "
+        "fraud_score, which only fraud sees: let only fraud see escalate$",
+    ):
+        parse_case(definition)
+
+
+def test_a_set_field_may_hide_more_than_its_sources() -> None:
+    definition = with_owed()
+    definition["fields"]["owed"]["visible_to"] = ["support-lead"]
+    parse_case(definition)
+
+
+def test_a_set_sensitive_value_stays_wrapped() -> None:
+    # Computed on plain values inside the worker, kept wrapped, never written out (brief, D31).
+    run = run_case(
+        with_national_id(), file=FILE | {"national_id": "190101-1234"}, answers=[], people=PEOPLE
+    )
+    risk_band = run.state.values["risk_band"]
+    assert isinstance(risk_band, Sensitive)
+    assert plain(risk_band) == "band-190101-1234"
+    assert not any("190101" in line for line in run.history)
+    assert run.view(["support"]).values.get("risk_band") is None

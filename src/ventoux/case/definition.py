@@ -572,6 +572,42 @@ def set_problems(path: str, rule: Rule, case: CaseDefinition) -> list[str]:
                 f"{path}.then.set.{name}: {name} is set by a person in {answered[name]}, so a rule "
                 f"never sets it: set another field, and read {name} there"
             )
+        else:
+            problems += revealing(f"{path}.then.set.{name}", name, rule, case)
+    return problems
+
+
+def revealing(path: str, name: str, rule: Rule, case: CaseDefinition) -> list[str]:
+    """What a set value would reveal: it is computed from every field its value and its rule's
+    condition read, so it is as sensitive as the most sensitive of them (brief, D31), and seen by
+    no role that can't see each of them (brief, D30). A view may hide more than its source, never
+    less (brief, D42)."""
+    written = case.fields[name]
+    read = [rule.then.set[name], *([rule.when] if rule.when is not None else [])]
+    problems: list[str] = []
+    for source in sorted({field for expression in read for field in fields_read(expression)}):
+        field = case.fields.get(source)
+        if field is None:
+            continue  # an outcome, an output or a payload value: seen by every role of the case
+        if field.sensitive and not written.sensitive:
+            problems.append(
+                f"{path}: {name} is set from {source}, which is sensitive: declare {name} "
+                "sensitive"
+            )
+        hidden = field.visible_to
+        if hidden is not None and (
+            written.visible_to is None or not set(written.visible_to) <= set(hidden)
+        ):
+            seen = (
+                "every role of the case"
+                if written.visible_to is None
+                else " or ".join(written.visible_to)
+            )
+            only = " or ".join(hidden)
+            problems.append(
+                f"{path}: {name} is seen by {seen}, and is set from {source}, which only {only} "
+                f"sees: let only {only} see {name}"
+            )
     return problems
 
 
