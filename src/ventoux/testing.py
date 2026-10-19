@@ -20,7 +20,7 @@ from ventoux.case.definition import CaseDefinition, parse_case
 from ventoux.case.freshness import seconds_in
 from ventoux.case.memory import Activity, CaseRun, Finish, PlanRunner, run_case_in_memory
 from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
-from ventoux.case.runtime import CaseRefused
+from ventoux.case.runtime import CaseRefused, EventRefused
 from ventoux.case.state import (
     Answered,
     CloseAsked,
@@ -31,6 +31,7 @@ from ventoux.case.state import (
     Opened,
     Proposed,
     Retried,
+    Sent,
     Shown,
     StartPlan,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "CloseRefused",
     "DevelopmentCases",
     "DevelopmentPlans",
+    "EventRefused",
     "InputRefused",
     "Outcome",
     "ProposalRefused",
@@ -77,6 +79,7 @@ __all__ = [
     "retry",
     "run_case",
     "run_plan",
+    "send",
     "shown",
 ]
 
@@ -421,6 +424,11 @@ def run_case(
         if isinstance(item, Retry):
             events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ())), at=now))
             continue
+        if isinstance(item, Sending):
+            # The test plays the API: it states who sent it, and a person's roles (brief, D19).
+            roles = frozenset(people.get(item.by, ()))
+            events.append(Sent(item.event, as_json(item.payload), item.by, roles, at=now))
+            continue
         if isinstance(item, ShownTo):
             events.append(Shown(item.field, item.by, frozenset(people.get(item.by, ())), at=now))
             continue
@@ -607,6 +615,20 @@ def shown(field: str, who: str) -> ShownTo:
     """A script's record shown: `shown("customer_id", "ana")`, recorded in the case's history,
     as the API records it after asking the system's resolver (brief, D16)."""
     return ShownTo(field, who)
+
+
+class Sending(NamedTuple):
+    """A scripted event from outside: `event`, carrying `payload`, sent by `by`."""
+
+    event: str
+    payload: Mapping[str, Any]
+    by: str  # `system:portal`, or a person, whose roles come from `people`
+
+
+def send(event: str, payload: Mapping[str, Any], by: str) -> Sending:
+    """A script's event from outside: `send("cancelled", {"note": "…"}, "system:portal")`, or
+    sent by a person, `send("customer_called", {}, "ana")` (brief, D41)."""
+    return Sending(event, payload, by)
 
 
 def propose(step: str, who: str) -> Proposal:

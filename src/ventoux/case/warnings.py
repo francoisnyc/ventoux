@@ -357,8 +357,8 @@ def refresh_issues(
     fact from a step, that an error already refuses."""
     found: list[Issue] = []
     for name, step in case.steps.items():
-        if name in refused or isinstance(step, TaskStep):
-            continue
+        if name in refused or not isinstance(step, CallStep | PlanStep):
+            continue  # a task or a wait has no max_age
         for value in step.max_age:
             writer = value.partition(".")[0]
             if writer in refused:
@@ -409,6 +409,8 @@ def never_fetched(
         return f"{writer}, a plan step, which isn't run again unasked"
     if isinstance(step, WorkflowStep):
         return f"{writer}, a workflow step, which isn't run again unasked"
+    if not isinstance(step, ActivityStep):
+        return f"{writer}, a wait, which gives no value"  # reading it is EXPRESSION_INVALID's
     contract = contracts[writer]
     if contract.effect == "compute":
         return f"{writer}, which computes it (compute), so running it again gives nothing new"

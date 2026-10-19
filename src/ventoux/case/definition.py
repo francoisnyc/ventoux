@@ -20,6 +20,7 @@ from pydantic import (
 )
 
 from ventoux.case.freshness import seconds_in
+from ventoux.core.expressions import ListType
 from ventoux.core.plan import (
     ActivityReference,
     DeclaredType,
@@ -82,6 +83,71 @@ class CaseField(Shape):
         around = ("display", "source", "visible_to", "sensitive")
         declared = {key: value for key, value in data.items() if key not in around}
         return {"declared": declared} | {key: data[key] for key in around if key in data}
+
+
+# A system the platform team registered, written as a label is: `portal`, `claims-archive`.
+SystemName = Annotated[str, matching(r"[a-z][a-z0-9-]*", 'a system name looks like "portal"')]
+
+
+class SentBy(Shape):
+    """Who may send an event: one sender, a system or people, never both (brief, D41)."""
+
+    system: SystemName | None = None  # a system the platform team registered, such as `portal`
+    # People holding one of these roles, checked as for a close reason (brief, D10) (brief, D22).
+    roles: Roles | None = None
+
+    # Pydantic: a validator with `mode="after"` runs on the whole object, once its fields passed.
+    @model_validator(mode="after")
+    def one_sender(self) -> "SentBy":
+        """One sender, so each value an event carries comes from one writer (brief, D41)."""
+        if (self.system is None) == (self.roles is None):
+            raise ValueError(
+                'an event is sent by one sender: a system ({"system": "portal"}) or people '
+                '({"roles": ["support"]})'
+            )
+        return self
+
+
+class PayloadField(Shape):
+    """One value an event carries: its type, what people read, and a declared untrusted source."""
+
+    declared: DeclaredType  # its type, written beside `display` (`"type": "string"`)
+    display: Display  # what people read
+    # `untrusted:<label>`, added to its sender whoever sends it, never trusted (brief, D12).
+    source: Source | None = None
+
+    # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
+    @model_validator(mode="before")
+    @classmethod
+    def type_apart(cls, data: Any) -> Any:
+        """The field's type (`type` and what goes with it) gathered under `declared`."""
+        if not isinstance(data, dict):
+            return data
+        around = ("display", "source")
+        declared = {key: value for key, value in data.items() if key not in around}
+        return {"declared": declared} | {key: data[key] for key in around if key in data}
+
+    @model_validator(mode="after")
+    def no_list(self) -> "PayloadField":
+        """A list waits until a list value can be checked, and is never packed into a text
+        meanwhile, which a list type would later have to read differently (brief, D41)."""
+        if isinstance(self.declared, ListType):
+            # Pydantic reports a ValueError raised here as the field's problem; a TypeError
+            # would escape it.
+            raise ValueError(  # noqa: TRY004
+                "an event carries no list yet: a list comes once a list value can be checked"
+            )
+        return self
+
+
+class DeclaredEvent(Shape):
+    """An event from outside the case: who may send it, and what it carries (brief, D41)."""
+
+    display: Display
+    sent_by: SentBy
+    # Each value it carries, landing in the case file as `<event>.<field>`, every field given on
+    # every arrival.
+    payload: dict[Name, PayloadField] = {}
 
 
 class Milestone(Shape):
@@ -176,6 +242,15 @@ class WorkflowStep(CallStep):
         return self.workflow
 
 
+class WaitStep(Step):
+    """A step that waits for an event from outside: its run is open until the event's next
+    arrival, which makes it done. Pending work, unlike a rule listening for it (brief, D10)
+    (brief, D41)."""
+
+    kind: Literal["wait"]
+    event: Name  # the declared event it waits for
+
+
 class PlanStep(Step):
     """A plan the deployment supplies, run as one step: its fields given from the case file
     (brief, D28). A case references a plan, never defines one."""
@@ -245,9 +320,15 @@ class AnsweredTask(Shape):
     answered: Name  # the task
 
 
-# The moments named by a step or a milestone. A closed list: a new moment is a decision recorded in
-# the brief, like an operator (brief, D38) (brief, D39).
-KINDS_OF_MOMENT = ("started", "reached", "answered")
+class EventArrived(Shape):
+    """The moment an event from outside arrives: each arrival (brief, D41)."""
+
+    event: Name  # the declared event
+
+
+# The moments named by a step, a milestone, a task or an event. A closed list: a new moment is a
+# decision recorded in the brief, like an operator (brief, D38) (brief, D39) (brief, D41).
+KINDS_OF_MOMENT = ("started", "reached", "answered", "event")
 
 
 def moment_of(on: object) -> str | None:
@@ -265,11 +346,15 @@ type Moment = Annotated[
     Annotated[Literal["opened"], Tag("opened moment")]
     | Annotated[Started, Tag("started moment")]
     | Annotated[Reached, Tag("reached moment")]
-    | Annotated[AnsweredTask, Tag("answered moment")],
+    | Annotated[AnsweredTask, Tag("answered moment")]
+    | Annotated[EventArrived, Tag("event moment")],
     Discriminator(moment_of),
 ]
 
-MOMENTS = '"opened", {"started": <step>}, {"reached": <milestone>} or {"answered": <task>}'
+MOMENTS = (
+    '"opened", {"started": <step>}, {"reached": <milestone>}, {"answered": <task>} or '
+    '{"event": <event>}'
+)
 
 
 class Rule(Shape):
@@ -277,7 +362,8 @@ class Rule(Shape):
 
     display: Display
     # The moment it reacts to: the case opened, a step's run started, a milestone reached, a task
-    # answered. A closed list: a new moment is a decision recorded in the brief (brief, D38).
+    # answered, an event arrived. A closed list: a new moment is a decision recorded in the brief
+    # (brief, D38).
     on: Moment
     when: PlanExpression | None = None  # read once the moment has come, on the case file then
     then: Then
@@ -295,7 +381,8 @@ type AnyStep = Annotated[
     Annotated[TaskStep, Tag("task step")]
     | Annotated[ActivityStep, Tag("activity step")]
     | Annotated[PlanStep, Tag("plan step")]
-    | Annotated[WorkflowStep, Tag("workflow step")],
+    | Annotated[WorkflowStep, Tag("workflow step")]
+    | Annotated[WaitStep, Tag("wait step")],
     Discriminator(kind_of),
 ]
 
@@ -310,6 +397,9 @@ class CaseDefinition(Shape):
     steps: Annotated[dict[Name, AnyStep], Field(min_length=1)]
     sequence: tuple[Name, ...] = ()  # each step requires the one before it
     rules: dict[Name, Rule] = {}  # what the case does on a moment (brief, D38)
+    events: dict[
+        Name, DeclaredEvent
+    ] = {}  # what may come from outside, and who sends it (brief, D41)
     close_reasons: dict[Name, CloseReason] = {}  # how a person may close it, and who (brief, D10)
     closes_when: tuple[Name, ...] = ()  # milestones that close it once all are reached
     stays_open: bool = False  # True: it never closes by itself; a person closes it
@@ -353,6 +443,13 @@ class CaseDefinition(Shape):
         started_by_rules = {step for rule in self.rules.values() for step in rule.then.start}
         for name, step in self.steps.items():
             problems += step_problems(f"steps.{name}", step, self, name in started_by_rules)
+        for name in self.events:
+            # An arrival is an entry beside step runs and firings (`cancelled#1`), and its values
+            # are read as `<event>.<field>` beside a step's: so no name is shared.
+            if name in self.steps or name in self.milestones or name in self.rules:
+                problems.append(
+                    f"events.{name}: an event is not named like a step, a milestone or a rule"
+                )
         for name, rule in self.rules.items():
             # A rule's firings are entries beside step runs (`flag_large#1`), so no name is shared.
             if name in self.steps or name in self.milestones:
@@ -365,6 +462,8 @@ class CaseDefinition(Shape):
                 self.steps.get(rule.on.answered), TaskStep
             ):
                 problems.append(f"rules.{name}.on.answered: {rule.on.answered} is not a task")
+            if isinstance(rule.on, EventArrived) and rule.on.event not in self.events:
+                problems.append(f"rules.{name}.on.event: {rule.on.event} is not an event")
             problems += reaching(f"rules.{name}.then.reach", rule.then.reach, self)
             problems += [
                 f"rules.{name}.then.{action}: {step} is not a step"
@@ -378,7 +477,10 @@ class CaseDefinition(Shape):
 
 
 def step_problems(
-    path: str, step: TaskStep | CallStep | PlanStep, case: CaseDefinition, rule_starts: bool
+    path: str,
+    step: TaskStep | CallStep | PlanStep | WaitStep,
+    case: CaseDefinition,
+    rule_starts: bool,
 ) -> list[str]:
     """What `step` names that `case` doesn't declare, and whether anyone can start it: itself, a
     person who proposes it, or a rule (`rule_starts`)."""
@@ -397,8 +499,10 @@ def step_problems(
                 if name not in case.fields
             ]
             problems += reaching(f"{where}.reaches", outcome.reaches, case)
-    if not isinstance(step, TaskStep):
+    if isinstance(step, CallStep | PlanStep):
         problems += stale_names(path, step)
+    if isinstance(step, WaitStep) and step.event not in case.events:
+        problems.append(f"{path}.event: {step.event} is not an event")
     # A step nobody may propose and that doesn't start by itself could never run; and a step starts
     # by itself at most once, so a repeatable one runs again only when proposed. Unless a rule
     # starts it: 11b's one loosening (brief, D39).
@@ -455,7 +559,7 @@ def parse_case(data: object) -> CaseDefinition:
         raise CaseInvalid("\n".join(problem(e) for e in error.errors())) from None
 
 
-STEP_KINDS = "a task, an activity, a plan or a workflow"
+STEP_KINDS = "a task, an activity, a plan, a workflow or a wait"
 
 
 def problem(error: Any) -> str:

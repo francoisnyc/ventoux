@@ -60,6 +60,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "proposed_by_rules": {
             step: rule_start_as_data(asked) for step, asked in state.proposed_by_rules.items()
         },
+        "arrived": dict(state.arrived),
         "waiting": dict(state.waiting),  # in the order they opened: JSON keeps it
         "opened_by": state.opened_by,
         "phase": state.phase,
@@ -162,6 +163,8 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
             step: rule_start_from_data(asked)
             for step, asked in data.get("proposed_by_rules", {}).items()
         },
+        # None in a state from before layer 11d: no event had arrived.
+        arrived={name: whole(count) for name, count in data.get("arrived", {}).items()},
         waiting=dict(data["waiting"]),
         opened_by=data["opened_by"],
         phase=data["phase"],

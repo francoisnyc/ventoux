@@ -36,8 +36,10 @@ from ventoux.case.definition import (
     ActivityStep,
     CallStep,
     CaseDefinition,
+    DeclaredEvent,
     PlanStep,
     TaskStep,
+    WaitStep,
     WorkflowStep,
 )
 from ventoux.case.forgetting import forget
@@ -63,6 +65,7 @@ from ventoux.case.state import (
     Retried,
     RuleStart,
     Schedule,
+    Sent,
     Shown,
     StartPlan,
     StartWorkflow,
@@ -130,6 +133,11 @@ class ShownRefused(Exception):
     """A record shown that the case won't record, because it couldn't have been: why."""
 
 
+class EventRefused(Exception):
+    """An event from outside the case won't take: why, naming the event and its sender, never a
+    value it carries (brief, D41)."""
+
+
 def decide(
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: Event
 ) -> tuple[CaseState, list[Command]]:
@@ -159,6 +167,8 @@ def decide(
         retry(case, catalog, state, event, commands)
     elif isinstance(event, Shown):
         record_shown(case, catalog, state, event)
+    elif isinstance(event, Sent):
+        receive(case, catalog, state, event)
     elif isinstance(event, ForgetApproved):
         forget(case, catalog, state, event)
     elif isinstance(event, CloseAsked):
@@ -181,6 +191,107 @@ def decide(
     state.started_by_rules.clear()
     settle(case, state)
     return state, commands
+
+
+def receive(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Sent) -> None:
+    """An event from outside reaches the case (brief, D41)."""
+    if event.event not in case.events:
+        known = listed(list(case.events)) if case.events else "none"
+        raise EventRefused(f"{event.event} is not an event of {case.case}: its events are {known}")
+    declared = case.events[event.event]
+    role = sender_role(catalog, event.event, declared, event)  # who sent it, before what it carries
+    refuse_payload(event.event, declared, event.payload)
+    arrive(case, state, event, role)
+
+
+def arrive(case: CaseDefinition, state: CaseState, event: Sent, role: str | None) -> None:
+    """The event has arrived: an entry of its own, each value it carries in the case file as
+    `<event>.<field>`, from its sender and the field's declared mark, obtained now and by this
+    arrival (brief, D12) (brief, D33) (brief, D41). The arrival is a moment for rules."""
+    name = event.event
+    state.arrived[name] = state.arrived.get(name, 0) + 1
+    entry = f"{name}#{state.arrived[name]}"
+    # A system's own name, or the person who sent it: trusted as that sender is (brief, D41).
+    sender = event.by if event.by.startswith("system:") else f"person:{event.by}"
+    given: list[str] = []
+    for field, declared in case.events[name].payload.items():
+        value = f"{name}.{field}"
+        state.values[value] = event.payload[field]
+        # A mark adds distrust, never removes it, whoever sends it (brief, D12).
+        state.sources[value] = frozenset(
+            {sender} | ({declared.source} if declared.source else set())
+        )
+        state.obtained[value] = Obtained(event.at, entry)
+        given.append(f"{field} from {', '.join(sorted(state.sources[value]))}")
+    who = (
+        f"from {event.by.removeprefix('system:')}" if role is None else f"by {event.by}, as {role}"
+    )
+    giving = f", giving {'; '.join(given)}" if given else ""
+    state.history.append(f"{entry} {who}{giving}")
+    state.moments.append(f"event {name}")
+    # Each wait open for it is done: only an arrival after a wait opens ends it (brief, D41).
+    for run in state.runs:
+        waits = case.steps[run.step]
+        if run.status == "open" and isinstance(waits, WaitStep) and waits.event == name:
+            run.status = "done"
+            del state.waiting[run.entry]
+            state.history.append(f"{run.entry} done: {entry} arrived")
+            reach(state, waits.reaches)
+
+
+def sent_by(declared: DeclaredEvent) -> str:
+    """Who sends an event, as the inbox says it: `from portal`, `by support or fraud`."""
+    if declared.sent_by.system is not None:
+        return f"from {declared.sent_by.system}"
+    return f"by {' or '.join(declared.sent_by.roles or ())}"
+
+
+def sender_role(catalog: Catalog, name: str, declared: DeclaredEvent, event: Sent) -> str | None:
+    """The role that lets a person send the event, None if a system sends it; or `EventRefused`.
+    One sender, as declared: its system, or a person holding one of its roles, checked as for a
+    close reason (brief, D22) (brief, D41)."""
+    sent_by = declared.sent_by
+    if sent_by.system is not None:
+        if event.by != f"system:{sent_by.system}":
+            raise EventRefused(
+                f"{name} is sent by {sent_by.system}, and this one comes from {event.by}"
+            )
+        return None
+    assert sent_by.roles is not None  # one sender: a system or people (`SentBy`)
+    roles = " or ".join(sent_by.roles)
+    if event.by.startswith("system:"):
+        raise EventRefused(f"{name} is sent by {roles}, and this one comes from {event.by}")
+    # Who sent it is written one way, before anything is checked against it (brief, D22).
+    if (wrong := identifier_problem(event.by)) is not None:
+        raise EventRefused(wrong)
+    role = role_that_counts(sent_by.roles, event.roles, catalog.roles)
+    if role is None:
+        counted = sorted(r for r in event.roles if r in catalog.roles)
+        known = listed(counted) if counted else "no role"
+        raise EventRefused(f"{name} is sent by {roles}, and {event.by} has {known}")
+    return role
+
+
+def refuse_payload(name: str, declared: DeclaredEvent, payload: Mapping[str, object]) -> None:
+    """Refuse a payload that isn't exactly the declared one: every field given, each of its type,
+    and nothing else. The type, never the value: a refusal reaches people who may not see it
+    (brief, D30) (brief, D41)."""
+    problems = [
+        f"{name}'s payload has no {field}" for field in declared.payload if field not in payload
+    ]
+    fields = listed(list(declared.payload)) if declared.payload else "none"
+    problems += [
+        f"{name}'s payload has no field {given}: its fields are {fields}"
+        for given in payload
+        if given not in declared.payload
+    ]
+    problems += [
+        f"{name}.{field} is {a_type(kind.declared)}, and the event gives {a_kind(payload[field])}"
+        for field, kind in declared.payload.items()
+        if field in payload and not fits(payload[field], kind.declared)
+    ]
+    if problems:
+        raise EventRefused("\n".join(problems))
 
 
 def record_shown(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Shown) -> None:
@@ -297,6 +408,9 @@ def answer(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Answ
     if (wrong := identifier_problem(event.by)) is not None:
         raise AnswerRefused(wrong)
     found = open_entry(state, event.entry)
+    if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
+        # Only its event ends it, sent by its sender: nobody answers it (brief, D41).
+        raise AnswerRefused(f"{found.entry} waits for {waits.event}: it is sent, never answered")
     if isinstance(found, StepRun):
         answer_task(case, catalog, state, found, event)
     else:
@@ -373,7 +487,7 @@ def propose(
     # Freshness first, before the condition, the approval and the start, as for any start
     # (brief, D33): a stale read is fetched again and the proposal waits for it; a fact nothing
     # can fetch again refuses the proposal, saying why (brief, D39). A refusal changes nothing.
-    if not isinstance(step, TaskStep):
+    if isinstance(step, CallStep | PlanStep):  # a task or a wait needs no fact fresh
         try:
             fresh = refresh_stale(case, catalog, state, event.step, step, event.at, commands)
         except StoppedRefresh as stopped:
@@ -525,7 +639,7 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     output, each field tagged with its contract's source (brief, D29)."""
     run = next(run for run in state.runs if run.entry == event.entry)
     step = case.steps[run.step]
-    assert not isinstance(step, TaskStep)  # only an activity, a workflow or a plan completes
+    assert isinstance(step, CallStep | PlanStep)  # only an activity, a workflow or a plan completes
     if isinstance(step, PlanStep):
         declares, problem = step.plan, plan_outcome_problem(step, event)
     else:
@@ -765,7 +879,7 @@ def retry(
     # A person decided to try again: a fact the step needs fresh may be fetched again, unless a
     # refresh of it is still on its way (brief, D33). A stopped refresh counts for nothing, even
     # while it runs on (brief, D40).
-    for field in step.max_age if not isinstance(step, TaskStep) else {}:
+    for field in step.max_age if isinstance(step, CallStep | PlanStep) else {}:
         prior = state.refreshing.get(field)
         if prior is None:
             continue
@@ -774,9 +888,11 @@ def retry(
             del state.refreshing[field]
 
 
-def reads_a_stale_fact(step: TaskStep | CallStep | PlanStep, state: CaseState, at: int) -> bool:
+def reads_a_stale_fact(
+    step: TaskStep | CallStep | PlanStep | WaitStep, state: CaseState, at: int
+) -> bool:
     """Whether the step's condition reads a fact the step needs fresh that is too old at `at`."""
-    if isinstance(step, TaskStep) or step.when is None:
+    if not isinstance(step, CallStep | PlanStep) or step.when is None:
         return False
     read = fields_read(step.when)
     return any(stale.field in read for stale in stale_facts(step.max_age, state, at))
@@ -820,7 +936,7 @@ def admit(
                     raise StepStopped(problem)
                 # Freshness first, before the condition, the approval and the start, so each
                 # reads fresh facts (brief, D18) (brief, D33).
-                if not isinstance(step, TaskStep):
+                if isinstance(step, CallStep | PlanStep):  # a task or a wait needs none fresh
                     waits = refresh_stale(case, catalog, state, name, step, at, commands)
                     if waits == "refreshing":
                         started = True  # a refresh was scheduled: admission goes round again
@@ -987,7 +1103,9 @@ def is_from_a_person(state: CaseState, field: str) -> bool:
     return any(source.startswith("person:") for source in state.sources.get(field, ()))
 
 
-def free_to_start(state: CaseState, name: str, step: TaskStep | CallStep | PlanStep) -> bool:
+def free_to_start(
+    state: CaseState, name: str, step: TaskStep | CallStep | PlanStep | WaitStep
+) -> bool:
     """Whether the step may start by itself: it isn't waiting for its approval, and it starts by
     itself and hasn't started before; or its approval was just given; or a person proposed it,
     and it waited for a fact fetched again."""
@@ -1036,7 +1154,7 @@ def start_from_rules(
             try:
                 if (problem := expression_problem(case, catalog, name)) is not None:
                     raise StepStopped(problem)
-                if not isinstance(step, TaskStep):
+                if isinstance(step, CallStep | PlanStep):
                     never_waits(case, catalog, state, name, step, at)
                 if step.when is not None and not holds(
                     step.when, state.values, f"{name}'s condition"
@@ -1112,13 +1230,21 @@ def start(
     catalog: Catalog,
     state: CaseState,
     name: str,
-    step: TaskStep | CallStep | PlanStep,
+    step: TaskStep | CallStep | PlanStep | WaitStep,
     commands: list[Command],
 ) -> None:
-    """Open a task's run; start a plan; ask for an activity's or a workflow's approval, or start
-    it."""
+    """Open a task's run, or a wait's; start a plan; ask for an activity's or a workflow's
+    approval, or start it."""
     if isinstance(step, PlanStep):
         start_plan(case, catalog, state, name, step, commands)
+        return
+    if isinstance(step, WaitStep):
+        # Open until the event's next arrival: pending work, listed with what it waits for
+        # (brief, D10) (brief, D24) (brief, D41).
+        entry = coming_run(state, name, "open").entry
+        proposal_spent(state, name)  # a wait has no approval: the proposed run has started
+        state.waiting[entry] = f"{step.event} {sent_by(case.events[step.event])}"
+        state.history.append(f"started {entry}: waiting for {state.waiting[entry]}")
         return
     if isinstance(step, TaskStep):
         entry = coming_run(state, name, "open").entry

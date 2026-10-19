@@ -813,7 +813,7 @@ as for a close reason. The Ventoux API, the only caller allowed to send events (
 states who sent it. Two systems sending the same news are two events. Anything else is refused,
 and nothing changes in the case:
 
-| Refused when | Example |
+| An event is refused when | Example |
 |---|---|
 | the case declares no such event | `refunded is not an event of refund: its events are cancelled` |
 | another system sends it | `cancelled is sent by portal, and this one comes from system:crm` |
@@ -885,8 +885,8 @@ While it waits, it is pending work, and the case says so: `waiting_for` lists `r
 portal`, beside the tasks and approvals. A stop cancels it, as it cancels an open task, and so
 does a close. An answer to it is refused: `wait_for_receipt#1 waits for receipt_sent: it is sent,
 never answered`. Only an arrival after it opens counts: one that came before is already in the
-case file, and a `when` can let the step skip the wait, `{"!": [{"exists": "receipt_sent.receipt"}]}`.
-A wait has no inputs, approval or `max_age`; `reaches` names what it reaches once done.
+case file, but the wait waits for the next. A wait has no inputs, approval or `max_age`; `reaches`
+names what it reaches once done.
 
 **When the case closes.** An event that reaches a closing case is refused, and the case is
 flagged, since nobody would hear of it otherwise:
@@ -900,16 +900,10 @@ A closed case's workflow has ended: sending it an event raises `EventRefused`, a
 again. While a failed step holds the close (every `closes_when` milestone reached), an event's
 payload still lands and a wait it ends is done, but no rule acts on it.
 
-**Sending one.** On Temporal, `send_event` signals the case's workflow, by its ID:
-
-```python
-from ventoux.temporal.cases import send_event
-
-await send_event(case, "cancelled", {"note": "please cancel"}, by="system:portal")
-await send_event(case, "customer_called", {}, by="ana", roles=["support"])
-```
-
-Every event is the same signal, whoever sends it. In a test, the script says `send(event,
+**Sending one.** On Temporal, `send_event(case, event, payload, by, roles)`, from
+`ventoux.temporal.cases`, signals the case's workflow by its ID, as `answer` does: `by` is
+`"system:portal"` for a system, or a person's identifier with their `roles`. Every event is the
+same signal, whoever sends it. In a test, the script says `send(event,
 payload, by)`: `send("cancelled", {"note": "please cancel"}, "system:portal")`, or a person's name,
 whose roles come from `people`.
 

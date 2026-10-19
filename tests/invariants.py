@@ -10,7 +10,7 @@ invariant".
 from typing import assert_never
 
 from ventoux.case.admission import latest_counted, requirements_met
-from ventoux.case.definition import CaseDefinition, TaskStep
+from ventoux.case.definition import CallStep, CaseDefinition, PlanStep
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState, StepRun
 
@@ -87,8 +87,8 @@ def fact_on_its_way(
     (`refresh_stale`). Never back through a step already followed: two refreshes waiting for each
     other wait for nothing."""
     step = case.steps[name]
-    if isinstance(step, TaskStep):
-        return False  # a task needs no fact fresh
+    if not isinstance(step, CallStep | PlanStep):
+        return False  # a task or a wait needs no fact fresh
     runs = {run.entry: run for run in state.runs}
     for field, entry in state.refreshing.items():
         if field not in step.max_age or entry not in runs:

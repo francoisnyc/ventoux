@@ -7,7 +7,7 @@ run is never stopped (brief, D17) (brief, D26). See docs/layers/11-rules.md (11c
 
 from ventoux.case.admission import latest_run, requirements_met
 from ventoux.case.closing import close_held
-from ventoux.case.definition import CaseDefinition, PlanStep, TaskStep, WorkflowStep
+from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
 from ventoux.case.freshness import stale_facts
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CLOSING, CancelWorkflow, CaseState, Command, StepRun, StopPlan
@@ -129,7 +129,9 @@ def waits_for_its_fact(case: CaseDefinition, state: CaseState, name: str, at: in
     requirements are met and the close isn't held; and a fact it reads is too old for it now,
     with a refresh of it running. A refresh another step asked for doesn't make it wait."""
     step = case.steps[name]
-    if isinstance(step, TaskStep) or not step.automatic or latest_run(state, name) is not None:
+    if not isinstance(step, CallStep | PlanStep):
+        return False  # a task or a wait needs no fact fresh
+    if not step.automatic or latest_run(state, name) is not None:
         return False
     if not requirements_met(requirements(case)[name], state) or close_held(case, state):
         return False
