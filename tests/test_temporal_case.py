@@ -1029,6 +1029,101 @@ def test_a_history_from_before_11c_replays() -> None:
     replay(history, CasesWithPlans, fixture_converter(BEFORE_11C))
 
 
+# --- The fix of a rejected retry: a history recorded before it still replays (brief, D26) ---
+
+RETRY_REJECTED = Path(__file__).parent / "histories" / "before_fix_retry_rejected.json"
+
+
+def test_a_history_with_a_rejected_retry_replays() -> None:
+    # Recorded under main, before the fix: pay#1 fails, the review is answered again for more,
+    # an operator retries pay#1, its approval is rejected (recorded then as `pay#2 won't run`),
+    # and Ana closes the case as a duplicate. The fix sends the rejected retry back to failed,
+    # which schedules nothing either, so the new worker replays it. A history that went on to
+    # retry pay#1 again replays while that retry asks an approval, and not once it would start
+    # unasked (the next two tests; the fix's note, decision 4).
+    history = WorkflowHistory.from_json("refund-1", RETRY_REJECTED.read_text())
+    replay(history, DevelopmentCases, fixture_converter(RETRY_REJECTED))
+
+
+RETRIED_AGAIN = Path(__file__).parent / "histories" / "before_fix_retry_rejected_retried.json"
+UNAPPROVED = Path(__file__).parent / "histories" / "before_fix_retry_rejected_unapproved.json"
+
+
+def test_a_history_that_retried_a_rejected_retry_again_replays_if_it_asks_again() -> None:
+    # Recorded under main: the same case, but an operator retries pay#1 again after the
+    # rejection, which main refused ("has not failed"), before Ana closes it. The fix takes
+    # that retry, and pay#1 asks a new approval: state, not a command, so the history replays.
+    history = WorkflowHistory.from_json("refund-1", RETRIED_AGAIN.read_text())
+    replay(history, DevelopmentCases, fixture_converter(RETRIED_AGAIN))
+
+
+def test_a_history_whose_retry_again_would_start_unasked_doesnt_replay() -> None:
+    # The known limit (the fix's note, decision 4). Recorded under main: after the rejection
+    # the review is answered again for 80, which needs no approval, then pay#1 is retried again,
+    # refused by main. The fix takes the retry and schedules pay#1 at once, so Temporal refuses
+    # the history rather than let the case go another way than it went, and the case waits
+    # until the code is fixed (brief, D17).
+    history = WorkflowHistory.from_json("refund-1", UNAPPROVED.read_text())
+    with pytest.raises(NondeterminismError):
+        replay(history, DevelopmentCases, fixture_converter(UNAPPROVED))
+
+
+# The refund whose review may be answered again, and a close reason: the fix's path.
+RESCUABLE = copy.deepcopy(REFUND)
+RESCUABLE["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+RESCUABLE["close_reasons"] = {"duplicate": DUPLICATE}
+
+
+def test_a_rejected_retry_on_temporal() -> None:
+    # pay#1 fails past its retries; the review is answered again for 250, so the operator's
+    # retry asks for an approval, which Sam rejects: pay#1 needs attention again, with no new
+    # run. Retried again once the provider is back, it asks again and pays once, every attempt
+    # with the first run's key (brief, D17, D26) (the fix's note, decision 1).
+    keys: list[str] = []
+    back = False
+
+    def flaky(inputs: dict[str, Any]) -> dict[str, Any]:
+        keys.append(inputs["idempotency_key"])
+        if not back:
+            raise ConnectionError("provider unreachable")
+        return {"refund_id": "refund-ord-1"}
+
+    async def scenario(environment: WorkflowEnvironment) -> tuple[CaseReport, CaseReport, str]:
+        nonlocal back
+        client = environment.client
+        file = {"order_id": "ord-1", "amount": Decimal(300)}
+        case = await start_case(client, DevelopmentCases, RESCUABLE, file, "refund-1", QUEUE)
+        await answer(
+            case, "review#1", "approve", "ana", PEOPLE["ana"], {"approved_amount": Decimal(80)}
+        )
+        await past_the_retries(environment, case)
+        await propose(case, "review", "ana", PEOPLE["ana"])
+        await reported(case, lambda now: now.waiting_at == ["review#2"])
+        await answer(case, "review#2", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        await retry(case, "pay#1", "omar", ["operations"])
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await answer(case, "pay.approval#1", "reject", "sam", PEOPLE["sam"])
+        rejected = await reported(case, lambda now: now.needs_attention != [])
+        back = True
+        await retry(case, "pay#1", "omar", ["operations"])
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#2"])
+        await answer(case, "pay.approval#2", "approve", "sam", PEOPLE["sam"])
+        return rejected, await case.result(), await first_run(client, "refund-1")
+
+    rejected, ended, run_id = skipping(scenario, {**FAKES, "payments.refund@2": flaky})
+    assert rejected.needs_attention == [
+        (
+            "pay#1: sam rejected pay.approval#1, the approval of its retry: retry it to ask "
+            "again, or close the case"
+        )
+    ]
+    assert "pay#1 won't run: sam rejected pay.approval#1, so it needs attention again" in (
+        rejected.history
+    )
+    assert keys == [f"refund-1/{run_id}/pay#1"] * 6  # five attempts, then the second retry's
+    assert ended.status == "closed"
+
+
 # --- Layer 11b: a waiting start and a rule's record cross continue-as-new (brief, D27, D39) ---
 
 # The refund with the order looked up, and `pay` proposed by support only on a status at most a

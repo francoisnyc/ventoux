@@ -16,6 +16,7 @@ from ventoux.case.admission import (
     ProposalRefused,
     RetryRefused,
     StepStopped,
+    ended_requirement,
     holds,
     latest_run,
     proposal_refusal,
@@ -95,7 +96,7 @@ from ventoux.core.form import fits
 from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
-from ventoux.core.provenance import NoSources, Sourced, provenance
+from ventoux.core.provenance import NoSources, Sourced, fields_read, provenance
 from ventoux.core.references import unregistered
 from ventoux.core.roles import role_that_counts
 from ventoux.core.sensitive import Sensitive, plain
@@ -497,6 +498,20 @@ def answer_approval(
             return
         state.given[approval.step] = GivenApproval(approval.entry, event.by, digest, approval.seen)
         return
+    latest = latest_run(state, approval.step)
+    if latest is not None and latest.status == "retrying":
+        # A rejected rescue resolves nothing: the failed run may or may not have acted, so it
+        # needs attention again, as the run it is, never a new one (brief, D17) (brief, D26).
+        latest.status = "failed"
+        latest.reason = (
+            f"{event.by} rejected {approval.entry}, the approval of its retry: retry it to ask "
+            "again, or close the case"
+        )
+        state.history.append(
+            f"{latest.entry} won't run: {event.by} rejected {approval.entry}, so it needs "
+            "attention again"
+        )
+        return
     # A rejection is an outcome: the step doesn't run (brief, D23).
     entry = next_entry(state, approval.step)
     proposal_spent(state, approval.step)  # the proposed run is over
@@ -713,6 +728,16 @@ def retry(
     run = next((run for run in state.runs if run.entry == event.entry), None)
     if run is None or run.status != "failed":
         raise RetryRefused(f"{event.entry} has not failed: nothing to retry")
+    latest = latest_run(state, run.step)
+    if latest is not None and latest is not run:
+        # Only a step's latest run runs again, so a retry of an earlier one could never start:
+        # refused, rather than left waiting for nothing (brief, D26).
+        failed_too = latest.status == "failed"
+        then = f"retry {latest.entry}, or close the case" if failed_too else "close the case"
+        raise RetryRefused(
+            f"{event.entry} can't be retried: {latest.entry} has run since, and only a step's "
+            f"latest run runs again: {then}"
+        )
     counted = [operating_role(catalog, event)]
     step = case.steps[run.step]
     # The step is checked again: what made it fail may still hold. Fail closed: nothing starts.
@@ -729,7 +754,10 @@ def retry(
             decided = holds(step.when, state.values, f"{run.step}'s condition")
         except StepStopped as unreadable:
             raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
-        if not decided:
+        # A stale fact is fetched again, never trusted to refuse: the retry is taken, and
+        # admission fetches the fact, if anything can, before it reads the condition again; if
+        # nothing can, the run fails at once on its age (brief, D18) (brief, D33).
+        if not decided and not reads_a_stale_fact(step, state, event.at):
             raise RetryRefused(f"{event.entry} can't be retried: {render(step.when)} is false now")
     # A person decided to try again: no longer a run whose stop was asked (brief, D40).
     run.status, run.reason, run.stop_requested = "retrying", "", ""
@@ -744,6 +772,14 @@ def retry(
         refresh = next(r for r in state.runs if r.entry == prior)
         if refresh.status in ("done", "failed") or refresh.stop_requested:
             del state.refreshing[field]
+
+
+def reads_a_stale_fact(step: TaskStep | CallStep | PlanStep, state: CaseState, at: int) -> bool:
+    """Whether the step's condition reads a fact the step needs fresh that is too old at `at`."""
+    if isinstance(step, TaskStep) or step.when is None:
+        return False
+    read = fields_read(step.when)
+    return any(stale.field in read for stale in stale_facts(step.max_age, state, at))
 
 
 def admit(
@@ -766,13 +802,16 @@ def admit(
         for name, step in case.steps.items():
             if not free_to_start(state, name, step):
                 continue
-            if not requirements_met(required[name], state):
-                drop_waiting(state, name, "its requirements are no longer met")
-                continue
-            # Once the close is only held by a failed run, nothing new starts: only the run an
-            # operator retries (brief, D34).
             latest = latest_run(state, name)
-            if close_held(case, state) and (latest is None or latest.status != "retrying"):
+            retried = latest if latest is not None and latest.status == "retrying" else None
+            # Once the close is only held by a failed run, nothing new starts, whatever the
+            # step's requirements: only the run an operator retries (brief, D34).
+            if close_held(case, state) and retried is None:
+                let_go_while_held(case, state, name)
+                continue
+            if not requirements_met(required[name], state):
+                # A retry or an approval given waits for it, until admission settles (below).
+                drop_waiting(state, name, "its requirements are no longer met")
                 continue
             try:
                 # Every expression it reads is checked over the case's types first, so a misspelt
@@ -791,6 +830,9 @@ def admit(
                 if step.when is not None and not holds(
                     step.when, state.values, f"{name}'s condition"
                 ):
+                    if retried is not None:  # nothing can let it start now
+                        why = f"{render(step.when)} is false now"
+                        retry_fails(state, retried, why, "retry it once it holds")
                     drop_waiting(state, name, f"{render(step.when)} is false")
                     continue
                 taken_up(state, name)
@@ -801,6 +843,46 @@ def admit(
                 taken_up(state, name)
                 fail(state, name, str(error))
             started = True
+    nothing_on_its_way(case, state, required)
+
+
+def nothing_on_its_way(
+    case: CaseDefinition, state: CaseState, required: dict[str, tuple[str, ...]]
+) -> None:
+    """Once admission has settled, what waits for a step's requirement that ended without
+    completing waits for nothing: an approval given lapses, then a retried run fails again, each
+    saying which. Read on the settled state, so a requirement a rule stopped and another started
+    again in this decision is on its way. A requirement still on its way keeps both: the approval
+    tied to the values it saw, the retry shown through it (brief, D11) (brief, D17) (brief, D26)."""
+    for name in case.steps:
+        ended = ended_requirement(state, required[name])
+        if ended is None:
+            continue
+        why = f"{name} requires {ended}, which hasn't completed"
+        if (given := state.given.pop(name, None)) is not None:
+            state.history.append(f"lapsed {given.entry}: {why}")
+        latest = latest_run(state, name)
+        if latest is not None and latest.status == "retrying":
+            retry_fails(state, latest, why, "retry it once it has")
+
+
+def let_go_while_held(case: CaseDefinition, state: CaseState, name: str) -> None:
+    """While the close is held nothing new starts, so nothing waits to: an approval given for
+    the step is let go, and a person's proposal waiting for its fact is dropped, each saying
+    why, never kept as pending work nobody sees (brief, D34) (brief, D39)."""
+    why = nothing_new(case, state)
+    if state.given.pop(name, None) is not None:
+        state.history.append(f"{name} not started: {why}")
+    drop_waiting(state, name, why)
+
+
+def retry_fails(state: CaseState, run: StepRun, why: str, then: str) -> None:
+    """A retried run that nothing can let start any more goes back to failed, saying why and
+    what to do, never kept waiting for nothing: an operator retries it again, or closes the case
+    (brief, D17) (brief, D26)."""
+    run.status = "failed"
+    run.reason = f"its retry can't start: {why}: {then}, or close the case"
+    state.history.append(f"{run.entry} failed again: its retry can't start: {why}")
 
 
 def refresh_stale(
@@ -1062,6 +1144,10 @@ def start(
     if given is not None:
         lapsed(state, name, step, given)
     schedule(case, catalog, state, name, step, given, commands)
+    # The proposed run has started. Spent here, never in `schedule`: a refresh of the step for
+    # another step's fact isn't the run anyone proposed, and its proposer still may not approve
+    # it (brief, D25).
+    proposal_spent(state, name)
 
 
 def schedule(
@@ -1094,7 +1180,6 @@ def schedule(
     run = coming_run(state, name, "running")
     run.approved, run.steered = approved, steered
     run.excluded = may_not_approve(state, name, run)  # read before the proposal is spent
-    proposal_spent(state, name)  # the proposed run has started
     if isinstance(step, WorkflowStep):
         # The run's name names its child workflow on Temporal, as a plan step's does.
         state.history.append(

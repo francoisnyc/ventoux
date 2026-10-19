@@ -1693,9 +1693,8 @@ def test_the_failed_run_retried_closes_the_case() -> None:
     assert run.history[-1] == "closed: paid reached"
 
 
-def test_an_approval_answered_while_the_close_is_held_starts_nothing() -> None:
-    # goodwill's approval is asked before paid is reached and answered after: it is given, and
-    # starts nothing; closing withdraws it once the letter is retried.
+def goodwill_while_held() -> tuple[dict[str, Any], dict[str, Activity]]:
+    """`held_close`, with a goodwill refund that asks its own approval once reviewed."""
     definition, fakes = held_close()
     definition["steps"]["goodwill"] = {
         "kind": "activity",
@@ -1705,6 +1704,13 @@ def test_an_approval_answered_while_the_close_is_held_starts_nothing() -> None:
         "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
         "approval": {"roles": ["support-lead"], "display": {"reason": "Goodwill needs a lead"}},
     }
+    return definition, fakes
+
+
+def test_an_approval_answered_while_the_close_is_held_starts_nothing() -> None:
+    # goodwill's approval is asked before paid is reached and answered after: it starts nothing,
+    # and the case closes once the letter is retried.
+    definition, fakes = goodwill_while_held()
     answers = [SMALL_REVIEW, ("goodwill", "approve", "sam")]
     run = run_case(definition, file=SMALL, answers=answers, people=OPERATORS, activities=fakes)
     assert run.history.index("reached paid") < run.history.index(
@@ -1721,6 +1727,22 @@ def test_an_approval_answered_while_the_close_is_held_starts_nothing() -> None:
     )
     assert not any(line.startswith("scheduled goodwill") for line in closed.history)
     assert closed.history[-1] == "closed: paid reached"
+
+
+def test_an_approval_given_while_the_close_is_held_is_let_go() -> None:
+    # Path K of the fix of a rejected retry. Once paid is reached, nothing new starts while the
+    # letter's failed run holds the close, so an approval given then can't be spent: it is let go,
+    # saying why, rather than kept as pending work nobody sees (brief, D34).
+    definition, fakes = goodwill_while_held()
+    answers = [SMALL_REVIEW, ("goodwill", "approve", "sam")]
+    run = run_case(definition, file=SMALL, answers=answers, people=OPERATORS, activities=fakes)
+    assert run.history[-1] == (
+        "goodwill not started: paid is reached, so the case closes once notify#1 is retried, or "
+        "a person closes it: nothing new starts"
+    )
+    assert run.state.given == {}
+    # Only what is let go says so: no line for a step with nothing pending.
+    assert [line for line in run.history if " not started: " in line] == [run.history[-1]]
 
 
 # --- Layer 8d, slice 1: outputs into the case file ---

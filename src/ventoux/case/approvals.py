@@ -71,7 +71,7 @@ def what_it_reads(step: CallStep, values: dict[str, object]) -> dict[str, object
 
 def follow(case: CaseDefinition, state: CaseState) -> None:
     """Withdraw each open approval whose step is no longer admitted, or whose values changed;
-    and lapse each given approval whose values a refresh changed."""
+    and lapse each given approval whose values changed."""
     required = requirements(case)
     for name, approval in list(state.approvals.items()):
         step = case.steps[name]

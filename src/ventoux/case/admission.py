@@ -48,6 +48,19 @@ def latest_counted(state: CaseState, step: str) -> StepRun | None:
     return runs[-1] if runs else None
 
 
+def ended_requirement(state: CaseState, required: tuple[str, ...]) -> str | None:
+    """A step or milestone the step requires that isn't met, and has nothing on its way to meet
+    it: its latest run ended without completing (cancelled, rejected), or there is none. None if
+    each unmet one is on its way: open, running, failed or retried, each shown by the case."""
+    for requirement in required:
+        if requirements_met((requirement,), state):
+            continue
+        latest = latest_counted(state, requirement)
+        if latest is None or latest.status not in ("open", "running", "failed", "retrying"):
+            return requirement
+    return None
+
+
 def holds(condition: Expression, values: Mapping[str, object], whose: str) -> bool:
     """Whether `condition` is true now. Fail closed: one that can't be read stops the case, and
     anything but true or false is an error, never read as false."""
