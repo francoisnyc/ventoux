@@ -6,6 +6,7 @@ See docs/layers/fix-untrusted-moment.md and the brief, D43.
 """
 
 import copy
+from pathlib import Path
 from typing import Any
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
@@ -554,3 +555,34 @@ def test_a_step_requiring_a_steered_run_cant_send_what_its_policy_refuses() -> N
             ),
         )
     ]
+
+
+# --- Slice 6: the guide, and no value quoted ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+
+
+def test_the_guides_line_is_what_the_engine_says() -> None:
+    section = GUIDE.split("**The influence goes on with the run.**")[1]
+    quoted = section.split("```\n")[1].strip()
+    run = run_case(say_goodbye(), file=SMALL, answers=[cancelled()], people=PEOPLE)
+    assert quoted in run.history
+
+
+def test_no_line_or_issue_of_the_fix_quotes_a_value_from_the_case_file() -> None:
+    # What the customer wrote reaches people who may not see it: lines and issues name the
+    # value and its source, never quote it (brief, D30). Steered by any note but one.
+    typed = "c-99123 wants out"
+    steered_by_any_note = {"!": [{"==": [{"var": "cancelled.note"}, "never"]}]}
+    definitions = [
+        say_goodbye(),
+        say_goodbye({"stop": ["review"]}),
+        say_goodbye({"start": ["letter"]}, steps={"letter": LETTER}),
+        starting("lookup", {"lookup": LOOKUP | {"reaches": ["withdrawn"]}}),
+    ]
+    for definition in definitions:
+        definition["rules"]["say_goodbye"]["when"] = steered_by_any_note
+        run = run_case(definition, file=SMALL, answers=[cancelled(typed)], people=PEOPLE)
+        said = run.history + run.needs_attention + [message for *_, message in issues(definition)]
+        assert any("untrusted:customer" in line for line in said)
+        assert not [line for line in said if typed in line or "99123" in line]

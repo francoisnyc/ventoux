@@ -115,6 +115,64 @@ Each starts with its negative test, seen failing for the right reason.
 5. On Temporal: crossing continue-as-new; the fixtures.
 6. The guide, and the promises.
 
+## Decided while building
+
+- **A moment names its run** (`Moment(said, run)`, slice 1): the rule firing on a start reads
+  what steered that run, never "the latest run of the step", which two runs in one decision
+  could confuse. Moments are always empty between events, so nothing new crosses with them.
+- **A firing keeps a copy** of what steered the start it fired on (`RuleFiring.steered`), and a
+  rule's start keeps it beside what its condition read (`RuleStart.steered`): a run's own record
+  may grow on a retry, and the firing stands for the start it heard of.
+- **A requirement's steering is said as a chain** (slice 3): `confirm requires lookup, and
+  say_goodbye#1's condition, which started lookup, reads cancelled.note (untrusted:customer)`.
+- **A start's steering holds only what the engine doesn't trust** (slice 4): a person's answer
+  that let a step start vouches for nothing it gives, so `started <step>` passes on only
+  untrusted sources, and an `only_from` input is never refused for a trusted condition.
+- **A 10d test changed its fixture** (slice 4):
+  `test_a_condition_reads_only_the_branch_of_an_if_it_takes` had `notify`'s condition read
+  `pay.refund_id` (from `untrusted:undeclared`), and `pay` requires `notify`. Under D43 `pay`
+  is refused on its inputs whenever it runs, a true new error that hid the test's subject (the
+  `if` branch giving `MAY_BE_UNSET`, never `SET_AFTER`). It now reads `pay.outcome`, which the
+  contract vouches for; the new error has its own test.
+- **Found, not fixed:** a false `INPUT_POLICY` on `main` since 11e. An `only_from` input given a
+  field a rule set from the allowed system is claimed "refused every time", yet the run sends
+  it: `writers.always` reads a rule's write with no mark as stamped with no source, which
+  `only_from` refuses. It errs on the safe side, but the check stops being a proof there; it isn't
+  a path where untrusted data decides, so it is left for its own fix.
+
 ## Promises
 
-Filled once built: each promise the note makes, and the test that would fail if it weren't true.
+Every test is in `tests/test_untrusted_moment.py` unless said otherwise. Each negative test was
+seen failing against `main`'s code (19 of them; the three controls marked "passes on main" were
+seen passing there), and each Temporal test against the code before slice 5.
+
+| Promise | Test that would fail |
+|---|---|
+| A rule on the start of a run a rule began on untrusted data reaches nothing, saying what steered it, never the value | `test_a_rule_on_a_start_untrusted_data_steered_reaches_nothing` |
+| The same for a step started by its own untrusted `when` | `test_a_start_its_own_untrusted_condition_steered_passes_it_on` |
+| A rule on such a start stops nothing | `test_a_rule_on_a_start_untrusted_data_steered_stops_nothing` |
+| A start nothing untrusted steered still decides, by a rule or a person's proposal (passes on main) | `test_a_start_trusted_data_chose_still_decides` |
+| A value set on a steered start carries what steered it, and a rule reading it doesn't decide | `test_a_value_set_on_a_steered_start_carries_what_steered_it` |
+| A step a rule starts on a steered start is refused on an input whose policy refuses that | `test_a_step_started_on_a_steered_start_cant_send_what_its_policy_refuses` |
+| A failed firing keeps what steered its start for its retry | `test_a_retried_rule_keeps_what_its_moment_carried` |
+| A steered activity reaches nothing, saying why; a steered wait too | `test_a_steered_run_reaches_nothing`, `test_a_steered_wait_reaches_nothing` |
+| A steered run's outcome and outputs carry what steered it | `test_a_steered_runs_outcome_and_outputs_carry_what_steered_it` |
+| A step requiring a steered run is steered by it: a rule on its start doesn't decide, and its inputs are checked | `test_a_step_requiring_a_steered_run_is_steered_by_it`, `test_a_step_requiring_a_steered_run_cant_send_what_its_policy_refuses` |
+| A refresh fetched for a step a steered run admits is steered by it | `test_a_refresh_for_a_step_a_steered_run_admits_is_steered_by_it` |
+| A person's answer to a steered task decides, through a rule or its outcome (passes on main) | `test_a_person_answering_a_steered_task_decides` |
+| An approval doesn't end what steered a run | `test_an_approval_doesnt_end_what_steered_a_run` |
+| `ventoux check` refuses a rule that reaches or stops on a start every way of which is steered | `test_check_refuses_a_rule_on_a_start_untrusted_data_always_steers`, `test_check_finds_a_start_steered_by_its_own_condition` |
+| It warns (`WRITER_DECIDES`), naming the ways, when only some are | `test_check_warns_when_only_some_starts_are_steered` |
+| It refuses a steered call's or wait's `reaches`, and says nothing of a task's | `test_check_refuses_a_steered_runs_reaches` |
+| It follows a steered outcome into a rule's condition, and a requirement into a rule on the start | `test_check_follows_a_steered_runs_outcome_and_what_requires_it` |
+| It follows what a steered start passes on: a start made on it, a value set on it, a start of a start (grown until nothing changes), and a step requiring a steered run | `test_check_follows_what_a_steered_start_passes_on`, `test_a_step_requiring_a_steered_run_cant_send_what_its_policy_refuses` |
+| It says nothing of a start nothing untrusted steers (passes on main) | `test_check_says_nothing_of_a_start_nothing_untrusted_steers` |
+| The 10d `if` test keeps its subject, the branch | `test_a_condition_reads_only_the_branch_of_an_if_it_takes` (`tests/test_case_validation.py`) |
+| A failed firing's and a rule's start's steering cross continue-as-new | `test_a_failed_firing_keeps_what_steered_its_start_across_continue_as_new`, `test_a_rules_start_keeps_what_steered_its_moment_across_continue_as_new` (`tests/test_temporal_untrusted_moment.py`) |
+| What steered a run reads back as it was; a state from before the fix reads as steered by nothing | `test_what_steered_a_run_reads_back_as_it_was`, `test_a_state_carried_from_before_the_fix_reads_as_steered_by_nothing` (`tests/test_temporal_untrusted_moment.py`) |
+| A history recorded before the fix on a path decided the same replays; the bug's own path doesn't | `test_a_history_the_fix_decides_the_same_replays`, `test_a_history_the_fix_decides_differently_doesnt_replay` (`tests/test_temporal_untrusted_moment.py`) |
+| On Temporal, a steered start is decided as in memory | `test_a_steered_start_on_temporal_is_decided_as_in_memory` (`tests/test_temporal_untrusted_moment.py`) |
+| The guide's line is what the engine says | `test_the_guides_line_is_what_the_engine_says` |
+| No line or issue of the fix quotes a value from a case file | `test_no_line_or_issue_of_the_fix_quotes_a_value_from_the_case_file` |
+| Every decision shows each pending item | the invariant, `tests/conftest.py` and `tests/invariants.py`, run after every decision of the tests above |
+| The runtime refuses what the check refuses, on nothing validation did | each runtime test above runs through `run_case` alone |
