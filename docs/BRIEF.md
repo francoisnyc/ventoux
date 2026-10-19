@@ -658,6 +658,9 @@ be erased on request), has size limits, and a second copy of business records go
     fails at once on its age (D33);
   - a refresh of a step, run for another step's fact, is not the run anyone proposed: it spends
     no proposal, so its proposer still may not approve the run (D25);
+  - only a step's latest run is retried: a retry of a failed run its step has run again since
+    is refused, saying which run is the latest, since admission resumes only the latest
+    (*added 2026-10-19, in the tutor review*);
   - while every `closes_when` milestone is reached and a failed run holds the close, an approval
     given for any other step is let go, and a person's proposal waiting for its fact is dropped,
     each saying so: nothing waits to start (D34);

@@ -728,6 +728,16 @@ def retry(
     run = next((run for run in state.runs if run.entry == event.entry), None)
     if run is None or run.status != "failed":
         raise RetryRefused(f"{event.entry} has not failed: nothing to retry")
+    latest = latest_run(state, run.step)
+    if latest is not None and latest is not run:
+        # Only a step's latest run runs again, so a retry of an earlier one could never start:
+        # refused, rather than left waiting for nothing (brief, D26).
+        failed_too = latest.status == "failed"
+        then = f"retry {latest.entry}, or close the case" if failed_too else "close the case"
+        raise RetryRefused(
+            f"{event.entry} can't be retried: {latest.entry} has run since, and only a step's "
+            f"latest run runs again: {then}"
+        )
     counted = [operating_role(catalog, event)]
     step = case.steps[run.step]
     # The step is checked again: what made it fail may still hold. Fail closed: nothing starts.

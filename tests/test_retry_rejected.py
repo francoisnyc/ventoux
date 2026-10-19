@@ -14,7 +14,8 @@ from invariants import Silent, unshown
 from test_case import OPERATORS, SMALL, SMALL_REVIEW, goodwill_while_held
 
 from ventoux.case.definition import parse_case
-from ventoux.case.memory import Activity, CaseRun, Driver, no_plans
+from ventoux.case.memory import Activity, CaseRun, Driver, no_plans, outcome_of
+from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, CloseAsked, Event, Opened, Proposed, Retried
 from ventoux.core.sensitive import Sensitive
 from ventoux.testing import (
@@ -1137,12 +1138,17 @@ def test_the_guides_retry_lines_are_what_the_engine_says() -> None:
     stale = run_case(
         unfetchable, FILE, aged, PEOPLE, activities={"payments.refund@2": down_once([])}
     )
+    with pytest.raises(RetryRefused) as superseded_retry:
+        roles = frozenset(PEOPLE["omar"])
+        retried = Retried("check_order#2", "omar", roles, at=START)
+        decide(parse_case(rechecked()), CATALOG, superseded().state, retried)
     for line in [
         rejected.history[-1],
         rejected.needs_attention[0],
         false_now.history[-1],
         ended.history[-1],
         stale.history[-1],
+        str(superseded_retry.value),
     ]:
         assert in_the_guide(line), line
     # And the line for an approval a held close lets go, which the guide shortens.
@@ -1494,3 +1500,201 @@ def test_a_given_approval_is_not_shown_by_a_refresh_it_cant_use() -> None:
     assert unshown(parse_case(definition), run.state) == [
         "pay.approval#1 is given, and pay waits for no fact or requirement"
     ]
+
+
+# --- Path N: a retry of a run its step has run again since ---
+
+
+def rechecked() -> dict[str, Any]:
+    """The refund with the order looked up and `hold`, whose answer also makes a rule stop the
+    lookup: so a refresh of the order's status can be stopped, and another scheduled beside it."""
+    definition = generated_definition(fresh=True, audited=False)
+    definition["rules"]["recheck"] = {
+        "display": {"title": "Stop the lookup on hold"},
+        "on": {"answered": "hold"},
+        "then": {"stop": ["check_order"]},
+    }
+    return definition
+
+
+# pay#1 fails; two days on, its retry fetches the status again, and a rule stops that refresh,
+# so pay#1 fails again; retried once more, it fetches the status with a new refresh, beside the
+# stopped one, which then fails. The new one lands, and pay#1 is paid: check_order#2 needs
+# attention, though check_order#3 is the step's latest run.
+SUPERSEDED = [
+    finish("check_order#1"),
+    ("review", "approve", "ana", {"approved_amount": 80}),  # pay#1 fails
+    later("2d"),
+    retry("pay#1", "omar"),  # the status is stale: check_order#2, held
+    propose("hold", "ana"),
+    ("hold#1", "hold", "ana"),  # recheck stops check_order#2: pay#1 fails again
+    retry("pay#1", "omar"),  # a new refresh: check_order#3, held
+    finish("check_order#2"),  # the lookup is down: check_order#2 fails
+    finish("check_order#3"),  # delivered: pay#1 runs with its key
+]
+
+
+def superseded() -> CaseRun:
+    """The case above, played to just before check_order#2 is retried."""
+    activities = {
+        "orders.lookup@2": looked_up("delivered", "down", "delivered"),
+        "payments.refund@2": down_once([]),
+    }
+    return run_case(
+        rechecked(), FILE, SUPERSEDED, PEOPLE, activities=activities, held=["check_order"]
+    )
+
+
+def test_a_retry_of_a_run_its_step_has_run_again_since_is_refused() -> None:
+    # Path N. Only a step's latest run runs again, so a retry of an earlier one could never
+    # start: it is refused, saying which run is the latest and what to do, and nothing in the
+    # case changes (the note, decision 6) (brief, D26).
+    run = superseded()
+    assert [(r.entry, r.status) for r in run.state.runs if r.step == "check_order"] == [
+        ("check_order#1", "done"),
+        ("check_order#2", "failed"),
+        ("check_order#3", "done"),
+    ]
+    before = copy.deepcopy(run.state)
+    roles = frozenset(PEOPLE["omar"])
+    with pytest.raises(RetryRefused) as refused:
+        decide(
+            parse_case(rechecked()),
+            CATALOG,
+            run.state,
+            Retried("check_order#2", "omar", roles, at=START),
+        )
+    assert str(refused.value) == (
+        "check_order#2 can't be retried: check_order#3 has run since, and only a step's latest "
+        "run runs again: close the case"
+    )
+    assert run.state == before
+
+
+def generated_held_case(seed: int, refusals: list[str]) -> CaseState:
+    """A second family of generated cases, its own seeds: the refund with the order looked up,
+    the lookup held until a turn lets it finish, and `recheck`, a rule that stops the lookup
+    on the hold's answer, so refreshes can be stopped, fail and be superseded across a person's
+    acts. Played under the hook in `conftest.py`, as `generated_case` is; each refusal's text
+    goes into `refusals`."""
+    chance = random.Random(seed)  # a test's randomness, seeded: the engine reads none
+    definition = rechecked()
+    definition["stays_open"] = chance.random() < 0.25
+    case = parse_case(definition)
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        if chance.random() < 0.5:
+            raise ConnectionError("provider unreachable")
+        return {"refund_id": "refund-1"}
+
+    def lookup(inputs: dict[str, Any]) -> dict[str, Any]:
+        if chance.random() < 0.3:
+            raise ConnectionError("orders system down")
+        return {"status": "delivered"}
+
+    activities = {**FAKES, "payments.refund@2": refund, "orders.lookup@2": lookup}
+    holding = frozenset({"check_order"})
+    driver = Driver(case, CATALOG, activities, holding=holding, plans=no_plans, workflows={})
+    at = START
+    file = {"order_id": "ord-1", "amount": Decimal(300)}
+    state = driver.carry(CaseState("held"), Opened(wrapped(case, as_json(file)), None, at=at))
+    played = [f"seed {seed}"]
+    for _ in range(40):
+        if state.phase != "open":
+            break
+        if chance.random() < 0.1:
+            at += 2 * DAY
+            played.append("two days later")
+            continue
+        # Each held lookup may finish now, offered twice: what it gives arrives at this turn.
+        finishing: list[Event | str] = [*driver.held, *driver.held]
+        choice = chance.choice([*next_events(chance, state, at), *finishing])
+        played.append(repr(choice))
+        try:
+            if isinstance(choice, str):
+                ended = outcome_of(driver.held.pop(choice), driver.activity, at)
+                state = driver.carry(state, ended)
+            else:
+                state = driver.carry(state, choice)
+        except (AnswerRefused, ProposalRefused, RetryRefused, CloseRefused) as refused:
+            played.append(f"  refused: {refused}")
+            refusals.append(str(refused))
+        except Silent as silent:
+            raise Silent("\n".join([str(silent), *played])) from None
+    return state
+
+
+@pytest.mark.parametrize("seed", range(500))
+def test_generated_cases_with_held_lookups_show_what_is_pending(seed: int) -> None:
+    generated_held_case(seed, [])
+
+
+def test_the_held_generated_cases_reach_a_retry_of_a_superseded_run() -> None:
+    # Path N in the generated cases: some seed retries a run its step has run again since, and
+    # is refused, so a change to the generator or the runtime can't drop or reopen it unseen.
+    refusals: list[str] = []
+    for seed in range(500):
+        generated_held_case(seed, refusals)
+    superseded = [said for said in refusals if "has run since" in said]
+    assert superseded, "no generated case retried a run its step has run again since"
+
+
+def test_a_retry_failed_while_its_requirements_refresh_runs_is_shown_and_retried() -> None:
+    # The known limit (the note, decision 4): pay#1's retry waits on check_order, whose coming
+    # run a rule cancels in the decision another step's need schedules a refresh of it. The
+    # refresh isn't counted, so pay#1 fails one event early, but shown: it needs attention, and
+    # the operator's retry, once the refresh has landed, asks its approval again.
+    definition = generated_definition(fresh=True, audited=False)
+    steps = definition["steps"]
+    steps["ping"] = {
+        "kind": "activity",
+        "display": {"title": "Ping the order"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    steps["check_order"] |= {
+        "repeatable": True,
+        "proposed_by": ["support"],
+        "requires": ["ping"],
+        "when": {"==": [{"var": "ping.status"}, "delivered"]},
+        "max_age": {"ping.status": "1d"},
+    }
+    steps["recheck"] = {
+        "kind": "activity",
+        "display": {"title": "Recheck on hold"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "requires": ["hold"],
+        "when": {"==": [{"var": "check_order.status"}, "delivered"]},
+        "max_age": {"check_order.status": "1d"},
+    }
+    definition["rules"]["halt_check"] = {
+        "display": {"title": "Stop the lookup on hold"},
+        "on": {"answered": "hold"},
+        "then": {"stop": ["check_order"]},
+    }
+    script = [
+        finish("ping#1"),
+        *RESCUED,  # retried, pay#1 asks pay.approval#1
+        later("2d"),
+        propose("check_order", "ana"),  # ping.status is stale: ping#2 fetches it, held
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),  # check_order's coming run cancelled; recheck refreshes it
+    ]
+    activities = {
+        "orders.lookup@2": looked_up(*["delivered"] * 10),
+        "payments.refund@2": down_once([]),
+    }
+    run = run_case(definition, FILE, script, PEOPLE, activities=activities, held=["ping"])
+    assert run.needs_attention == [
+        (
+            "pay#1: its retry can't start: pay requires check_order, which hasn't completed: "
+            "retry it once it has, or close the case"
+        )
+    ]
+    assert "check_order#3 done, giving status from system:orders" in run.history
+    activities["orders.lookup@2"] = looked_up(*["delivered"] * 10)
+    activities["payments.refund@2"] = down_once([])
+    again = [*script, retry("pay#1", "omar")]
+    run = run_case(definition, FILE, again, PEOPLE, activities=activities, held=["ping"])
+    assert run.waiting_for == ["approval of pay by support-lead"]

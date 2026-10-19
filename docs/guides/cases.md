@@ -309,6 +309,11 @@ nothing can (a person's answer, say), the retry fails at once on the fact's age,
 does, saying why: `pay#1 failed: review.outcome was obtained 2 days ago, and pay needs it at most
 1 day old: it came from a person, so it can't be fetched again`.
 
+Only a step's latest run is retried. Once a step has run again since a run failed (a refresh
+scheduled beside one that failed, say), a retry of the earlier run could never start, so it is
+refused, and nothing in the case changes: `check_order#2 can't be retried: check_order#3 has run
+since, and only a step's latest run runs again: close the case`.
+
 **Nothing starts beside a failed run.** Say `check_order` is `repeatable`. While `check_order#1`
 needs attention, proposing `check_order` again is refused (`check_order#1 needs attention: retry
 it, or close the case`), and so is a rule's start. A new run would skip the failed one by another
