@@ -11,10 +11,16 @@ from typing import Any
 
 import pytest
 
+# pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
+from test_case_validation import PLANS, settled
+
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.state import Obtained
+from ventoux.case.validate import validate_case
 from ventoux.core.sensitive import Sensitive, plain
+from ventoux.core.validate import Issue
 from ventoux.testing import (
+    CATALOG,
     DAY,
     START,
     AnswerRefused,
@@ -193,7 +199,7 @@ def test_a_set_of_another_type_fails_the_rule() -> None:
     assert run.needs_attention == [
         (
             "work_out_owed#1: work_out_owed.then.set.owed can't be read: owed is a number, and this "
-            "gives a string"
+            "gives a string: set it from a number"
         ),
     ]
     assert "owed" not in run.state.values
@@ -444,6 +450,7 @@ def with_settle() -> dict[str, Any]:
         "proposed_by": ["support"],
         "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "owed"}},
         "max_age": {"owed": "1d"},
+        "approval": {"roles": ["support-lead"], "display": {"reason": "A team lead pays it"}},
     }
     return definition
 
@@ -622,3 +629,372 @@ def test_set_doesnt_act_while_the_case_closes() -> None:
         "work_out_owed#1 on reached paid: not applied: the case is closing, so nothing new is "
         "decided"
     ) in run.history
+
+
+# --- Slice 7: validation stays a proof ---
+
+
+def issues(definition: dict[str, Any]) -> list[Issue]:
+    return validate_case(parse_case(definition), CATALOG)
+
+
+def coded(definition: dict[str, Any], code: str) -> list[Issue]:
+    return [issue for issue in issues(definition) if issue.code == code]
+
+
+def with_flagged() -> dict[str, Any]:
+    """The large claim, with `flagged` set from `large_claim` by a rule written before the rule
+    that sets `large_claim`, and the milestone reached on `flagged` instead."""
+    definition = with_large_claim()
+    rules = definition["rules"]
+    definition["fields"]["flagged"] = {"type": "boolean", "display": {"title": "Flagged"}}
+    flag = {
+        "display": {"title": "Flag what is large"},
+        "on": {"answered": "review"},
+        "then": {"set": {"flagged": {"var": "large_claim"}}},
+    }
+    rules["flag_large"]["on"] = {"answered": "review"}
+    rules["flag_large"]["when"] = {"==": [{"var": "flagged"}, True]}
+    definition["rules"] = {"flag": flag, **rules}  # written before size_up
+    return definition
+
+
+def test_sources_go_round_until_nothing_changes() -> None:
+    # Read once in the written order, `flagged` would look like it comes from nobody untrusted,
+    # since `large_claim` is worked out after it. Going round until nothing changes, it comes
+    # from the customer, so the rule reaching on it never acts (brief, D34, D42).
+    assert coded(with_flagged(), "UNTRUSTED_TRIGGER") == [
+        Issue(
+            "rules.flag_large.when",
+            "UNTRUSTED_TRIGGER",
+            "flag_large's condition reads flagged, which comes from untrusted:customer whoever "
+            "writes it, and untrusted data can't decide, so it never reaches large: read a value "
+            "a person or a trusted system gives, such as a task's answer",
+        )
+    ]
+
+
+def with_two_sizers() -> dict[str, Any]:
+    """The large claim, which a second rule also sets, from the review's answer: untrusted when
+    `size_up` sets it, and not when `review_size` does."""
+    definition = with_large_claim()
+    definition["rules"]["flag_large"]["on"] = {"answered": "review"}
+    definition["rules"]["review_size"] = {
+        "display": {"title": "Size the claim from the review"},
+        "on": {"answered": "review"},
+        "then": {"set": {"large_claim": {"==": [{"var": "review.outcome"}, "approve"]}}},
+    }
+    return definition
+
+
+def test_a_field_only_some_writers_make_untrusted_warns() -> None:
+    # Whether flag_large acts depends on which rule set large_claim last: a warning, never an
+    # error, which must hold for every case (brief, D34, D42).
+    found = [i for i in issues(with_two_sizers()) if i.path == "rules.flag_large.when"]
+    assert found == [
+        Issue(
+            "rules.flag_large.when",
+            "WRITER_DECIDES",
+            "flag_large's condition reads large_claim, which comes from untrusted:customer when "
+            "size_up sets it, and not when review_size does, and untrusted data can't decide, so "
+            "whether it reaches large depends on which rule set large_claim last: set large_claim "
+            "only from trusted values",
+            "warning",
+        )
+    ]
+
+
+def test_a_field_every_writer_makes_untrusted_is_refused() -> None:
+    definition = with_two_sizers()
+    definition["rules"]["review_size"]["when"] = {">": [{"var": "estimate"}, 1]}
+    assert [i.code for i in issues(definition) if i.path == "rules.flag_large.when"] == [
+        "UNTRUSTED_TRIGGER"
+    ]
+
+
+def with_owed_from_the_estimate() -> dict[str, Any]:
+    """The refund paying what is owed, which `work_out_owed` sets from the customer's estimate."""
+    definition = with_owed()
+    definition["fields"]["estimate"] = with_large_claim()["fields"]["estimate"]
+    definition["rules"]["work_out_owed"]["then"]["set"] = {
+        "owed": {"-": [{"var": "estimate"}, {"var": "fee"}]}
+    }
+    definition["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    return definition
+
+
+def test_an_input_given_a_value_every_writer_makes_untrusted_is_refused() -> None:
+    assert [i.code for i in issues(with_owed_from_the_estimate()) if "inputs" in i.path] == [
+        "INPUT_POLICY"
+    ]
+
+
+def test_an_input_given_a_value_only_some_writers_make_untrusted_warns() -> None:
+    # Refused only when work_out_owed wrote last: a warning, never an error (brief, D42).
+    definition = with_owed_from_the_estimate()
+    definition["rules"]["owe_all"] = {
+        "display": {"title": "Owe all of it"},
+        "on": {"answered": "review"},
+        "then": {"set": {"owed": {"var": "approved_amount"}}},
+    }
+    found = [i for i in issues(definition) if i.path == "steps.pay.inputs.amount"]
+    assert found == [
+        Issue(
+            "steps.pay.inputs.amount",
+            "WRITER_DECIDES",
+            "payments.refund@2 takes amount only from a system or a person, never from untrusted "
+            "data, and this value comes from owed (person:answering review, the opener, "
+            "untrusted:customer): owed comes from untrusted:customer when work_out_owed sets it, "
+            "and not when owe_all does: whether pay is refused depends on which rule set owed "
+            "last: set owed only from values the policy takes",
+            "warning",
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("sizers", "code"),
+    [(with_large_claim, "INPUT_POLICY"), (with_two_sizers, "WRITER_DECIDES")],
+    ids=["every writer untrusted", "some writers untrusted"],
+)
+def test_a_condition_steering_on_a_set_field_is_claimed_only_where_proven(
+    sizers: Any, code: str
+) -> None:
+    # pay's own `when` lets it start; read untrusted, its inputs are refused (brief, D39). Only
+    # where every writer makes it untrusted is that an error (brief, D42).
+    definition = sizers()
+    del definition["rules"]["flag_large"]
+    definition["steps"]["pay"]["when"] = {"==": [{"var": "large_claim"}, False]}
+    assert {i.code for i in issues(definition) if i.path.startswith("steps.pay.inputs")} == {code}
+
+
+@pytest.mark.parametrize(
+    ("second_writer", "code"),
+    [(False, "INPUT_POLICY"), (True, "WRITER_DECIDES")],
+    ids=["every writer untrusted", "some writers untrusted"],
+)
+def test_a_plan_step_given_a_set_field_is_claimed_only_where_proven(
+    second_writer: bool, code: str
+) -> None:
+    # The plan's payment takes amount only from a system or a person (brief, D36): what the
+    # case gives it is followed into the plan, a set field's writers included (brief, D42).
+    definition = settled(inputs={"order_id": {"var": "order_id"}, "amount": {"var": "owed"}})
+    owed = with_owed_from_the_estimate()
+    definition["fields"] |= {name: owed["fields"][name] for name in ("fee", "owed", "estimate")}
+    definition["rules"] = {"work_out_owed": owed["rules"]["work_out_owed"]}
+    if second_writer:
+        definition["rules"]["owe_all"] = {
+            "display": {"title": "Owe all of it"},
+            "on": {"answered": "review"},
+            "then": {"set": {"owed": {"var": "approved_amount"}}},
+        }
+    found = validate_case(parse_case(definition), CATALOG, plans=PLANS)
+    assert [i.code for i in found if i.path == "steps.settle.inputs.amount"] == [code]
+
+
+def test_a_value_rules_set_may_be_unset() -> None:
+    # Nothing pay waits for ensures work_out_owed has set what is owed: it may fail, its
+    # condition may be false. Not "given at the opening": the opening never gives it (brief, D42).
+    definition = with_owed()
+    definition["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    assert coded(definition, "MAY_BE_UNSET") == [
+        Issue(
+            "steps.pay.inputs.amount",
+            "MAY_BE_UNSET",
+            "pay reads owed, which only rules set (work_out_owed), and nothing pay waits for "
+            "ensures they have: then pay fails and needs attention: require a milestone only they "
+            "reach, or read it only when it exists",
+            "warning",
+        )
+    ]
+    # The proof: run as it is, with a rule whose condition is false, pay fails.
+    definition["rules"]["work_out_owed"]["when"] = {"==": [{"var": "review.outcome"}, "reject"]}
+    run = run_case(definition, file=FILE, answers=[APPROVED], people=PEOPLE)
+    assert run.needs_attention == ["pay#1: amount can't be evaluated: owed has no known sources"]
+
+
+def test_a_rule_reading_a_value_rules_set_may_find_it_unset() -> None:
+    assert [i.code for i in issues(with_large_claim()) if i.path == "rules.flag_large.when"] == [
+        "UNTRUSTED_TRIGGER"
+    ]
+    definition = with_large_claim()
+    definition["fields"]["estimate"].pop("source")
+    assert [i.code for i in issues(definition) if i.path == "rules.flag_large.when"] == [
+        "MAY_BE_UNSET"
+    ]
+
+
+def test_a_value_rules_set_is_surely_set_behind_their_milestone() -> None:
+    # work_out_owed sets what is owed before it reaches owed_known, and acts whole or not at all:
+    # a step requiring owed_known reads it set (brief, D42).
+    definition = with_owed()
+    definition["milestones"] = {"owed_known": {"display": {"title": "What is owed is known"}}}
+    definition["rules"]["work_out_owed"]["then"]["reach"] = ["owed_known"]
+    definition["steps"]["pay"]["requires"] = ["owed_known"]
+    definition["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    assert coded(definition, "MAY_BE_UNSET") == []
+    # A step reaching the same milestone, setting nothing, takes the proof away.
+    definition["steps"]["review"]["reaches"] = ["owed_known"]
+    assert [i.path for i in coded(definition, "MAY_BE_UNSET")] == ["steps.pay.inputs.amount"]
+
+
+def test_a_set_expression_is_type_checked() -> None:
+    # The same check the runtime makes before the rule reads anything (brief, D35, D42).
+    definition = with_owed()
+    definition["rules"]["work_out_owed"]["then"]["set"] = {"owed": {"string": [{"var": "fee"}]}}
+    assert coded(definition, "EXPRESSION_INVALID") == [
+        Issue(
+            "rules.work_out_owed.then.set.owed",
+            "EXPRESSION_INVALID",
+            "owed is a number, and this gives a string: set it from a number",
+        )
+    ]
+
+
+def test_a_set_expression_reads_an_outcome() -> None:
+    # A rule recording whether the refund was declined, as support follows it up, tells
+    # declined from done: someone reads it (brief, D37, D42).
+    definition = with_owed()
+    definition["steps"]["call_customer"] |= {"display": {"title": "Follow the refund up"}}
+    del definition["steps"]["call_customer"]["when"]
+    definition["fields"]["declined"] = {"type": "boolean", "display": {"title": "Declined"}}
+    definition["rules"]["record_decline"] = {
+        "display": {"title": "Record a declined refund"},
+        "on": {"started": "call_customer"},
+        "then": {"set": {"declined": {"==": [{"var": "pay.outcome"}, "declined"]}}},
+    }
+    assert coded(definition, "OUTCOME_UNREAD") == []
+
+
+def test_a_set_reading_on_the_opening_what_a_person_sets_fails_every_time() -> None:
+    # On the opening nothing has run, so a value only the review sets is never there: the rule
+    # fails every time it fires (brief, D37, D42), as test_a_retried_set_reads_again runs it.
+    definition = with_owed()
+    rule = definition["rules"]["work_out_owed"]
+    rule["on"] = "opened"
+    del rule["when"]
+    assert [(i.path, i.code) for i in issues(definition) if i.path.startswith("rules.")] == [
+        ("rules.work_out_owed.then.set.owed", "SET_AFTER")
+    ]
+
+
+def test_a_set_guarded_by_its_condition_is_not_warned() -> None:
+    # The condition is read first: once review.outcome is approve, approved_amount is set.
+    assert [i for i in issues(with_owed()) if i.path.startswith("rules.")] == []
+
+
+def with_settle_reading_what_it_reaches() -> dict[str, Any]:
+    """The refund, where `settle` pays what is owed, and what is owed is set only once `settle`
+    has reached `settled`."""
+    definition = with_owed()
+    definition["milestones"] = {"settled": {"display": {"title": "Settled"}}}
+    definition["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    definition["steps"]["pay"]["reaches"] = ["settled"]
+    definition["rules"]["work_out_owed"]["on"] = {"reached": "settled"}
+    return definition
+
+
+def test_set_after_a_rule_is_claimed_only_where_proven() -> None:
+    # work_out_owed fires only once pay is done, and pay reads what it sets every time it starts:
+    # pay fails every time (brief, D37, D42).
+    assert coded(with_settle_reading_what_it_reaches(), "SET_AFTER") == [
+        Issue(
+            "steps.pay.inputs.amount",
+            "SET_AFTER",
+            "pay reads owed, which only work_out_owed sets, and work_out_owed fires only after "
+            "pay: pay fails every time it starts: read it in a step that comes after "
+            "work_out_owed, or run pay after work_out_owed",
+        )
+    ]
+    # A rule on pay's start fires once pay has read it, but a retry reads it again: no proof.
+    definition = with_settle_reading_what_it_reaches()
+    definition["rules"]["work_out_owed"]["on"] = {"started": "pay"}
+    assert coded(definition, "SET_AFTER") == []
+    assert [i.path for i in coded(definition, "MAY_BE_UNSET")] == ["steps.pay.inputs.amount"]
+
+
+def test_a_max_age_on_a_set_value_is_never_refreshed() -> None:
+    # A rule doesn't fire again because a fact was refreshed (brief, D33, D42).
+    found = [i for i in issues(with_settle()) if i.code == "NEVER_REFRESHED"]
+    assert found == [
+        Issue(
+            "steps.settle.max_age.owed",
+            "NEVER_REFRESHED",
+            "owed comes from work_out_owed, a rule that computes it, which doesn't fire again "
+            "when a fact is fetched again: whenever it is older than settle's max_age allows, a "
+            "proposal of settle is refused: keep it only if a person should decide each time",
+            "warning",
+        )
+    ]
+
+
+# Each other check that reads writers, sources or what a value reveals, with a set field.
+
+
+def test_a_set_only_rule_whose_moment_never_comes_never_fires() -> None:
+    definition = with_owed()
+    definition["milestones"] = {"never": {"display": {"title": "Never reached"}}}
+    definition["rules"]["work_out_owed"]["on"] = {"reached": "never"}
+    assert [i.path for i in coded(definition, "NEVER_FIRES")] == ["rules.work_out_owed.on"]
+
+
+def test_a_rule_setting_on_the_opening_doesnt_keep_the_case_open() -> None:
+    # Setting a field starts nothing, so a case whose only step must be proposed still closes at
+    # once (CLOSES_AT_OPENING stays a proof), as the run shows.
+    definition = with_owed()
+    definition["steps"] = {"review": definition["steps"]["review"] | {"automatic": False}}
+    definition["steps"]["review"]["proposed_by"] = ["support"]
+    del definition["sequence"]
+    definition["rules"]["work_out_owed"] |= {"on": "opened"}
+    del definition["rules"]["work_out_owed"]["when"]
+    definition["rules"]["work_out_owed"]["then"]["set"] = {"owed": {"var": "fee"}}
+    assert [i.code for i in issues(definition)] == ["CLOSES_AT_OPENING"]
+    assert run_case(definition, file=FILE, answers=[], people=PEOPLE).closed
+
+
+def test_a_workflow_step_given_a_value_computed_from_a_sensitive_one_is_refused() -> None:
+    # The set field is declared sensitive, as it must be, so SENSITIVE_TO_WORKFLOW still sees it.
+    definition = with_national_id()
+    definition["steps"]["kyc"] = {
+        "kind": "workflow",
+        "display": {"title": "Check the customer"},
+        "workflow": "kyc.check@1",
+        "inputs": {"customer_id": {"var": "risk_band"}},
+    }
+    assert "SENSITIVE_TO_WORKFLOW" in [i.code for i in issues(definition)]
+
+
+def test_a_reference_a_rule_copies_goes_where_its_system_is_expected() -> None:
+    definition = with_owed()
+    definition["fields"]["refunded_order"] = {
+        "type": "reference",
+        "system": "orders",
+        "display": {"title": "Order"},
+    }
+    definition["rules"]["work_out_owed"]["then"]["set"] = {"refunded_order": {"var": "order_id"}}
+    definition["steps"]["pay"]["inputs"]["order_id"] = {"var": "refunded_order"}
+    assert [i.code for i in issues(definition) if i.code in ("REFERENCE", "INPUT_TYPE")] == []
+
+
+def test_an_input_given_a_set_field_of_another_type_is_refused() -> None:
+    definition = with_owed()
+    definition["fields"]["note"] = {"type": "string", "display": {"title": "Note"}}
+    definition["rules"]["work_out_owed"]["then"]["set"] = {"note": {"string": [{"var": "fee"}]}}
+    definition["steps"]["pay"]["inputs"]["amount"] = {"var": "note"}
+    assert "INPUT_TYPE" in [i.code for i in issues(definition)]
+
+
+def test_an_approver_who_cant_see_a_set_field_is_warned() -> None:
+    definition = with_owed()
+    definition["fields"]["owed"]["visible_to"] = ["fraud"]
+    definition["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    assert "APPROVER_CANT_SEE" in [i.code for i in issues(definition)]
+
+
+def test_a_rule_that_reaches_and_sets_on_untrusted_data_never_sets_either() -> None:
+    definition = with_large_claim()
+    definition["rules"]["size_up"]["then"]["reach"] = ["large"]
+    assert next(i.message for i in coded(definition, "UNTRUSTED_TRIGGER")).startswith(
+        "size_up's condition reads estimate, which comes from untrusted:customer whoever writes "
+        "it, and untrusted data can't decide, so it never reaches large or sets large_claim"
+    )

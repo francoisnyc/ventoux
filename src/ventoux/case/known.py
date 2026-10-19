@@ -11,7 +11,14 @@ from decimal import Decimal
 from functools import reduce
 from typing import NamedTuple
 
-from ventoux.case.definition import ActivityStep, CaseDefinition, PlanStep, TaskStep, WaitStep
+from ventoux.case.definition import (
+    ActivityStep,
+    CaseDefinition,
+    PlanStep,
+    TaskStep,
+    WaitStep,
+    rule_fields,
+)
 from ventoux.case.sequence import requirements
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions.model import (
@@ -106,9 +113,14 @@ class Reading:
             both(Known({step: endings}), self.before(step, visiting))
             for step, endings in self.reachers(requirement).items()
         ]
-        # A rule may reach it too, saying nothing of what steps ended or set: a way that proves
-        # nothing, so the milestone proves only what every other way agrees on (brief, D38).
-        ways += [Known() for rule in self.case.rules.values() if requirement in rule.then.reach]
+        # A rule may reach it too, saying nothing of what steps ended, only what the rule set: it
+        # sets before it reaches, and acts whole or not at all, so the milestone proves only what
+        # every way agrees on (brief, D38) (brief, D42).
+        ways += [
+            Known(present=frozenset(rule.then.set))
+            for rule in self.case.rules.values()
+            if requirement in rule.then.reach
+        ]
         # Nothing reaches it: the step can never run (NEVER_RUNS says so), so know nothing.
         return reduce(either, ways) if ways else Known()
 
@@ -172,8 +184,8 @@ class Reading:
         return step, frozenset(ways)
 
     def surely_set(self, name: str, known: Known) -> bool:
-        """Whether the value is surely set: given at the opening, an `exists` said so, or what
-        has surely ended set it every way it may have ended. A value an event carries is set
+        """Whether the value is surely set: given at the opening, an `exists` said so, a milestone
+        only rules setting it reach, or what has surely ended set it every way it may have ended. A value an event carries is set
         once it has arrived: in a rule on it (`present`), or once a wait for it is done; never
         assumed given at the opening (brief, D41)."""
         if name in known.present:
@@ -185,6 +197,10 @@ class Reading:
             if value == "outcome":
                 return step in known.ended  # set whichever way it ended
             return known.ended.get(step) == frozenset({DONE})  # an output: written only when done
+        if name in rule_fields(self.case):
+            # Set only by rules, which may fail, find their condition false, or not fire: never
+            # assumed given at the opening, which never gives it (brief, D42).
+            return False
         setters = set_by_outcomes(self.case).get(name)
         if setters is None:
             return True  # given at the opening (assumed: the opener's to give)

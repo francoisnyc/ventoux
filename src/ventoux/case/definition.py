@@ -591,8 +591,7 @@ def revealing(path: str, name: str, rule: Rule, case: CaseDefinition) -> list[st
             continue  # an outcome, an output or a payload value: seen by every role of the case
         if field.sensitive and not written.sensitive:
             problems.append(
-                f"{path}: {name} is set from {source}, which is sensitive: declare {name} "
-                "sensitive"
+                f"{path}: {name} is set from {source}, which is sensitive: declare {name} sensitive"
             )
         hidden = field.visible_to
         if hidden is not None and (

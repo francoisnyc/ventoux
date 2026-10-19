@@ -10,7 +10,7 @@ from typing import Any
 from ventoux.case.called import called
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
 from ventoux.case.plan_step import PlanNotSupplied, supplied
-from ventoux.case.types import expressions_of, type_problem
+from ventoux.case.types import expressions_of, set_problem, type_problem
 from ventoux.core.approval import risk_refusal
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
@@ -161,6 +161,18 @@ def expression_issues(
             continue
         if (problem := type_problem(rule.when, types, True)) is not None:
             issues.append(Issue(f"rules.{name}.when", "EXPRESSION_INVALID", problem))
+    # And each value a rule sets, against its field's type (brief, D42).
+    for name, rule in case.rules.items():
+        for field, expression in rule.then.set.items():
+            if any(
+                read.split(".")[0] in missing and "." in read for read in fields_read(expression)
+            ):
+                continue
+            declared = case.fields[field].declared
+            if (problem := set_problem(expression, types, declared, field)) is not None:
+                issues.append(
+                    Issue(f"rules.{name}.then.set.{field}", "EXPRESSION_INVALID", problem)
+                )
     return issues
 
 

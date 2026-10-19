@@ -25,7 +25,8 @@ from ventoux.case.rules import said as moment_said
 from ventoux.case.rules import unknown_moment
 from ventoux.case.runtime import listed
 from ventoux.case.types import expressions_of
-from ventoux.case.writers import OPENER, case_sources, untrusted_of
+from ventoux.case.writers import OPENER, untrusted_of
+from ventoux.case.writers import always as always_refused
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions.model import (
     Add,
@@ -86,25 +87,19 @@ def rule_unset_issues(
     nothing has run: the check claims less, never more."""
     found: list[Issue] = []
     for name, rule in reading.case.rules.items():
-        path = f"rules.{name}.when"
-        if rule.when is None or path in said:
-            continue
         on = rule.on
-        if isinstance(on, Reached):
-            known = reading.met(on.reached, frozenset())
-        elif isinstance(on, Started):
-            known = reading.before(on.started)
-        elif isinstance(on, AnsweredTask):
-            known = reading.met(on.answered, frozenset())
-        elif isinstance(on, EventArrived):
-            # The event has just arrived: what it carries is set (brief, D41).
-            payload = reading.case.events[on.event].payload
-            known = Known(present=frozenset(f"{on.event}.{field}" for field in payload))
-        elif on == "opened":
-            known = Known()  # nothing has run
-        else:
-            unknown_moment(on)  # fail closed: never read as the opening
-        for value, at, always in reads(rule.when, known, reading):
+        known = at_moment(reading, on)
+        # The condition is read first; once true, it guards each value the rule sets, which are
+        # read next (brief, D42).
+        read: list[tuple[str, Read]] = []
+        if rule.when is not None and f"rules.{name}.when" not in said:
+            read += [(f"rules.{name}.when", r) for r in reads(rule.when, known, reading)]
+        guarded = known if rule.when is None else reading.holds(rule.when, known)
+        for field, expression in rule.then.set.items():
+            path = f"rules.{name}.then.set.{field}"
+            if path not in said:
+                read += [(path, r) for r in reads(expression, guarded, reading)]
+        for path, (value, at, always) in read:
             if value.partition(".")[0] in missing or reading.surely_set(value, at):
                 continue
             writers = writers_of(reading, value)
@@ -133,6 +128,25 @@ def rule_unset_issues(
                 )
             break  # one issue per rule: the first value the runtime would miss
     return found
+
+
+def at_moment(reading: Reading, on: object) -> Known:
+    """What has surely happened when a rule's moment comes. Its moment stands for a step's
+    requirements: the opening knows nothing has run; a milestone reached, what reaching it
+    proves; a step started, what that step required; a task answered, that it ended, as
+    requiring it does (brief, D39); an event, that what it carries is set (brief, D41)."""
+    if isinstance(on, Reached):
+        return reading.met(on.reached, frozenset())
+    if isinstance(on, Started):
+        return reading.before(on.started)
+    if isinstance(on, AnsweredTask):
+        return reading.met(on.answered, frozenset())
+    if isinstance(on, EventArrived):
+        payload = reading.case.events[on.event].payload
+        return Known(present=frozenset(f"{on.event}.{field}" for field in payload))
+    if on == "opened":
+        return Known()  # nothing has run
+    unknown_moment(on)  # fail closed: never read as the opening
 
 
 def outcome_issues(
@@ -182,9 +196,10 @@ def unread_issue(name: str, unread: list[str]) -> Issue:
 
 def read_outcomes(case: CaseDefinition, field: str) -> set[str]:
     """Every outcome of `field` (`pay.outcome`) some expression of the case tells apart: a
-    step's, or a rule's condition (brief, D38)."""
+    step's, a rule's condition (brief, D38), or a value a rule sets (brief, D42)."""
     expressions = [e for step in case.steps.values() for _, e, _ in expressions_of(step)]
     expressions += [rule.when for rule in case.rules.values() if rule.when is not None]
+    expressions += [e for rule in case.rules.values() for e in rule.then.set.values()]
     return {outcome for expression in expressions for outcome in told_apart(expression, field)}
 
 
@@ -274,6 +289,25 @@ def step_reads(where: str, expression: Expression, known: Known, reading: Readin
 
 def unset_issue(reading: Reading, read: Unset) -> Issue:
     """The read's issue: an error when it fails every time (`SET_AFTER`), a warning otherwise."""
+    computing = [r for r, rule in reading.case.rules.items() if read.value in rule.then.set]
+    if (
+        computing
+        and read.always
+        and all(read.step in at_moment(reading, reading.case.rules[r].on).ended for r in computing)
+    ):
+        # Every rule setting it fires only once the step is done, and the step is done only
+        # after a run that read it: no run of it ever succeeds (brief, D37) (brief, D42).
+        who, fire = (
+            (computing[0], "fires") if len(computing) == 1 else (" or ".join(computing), "fire")
+        )
+        sets = "sets" if len(computing) == 1 else "set"
+        return Issue(
+            f"steps.{read.step}.{read.where}",
+            "SET_AFTER",
+            f"{read.step} reads {read.value}, which only {who} {sets}, and {who} {fire} only "
+            f"after {read.step}: {read.step} fails every time it starts: read it in a step that "
+            f"comes after {who}, or run {read.step} after {who}",
+        )
     writers = writers_of(reading, read.value)
     if set_after(reading, read, writers):
         gives = "gives" if read.value.partition(".")[0] in reading.case.steps else "sets"
@@ -336,6 +370,13 @@ def unset_message(reading: Reading, name: str, value: str, known: Known) -> str:
         return (
             f"{name} reads {value}, which {step} gives only when done, and {step} may end "
             f"{' or '.join(others)}: {fails}: read it only when {step}.outcome is done"
+        )
+    computing = [rule for rule, then in reading.case.rules.items() if value in then.then.set]
+    if computing:
+        return (
+            f"{name} reads {value}, which only rules set ({', '.join(computing)}), and nothing "
+            f"{name} waits for ensures they have: {fails}: require a milestone only they reach, "
+            "or read it only when it exists"
         )
     setters = set_by_outcomes(reading.case)[value]
     waited = [task for task in setters if task in known.ended]
@@ -412,6 +453,11 @@ def never_fetched(
     if writer in case.events:
         return f"the event {writer}, sent from outside, and can't be fetched again"
     step = case.steps.get(writer)
+    computing = [name for name, rule in case.rules.items() if value in rule.then.set]
+    if step is None and computing:
+        rules = " or ".join(computing)
+        a_rule = "a rule that computes" if len(computing) == 1 else "rules that compute"
+        return f"{rules}, {a_rule} it, which doesn't fire again when a fact is fetched again"
     if step is None:
         setters = set_by_outcomes(case).get(value)
         if setters is not None:
@@ -440,12 +486,14 @@ def always_asked(
     case: CaseDefinition, contracts: Mapping[str, Contract], when: Expression | None
 ) -> bool:
     """Whether an approval with the condition `when` is asked every time: it has none, or it
-    reads untrusted data, which can add an approval, never remove one (brief, D39). The opener is
-    trusted either way."""
+    reads data untrusted whichever rule wrote it, which can add an approval, never remove one
+    (brief, D39) (brief, D42). The opener is trusted either way."""
     if when is None:
         return True
-    sources = case_sources(case, contracts, OPENER)
-    return bool(untrusted_of({name: sources.get(name, frozenset()) for name in fields_read(when)}))
+    untrusted = always_refused(
+        case, contracts, OPENER, lambda sources: bool(untrusted_of({"": sources}))
+    )
+    return any(name in untrusted for name in fields_read(when))
 
 
 def elsewhere_issues(case: CaseDefinition, refused: Collection[str]) -> list[Issue]:

@@ -167,5 +167,5 @@ def set_problem(
     except ExpressionInvalid as refused:
         return str(refused)
     if fits_type(found, wanted) is False:
-        return f"{field} is {a_type(wanted)}, and this gives {a_type(found)}"
+        return f"{field} is {a_type(wanted)}, and this gives {a_type(found)}: set it from {a_type(wanted)}"
     return None
