@@ -227,15 +227,16 @@ def write(
     at: int,
 ) -> None:
     """Write a value the rule set: it comes from everything its rule read, its value and its
-    condition, plus the field's mark; it is as old as the oldest fact it read, obtained by the
-    firing, never "now" (brief, D33) (brief, D42). The line names the field and the sources, never
-    the value (brief, D30)."""
+    condition, plus the field's mark, and what steered the start it fired on; it is as old as the
+    oldest fact it read, obtained by the firing, never "now" (brief, D33) (brief, D42)
+    (brief, D43). The line names the field and the sources, never the value (brief, D30)."""
     rule = case.rules[firing.rule]
     read: dict[str, frozenset[str]] = {}
     for expression in (rule.then.set[field], rule.when):
         read |= read_sources(case, catalog, state, expression)
     mark = case.fields[field].source
-    sources = frozenset().union(*read.values(), {mark} if mark else set())
+    steered = (steering.sources for steering in firing.steered)
+    sources = frozenset().union(*read.values(), *steered, {mark} if mark else set())
     ages = [state.obtained[name].at for name in read if name in state.obtained]
     state.values[field] = value
     state.sources[field] = sources
