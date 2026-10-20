@@ -12,10 +12,14 @@ from typing import Any
 
 import pytest
 
+# pytest puts tests/ on the import path (it has no __init__.py), so a helper there imports by
+# its name.
+from invariants import unshown
+
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import run_case_in_memory
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, Opened, TimerDue
+from ventoux.case.state import Answered, Opened, Timer, TimerDue
 from ventoux.case.timers import TimerRefused, next_due, utc
 from ventoux.core.sensitive import Sensitive
 from ventoux.testing import (
@@ -448,3 +452,46 @@ def test_a_timer_isnt_set_once_nothing_new_is_decided() -> None:
         "new is decided"
     ) in run.history
     assert run.closed
+
+
+# --- Slice 4: what a report shows, and nothing pending is silent ---
+
+
+def test_a_report_lists_set_timers_soonest_first_never_in_waiting_for() -> None:
+    # A timer waits on nobody, so it is not in `waiting_for` (brief, D24); `timers` lists each
+    # one set, soonest first, with its due time: the view a due date reads (brief, D44).
+    definition = chased()
+    definition["rules"]["early"] = {
+        "display": {"title": "Early"},
+        "on": {"after": "12h", "since": "opened"},
+        "then": {"start": ["chase"]},
+    }
+    run = run_case(definition, file=SMALL, answers=[], people=PEOPLE)
+    assert run.waiting_for == ["review by support"]
+    assert run.timers == [
+        "early: 12h after opened, due 2026-01-01T12:00:00Z",
+        "chase_review: 2d after started review#1, due 2026-01-03T00:00:00Z",
+    ]
+
+
+def test_the_invariant_finds_a_timer_that_outlived_its_purpose() -> None:
+    # Read on states the runtime never leaves, so the invariant can't pass them either: a timer
+    # set on a run that has ended, and one set while the close is held.
+    case = parse_case(chased())
+    run = run_case(chased(), file=SMALL, answers=[], people=PEOPLE)
+    assert unshown(case, run.state) == []
+    next(r for r in run.state.runs if r.entry == "review#1").status = "done"
+    assert unshown(case, run.state) == [
+        "chase_review, 2d after started review#1 is set, and review#1 has ended"
+    ]
+    held = run_case(
+        holding(),
+        file=SMALL,
+        answers=[APPROVED],
+        people=PEOPLE,
+        activities={"orders.lookup@1": down},
+    )
+    held.state.timers.append(Timer("chase_review", "5d", "opened", START + 5 * DAY))
+    assert unshown(parse_case(holding()), held.state) == [
+        "chase_review, 5d after opened is set, and the close is held: it can never act"
+    ]
