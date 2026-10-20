@@ -11,6 +11,10 @@ dependencies = [
     "temporalio>=1.34.0",
 ]
 
+[project.scripts]
+# The `ventoux` command (layer 11g2): `ventoux simulate STORY.json`.
+ventoux = "ventoux.tooling.cli:main"
+
 [build-system]
 requires = ["uv_build>=0.8,<0.9"]
 build-backend = "uv_build"
