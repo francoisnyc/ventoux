@@ -19,8 +19,11 @@ from ventoux.case.definition import (
     Reached,
     Rule,
     Started,
+    TaskStep,
     Then,
+    WaitStep,
 )
+from ventoux.case.sequence import requirements
 from ventoux.core.expressions import Expression, ExpressionInvalid, render
 
 
@@ -41,6 +44,9 @@ CLAUSES = (
     "untrusted data decides nothing",  # on a rule that reaches or stops (brief, D38) (brief, D43)
     "set value carries what it read",  # setting informs, it never decides (brief, D42)
     "start checked against inputs",  # a start goes ahead, its inputs checked (brief, D39)
+    "what a stop does",  # what a close does, to one step: a call isn't cut off (brief, D40)
+    "a start is a proposal",  # admission decides, as for a person's (brief, D39)
+    "reaching closes the case",  # a closes_when milestone cancels what is open (brief, D10)
     "only while the case decides",  # not once closing, nor closes_when reached (brief, D38)
     "every rule",  # EVERY_RULE, said once above a definition's readings
 )
@@ -203,6 +209,9 @@ def fine_print(name: str, rule: Rule, case: CaseDefinition) -> list[Clause]:
             Clause("listening", f"Listening for {anchor.event} doesn't keep the case open.")
         )
     fine += trust(rule, case)
+    fine += stops(rule.then, case)
+    fine += starts(rule.then, case)
+    fine += closes(rule.then, case)
     fine.append(deciding(case))
     return fine
 
@@ -236,22 +245,27 @@ def trust(rule: Rule, case: CaseDefinition) -> list[Clause]:
     then = rule.then
     anchor = rule.on.since if isinstance(rule.on, After) else rule.on
     steered = f"the run of {anchor.started}" if isinstance(anchor, Started) else None
-    if then.reach or then.stop:
+    decides = bool(then.reach or then.stop)
+    fine: list[Clause] = []
+    if decides:
         # Reaching or stopping decides for the case, so untrusted data stops the whole rule
         # (brief, D38) (brief, D40) (brief, D42).
         why = [
             *(["its condition reads untrusted data"] if rule.when is not None else []),
             *([f"untrusted data steered {steered}"] if steered else []),
         ]
-        if not why:
-            return []  # nothing it reads or rests on can be untrusted
-        return [Clause("untrusted data decides nothing", f"If {', or '.join(why)}, {UNTRUSTED}")]
-    fine: list[Clause] = []
+        if why:  # else nothing it reads or rests on can be untrusted
+            fine.append(
+                Clause("untrusted data decides nothing", f"If {', or '.join(why)}, {UNTRUSTED}")
+            )
     if then.set:
-        # Setting informs: the value carries everything its rule read (brief, D42).
-        also = f", and what steered {steered}" if steered else ""
+        # Setting informs: the value carries everything its rule read (brief, D42). A rule that
+        # also reaches or stops doesn't act on a steered start, so its values never carry that.
+        also = f", and what steered {steered}" if steered and not decides else ""
         carried = f"The values it sets carry the sources of everything it read{also}."
         fine.append(Clause("set value carries what it read", carried))
+    if decides:
+        return fine  # untrusted data stops it whole: what it starts never rests on untrusted data
     taking = [step for step in then.start if takes_inputs(case, step)]
     read = [
         *(["its condition reads"] if rule.when is not None else []),
@@ -296,3 +310,75 @@ def deciding(case: CaseDefinition) -> Clause:
         f"Only while the case decides: not once {milestones} {verb} reached, nor once the case "
         "is closing.",
     )
+
+
+def stops(then: Then, case: CaseDefinition) -> list[Clause]:
+    """What a stop does to each step it names: what a close does, to one step. An open task or
+    wait is cancelled at once; a running call can't be cut off halfway (brief, D10) (brief, D40)."""
+    fine: list[Clause] = []
+    for name in then.stop:
+        step = case.steps[name]
+        if isinstance(step, TaskStep | WaitStep):
+            text = f"Stopping {name} cancels its open run at once."
+        elif isinstance(step, CallStep | PlanStep):
+            text = (
+                f"Stopping {name} doesn't cut off a running call: it may still finish, and if it "
+                "does, what it gives lands and the case is flagged. A run not yet started is "
+                "cancelled; a failed run isn't stopped."
+            )
+        else:
+            # Fail closed: a kind of step the reader doesn't know is refused, never guessed.
+            raise ReadingRefused(
+                f"can't read what stopping {name} does: {step!r} is no kind of step"
+            )
+        fine.append(Clause("what a stop does", text))
+    return fine
+
+
+def starts(then: Then, case: CaseDefinition) -> list[Clause]:
+    """What a start does: the engine proposes a run, and admission decides as for a person's
+    proposal; a start it can't make is recorded, and nothing runs (brief, D39)."""
+    required = requirements(case) if then.start else {}
+    fine: list[Clause] = []
+    for name in then.start:
+        step = case.steps[name]
+        calls = isinstance(step, CallStep | PlanStep)
+        approval = isinstance(step, CallStep) and step.approval is not None
+        why = [
+            *(["its requirements aren't met"] if required[name] else []),
+            *(["its condition is false"] if step.when is not None else []),
+            "it is already running" + (" or waiting for its approval" if approval else ""),
+            *(["it has run and isn't repeatable"] if not step.repeatable else []),
+            *(["its latest run needs attention"] if calls else []),
+        ]
+        text = (
+            f"Starting {name} proposes a run, decided as a person's proposal is: nothing starts, "
+            f"and the history says why, if {listed(why)}."
+        )
+        if approval:
+            text += " It waits for its approval when one is needed."
+        fine.append(Clause("a start is a proposal", text))
+    return fine
+
+
+def closes(then: Then, case: CaseDefinition) -> list[Clause]:
+    """What reaching a `closes_when` milestone does: the case closes, cancelling what is open, and
+    running calls finish (brief, D10) (brief, D34)."""
+    reached = [milestone for milestone in then.reach if milestone in case.closes_when]
+    if not reached:
+        return []
+    others = [milestone for milestone in case.closes_when if milestone not in then.reach]
+    verb = "is" if len(others) == 1 else "are"
+    once = f" once {' and '.join(others)} {verb} reached too" if others else ""
+    return [
+        Clause(
+            "reaching closes the case",
+            f"Reaching {' and '.join(reached)} closes the case{once}, unless a failed run holds "
+            "the close: open tasks, approvals and timers are cancelled, and running calls finish.",
+        )
+    ]
+
+
+def listed(parts: list[str]) -> str:
+    """`a`, `a, or b`, `a, b, or c`: the reasons a start may be refused, read as one list."""
+    return parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])}, or {parts[-1]}"

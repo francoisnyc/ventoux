@@ -8,19 +8,25 @@ See docs/layers/11-rules.md (11g), the brief, D45, and docs/guides/cases.md, "Re
 import inspect
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any, get_args, get_origin
+from typing import Annotated, Any, cast, get_args, get_origin
 
 import pytest
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_rules import (
+    APPROVED_40,
     SAYS_SEND,
+    SMALL_REVIEW,
+    WITHDRAWS,
     closing_on_paid,
     notes_say_send,
+    only_a_rule_starts,
     unreadable,
     welcome_file,
     with_kyc_rule,
+    with_rule,
     with_welcome,
+    withdrawable,
 )
 from test_set import FILE as OWED_FILE
 from test_set import with_owed
@@ -501,6 +507,150 @@ def test_what_every_rule_does_is_said_once() -> None:
     )
     assert run.needs_attention[0].startswith("flag_large#1: flag_large's condition")
     assert "reached large" not in run.history and not run.closed
+
+
+# --- From the tutor review: what a stop, a start and a close really do ---
+
+
+@witness("what a stop does")
+def test_a_stop_reads_as_what_the_engine_does_to_each_kind() -> None:
+    # A stop is what a close does, to one step: an open task is cancelled at once, a running call
+    # finishes and flags the case (brief, D10, D40). "stop pay" alone reads as if the payment stops.
+    reading = reading_of(withdrawable(), "withdraw")
+    assert "what a stop does" in reading.clauses
+    assert "Stopping review cancels its open run at once." in reading.fine_print
+    assert (
+        "Stopping pay doesn't cut off a running call: it may still finish, and if it does, what "
+        "it gives lands and the case is flagged. A run not yet started is cancelled; a failed run "
+        "isn't stopped."
+    ) in reading.fine_print
+    open_task = run_case(withdrawable(), file=SMALL, answers=WITHDRAWS, people=PEOPLE)
+    assert "cancelled review#1: stopped by withdraw#1" in open_task.history
+    paying = run_case(
+        withdrawable(),
+        file=SMALL,
+        answers=[SMALL_REVIEW, *WITHDRAWS, finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+    )
+    assert "pay#1 done, giving refund_id from untrusted:undeclared" in paying.history
+    assert paying.flags == ["pay#1 completed after its stop was requested by withdraw#1"]
+
+
+def test_a_stopped_step_of_a_kind_the_reader_doesnt_know_is_refused() -> None:
+    # `parse_case` refuses an unknown kind first; this is a definition that didn't come through it.
+    case = parse_case(withdrawable())
+    case.steps["review"] = cast(Any, "a meeting")
+    with pytest.raises(ReadingRefused) as refused:
+        read_rules(case)
+    assert str(refused.value) == (
+        "can't read what stopping review does: 'a meeting' is no kind of step"
+    )
+
+
+def pay_on_approval() -> dict[str, Any]:
+    """The refund whose payment a rule starts once the review is approved; over 100, a team lead
+    approves it first."""
+    definition = with_rule(
+        on={"answered": "review"},
+        when={"==": [{"var": "review.outcome"}, "approve"]},
+        then={"start": ["pay"]},
+    )
+    definition["steps"]["pay"] |= {"automatic": False}
+    del definition["sequence"]
+    return definition
+
+
+@witness("a start is a proposal")
+def test_a_start_reads_as_a_proposal_admission_decides() -> None:
+    # The engine proposes, and admission decides as for a person's proposal: "start pay" alone
+    # reads as if pay starts (brief, D39).
+    reading = reading_of(pay_on_approval(), "flag_large")
+    assert "a start is a proposal" in reading.clauses
+    assert (
+        "Starting pay proposes a run, decided as a person's proposal is: nothing starts, and the "
+        "history says why, if its condition is false, it is already running or waiting for its "
+        "approval, it has run and isn't repeatable, or its latest run needs attention. It waits "
+        "for its approval when one is needed."
+    ) in reading.fine_print
+    big = ("review", "approve", "ana", {"approved_amount": 250})
+    run = run_case(pay_on_approval(), file=SMALL, answers=[big], people=PEOPLE)
+    assert "flag_large#1 on answered review: starting pay" in run.history
+    assert "asked pay.approval#1: approval of pay by support-lead" in run.history
+    assert not any(line.startswith("scheduled pay") for line in run.history)
+    # Its requirements not met: nothing starts, and the history says why.
+    requiring = only_a_rule_starts(requires=["pay"])
+    assert (
+        "Starting lead_check proposes a run, decided as a person's proposal is: nothing starts, "
+        "and the history says why, if its requirements aren't met, it is already running, or it "
+        "has run and isn't repeatable."
+    ) in reading_of(requiring, "flag_large").fine_print
+    run = run_case(requiring, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
+    assert (
+        "flag_large#1 on answered review: lead_check not started: lead_check requires pay, which "
+        "hasn't completed"
+    ) in run.history
+
+
+def closing_on_a_note() -> dict[str, Any]:
+    """The refund closing once `large` is reached, which a rule reaches when a note is answered;
+    a timer is set at the opening."""
+    definition = with_rule(on={"answered": "note"}, when=None)
+    definition["closes_when"] = ["large"]
+    definition["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the refund"},
+        "roles": ["support"],
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    definition["rules"]["remind"] = {
+        "display": {"title": "Remind"},
+        "on": {"after": "2d", "since": "opened"},
+        "then": {"start": ["note"]},
+    }
+    return definition
+
+
+@witness("reaching closes the case")
+def test_reaching_closes_when_reads_as_closing_the_case() -> None:
+    # "reach large" alone doesn't say the case closes, cancelling what is open (brief, D10).
+    reading = reading_of(closing_on_a_note(), "flag_large")
+    assert "reaching closes the case" in reading.clauses
+    assert (
+        "Reaching large closes the case, unless a failed run holds the close: open tasks, "
+        "approvals and timers are cancelled, and running calls finish."
+    ) in reading.fine_print
+    run = run_case(
+        closing_on_a_note(), file=SMALL, answers=[("note", "noted", "ana")], people=PEOPLE
+    )
+    assert run.history[-4:] == [
+        "reached large",
+        "cancelled review#1: the case closes when large is reached",
+        "cancelled remind, 2d after opened: the case closes when large is reached",
+        "closed: large reached",
+    ]
+    # With two closes_when milestones, it says which other must be reached too.
+    both = closing_on_a_note()
+    both["milestones"]["paid"] = {"display": {"title": "Paid"}}
+    both["closes_when"] = ["large", "paid"]
+    assert (
+        "Reaching large closes the case once paid is reached too, unless a failed run holds the "
+        "close: open tasks, approvals and timers are cancelled, and running calls finish."
+    ) in reading_of(both, "flag_large").fine_print
+
+
+def test_a_set_value_on_a_rule_that_reaches_still_reads_as_carrying_what_it_read() -> None:
+    # Untrusted data stops the whole rule, but a trusted value still carries a person's source,
+    # which decides who may approve a step it reaches (brief, D42).
+    definition = with_owed()
+    definition["milestones"] = {"owed_known": {"display": {"title": "What is owed is known"}}}
+    definition["rules"]["work_out_owed"]["then"]["reach"] = ["owed_known"]
+    reading = reading_of(definition, "work_out_owed")
+    assert "The values it sets carry the sources of everything it read." in reading.fine_print
+    run = run_case(definition, file=OWED_FILE, answers=[APPROVED], people=PEOPLE)
+    assert (
+        "work_out_owed#1 on answered review: setting owed, from person:ana, system:opener"
+    ) in run.history
 
 
 def test_every_clause_has_a_witness() -> None:

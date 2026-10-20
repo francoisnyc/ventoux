@@ -1520,6 +1520,15 @@ whose text is kept.*
 - **Each faithful part has a witness:** a test that reads a rule with that part and runs a case
   where the engine does what it says. The parts form a closed list, and a test checks that the
   witnesses cover it, so a reading can't drift from the engine.
+- **An action reads as what the engine does, not as its name.** A stop reads as what a close
+  does to one step: an open task or wait is cancelled at once; a running call isn't cut off, and
+  if it finishes, what it gives lands and the case is flagged; a run not yet started is cancelled;
+  a failed run is never stopped (D10, D40). A start reads as a proposal that admission decides as
+  it would a person's, saying why when nothing starts, and waiting for an approval (D39). Reaching
+  a `closes_when` milestone reads as closing the case, cancelling what is open (D10, D34). A value
+  set by a rule that also reaches or stops still reads as carrying what it read (D42). Why: "stop
+  pay" read as if the payment stopped, and the refund went through. *Added in the tutor review of
+  11g1, before D45 was merged.*
 - **A story is data, played in simulated time** (D7, D33): a JSON file naming its definition,
   the opening's values, people's roles, a fake for each contract the definition calls, and a
   timeline of answers, proposals, retries, closes, events, held runs finishing and time passing,
