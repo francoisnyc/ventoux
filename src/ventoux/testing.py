@@ -16,7 +16,7 @@ from temporalio.converter import DataConverter
 from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused
-from ventoux.case.definition import CaseDefinition, parse_case
+from ventoux.case.definition import parse_case
 from ventoux.case.freshness import seconds_in
 from ventoux.case.memory import (
     Activity,
@@ -24,7 +24,9 @@ from ventoux.case.memory import (
     CaseRun,
     Finish,
     PlanRunner,
+    as_json,
     run_case_in_memory,
+    wrapped,
 )
 from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
 from ventoux.case.runtime import CaseRefused, EventRefused
@@ -78,6 +80,7 @@ __all__ = [
     "ProposalRefused",
     "RetryRefused",
     "StepStopped",
+    "as_json",
     "check_workflow_contract",
     "close",
     "finish",
@@ -88,6 +91,7 @@ __all__ = [
     "run_plan",
     "send",
     "shown",
+    "wrapped",
 ]
 
 
@@ -645,24 +649,6 @@ def send(event: str, payload: Mapping[str, Any], by: str) -> Sending:
 def propose(step: str, who: str) -> Proposal:
     """A script's proposal: `propose("check_order", "ana")`, played in order with the answers."""
     return Proposal(step, who)
-
-
-def as_json(values: Mapping[str, Any]) -> dict[str, Any]:
-    """`values` as the API would pass them on from JSON, whose numbers are exact decimals
-    (brief, D20): a whole number in a test is one. A float is passed on as it is, and refused by
-    the type check, since it may already have lost its exact value."""
-    return {
-        name: Decimal(value) if isinstance(value, int) and not isinstance(value, bool) else value
-        for name, value in values.items()
-    }
-
-
-def wrapped(case: CaseDefinition, file: Mapping[str, Any]) -> dict[str, Any]:
-    """`file` as the client sends it: each sensitive field's value wrapped (brief, D31)."""
-    return {
-        name: Sensitive(value) if name in case.fields and case.fields[name].sensitive else value
-        for name, value in file.items()
-    }
 
 
 def run_plan(

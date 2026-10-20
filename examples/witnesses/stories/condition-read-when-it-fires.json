@@ -1,0 +1,61 @@
+{
+  "title": "A rule's condition reads the answer that brought its moment",
+  "definition": "../condition-read-when-it-fires.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ],
+    "omar": [
+      "operations"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1",
+      "answer": {
+        "step": "review",
+        "outcome": "approve",
+        "by": "ana",
+        "form": {
+          "approved_amount": 250
+        }
+      }
+    }
+  ],
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support"
+      ],
+      "day 1 00:00": [
+        "ana answers review: approve, with approved_amount",
+        "ana answered review#1 approve as support, setting approved_amount",
+        "review#1 done",
+        "chase_review#1 on answered review: starting chase",
+        "started chase#1: waiting for chased by support-lead",
+        "asked pay.approval#1: approval of pay by support-lead"
+      ]
+    },
+    "end": [
+      "status: open",
+      "waiting for: chase by support-lead, approval of pay by support-lead"
+    ]
+  }
+}

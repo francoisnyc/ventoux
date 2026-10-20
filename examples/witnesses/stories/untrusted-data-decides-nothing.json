@@ -1,0 +1,59 @@
+{
+  "title": "A goodbye the customer's note started closes nothing",
+  "definition": "../untrusted-data-decides-nothing.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ],
+    "omar": [
+      "operations"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1",
+      "send": {
+        "event": "cancelled",
+        "payload": {
+          "note": "please cancel"
+        },
+        "by": "system:portal"
+      }
+    }
+  ],
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support"
+      ],
+      "day 1 00:00": [
+        "system:portal sends cancelled, with note",
+        "cancelled#1 from portal, giving note from system:portal, untrusted:customer",
+        "say_goodbye#1 on event cancelled: starting goodbye",
+        "started goodbye#1: waiting for called by support",
+        "close_it#1 on started goodbye: reaches nothing: its moment comes from untrusted data: say_goodbye#1's condition, which started goodbye, reads cancelled.note (untrusted:customer), and untrusted data can't decide"
+      ]
+    },
+    "end": [
+      "status: open",
+      "waiting for: review by support, goodbye by support"
+    ]
+  }
+}

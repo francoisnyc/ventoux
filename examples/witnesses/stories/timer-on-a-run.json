@@ -1,0 +1,64 @@
+{
+  "title": "A review answered within two days ends its chase",
+  "definition": "../timer-on-a-run.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ],
+    "omar": [
+      "operations"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1",
+      "answer": {
+        "step": "review",
+        "outcome": "approve",
+        "by": "ana",
+        "form": {
+          "approved_amount": 40
+        }
+      }
+    }
+  ],
+  "until": "day 3",
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support",
+        "set chase_review: 2d after started review#1, due 2026-01-03T00:00:00Z"
+      ],
+      "day 1 00:00": [
+        "ana answers review: approve, with approved_amount",
+        "ana answered review#1 approve as support, setting approved_amount",
+        "review#1 done",
+        "scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key story/pay#1",
+        "cancelled chase_review, 2d after started review#1: review#1 is done",
+        "pay#1 done, giving refund_id from untrusted:undeclared",
+        "closed: nothing left to do"
+      ]
+    },
+    "end": [
+      "status: closed",
+      "nothing pending"
+    ]
+  }
+}

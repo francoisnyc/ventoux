@@ -1,0 +1,63 @@
+{
+  "title": "A rule on the milestone that closes the case is not applied",
+  "definition": "../only-while-the-case-decides.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ],
+    "omar": [
+      "operations"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1",
+      "answer": {
+        "step": "review",
+        "outcome": "approve",
+        "by": "ana",
+        "form": {
+          "approved_amount": 40
+        }
+      }
+    }
+  ],
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support"
+      ],
+      "day 1 00:00": [
+        "ana answers review: approve, with approved_amount",
+        "ana answered review#1 approve as support, setting approved_amount",
+        "review#1 done",
+        "scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key story/pay#1",
+        "pay#1 done, giving refund_id from untrusted:undeclared",
+        "reached paid",
+        "flag_large#1 on reached paid: not applied: paid is reached, so the case closes and nothing new is decided",
+        "closed: paid reached"
+      ]
+    },
+    "end": [
+      "status: closed",
+      "nothing pending"
+    ]
+  }
+}

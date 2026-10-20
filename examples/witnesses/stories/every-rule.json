@@ -1,0 +1,56 @@
+{
+  "title": "A rule that can't be read needs attention, and the case stays open",
+  "definition": "../every-rule.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 250
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ],
+    "omar": [
+      "operations"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1",
+      "answer": {
+        "step": "review",
+        "outcome": "reject",
+        "by": "ana"
+      }
+    }
+  ],
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "flag_large#1 failed: flag_large's condition approved_amount > 1000 can't be evaluated: approved_amount has no value",
+        "started review#1: waiting for approve or reject by support"
+      ],
+      "day 1 00:00": [
+        "ana answers review: reject",
+        "ana answered review#1 reject as support",
+        "review#1 done"
+      ]
+    },
+    "end": [
+      "status: open",
+      "needs attention: flag_large#1: flag_large's condition approved_amount > 1000 can't be evaluated: approved_amount has no value"
+    ]
+  }
+}
