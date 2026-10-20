@@ -5,18 +5,31 @@ Tests go through `parse_case` and `read_rules`, and, for each part a reading say
 See docs/layers/11-rules.md (11g), the brief, D45, and docs/guides/cases.md, "Reading rules".
 """
 
-import copy
+import inspect
 from collections.abc import Callable
+from pathlib import Path
 from typing import Annotated, Any, get_args, get_origin
 
 import pytest
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
+from test_rules import (
+    SAYS_SEND,
+    closing_on_paid,
+    notes_say_send,
+    unreadable,
+    welcome_file,
+    with_kyc_rule,
+    with_welcome,
+)
+from test_set import FILE as OWED_FILE
+from test_set import with_owed
 from test_timers import APPROVED, CLOSABLE, NOTED, PEOPLE, SMALL, chased, down
+from test_untrusted_moment import LETTER, cancelled, say_goodbye
 
 from ventoux.case.definition import RuleMoment, Then, parse_case
-from ventoux.case.reading import CLAUSES, ReadingRefused, read_rules
-from ventoux.testing import close, later, run_case, send
+from ventoux.case.reading import CLAUSES, EVERY_RULE, ReadingRefused, read_rules
+from ventoux.testing import close, finish, later, run_case, send
 
 # --- Slice 1: the moments ---
 
@@ -310,8 +323,221 @@ def test_a_rule_on_an_event_reads_as_listening() -> None:
     assert run.closed
 
 
-def unused(*_: Any) -> None:
-    """Keeps the imports used while the file grows slice by slice."""
+UNTRUSTED = "it acts on nothing, and says why: untrusted data can't decide."
 
 
-unused(copy, PEOPLE, SMALL)
+@witness("untrusted data decides nothing")
+def test_untrusted_data_reads_as_deciding_nothing() -> None:
+    # Its condition reads the model's notes: the rule reaches nothing (brief, D38).
+    definition = with_kyc_rule({"!=": [{"var": "kyc.analyst_notes"}, ""]})
+    reading = reading_of(definition, "flag_high_risk")
+    assert "untrusted data decides nothing" in reading.clauses
+    assert f"If its condition reads untrusted data, {UNTRUSTED}" in reading.fine_print
+    run = run_case(definition, file={**SMALL, "customer_id": "c-1"}, answers=[], people=PEOPLE)
+    assert (
+        "flag_high_risk#1 on reached checked: reaches nothing: its condition reads "
+        "kyc.analyst_notes, from untrusted:llm, and untrusted data can't decide"
+    ) in run.history
+    # It reads nothing, and is set on a start the customer's note steered (brief, D43).
+    steered = say_goodbye()
+    reading = reading_of(steered, "close_it")
+    assert f"If untrusted data steered the run of goodbye, {UNTRUSTED}" in reading.fine_print
+    run = run_case(steered, file=SMALL, answers=[cancelled()], people=PEOPLE)
+    assert (
+        "close_it#1 on started goodbye: reaches nothing: its moment comes from untrusted data: "
+        "say_goodbye#1's condition, which started goodbye, reads cancelled.note "
+        "(untrusted:customer), and untrusted data can't decide"
+    ) in run.history
+
+
+@witness("set value carries what it read")
+def test_a_set_value_reads_as_carrying_what_it_read() -> None:
+    reading = reading_of(with_owed(), "work_out_owed")
+    assert "set value carries what it read" in reading.clauses
+    assert "The values it sets carry the sources of everything it read." in reading.fine_print
+    run = run_case(with_owed(), file=OWED_FILE, answers=[APPROVED], people=PEOPLE)
+    assert (
+        "work_out_owed#1 on answered review: setting owed, from person:ana, system:opener"
+    ) in run.history
+    # On a steered start, it carries what steered it too (brief, D43).
+    steered = say_goodbye({"set": {"leaving": {">": [{"var": "amount"}, 0]}}})
+    steered["fields"]["leaving"] = {"type": "boolean", "display": {"title": "Leaving"}}
+    assert (
+        "The values it sets carry the sources of everything it read, and what steered the run "
+        "of goodbye."
+    ) in reading_of(steered, "close_it").fine_print
+    run = run_case(steered, file=SMALL, answers=[cancelled()], people=PEOPLE)
+    assert run.state.sources["leaving"] == {"system:opener", "untrusted:customer"}
+
+
+@witness("start checked against inputs")
+def test_a_start_reads_as_checked_against_inputs() -> None:
+    definition = with_welcome(SAYS_SEND)
+    del definition["steps"]["welcome"]["when"]
+    definition["steps"]["welcome"]["automatic"] = False
+    definition["rules"]["send_welcome"] = {
+        "display": {"title": "Send a welcome letter"},
+        "on": {"reached": "checked"},
+        "when": SAYS_SEND,
+        "then": {"start": ["welcome"]},
+    }
+    reading = reading_of(definition, "send_welcome")
+    assert "start checked against inputs" in reading.clauses
+    assert (
+        "What its condition reads counts for the inputs of welcome: an input whose policy "
+        "refuses an untrusted source is refused, and its run fails."
+    ) in reading.fine_print
+    run = run_case(
+        definition,
+        file=welcome_file(),
+        answers=[],
+        people=PEOPLE,
+        workflows={"kyc.check@1": notes_say_send},
+    )
+    assert run.needs_attention == [
+        (
+            "welcome#1: letters.draft@2 takes to_customer only from a system or a person, never "
+            "from untrusted data, and send_welcome#1's condition, which started welcome, reads "
+            "kyc.analyst_notes (untrusted:llm)"
+        )
+    ]
+    # Set on a steered start, the start carries what steered it (brief, D43).
+    steered = say_goodbye({"start": ["letter"]}, steps={"letter": LETTER})
+    assert (
+        "What steered the run of goodbye counts for the inputs of letter: an input whose policy "
+        "refuses an untrusted source is refused, and its run fails."
+    ) in reading_of(steered, "close_it").fine_print
+    run = run_case(steered, file=SMALL, answers=[cancelled()], people=PEOPLE)
+    assert run.needs_attention[0].startswith("letter#1: letters.draft@2 takes to_customer only")
+
+
+def test_a_start_of_a_step_without_inputs_says_nothing_of_them() -> None:
+    # The fine print says only what applies: the chase is a task, and takes no inputs.
+    assert not any("inputs" in line for line in reading_of(chased()).fine_print)
+
+
+@witness("only while the case decides")
+def test_a_rule_reads_as_acting_only_while_the_case_decides() -> None:
+    definition = closing_on_paid(on={"reached": "paid"}, when=None)
+    reading = reading_of(definition, "flag_large")
+    assert "only while the case decides" in reading.clauses
+    assert (
+        "Only while the case decides: not once paid is reached, nor once the case is closing."
+    ) in reading.fine_print
+    run = run_case(definition, file=SMALL, answers=[APPROVED], people=PEOPLE)
+    assert (
+        "flag_large#1 on reached paid: not applied: paid is reached, so the case closes and "
+        "nothing new is decided"
+    ) in run.history
+    # Without closes_when: a person's close. The payment runs on, and reaches paid while the
+    # case is closing (brief, D10).
+    closing = chased({"reached": "paid"}, close_reasons=CLOSABLE)
+    closing["milestones"] = {"paid": {"display": {"title": "Paid"}}}
+    closing["steps"]["pay"]["reaches"] = ["paid"]
+    decides = "Only while the case decides: not once the case is closing."
+    assert decides in reading_of(closing).fine_print
+    answers = [APPROVED, close("duplicate", "ana"), finish("pay#1")]
+    run = run_case(closing, file=SMALL, answers=answers, people=PEOPLE, held=["pay"])
+    assert (
+        "chase_review#1 on reached paid: not applied: the case is closing, so nothing new is "
+        "decided"
+    ) in run.history
+
+
+@witness("condition read when it fires")
+def test_a_condition_reads_as_read_when_it_fires() -> None:
+    # Read on the case file as the answer left it: the amount this very answer gives.
+    definition = chased({"answered": "review"})
+    definition["rules"]["chase_review"]["when"] = {">": [{"var": "approved_amount"}, 100]}
+    reading = reading_of(definition)
+    assert "condition read when it fires" in reading.clauses
+    assert "if approved_amount > 100 (read when it fires)" in reading.sentence
+    big = ("review", "approve", "ana", {"approved_amount": 250})
+    run = run_case(definition, file=SMALL, answers=[big], people=PEOPLE)
+    assert "chase_review#1 on answered review: starting chase" in run.history
+
+
+@witness("timer's condition read when it fires")
+def test_a_timers_condition_reads_as_read_when_the_timer_fires() -> None:
+    # Set at the opening, when nothing is approved; read two days later, on the case file then.
+    definition = chased({"after": "2d", "since": "opened"})
+    definition["rules"]["chase_review"]["when"] = {">": [{"var": "approved_amount"}, 100]}
+    reading = reading_of(definition)
+    assert "timer's condition read when it fires" in reading.clauses
+    assert "(read when the timer fires, not when it is set)" in reading.sentence
+    big = ("review", "approve", "ana", {"approved_amount": 250})
+    run = run_case(definition, file=SMALL, answers=[later("1d"), big, later("1d")], people=PEOPLE)
+    assert "chase_review#1 on 2d after opened: starting chase" in run.history
+
+
+@witness("actions in the engine's order")
+def test_actions_read_in_the_order_the_engine_takes_them() -> None:
+    reading = reading_of(every_action())
+    assert "actions in the engine's order" in reading.clauses
+    run = run_case(every_action(), file=SMALL, answers=[APPROVED], people=PEOPLE)
+    said = [line for line in run.history if line.startswith("chase_review#1 on answered review")]
+    assert [line.split(": ")[1].split(" ")[0] for line in said] == [
+        "stopping",
+        "call_customer",  # `call_customer not stopped`: nothing of it was running
+        "setting",
+        "reaching",
+        "starting",
+        "starting",
+    ]
+
+
+@witness("every rule")
+def test_what_every_rule_does_is_said_once() -> None:
+    assert EVERY_RULE == (
+        "A rule remembers nothing: its condition is read once, when it fires. A rule whose "
+        "condition or value can't be read acts on nothing, and needs attention."
+    )
+    # Never read as false: the rule fails, and waits for a person (brief, D17) (brief, D38).
+    run = run_case(
+        unreadable(),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[("review", "reject", "ana")],
+        people=PEOPLE,
+    )
+    assert run.needs_attention[0].startswith("flag_large#1: flag_large's condition")
+    assert "reached large" not in run.history and not run.closed
+
+
+def test_every_clause_has_a_witness() -> None:
+    # A clause can't be added without a run showing the engine does what it says (brief, D45).
+    assert WITNESSED == set(CLAUSES)
+
+
+# --- Slice 5: the guide, and what a reading is given ---
+
+
+def test_a_reading_needs_only_the_definition() -> None:
+    # It is given no case file, so it can't quote a value from one; the constants it shows are
+    # the rule's own (brief, D45).
+    assert list(inspect.signature(read_rules).parameters) == ["case"]
+    definition = with_kyc_rule({">": [{"var": "kyc.risk_score"}, 70]})
+    [reading] = read_rules(parse_case(definition))
+    assert "kyc.risk_score > 70" in reading.sentence
+
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+READING_SECTION = GUIDE.split("## Reading rules\n")[1].split("\n## ")[0]
+
+
+def plain_blocks() -> list[str]:
+    """The section's plain code blocks, in order."""
+    return [
+        block.split("\n", 1)[1]
+        for block in READING_SECTION.split("```")[1::2]
+        if block.startswith("\n")
+    ]
+
+
+def test_the_guides_readings_are_the_renderers() -> None:
+    timer, flag, every = plain_blocks()
+    [chase] = read_rules(parse_case(chased()))
+    assert timer == f"{chase}\n"
+    risky = with_kyc_rule({">": [{"var": "kyc.risk_score"}, 70]})
+    [flagged] = read_rules(parse_case(risky))
+    assert flag == f"{flagged}\n"
+    assert every == f"{EVERY_RULE}\n"

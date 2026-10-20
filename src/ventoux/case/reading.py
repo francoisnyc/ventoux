@@ -12,8 +12,10 @@ from typing import NamedTuple
 from ventoux.case.definition import (
     After,
     AnsweredTask,
+    CallStep,
     CaseDefinition,
     EventArrived,
+    PlanStep,
     Reached,
     Rule,
     Started,
@@ -36,6 +38,18 @@ CLAUSES = (
     "timer on an instant",  # lives until it fires (brief, D44)
     "timer holds the case",  # pending work, cancelled by a close (brief, D10)
     "listening",  # a rule on an event holds nothing (brief, D41)
+    "untrusted data decides nothing",  # on a rule that reaches or stops (brief, D38) (brief, D43)
+    "set value carries what it read",  # setting informs, it never decides (brief, D42)
+    "start checked against inputs",  # a start goes ahead, its inputs checked (brief, D39)
+    "only while the case decides",  # not once closing, nor closes_when reached (brief, D38)
+    "every rule",  # EVERY_RULE, said once above a definition's readings
+)
+
+# What holds for every rule, said once above a definition's readings rather than on each
+# (brief, D17) (brief, D38).
+EVERY_RULE = (
+    "A rule remembers nothing: its condition is read once, when it fires. A rule whose condition "
+    "or value can't be read acts on nothing, and needs attention."
 )
 
 
@@ -188,6 +202,8 @@ def fine_print(name: str, rule: Rule, case: CaseDefinition) -> list[Clause]:
         fine.append(
             Clause("listening", f"Listening for {anchor.event} doesn't keep the case open.")
         )
+    fine += trust(rule, case)
+    fine.append(deciding(case))
     return fine
 
 
@@ -212,3 +228,71 @@ def timer_anchor(name: str, since: object) -> Clause:
     else:
         raise unknown(name, since)
     return Clause("timer on an instant", f"The timer is set {instant}, and lives until it fires.")
+
+
+def trust(rule: Rule, case: CaseDefinition) -> list[Clause]:
+    """What untrusted data does to the rule: what its condition reads and, on a run's start, what
+    steered that run (brief, D43)."""
+    then = rule.then
+    anchor = rule.on.since if isinstance(rule.on, After) else rule.on
+    steered = f"the run of {anchor.started}" if isinstance(anchor, Started) else None
+    if then.reach or then.stop:
+        # Reaching or stopping decides for the case, so untrusted data stops the whole rule
+        # (brief, D38) (brief, D40) (brief, D42).
+        why = [
+            *(["its condition reads untrusted data"] if rule.when is not None else []),
+            *([f"untrusted data steered {steered}"] if steered else []),
+        ]
+        if not why:
+            return []  # nothing it reads or rests on can be untrusted
+        return [Clause("untrusted data decides nothing", f"If {', or '.join(why)}, {UNTRUSTED}")]
+    fine: list[Clause] = []
+    if then.set:
+        # Setting informs: the value carries everything its rule read (brief, D42).
+        also = f", and what steered {steered}" if steered else ""
+        carried = f"The values it sets carry the sources of everything it read{also}."
+        fine.append(Clause("set value carries what it read", carried))
+    taking = [step for step in then.start if takes_inputs(case, step)]
+    read = [
+        *(["its condition reads"] if rule.when is not None else []),
+        *([f"steered {steered}"] if steered else []),
+    ]
+    if taking and read:
+        # A start goes ahead, and what chose it is checked against each input's policy
+        # (brief, D39) (brief, D43).
+        what = "What " + ", and what ".join(read)
+        counts = "count" if len(read) > 1 else "counts"
+        fine.append(
+            Clause(
+                "start checked against inputs",
+                f"{what} {counts} for the inputs of {' and '.join(taking)}: an input whose "
+                "policy refuses an untrusted source is refused, and its run fails.",
+            )
+        )
+    return fine
+
+
+UNTRUSTED = "it acts on nothing, and says why: untrusted data can't decide."
+
+
+def takes_inputs(case: CaseDefinition, step: str) -> bool:
+    """Whether `step` sends anything to what it calls: only then can an input policy refuse."""
+    found = case.steps[step]
+    return isinstance(found, CallStep | PlanStep) and bool(found.inputs)
+
+
+def deciding(case: CaseDefinition) -> Clause:
+    """A rule acts only while the case decides: not once every `closes_when` milestone is
+    reached, nor once the case is closing (brief, D34) (brief, D38)."""
+    if not case.closes_when:
+        return Clause(
+            "only while the case decides",
+            "Only while the case decides: not once the case is closing.",
+        )
+    milestones = " and ".join(case.closes_when)
+    verb = "is" if len(case.closes_when) == 1 else "are"
+    return Clause(
+        "only while the case decides",
+        f"Only while the case decides: not once {milestones} {verb} reached, nor once the case "
+        "is closing.",
+    )

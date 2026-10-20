@@ -36,7 +36,9 @@ building; built, slices 0–9, and the Promises table checked against the tests,
 11f, "Decided while building"). 11g: the warm-up (learning question 38) put, 2026-10-20; eighteen
 choices put with a recommendation each, one of them splitting 11g in two, recorded as a draft
 awaiting answers; the warm-up answered, and the choices answered "all as recommended", the same
-day; D45 and the guide's "Reading rules" written before building 11g1.
+day; D45 and the guide's "Reading rules" written before building 11g1; 11g1 built, slices 0–5,
+and its Promises table checked against the tests, the same day (see 11g, "Decided while building
+11g1").
 
 ## What this layer is for
 
@@ -2702,30 +2704,68 @@ Each starts with its negative test, seen failing for the right reason.
 6. The command line: `ventoux simulate`, its exit codes.
 7. The guide, run as written, and the Promises table checked against the tests.
 
+### Decided while building 11g1
+
+- **The reader takes the definition, not one rule** (slice 3): two clauses need more than the
+  rule. "Only while the case decides" names the case's own `closes_when`, and "start checked
+  against inputs" is said only when a started step takes inputs. Both are still the definition
+  alone, so a reading quotes no value from a case file.
+- **The sentence's own claims are clauses too** (slice 3): "read when it fires", "read when the
+  timer fires" and "the actions in the engine's order" are in the sentence, not the fine print,
+  but are as easy to get wrong; each is in the closed list with a witness. So is what holds for
+  every rule, `EVERY_RULE`, said once above a definition's readings.
+- **The untrusted clause is said only where untrusted data could reach the rule** (slice 3): on
+  a rule that reaches or stops, if it has a condition, or is set on a run's start, which may be
+  steered (brief, D43). A rule on a milestone, an answer, an arrival or the opening with no
+  condition reads nothing untrusted, so the clause would be noise there.
+- **"Ends when that run does: done, rejected or cancelled, a stop included"** (slice 3): the
+  statuses `end_with_their_runs` ends a timer on; a stopped run ends `cancelled` (brief, D40).
+- **The witnesses reuse the scenarios earlier layers proved** (slice 4): the guide's chase, the
+  KYC rule, the customer's note that steers a goodbye, the owed amount. Each witness asserts the
+  clause's exact text and the engine's own history line in one test.
+- **Checked by mutation, not only by running:** a failed run made to end its timers fails the
+  "timer on a run" witness; the "only while the case decides" clause left out fails its
+  witness. Each passed with the code put back.
+
 ### Promises
 
-A draft, to be checked against the tests once built. Tests in `tests/test_reading.py` (11g1)
-and `tests/test_simulate.py` (11g2) unless said otherwise.
+Every test is in `tests/test_reading.py` unless said otherwise. Each negative test was seen
+failing for the right reason before its code was written. 11g2's rows are a draft, checked when
+it is built.
+
+**11g1, the reading**
 
 | Promise | Test that would fail |
 |---|---|
-| A reading is worked out from the definition alone, and quotes only its constants | `test_a_reading_needs_only_the_definition` |
-| A moment, action or expression the renderer doesn't know is refused, never left out | `test_a_shape_the_renderer_doesnt_know_is_refused` |
-| Every moment shape the definition takes has a reading | `test_every_moment_the_definition_takes_is_read` |
-| Every action the definition takes has a reading | `test_every_action_the_definition_takes_is_read` |
-| A condition reads as the expression renderer writes it, read when the rule fires | `test_a_condition_reads_as_rendered_and_when_it_is_read` |
-| A timer's condition is read when it fires, not when it is set | `test_a_timers_condition_is_read_when_it_fires` (witness) |
-| Actions read in the order the engine takes them: stop, set, reach, start | `test_actions_read_in_the_order_the_engine_takes_them` (witness) |
-| A timer on a run reads as ending with that run, kept by a failed run | `test_a_timer_on_a_run_reads_as_ending_with_it` (witness) |
-| A timer on an instant reads as living until it fires | `test_a_timer_on_an_instant_reads_as_living_until_it_fires` (witness) |
-| A set timer reads as keeping the case open | `test_a_set_timer_reads_as_keeping_the_case_open` (witness) |
-| A rule on an event reads as listening, holding nothing | `test_a_rule_on_an_event_reads_as_listening` (witness) |
-| A rule that reaches or stops reads as acting on nothing on untrusted data, and on a steered start | `test_untrusted_data_reads_as_deciding_nothing` (witness) |
-| A rule that only sets reads as carrying what it read | `test_a_set_value_reads_as_carrying_what_it_read` (witness) |
-| A rule that starts a step with inputs reads as checked against their policies | `test_a_start_reads_as_checked_against_inputs` (witness) |
-| Every rule reads as acting only while the case decides, naming `closes_when` | `test_a_rule_reads_as_acting_only_while_the_case_decides` (witness) |
-| Each clause has a witness, and the witnesses cover the closed list | `test_every_clause_has_a_witness` |
-| The guide's readings are the renderer's | `test_the_guides_readings_are_the_renderers` (`tests/test_case.py`) |
+| A reading is worked out from the definition alone, and shows only its constants | `test_a_reading_needs_only_the_definition` |
+| A moment the reader doesn't know is refused, never read as another | `test_a_shape_the_reader_doesnt_know_is_refused` |
+| An action the reader doesn't know is refused, never left out | `test_an_action_the_reader_doesnt_know_is_refused` |
+| An expression the reader can't render is refused, naming the rule | `test_an_expression_the_reader_doesnt_know_is_refused` |
+| Every moment shape the definition takes has a reading, a timer on each of the five | `test_every_moment_the_definition_takes_is_read` |
+| Every action the definition takes has a reading, in the engine's order whatever the JSON's | `test_every_action_the_definition_takes_is_read_in_the_engines_order` |
+| A condition reads as the expression renderer writes it, with when it is read | `test_a_condition_reads_as_rendered_and_when_it_is_read` |
+| A rule's condition is read when it fires, on the case file then (witness) | `test_a_condition_reads_as_read_when_it_fires` |
+| A timer's condition is read when the timer fires, not when it is set (witness) | `test_a_timers_condition_reads_as_read_when_the_timer_fires` |
+| The actions act in the order they read: stop, set, reach, start (witness) | `test_actions_read_in_the_order_the_engine_takes_them` |
+| A timer on a run ends when the run is done or stopped, and a failed run keeps it (witness) | `test_a_timer_on_a_run_reads_as_ending_with_it` |
+| A timer on an instant lives until it fires (witness) | `test_a_timer_on_an_instant_reads_as_living_until_it_fires` |
+| A set timer keeps the case open, and a close cancels it (witness) | `test_a_set_timer_reads_as_keeping_the_case_open` |
+| A rule on an event doesn't keep the case open (witness) | `test_a_rule_on_an_event_reads_as_listening` |
+| A rule that reaches or stops acts on nothing on untrusted data, its condition's or its steered start's (witness) | `test_untrusted_data_reads_as_deciding_nothing` |
+| A value a rule sets carries what it read, and what steered its start (witness) | `test_a_set_value_reads_as_carrying_what_it_read` |
+| What a start's condition read, and what steered its moment, count for the started step's inputs (witness) | `test_a_start_reads_as_checked_against_inputs` |
+| The inputs clause is said only of a step that takes inputs | `test_a_start_of_a_step_without_inputs_says_nothing_of_them` |
+| A rule acts only while the case decides, naming `closes_when` (witness) | `test_a_rule_reads_as_acting_only_while_the_case_decides` |
+| A rule that can't be read acts on nothing and needs attention, said once for every rule (witness) | `test_what_every_rule_does_is_said_once` |
+| Every clause has a witness, and the witnesses cover the closed list | `test_every_clause_has_a_witness` |
+| The guide's readings are the reader's | `test_the_guides_readings_are_the_renderers` |
+| The guide's example calls the reader as written | `test_the_guides_examples_run_as_written` (`tests/test_case.py`) |
+| `case` stays free of the clock and I/O | `tests/test_layers.py`, as it is |
+
+**11g2, the story (draft)**
+
+| Promise | Test that would fail |
+|---|---|
 | A story with a misspelt key, an entry with two actions, or time going back is refused, saying where | `test_a_story_that_cant_be_read_is_refused` |
 | A story missing a fake for a contract its definition calls is refused before it runs, listing each | `test_a_story_without_a_fake_is_refused` |
 | A story whose definition has a plan step is refused, saying so | `test_a_story_with_a_plan_step_is_refused` |
