@@ -39,7 +39,8 @@ awaiting answers; the warm-up answered, and the choices answered "all as recomme
 day; D45 and the guide's "Reading rules" written before building 11g1; 11g1 built, slices 0–5,
 and its Promises table checked against the tests, the same day (see 11g, "Decided while building
 11g1"); the tutor review's four items built test-first the same day (see 11g, "From the tutor
-review of 11g1").
+review of 11g1"). 11g2: started 2026-10-20 once #33 merged; the warm-up put and three
+points awaiting answers (see 11g, "Before building 11g2").
 
 ## What this layer is for
 
@@ -2777,6 +2778,25 @@ Also, while building: `starts()` read every step's requirements even for a rule 
 nothing, so the negative test for a stopped step of an unknown kind failed for the wrong reason
 under mutation (an attribute error, not the refusal). It now reads them only for a rule that
 starts, and the mutation fails as it should.
+
+### Before building 11g2
+
+**Status: draft, awaiting answers** (2026-10-20). 11g1 merged as #33. The warm-up, learning
+question 37's follow-up, put and awaiting its answer. Choices 7–15 are decided; three points came
+up since, each with a recommendation, and need the user's answer before building.
+
+- **A. Witnesses as stories.** Choice 18 said 11g2 would move 11g1's witnesses into stories.
+  Since the tutor review there are fourteen clauses, most witnesses running two or three cases:
+  moved, about 25 story files, and a story checks the run, not a clause's exact text.
+  Recommended: keep the witness tests as they are, and add one story for each clause that reads
+  well as a timeline (the timer on a run, the stop, the start, reaching `closes_when`), each
+  firing printed beside its reading. This changes choice 18, so it needs the user's agreement.
+- **B. What is printed beside a firing.** Recommended: the rule's sentence alone; the full
+  readings, with their fine print, once in the header. The fine print under every firing would
+  bury the timeline.
+- **C. The story's own lines in what it expects.** Recommended: the expected timeline holds the
+  story's own lines (`ana answers assess#1: done`) as well as the engine's, so a story can't pass
+  with an entry silently dropped (choice 13).
 
 ### Promises
 
