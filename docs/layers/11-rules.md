@@ -39,8 +39,10 @@ awaiting answers; the warm-up answered, and the choices answered "all as recomme
 day; D45 and the guide's "Reading rules" written before building 11g1; 11g1 built, slices 0–5,
 and its Promises table checked against the tests, the same day (see 11g, "Decided while building
 11g1"); the tutor review's four items built test-first the same day (see 11g, "From the tutor
-review of 11g1"). 11g2: started 2026-10-20 once #33 merged; the warm-up put and three
-points awaiting answers (see 11g, "Before building 11g2").
+review of 11g1"). 11g2: started 2026-10-20 once #33 merged; the warm-up put and left
+open; three points put, answered "build 11g2 now, as decided" the same day (see 11g, "Before
+building 11g2"); built, slices 1–7, and the Promises table checked against the tests, the same
+day (see 11g, "Decided while building 11g2").
 
 ## What this layer is for
 
@@ -2781,28 +2783,55 @@ starts, and the mutation fails as it should.
 
 ### Before building 11g2
 
-**Status: draft, awaiting answers** (2026-10-20). 11g1 merged as #33. The warm-up, learning
-question 37's follow-up, put and awaiting its answer. Choices 7–15 are decided; three points came
-up since, each with a recommendation, and need the user's answer before building.
+Three points came up once 11g1 was merged (#33), each put with a recommendation, 2026-10-20. The
+user's answer: "build 11g2 now, as decided (choices 7–18)", each firing "shown beside its
+reading, with the clauses added in the review". So:
 
-- **A. Witnesses as stories.** Choice 18 said 11g2 would move 11g1's witnesses into stories.
-  Since the tutor review there are fourteen clauses, most witnesses running two or three cases:
-  moved, about 25 story files, and a story checks the run, not a clause's exact text.
-  Recommended: keep the witness tests as they are, and add one story for each clause that reads
-  well as a timeline (the timer on a run, the stop, the start, reaching `closes_when`), each
-  firing printed beside its reading. This changes choice 18, so it needs the user's agreement.
-- **B. What is printed beside a firing.** Recommended: the rule's sentence alone; the full
-  readings, with their fine print, once in the header. The fine print under every firing would
-  bury the timeline.
-- **C. The story's own lines in what it expects.** Recommended: the expected timeline holds the
-  story's own lines (`ana answers assess#1: done`) as well as the engine's, so a story can't pass
-  with an entry silently dropped (choice 13).
+- **A. Witnesses as stories:** as choice 18 decided, not as recommended. Each clause has a
+  witness story in `examples/witnesses/stories/`, its definition beside it; the 11g1 witness
+  tests stay too, since a story checks the run and not a clause's exact text (see "Decided while
+  building 11g2").
+- **B. Beside a firing:** the rule's whole reading, its fine print included, not the sentence
+  alone as recommended; every reading is also printed once at the top.
+- **C. The story's own lines:** in what it expects, as choice 13 already says.
+
+The warm-up (learning question 37's follow-up) was put and left unanswered: it stays open, for
+the next layer.
+
+### Decided while building 11g2
+
+- **A story's times are written in one form** (slice 1): `day 1` reads back as `day 1 00:00`,
+  so two ways of writing a time compare alike, in messages and in what a story expects.
+- **What a story expects is keyed by time** (slice 3): `"timeline": {"day 2 00:00": [lines]}`,
+  in the order printed, and `"end": [lines]`. The printed timeline groups its lines the same
+  way, so expectations are copied from the output.
+- **An entry with nothing is a line, `(time passes)`** (slice 2), so a story shows the time it
+  reached even when nothing happened then.
+- **A `finish` of a run that isn't held and running is refused** (slice 3): it is the story's
+  own mistake, never the engine's refusal, so it fails loudly, as `StoryRefused`.
+- **A fake that `fails` raises `FakeFailed`,** whose message the engine records as
+  `‹sensitive›`, as for any failure (brief, D31): only its kind shows.
+- **Pending work the end can't name is an error** (slice 3): if the engine counts work pending
+  that none of the end's lines names, the simulation raises rather than print `nothing pending`.
+- **`as_json` and `wrapped` moved from `ventoux.testing` to `case/memory.py`** (slice 2):
+  `simulate` opens a case as `run_case` does, and `case` can't import `testing`, which imports
+  Temporal. `testing` imports them back under the same names.
+- **The witness stories were written from the 11g1 scenarios** (slice 5) by a short script, run
+  once and not kept; their expectations were then read line by line. The test names, for each
+  clause, its story, the rule whose reading says it, and the line that shows the engine doing
+  it.
+- **The command reads the development catalog** (`ventoux.testing.CATALOG`), as choice 10 said;
+  a project's own catalog comes with `ventoux check` and the builder (layer 14).
+- **Checked by mutation, not only by running:** finishing what isn't held left unrefused, the
+  expectation never compared, a firing's reading left out, one expected line changed in a
+  witness story, a done run left holding its timer, and a refused story exiting 0: each failed
+  its test, then passed with the code put back.
 
 ### Promises
 
-Every test is in `tests/test_reading.py` unless said otherwise. Each negative test was seen
-failing for the right reason before its code was written. 11g2's rows are a draft, checked when
-it is built.
+11g1's tests are in `tests/test_reading.py`, 11g2's in `tests/test_simulate.py`, unless said
+otherwise. Each negative test was seen failing for the right reason before its code was written,
+or, where its code came first, by mutation.
 
 **11g1, the reading**
 
@@ -2838,24 +2867,27 @@ it is built.
 | The guide's example calls the reader as written | `test_the_guides_examples_run_as_written` (`tests/test_case.py`) |
 | `case` stays free of the clock and I/O | `tests/test_layers.py`, as it is |
 
-**11g2, the story (draft)**
+**11g2, the story**
 
 | Promise | Test that would fail |
 |---|---|
-| A story with a misspelt key, an entry with two actions, or time going back is refused, saying where | `test_a_story_that_cant_be_read_is_refused` |
-| A story missing a fake for a contract its definition calls is refused before it runs, listing each | `test_a_story_without_a_fake_is_refused` |
+| A story with a misspelt key, an entry doing two things, a malformed time, time going back, or a fake doing two things is refused, saying where | `test_a_story_that_cant_be_read_is_refused` |
+| A story with no fake for a contract its definition calls, or a fake for nothing it calls, is refused before it plays | `test_a_story_without_a_fake_for_what_its_definition_calls_is_refused` |
 | A story whose definition has a plan step is refused, saying so | `test_a_story_with_a_plan_step_is_refused` |
-| Times are named from the opening, `day 3 14:30`, and events are stamped with them | `test_a_story_names_times_from_the_opening` |
-| Time passing fires each timer due, stamped with its due time | `test_time_passing_fires_timers_at_their_due_time` |
+| Times are named from the opening, `day 1 09:30`, and each event is decided at its entry's time | `test_a_story_names_times_from_the_opening` |
+| Time passing fires each timer due, at its due time | `test_time_passing_fires_timers_at_their_due_time` |
 | An entry the engine refuses is a line, changes nothing, and the story goes on | `test_a_refused_entry_is_a_line_and_the_story_goes_on` |
-| Each firing is shown beside its rule's reading | `test_each_firing_is_shown_beside_its_reading` |
+| Each firing is shown beside its rule's whole reading, and every reading is printed at the top | `test_each_firing_is_shown_beside_its_reading` |
 | Every kind of pending work is listed at the end; with none, `nothing pending` | `test_the_end_lists_every_pending_item` |
-| No output line quotes a value from the case file | `test_no_output_line_quotes_a_value_from_the_case_file` |
+| No output line quotes a value from the case file: the opening's, a form's, a fake's, or one a rule computes | `test_no_output_line_quotes_a_value_from_the_case_file` |
 | The same story gives the same output, byte for byte | `test_a_story_simulates_the_same_every_time` |
-| Nothing real is called: only the story's fakes run | `test_only_the_storys_fakes_run` |
-| A story whose expectation fails says the first line that differs | `test_a_failing_expectation_says_where` |
-| Every story under `examples/` holds | `test_every_story_holds` |
-| `ventoux simulate` exits 0, 1 or 2 as its story holds, fails or can't be read | `test_simulate_exits_as_its_story_does` (`tests/test_cli.py`) |
-| The `ventoux` command is installed | `test_the_ventoux_command_is_installed` (`tests/test_cli.py`) |
-| The guide's stories and their output are what `simulate` prints | `test_the_guides_stories_are_what_simulate_prints` (`tests/test_case.py`) |
-| `case` stays free of the clock and I/O: reading the files is the command line's | `tests/test_layers.py`, as it is |
+| Nothing real is called: only the story's fakes run | `test_only_the_storys_fakes_run`, `test_a_story_without_a_fake_for_what_its_definition_calls_is_refused` |
+| A held run finishes when the story says; finishing what isn't held is refused | `test_a_held_run_finishes_when_the_story_says` |
+| A story whose expectation fails says the first line that differs, and where; one that holds says nothing | `test_a_failing_expectation_says_where` |
+| Every story under `examples/` states what it expects, and holds | `test_every_story_holds` |
+| Every clause has a witness story, its rule's reading saying it and its run showing the engine doing it | `test_every_clause_has_a_witness_story` |
+| `ventoux simulate` exits 0 when the story holds and 1, with the first difference, when it doesn't | `test_simulate_exits_as_its_story_does` (`tests/test_cli.py`) |
+| It exits 2, naming the file, when the story or its definition can't be read or can't run | `test_a_story_that_cant_be_read_exits_2_saying_where` (`tests/test_cli.py`) |
+| The `ventoux` command is installed and runs | `test_the_ventoux_command_is_installed` (`tests/test_cli.py`) |
+| The guide's story and its output are what `simulate` prints | `test_the_guides_story_is_what_simulate_prints` |
+| `case` stays free of the clock and I/O: reading the files and printing are the command line's | `tests/test_layers.py`, as it is |

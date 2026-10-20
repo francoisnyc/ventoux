@@ -1245,6 +1245,144 @@ A reading is never given a case file, so it can't quote a value from one: the co
 (`70`, `"approve"`) are the definition's own. A rule it can't read is refused, never read with a
 part left out.
 
+## Simulating a story
+
+A reading says what a rule does; a **story** shows it, on a timeline. A story is a JSON file: the
+definition it plays, the values the case opens with, who has which roles, a fake for each contract
+the definition calls, and what happens, when:
+
+```json
+{
+  "title": "Nobody reviews the refund for two days",
+  "definition": "../refund-chased.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 2 09:00",
+      "answer": {
+        "step": "chase",
+        "outcome": "chased",
+        "by": "sam"
+      }
+    },
+    {
+      "at": "day 2 10:30",
+      "answer": {
+        "step": "review",
+        "outcome": "approve",
+        "by": "ana",
+        "form": {
+          "approved_amount": 40
+        }
+      }
+    }
+  ]
+}
+```
+
+Times are counted from the opening, `day 0 00:00`, which is 1 January 2026, 00:00 UTC: `"day 2"`
+or `"day 2 09:00"`. They only move forward, and each becomes its event's time, so a story decides
+as a real case would, reading no clock. Each entry does one thing, or nothing, for time passing:
+
+| Entry | Does |
+|---|---|
+| `"answer": {"step": "review", "outcome": "approve", "by": "ana", "form": {...}}` | a person answers a task or an approval, named by its step or its `entry` (`"pay.approval#1"`) |
+| `"propose": {"step": "chase", "by": "sam"}` | a person proposes a run |
+| `"retry": {"entry": "pay#1", "by": "omar"}` | an operator retries a failed run or firing |
+| `"close": {"reason": "duplicate", "by": "ana"}` | a person closes the case |
+| `"send": {"event": "cancelled", "payload": {...}, "by": "system:portal"}` | an event arrives |
+| `"finish": {"entry": "pay#1"}` | a held run finishes |
+| nothing | time passes to `at` |
+
+`until` moves time on at the end, firing what falls due. Each fake `gives` an output, gives an
+`outcome` the contract declares (`{"outcome": "declined"}`), or `fails`; with `"held": true` its
+runs keep running until a `finish` entry. Nothing real is called and nothing is sent: a
+contract the definition calls with no fake, a fake for nothing it calls, or a plan step refuses
+the story before it plays.
+
+```sh
+uv run ventoux simulate examples/refund/stories/nobody-reviews.json
+```
+
+```
+Story: Nobody reviews the refund for two days
+Definition: refund (../refund-chased.json)
+Opens: 2026-01-01T00:00:00Z, day 0 00:00
+
+Rules
+  A rule remembers nothing: its condition is read once, when it fires. A rule whose condition or value can't be read acts on nothing, and needs attention.
+
+  chase_review: Chase a review left open for two days
+    2d after each run of review starts: start chase.
+    - The timer is set as each run of review starts, and ends when that run does: done, rejected or cancelled, a stop included. A failed run keeps it: a retry is the same run.
+    - While it is set, the timer keeps the case open; a close cancels it.
+    - Starting chase is a proposal, decided at once as a person's is: nothing starts, and the history says why, if it is already running, or it has run and isn't repeatable.
+    - Only while the case decides: not once the case is closing.
+
+Timeline
+day 0 00:00
+  the case opens
+  opened by system:opener, with amount and order_id
+  started review#1: waiting for approve or reject by support
+  set chase_review: 2d after started review#1, due 2026-01-03T00:00:00Z
+day 2 00:00
+  chase_review#1 on 2d after started review#1: starting chase
+    ↳ chase_review: Chase a review left open for two days
+      2d after each run of review starts: start chase.
+      - The timer is set as each run of review starts, and ends when that run does: done, rejected or cancelled, a stop included. A failed run keeps it: a retry is the same run.
+      - While it is set, the timer keeps the case open; a close cancels it.
+      - Starting chase is a proposal, decided at once as a person's is: nothing starts, and the history says why, if it is already running, or it has run and isn't repeatable.
+      - Only while the case decides: not once the case is closing.
+  started chase#1: waiting for chased by support-lead
+day 2 09:00
+  sam answers chase: chased
+  sam answered chase#1 chased as support-lead
+  chase#1 done
+day 2 10:30
+  ana answers review: approve, with approved_amount
+  ana answered review#1 approve as support, setting approved_amount
+  review#1 done
+  scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key story/pay#1
+  pay#1 done, giving refund_id from untrusted:undeclared
+  closed: nothing left to do
+
+At the end, day 2 10:30
+  status: closed
+  nothing pending
+```
+
+Each firing is printed beside its rule's whole reading, fine print included. Timers set, fired
+and cancelled, and refusals (`refused: review#1 is answered by support, and eve has no role`),
+are the engine's own lines, so the output can't drift from what the engine does. At the end
+comes every kind of pending work, or `nothing pending`. No line quotes a value from the case file:
+the story's own lines name fields, never their values.
+
+**A story is also a test.** Its `expect` holds the timeline, each time with its lines (without the
+readings), and the lines at the end, exactly as printed: a firing nobody expected fails it.
+`ventoux simulate` exits 0 when it holds (or the story expects nothing), 1 with the first
+difference when it doesn't, and 2 when the story or its definition can't be read or can't run.
+Every story under `examples/` runs as a test, among them a witness for each part of a reading's
+fine print, in `examples/witnesses/stories/`.
+
 ## Testing a case
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`

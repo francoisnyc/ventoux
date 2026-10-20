@@ -4,6 +4,7 @@ Tests go through `parse_story` and `simulate`, and read what a simulation prints
 See docs/layers/11-rules.md (11g), the brief, D45, and docs/guides/cases.md, "Simulating a story".
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -429,3 +430,24 @@ def test_every_clause_has_a_witness_story() -> None:
         reading = next(reading for reading in simulation.readings if reading.name == rule)
         assert clause in reading.clauses or (clause == "every rule" and EVERY_RULE in printed)
         assert evidence in printed, name
+
+
+# --- Slice 7: the guide ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+SIMULATING = GUIDE.split("## Simulating a story\n")[1].split("\n## ")[0]
+GUIDES_STORY = EXAMPLES / "refund" / "stories" / "nobody-reviews.json"
+
+
+def test_the_guides_story_is_what_simulate_prints() -> None:
+    # The guide's story is the file, less what it expects, and its output is what simulate
+    # prints, word for word, so the guide can't drift from the engine.
+    blocks = SIMULATING.split("```")[1::2]
+    written = next(block for block in blocks if block.startswith("json\n"))
+    printed = next(block for block in blocks if block.startswith("\n"))
+    story_file = json.loads(GUIDES_STORY.read_text())
+    del story_file["expect"]
+    assert json.loads(written.removeprefix("json\n")) == story_file
+    assert f"ventoux simulate {GUIDES_STORY.relative_to(EXAMPLES.parent)}" in SIMULATING
+    story, case = read_story(GUIDES_STORY)
+    assert printed.removeprefix("\n") == str(simulate(story, case, CATALOG))
