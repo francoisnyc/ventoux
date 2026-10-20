@@ -1153,10 +1153,29 @@ if a rule started the run on untrusted data, a rule on its timer that reaches or
 nothing, as a rule on the start itself would ("Rules that start steps").
 
 **Noticing a stale fact sooner.** A fact a step needs fresh is checked when an event reaches the
-case (`max_age`, the case data guide). The engine sets no timer for it; to fetch a read again
-before anyone acts, write one: a rule on `{"after": "1d", "since": {"answered": "review"}}` that
-starts the read again. Its output replaces the old one, and an open approval follows the case
-file, asked again if what it saw changed.
+case (`max_age`, the case data guide): a team lead approving the payment two days after the
+order was looked up waits for it to be looked up again. The engine sets no timer for it; to fetch
+a read again before anyone acts, write one, on the case data guide's refund, with `check_order`
+repeatable:
+
+```json
+"look_again": {
+  "display": {"title": "Look the order up again a day after the review"},
+  "on": {"after": "1d", "since": {"answered": "review"}},
+  "then": {"start": ["check_order"]}
+}
+```
+
+The approval asked on the old status is withdrawn as the look-up starts again, since `pay`
+requires it, and asked again on the fresh status, so the team lead approves on a fact a day old:
+
+```
+look_again#1 on 1d after answered review#1: starting check_order
+scheduled check_order#2: orders.lookup@2 (order_id from system:opener)
+withdrew pay.approval#1: check_order started again
+check_order#2 done, giving status from system:orders
+asked pay.approval#2: approval of pay by support-lead
+```
 
 **What the check says about timers.** A timer fires only if its moment can come: one whose moment
 never comes, or comes only once every `closes_when` milestone is reached, is `NEVER_FIRES`. A timer

@@ -15,6 +15,10 @@ import pytest
 # pytest puts tests/ on the import path (it has no __init__.py), so a helper there imports by
 # its name.
 from invariants import unshown
+from test_fresh_facts import FILE as FRESH_FILE
+from test_fresh_facts import PEOPLE as FRESH_PEOPLE
+from test_fresh_facts import refund_fresh
+from test_fresh_facts import run_case as run_fresh
 from test_rules import endless_rework
 from test_untrusted_moment import LETTER, PLEASE, cancelled, say_goodbye
 
@@ -768,3 +772,79 @@ def test_a_timer_that_may_stop_a_loop_lets_it_end() -> None:
     assert issues(definition, "NEVER_CLOSES", "LOOPS_UNTIL_CLOSED") == []
     run = run_case(definition, file=SMALL, answers=[later("5d")], people=PEOPLE)
     assert run.closed
+
+
+# --- Slice 8: staleness noticed sooner, by a timer an author writes ---
+
+
+def looked_up_again() -> dict[str, Any]:
+    """The case data guide's fresh refund, whose payment needs the order's status at most a day
+    old, with a timer looking the order up again a day after the review is answered: the guide's
+    "Noticing a stale fact sooner"."""
+    definition = refund_fresh()
+    definition["steps"]["check_order"]["repeatable"] = True
+    definition["rules"] = {
+        "look_again": {
+            "display": {"title": "Look the order up again a day after the review"},
+            "on": {"after": "1d", "since": {"answered": "review"}},
+            "then": {"start": ["check_order"]},
+        }
+    }
+    return definition
+
+
+BIG = ("review", "approve", "ana", {"approved_amount": 250})
+
+
+def test_a_timer_an_author_writes_fetches_a_read_again_before_anyone_acts() -> None:
+    # The engine sets no timer for a fact's age (brief, D44). Without one, the stale status is
+    # noticed only when Sam approves on the second day, and fetched again then (brief, D33).
+    plain = run_fresh(
+        refund_fresh(), FRESH_FILE, [BIG, later("2d"), ("pay", "approve", "sam")], FRESH_PEOPLE
+    )
+    assert plain.history.index("sam answered pay.approval#1 approve as support-lead") < (
+        plain.history.index(
+            "refreshing check_order.status for pay: obtained 2 days ago, at most 1 day"
+        )
+    )
+    # With the author's timer the order is looked up again on the first day: the approval asked
+    # on the old status is withdrawn as its requirement starts again, and asked again on the
+    # fresh one, so Sam approves on a fact a day old, and nothing is fetched as he acts.
+    run = run_fresh(
+        looked_up_again(),
+        FRESH_FILE,
+        [BIG, later("1d"), later("1d"), ("pay", "approve", "sam")],
+        FRESH_PEOPLE,
+    )
+    assert appears_in_order(
+        [
+            "look_again#1 on 1d after answered review#1: starting check_order",
+            "scheduled check_order#2: orders.lookup@2 (order_id from system:opener)",
+            "withdrew pay.approval#1: check_order started again",
+            "check_order#2 done, giving status from system:orders",
+            "asked pay.approval#2: approval of pay by support-lead",
+            "sam answered pay.approval#2 approve as support-lead",
+        ],
+        run.history,
+    )
+    assert not any(line.startswith("refreshing") for line in run.history)
+    assert run.reached("pay")
+
+
+def appears_in_order(lines: list[str], history: list[str]) -> bool:
+    """Whether each of `lines` is in `history`, in the same order (others may come between)."""
+    rest = iter(history)
+    return all(line in rest for line in lines)
+
+
+def test_an_open_approval_follows_what_the_timers_read_gives() -> None:
+    # The second look-up finds the order lost: the approval asked on what the first one said is
+    # withdrawn before Sam acts on it, and the payment's condition is false now (brief, D25).
+    statuses = iter(["delivered", "lost"])
+    lookup = {"orders.lookup@2": lambda inputs: {"status": next(statuses)}}
+    run = run_fresh(
+        looked_up_again(), FRESH_FILE, [BIG, later("1d")], FRESH_PEOPLE, activities=lookup
+    )
+    assert "withdrew pay.approval#1: check_order started again" in run.history
+    assert "asked pay.approval#2: approval of pay by support-lead" not in run.history
+    assert run.closed  # the order is lost: nothing is paid, and nothing is left to do

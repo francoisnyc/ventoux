@@ -1484,7 +1484,8 @@ whose text is kept.*
 - **Staleness noticed sooner is an author's timer** (D33's "timers that would notice sooner come
   with rules"): the engine sets none for a `max_age` expiry, since such a timer would keep cases
   open and call systems nobody asked it to. A rule on a timer may start a read again; an open
-  approval then follows the case file (D25).
+  approval of a step that requires the read is then withdrawn as it starts again, and asked again
+  on the fresh value (D25).
 - **Case validation counts timers** (D34): a timer fires only if its moment can come, and is
   `NEVER_FIRES` if it never can, or comes only once every `closes_when` milestone is reached; a
   timer set as the case opens keeps it open, so it gives no `CLOSES_AT_OPENING`; the claims about
