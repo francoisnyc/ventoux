@@ -15,6 +15,7 @@ import pytest
 # pytest puts tests/ on the import path (it has no __init__.py), so a helper there imports by
 # its name.
 from invariants import unshown
+from test_untrusted_moment import PLEASE, cancelled, say_goodbye
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import run_case_in_memory
@@ -495,3 +496,40 @@ def test_the_invariant_finds_a_timer_that_outlived_its_purpose() -> None:
     assert unshown(parse_case(holding()), held.state) == [
         "chase_review, 5d after opened is set, and the close is held: it can never act"
     ]
+
+
+# --- Slice 5: trust ---
+
+
+def test_a_timer_on_a_start_untrusted_data_steered_reaches_nothing() -> None:
+    # The goodbye call starts on what the customer typed; a day later, a timer on its start
+    # would close the case. Time passing doesn't clean what steered the run (brief, D43) (brief,
+    # D44): the rule on it reaches nothing, saying what steered, never the note.
+    definition = say_goodbye()
+    definition["rules"]["close_it"]["on"] = {"after": "1d", "since": {"started": "goodbye"}}
+    run = run_case(definition, file=SMALL, answers=[cancelled(), later("1d")], people=PEOPLE)
+    assert run.state.phase == "open" and "withdrawn" not in run.state.milestones
+    assert (
+        "close_it#1 on 1d after started goodbye#1: reaches nothing: its moment comes from "
+        "untrusted data: say_goodbye#1's condition, which started goodbye, reads cancelled.note "
+        "(untrusted:customer), and untrusted data can't decide"
+    ) in run.history
+    assert PLEASE not in "\n".join(run.history)
+
+
+def test_a_timer_on_a_steered_start_sets_a_value_that_carries_it() -> None:
+    definition = say_goodbye({"set": {"leaving": {"var": "amount"}}})
+    definition["fields"]["leaving"] = {"type": "number", "display": {"title": "Leaving with"}}
+    definition["rules"]["close_it"]["on"] = {"after": "1d", "since": {"started": "goodbye"}}
+    run = run_case(definition, file=SMALL, answers=[cancelled(), later("1d")], people=PEOPLE)
+    assert "untrusted:customer" in run.state.sources["leaving"]
+
+
+def test_time_passing_after_an_arrival_is_a_fact() -> None:
+    # The event's arrival is a fact, whatever it carries (brief, D41): a timer set on it carries
+    # nothing, so its rule decides, the note unread.
+    definition = say_goodbye()
+    definition["rules"]["close_it"]["on"] = {"after": "1d", "since": {"event": "cancelled"}}
+    run = run_case(definition, file=SMALL, answers=[cancelled(), later("1d")], people=PEOPLE)
+    assert "close_it#1 on 1d after event cancelled#1: reaching withdrawn" in run.history
+    assert run.closed
