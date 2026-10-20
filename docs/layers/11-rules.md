@@ -30,7 +30,8 @@ recommendation each, answered "all as recommended, one pull request" the same da
 part, D42 and a draft Promises table written before building; built, slices 0–9, and the Promises
 table checked against the tests, the same day (see 11e, "Decided while building"). 11f: the
 warm-up (learning question 33's follow-up) walked through, 2026-10-19; sixteen choices put with a
-recommendation each, recorded as a draft awaiting answers, 2026-10-20 (see 11f).
+recommendation each, recorded as a draft awaiting answers, then answered "all as recommended,
+one pull request", 2026-10-20 (see 11f).
 
 ## What this layer is for
 
@@ -1205,6 +1206,8 @@ each, and answered "go with all recommendations", 2026-10-18. Below, "Agreed in 
 31. **A run has ended once it has its final status** (`done`, `rejected`, `failed`, `cancelled`).
     A run whose stop is requested and still running hasn't ended; a stopped run's timers end with
     it, when it does.
+    *Amended 2026-10-20, in 11f's session (choice 4):* for its timers, a failed run hasn't ended:
+    it waits for a person, and an operator's retry runs it again as the same run (brief, D26).
 
 **And:**
 
@@ -2048,10 +2051,9 @@ Every test is in `tests/test_set.py` unless said otherwise. Checked against the 
 
 ## 11f. Time
 
-**Status: draft, awaiting answers** (2026-10-20). Nothing below is decided yet: each choice
-carries the assistant's recommendation, and the user answers them by number. Choice 4 would
-change what 11c decided (its choice 31), and needs the user's agreement. No code, no guide text
-and no D44 until then.
+**Decided, 2026-10-20:** all sixteen choices as recommended, one pull request (the user, "all as
+recommended, one pull request"). Choice 4 changes 11c's choice 31, which keeps its text and gets
+a dated amendment; D44 (brief) records the layer, with a dated amendment to D40.
 
 ### What this part is for
 
@@ -2087,9 +2089,11 @@ day 5  (no event; the timer is due)        → TimerDue stamped day 5, never "no
 
 The warm-up first: learning question 33's follow-up, answered "help me", then "walk me through
 it" (recorded in the log). Then 11f was explained and sixteen choices were put, each with a
-recommendation, 2026-10-19. This draft records them before the answers, at the user's request.
+recommendation, 2026-10-19. This draft records them before the answers, at the user's request. Answered "all as recommended, one pull request", 2026-10-20.
 
-### Choices put, with the recommendation for each
+### Decided in the session
+
+All sixteen as recommended, 2026-10-20. Each is written as it was put.
 
 1. **Shape.** Recommended: `on: {"after": "<age>", "since": <moment>}`.
    - `after` uses D33's format (`30m`, `12h`, `1d`) and must be at least one minute. It means one
@@ -2224,10 +2228,69 @@ an `sla` would stop escalating the moment its step needs attention, against D17'
 escalates during a long outage". A failed run that is then cancelled by a close ends its timers
 with the close.
 
-If agreed, choice 31 and D40 keep their text, and each gets an amendment saying when it was added
-(CLAUDE.md: decisions are never rewritten). Nothing built depends on choice 31 yet: no timer
-exists before 11f.
+Agreed, 2026-10-20: choice 31 and D40 keep their text, and each has an amendment saying when it
+was added (CLAUDE.md: decisions are never rewritten). Nothing built depended on choice 31: no
+timer existed before 11f.
+
+### Where the code goes
+
+- `case/definition.py`: the timer's shape, `{"after", "since"}`, a moment of its own whose
+  `since` is one of the five others; `anchor`, the moment a timer is set on (the moment itself for
+  any other rule), which every check reads.
+- `case/timers.py` (new): setting a timer on its moment, firing one, ending those whose purpose
+  ended, the firings due by a time, and how a timer reads (its line, its due date in UTC, worked
+  out from whole seconds: `case` reads no `datetime`, layer 0's boundary).
+- `case/state.py`: `Timer`, `state.timers`, the `TimerDue` event; a moment names the entry it
+  came from (`assess#1`, `cancelled#2`), and a timer's moment the rule it is for.
+- `case/rules.py`: timers are set as their moments are taken; a timer's firing fires its rule
+  alone. `case/runtime.py`: `TimerDue` decided; `case/closing.py`: a set timer is pending work,
+  and closing cancels it.
+- `case/memory.py`, `testing.py`: the driver fires what falls due before each event, and
+  `later(...)` moves time on; `run.timers`.
+- `case/reach.py`, `case/validate.py`, `case/warnings.py`, `case/writers.py`, `case/flow.py`:
+  each check reads a timer by its anchor where that claims less, never more (choice 12).
+- `temporal/cases.py`: one workflow timer for the earliest due time; `CaseReport.timers`.
+  `temporal/carried.py`: timers cross continue-as-new.
+- `tests/invariants.py`: no set timer outlives its purpose.
+- `docs/guides/cases.md`: "Rules on time", written before building.
+
+### Not in 11f
+
+- A repeating timer (an `every`, with a count): not planned (row 16). Cron: after v1.0.
+- A timer at a date read from the case file: a later shape of `since` (row 15).
+- A condition on setting a timer: a later key (row 17).
+- A timer the engine sets for a `max_age` expiry (choice 10).
+- The renderer and `simulate` (11g); `sla`, `reminder` and the teaching warnings (11h).
+- No new dependency.
+
+### Seams the tests use
+
+- `parse_case(data)` with a timer's `on`; `CaseInvalid` for a bad one.
+- `run_case(...)` with `later(age)` in the script: `history`, `timers`, `closed`,
+  `needs_attention`, `waiting_for`; `decide` with a `TimerDue`, for the refusals.
+- `validate_case(parse_case(d), CATALOG)`: the issues of choice 12.
+- The Temporal test server, skipping time: a timer fires stamped with its due time, across
+  continue-as-new, and a history from before 11f replays.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. This note, D44, the guide's part, and a fixture recorded before any change.
+1. The shape. Negative: a bad `after`, a timer `since` a timer, `since` what the case doesn't
+   declare.
+2. Setting and firing in memory, and the order. Negative: a firing for a timer that isn't set,
+   or stamped with another time, is refused.
+3. Purpose ending and the close. Negative: a timer on a run that ended doesn't fire; a close
+   cancels it.
+4. The reports and the invariant.
+5. Trust. Negative: a timer on a steered start reaches nothing.
+6. Validation, each check shown with a run.
+7. Temporal and continue-as-new.
+8. Staleness noticed by a timer an author writes.
+9. The guide, run as written, and the Promises table checked against the tests.
 
 ### Promises
 
-None yet: the table comes once the choices are answered and the design note is agreed.
+Drafted before building; each test is named once written, and the table checked against the
+tests before the pull request.

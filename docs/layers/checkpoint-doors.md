@@ -155,6 +155,11 @@ Rows touched: 15, 16, 17, 19, 30.
 - **A due date is a view of a timer** (row 30): a task's due date, if the inbox ever shows one,
   reads the timer set on its run, never a second clock.
 
+*Answered in 11f's session, 2026-10-20:* each of these stays open as the row says it should
+(`docs/layers/11-rules.md`, 11f, choices 1, 3 and 14; brief, D44). Row 19's purpose ending covers
+a stopped step, an exited stage or an ended child case through one rule: a timer set on a run's
+start ends with the run.
+
 ## Rows blocked by a decision already merged
 
 None blocks the six rows the curriculum names, for existing definitions. Recorded for the

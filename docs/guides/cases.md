@@ -203,6 +203,9 @@ assert not run.closed
 A step waiting for an event from outside is listed the same way, with who sends it:
 `receipt_sent from portal` ("Events from outside", below).
 
+A timer that is set keeps the case open too, but waits on nobody: it is listed in `timers`, not
+`waiting_for` ("Rules on time", below).
+
 ## When a system says no
 
 A business failure is an answer, not an error (brief, D17). `payments.refund@2` declares the
@@ -1064,6 +1067,100 @@ A value only rules set is surely set only where a step requires a milestone that
 setting it reach, or a guard says so; read anywhere else, it may not be set yet
 (`MAY_BE_UNSET`). A `max_age` on it is `NEVER_REFRESHED`.
 
+## Rules on time
+
+A rule may react to time passing: `"on": {"after": "2d", "since": <moment>}` waits two days after
+its moment, then fires. Take the refund: if a review is left open for two days, a team lead chases
+it.
+
+```json
+"chase_review": {
+  "display": {"title": "Chase a review left open for two days"},
+  "on": {"after": "2d", "since": {"started": "review"}},
+  "then": {"start": ["chase"]}
+}
+```
+
+with the step it starts:
+
+```json
+"chase": {
+  "kind": "task",
+  "display": {"title": "Chase the review"},
+  "roles": ["support-lead"],
+  "automatic": false,
+  "outcomes": {"chased": {"display": {"title": "Review chased"}}}
+}
+```
+
+Read aloud: two days after the review starts, if it is still open, a team lead chases it. When the
+review starts, the rule's **timer** is set; two days later it fires, and the rule acts:
+
+```
+started review#1: waiting for approve or reject by support
+set chase_review: 2d after started review#1, due 2026-01-03T00:00:00Z
+chase_review#1 on 2d after started review#1: starting chase
+started chase#1: waiting for chased by support-lead
+```
+
+The review stays open: nothing is cancelled or skipped because time passed (brief, D17). `after`
+is an age, `30m`, `12h` or `2d`, of at least a minute, and means one firing. `since` is any other
+moment a rule may name: `"opened"`, `{"started": …}`, `{"reached": …}`, `{"answered": …}` or
+`{"event": …}`, never another timer. The rule's `when`, if it has one, is read when the timer
+fires, on the case file as it is then.
+
+**Time is data.** A timer's due time is the time of the event that brought its moment, plus
+`after`, and it fires as an event stamped with that time, never "now": replayed on Temporal a
+month later, the case decides the same way (brief, D33). Before an event is decided, every timer
+due by its time fires first, soonest first; a timer due in the same second as an event fires
+before it.
+
+**A timer ends with its purpose.** It needs no `when` saying "if the review is still open": a
+timer set on a run's start lives only while that run does. Answered within two days, the review is
+done, and its timer goes with it:
+
+```
+ana answered review#1 approve as support, setting approved_amount
+review#1 done
+cancelled chase_review, 2d after started review#1: review#1 is done
+```
+
+A stopped run's timers end with it; a failed run's don't, since an operator's retry runs it again
+as the same run. A timer set on any other moment, the opening, a milestone, an answer or an
+event's arrival, lives until it fires: to act 30 days after the payment, set it on the milestone
+the payment reaches, not on its start. And a close cancels every timer, saying so, as it cancels
+open tasks; so does a close held by a failed step, after which nothing new is decided.
+
+**A set timer keeps the case open.** It is pending work: a case with a timer set doesn't close
+until the timer fires or ends. A rule waiting for its moment holds nothing: listening is not
+waiting. Timers aren't in `waiting_for`, which lists what waits on people; `timers` lists each set
+timer, soonest first, with its due time:
+
+```python
+assert run.timers == ["chase_review: 2d after started review#1, due 2026-01-03T00:00:00Z"]
+```
+
+That line is where a due date comes from: a task's due date, if the inbox ever shows one, is the
+timer set on its run, never a second clock.
+
+**Untrusted data and time.** Time passing is a fact, so a timer set on the opening, a milestone, an
+answer or an arrival carries nothing. A timer set on a run's start carries what steered that run:
+if a rule started the run on untrusted data, a rule on its timer that reaches or stops does
+nothing, as a rule on the start itself would ("Rules that start steps").
+
+**Noticing a stale fact sooner.** A fact a step needs fresh is checked when an event reaches the
+case (`max_age`, the case data guide). The engine sets no timer for it; to fetch a read again
+before anyone acts, write one: a rule on `{"after": "1d", "since": {"answered": "review"}}` that
+starts the read again. Its output replaces the old one, and an open approval follows the case
+file, asked again if what it saw changed.
+
+**What the check says about timers.** A timer fires only if its moment can come: one whose moment
+never comes, or comes only once every `closes_when` milestone is reached, is `NEVER_FIRES`. A timer
+set as the case opens keeps it open, so the case doesn't close at once. What a timer's rule reads
+is checked as for a rule on its moment, since it fires later: what was set then is set still. A
+timer can't re-arm itself: one set on a run ends with it, and the moments that come without a
+person or an event come once.
+
 ## Testing a case
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`
@@ -1079,7 +1176,9 @@ the fake activities; an activity raises `Outcome("declined")` for a declared out
 replaces the fake workflows in the same way, a function from the inputs to the output, by
 reference: `workflows={"kyc.check@1": lambda inputs: {...}}`. A workflow contract with no function
 there is not bound, and its step fails. `held=["pay"]`
-keeps `pay`'s runs running until the script says `finish("pay#1")`.
+keeps `pay`'s runs running until the script says `finish("pay#1")`. `later("2d")` moves time on: the
+events after it happen two days later, and every timer due by then fires first, in order, even at
+the end of the script. `run.timers` lists the timers still set.
 
 ```python
 run = run_case(

@@ -1269,6 +1269,10 @@ kept.*
   that stops counts as any rule, and on always-untrusted data is `UNTRUSTED_TRIGGER`, alone.
 - **A run has ended once it has its final status;** a run whose stop is requested and still
   running hasn't, and a stopped run's timers end with it (layer 11e).
+- **Amended 2026-10-20, by D44** (the text above stands; this narrows it): for its timers, a
+  failed run hasn't ended. It waits for a person, and an operator's retry runs it again as the
+  same run (D26), so a timer set on its start stays set, as D17's "an sla still escalates during
+  a long outage" asks.
 
 ### D41. Events from outside: declared with one sender, a fact on arrival, and a step that waits for one
 
@@ -1435,6 +1439,61 @@ Adds to D29, D38, D39, D40, D41 and D42, whose text is kept.*
 - **Cases already open** on a path the fix decides differently replay differently, and wait until
   the code is fixed (D17), as 11b's did: carried to layer 12. A later moment a run brings (11f's
   timers `since` a start) carries what steered the run too.
+
+### D44. Timers: time passing after a moment, set on it, fired as an event at its own time
+
+*Decided 2026-10-20, in layer 11f. Adds to D7, D10, D17, D24, D27, D33, D34, D38, D40, D41 and D43,
+whose text is kept.*
+
+- **A sixth moment: time passing after another.** `"on": {"after": "5d", "since": <moment>}`.
+  `after` is an age in D33's format (`30m`, `12h`, `1d`), at least a minute, and means one firing;
+  a repeat, if one ever comes, is its own key with a count. `since` is one of the five other
+  moments (adds to D38's closed list): never a timer, and never a date from the case file, which
+  would be a later shape of its own. The rule's `when` is read at the firing, on the case file
+  then (D38); a condition on setting it would be a later key.
+- **A timer is set when its moment comes,** in the decision that handles the moment, only while
+  the case decides (D38: once closing, or once every `closes_when` milestone is reached, a timer
+  is not set, and a line says so). It is named by its rule and the moment it was set on,
+  `chase_review, 2d after started review#1`, and its due time is that decision's event time plus
+  `after`: time stays data (D33).
+- **It fires as an event stamped with its due time,** never "now": `decide` still reads no clock.
+  Before an event stamped `t` is decided, every timer due at or before `t` fires first, soonest
+  first, two due at one second in the order they were set; at a tie with an event, the timer goes
+  first, since the event happened during that second and the timer was due at its start. One pure
+  function gives the firings due by a time, and every driver uses it. A firing for a timer that
+  isn't set, or stamped with another time, is refused.
+- **A set timer is pending work (D10); a rule waiting for its moment is listening (D41).** It
+  isn't in `waiting_for` (D24): reports list set timers on their own, soonest first, with their
+  due time in UTC. That line is the view a due date reads: a task's due date, if the inbox ever
+  shows one, reads the timer set on its run, never a second clock.
+- **Its purpose ends, in general,** with no rule needed for each case: a timer set on a run's
+  start lives while that run hasn't ended (a stopped run's timers end with it, D40; a failed one's
+  don't, D40 as amended by this decision); one set on the opening, a milestone, an answer or an
+  arrival lives until it fires; and any close ends every timer, as does a close held by a failed
+  run, after which nothing can be decided again (D34). Each end is a line of history: a timer is
+  either fired or cancelled, never lost. So an `sla` stops when its step completes (D7, D10) with
+  no `when`, and "30 days after the payment" anchors on the milestone the payment reaches.
+- **Trust (D43).** A timer set on a run's start carries what steered the run: a rule on its firing
+  that reaches or stops doesn't act on it. Set on any other moment it carries nothing: time
+  passing is a fact.
+- **On Temporal,** the case workflow keeps one workflow timer, for the earliest due time; when it
+  wakes, the due firings are decided, each stamped with its due time. A set timer is state, not
+  running work, so it doesn't hold back continue-as-new (D27): it crosses with its due time, and
+  the new run fires it once, at once if it fell due during the switch. A timer is in the state
+  until the decision that fires it removes it, so exactly one run fires it.
+- **Staleness noticed sooner is an author's timer** (D33's "timers that would notice sooner come
+  with rules"): the engine sets none for a `max_age` expiry, since such a timer would keep cases
+  open and call systems nobody asked it to. A rule on a timer may start a read again; an open
+  approval then follows the case file (D25).
+- **Case validation counts timers** (D34): a timer fires only if its moment can come, and is
+  `NEVER_FIRES` if it never can, or comes only once every `closes_when` milestone is reached; a
+  timer set as the case opens keeps it open, so it gives no `CLOSES_AT_OPENING`; the claims about
+  what is set when a rule fires read a timer as firing at its moment, which claims less, never
+  more; what steered a start reaches a timer's rule as it reaches a rule on the start.
+- **No timer re-arms itself.** A timer on a run dies with it, and the moments that come without a
+  person or an event (the opening, a milestone) come once, so every way round goes through a
+  person, an event or a run ending. D10's "a timer that re-arms itself" can't be written, and
+  `NEVER_CLOSES` has nothing new to claim; a repeating key, if it comes, brings its own.
 
 ### Simplifications adopted
 
