@@ -33,7 +33,13 @@ warm-up (learning question 33's follow-up) walked through, 2026-10-19; sixteen c
 recommendation each, recorded as a draft awaiting answers, then answered "all as recommended,
 one pull request", 2026-10-20; D44, the guide's part and the slices' plan written before
 building; built, slices 0–9, and the Promises table checked against the tests, the same day (see
-11f, "Decided while building").
+11f, "Decided while building"). 11g: the warm-up (learning question 38) put, 2026-10-20; eighteen
+choices put with a recommendation each, one of them splitting 11g in two, recorded as a draft
+awaiting answers; the warm-up answered, and the choices answered "all as recommended", the same
+day; D45 and the guide's "Reading rules" written before building 11g1; 11g1 built, slices 0–5,
+and its Promises table checked against the tests, the same day (see 11g, "Decided while building
+11g1"); the tutor review's four items built test-first the same day (see 11g, "From the tutor
+review of 11g1").
 
 ## What this layer is for
 
@@ -2383,3 +2389,453 @@ for the right reason before its code was written.
 | The guide's definitions, histories and `run.timers` are what the engine does | `test_the_guides_definitions_are_these_tests`, `test_the_guides_histories_are_what_the_engine_records`, `test_the_guides_examples_run_as_written` (`tests/test_case.py`) |
 | No timer line or issue quotes a value from a case file | `test_no_timer_line_or_issue_quotes_a_value_from_the_case_file` |
 | The runtime refuses what the check refuses, on nothing validation did | each runtime test above runs through `run_case` alone |
+
+---
+
+## 11g. Reading rules
+
+**Decided, 2026-10-20:** all eighteen choices as recommended (the user, "all as recommended"),
+so 11g lands as two pull requests: 11g1, the reading (choices 1–6), then 11g2, the story and the
+command line (choices 7–15). D45 (brief) records the layer.
+
+### What this part is for
+
+A rule is stored as JSON, and its behaviour has parts people get wrong: a timer's anchor, what
+untrusted data can't do, when the condition is read, and that rules stop with the close. 11g
+gives two ways to read a rule before it runs on a real case (brief, D7):
+
+- **a reading**, the rule in plain words, worked out from the definition alone;
+- **a story**, a timeline in simulated time that `ventoux simulate` plays on the in-memory engine,
+  showing each firing beside its reading. A story says what it expects, so it is also a test.
+
+The guide's timer, read:
+
+```
+chase_review: Chase a review left open for two days
+  2d after each run of review starts: start chase.
+  - The timer is set as each run of review starts, and ends with that run: done, rejected,
+    stopped or cancelled. A failed run keeps it, since a retry is the same run.
+  - While it is set, the timer keeps the case open.
+  - Only while the case decides: not once the case is closing.
+```
+
+And D7's story ("Mon: assess starts; Wed: assessed; Thu: assess restarts"), on a claim whose
+`escalate` rule waits 5 days after `assess` starts:
+
+```
+day 0 00:00  the case opens
+             started assess#1: waiting for done by adjuster
+             set escalate: 5d after started assess#1, due 2026-01-06T00:00:00Z
+day 2 09:00  ana answers assess#1: done
+             ana answered assess#1 done as adjuster
+             assess#1 done
+             cancelled escalate, 5d after started assess#1: assess#1 is done
+day 3 09:00  ana proposes assess
+             started assess#2: waiting for done by adjuster
+             set escalate: 5d after started assess#2, due 2026-01-09T09:00:00Z
+day 8 09:00  escalate#1 on 5d after started assess#2: starting lead_review
+               ↳ escalate: 5d after each run of assess starts: start lead_review.
+             started lead_review#1: waiting for reviewed by support-lead
+
+At the end, day 9 00:00: open
+  waiting for: assess by adjuster, lead_review by support-lead
+  timers: none
+```
+
+The reader sees what the engine does: the timer measures from the latest start, ends with the
+first run, and fires once for the second. (The engine lines are the history the engine writes
+today; the exact wording of the story's own lines is choice 12.)
+
+### How the session went
+
+The warm-up first: learning question 38, answered 2026-10-20 (b came back, a didn't; recorded in
+the log). Then 11g was explained
+and eighteen choices were put, each with a recommendation, recorded as a draft awaiting answers,
+then answered "all as recommended", 2026-10-20.
+
+### Decided in the session
+
+All eighteen as recommended, 2026-10-20. Each is written as it was put.
+
+**The reading (the renderer)**
+
+1. **A pure function of the definition.** Recommended: `read_rules(case) -> list[Reading]` in
+   `case/reading.py`, taking a `CaseDefinition` and nothing else. A `Reading` is the rule's name,
+   its title, its sentence and its fine print (choice 4). It is never given a case file, so it
+   can't quote a value from one; a rule's own constants (`> 70`, `"done"`) are the definition's,
+   and show through the expression renderer (`core/expressions/render.py`). The type checker
+   holds this, and the layer test keeps I/O out of `case`.
+2. **Names, not titles.** Recommended: a reading names steps, milestones, tasks and events by
+   their names, as the history does, so a firing and its reading, printed side by side, use the
+   same words; the rule's title heads the reading. Set aside: titles ("when Checked is reached"),
+   which read more smoothly but differ from the history beside them, and two may be the same.
+   This changes the wording 11a's choice 1 sketched ("if the risk score is over 70, reach high
+   risk"): a condition reads as the expression renderer writes it, `kyc.risk_score > 70`. Prose
+   for an expression would need a second renderer, and a second place to be wrong.
+3. **The sentence.** Recommended: `<moment>[, if <condition>]: <actions>.`
+   - The moment, one wording per shape:
+
+     | `on` | reads |
+     |---|---|
+     | `"opened"` | `when the case opens` |
+     | `{"reached": "checked"}` | `when checked is reached (once: a milestone is never undone)` |
+     | `{"started": "assess"}` | `each time a run of assess starts` |
+     | `{"answered": "review"}` | `each time review is answered, whatever the outcome` |
+     | `{"event": "cancelled"}` | `each time cancelled arrives` |
+     | `{"after": "5d", "since": …}` | `5d after` and the moment it is set on: `5d after each run of assess starts` |
+
+   - The condition, through `render()`, followed by when it is read: `(read when it fires)`; for
+     a timer, `(read when the timer fires, not when it is set)` (brief, D44).
+   - The actions in the order the engine takes them (brief, D40, D42): `stop review, set owed to
+     amount - fee, reach high_risk, start chase`.
+4. **The fine print: each faithful part, only where it applies.** Recommended: a short line per
+   part, each from a closed list of **clauses**, shown only on the rules it is true of:
+   - *a timer on a run*: set as each run starts, ended with that run (done, rejected, stopped or
+     cancelled); a failed run keeps it, since a retry is the same run (brief, D40 as amended by
+     D44);
+   - *a timer on an instant* (the opening, a milestone, an answer, an arrival): set when the
+     moment comes, and lives until it fires;
+   - *a timer holds the case*: while set, it keeps the case open (brief, D10);
+   - *listening*: a rule on an event holds nothing until it fires (brief, D41);
+   - *untrusted data can't decide*, on a rule that reaches or stops: if its condition reads
+     untrusted data, it acts on nothing, saying why (brief, D38, D40, D42). On a rule set on a
+     run's start, or a timer set on one, it adds "or if untrusted data steered that run"
+     (brief, D43, D44). Nothing is added on the other moments: an answer is a person's, an
+     arrival and the opening are facts, and a milestone never carries what steered anything;
+   - *a set value carries what it read*, on a rule that sets and neither reaches nor stops: the
+     value carries the sources of everything its rule read (brief, D42), and what steered the
+     run, on a start;
+   - *starts are checked against inputs*, on a rule that starts a step that takes inputs: what
+     the condition reads, and what steered the run on a start, counts for that step's input
+     policies (brief, D39, D43);
+   - *only while the case decides*, on every rule, naming the definition's own `closes_when`:
+     `not once paid is reached, nor while the case is closing` (brief, D34, D38); without
+     `closes_when`, `not once the case is closing`.
+
+   Two facts true of every rule are said once, above the readings, rather than on each:
+   a rule remembers nothing between firings, and a rule whose condition or value can't be read
+   acts on nothing and needs attention (brief, D17, D38).
+5. **Every shape, and fail closed.** Recommended:
+   - a moment, an action or an expression the renderer doesn't know raises `ReadingRefused`,
+     naming it: never a sentence with a part left out;
+   - **coverage is proven from the definition's own closed lists**, as for operators: a test
+     reads the moment shapes from `RuleMoment`'s union (its tags) and the actions from `Then`'s
+     fields, and asserts each has a row in the test's table of exact readings. A new moment or
+     action added to the definition fails that test until the renderer and a row cover it.
+     Expressions are covered by `render()`'s own tests (layer 2);
+   - the negative test first: a shape the definition can't hold, forced past it, is refused.
+6. **Faithful: each clause has a witness.** Recommended: every clause in the closed list of
+   choice 4 has a **witness**, a test that reads a rule with that clause and runs a case where
+   the engine does what the clause says, in one test:
+   - *a timer on a run*: the run done, the timer cancelled; a run failed, the timer fires;
+   - *untrusted data can't decide*: `reaches nothing: … untrusted data can't decide`, and on a
+     steered start too;
+   - *read when the timer fires*: a value changed between setting and firing, and the firing
+     reads the new one;
+   - *only while the case decides*: `not applied: paid is reached …`;
+   - *the order of actions*: one rule with all four, and the history in that order;
+   - and one each for the rest.
+
+   A test asserts that the witnesses' clauses are exactly the closed list. So a clause can't be
+   added without a run showing it, and an engine change that breaks a clause fails its witness.
+   In 11g2 (choice 18) each witness becomes a story, so it reads as the reader will see it.
+
+**The story**
+
+7. **A story is data:** a JSON file, read with the standard library, as definitions are.
+   Recommended keys, each refused if misspelt (`extra="forbid"`):
+   - `title`;
+   - `definition`, a path relative to the story file, so a story runs the real definition;
+   - `file`, the values the case opens with; `opened_by`, if a person opened it;
+   - `people`, each person's roles, as the API states them (brief, D22);
+   - `fakes`, by contract reference (choice 10);
+   - `timeline`, the entries in time (choices 8 and 9);
+   - `until`, when the story ends (default: the last entry's time). Time moves on to it at the
+     end, so a timer due by then fires;
+   - `expect`, optional (choice 13).
+8. **How a story names a moment in time.** Recommended: `"at": "day 3"` or `"day 3 14:30"`,
+   counted from the opening, which is day 0 00:00. The opening is fixed at
+   2026-01-01T00:00:00Z (the tests' `START`), printed in the header, so the timers' due times read
+   as real dates. Time only moves forward: an entry earlier than the one before is refused.
+   Set aside: weekday names, as D7 sketches them ("Mon", "Wed"), which are ambiguous after a
+   week; and an `opens` date, which needs a date parser in `case` for little gain.
+9. **What happens on the timeline.** Recommended: each entry has `at` and at most one of
+   `answer` (`step` or `entry`, `outcome`, `by`, `form`), `propose` (`step`, `by`), `retry`
+   (`entry`, `by`), `close` (`reason`, `by`), `send` (`event`, `payload`, `by`) or `finish`
+   (`entry`: a held run ends, giving its fake's result). An entry with none of them is time
+   passing. These are `run_case`'s script items, so stories and tests drive the engine the same
+   way. Left out: `shown` and `forget`, which no rule reads.
+10. **Activities are fakes the story declares.** Recommended:
+    - by contract reference: `{"gives": {...}}`, `{"outcome": "declined"}` (a declared outcome)
+      or `{"fails": "provider down"}`, with `"held": true` to keep its runs going until a
+      `finish` entry. Workflow contracts the same way;
+    - every contract the definition calls needs a fake, or the story is refused before it runs,
+      listing each one missing (fail closed: nothing real is reached for);
+    - nothing is sent: a fake is a value, and simulate imports no Temporal client and no network
+      code. A `notify` contract's fake gives its draft's id; nothing leaves the process
+      (draft, never send);
+    - a definition with a plan step is refused, saying so: plans in a story are not in 11g;
+    - the contracts are the development catalog's (`ventoux.testing.CATALOG`), as in `run_case`.
+      A project's own catalog comes with `ventoux check` and the builder (layer 14), which needs
+      the same thing.
+11. **Simulated on the in-memory driver.** Recommended: `simulate(story, definition, catalog) ->
+    Simulation`, pure, in `case/simulate.py`, with the format in `case/story.py`. It plays each
+    entry through the in-memory driver's `until` and `carry`, so each history line gets the time
+    of the decision that wrote it, a timer's firing its due time; the state and the history's
+    lines are unchanged. Time stays data (brief, D33): the entries' times are the events' times,
+    and nothing reads a clock. An entry the engine refuses (an answer from someone without the
+    role, a close reason not declared) is shown as `refused: <why>` at its time, changes nothing,
+    and the story goes on; any other error is a bug and stops it. The same story gives the same
+    output, byte for byte.
+12. **The output.** Recommended:
+    - a header (the title, the definition, the opening time), then each rule's reading;
+    - the timeline, grouped by time: the story's own entry first, by names only (`ana answers
+      assess#1: done`, never the form's values), then the engine's lines as it wrote them.
+      Each firing line is followed by its rule's sentence, `↳ escalate: …`. Timers set, fired
+      and cancelled, refusals and lines such as `reaches nothing: … untrusted data can't
+      decide` are the engine's own lines, so the output can't drift from the engine;
+    - at the end, the status and every kind of pending work (brief, D10), each on its line:
+      waiting for people, running steps, set timers with their due times, what needs attention,
+      a step waiting for an event. None is left out; with nothing pending, it says
+      `nothing pending`;
+    - no value from the case file: the engine's lines quote none (earlier layers), the story's
+      lines are names only, and the readings show only the definition's constants.
+13. **What a story expects.** Recommended: `expect` holds the timeline's lines, each with its
+    time, exactly as printed (without the readings), and the end's lines. Compared exactly, so
+    nothing the engine did goes unchecked: a rule firing that nobody expected fails the story.
+    A mismatch prints the first line that differs, expected and got, and a failing story fails
+    its test. Set aside: expected lines as a subsequence, shorter to write, through which an
+    unexpected firing passes. A story without `expect` only prints.
+14. **Stories as tests.** Recommended: stories live beside their definition,
+    `examples/<case>/stories/*.json`; one parametrized test runs every story under `examples/`.
+    The guide's stories are among them, so the guide can't drift. 11h adds one story per
+    pattern (curriculum, layer 11).
+
+**The command line**
+
+15. **One entry point, one command.** Recommended: `[project.scripts] ventoux =
+    "ventoux.tooling.cli:main"`, with `argparse` (no dependency). One command: `ventoux simulate
+    STORY.json`, which prints the simulation and exits 0 when its expectations hold (or it has
+    none), 1 when one fails, 2 when the story or its definition can't be read, each problem on a
+    line saying where, what is wrong, then what to do. Reading files and printing happen only in
+    `tooling/cli.py`. `ventoux check` stays with the builder (brief, D34: layer 14); until then,
+    a story with an empty timeline reads a definition's rules. Set aside: a second command,
+    `ventoux rules DEFINITION.json`, printing the readings alone.
+
+**Patterns, for 11h**
+
+16. **Room for patterns, nothing built.** Recommended: 11h gives a pattern its own reading (D7's
+    "Escalate to a senior adjuster if the assessment isn't finished within 5 days of its latest
+    start"), and its expansion is raw rules, which `read_rules` reads as any other. In a
+    simulation, a firing of an expanded rule then shows its pattern's sentence and its own. 11g
+    adds no pattern field and no hook for one.
+
+**Records and size**
+
+17. **Records.** Recommended: D45, written before building, adding to D7: what a reading is (a
+    pure function of the definition, every shape, fails closed, each clause witnessed), what a
+    story is (its format, its time, its fakes, what it expects), and the one command. The cases
+    guide gets "Reading rules" and "Simulating a story", written before building, their examples
+    run as tests. No new dependency.
+18. **Size: two pull requests.** Recommended:
+    - **11g1, the reading** (choices 1–6): the renderer, its coverage and its witnesses as
+      `run_case` tests. Pure code in `case`, about five slices;
+    - **11g2, the story** (choices 7–15): the format, `simulate`, the output, expectations,
+      stories as tests, the command line, and the witnesses moved into stories. About seven
+      slices.
+
+    Why: they are two kinds of code (a pure function; a data format with I/O around it), and the
+    story is a new format people will write, worth its own review. The alternative: one pull
+    request, about twelve slices.
+
+### Where the code goes
+
+- `case/reading.py` (new): `read_rules`, `Reading`, the clauses, `ReadingRefused`.
+- `case/story.py` (new, 11g2): the story's format, its times (`day 3 14:30` to seconds).
+- `case/simulate.py` (new, 11g2): playing a story on the in-memory driver, the timeline, the end,
+  the expectations.
+- `case/memory.py`: nothing new expected; `Driver` is used as it is.
+- `tooling/cli.py` (new, 11g2): `main`, `simulate`; reading the files, printing, the exit code.
+- `pyproject.toml` (11g2): the `ventoux` script.
+- `examples/refund/stories/`, `examples/claim/` (11g2): stories, and the definitions they run.
+- `docs/guides/cases.md`: "Reading rules" (11g1), "Simulating a story" (11g2).
+
+### Not in 11g
+
+- Patterns, their readings, their stories, and teaching warnings (11h).
+- `ventoux check`, a project's catalog, and readings in the case map (layer 14).
+- Plan steps in a story; `shown` and `forget` entries.
+- Prose for expressions: conditions read as the expression renderer writes them.
+- No new dependency.
+
+### Seams the tests use
+
+- `read_rules(parse_case(d))`: each reading's text; `ReadingRefused` for a shape it doesn't know.
+- `run_case(...)` (11g1's witnesses): `history`, `timers`, `needs_attention`.
+- `simulate(story, definition, CATALOG)` (11g2): the printed timeline, the end, and whether its
+  expectations hold.
+- `main(["simulate", path])` (11g2): what it prints and its exit code.
+- The guide's examples, run as written.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+11g1:
+
+0. This note, D45's first part, the guide's "Reading rules".
+1. The moments. Negative: a moment the renderer doesn't know is refused; then each shape, and the
+   coverage test over `RuleMoment`.
+2. Conditions and actions. Negative: an action it doesn't know; then the order, and the coverage
+   test over `Then`.
+3. The fine print, each clause where it applies.
+4. The witnesses, one per clause, and the test that they cover the closed list.
+5. The guide, run as written, and the Promises table checked against the tests.
+
+11g2:
+
+0. D45's second part, the guide's "Simulating a story".
+1. The format. Negative: a misspelt key, an entry with two actions, time going back, a missing
+   fake, a plan step.
+2. Playing it: entries, time passing, timers firing at their due time, refusals as lines.
+3. The output: grouped by time, each firing beside its reading, the end's pending work, no value
+   from the case file.
+4. Expectations. Negative: a story whose expectation fails, saying the first line that differs.
+5. Stories as tests; the witnesses as stories.
+6. The command line: `ventoux simulate`, its exit codes.
+7. The guide, run as written, and the Promises table checked against the tests.
+
+### Decided while building 11g1
+
+- **The reader takes the definition, not one rule** (slice 3): two clauses need more than the
+  rule. "Only while the case decides" names the case's own `closes_when`, and "start checked
+  against inputs" is said only when a started step takes inputs. Both are still the definition
+  alone, so a reading quotes no value from a case file.
+- **The sentence's own claims are clauses too** (slice 3): "read when it fires", "read when the
+  timer fires" and "the actions in the engine's order" are in the sentence, not the fine print,
+  but are as easy to get wrong; each is in the closed list with a witness. So is what holds for
+  every rule, `EVERY_RULE`, said once above a definition's readings.
+- **The untrusted clause is said only where untrusted data could reach the rule** (slice 3): on
+  a rule that reaches or stops, if it has a condition, or is set on a run's start, which may be
+  steered (brief, D43). A rule on a milestone, an answer, an arrival or the opening with no
+  condition reads nothing untrusted, so the clause would be noise there.
+- **"Ends when that run does: done, rejected or cancelled, a stop included"** (slice 3): the
+  statuses `end_with_their_runs` ends a timer on; a stopped run ends `cancelled` (brief, D40).
+- **The witnesses reuse the scenarios earlier layers proved** (slice 4): the guide's chase, the
+  KYC rule, the customer's note that steers a goodbye, the owed amount. Each witness asserts the
+  clause's exact text and the engine's own history line in one test.
+- **Checked by mutation, not only by running:** a failed run made to end its timers fails the
+  "timer on a run" witness; the "only while the case decides" clause left out fails its
+  witness. Each passed with the code put back.
+
+### From the tutor review of 11g1
+
+The tutor review (2026-10-20, at `e466b26`) found two readings that promised more than the engine
+does, in the very place D45 aims at, and asked for two more points in the same pull request. All
+four built test-first, each new clause with its witness, so `test_every_clause_has_a_witness`
+still covers the closed list. D45 isn't merged yet, so its list of clauses is updated in place.
+
+1. **`stop pay` read as if the payment stops.** The engine only asks a running call to stop, and
+   it finishes: the refund went through, and the case was flagged (brief, D10, D40). A new
+   clause, "what a stop does", one line per stopped step: a task's or a wait's open run is
+   cancelled at once; for an activity, a workflow or a plan, a run waiting for its approval (if
+   the step has one), or to start, is cancelled at once, a running call is only asked to stop,
+   may still finish, and is flagged if it does, and a failed run isn't stopped. Its witness is
+   the review's case, a rule on `cancelled` stopping `pay` while it runs: the refund completes and
+   the case is flagged; and, on the same rule, the open review and an asked approval are
+   cancelled at once. A cancellable workflow is cancelled rather than left to finish, but whether
+   it is depends on its contract, in the catalog, which the reader never sees; "may still finish"
+   is true of every kind.
+2. **`start pay` read as if pay starts.** The engine proposes, and admission decides as for a
+   person's proposal (brief, D39). A new clause, "a start is a proposal", one line per started
+   step, naming only the reasons that apply to it: its requirements, its condition, already
+   running (or waiting for its approval), has run and isn't repeatable, its latest run needing
+   attention; then, for a step with `max_age`, that a stale fact fails the run; and, for a step
+   with an approval, that it waits for it. Its witness: `pay` started over 100 waits for the
+   approval, asked first; a check whose requirement isn't met doesn't start, and says why; a
+   lookup on a stale fact fails, needing attention.
+   **Worded as the engine acts, not as the review put it.** The review's wording, "the step
+   starts once its requirements, condition and freshness hold and its approval is given", would
+   say the start waits for them. Only the approval is waited for: a rule's start the engine
+   can't make is recorded and nothing runs, then or later (D39), and one on a stale fact fails
+   rather than waiting for a refresh (D39: a refresh lands with no person in it). So the line
+   says "decided at once", and what happens in each case; each part has its run in the witness.
+3. **A rule that reaches or stops dropped "the values it sets carry what it read."** `trust()`
+   returned early. Untrusted data stops such a rule whole, but a trusted value still carries a
+   person's answer, which decides who may approve a step given it (brief, D11, D42). The clause
+   is now said on every rule that sets; on one that reaches or stops, without "what steered the
+   run", since such a rule never acts on a steered start. Its witness is four eyes: a rule that
+   sets what is owed and reaches a milestone, and Sam, whose answer the value carries, can't
+   approve paying it.
+4. **Reaching a `closes_when` milestone closes the case,** cancelling open tasks, approvals and
+   timers, while running calls finish (brief, D10, D34). A new clause, "reaching closes the
+   case", naming the other `closes_when` milestones still to be reached, if any. Its witness: a
+   rule reaching the closing milestone cancels the open review and a set timer, and the case
+   closes.
+
+Also, while building: `starts()` read every step's requirements even for a rule that starts
+nothing, so the negative test for a stopped step of an unknown kind failed for the wrong reason
+under mutation (an attribute error, not the refusal). It now reads them only for a rule that
+starts, and the mutation fails as it should.
+
+### Promises
+
+Every test is in `tests/test_reading.py` unless said otherwise. Each negative test was seen
+failing for the right reason before its code was written. 11g2's rows are a draft, checked when
+it is built.
+
+**11g1, the reading**
+
+| Promise | Test that would fail |
+|---|---|
+| A reading is worked out from the definition alone, and shows only its constants | `test_a_reading_needs_only_the_definition` |
+| A moment the reader doesn't know is refused, never read as another | `test_a_shape_the_reader_doesnt_know_is_refused` |
+| An action the reader doesn't know is refused, never left out | `test_an_action_the_reader_doesnt_know_is_refused` |
+| An expression the reader can't render is refused, naming the rule | `test_an_expression_the_reader_doesnt_know_is_refused` |
+| Every moment shape the definition takes has a reading, a timer on each of the five | `test_every_moment_the_definition_takes_is_read` |
+| Every action the definition takes has a reading, in the engine's order whatever the JSON's | `test_every_action_the_definition_takes_is_read_in_the_engines_order` |
+| A condition reads as the expression renderer writes it, with when it is read | `test_a_condition_reads_as_rendered_and_when_it_is_read` |
+| A rule's condition is read when it fires, on the case file then (witness) | `test_a_condition_reads_as_read_when_it_fires` |
+| A timer's condition is read when the timer fires, not when it is set (witness) | `test_a_timers_condition_reads_as_read_when_the_timer_fires` |
+| The actions act in the order they read: stop, set, reach, start (witness) | `test_actions_read_in_the_order_the_engine_takes_them` |
+| A timer on a run ends when the run is done or stopped, and a failed run keeps it (witness) | `test_a_timer_on_a_run_reads_as_ending_with_it` |
+| A timer on an instant lives until it fires (witness) | `test_a_timer_on_an_instant_reads_as_living_until_it_fires` |
+| A set timer keeps the case open, and a close cancels it (witness) | `test_a_set_timer_reads_as_keeping_the_case_open` |
+| A rule on an event doesn't keep the case open (witness) | `test_a_rule_on_an_event_reads_as_listening` |
+| A rule that reaches or stops acts on nothing on untrusted data, its condition's or its steered start's (witness) | `test_untrusted_data_reads_as_deciding_nothing` |
+| A value a rule sets carries what it read, and what steered its start (witness) | `test_a_set_value_reads_as_carrying_what_it_read` |
+| What a start's condition read, and what steered its moment, count for the started step's inputs (witness) | `test_a_start_reads_as_checked_against_inputs` |
+| The inputs clause is said only of a step that takes inputs | `test_a_start_of_a_step_without_inputs_says_nothing_of_them` |
+| A rule acts only while the case decides, naming `closes_when` (witness) | `test_a_rule_reads_as_acting_only_while_the_case_decides` |
+| A rule that can't be read acts on nothing and needs attention, said once for every rule (witness) | `test_what_every_rule_does_is_said_once` |
+| A stop reads as what the engine does: an open task or an asked approval cancelled at once, a running call only asked to stop, finishing and flagged (witness) | `test_a_stop_reads_as_what_the_engine_does_to_each_kind` |
+| A stopped step of a kind the reader doesn't know is refused | `test_a_stopped_step_of_a_kind_the_reader_doesnt_know_is_refused` |
+| A start reads as a proposal decided at once: waiting for its approval, nothing started and why, a stale fact failing the run (witness) | `test_a_start_reads_as_a_proposal_admission_decides` |
+| Reaching a `closes_when` milestone reads as closing the case, cancelling an open task and a timer, naming any other milestone still to reach (witness) | `test_reaching_closes_when_reads_as_closing_the_case` |
+| A value set by a rule that also reaches still reads as carrying what it read, and whose answer it carries can't approve the step given it | `test_a_set_value_on_a_rule_that_reaches_still_reads_as_carrying_what_it_read` |
+| Every clause has a witness, and the witnesses cover the closed list | `test_every_clause_has_a_witness` |
+| The guide's readings are the reader's | `test_the_guides_readings_are_the_renderers` |
+| The guide's example calls the reader as written | `test_the_guides_examples_run_as_written` (`tests/test_case.py`) |
+| `case` stays free of the clock and I/O | `tests/test_layers.py`, as it is |
+
+**11g2, the story (draft)**
+
+| Promise | Test that would fail |
+|---|---|
+| A story with a misspelt key, an entry with two actions, or time going back is refused, saying where | `test_a_story_that_cant_be_read_is_refused` |
+| A story missing a fake for a contract its definition calls is refused before it runs, listing each | `test_a_story_without_a_fake_is_refused` |
+| A story whose definition has a plan step is refused, saying so | `test_a_story_with_a_plan_step_is_refused` |
+| Times are named from the opening, `day 3 14:30`, and events are stamped with them | `test_a_story_names_times_from_the_opening` |
+| Time passing fires each timer due, stamped with its due time | `test_time_passing_fires_timers_at_their_due_time` |
+| An entry the engine refuses is a line, changes nothing, and the story goes on | `test_a_refused_entry_is_a_line_and_the_story_goes_on` |
+| Each firing is shown beside its rule's reading | `test_each_firing_is_shown_beside_its_reading` |
+| Every kind of pending work is listed at the end; with none, `nothing pending` | `test_the_end_lists_every_pending_item` |
+| No output line quotes a value from the case file | `test_no_output_line_quotes_a_value_from_the_case_file` |
+| The same story gives the same output, byte for byte | `test_a_story_simulates_the_same_every_time` |
+| Nothing real is called: only the story's fakes run | `test_only_the_storys_fakes_run` |
+| A story whose expectation fails says the first line that differs | `test_a_failing_expectation_says_where` |
+| Every story under `examples/` holds | `test_every_story_holds` |
+| `ventoux simulate` exits 0, 1 or 2 as its story holds, fails or can't be read | `test_simulate_exits_as_its_story_does` (`tests/test_cli.py`) |
+| The `ventoux` command is installed | `test_the_ventoux_command_is_installed` (`tests/test_cli.py`) |
+| The guide's stories and their output are what `simulate` prints | `test_the_guides_stories_are_what_simulate_prints` (`tests/test_case.py`) |
+| `case` stays free of the clock and I/O: reading the files is the command line's | `tests/test_layers.py`, as it is |

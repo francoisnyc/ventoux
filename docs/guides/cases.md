@@ -1184,6 +1184,67 @@ is checked as for a rule on its moment, since it fires later: what was set then 
 timer can't re-arm itself: one set on a run ends with it, and the moments that come without a
 person or an event come once.
 
+## Reading rules
+
+A rule stored as JSON doesn't say the parts people get wrong: what a timer measures from, what
+untrusted data can't do, when the condition is read, and that rules stop with the close. Each
+rule has a **reading**, the rule in plain words, worked out from the definition alone:
+
+```python
+readings = read_rules(parse_case(refund_with_chase))
+assert [reading.name for reading in readings] == ["chase_review"]
+```
+
+The timer above reads:
+
+```
+chase_review: Chase a review left open for two days
+  2d after each run of review starts: start chase.
+  - The timer is set as each run of review starts, and ends when that run does: done, rejected or cancelled, a stop included. A failed run keeps it: a retry is the same run.
+  - While it is set, the timer keeps the case open; a close cancels it.
+  - Starting chase is a proposal, decided at once as a person's is: nothing starts, and the history says why, if it is already running, or it has run and isn't repeatable.
+  - Only while the case decides: not once the case is closing.
+```
+
+and the rule flagging a high-risk customer ("Rules"):
+
+```
+flag_high_risk: Flag a high-risk customer
+  When checked is reached (once: a milestone is never undone), if kyc.risk_score > 70 (read when it fires): reach high_risk.
+  - If its condition reads untrusted data, it acts on nothing, and says why: untrusted data can't decide.
+  - Only while the case decides: not once the case is closing.
+```
+
+The first line is the rule's name and title; the second its sentence: the moment, the condition
+and what it does, in the order the engine does it (stop, set, reach, start). Names are the
+definition's, as in the history, so a firing and its reading use the same words, and a condition
+reads as the expression renderer writes it. Below come the parts that apply to this rule only:
+
+| Fine print | On |
+|---|---|
+| the timer is set as each run starts, and ends when that run does; a failed run keeps it | a timer set on a run's start |
+| the timer is set when its moment comes, and lives until it fires | a timer set on the opening, a milestone, an answer or an arrival |
+| while it is set, the timer keeps the case open; a close cancels it | every timer |
+| listening for the event doesn't keep the case open | a rule on an event's arrival |
+| if its condition reads untrusted data, or untrusted data steered the run, it acts on nothing | a rule that reaches or stops |
+| the values it sets carry the sources of everything it read | a rule that sets |
+| what its condition reads counts for the inputs of the steps it starts | a rule that starts a step taking inputs, and neither reaches nor stops |
+| stopping it cancels its open task or wait at once | a rule that stops a task or a wait |
+| stopping it cancels a run waiting for its approval, or to start, at once; a running call is only asked to stop, may still finish, and is flagged if it does; a failed run isn't stopped | a rule that stops an activity, a workflow or a plan |
+| starting it is a proposal, decided at once as a person's is: nothing starts, and the history says why, if it can't run now (its requirements, its condition, already running, run and not repeatable, its latest run needing attention); a stale fact it needs fresh fails the run; it waits for its approval | a rule that starts a step |
+| reaching it closes the case, unless a failed run holds the close: open tasks, approvals and timers are cancelled, and running calls finish | a rule that reaches a `closes_when` milestone |
+| only while the case decides: not once the `closes_when` milestones are reached, nor once the case is closing | every rule |
+
+Two things hold for every rule, and are said once, above a definition's readings:
+
+```
+A rule remembers nothing: its condition is read once, when it fires. A rule whose condition or value can't be read acts on nothing, and needs attention.
+```
+
+A reading is never given a case file, so it can't quote a value from one: the constants it shows
+(`70`, `"approve"`) are the definition's own. A rule it can't read is refused, never read with a
+part left out.
+
 ## Testing a case
 
 `run_case` opens the case, plays the script in order, and reports where it ended: `status`

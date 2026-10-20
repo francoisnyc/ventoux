@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from test_timers import chased
 
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.reading import read_rules
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Opened
 from ventoux.core.catalog import Catalog
@@ -690,6 +691,8 @@ def test_the_guides_examples_run_as_written() -> None:
         "refund_with_plan": guide_refund_with_plan(),
         "refund_order": refund_order(),
         "refund_with_chase": chased(),  # "Rules on time", whose blocks test_timers.py checks
+        "read_rules": read_rules,  # "Reading rules", whose readings test_reading.py checks
+        "parse_case": parse_case,
     }
     for code in blocks("python"):
         exec(code, namespace)  # noqa: S102 -- our guide, as in layer 7
