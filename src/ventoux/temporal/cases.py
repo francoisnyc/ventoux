@@ -8,7 +8,7 @@ clock, randomness or I/O, so replay rebuilds the same case. See docs/layers/08-c
 
 import asyncio
 from collections.abc import Coroutine, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
@@ -65,6 +65,7 @@ with workflow.unsafe.imports_passed_through():
         StopPlan,
         WorkflowCancelled,
     )
+    from ventoux.case.timers import next_due, set_timers, soonest
     from ventoux.case.visibility import ApprovalSheet, CaseView, SheetRefused, case_view, sheet_of
     from ventoux.core.catalog import Catalog
     from ventoux.core.sensitive import Sensitive
@@ -104,6 +105,9 @@ class CaseReport:
     needs_attention: list[str]  # failed step runs, each with its reason (brief, D17)
     flags: list[str]  # what completed after the close was requested
     history: list[str]  # what happened, one line each
+    # Each timer still set, soonest first, with its due time: never in `waiting_for` (brief, D24)
+    # (brief, D44). Empty from a worker before 11f.
+    timers: list[str] = field(default_factory=list[str])
 
 
 @dataclass
@@ -253,6 +257,7 @@ class CaseWorkflow:
             attention,
             list(state.flags),
             list(state.history),
+            set_timers(state),
         )
 
     @workflow.query(name="view")
@@ -296,15 +301,19 @@ class CaseWorkflow:
             kind = type(refused).__name__
             raise ApplicationError(str(refused), type=kind, non_retryable=True) from None
         while self.state.phase != "closed":
-            await workflow.wait_condition(
-                lambda: bool(self.inbox) or self.time_to_switch() or self.broken is not None
-            )
+            await self.until_something_comes()
             if self.broken is not None:
                 # An engine bug is never lost: it fails the workflow task, which Temporal retries
                 # until fixed code is deployed (brief, D17); the log keeps its type (brief, D31).
                 raise self.broken
+            # Before an event stamped `t`, every timer due by `t` fires, each stamped with its own
+            # due time; with nothing in the inbox, every timer due by now (brief, D44).
+            if self.fire_due(case, self.inbox[0].at if self.inbox else now()):
+                continue  # the case may have closed: the loop asks again
             if not self.inbox:
-                self.switch(start)
+                if self.time_to_switch():
+                    self.switch(start)
+                continue
             event = self.inbox.pop(0)
             try:
                 names_its_entry(event, self.state)
@@ -330,6 +339,35 @@ class CaseWorkflow:
             self.state.history.append(f"refused {asked(event)}: the case is closed")
         self.inbox.clear()
         return self.report()
+
+    async def until_something_comes(self) -> None:
+        """Wait for an event, the time to continue as new, an engine bug, or the earliest timer's
+        due time, whichever comes first. A case with no timer waits as it did before 11f, so its
+        history replays the same; one with a timer waits on one workflow timer, for the soonest
+        (brief, D44)."""
+        due = soonest(self.state)
+        if due is not None and due <= workflow.now().timestamp():
+            return  # one has fallen due already, as across a switch: it fires at once
+        # Temporal: with a timeout, `wait_condition` starts a workflow timer, which history
+        # records, and raises `TimeoutError` when it fires first; it is cancelled otherwise.
+        timeout = None if due is None else due - workflow.now().timestamp()
+        try:
+            await workflow.wait_condition(
+                lambda: bool(self.inbox) or self.time_to_switch() or self.broken is not None,
+                timeout=timeout,
+            )
+        except TimeoutError:
+            pass  # the timer's time has come
+
+    def fire_due(self, case: Any, at: int) -> bool:
+        """Decide every timer due by `at`, one at a time and in order, each stamped with its own
+        due time: a firing may set or end timers, so the next is asked for afresh. Whether any
+        fired (brief, D44)."""
+        fired = False
+        while self.state.phase != "closed" and (due := next_due(self.state, at)) is not None:
+            self.decide(case, due)
+            fired = True
+        return fired
 
     def time_to_switch(self) -> bool:
         """Whether the case should continue as new now: enough events in this run, or Temporal

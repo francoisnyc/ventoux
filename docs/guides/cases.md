@@ -1277,7 +1277,7 @@ assert (await case.result()).status == "closed"
 
 `propose(case, step, by, roles)`, `retry(case, entry, by, roles)` and `close(case, reason, by,
 roles)` do what a script's `propose`, `retry` and `close` do. `report` gives what `run_case`
-reports (`status`, `waiting_for`, `needs_attention`, `flags`, `history`), and `waiting_at`, the
+reports (`status`, `waiting_for`, `needs_attention`, `flags`, `history`, `timers`), and `waiting_at`, the
 entries open for an answer, in the same order as `waiting_for`; once the case has closed, it is
 the report the case returned then, read without replaying it. `view(case, roles)` gives the
 case file as people with those roles see it, filtered inside the worker, and `shown(case, field,
@@ -1291,6 +1291,10 @@ What changes from memory, and what doesn't:
   `review#1` or `pay.approval#1`, never a step: after a rework, an answer to "review" could
   approve a review its sender never saw. An answer counts only for the entry open when it
   arrives; a double click, or an answer sent before its entry opens, is refused.
+- **A timer is a workflow timer.** The case waits on one, for the soonest timer set; when it
+  fires, the timer's firing is decided stamped with its due time, as in memory. A timer set is
+  state, not running work: it doesn't hold back continue-as-new, crosses with its due time, and
+  fires once in the new run, at once if its time came during the switch.
 - **Anything refused is recorded, and the case waits on.** In memory a refusal raises from
   `run_case`; on Temporal nobody is there to catch it, so the history says what was refused and
   why, and the case goes on as if it hadn't come:

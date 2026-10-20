@@ -142,13 +142,15 @@ def skipping[T](
     scenario: Callable[[WorkflowEnvironment], Awaitable[T]],
     activities: Mapping[str, Activity] = FAKES,
     cases: type[CaseWorkflow] = DevelopmentCases,
+    converter: DataConverter | None = None,
 ) -> T:
     """As `on_temporal`, for a scenario that moves time on itself: the server skips time only
-    while a client waits on a workflow's result, and a case waiting for a person never ends."""
+    while a client waits on a workflow's result, and a case waiting for a person never ends.
+    `converter` holds the keys, for a test that replays what it recorded; else fresh ones."""
 
     async def go() -> T:
         environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
+            data_converter=converter or development_converter()
         )
         async with (
             environment,

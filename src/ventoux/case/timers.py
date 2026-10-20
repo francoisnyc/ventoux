@@ -68,6 +68,11 @@ def cancel_timers(state: CaseState, because: str) -> None:
     state.timers.clear()
 
 
+def soonest(state: CaseState) -> int | None:
+    """The earliest due time of the timers set, which a driver waits for; None if none is set."""
+    return min((timer.due for timer in state.timers), default=None)
+
+
 def next_due(state: CaseState, at: int) -> TimerDue | None:
     """The firing due first by `at`, stamped with its due time; None if none is. Soonest first,
     and two due the same second in the order they were set (brief, D44). A driver asks again after
