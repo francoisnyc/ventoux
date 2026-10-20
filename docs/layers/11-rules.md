@@ -28,7 +28,9 @@ was merged; the Promises table checked against the tests, the same day. 11e: the
 (learning question 36's follow-up) answered "can't remember", 2026-10-19; 14 choices put with a
 recommendation each, answered "all as recommended, one pull request" the same day; the guide's
 part, D42 and a draft Promises table written before building; built, slices 0–9, and the Promises
-table checked against the tests, the same day (see 11e, "Decided while building").
+table checked against the tests, the same day (see 11e, "Decided while building"). 11f: the
+warm-up (learning question 33's follow-up) walked through, 2026-10-19; sixteen choices put with a
+recommendation each, recorded as a draft awaiting answers, 2026-10-20 (see 11f).
 
 ## What this layer is for
 
@@ -2041,3 +2043,191 @@ Every test is in `tests/test_set.py` unless said otherwise. Checked against the 
 | A set value crosses continue-as-new, a sensitive one encrypted; a rule sets again in the new run; the new run replays the same | `test_a_set_value_crosses_continue_as_new` (`tests/test_temporal_set.py`), `test_a_carried_state_reads_back_as_it_was` (`tests/test_temporal_case.py`) |
 | Every decision shows each pending item | the invariant, `tests/conftest.py` and `tests/invariants.py`, run after every decision of the tests above |
 | The guide's section, its `WRITER_DECIDES` row and its quoted refusals are what the engine does | `test_the_guides_set_runs_as_shown`, `test_the_guides_writer_decides_is_what_validate_case_says`, `test_the_guides_set_refusals_are_what_the_engine_says` |
+
+---
+
+## 11f. Time
+
+**Status: draft, awaiting answers** (2026-10-20). Nothing below is decided yet: each choice
+carries the assistant's recommendation, and the user answers them by number. Choice 4 would
+change what 11c decided (its choice 31), and needs the user's agreement. No code, no guide text
+and no D44 until then.
+
+### What this part is for
+
+A timer is a rule whose moment is time passing after another moment:
+
+```json
+"escalate": {
+  "display": {"title": "Escalate a slow assessment"},
+  "on": {"after": "5d", "since": {"started": "assess"}},
+  "when": {"!=": [{"var": "assess.outcome"}, "done"]},
+  "then": {"start": ["lead_review"]}
+}
+```
+
+```
+day 0  started assess#1                    → timer set: escalate since assess#1, due day 5
+day 5  (no event; the timer is due)        → TimerDue stamped day 5, never "now"
+       escalate#1 on 5d after assess#1 started: started lead_review
+```
+
+- **Time stays data** (brief, D33). The due time is the event time of the decision where the
+  `since` moment came, plus `after`. The firing is an event like any other, stamped with that due
+  time. `decide` still reads no clock.
+- **A set timer holds the case (brief, D10); a rule that listens doesn't (brief, D41).** Once the
+  `since` moment has come, the timer is a firing that will happen at a known time. Until then, the
+  rule is only listening.
+- **Purpose ending.** Without it, a timer would hold the case after its reason was gone: if
+  `assess#1` is done on day 2, its timer should end then, not keep the case open until day 5. This
+  is Flowable's orphan removal (`docs/layers/checkpoint-doors.md`, row 19), defined once for all
+  timers.
+
+### How the session went
+
+The warm-up first: learning question 33's follow-up, answered "help me", then "walk me through
+it" (recorded in the log). Then 11f was explained and sixteen choices were put, each with a
+recommendation, 2026-10-19. This draft records them before the answers, at the user's request.
+
+### Choices put, with the recommendation for each
+
+1. **Shape.** Recommended: `on: {"after": "<age>", "since": <moment>}`.
+   - `after` uses D33's format (`30m`, `12h`, `1d`) and must be at least one minute. It means one
+     firing (doors row 16).
+   - `since` takes one of D38's five moment shapes. A nested timer is refused, and so is a date
+     from the case file; that one is a later shape (row 15).
+   - `when` is read at the firing, on the case file as it is then (row 17).
+2. **Setting and naming.** Recommended:
+   - a timer is set in the decision where its `since` moment comes, but only while the case
+     decides. Once the case is closing or its close is held, a timer that would be set is not,
+     and a line says so (11a's "nothing new is decided");
+   - it is named by its rule and its anchor: `escalate since assess#1`, `remind since
+     cancelled#2`. When it fires, the firing gets the rule's next entry (`escalate#1`);
+   - it lives in `state.timers`, which crosses continue-as-new.
+3. **Purpose ending, in general (row 19).** Recommended:
+   - a timer set on a run's start lives only while that run hasn't ended. A stop ends its timers
+     through this rule (brief, D40);
+   - a timer set on an instant (opened, reached, answered, an event's arrival) lives until it
+     fires;
+   - any close ends every timer. Each cancellation is a line in the history.
+
+   What follows: "30 days after payment" anchors on the milestone `pay` reaches, not on `pay`'s
+   start. The `sla` behaviour D10 describes ("cancelled when the step completes") then comes from
+   this rule, with nothing added for patterns.
+4. **A failed run hasn't ended for its timers.** Recommended: amend 11c's choice 31, with a date
+   (see "What choice 4 changes", below). An operator's retry is the same run (brief, D26), and
+   D17 says "an sla still escalates during a long outage".
+5. **Firing.** Recommended:
+   - a new event, `TimerDue(rule, since, at=due)`, decided like any other: the timer is removed,
+     its moment is queued, and its rule fires;
+   - a firing for a timer that isn't set is refused (fail closed: only the drivers make these
+     events, from the state).
+6. **Order, so replay decides the same.** Recommended:
+   - before an event stamped `t` is decided, every timer due at or before `t` fires, in due order;
+     timers due at the same second fire in the order they were set. At a tie with an event, the
+     timer goes first: an event stamped `t` happened during that second, and the timer was due at
+     its start;
+   - one pure function in `case` gives "the firings due by `t`", and both drivers use it;
+   - in memory, `later("5d")` advances time and fires what falls due, even at the end of a
+     script.
+7. **What holds the case, and where it shows.** Recommended:
+   - a set timer is pending work. It stays out of `waiting_for` (brief, D24);
+   - `run.timers` and `CaseReport.timers` list each set timer, soonest first: `escalate since
+     assess#1: due 2026-10-24T09:00:00Z`. A due time is not a case-file value, so showing it
+     quotes nothing from the case file;
+   - the invariant in `tests/invariants.py` adds two checks: every set timer is listed, and no set
+     timer has outlived its purpose.
+8. **The close.** Recommended:
+   - closing cancels every set timer, with a line for each (brief, D10);
+   - a timer due at or before the close's own time fires first (choice 6). A timer due later is
+     cancelled. Either way it is recorded and never lost, the same promise 11d's review made for
+     signals;
+   - a held close (a failed run holding it, brief, D34) also cancels timers. A held close never
+     goes back to deciding, so they could never act. This is one line, said once, instead of a
+     "not applied" line at each firing.
+9. **Temporal.** Recommended:
+   - the workflow keeps one workflow timer, for the earliest due time (`wait_condition` with a
+     timeout). When it wakes, the loop decides the due firings, each stamped with its due time;
+   - no new command: the timers follow `state.timers`;
+   - continue-as-new (brief, D27):
+     - a timer is state, not running work, so it doesn't hold back the switch;
+     - the new run sets its workflow timer again from the carried state. A timer that fell due
+       during the switch fires at once, still stamped with its due time;
+     - it fires once: a timer is in the state until the decision that fires it removes it, so
+       exactly one run fires it;
+     - two tests on the time-skipping server: a timer due across the switch, and one due at the
+       instant the switch happens;
+   - replay: a state carried from before 11f reads as having no timers, and a fixture recorded
+     before 11f replays.
+10. **Staleness noticed by a timer** (brief, D33's "timers that would notice sooner come with
+    rules"). Recommended: the engine sets no timer on its own; an author writes one (for example,
+    a rule that starts the read again a day after the review is answered; the open approval then
+    follows the case file, brief, D25).
+    - Why: a timer the engine set would keep cases open and call systems nobody asked it to.
+    - The approval sheet already shows each fact's age (brief, D33).
+    - The guide gets that example, and a test runs it.
+    - The alternative: when an approval waits on a fact, the engine sets a timer at the fact's
+      `max_age` expiry. When it fires, a read is refreshed and a fact from a person needs
+      attention.
+11. **Trust (brief, D43).** Recommended: a timer set on a run's start carries what steered that
+    run, so a rule on its firing that reaches or stops doesn't act. Timers set on the opening, a
+    milestone, an answer or an arrival carry nothing: time passing is a fact.
+12. **Validation stays a proof, and every check below is shown with a run.** Recommended:
+    - `can_happen`: a timer fires only if its `since` moment can come;
+    - `NEVER_FIRES`: a timer whose moment never comes, or comes only once every `closes_when`
+      milestone is reached;
+    - `CLOSES_AT_OPENING`: a timer set at the opening keeps the case open, so today's error would
+      stop being a proof;
+    - surely-set, `MAY_BE_UNSET`, `SET_AFTER` and `OUTCOME_UNREAD` treat a firing as happening at
+      its `since` moment. That claims less, and claiming less never makes an error false;
+    - `UNTRUSTED_TRIGGER`, `WRITER_DECIDES` and `INPUT_POLICY` reuse the fixpoint's `started
+      <step>` value;
+    - the loop checks (`NEVER_CLOSES`, `LOOPS_UNTIL_CLOSED`) are checked again with timer rules
+      inside a loop.
+13. **`NEVER_CLOSES` for a timer that re-arms itself.** Under choice 3, every way a timer could
+    re-arm goes through a person, an event, or a run ending: a timer on a run dies with that run,
+    and the anchors that fire with no person or event (the opening, a milestone) happen only once.
+    So there is nothing to prove. Recommended: record this in D44, and add a test that runs the
+    would-be loop (`since started ping`, `then start ping`) and shows it ends. A repeating key, if
+    one ever comes (row 16), brings its own `NEVER_CLOSES`. If choice 3 is rejected, this error
+    has to be built.
+14. **A due date is a view of a timer (row 30).** Recommended: the report line in choice 7 is that
+    view. If the inbox ever shows a task's due date, it will read the timer set on that task's
+    run.
+15. **Records.** Recommended: D44, written before building. The cases guide gets a "Rules on time"
+    section, and its examples run as tests. No new dependency.
+16. **Size.** Recommended: one pull request, about nine slices:
+    1. the shape;
+    2. setting and firing in memory, with the order;
+    3. purpose ending and the close;
+    4. the reports and the invariant;
+    5. trust;
+    6. validation;
+    7. Temporal and continue-as-new;
+    8. staleness;
+    9. the guide and the Promises table.
+
+    That is about the size of 11e. The alternative, two pull requests: split after slice 6, 11f1
+    in memory with validation, 11f2 with Temporal, continue-as-new and staleness.
+
+### What choice 4 changes
+
+11c's choice 31 (above, under "Timers (11e), only what it needs") says: "A run has ended once it
+has its final status (`done`, `rejected`, `failed`, `cancelled`). A run whose stop is requested
+and still running hasn't ended; a stopped run's timers end with it, when it does." D40's last line
+says the same.
+
+Choice 4 would take `failed` out of that list, for timers. A failed run waits for a person, and an
+operator's retry runs it again as the same run (brief, D26). So it hasn't ended for its timers:
+they stay set, and a rule on one still acts unless the close is held (choice 8). Kept as written,
+an `sla` would stop escalating the moment its step needs attention, against D17's "an sla still
+escalates during a long outage". A failed run that is then cancelled by a close ends its timers
+with the close.
+
+If agreed, choice 31 and D40 keep their text, and each gets an amendment saying when it was added
+(CLAUDE.md: decisions are never rewritten). Nothing built depends on choice 31 yet: no timer
+exists before 11f.
+
+### Promises
+
+None yet: the table comes once the choices are answered and the design note is agreed.
