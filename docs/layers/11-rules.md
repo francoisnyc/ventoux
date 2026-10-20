@@ -35,7 +35,7 @@ one pull request", 2026-10-20; D44, the guide's part and the slices' plan writte
 building; built, slices 0–9, and the Promises table checked against the tests, the same day (see
 11f, "Decided while building"). 11g: the warm-up (learning question 38) put, 2026-10-20; eighteen
 choices put with a recommendation each, one of them splitting 11g in two, recorded as a draft
-awaiting answers (see 11g).
+awaiting answers; the warm-up answered (see 11g).
 
 ## What this layer is for
 
@@ -2444,7 +2444,8 @@ today; the exact wording of the story's own lines is choice 12.)
 
 ### How the session went
 
-The warm-up first: learning question 38, put 2026-10-20 (answer pending). Then 11g was explained
+The warm-up first: learning question 38, answered 2026-10-20 (b came back, a didn't; recorded in
+the log). Then 11g was explained
 and eighteen choices were put, each with a recommendation. This draft records them before the
 answers.
 

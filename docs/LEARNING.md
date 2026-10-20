@@ -1154,6 +1154,23 @@ and record the key points. A question is closed once you can explain the answer 
     `pay` needs attention and a person decides (send the review back, then retry, or close).
   In one line: a stale read is refreshed, a stale answer goes to a person; and replay decides the
   same because the time is recorded on each event, never read from a clock.
+- Retrieval (layer 11g warm-up, 2026-10-20): a) "to see the timestamp"; b) "because each event
+  has the time it was logged on". b came back: each event carries its time, recorded once. a
+  didn't, for the second time: the timestamp is how staleness is *noticed*, not what is *done*
+  about it. Sharpened:
+  - **a, the two answers:** both facts are 3 days old, and `pay` needs them at most 1 day old.
+    `check_order.status` is a **read**, so the engine fetches it again, as a new run of
+    `check_order`, and `pay` goes on with the fresh value. `approved_amount` is **a person's
+    answer**. The engine can't ask Ana again, so `pay` needs attention, and a person decides:
+    send the review back, then retry `pay`, or close the case (brief, D18, D33). A hook to
+    remember it: *a stale read goes back to its system; a stale answer goes to a person.*
+  - **b, one word to add, "recorded":** the time is stamped once as the event reaches the case,
+    from Temporal's workflow time, and history records it. On replay `decide` reads that recorded
+    time, never a clock, so the fact is 3 days old again even on day 10.
+  - **Why it matters now (11g):** `ventoux simulate` works only because of b. A story's times are
+    the events' times, so a timeline in simulated time decides exactly as a real case would.
+  In one line: a stale read is refreshed, a stale answer goes to a person; replay decides the
+  same because each event's time is recorded, never read from a clock.
 - Status: open, until a (a read refreshed, a person's answer to a person) comes back from memory.
 
 
