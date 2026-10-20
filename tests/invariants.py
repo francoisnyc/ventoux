@@ -2,17 +2,19 @@
 
 An open case, whether or not it stays open, has nothing pending, or shows each pending item: an
 open run or approval in `waiting_for`; a failed run or rule in `needs_attention` (which lists
-every one); a running run as running work; and a run an operator retried, an approval given, or
-a proposal waiting to start, by what it waits for. See docs/layers/fix-retry-rejected.md, "The
-invariant".
+every one); a running run as running work; a run an operator retried, an approval given, or a
+proposal waiting to start, by what it waits for; and a timer set, in `timers`, while its purpose
+lasts (brief, D44). See docs/layers/fix-retry-rejected.md, "The invariant".
 """
 
 from typing import assert_never
 
 from ventoux.case.admission import latest_counted, requirements_met
+from ventoux.case.closing import close_held
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState, StepRun
+from ventoux.case.timers import named
 
 
 class Silent(AssertionError):
@@ -53,7 +55,22 @@ def unshown(case: CaseDefinition, state: CaseState) -> list[str]:
     for name in state.waiting_to_start:
         if not fact_on_its_way(case, state, name):
             silent.append(f"{name}'s proposal waits to start, for no fact")
-    return silent
+    return silent + outlived(case, state)
+
+
+def outlived(case: CaseDefinition, state: CaseState) -> list[str]:
+    """Each timer set that has outlived its purpose: its run has ended, or the close is held, so
+    it could never act (brief, D44). A set timer is shown by `timers`, which lists every one, so
+    one that lives on past its purpose is pending work nobody can explain."""
+    runs = {run.entry: run.status for run in state.runs}
+    found: list[str] = []
+    for timer in state.timers:
+        said = f"{named(timer)} is set, and"
+        if runs.get(timer.run) in ("done", "rejected", "cancelled"):
+            found.append(f"{said} {timer.run} has ended")
+        elif close_held(case, state):
+            found.append(f"{said} the close is held: it can never act")
+    return found
 
 
 def retry_waits_for_its_own(case: CaseDefinition, state: CaseState, name: str) -> bool:

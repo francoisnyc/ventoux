@@ -18,7 +18,14 @@ from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import CaseDefinition, parse_case
 from ventoux.case.freshness import seconds_in
-from ventoux.case.memory import Activity, CaseRun, Finish, PlanRunner, run_case_in_memory
+from ventoux.case.memory import (
+    Activity,
+    Advance,
+    CaseRun,
+    Finish,
+    PlanRunner,
+    run_case_in_memory,
+)
 from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
 from ventoux.case.runtime import CaseRefused, EventRefused
 from ventoux.case.state import (
@@ -407,14 +414,17 @@ def run_case(
     `catalog` replaces the development catalog, for a test's own contracts. `workflows` binds each
     workflow contract to a function from its inputs to its output, by reference, replacing the
     fake workflows; a workflow contract with none is not bound, and its step fails. The case opens
-    at `at`, seconds since the epoch; `later("3d")` in the script moves time on, and every event
-    after it happens then."""
+    at `at`, seconds since the epoch; `later("3d")` in the script moves time on, every timer due
+    by then fires, and every event after it happens then."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
     now = at
-    events: list[Event | Finish] = [Opened(wrapped(case, as_json(file)), opened_by, at=now)]
+    events: list[Event | Finish | Advance] = [
+        Opened(wrapped(case, as_json(file)), opened_by, at=now)
+    ]
     for item in answers:
         if isinstance(item, Later):
             now += item.seconds
+            events.append(Advance(now))  # every timer due by then fires (brief, D44)
             continue
         if isinstance(item, Finishing):
             events.append(Finish(item.entry, at=now))

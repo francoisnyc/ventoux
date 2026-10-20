@@ -18,6 +18,7 @@ from ventoux.case.state import (
     RuleFiring,
     RuleStart,
     StepRun,
+    Timer,
 )
 from ventoux.core.before_activity import Steering
 
@@ -81,9 +82,23 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
             for f in state.firings
         ],
         # Always empty between events (brief, D38).
-        "moments": [{"said": m.said, "run": m.run} for m in state.moments],
+        "moments": [
+            {"said": m.said, "run": m.run, "entry": m.entry, "rule": m.rule} for m in state.moments
+        ],
         "rule_starts": [rule_start_as_data(asked) for asked in state.rule_starts],  # the same
         "started_by_rules": list(state.started_by_rules),  # the same
+        # Each timer set, with its due time: state, not running work, so it crosses as it is and
+        # the new run fires it, once (brief, D27) (brief, D44).
+        "timers": [
+            {
+                "rule": t.rule,
+                "after": t.after,
+                "since": t.since,
+                "due": t.due,
+                "run": t.run,
+            }
+            for t in state.timers
+        ],
     }
 
 
@@ -180,9 +195,17 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         history=list(data["history"]),
         # None in a state from before layer 11a: no rule had fired.
         firings=[firing_from_data(firing) for firing in data.get("firings", [])],
-        moments=[Moment(m["said"], m["run"]) for m in data.get("moments", [])],
+        moments=[
+            Moment(m["said"], m["run"], m.get("entry", ""), m.get("rule", ""))
+            for m in data.get("moments", [])
+        ],
         rule_starts=[rule_start_from_data(asked) for asked in data.get("rule_starts", [])],
         started_by_rules=list(data.get("started_by_rules", [])),
+        # None in a state from before layer 11f: no timer could be set.
+        timers=[
+            Timer(t["rule"], t["after"], t["since"], whole(t["due"]), t["run"])
+            for t in data.get("timers", [])
+        ],
     )
 
 

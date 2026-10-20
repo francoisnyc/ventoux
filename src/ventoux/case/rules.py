@@ -10,9 +10,17 @@ from typing import NoReturn
 
 from ventoux.case.admission import StepStopped, holds
 from ventoux.case.closing import close_held
-from ventoux.case.definition import AnsweredTask, CaseDefinition, EventArrived, Reached, Started
+from ventoux.case.definition import (
+    After,
+    AnsweredTask,
+    CaseDefinition,
+    EventArrived,
+    Reached,
+    Started,
+)
 from ventoux.case.state import CaseState, Command, Moment, Obtained, RuleFiring, RuleStart
 from ventoux.case.stopping import stop_step
+from ventoux.case.timers import set_timer
 from ventoux.case.types import rule_problem
 from ventoux.case.writers import read_sources, untrusted_of
 from ventoux.core.before_activity import Steering
@@ -26,8 +34,10 @@ from ventoux.core.sensitive_inputs import reads_sensitive
 
 def said(moment: object) -> str:
     """A rule's moment as the history says it: `opened`, `started pay`, `reached checked`,
-    `answered review`, `event cancelled`. A moment it doesn't know is an error, never read as the
-    opening (fail closed)."""
+    `answered review`, `event cancelled`, `2d after started review`. A moment it doesn't know is
+    an error, never read as the opening (fail closed)."""
+    if isinstance(moment, After):
+        return f"{moment.after} after {said(moment.since)}"
     if isinstance(moment, Started):
         return f"started {moment.started}"
     if isinstance(moment, Reached):
@@ -66,9 +76,26 @@ def fire_rules(
     the time of the event being decided, is what a stop measures facts' ages against."""
     while state.moments:
         moment = state.moments.pop(0)
+        if moment.rule:  # a timer's firing is its own rule's moment, and no other's (brief, D44)
+            fire(case, catalog, state, moment.rule, moment, commands, at)
+            continue
         for name, rule in case.rules.items():
-            if said(rule.on) == moment.said:
+            if isinstance(rule.on, After):
+                if said(rule.on.since) == moment.said:
+                    set_on(case, state, name, rule.on.after, moment, at)
+            elif said(rule.on) == moment.said:
                 fire(case, catalog, state, name, moment, commands, at)
+
+
+def set_on(
+    case: CaseDefinition, state: CaseState, name: str, after: str, moment: Moment, at: int
+) -> None:
+    """Set the rule's timer on the moment that came, unless nothing new is decided: a timer
+    set then could never act, so it isn't, and a line says so (brief, D38) (brief, D44)."""
+    if (stopped := nothing_decided(case, state)) is not None:
+        state.history.append(f"{name} on {moment.said}: not set: {stopped}")
+        return
+    set_timer(state, name, after, moment, at)
 
 
 def fire(

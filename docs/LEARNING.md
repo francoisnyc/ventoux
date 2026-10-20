@@ -877,6 +877,17 @@ and record the key points. A question is closed once you can explain the answer 
   - **Why it came up now.** Layer 10's fixpoint ends for the same reason as `reach`: the set of
     what a case can reach only grows, and there are finitely many steps and milestones to put in
     it.
+- Retrieval (layer 11f warm-up, 2026-10-19), the follow-up: "help me", then, after a hint per
+  part, "walk me through it". Walked through with the trace:
+  - **(a)** `reach` puts a state in `waiting` only when it first enters `seen`. Slice 8's plan:
+    `initial`, `check_order`, `approve_refund`, `pay`, `declined` are each added once; out of
+    `declined`, the arrow back to `pay` finds it already seen and adds nothing, so `waiting`
+    empties. Finitely many states, so finitely many turns, cycle or not.
+  - **(b)** One approval unlocks one run of one step (brief, D11). `pay#2` runs on the approval
+    `pay#1` spent, under a new key, so the payment system makes a second refund nobody approved.
+    `APPROVAL_REUSED` refuses it; the fix sends the loop back through the approval.
+  - **Why it came up in 11f:** a timer that re-arms itself would be a loop with no person in
+    between, which 11f's choice 3 rules out.
 - Status: open, until the follow-up comes from memory.
 
 

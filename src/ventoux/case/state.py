@@ -78,6 +78,26 @@ class Moment:
 
     said: str  # `opened`, `started pay`, `reached checked`, `answered review`, `event cancelled`
     run: str = ""  # the run that started, such as `goodbye#1`; empty for any other moment
+    # The entry it came from, which names a timer set on it: a run started or answered
+    # (`review#1`), an event's arrival (`cancelled#2`); empty for the opening or a milestone.
+    entry: str = ""
+    # A timer's firing is a moment for its own rule alone, named here; empty for any other moment
+    # (brief, D44).
+    rule: str = ""
+
+
+@dataclass(frozen=True)
+class Timer:
+    """A timer set on its moment: it fires once, at its due time, unless its purpose ends first
+    (brief, D44)."""
+
+    rule: str  # the rule whose moment it is, such as `chase_review`
+    after: str  # how long it waits, as written: `2d`
+    since: str  # the moment it was set on, with its entry: `started review#1`, `reached paid`
+    due: int  # in whole seconds since the epoch: its moment's event time, plus `after`
+    # The run whose start set it, which it lives while; empty if set on any other moment, when it
+    # lives until it fires (brief, D44).
+    run: str = ""
 
 
 @dataclass(frozen=True)
@@ -165,6 +185,9 @@ class CaseState:
     # between events, like `moments`.
     rule_starts: list[RuleStart] = field(default_factory=list[RuleStart])
     started_by_rules: list[str] = field(default_factory=list[str])
+    # Each timer set and not yet fired or ended, in the order set: pending work (brief, D10)
+    # (brief, D44).
+    timers: list[Timer] = field(default_factory=list[Timer])
 
 
 @dataclass(frozen=True)
@@ -300,6 +323,16 @@ class Sent:
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
+@dataclass(frozen=True)
+class TimerDue:
+    """A timer's time has come: the rule and the moment it was set on name it, and it is stamped
+    with its due time, never the time a driver noticed it (brief, D33) (brief, D44)."""
+
+    rule: str  # the rule whose timer it is, such as `chase_review`
+    since: str  # the moment it was set on, with its entry: `started review#1`
+    at: int = field(kw_only=True)  # its due time, in seconds since the epoch
+
+
 type Event = (
     Opened
     | Answered
@@ -313,6 +346,7 @@ type Event = (
     | Shown
     | ForgetApproved
     | Sent
+    | TimerDue
 )
 
 

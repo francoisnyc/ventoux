@@ -26,6 +26,7 @@ from ventoux.case.state import (
     StopPlan,
     WorkflowCancelled,
 )
+from ventoux.case.timers import next_due, set_timers
 from ventoux.case.visibility import ApprovalSheet, CaseView, case_view, sheet_of
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome, failed_with
@@ -57,6 +58,9 @@ class CaseRun:
     definition: CaseDefinition  # what ran, so a view can be filtered by it
     state: CaseState  # where it ended
     registered: tuple[str, ...]  # the catalog's roles: only these give sight (brief, D22)
+    # Each timer still set, soonest first, with its due time: pending work that waits on nobody,
+    # so never in `waiting_for` (brief, D24) (brief, D44).
+    timers: list[str]
 
     def view(self, roles: Iterable[str]) -> CaseView:
         """The case file as a person holding `roles` sees it (brief, D30)."""
@@ -77,6 +81,14 @@ class CaseRun:
 
 
 @dataclass(frozen=True)
+class Advance:
+    """Time moves on to `at`, with no event: every timer due by then fires. For the driver, not
+    `decide` (brief, D44)."""
+
+    at: int  # in seconds since the epoch
+
+
+@dataclass(frozen=True)
 class Finish:
     """Let a held activity's run finish now: `Finish("pay#1", at=t)`. For the driver, not
     `decide`."""
@@ -89,7 +101,7 @@ def run_case_in_memory(
     case: CaseDefinition,
     catalog: Catalog,
     implementations: Mapping[str, Activity],
-    events: Iterable[Event | Finish],
+    events: Iterable[Event | Finish | Advance],
     name: str = "memory",
     held: Iterable[str] = (),
     plans: PlanRunner = no_plans,
@@ -98,10 +110,14 @@ def run_case_in_memory(
     """Play `events` in order, the first opening the case; `name` names the case in its keys.
     The runs of the steps in `held` keep running until a `Finish` names them, so a test can
     close a case while an activity runs (brief, D10). `workflows` binds each workflow contract
-    to the code that runs it, by reference; one it doesn't bind fails its step."""
+    to the code that runs it, by reference; one it doesn't bind fails its step. Before each
+    event, and at each `Advance`, every timer due by its time fires first (brief, D44)."""
     state = CaseState(name)
     driver = Driver(case, catalog, implementations, frozenset(held), plans, workflows or {})
     for event in events:
+        state = driver.until(state, event.at)
+        if isinstance(event, Advance):
+            continue
         if isinstance(event, Finish):
             finishing = driver.held.pop(event.entry)
             state = driver.carry(state, outcome_of(finishing, driver.activity, event.at))
@@ -111,8 +127,18 @@ def run_case_in_memory(
     attention = needs_attention(state)
     waiting = list(state.waiting.values())
     registered = tuple(catalog.roles)
+    timers = set_timers(state)
     return CaseRun(
-        state.phase, waiting, attention, state.flags, state.history, done, case, state, registered
+        state.phase,
+        waiting,
+        attention,
+        state.flags,
+        state.history,
+        done,
+        case,
+        state,
+        registered,
+        timers,
     )
 
 
@@ -136,6 +162,13 @@ class Driver:
         if command.activity not in self.implementations:
             raise LookupError(f"no implementation of {command.activity} is available")
         return self.implementations[command.activity]
+
+    def until(self, state: CaseState, at: int) -> CaseState:
+        """Fire every timer due by `at`, one at a time and in order, each stamped with its own
+        due time: a firing may set or end timers, so the next is asked for afresh (brief, D44)."""
+        while (due := next_due(state, at)) is not None:
+            state = self.carry(state, due)
+        return state
 
     def carry(self, state: CaseState, event: Event) -> CaseState:
         """Decide on `event`, then run each activity it asks for, feeding back what it gave. In

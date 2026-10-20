@@ -8,6 +8,7 @@ case is **closed**. Something that completes while closing flags the case for a 
 
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.state import CaseState, CloseAsked
+from ventoux.case.timers import cancel_timers
 from ventoux.core.catalog import Catalog
 from ventoux.core.person import identifier_problem
 from ventoux.core.roles import role_that_counts
@@ -44,9 +45,9 @@ def refuse_to_close(
 
 
 def begin_closing(state: CaseState, cancelled_because: str, closed_because: str) -> None:
-    """Put the case in closing: cancel every open task, approval, failed run and failed rule,
-    saying why, so
-    the people they were assigned to see it; running activities finish (brief, D10)."""
+    """Put the case in closing: cancel every open task, approval, failed run, failed rule and
+    timer, saying why, so the people they were assigned to see it; running activities finish
+    (brief, D10)."""
     state.phase = "closing"
     state.closed_because = closed_because
     for run in state.runs:
@@ -66,6 +67,7 @@ def begin_closing(state: CaseState, cancelled_because: str, closed_because: str)
     state.proposers.clear()
     state.proposed_by_rules.clear()
     state.waiting_to_start.clear()  # nor does a proposal waiting for a fact (brief, D39)
+    cancel_timers(state, cancelled_because)  # nor can a timer act (brief, D10) (brief, D44)
 
 
 def settle(case: CaseDefinition, state: CaseState) -> None:
@@ -108,11 +110,12 @@ def close_held(case: CaseDefinition, state: CaseState) -> bool:
 
 def pending(state: CaseState) -> bool:
     """Whether anything is left to do (brief, D10): a task open, an activity running, an approval
-    asked or given and not yet spent, or a step or a rule failed, which waits for a person
-    (brief, D17) (brief, D38)."""
+    asked or given and not yet spent, a step or a rule failed, which waits for a person
+    (brief, D17) (brief, D38), or a timer set (brief, D44)."""
     unfinished = any(run.status in ("open", "running", "failed", "retrying") for run in state.runs)
     failed_rule = any(firing.status == "failed" for firing in state.firings)
-    return unfinished or failed_rule or bool(state.approvals) or bool(state.given)
+    waiting = bool(state.approvals) or bool(state.given) or bool(state.timers)
+    return unfinished or failed_rule or waiting
 
 
 def needs_attention(state: CaseState) -> list[str]:
