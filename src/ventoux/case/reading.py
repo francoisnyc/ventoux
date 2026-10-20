@@ -18,7 +18,7 @@ from ventoux.case.definition import (
     Started,
     Then,
 )
-from ventoux.core.expressions import render
+from ventoux.core.expressions import Expression, ExpressionInvalid, render
 
 
 class ReadingRefused(Exception):
@@ -45,7 +45,12 @@ def read_rules(case: CaseDefinition) -> list[Reading]:
 def read_rule(name: str, rule: Rule) -> Reading:
     """One rule in plain words: `When checked is reached …: reach high_risk.`"""
     moment = when(name, rule.on)
-    sentence = f"{moment[0].upper()}{moment[1:]}: {actions(rule.then)}."
+    if rule.when is not None:
+        # A rule remembers nothing: its condition is read when it fires (brief, D38), a timer's
+        # when the timer fires, never when it is set (brief, D44).
+        read = "the timer fires, not when it is set" if isinstance(rule.on, After) else "it fires"
+        moment += f", if {expression(name, 'condition', rule.when)} (read when {read})"
+    sentence = f"{moment[0].upper()}{moment[1:]}: {', then '.join(actions(name, rule.then))}."
     return Reading(name, rule.display.title, sentence)
 
 
@@ -87,17 +92,38 @@ def unknown(name: str, moment: object) -> ReadingRefused:
     return ReadingRefused(f"can't read {name}'s moment {moment!r}: it isn't a moment Ventoux knows")
 
 
-def actions(then: Then) -> str:
-    """What the rule does, in the order the engine does it: stop, set, reach, start
-    (brief, D40) (brief, D42)."""
-    done = [
-        *([f"stop {' and '.join(then.stop)}"] if then.stop else []),
-        *(
-            [f"set {', '.join(f'{field} to {render(v)}' for field, v in then.set.items())}"]
-            if then.set
-            else []
-        ),
-        *([f"reach {' and '.join(then.reach)}"] if then.reach else []),
-        *([f"start {' and '.join(then.start)}"] if then.start else []),
-    ]
-    return ", then ".join(done)
+# What a rule may do, in the order the engine does it: stop, set, reach, start (brief, D40)
+# (brief, D42). A closed list: a new action is a decision recorded in the brief.
+ACTIONS = ("stop", "set", "reach", "start")
+
+
+def actions(name: str, then: Then) -> list[str]:
+    """What the rule does, each action in the engine's order: `stop review`, `reach paid`."""
+    for action in type(then).model_fields:
+        # Fail closed: an action the reader doesn't know is refused, never left out.
+        if action not in ACTIONS:
+            raise ReadingRefused(
+                f"can't read {name}'s then.{action}: it isn't an action Ventoux knows"
+            )
+    done: list[str] = []
+    if then.stop:
+        done.append(f"stop {' and '.join(then.stop)}")
+    if then.set:
+        values = (
+            f"{field} to {expression(name, f'value of {field}', v)}"
+            for field, v in then.set.items()
+        )
+        done.append(f"set {', '.join(values)}")
+    if then.reach:
+        done.append(f"reach {' and '.join(then.reach)}")
+    if then.start:
+        done.append(f"start {' and '.join(then.start)}")
+    return done
+
+
+def expression(name: str, what: str, written: Expression) -> str:
+    """An expression of the rule, on one line as the expression renderer writes it (layer 2)."""
+    try:
+        return render(written)
+    except ExpressionInvalid as refused:
+        raise ReadingRefused(f"can't read {name}'s {what}: {refused}") from None
