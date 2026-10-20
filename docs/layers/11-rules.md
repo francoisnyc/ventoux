@@ -2346,7 +2346,7 @@ for the right reason before its code was written.
 | It fires once its time has passed, its rule acts, and nothing is cancelled because time passed | `test_a_timer_fires_once_its_time_has_passed_and_its_rule_acts` |
 | It never fires before its time | `test_a_timer_doesnt_fire_before_its_time` |
 | A firing is stamped with its due time, never "now" | `test_the_firing_is_stamped_with_its_due_time`, `test_a_firing_stamped_with_another_time_is_refused`, `test_a_timer_that_fell_due_during_the_switch_fires_at_once_stamped_with_its_due_time` (`tests/test_temporal_timers.py`) |
-| A timer due the second an event comes fires before it | `test_a_timer_due_with_an_event_fires_before_it` |
+| A timer due the second an event comes fires before it; on Temporal, a timer already due and a person's answer decided in the same workflow task, the timer first | `test_a_timer_due_with_an_event_fires_before_it`, `test_a_timer_already_due_and_an_answer_in_one_workflow_task_fire_timer_first` (`tests/test_temporal_timers.py`) |
 | Timers fire soonest first, two due at one second in the order set | `test_timers_fire_soonest_first_and_in_the_order_set_at_one_second` |
 | `later` fires what falls due, even at the end of a script, and timers set on the way fire in turn | `test_a_timer_falling_due_at_the_end_of_the_script_fires`, `test_a_timer_set_while_time_moves_on_fires_in_turn` |
 | A timer's `when` is read at its firing, on the case file then | `test_a_timers_condition_is_read_when_it_fires` |

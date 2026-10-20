@@ -4,7 +4,9 @@ time; it crosses continue-as-new exactly; and histories recorded before 11f repl
 See docs/layers/11-rules.md (11f) and the brief, D44.
 """
 
+import asyncio
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -29,16 +31,20 @@ from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import (
     CaseReport,
     CaseStart,
+    answer,
     case_handle,
     close,
     send_event,
     start_case,
 )
 from ventoux.temporal.converter import keys_of
+from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     DAY,
+    FAKES,
     START,
     DevelopmentCases,
+    DevelopmentPlans,
     development_converter,
     fixture_converter,
     later,
@@ -197,3 +203,39 @@ def test_a_close_cancels_a_timer_on_temporal_and_the_case_ends() -> None:
     assert (
         "cancelled chase_review, 2d after started review#1: closed as duplicate by ana"
     ) in ended.history
+
+
+def test_a_timer_already_due_and_an_answer_in_one_workflow_task_fire_timer_first() -> None:
+    # The carried state holds a review open and its chase long due. Ana's answer is signalled
+    # before any worker runs, so the timer and the answer are decided in the same workflow task:
+    # the timer fires first, stamped with its due time, before the answer stamped now (brief,
+    # D44). Answered first, review#1 would be done and its timer cancelled, never fired.
+    carried = run_in_memory(chased(), file=SMALL_IN_MEMORY, answers=[], people=PEOPLE).state
+    assert carried.timers[0].due == START + 2 * DAY  # long past on the test server
+
+    async def go() -> CaseReport:
+        environment = await WorkflowEnvironment.start_time_skipping(
+            data_converter=development_converter()
+        )
+        async with environment:
+            client = environment.client
+            keys_of(client).create("refund-1")
+            start = CaseStart(chased(), {}, None, state_as_data(carried))
+            await client.start_workflow(
+                DevelopmentCases.run, start, id="refund-1", task_queue=QUEUE
+            )
+            case = case_handle(client, DevelopmentCases, "refund-1")
+            form = {"approved_amount": Decimal(40)}
+            await answer(case, "review#1", "approve", "ana", ["support"], form)
+            async with case_worker(client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES):
+                answered = "ana answered review#1 approve as support, setting approved_amount"
+                return await asyncio.wait_for(
+                    reported(case, lambda now: answered in now.history), timeout=20
+                )
+
+    ended = asyncio.run(go())
+    fired = ended.history.index(FIRED)
+    assert fired < ended.history.index(
+        "ana answered review#1 approve as support, setting approved_amount"
+    )
+    assert ended.timers == []
