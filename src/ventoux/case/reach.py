@@ -10,6 +10,7 @@ from typing import Literal
 
 from ventoux.case.definition import (
     ActivityStep,
+    After,
     AnsweredTask,
     CaseDefinition,
     EventArrived,
@@ -17,6 +18,7 @@ from ventoux.case.definition import (
     Started,
     TaskStep,
     WorkflowStep,
+    anchor,
 )
 from ventoux.case.rules import said, unknown_moment
 from ventoux.case.sequence import requirements
@@ -64,7 +66,10 @@ def can_happen(case: CaseDefinition, catalog: Catalog) -> set[str]:
 def moment_can_come(moment: object, can: set[str]) -> bool:
     """Whether a rule's moment can come, given what can happen so far: the opening always; a
     milestone, a step's start or a task's answer, once it is in `can`; an event from outside
-    whenever the case is open, since nothing in the case decides when it comes (brief, D41)."""
+    whenever the case is open, since nothing in the case decides when it comes (brief, D41); a
+    timer, once the moment it is set on can come (brief, D44)."""
+    if isinstance(moment, After):
+        return moment_can_come(moment.since, can)
     if isinstance(moment, Reached):
         return moment.reached in can
     if isinstance(moment, Started):
@@ -78,9 +83,10 @@ def moment_can_come(moment: object, can: set[str]) -> bool:
 
 def acts_after_close(case: CaseDefinition, name: str) -> bool:
     """Whether the rule `name` can act only once every `closes_when` milestone is reached: its
-    moment is reaching the only one. Nothing new is decided then (brief, D38). Only this form is
+    moment is reaching the only one, or its timer is set on that (a timer isn't set once nothing
+    new is decided). Nothing new is decided then (brief, D38) (brief, D44). Only this form is
     claimed: the check says less, never more."""
-    on = case.rules[name].on
+    on = anchor(case.rules[name].on)
     return (
         isinstance(on, Reached) and bool(case.closes_when) and set(case.closes_when) == {on.reached}
     )
@@ -198,11 +204,15 @@ def start_refused(case: CaseDefinition, rule: str, name: str) -> str | None:
     it, or None if it may be taken. Claimed only where proven (brief, D34): a failed firing is
     retried later, on the case file as it is then, so a condition that may fail proves nothing
     that later could change."""
-    on, may_fail = case.rules[rule].on, case.rules[rule].when is not None
+    written, may_fail = case.rules[rule].on, case.rules[rule].when is not None
     repeatable = case.steps[name].repeatable
-    fires = f"{rule} can never start {name}: it fires on {said(on)}"
-    if on == "opened" and not may_fail and (unmet := unmet_at_opening(case, name)) is not None:
+    fires = f"{rule} can never start {name}: it fires on {said(written)}"
+    # A timer on the opening fires later, when more may have happened: only the opening itself.
+    if written == "opened" and not may_fail and (unmet := unmet_at_opening(case, name)) is not None:
         return f"{fires}, and {unmet}"
+    # A timer set on the step's start or answer fires later, and on a start only while that run
+    # lasts, so it is read as its moment is (brief, D44).
+    on = anchor(written)
     # On its own moment: a step's start comes while it runs, its answer once it has run. Unless
     # a rule may stop it first and it is a task: a stopped task is cancelled at once, and the
     # start is taken; anything else runs on through the decision (brief, D40).
@@ -249,8 +259,8 @@ def unmet_at_opening(case: CaseDefinition, name: str) -> str | None:
 
 def on_own_moment(case: CaseDefinition, rule: str, name: str) -> bool:
     """Whether the rule fires on the step `name` starting or being answered: a moment that comes
-    only once the step runs."""
-    on = case.rules[rule].on
+    only once the step runs; a timer set on one of them, too (brief, D44)."""
+    on = anchor(case.rules[rule].on)
     return (isinstance(on, Started) and on.started == name) or (
         isinstance(on, AnsweredTask) and on.answered == name
     )

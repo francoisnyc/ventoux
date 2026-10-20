@@ -15,14 +15,17 @@ import pytest
 # pytest puts tests/ on the import path (it has no __init__.py), so a helper there imports by
 # its name.
 from invariants import unshown
-from test_untrusted_moment import PLEASE, cancelled, say_goodbye
+from test_rules import endless_rework
+from test_untrusted_moment import LETTER, PLEASE, cancelled, say_goodbye
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import run_case_in_memory
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, Opened, Timer, TimerDue
 from ventoux.case.timers import TimerRefused, next_due, utc
+from ventoux.case.validate import validate_case
 from ventoux.core.sensitive import Sensitive
+from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
     DAY,
@@ -532,4 +535,236 @@ def test_time_passing_after_an_arrival_is_a_fact() -> None:
     definition["rules"]["close_it"]["on"] = {"after": "1d", "since": {"event": "cancelled"}}
     run = run_case(definition, file=SMALL, answers=[cancelled(), later("1d")], people=PEOPLE)
     assert "close_it#1 on 1d after event cancelled#1: reaching withdrawn" in run.history
+    assert run.closed
+
+
+# --- Slice 6: validation stays a proof ---
+
+
+def issues(definition: dict[str, Any], *codes: str) -> list[Issue]:
+    """What `ventoux check` says of a definition, only the issues with `codes` if any are given."""
+    found = validate_case(parse_case(definition), CATALOG)
+    return [issue for issue in found if not codes or issue.code in codes]
+
+
+def test_check_reads_the_guides_timer() -> None:
+    # Before 11f a moment the check didn't know was refused, never read as the opening (fail
+    # closed); a timer is known now, and the guide's gets no issue.
+    assert issues(chased()) == []
+
+
+def test_a_timer_whose_moment_never_comes_never_fires() -> None:
+    definition = chased({"after": "1d", "since": {"reached": "escalated"}})
+    definition["milestones"] = {"escalated": {"display": {"title": "Escalated"}}}
+    assert issues(definition, "NEVER_FIRES") == [
+        Issue(
+            "rules.chase_review.on",
+            "NEVER_FIRES",
+            "chase_review can never fire: it fires on 1d after reached escalated, which no step "
+            "or rule reaches: reach escalated from a step or a rule, or fire it on another moment",
+        )
+    ]
+
+
+def test_a_timer_on_the_last_closes_when_milestone_never_acts() -> None:
+    # Shown with a run in slice 3: its moment comes as the case closes, and it isn't set.
+    definition = holding()
+    definition["rules"]["chase_review"]["on"] = {"after": "1d", "since": {"reached": "paid"}}
+    assert issues(definition, "NEVER_FIRES") == [
+        Issue(
+            "rules.chase_review.on",
+            "NEVER_FIRES",
+            "chase_review can never act: it fires on 1d after reached paid, and refund closes "
+            "once paid is reached, when nothing new is decided: fire it on an earlier moment, or "
+            "remove paid from closes_when",
+        )
+    ]
+
+
+def waiting_a_day() -> dict[str, Any]:
+    """The refund whose review nobody starts as it opens: a timer on the opening starts it a day
+    later."""
+    definition = chased()
+    definition["steps"]["review"] |= {"automatic": False, "proposed_by": ["support"]}
+    definition["rules"] = {
+        "open_review": {
+            "display": {"title": "Open the review a day later"},
+            "on": {"after": "1d", "since": "opened"},
+            "then": {"start": ["review"]},
+        }
+    }
+    del definition["steps"]["chase"]
+    return definition
+
+
+def test_a_timer_set_as_the_case_opens_keeps_it_open() -> None:
+    # Nothing starts by itself, but the timer is set as the case opens: pending work, so the case
+    # doesn't close at once, and the check doesn't say it does (brief, D10) (brief, D44).
+    assert issues(waiting_a_day(), "CLOSES_AT_OPENING") == []
+    opened_only = run_case(waiting_a_day(), file=SMALL, answers=[], people=PEOPLE)
+    assert not opened_only.closed
+    a_day_on = run_case(waiting_a_day(), file=SMALL, answers=[later("1d")], people=PEOPLE)
+    assert a_day_on.waiting_for == ["review by support"]
+    # The same set on a milestone a rule on the opening reaches: set as it opens, too.
+    triaged = waiting_a_day()
+    triaged["milestones"] = {"triaged": {"display": {"title": "Triaged"}}}
+    triaged["rules"]["triage"] = {
+        "display": {"title": "Triage"},
+        "on": "opened",
+        "then": {"reach": ["triaged"]},
+    }
+    triaged["rules"]["open_review"]["on"] = {"after": "1d", "since": {"reached": "triaged"}}
+    assert issues(triaged, "CLOSES_AT_OPENING") == []
+    assert not run_case(triaged, file=SMALL, answers=[], people=PEOPLE).closed
+    # Without the timer it would close at once, and the check says so, as before.
+    definition = waiting_a_day()
+    del definition["rules"]
+    assert [i.code for i in issues(definition, "CLOSES_AT_OPENING")] == ["CLOSES_AT_OPENING"]
+
+
+def test_a_timer_reads_what_may_be_set_by_then() -> None:
+    # On the opening itself, a rule reading what only a person sets fails every time
+    # (`SET_AFTER`). Two days later the person may have answered: shown with a run in slice 2,
+    # so the check only warns (brief, D37).
+    definition = chased({"after": "2d", "since": "opened"})
+    definition["rules"]["chase_review"]["when"] = {">": [{"var": "approved_amount"}, 100]}
+    assert issues(definition, "SET_AFTER", "MAY_BE_UNSET") == [
+        Issue(
+            "rules.chase_review.when",
+            "MAY_BE_UNSET",
+            "chase_review reads approved_amount, which may not be set when 2d after opened "
+            "comes: then chase_review fails and needs attention: read it only when it is set, or "
+            "fire it on another moment",
+            "warning",
+        )
+    ]
+    # Set on the answer, what the answer gives is set when it fires.
+    answered = chased({"after": "2d", "since": {"answered": "review"}})
+    answered["rules"]["chase_review"]["when"] = {"==": [{"var": "review.outcome"}, "approve"]}
+    assert issues(answered) == []
+
+
+def test_a_step_reading_what_only_a_timer_after_it_sets_fails_every_time() -> None:
+    # `flagged` is set only by a timer on the follow-up's answer, and the follow-up reads it as it
+    # starts: it fails every time (`SET_AFTER`), as the run shows.
+    definition = copy.deepcopy(REFUND)
+    definition["fields"]["flagged"] = {"type": "boolean", "display": {"title": "Flagged"}}
+    definition["steps"]["follow_up"] = {
+        "kind": "task",
+        "display": {"title": "Follow up"},
+        "roles": ["support"],
+        "when": {"var": "flagged"},
+        "outcomes": {"done": {"display": {"title": "Done"}}},
+    }
+    definition["rules"] = {
+        "flag": {
+            "display": {"title": "Flag it"},
+            "on": {"after": "1h", "since": {"answered": "follow_up"}},
+            "then": {"set": {"flagged": {"var": "amount"}}},
+        }
+    }
+    definition["rules"]["flag"]["then"]["set"]["flagged"] = {">": [{"var": "amount"}, 0]}
+    assert [(i.path, i.code) for i in issues(definition, "SET_AFTER")] == [
+        ("steps.follow_up.when", "SET_AFTER")
+    ]
+    run = run_case(definition, file=SMALL, answers=[], people=PEOPLE)
+    assert run.needs_attention[0].startswith("follow_up#1: ")
+
+
+def test_check_follows_what_steered_a_timers_start() -> None:
+    definition = say_goodbye()
+    definition["rules"]["close_it"]["on"] = {"after": "1d", "since": {"started": "goodbye"}}
+    assert issues(definition, "UNTRUSTED_TRIGGER", "WRITER_DECIDES") == [
+        Issue(
+            "rules.close_it.on",
+            "UNTRUSTED_TRIGGER",
+            "close_it fires on 1d after started goodbye, which untrusted data steers however "
+            "goodbye starts (untrusted:customer), and untrusted data can't decide, so it never "
+            "reaches withdrawn: start goodbye only on trusted data, or let a person decide in a "
+            "task",
+        )
+    ]
+    # A person may propose the call too: then only some of its starts are steered, a warning.
+    definition["steps"]["goodbye"]["proposed_by"] = ["support"]
+    assert [
+        (i.code, i.severity) for i in issues(definition, "UNTRUSTED_TRIGGER", "WRITER_DECIDES")
+    ] == [("WRITER_DECIDES", "warning")]
+
+
+def test_check_refuses_an_input_a_timer_on_a_steered_start_would_send() -> None:
+    definition = say_goodbye({"start": ["letter"]}, steps={"letter": LETTER})
+    definition["rules"]["close_it"]["on"] = {"after": "1d", "since": {"started": "goodbye"}}
+    assert issues(definition, "INPUT_POLICY") == [
+        Issue(
+            "rules.close_it.then.start",
+            "INPUT_POLICY",
+            "letter fails on its inputs every time close_it starts it: letters.draft@2 takes "
+            "to_customer only from a system or a person, never from untrusted data, and close_it "
+            "fires on 1d after started goodbye, which untrusted data steers (untrusted:customer): "
+            "start goodbye only on trusted data, or let a person decide in a task",
+        )
+    ]
+    run = run_case(definition, file=SMALL, answers=[cancelled(), later("1d")], people=PEOPLE)
+    assert run.needs_attention[0].startswith("letter#1: letters.draft@2 takes to_customer")
+
+
+def test_a_timer_on_its_steps_start_can_never_start_it() -> None:
+    # Set on the review's start, it lives only while that run does: the review is running
+    # whenever it fires, so its start is refused every time (`NEVER_STARTS`).
+    definition = chased()
+    definition["rules"]["chase_review"]["then"] = {"start": ["review"]}
+    definition["steps"]["review"]["repeatable"] = True
+    del definition["steps"]["chase"]
+    assert issues(definition, "NEVER_STARTS") == [
+        Issue(
+            "rules.chase_review.then.start",
+            "NEVER_STARTS",
+            "chase_review can never start review: it fires on 2d after started review, while "
+            "review is running: start it on another moment",
+        )
+    ]
+    run = run_case(definition, file=SMALL, answers=[later("2d")], people=PEOPLE)
+    assert any(
+        line.startswith("chase_review#1 on 2d after started review#1: review not started")
+        for line in run.history
+    )
+
+
+def test_a_timer_cant_re_arm_itself() -> None:
+    # The would-be loop: a lookup that starts again an hour after it starts. Its timer lives only
+    # while its run does, and the run is done first, so it ends: nothing to claim (brief, D44).
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["look_up"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "repeatable": True,
+        "proposed_by": ["support"],
+    }
+    definition["rules"] = {
+        "again": {
+            "display": {"title": "Look it up again"},
+            "on": {"after": "1h", "since": {"started": "look_up"}},
+            "then": {"start": ["look_up"]},
+        }
+    }
+    assert issues(definition, "NEVER_CLOSES", "LOOPS_UNTIL_CLOSED") == []
+    run = run_case(definition, file=SMALL, answers=[APPROVED, later("1d")], people=PEOPLE)
+    assert "cancelled again, 1h after started look_up#1: look_up#1 is done" in run.history
+    assert run.closed
+
+
+def test_a_timer_that_may_stop_a_loop_lets_it_end() -> None:
+    # The endless rework never closes; a timer that may stop the review lets the loop end, as any
+    # rule that may stop does (brief, D40): the check claims no NEVER_CLOSES.
+    definition = endless_rework()
+    assert [i.code for i in issues(definition, "NEVER_CLOSES")] == ["NEVER_CLOSES"]
+    definition["rules"]["give_up"] = {
+        "display": {"title": "Give up on a slow review"},
+        "on": {"after": "5d", "since": {"started": "review"}},
+        "then": {"stop": ["review"]},
+    }
+    assert issues(definition, "NEVER_CLOSES", "LOOPS_UNTIL_CLOSED") == []
+    run = run_case(definition, file=SMALL, answers=[later("5d")], people=PEOPLE)
     assert run.closed

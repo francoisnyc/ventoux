@@ -12,7 +12,15 @@ sources, so a condition naming it is judged on what it could be (brief, D39).
 
 from collections.abc import Callable, Mapping
 
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, Rule, Started, TaskStep
+from ventoux.case.definition import (
+    CallStep,
+    CaseDefinition,
+    PlanStep,
+    Rule,
+    Started,
+    TaskStep,
+    anchor,
+)
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState
 from ventoux.core.catalog import Catalog, NotInCatalog
@@ -142,8 +150,10 @@ def rule_reads(rule: Rule) -> frozenset[str]:
     """What a rule's acts count as read: what its condition reads, and, on a step's start, what
     steered that start (brief, D43)."""
     reads = set(fields_read(rule.when)) if rule.when is not None else set()
-    if isinstance(rule.on, Started):
-        reads.add(start_of(rule.on.started))
+    # A timer set on a step's start carries what steered it, as a rule on the start does
+    # (brief, D44).
+    if isinstance(on := anchor(rule.on), Started):
+        reads.add(start_of(on.started))
     return frozenset(reads)
 
 

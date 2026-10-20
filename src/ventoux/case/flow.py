@@ -16,7 +16,9 @@ from ventoux.case.definition import (
     Then,
     WaitStep,
     WorkflowStep,
+    anchor,
 )
+from ventoux.case.rules import said as said_moment
 from ventoux.case.types import case_types, fits_type
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.case.writers import (
@@ -494,8 +496,10 @@ def steered(
                     return said, to_do, value, policy
                 step = value.removeprefix("started ")
                 rule = case.rules.get(who)
-                if rule is not None and isinstance(rule.on, Started) and rule.on.started == step:
-                    said += f"{who} fires on {value}, which untrusted data steers ({labels})"
+                on = None if rule is None else anchor(rule.on)
+                if rule is not None and isinstance(on, Started) and on.started == step:
+                    moment = said_moment(rule.on)  # a timer on the start says so
+                    said += f"{who} fires on {moment}, which untrusted data steers ({labels})"
                 else:
                     said += f"{who} requires {step}, which untrusted data steers ({labels})"
                 return said, steered_to_do(step), value, policy
@@ -628,8 +632,8 @@ def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> l
                     )
                 )
             break  # one cause, one issue
-        if len(found) == said and isinstance(rule.on, Started):
-            found += moment_issues(case, contracts, name, rule, rule.on.started)
+        if len(found) == said and isinstance(on := anchor(rule.on), Started):
+            found += moment_issues(case, contracts, name, rule, on.started)
     return found + reach_issues(case, contracts)
 
 
@@ -650,7 +654,7 @@ def moment_issues(
             Issue(
                 f"rules.{name}.on",
                 "UNTRUSTED_TRIGGER",
-                f"{name} fires on started {step}, which untrusted data steers however {step} "
+                f"{name} fires on {said_moment(rule.on)}, which untrusted data steers however {step} "
                 f"starts ({labels}), and untrusted data can't decide, so it never "
                 f"{never_does(rule.then)}: {to_do}",
             )
@@ -660,7 +664,7 @@ def moment_issues(
         Issue(
             f"rules.{name}.on",
             "WRITER_DECIDES",
-            f"{name} fires on started {step}, which untrusted data steers ({labels}) {how}, and "
+            f"{name} fires on {said_moment(rule.on)}, which untrusted data steers ({labels}) {how}, and "
             f"untrusted data can't decide, so whether it {never_does(rule.then)} depends on how "
             f"{step} started: {to_do}",
             "warning",

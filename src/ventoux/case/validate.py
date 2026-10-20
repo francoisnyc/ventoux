@@ -14,12 +14,14 @@ from ventoux.case.calls import (
     supplied_plans,
 )
 from ventoux.case.definition import (
+    After,
     AnsweredTask,
     CallStep,
     CaseDefinition,
     PlanStep,
     Reached,
     Started,
+    anchor,
 )
 from ventoux.case.flow import (
     approver_issues,
@@ -265,17 +267,28 @@ def closes_at_opening(case: CaseDefinition) -> bool:
     (brief, D39). A case that stays open waits for a person instead. So does one whose rule on
     the opening has a condition: it may fail, whatever the check says of what it reads (the
     opener may leave a field out), and then the case needs attention instead of closing
-    (brief, D34)."""
+    (brief, D34). A timer set as the case opens is pending work, so it doesn't close then either
+    (brief, D44)."""
     fired = opening_fired(case)
     if any(case.rules[rule].when is not None for rule in fired):
         return False
     required = requirements(case)
     reached = opening_reaches(case)
+    if any(set_at_opening(rule.on, reached) for rule in case.rules.values()):
+        return False
     started = {step for rule in fired for step in case.rules[rule].then.start}
     return not case.stays_open and not any(
         (step.automatic or name in started) and set(required[name]) <= reached
         for name, step in case.steps.items()
     )
+
+
+def set_at_opening(on: object, reached: set[str]) -> bool:
+    """Whether a rule's moment is a timer set as the case opens: on the opening itself, or on a
+    milestone a rule on the opening may reach (`reached`)."""
+    if not isinstance(on, After):
+        return False
+    return on.since == "opened" or (isinstance(on.since, Reached) and on.since.reached in reached)
 
 
 def never_run(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[Issue]:
@@ -471,8 +484,8 @@ def never_fires(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
             for step in rule.then.start
         ):
             continue
-        on = rule.on
-        moment = said(on)  # fail closed: a moment Ventoux doesn't know is refused here
+        on = anchor(rule.on)  # a timer fires only once the moment it is set on has come
+        moment = said(rule.on)  # fail closed: a moment Ventoux doesn't know is refused here
         if acts_after_close(case, name):
             assert isinstance(on, Reached)
             why = (

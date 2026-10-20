@@ -18,6 +18,7 @@ from ventoux.case.definition import (
     Started,
     TaskStep,
     WorkflowStep,
+    anchor,
 )
 from ventoux.case.known import DONE, Known, Read, Reading, reads, set_by_outcomes
 from ventoux.case.reach import starters
@@ -88,7 +89,9 @@ def rule_unset_issues(
     found: list[Issue] = []
     for name, rule in reading.case.rules.items():
         on = rule.on
-        known = at_moment(reading, on)
+        # A timer fires later than its moment: what was set then is set still, and maybe more,
+        # so it is read as its moment, which claims less, never more (brief, D44).
+        known = at_moment(reading, anchor(on))
         # The condition is read first; once true, it guards each value the rule sets, which are
         # read next (brief, D42).
         read: list[tuple[str, Read]] = []
@@ -293,7 +296,10 @@ def unset_issue(reading: Reading, read: Unset) -> Issue:
     if (
         computing
         and read.always
-        and all(read.step in at_moment(reading, reading.case.rules[r].on).ended for r in computing)
+        and all(
+            read.step in at_moment(reading, anchor(reading.case.rules[r].on)).ended
+            for r in computing
+        )
     ):
         # Every rule setting it fires only once the step is done, and the step is done only
         # after a run that read it: no run of it ever succeeds (brief, D37) (brief, D42).
