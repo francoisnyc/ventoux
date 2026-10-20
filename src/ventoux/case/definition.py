@@ -47,6 +47,15 @@ def an_age(age: str) -> str:
 # How old each fact a step reads may be when it runs: `{"check_order.status": "1d"}` (brief, D18).
 MaxAge = dict[str, Annotated[str, AfterValidator(an_age)]]
 
+
+def a_wait(age: str) -> str:
+    """How long a timer waits after its moment: an age, at least a minute, fired once
+    (brief, D44). Kept as written, as an age is."""
+    if seconds_in(age) == 0:  # `seconds_in` refuses anything that isn't `30m`, `12h` or `1d`
+        raise ValueError("a timer waits at least 1m: write a later age")
+    return age
+
+
 CaseName = Annotated[str, matching(r"[a-z][a-z0-9-]*", 'a case name looks like "refund"')]
 # A field, step or milestone: no `.`, so `review.outcome` is never a field's name.
 Name = Annotated[str, matching(r"[a-z][a-z0-9_]*", 'a name looks like "approved_amount"')]
@@ -370,14 +379,43 @@ MOMENTS = (
 )
 
 
+class After(Shape):
+    """The moment a timer fires: time passing after another moment, once (brief, D44)."""
+
+    after: Annotated[str, AfterValidator(a_wait)]  # an age: `30m`, `12h`, `2d`; one firing
+    # The moment it is set on: one of the five others, never a timer (brief, D44).
+    since: Moment
+
+
+def rule_moment_of(on: object) -> str:
+    """Whether a rule's `on` is a timer (it names `after`) or one of the five other moments, whose
+    own shape is picked next."""
+    return "timer moment" if isinstance(on, dict) and "after" in on else "moment"
+
+
+# What a rule's `on` takes: the five moments, or a timer set on one of them (brief, D44).
+type RuleMoment = Annotated[
+    Annotated[Moment, Tag("moment")] | Annotated[After, Tag("timer moment")],
+    Discriminator(rule_moment_of),
+]
+
+RULE_MOMENTS = f'{MOMENTS.replace(" or ", ", ")} or {{"after": <age>, "since": <moment>}}'
+
+
+def anchor(on: object) -> object:
+    """The moment a rule's timer is set on, or the rule's own moment if it has no timer: what a
+    check reads, since a timer fires only once its moment has come (brief, D44)."""
+    return on.since if isinstance(on, After) else on
+
+
 class Rule(Shape):
     """On a moment, when a condition holds, then act on the case (brief, D38)."""
 
     display: Display
     # The moment it reacts to: the case opened, a step's run started, a milestone reached, a task
-    # answered, an event arrived. A closed list: a new moment is a decision recorded in the brief
-    # (brief, D38).
-    on: Moment
+    # answered, an event arrived, or time passing after one of these. A closed list: a new moment
+    # is a decision recorded in the brief (brief, D38) (brief, D44).
+    on: RuleMoment
     when: PlanExpression | None = None  # read once the moment has come, on the case file then
     then: Then
 
@@ -467,16 +505,8 @@ class CaseDefinition(Shape):
             # A rule's firings are entries beside step runs (`flag_large#1`), so no name is shared.
             if name in self.steps or name in self.milestones:
                 problems.append(f"rules.{name}: a rule is not named like a step or a milestone")
-            if isinstance(rule.on, Started) and rule.on.started not in self.steps:
-                problems.append(f"rules.{name}.on.started: {rule.on.started} is not a step")
-            if isinstance(rule.on, Reached):
-                problems += reaching(f"rules.{name}.on.reached", (rule.on.reached,), self)
-            if isinstance(rule.on, AnsweredTask) and not isinstance(
-                self.steps.get(rule.on.answered), TaskStep
-            ):
-                problems.append(f"rules.{name}.on.answered: {rule.on.answered} is not a task")
-            if isinstance(rule.on, EventArrived) and rule.on.event not in self.events:
-                problems.append(f"rules.{name}.on.event: {rule.on.event} is not an event")
+            on = f"rules.{name}.on.since" if isinstance(rule.on, After) else f"rules.{name}.on"
+            problems += moment_problems(on, anchor(rule.on), self)
             problems += reaching(f"rules.{name}.then.reach", rule.then.reach, self)
             problems += set_problems(f"rules.{name}", rule, self)
             problems += [
@@ -488,6 +518,21 @@ class CaseDefinition(Shape):
         if problems:
             raise ValueError("\n".join(problems))
         return self
+
+
+def moment_problems(path: str, moment: object, case: CaseDefinition) -> list[str]:
+    """What a moment names that `case` doesn't declare: a step, a milestone, a task, an event."""
+    if isinstance(moment, Started) and moment.started not in case.steps:
+        return [f"{path}.started: {moment.started} is not a step"]
+    if isinstance(moment, Reached):
+        return reaching(f"{path}.reached", (moment.reached,), case)
+    if isinstance(moment, AnsweredTask) and not isinstance(
+        case.steps.get(moment.answered), TaskStep
+    ):
+        return [f"{path}.answered: {moment.answered} is not a task"]
+    if isinstance(moment, EventArrived) and moment.event not in case.events:
+        return [f"{path}.event: {moment.event} is not an event"]
+    return []
 
 
 def step_problems(
@@ -688,11 +733,14 @@ def problem(error: Any) -> str:
     path = ".".join(
         part
         for part in loc
-        if not part.endswith(" step") and not part.endswith(" moment") and part != "[key]"
+        if not part.endswith(" step")
+        and not part.endswith(" moment")
+        and part not in ("[key]", "moment")
     )
     kind = error["type"]
     if kind in ("union_tag_invalid", "union_tag_not_found") and loc[:1] == ["rules"]:
-        return f"{path}: a moment is {MOMENTS}"
+        # A timer's own moment takes the five others; a rule's `on`, a timer too.
+        return f"{path}: a moment is {MOMENTS if loc[-1] == 'since' else RULE_MOMENTS}"
     if kind in ("union_tag_invalid", "union_tag_not_found") and loc[:1] == ["steps"]:
         tag = error.get("ctx", {}).get("tag", "").removesuffix(" step")
         found = f", and this one is {tag!r}" if tag else ", and this one says none"
