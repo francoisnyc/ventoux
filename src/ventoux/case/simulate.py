@@ -89,11 +89,10 @@ class Simulation:
             want = wanted[index] if index < len(wanted) else None
             got = printed[index] if index < len(printed) else None
             if want != got:
-                where = (want or got or ("", ""))[0]
                 return (
-                    f"the story's expectation fails at {where}:\n"
-                    f"  expected: {want[1] if want else '(nothing more)'}\n"
-                    f"  printed:  {got[1] if got else '(nothing more)'}"
+                    "the story's expectation fails:\n"
+                    f"  expected, {placed(want)}\n"
+                    f"  printed, {placed(got)}"
                 )
         return None
 
@@ -119,6 +118,11 @@ class Simulation:
                     lines += [f"    ↳ {first}", *(f"    {more}" for more in rest)]
         lines += ["", f"At the end, {self.end_at}", *(f"  {line}" for line in self.end)]
         return "\n".join(lines) + "\n"
+
+
+def placed(line: tuple[str, str] | None) -> str:
+    """A line with where it is, `at day 2 00:00: …`, or that there is none."""
+    return f"at {line[0]}: {line[1]}" if line is not None else "nothing more"
 
 
 def told(timeline: dict[str, list[str]], end: list[str]) -> list[tuple[str, str]]:

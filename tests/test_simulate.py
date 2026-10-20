@@ -4,7 +4,6 @@ Tests go through `parse_story` and `simulate`, and read what a simulation prints
 See docs/layers/11-rules.md (11g), the brief, D45, and docs/guides/cases.md, "Simulating a story".
 """
 
-import copy
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +11,7 @@ import pytest
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_case import guide_refund_with_plan
+from test_set import with_owed
 from test_timers import chased
 
 from ventoux.case.definition import parse_case
@@ -189,8 +189,128 @@ def test_a_refused_entry_is_a_line_and_the_story_goes_on() -> None:
     )
 
 
-def unused(*_: object) -> None:
-    """Keeps the imports used while the file grows slice by slice."""
+# --- Slice 3: what a simulation prints ---
 
 
-unused(copy)
+def test_each_firing_is_shown_beside_its_reading() -> None:
+    # Its whole reading, fine print included, so the reader sees what the engine does as it
+    # does it (brief, D45).
+    printed = str(played(story(until="day 3"), chased()))
+    assert (
+        "day 2 00:00\n"
+        "  chase_review#1 on 2d after started review#1: starting chase\n"
+        "    ↳ chase_review: Chase a review left open for two days\n"
+        "      2d after each run of review starts: start chase.\n"
+        "      - The timer is set as each run of review starts, and ends when that run does: "
+        "done, rejected or cancelled, a stop included. A failed run keeps it: a retry is the same "
+        "run.\n"
+        "      - While it is set, the timer keeps the case open; a close cancels it.\n"
+        "      - Starting chase is a proposal, decided at once as a person's is: nothing starts, "
+        "and the history says why, if it is already running, or it has run and isn't "
+        "repeatable.\n"
+        "      - Only while the case decides: not once the case is closing.\n"
+        "  started chase#1: waiting for chased by support-lead\n"
+    ) in printed
+    # Every rule's reading is printed once at the top too, under what holds for every rule.
+    assert printed.index("Rules\n  A rule remembers nothing") < printed.index("Timeline")
+
+
+def test_the_end_lists_every_pending_item() -> None:
+    # Every kind of pending work is listed, none left unsaid; with none, it says so (brief, D10).
+    assert played(story(until="day 1"), chased()).end == (
+        "status: open",
+        "waiting for: review by support",
+        "timer: chase_review: 2d after started review#1, due 2026-01-03T00:00:00Z",
+    )
+    held = story(timeline=[{"at": "day 1", "answer": APPROVE}])
+    held["fakes"] = {"payments.refund@2": {"gives": {"refund_id": "refund-1"}, "held": True}}
+    assert played(held).end == ("status: open", "running: pay#1")
+    failing = story(timeline=[{"at": "day 1", "answer": APPROVE}])
+    failing["fakes"] = {"payments.refund@2": {"fails": "the provider is down"}}
+    assert played(failing).end == (
+        "status: open",
+        "needs attention: pay#1: payments.refund@2 failed with FakeFailed: ‹sensitive›",
+    )
+    big = APPROVE | {"form": {"approved_amount": 250}}
+    asked = played(story(timeline=[{"at": "day 1", "answer": big}]))
+    assert asked.end == ("status: open", "waiting for: approval of pay by support-lead")
+    paid = played(story(timeline=[{"at": "day 1", "answer": APPROVE}]))
+    assert paid.end == ("status: closed", "nothing pending")
+
+
+def test_no_output_line_quotes_a_value_from_the_case_file() -> None:
+    # Names only: the story's lines, the engine's, the readings. Each value below is distinct,
+    # the opening's, a form's, a fake's, and one a rule computes (brief, D30, D45).
+    data = story(
+        file={"order_id": "ord-9876", "amount": 6543, "fee": 17},
+        people={"ana": ["support"], "sam": ["support", "support-lead"]},
+        timeline=[
+            {"at": "day 1", "answer": APPROVE | {"form": {"approved_amount": 4999}}},
+            {"at": "day 2", "answer": {"step": "pay", "outcome": "approve", "by": "sam"}},
+        ],
+    )
+    data["fakes"] = {"payments.refund@2": {"gives": {"refund_id": "rf-5555"}}}
+    simulation = played(data, with_owed())
+    printed = str(simulation)
+    assert "work_out_owed#1 on answered review: setting owed" in printed
+    assert simulation.end == ("status: closed", "nothing pending")
+    for value in ("ord-9876", "6543", "17", "4999", "4982", "rf-5555"):
+        assert value not in printed.replace("2026-01-01T00:00:00Z", ""), value
+
+
+def test_a_story_simulates_the_same_every_time() -> None:
+    first = str(played(story(until="day 3"), chased()))
+    assert str(played(story(until="day 3"), chased())) == first
+
+
+def test_only_the_storys_fakes_run() -> None:
+    # The development fakes would pay; the story's says the provider declined, so it did.
+    declined = story(timeline=[{"at": "day 1", "answer": APPROVE}])
+    declined["fakes"] = {"payments.refund@2": {"outcome": "declined"}}
+    lines = played(declined).timeline_lines()["day 1 00:00"]
+    assert "pay#1 gave declined" in lines
+    assert "started call_customer#1: waiting for called by support" in lines
+
+
+def test_a_held_run_finishes_when_the_story_says() -> None:
+    held = story(
+        timeline=[
+            {"at": "day 1", "answer": APPROVE},
+            {"at": "day 1 10:00", "finish": {"entry": "pay#1"}},
+        ]
+    )
+    held["fakes"] = {"payments.refund@2": {"gives": {"refund_id": "refund-1"}, "held": True}}
+    assert played(held).timeline_lines()["day 1 10:00"] == [
+        "pay#1 finishes",
+        "pay#1 done, giving refund_id from untrusted:undeclared",
+        "closed: nothing left to do",
+    ]
+    # Finishing what isn't held and running is the story's mistake: refused, never skipped.
+    wrong = story(timeline=[{"at": "day 1", "finish": {"entry": "pay#1"}}])
+    with pytest.raises(StoryRefused) as refusal:
+        played(wrong)
+    assert str(refusal.value) == ("day 1 00:00: pay#1 isn't a held run going on: nothing finishes")
+
+
+# --- Slice 4: what a story expects ---
+
+
+def test_a_failing_expectation_says_where() -> None:
+    # Compared whole: the story expects the chase never fires, and it does (brief, D45).
+    expected = played(story(until="day 1"), chased())
+    data = story(
+        until="day 3",
+        expect={"timeline": expected.timeline_lines(), "end": list(expected.end)},
+    )
+    simulation = played(data, chased())
+    assert simulation.difference() == (
+        "the story's expectation fails:\n"
+        "  expected, at the end: status: open\n"
+        "  printed, at day 2 00:00: chase_review#1 on 2d after started review#1: starting chase"
+    )
+    # What it did, expected exactly, holds.
+    holding = story(
+        until="day 3",
+        expect={"timeline": simulation.timeline_lines(), "end": list(simulation.end)},
+    )
+    assert played(holding, chased()).difference() is None
