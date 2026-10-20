@@ -1496,6 +1496,43 @@ whose text is kept.*
   person, an event or a run ending. D10's "a timer that re-arms itself" can't be written, and
   `NEVER_CLOSES` has nothing new to claim; a repeating key, if it comes, brings its own.
 
+### D45. Reading rules: a reading from the definition alone, and stories in simulated time
+
+*Decided 2026-10-20, in layer 11g. Adds to D7, whose text is kept.*
+
+- **A reading is a pure function of the definition.** Every rule reads as one sentence, its
+  moment, its condition and its actions, in the order the engine takes them (stop, set, reach,
+  start: D40, D42), with fine print for each part people get wrong, shown only on the rules it
+  is true of: a timer's anchor and that it ends with its run, kept by a failed run (D40, D44);
+  a timer on an instant living until it fires; a set timer holding the case, a rule on an event
+  only listening (D10, D41); untrusted data deciding nothing, including through a steered start
+  (D38, D43); a set value carrying what its rule read (D42); a start checked against the started
+  step's input policies (D39); and acting only while the case decides, naming `closes_when`
+  (D38). The reading is never given a case file, so it can't quote a value from one; a rule's
+  own constants are the definition's, shown through the expression renderer (D20).
+- **Names, not titles, and conditions as written.** A reading names steps, milestones and
+  events as the history does, so a firing and its reading, side by side, use the same words.
+  A condition reads as the one-line expression renderer writes it (`kyc.risk_score > 70`): prose
+  for an expression would be a second renderer, and a second place to be wrong.
+- **Every shape, failing closed.** A moment, an action or an expression the reader doesn't know
+  is refused, never left out of the sentence. A test reads the moments and actions from the
+  definition's own types, so a new one can't be added without a reading.
+- **Each faithful part has a witness:** a test that reads a rule with that part and runs a case
+  where the engine does what it says. The parts form a closed list, and a test checks that the
+  witnesses cover it, so a reading can't drift from the engine.
+- **A story is data, played in simulated time** (D7, D33): a JSON file naming its definition,
+  the opening's values, people's roles, a fake for each contract the definition calls, and a
+  timeline of answers, proposals, retries, closes, events, held runs finishing and time passing,
+  each at a time counted from the opening (`day 3 14:30`). It runs on the in-memory engine:
+  nothing real is called and nothing is sent. Its output shows each firing beside its rule's
+  reading, timers set, fired and cancelled, refusals, and every kind of pending work at the
+  end, and quotes no value from the case file. A story states what it expects, the whole
+  timeline exactly, so a firing nobody expected fails it; stories under `examples/` run as
+  tests.
+- **One command, `ventoux simulate STORY.json`,** the first entry point: reading files and
+  printing stay out of `core` and `case`. `ventoux check` stays with the builder (D34).
+- **Built in two parts:** the reading in 11g1, the story and the command in 11g2.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
