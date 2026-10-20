@@ -1202,7 +1202,7 @@ chase_review: Chase a review left open for two days
   2d after each run of review starts: start chase.
   - The timer is set as each run of review starts, and ends when that run does: done, rejected or cancelled, a stop included. A failed run keeps it: a retry is the same run.
   - While it is set, the timer keeps the case open; a close cancels it.
-  - Starting chase proposes a run, decided as a person's proposal is: nothing starts, and the history says why, if it is already running, or it has run and isn't repeatable.
+  - Starting chase is a proposal, decided at once as a person's is: nothing starts, and the history says why, if it is already running, or it has run and isn't repeatable.
   - Only while the case decides: not once the case is closing.
 ```
 
@@ -1229,10 +1229,10 @@ reads as the expression renderer writes it. Below come the parts that apply to t
 | if its condition reads untrusted data, or untrusted data steered the run, it acts on nothing | a rule that reaches or stops |
 | the values it sets carry the sources of everything it read | a rule that sets |
 | what its condition reads counts for the inputs of the steps it starts | a rule that starts a step taking inputs, and neither reaches nor stops |
-| stopping it cancels its open run at once | a rule that stops a task or a wait |
-| stopping it doesn't cut off a running call: it may still finish, flagging the case; a run not yet started is cancelled, a failed run isn't stopped | a rule that stops an activity, a workflow or a plan |
-| starting it proposes a run, decided as a person's proposal is: nothing starts, saying why, if it can't run now; it waits for its approval | a rule that starts a step |
-| reaching it closes the case: open tasks, approvals and timers are cancelled, running calls finish | a rule that reaches a `closes_when` milestone |
+| stopping it cancels its open task or wait at once | a rule that stops a task or a wait |
+| stopping it cancels a run waiting for its approval, or to start, at once; a running call is only asked to stop, may still finish, and is flagged if it does; a failed run isn't stopped | a rule that stops an activity, a workflow or a plan |
+| starting it is a proposal, decided at once as a person's is: nothing starts, and the history says why, if it can't run now (its requirements, its condition, already running, run and not repeatable, its latest run needing attention); a stale fact it needs fresh fails the run; it waits for its approval | a rule that starts a step |
+| reaching it closes the case, unless a failed run holds the close: open tasks, approvals and timers are cancelled, and running calls finish | a rule that reaches a `closes_when` milestone |
 | only while the case decides: not once the `closes_when` milestones are reached, nor once the case is closing | every rule |
 
 Two things hold for every rule, and are said once, above a definition's readings:

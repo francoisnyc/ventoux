@@ -1506,9 +1506,17 @@ whose text is kept.*
   is true of: a timer's anchor and that it ends with its run, kept by a failed run (D40, D44);
   a timer on an instant living until it fires; a set timer holding the case, a rule on an event
   only listening (D10, D41); untrusted data deciding nothing, including through a steered start
-  (D38, D43); a set value carrying what its rule read (D42); a start checked against the started
-  step's input policies (D39); and acting only while the case decides, naming `closes_when`
-  (D38). The reading is never given a case file, so it can't quote a value from one; a rule's
+  (D38, D43); a set value carrying what its rule read, on every rule that sets, one that also
+  reaches or stops included (D42); a start checked against the started step's input policies
+  (D39); a stop doing what a close does to one step: an open task, wait or approval cancelled at
+  once, a running call only asked to stop, which may still finish and is flagged if it does, and
+  a failed run never stopped (D10, D40); a start being a proposal that admission decides at
+  once, as a person's: nothing starts, and the history says why, if the step can't run now, a
+  stale fact it needs fresh fails the run rather than being waited for, and an approval is waited
+  for (D39); reaching a `closes_when` milestone closing the case, cancelling open tasks,
+  approvals and timers (D10, D34); and acting only while the case decides, naming `closes_when`
+  (D38). An action reads as what the engine does, never as its name alone: "stop pay" would read
+  as if the payment stops, and a running refund goes through. The reading is never given a case file, so it can't quote a value from one; a rule's
   own constants are the definition's, shown through the expression renderer (D20).
 - **Names, not titles, and conditions as written.** A reading names steps, milestones and
   events as the history does, so a firing and its reading, side by side, use the same words.
@@ -1520,15 +1528,6 @@ whose text is kept.*
 - **Each faithful part has a witness:** a test that reads a rule with that part and runs a case
   where the engine does what it says. The parts form a closed list, and a test checks that the
   witnesses cover it, so a reading can't drift from the engine.
-- **An action reads as what the engine does, not as its name.** A stop reads as what a close
-  does to one step: an open task or wait is cancelled at once; a running call isn't cut off, and
-  if it finishes, what it gives lands and the case is flagged; a run not yet started is cancelled;
-  a failed run is never stopped (D10, D40). A start reads as a proposal that admission decides as
-  it would a person's, saying why when nothing starts, and waiting for an approval (D39). Reaching
-  a `closes_when` milestone reads as closing the case, cancelling what is open (D10, D34). A value
-  set by a rule that also reaches or stops still reads as carrying what it read (D42). Why: "stop
-  pay" read as if the payment stopped, and the refund went through. *Added in the tutor review of
-  11g1, before D45 was merged.*
 - **A story is data, played in simulated time** (D7, D33): a JSON file naming its definition,
   the opening's values, people's roles, a fake for each contract the definition calls, and a
   timeline of answers, proposals, retries, closes, events, held runs finishing and time passing,

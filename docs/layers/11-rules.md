@@ -2732,34 +2732,46 @@ Each starts with its negative test, seen failing for the right reason.
 
 The tutor review (2026-10-20, at `e466b26`) found two readings that promised more than the engine
 does, in the very place D45 aims at, and asked for two more points in the same pull request. All
-four built test-first, each witness seen failing before its code; D45 gets a dated addition,
-before it is merged.
+four built test-first, each new clause with its witness, so `test_every_clause_has_a_witness`
+still covers the closed list. D45 isn't merged yet, so its list of clauses is updated in place.
 
-1. **`stop pay` read as if the payment stops.** The engine asks a running call to stop, and it
-   finishes: the refund went through, and the case was flagged (brief, D10, D40). A new clause,
-   "what a stop does", one line per stopped step: a task or a wait has its open run cancelled at
-   once; an activity, a workflow or a plan isn't cut off, may still finish, landing what it gives
-   and flagging the case, a run not yet started is cancelled, and a failed run isn't stopped. Its
-   witness runs both: the open review cancelled, the held payment finishing and flagged.
-   A cancellable workflow is cancelled rather than left to finish, but whether it is depends on
-   its contract, in the catalog, which the reader never sees; "may still finish" is true of
-   every kind, so one line serves them all.
+1. **`stop pay` read as if the payment stops.** The engine only asks a running call to stop, and
+   it finishes: the refund went through, and the case was flagged (brief, D10, D40). A new
+   clause, "what a stop does", one line per stopped step: a task's or a wait's open run is
+   cancelled at once; for an activity, a workflow or a plan, a run waiting for its approval (if
+   the step has one), or to start, is cancelled at once, a running call is only asked to stop,
+   may still finish, and is flagged if it does, and a failed run isn't stopped. Its witness is
+   the review's case, a rule on `cancelled` stopping `pay` while it runs: the refund completes and
+   the case is flagged; and, on the same rule, the open review and an asked approval are
+   cancelled at once. A cancellable workflow is cancelled rather than left to finish, but whether
+   it is depends on its contract, in the catalog, which the reader never sees; "may still finish"
+   is true of every kind.
 2. **`start pay` read as if pay starts.** The engine proposes, and admission decides as for a
    person's proposal (brief, D39). A new clause, "a start is a proposal", one line per started
-   step, naming only the reasons that apply to it (its requirements, its condition, already
-   running or waiting for its approval, has run and isn't repeatable, its latest run needing
-   attention), and that it waits for its approval when one is needed. Its witness runs a pay that
-   waits for a team lead, and a check whose requirement isn't met. The review's wording ("starts
-   once its requirements and condition hold") would have said the start waits; it doesn't: a
-   rule's start the engine can't make is recorded, and nothing runs.
+   step, naming only the reasons that apply to it: its requirements, its condition, already
+   running (or waiting for its approval), has run and isn't repeatable, its latest run needing
+   attention; then, for a step with `max_age`, that a stale fact fails the run; and, for a step
+   with an approval, that it waits for it. Its witness: `pay` started over 100 waits for the
+   approval, asked first; a check whose requirement isn't met doesn't start, and says why; a
+   lookup on a stale fact fails, needing attention.
+   **Worded as the engine acts, not as the review put it.** The review's wording, "the step
+   starts once its requirements, condition and freshness hold and its approval is given", would
+   say the start waits for them. Only the approval is waited for: a rule's start the engine
+   can't make is recorded and nothing runs, then or later (D39), and one on a stale fact fails
+   rather than waiting for a refresh (D39: a refresh lands with no person in it). So the line
+   says "decided at once", and what happens in each case; each part has its run in the witness.
 3. **A rule that reaches or stops dropped "the values it sets carry what it read."** `trust()`
    returned early. Untrusted data stops such a rule whole, but a trusted value still carries a
-   person's source, which decides who may approve a step given it (brief, D42). The clause is
-   now said on every rule that sets; on one that reaches or stops, without "what steered the
-   run", since such a rule never acts on a steered start.
+   person's answer, which decides who may approve a step given it (brief, D11, D42). The clause
+   is now said on every rule that sets; on one that reaches or stops, without "what steered the
+   run", since such a rule never acts on a steered start. Its witness is four eyes: a rule that
+   sets what is owed and reaches a milestone, and Sam, whose answer the value carries, can't
+   approve paying it.
 4. **Reaching a `closes_when` milestone closes the case,** cancelling open tasks, approvals and
    timers, while running calls finish (brief, D10, D34). A new clause, "reaching closes the
-   case", naming the other `closes_when` milestones still to be reached, if any.
+   case", naming the other `closes_when` milestones still to be reached, if any. Its witness: a
+   rule reaching the closing milestone cancels the open review and a set timer, and the case
+   closes.
 
 Also, while building: `starts()` read every step's requirements even for a rule that starts
 nothing, so the negative test for a stopped step of an unknown kind failed for the wrong reason
@@ -2795,12 +2807,11 @@ it is built.
 | What a start's condition read, and what steered its moment, count for the started step's inputs (witness) | `test_a_start_reads_as_checked_against_inputs` |
 | The inputs clause is said only of a step that takes inputs | `test_a_start_of_a_step_without_inputs_says_nothing_of_them` |
 | A rule acts only while the case decides, naming `closes_when` (witness) | `test_a_rule_reads_as_acting_only_while_the_case_decides` |
-| A stop reads as what the engine does: an open task cancelled at once, a running call finishing and flagged (witness) | `test_a_stop_reads_as_what_the_engine_does_to_each_kind` |
+| A stop reads as what the engine does: an open task or an asked approval cancelled at once, a running call only asked to stop, finishing and flagged (witness) | `test_a_stop_reads_as_what_the_engine_does_to_each_kind` |
 | A stopped step of a kind the reader doesn't know is refused | `test_a_stopped_step_of_a_kind_the_reader_doesnt_know_is_refused` |
-| A start reads as a proposal admission decides: waiting for its approval, or nothing started and why (witness) | `test_a_start_reads_as_a_proposal_admission_decides` |
-| Reaching a `closes_when` milestone reads as closing the case, naming any other still to reach (witness) | `test_reaching_closes_when_reads_as_closing_the_case` |
-| A value set by a rule that also reaches still reads as carrying what it read | `test_a_set_value_on_a_rule_that_reaches_still_reads_as_carrying_what_it_read` |
-| A rule that can't be read acts on nothing and needs attention, said once for every rule (witness) | `test_what_every_rule_does_is_said_once` |
+| A start reads as a proposal decided at once: waiting for its approval, nothing started and why, a stale fact failing the run (witness) | `test_a_start_reads_as_a_proposal_admission_decides` |
+| Reaching a `closes_when` milestone reads as closing the case, cancelling an open task and a timer, naming any other milestone still to reach (witness) | `test_reaching_closes_when_reads_as_closing_the_case` |
+| A value set by a rule that also reaches still reads as carrying what it read, and whose answer it carries can't approve the step given it | `test_a_set_value_on_a_rule_that_reaches_still_reads_as_carrying_what_it_read` |
 | Every clause has a witness, and the witnesses cover the closed list | `test_every_clause_has_a_witness` |
 | The guide's readings are the reader's | `test_the_guides_readings_are_the_renderers` |
 | The guide's example calls the reader as written | `test_the_guides_examples_run_as_written` (`tests/test_case.py`) |

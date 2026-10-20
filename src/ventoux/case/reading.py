@@ -313,18 +313,22 @@ def deciding(case: CaseDefinition) -> Clause:
 
 
 def stops(then: Then, case: CaseDefinition) -> list[Clause]:
-    """What a stop does to each step it names: what a close does, to one step. An open task or
-    wait is cancelled at once; a running call can't be cut off halfway (brief, D10) (brief, D40)."""
+    """What a stop does to each step it names: what a close does, to one step. What hasn't started
+    is cancelled at once; a running call can't be cut off halfway (brief, D10) (brief, D40)."""
     fine: list[Clause] = []
     for name in then.stop:
         step = case.steps[name]
-        if isinstance(step, TaskStep | WaitStep):
-            text = f"Stopping {name} cancels its open run at once."
+        if isinstance(step, TaskStep):
+            text = f"Stopping {name} cancels its open task at once."
+        elif isinstance(step, WaitStep):
+            text = f"Stopping {name} cancels its open wait at once."
         elif isinstance(step, CallStep | PlanStep):
+            waiting = (
+                "waiting for its approval, or to start" if approved(step) else "waiting to start"
+            )
             text = (
-                f"Stopping {name} doesn't cut off a running call: it may still finish, and if it "
-                "does, what it gives lands and the case is flagged. A run not yet started is "
-                "cancelled; a failed run isn't stopped."
+                f"Stopping {name} cancels a run {waiting}, at once; a running call is only asked "
+                "to stop, may still finish, and is flagged if it does; a failed run isn't stopped."
             )
         else:
             # Fail closed: a kind of step the reader doesn't know is refused, never guessed.
@@ -335,27 +339,39 @@ def stops(then: Then, case: CaseDefinition) -> list[Clause]:
     return fine
 
 
+def approved(step: object) -> bool:
+    """Whether a run of `step` may wait for a person's approval before it starts (brief, D11)."""
+    return isinstance(step, CallStep) and step.approval is not None
+
+
 def starts(then: Then, case: CaseDefinition) -> list[Clause]:
-    """What a start does: the engine proposes a run, and admission decides as for a person's
-    proposal; a start it can't make is recorded, and nothing runs (brief, D39)."""
+    """What a start does: the engine proposes a run, and admission decides at once, as for a
+    person's proposal; a start it can't make is recorded, and nothing runs, then or later
+    (brief, D39)."""
     required = requirements(case) if then.start else {}
     fine: list[Clause] = []
     for name in then.start:
         step = case.steps[name]
         calls = isinstance(step, CallStep | PlanStep)
-        approval = isinstance(step, CallStep) and step.approval is not None
         why = [
             *(["its requirements aren't met"] if required[name] else []),
             *(["its condition is false"] if step.when is not None else []),
-            "it is already running" + (" or waiting for its approval" if approval else ""),
+            "it is already running" + (" or waiting for its approval" if approved(step) else ""),
             *(["it has run and isn't repeatable"] if not step.repeatable else []),
             *(["its latest run needs attention"] if calls else []),
         ]
         text = (
-            f"Starting {name} proposes a run, decided as a person's proposal is: nothing starts, "
+            f"Starting {name} is a proposal, decided at once as a person's is: nothing starts, "
             f"and the history says why, if {listed(why)}."
         )
-        if approval:
+        if isinstance(step, CallStep | PlanStep) and step.max_age:
+            # A rule's start never waits for a refresh, which lands with no person in it
+            # (brief, D39).
+            text += (
+                " If a fact it needs fresh is stale, its run fails and needs attention: a rule's "
+                "start doesn't wait for it to be fetched again."
+            )
+        if approved(step):
             text += " It waits for its approval when one is needed."
         fine.append(Clause("a start is a proposal", text))
     return fine

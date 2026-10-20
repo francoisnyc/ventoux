@@ -17,10 +17,10 @@ from test_rules import (
     APPROVED_40,
     SAYS_SEND,
     SMALL_REVIEW,
-    WITHDRAWS,
     closing_on_paid,
     notes_say_send,
     only_a_rule_starts,
+    stale_notify,
     unreadable,
     welcome_file,
     with_kyc_rule,
@@ -35,7 +35,7 @@ from test_untrusted_moment import LETTER, cancelled, say_goodbye
 
 from ventoux.case.definition import RuleMoment, Then, parse_case
 from ventoux.case.reading import CLAUSES, EVERY_RULE, ReadingRefused, read_rules
-from ventoux.testing import close, finish, later, run_case, send
+from ventoux.testing import AnswerRefused, close, finish, later, run_case, send
 
 # --- Slice 1: the moments ---
 
@@ -512,29 +512,56 @@ def test_what_every_rule_does_is_said_once() -> None:
 # --- From the tutor review: what a stop, a start and a close really do ---
 
 
+def halting() -> dict[str, Any]:
+    """The refund the portal can cancel: on `cancelled`, a rule stops the review and the payment."""
+    definition = with_rule(on={"event": "cancelled"}, when=None, then={"stop": ["review", "pay"]})
+    definition["rules"]["flag_large"]["display"] = {"title": "Stop paying on a cancel"}
+    definition["events"] = {
+        "cancelled": {
+            "display": {"title": "Cancelled"},
+            "sent_by": {"system": "portal"},
+            "payload": {},
+        }
+    }
+    return definition
+
+
+PORTAL_CANCELS = send("cancelled", {}, "system:portal")
+
+
 @witness("what a stop does")
 def test_a_stop_reads_as_what_the_engine_does_to_each_kind() -> None:
-    # A stop is what a close does, to one step: an open task is cancelled at once, a running call
-    # finishes and flags the case (brief, D10, D40). "stop pay" alone reads as if the payment stops.
-    reading = reading_of(withdrawable(), "withdraw")
+    # A stop is what a close does, to one step (brief, D10, D40). "stop pay" alone read as if the
+    # payment stops, and the refund went through.
+    reading = reading_of(halting(), "flag_large")
     assert "what a stop does" in reading.clauses
-    assert "Stopping review cancels its open run at once." in reading.fine_print
+    assert "Stopping review cancels its open task at once." in reading.fine_print
     assert (
-        "Stopping pay doesn't cut off a running call: it may still finish, and if it does, what "
-        "it gives lands and the case is flagged. A run not yet started is cancelled; a failed run "
+        "Stopping pay cancels a run waiting for its approval, or to start, at once; a running "
+        "call is only asked to stop, may still finish, and is flagged if it does; a failed run "
         "isn't stopped."
     ) in reading.fine_print
-    open_task = run_case(withdrawable(), file=SMALL, answers=WITHDRAWS, people=PEOPLE)
-    assert "cancelled review#1: stopped by withdraw#1" in open_task.history
+    # The payment is running when the portal cancels: the refund completes, flagged.
     paying = run_case(
-        withdrawable(),
+        halting(),
         file=SMALL,
-        answers=[SMALL_REVIEW, *WITHDRAWS, finish("pay#1")],
+        answers=[SMALL_REVIEW, PORTAL_CANCELS, finish("pay#1")],
         people=PEOPLE,
         held=["pay"],
     )
-    assert "pay#1 done, giving refund_id from untrusted:undeclared" in paying.history
-    assert paying.flags == ["pay#1 completed after its stop was requested by withdraw#1"]
+    stopped = paying.history.index("pay#1: stop requested by flag_large#1")
+    assert paying.history[stopped : stopped + 3] == [
+        "pay#1: stop requested by flag_large#1",
+        "pay#1 done, giving refund_id from untrusted:undeclared",
+        "flagged: pay#1 completed after its stop was requested by flag_large#1",
+    ]
+    assert paying.flags == ["pay#1 completed after its stop was requested by flag_large#1"]
+    # The open review, and an approval asked: cancelled at once.
+    open_task = run_case(halting(), file=SMALL, answers=[PORTAL_CANCELS], people=PEOPLE)
+    assert "cancelled review#1: stopped by flag_large#1" in open_task.history
+    big = ("review", "approve", "ana", {"approved_amount": 250})
+    asked = run_case(halting(), file=SMALL, answers=[big, PORTAL_CANCELS], people=PEOPLE)
+    assert "cancelled pay.approval#1: stopped by flag_large#1" in asked.history
 
 
 def test_a_stopped_step_of_a_kind_the_reader_doesnt_know_is_refused() -> None:
@@ -563,33 +590,54 @@ def pay_on_approval() -> dict[str, Any]:
 
 @witness("a start is a proposal")
 def test_a_start_reads_as_a_proposal_admission_decides() -> None:
-    # The engine proposes, and admission decides as for a person's proposal: "start pay" alone
-    # reads as if pay starts (brief, D39).
+    # The engine proposes, and admission decides at once, as for a person's proposal: "start pay"
+    # alone read as if pay starts (brief, D39).
     reading = reading_of(pay_on_approval(), "flag_large")
     assert "a start is a proposal" in reading.clauses
     assert (
-        "Starting pay proposes a run, decided as a person's proposal is: nothing starts, and the "
+        "Starting pay is a proposal, decided at once as a person's is: nothing starts, and the "
         "history says why, if its condition is false, it is already running or waiting for its "
         "approval, it has run and isn't repeatable, or its latest run needs attention. It waits "
         "for its approval when one is needed."
     ) in reading.fine_print
+    # Over 100: the approval is asked first, and pay waits for it.
     big = ("review", "approve", "ana", {"approved_amount": 250})
     run = run_case(pay_on_approval(), file=SMALL, answers=[big], people=PEOPLE)
     assert "flag_large#1 on answered review: starting pay" in run.history
     assert "asked pay.approval#1: approval of pay by support-lead" in run.history
+    assert run.waiting_for == ["approval of pay by support-lead"]
     assert not any(line.startswith("scheduled pay") for line in run.history)
-    # Its requirements not met: nothing starts, and the history says why.
+    # Its requirements not met: nothing starts, and the history says why; never later.
     requiring = only_a_rule_starts(requires=["pay"])
     assert (
-        "Starting lead_check proposes a run, decided as a person's proposal is: nothing starts, "
-        "and the history says why, if its requirements aren't met, it is already running, or it "
-        "has run and isn't repeatable."
+        "Starting lead_check is a proposal, decided at once as a person's is: nothing starts, and "
+        "the history says why, if its requirements aren't met, it is already running, or it has "
+        "run and isn't repeatable."
     ) in reading_of(requiring, "flag_large").fine_print
     run = run_case(requiring, file=SMALL, answers=[APPROVED_40], people=PEOPLE)
     assert (
         "flag_large#1 on answered review: lead_check not started: lead_check requires pay, which "
         "hasn't completed"
     ) in run.history
+    # A stale fact: the run fails, and needs attention; the start doesn't wait for a refresh.
+    stale = stale_notify()
+    assert (
+        "Starting notify is a proposal, decided at once as a person's is: nothing starts, and the "
+        "history says why, if its requirements aren't met, its condition is false, it is already "
+        "running, it has run and isn't repeatable, or its latest run needs attention. If a fact "
+        "it needs fresh is stale, its run fails and needs attention: a rule's start doesn't wait "
+        "for it to be fetched again."
+    ) in reading_of(stale, "flag_large").fine_print
+    looked_up = {"orders.lookup@2": lambda inputs: {"status": "delivered"}}
+    run = run_case(
+        stale, file=SMALL, answers=[later("3d"), APPROVED_40], people=PEOPLE, activities=looked_up
+    )
+    assert run.needs_attention == [
+        (
+            "notify#1: check_order.status was obtained 3 days ago, and notify needs it at most 1 "
+            "day old: a rule's start doesn't wait for it to be fetched again; retry it to fetch it"
+        )
+    ]
 
 
 def closing_on_a_note() -> dict[str, Any]:
@@ -640,17 +688,23 @@ def test_reaching_closes_when_reads_as_closing_the_case() -> None:
 
 
 def test_a_set_value_on_a_rule_that_reaches_still_reads_as_carrying_what_it_read() -> None:
-    # Untrusted data stops the whole rule, but a trusted value still carries a person's source,
-    # which decides who may approve a step it reaches (brief, D42).
+    # Untrusted data stops the whole rule, but a trusted value still carries a person's answer:
+    # Sam's answer is in what is owed, so Sam can't approve paying it (brief, D11, D42).
     definition = with_owed()
     definition["milestones"] = {"owed_known": {"display": {"title": "What is owed is known"}}}
     definition["rules"]["work_out_owed"]["then"]["reach"] = ["owed_known"]
+    definition["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
     reading = reading_of(definition, "work_out_owed")
+    assert "set value carries what it read" in reading.clauses
     assert "The values it sets carry the sources of everything it read." in reading.fine_print
-    run = run_case(definition, file=OWED_FILE, answers=[APPROVED], people=PEOPLE)
-    assert (
-        "work_out_owed#1 on answered review: setting owed, from person:ana, system:opener"
-    ) in run.history
+    big = ("review", "approve", "sam", {"approved_amount": 500})
+    with pytest.raises(
+        AnswerRefused,
+        match="^sam's answer is in owed, which a rule computes and pay uses, so cannot approve it$",
+    ):
+        run_case(
+            definition, file=OWED_FILE, answers=[big, ("pay", "approve", "sam")], people=PEOPLE
+        )
 
 
 def test_every_clause_has_a_witness() -> None:
