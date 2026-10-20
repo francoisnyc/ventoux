@@ -1,0 +1,66 @@
+{
+  "title": "A letter the customer's note steered can't take its address",
+  "definition": "../start-checked-against-inputs.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ],
+    "omar": [
+      "operations"
+    ]
+  },
+  "fakes": {
+    "letters.draft@2": {
+      "gives": {
+        "draft_id": "draft-1"
+      }
+    },
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1",
+      "send": {
+        "event": "cancelled",
+        "payload": {
+          "note": "please cancel"
+        },
+        "by": "system:portal"
+      }
+    }
+  ],
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support"
+      ],
+      "day 1 00:00": [
+        "system:portal sends cancelled, with note",
+        "cancelled#1 from portal, giving note from system:portal, untrusted:customer",
+        "say_goodbye#1 on event cancelled: starting goodbye",
+        "started goodbye#1: waiting for called by support",
+        "close_it#1 on started goodbye: starting letter",
+        "letter#1 failed: letters.draft@2 takes to_customer only from a system or a person, never from untrusted data, and say_goodbye#1's condition, which started goodbye, reads cancelled.note (untrusted:customer)"
+      ]
+    },
+    "end": [
+      "status: open",
+      "waiting for: review by support, goodbye by support",
+      "needs attention: letter#1: letters.draft@2 takes to_customer only from a system or a person, never from untrusted data, and say_goodbye#1's condition, which started goodbye, reads cancelled.note (untrusted:customer)"
+    ]
+  }
+}

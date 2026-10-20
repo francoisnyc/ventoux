@@ -1,0 +1,87 @@
+{
+  "title": "A cancel while the refund is paying: it completes, and is flagged",
+  "definition": "../what-a-stop-does.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ],
+    "omar": [
+      "operations"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      },
+      "held": true
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1",
+      "answer": {
+        "step": "review",
+        "outcome": "approve",
+        "by": "ana",
+        "form": {
+          "approved_amount": 40
+        }
+      }
+    },
+    {
+      "at": "day 1 10:00",
+      "send": {
+        "event": "cancelled",
+        "payload": {},
+        "by": "system:portal"
+      }
+    },
+    {
+      "at": "day 1 11:00",
+      "finish": {
+        "entry": "pay#1"
+      }
+    }
+  ],
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support"
+      ],
+      "day 1 00:00": [
+        "ana answers review: approve, with approved_amount",
+        "ana answered review#1 approve as support, setting approved_amount",
+        "review#1 done",
+        "scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key story/pay#1"
+      ],
+      "day 1 10:00": [
+        "system:portal sends cancelled",
+        "cancelled#1 from portal",
+        "flag_large#1 on event cancelled: stopping review and pay",
+        "flag_large#1 on event cancelled: review not stopped: no run of review is going on",
+        "pay#1: stop requested by flag_large#1"
+      ],
+      "day 1 11:00": [
+        "pay#1 finishes",
+        "pay#1 done, giving refund_id from untrusted:undeclared",
+        "flagged: pay#1 completed after its stop was requested by flag_large#1",
+        "closed: nothing left to do"
+      ]
+    },
+    "end": [
+      "status: closed",
+      "nothing pending"
+    ]
+  }
+}

@@ -15,9 +15,11 @@ from test_set import with_owed
 from test_timers import chased
 
 from ventoux.case.definition import parse_case
+from ventoux.case.reading import CLAUSES, EVERY_RULE
 from ventoux.case.simulate import StoryRefused, simulate
 from ventoux.case.story import StoryInvalid, parse_story
 from ventoux.testing import CATALOG, load_definition
+from ventoux.tooling.cli import read_story
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 REFUND = load_definition(EXAMPLES / "refund" / "refund.json")
@@ -314,3 +316,116 @@ def test_a_failing_expectation_says_where() -> None:
         expect={"timeline": simulation.timeline_lines(), "end": list(simulation.end)},
     )
     assert played(holding, chased()).difference() is None
+
+
+# --- Slice 5: stories as tests, and each clause's witness a story ---
+
+STORIES = sorted(EXAMPLES.glob("*/stories/*.json"))
+
+
+@pytest.mark.parametrize("path", STORIES, ids=lambda path: f"{path.parent.parent.name}/{path.stem}")
+def test_every_story_holds(path: Path) -> None:
+    # A story under examples/ states what it expects, and a failing expectation fails here.
+    story, case = read_story(path)
+    assert story.expect is not None, f"{path.name} states nothing it expects"
+    assert simulate(story, case, CATALOG).difference() is None
+
+
+# Each clause a reading may say (brief, D45), its witness story in examples/witnesses/stories/,
+# the rule whose reading says it, and the line that shows the engine doing what it says.
+WITNESSES = {
+    "condition read when it fires": (
+        "condition-read-when-it-fires",
+        "chase_review",
+        "chase_review#1 on answered review: starting chase",
+    ),
+    "timer's condition read when it fires": (
+        "timers-condition-read-when-it-fires",
+        "chase_review",
+        "chase_review#1 on 2d after opened: starting chase",
+    ),
+    "actions in the engine's order": (
+        "actions-in-the-engines-order",
+        "chase_review",
+        "chase_review#1 on answered review: reaching owed_known",
+    ),
+    "timer on a run": (
+        "timer-on-a-run",
+        "chase_review",
+        "cancelled chase_review, 2d after started review#1: review#1 is done",
+    ),
+    "timer on an instant": (
+        "timer-on-an-instant",
+        "chase_review",
+        "chase_review#1 on 30d after answered review#1: starting chase",
+    ),
+    "timer holds the case": (
+        "timer-holds-the-case",
+        "chase_review",
+        "timer: chase_review: 30d after answered review#1, due 2026-02-01T00:00:00Z",
+    ),
+    "listening": ("listening", "chase_review", "closed: nothing left to do"),
+    "untrusted data decides nothing": (
+        "untrusted-data-decides-nothing",
+        "close_it",
+        "close_it#1 on started goodbye: reaches nothing: its moment comes from untrusted data",
+    ),
+    "set value carries what it read": (
+        "set-value-carries-what-it-read",
+        "work_out_owed",
+        "work_out_owed#1 on answered review: setting owed, from person:ana, system:opener",
+    ),
+    "start checked against inputs": (
+        "start-checked-against-inputs",
+        "close_it",
+        (
+            "needs attention: letter#1: letters.draft@2 takes to_customer only from a system or a "
+            "person, never from untrusted data"
+        ),
+    ),
+    "what a stop does": (
+        "what-a-stop-does",
+        "flag_large",
+        "flagged: pay#1 completed after its stop was requested by flag_large#1",
+    ),
+    "a start is a proposal": (
+        "a-start-is-a-proposal",
+        "flag_large",
+        "asked pay.approval#1: approval of pay by support-lead",
+    ),
+    "reaching closes the case": (
+        "reaching-closes-the-case",
+        "flag_large",
+        "cancelled review#1: the case closes when large is reached",
+    ),
+    "only while the case decides": (
+        "only-while-the-case-decides",
+        "flag_large",
+        (
+            "flag_large#1 on reached paid: not applied: paid is reached, so the case closes and "
+            "nothing new is decided"
+        ),
+    ),
+    "every rule": (
+        "every-rule",
+        "flag_large",
+        (
+            "needs attention: flag_large#1: flag_large's condition approved_amount > 1000 can't be "
+            "evaluated: approved_amount has no value"
+        ),
+    ),
+}
+
+
+def test_every_clause_has_a_witness_story() -> None:
+    # The reading says it, the story's run shows the engine doing it, and the story holds: a
+    # clause can't be added without one, nor drift from the engine (brief, D45).
+    assert set(WITNESSES) == set(CLAUSES)
+    for clause, (name, rule, evidence) in WITNESSES.items():
+        story, case = read_story(EXAMPLES / "witnesses" / "stories" / f"{name}.json")
+        simulation = simulate(story, case, CATALOG)
+        assert simulation.difference() is None, name
+        printed = str(simulation)
+        reading = next(reading for reading in simulation.readings if reading.name == rule)
+        assert clause in reading.clauses or (clause == "every rule" and EVERY_RULE in printed)
+        assert evidence in printed, name

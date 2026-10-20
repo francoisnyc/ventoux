@@ -1,0 +1,62 @@
+{
+  "title": "A rule reaches the closing milestone, and what is open is cancelled",
+  "definition": "../reaching-closes-the-case.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ],
+    "omar": [
+      "operations"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1",
+      "answer": {
+        "step": "note",
+        "outcome": "noted",
+        "by": "ana"
+      }
+    }
+  ],
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "set remind: 2d after opened, due 2026-01-03T00:00:00Z",
+        "started review#1: waiting for approve or reject by support",
+        "started note#1: waiting for noted by support"
+      ],
+      "day 1 00:00": [
+        "ana answers note: noted",
+        "ana answered note#1 noted as support",
+        "note#1 done",
+        "flag_large#1 on answered note: reaching large",
+        "reached large",
+        "cancelled review#1: the case closes when large is reached",
+        "cancelled remind, 2d after opened: the case closes when large is reached",
+        "closed: large reached"
+      ]
+    },
+    "end": [
+      "status: closed",
+      "nothing pending"
+    ]
+  }
+}
