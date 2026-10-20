@@ -2807,6 +2807,7 @@ it is built.
 | What a start's condition read, and what steered its moment, count for the started step's inputs (witness) | `test_a_start_reads_as_checked_against_inputs` |
 | The inputs clause is said only of a step that takes inputs | `test_a_start_of_a_step_without_inputs_says_nothing_of_them` |
 | A rule acts only while the case decides, naming `closes_when` (witness) | `test_a_rule_reads_as_acting_only_while_the_case_decides` |
+| A rule that can't be read acts on nothing and needs attention, said once for every rule (witness) | `test_what_every_rule_does_is_said_once` |
 | A stop reads as what the engine does: an open task or an asked approval cancelled at once, a running call only asked to stop, finishing and flagged (witness) | `test_a_stop_reads_as_what_the_engine_does_to_each_kind` |
 | A stopped step of a kind the reader doesn't know is refused | `test_a_stopped_step_of_a_kind_the_reader_doesnt_know_is_refused` |
 | A start reads as a proposal decided at once: waiting for its approval, nothing started and why, a stale fact failing the run (witness) | `test_a_start_reads_as_a_proposal_admission_decides` |
