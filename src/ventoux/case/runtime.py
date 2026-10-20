@@ -75,9 +75,11 @@ from ventoux.case.state import (
     StartPlan,
     StartWorkflow,
     StepRun,
+    TimerDue,
     WorkflowCancelled,
 )
 from ventoux.case.stopping import stop_children
+from ventoux.case.timers import fire_timer
 from ventoux.case.types import expression_problem
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.case.writers import OPENER, read_sources, untrusted_of
@@ -147,7 +149,8 @@ def decide(
     case: CaseDefinition, catalog: Catalog, state: CaseState, event: Event
 ) -> tuple[CaseState, list[Command]]:
     """The case's state after `event`, and the activities to schedule. A refused event raises
-    (`AnswerRefused`, `ProposalRefused`, `CaseRefused`, `TimeRefused`) and changes nothing; a step the engine
+    (`AnswerRefused`, `ProposalRefused`, `CaseRefused`, `TimeRefused`, `TimerRefused`) and changes
+    nothing; a step the engine
     can't run fails, and the case needs attention (brief, D17)."""
     refuse_unless_whole(event.at)  # time is only ever event data, so it is checked first
     state = copy.deepcopy(state)  # the state passed in is never changed
@@ -176,6 +179,8 @@ def decide(
         receive(case, catalog, state, event)
     elif isinstance(event, ForgetApproved):
         forget(case, catalog, state, event)
+    elif isinstance(event, TimerDue):
+        fire_timer(state, event)
     elif isinstance(event, CloseAsked):
         role = refuse_to_close(case, catalog, state, event)
         state.history.append(f"{event.by} closed the case as {event.reason}, as {role}")
@@ -249,7 +254,7 @@ def arrive(case: CaseDefinition, state: CaseState, event: Sent, role: str | None
     )
     giving = f", giving {'; '.join(given)}" if given else ""
     state.history.append(f"{entry} {who}{giving}")
-    state.moments.append(Moment(f"event {name}"))
+    state.moments.append(Moment(f"event {name}", entry=entry))
     # Each wait open for it is done: only an arrival after a wait opens ends it (brief, D41).
     for run in state.runs:
         waits = case.steps[run.step]
@@ -611,7 +616,7 @@ def answer_task(
     state.history.append(f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}")
     state.history.append(f"{run.entry} done")
     # Each answer, whatever the outcome (brief, D39).
-    state.moments.append(Moment(f"answered {run.step}"))
+    state.moments.append(Moment(f"answered {run.step}", entry=run.entry))
     reach(state, (*step.outcomes[event.outcome].reaches, *step.reaches))
 
 
@@ -1529,12 +1534,12 @@ def coming_run(
         # amended in 11b).
         if status != "failed" and not latest.started:
             latest.started = True
-            state.moments.append(Moment(f"started {name}", latest.entry))
+            state.moments.append(Moment(f"started {name}", latest.entry, latest.entry))
         return latest
     run = StepRun(next_entry(state, name), name, status, started=status != "failed")
     state.runs.append(run)
     if run.started:  # a run that fails before it starts never started
-        state.moments.append(Moment(f"started {name}", run.entry))
+        state.moments.append(Moment(f"started {name}", run.entry, run.entry))
     return run
 
 

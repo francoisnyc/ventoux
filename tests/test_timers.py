@@ -6,13 +6,19 @@ See docs/layers/11-rules.md (11f), the brief, D44, and docs/guides/cases.md, "Ru
 """
 
 import copy
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.testing import load_definition
+from ventoux.case.memory import run_case_in_memory
+from ventoux.case.runtime import decide
+from ventoux.case.state import Answered, Opened, TimerDue
+from ventoux.case.timers import TimerRefused, next_due, utc
+from ventoux.core.sensitive import Sensitive
+from ventoux.testing import CATALOG, DAY, FAKES, START, later, load_definition, run_case
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "omar": ["operations"]}
@@ -117,3 +123,168 @@ def test_a_timer_is_set_on_any_of_the_five_moments(since: object) -> None:
         }
     }
     parse_case(definition)
+
+
+# --- Slice 2: setting and firing, in memory, in order ---
+
+
+def opened(definition: dict[str, Any]) -> Any:
+    """The case just opened at START: its state, with the review started and its timer set."""
+    return run_case(definition, file=SMALL, answers=[], people=PEOPLE).state
+
+
+def test_a_firing_for_a_timer_that_isnt_set_is_refused() -> None:
+    # Only a driver makes a firing, from the state: one for no timer set is refused, and changes
+    # nothing, never read as a moment that came (fail closed).
+    case, state = parse_case(chased()), opened(chased())
+    nowhere = TimerDue("chase_review", "started review#2", at=START + 2 * DAY)
+    with pytest.raises(
+        TimerRefused, match="^chase_review has no timer set on started review#2: nothing fires$"
+    ):
+        decide(case, CATALOG, state, nowhere)
+
+
+def test_a_firing_stamped_with_another_time_is_refused() -> None:
+    # A timer fires as an event stamped with its own due time, never "now" (brief, D44).
+    case, state = parse_case(chased()), opened(chased())
+    late = TimerDue("chase_review", "started review#1", at=START + 3 * DAY)
+    with pytest.raises(
+        TimerRefused,
+        match="^chase_review, 2d after started review#1 is due at 2026-01-03T00:00:00Z, and this "
+        "firing is stamped 2026-01-04T00:00:00Z: a timer fires at its due time$",
+    ):
+        decide(case, CATALOG, state, late)
+
+
+def test_a_timer_is_set_when_its_moment_comes() -> None:
+    run = run_case(chased(), file=SMALL, answers=[], people=PEOPLE)
+    assert run.history[-2:] == [
+        "started review#1: waiting for approve or reject by support",
+        "set chase_review: 2d after started review#1, due 2026-01-03T00:00:00Z",
+    ]
+    assert not run.closed
+
+
+def test_a_timer_fires_once_its_time_has_passed_and_its_rule_acts() -> None:
+    run = run_case(chased(), file=SMALL, answers=[later("2d")], people=PEOPLE)
+    assert run.history[-2:] == [
+        "chase_review#1 on 2d after started review#1: starting chase",
+        "started chase#1: waiting for chased by support-lead",
+    ]
+    # The review stays open: nothing is cancelled because time passed (brief, D17).
+    assert run.waiting_for == ["review by support", "chase by support-lead"]
+
+
+def test_a_timer_doesnt_fire_before_its_time() -> None:
+    run = run_case(chased(), file=SMALL, answers=[later("47h")], people=PEOPLE)
+    assert not any(line.startswith("chase_review#") for line in run.history)
+
+
+def test_the_firing_is_stamped_with_its_due_time() -> None:
+    # Time moves on three days; the timer, due on the second, fires stamped then, never "now"
+    # (brief, D33) (brief, D44). The driver asks for the firings due by a time, one at a time.
+    state = opened(chased())
+    assert next_due(state, START + 3 * DAY) == TimerDue(
+        "chase_review", "started review#1", at=START + 2 * DAY
+    )
+    assert next_due(state, START + 2 * DAY - 1) is None
+
+
+def test_a_timer_due_with_an_event_fires_before_it() -> None:
+    # Due on the second at midnight, with Ana's answer stamped that same second: the timer fires
+    # first, since the answer came during that second and the timer was due at its start.
+    case = parse_case(chased())
+    answered = Answered(
+        "review",
+        "approve",
+        "ana",
+        frozenset({"support"}),
+        {"approved_amount": Sensitive(Decimal(40))},  # sealed, as the client sends every value
+        at=START + 2 * DAY,
+    )
+    opening = Opened({"order_id": "ord-1", "amount": Decimal(40)}, None, at=START)
+    run = run_case_in_memory(case, CATALOG, FAKES, [opening, answered])
+    fired = run.history.index("chase_review#1 on 2d after started review#1: starting chase")
+    assert fired < run.history.index(
+        "ana answered review#1 approve as support, setting approved_amount"
+    )
+
+
+def test_timers_fire_soonest_first_and_in_the_order_set_at_one_second() -> None:
+    definition = chased()
+    definition["steps"]["note"] = {
+        "kind": "task",
+        "display": {"title": "Note the wait"},
+        "roles": ["support"],
+        "automatic": False,
+        "repeatable": True,
+        "outcomes": {"noted": {"display": {"title": "Noted"}}},
+    }
+    definition["rules"] = {
+        "late": {
+            "display": {"title": "Late"},
+            "on": {"after": "3d", "since": "opened"},
+            "then": {"start": ["chase"]},
+        },
+        "first": {
+            "display": {"title": "First"},
+            "on": {"after": "1d", "since": "opened"},
+            "then": {"start": ["note"]},
+        },
+        "second": {
+            "display": {"title": "Second"},
+            "on": {"after": "24h", "since": "opened"},
+            "then": {"stop": ["note"]},
+        },
+    }
+    run = run_case(definition, file=SMALL, answers=[later("5d")], people=PEOPLE)
+    # `late` was set first and is due last; `first` and `second` are due the same second, and fire
+    # in the order they were set, which is the order they are written.
+    fired = [
+        line.split(" on ")[0]
+        for line in run.history
+        if line.startswith(("late#", "first#", "second#"))
+    ]
+    assert fired == ["first#1", "second#1", "late#1"]
+
+
+def test_a_timer_falling_due_at_the_end_of_the_script_fires() -> None:
+    # `later` moves time on even with nothing after it: what falls due by then fires.
+    run = run_case(chased(), file=SMALL, answers=[later("3d")], people=PEOPLE)
+    assert "started chase#1: waiting for chased by support-lead" in run.history
+
+
+def test_a_timer_set_while_time_moves_on_fires_in_turn() -> None:
+    # The first timer starts the chase; a timer on the chase's start falls due before time stops
+    # moving, so it fires too, in its turn.
+    definition = chased()
+    definition["rules"]["remind_lead"] = {
+        "display": {"title": "Remind the team lead"},
+        "on": {"after": "1h", "since": {"started": "chase"}},
+        "then": {"stop": ["chase"]},
+    }
+    run = run_case(definition, file=SMALL, answers=[later("3d")], people=PEOPLE)
+    assert run.history.index(
+        "set remind_lead: 1h after started chase#1, due 2026-01-03T01:00:00Z"
+    ) < (run.history.index("remind_lead#1 on 1h after started chase#1: stopping chase"))
+
+
+def test_a_timers_condition_is_read_when_it_fires() -> None:
+    # Set as the review starts, when nothing is approved; read two days later, on the case file
+    # then: Ana approved 250 on the first day (brief, D38) (brief, D44).
+    definition = chased()
+    definition["rules"]["chase_review"]["on"] = {"after": "2d", "since": "opened"}
+    definition["rules"]["chase_review"]["when"] = {">": [{"var": "approved_amount"}, 100]}
+    definition["steps"]["pay"]["approval"]["roles"] = ["support-lead"]
+    big = ("review", "approve", "ana", {"approved_amount": 250})
+    run = run_case(definition, file=SMALL, answers=[later("1d"), big, later("1d")], people=PEOPLE)
+    assert "chase_review#1 on 2d after opened: starting chase" in run.history
+
+
+def test_due_times_read_as_dates_in_utc() -> None:
+    # Worked out by hand in `case`, which imports no `datetime` (layer 0's boundary): checked here
+    # against Python's own, over leap years and centuries.
+    from datetime import UTC, datetime
+
+    for seconds in (0, START, 951_782_400, 4_107_542_399, 1_709_164_800, 253_402_300_799, 86_399):
+        assert utc(seconds) == datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
