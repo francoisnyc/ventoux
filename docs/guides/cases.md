@@ -1137,6 +1137,10 @@ waiting. Timers aren't in `waiting_for`, which lists what waits on people; `time
 timer, soonest first, with its due time:
 
 ```python
+run = run_case(
+    refund_with_chase, file={"order_id": "ord-1", "amount": 40}, answers=[], people=PEOPLE
+)
+assert run.waiting_for == ["review by support"]
 assert run.timers == ["chase_review: 2d after started review#1, due 2026-01-03T00:00:00Z"]
 ```
 

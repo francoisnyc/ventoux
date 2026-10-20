@@ -47,6 +47,27 @@ def fire_timer(state: CaseState, event: TimerDue) -> None:
     state.moments.append(Moment(f"{timer.after} after {timer.since}", timer.run, rule=timer.rule))
 
 
+def end_with_their_runs(state: CaseState) -> None:
+    """End each timer whose purpose has: one set on a run's start, once that run has its final
+    status, `done`, `rejected` or `cancelled`. A failed run hasn't ended for its timers, since an
+    operator's retry runs it again as the same run (brief, D26) (brief, D44, amending D40);
+    nor has one whose stop is asked, while it runs. Each is said, never dropped silently."""
+    ended = {run.entry: run.status for run in state.runs}
+    for timer in list(state.timers):
+        status = ended.get(timer.run)
+        if status in ("done", "rejected", "cancelled"):
+            state.timers.remove(timer)
+            state.history.append(f"cancelled {named(timer)}: {timer.run} is {status}")
+
+
+def cancel_timers(state: CaseState, because: str) -> None:
+    """Cancel every timer set, saying why: the case is closing, or nothing new is decided while
+    its close is held, so none could act again (brief, D10) (brief, D34) (brief, D44)."""
+    for timer in state.timers:
+        state.history.append(f"cancelled {named(timer)}: {because}")
+    state.timers.clear()
+
+
 def next_due(state: CaseState, at: int) -> TimerDue | None:
     """The firing due first by `at`, stamped with its due time; None if none is. Soonest first,
     and two due the same second in the order they were set (brief, D44). A driver asks again after
@@ -58,6 +79,13 @@ def next_due(state: CaseState, at: int) -> TimerDue | None:
     # Python: `min` keeps the first of equals, so the earlier set wins a tie.
     first = min(due, key=lambda timer: timer.due)
     return TimerDue(first.rule, first.since, at=first.due)
+
+
+def set_timers(state: CaseState) -> list[str]:
+    """Each timer set, as a report lists it, soonest first: two due the same second in the order
+    they were set, the order they would fire (brief, D44)."""
+    # Python: `sorted` keeps the order of equals, so the earlier set comes first.
+    return [shown(timer) for timer in sorted(state.timers, key=lambda timer: timer.due)]
 
 
 def named(timer: Timer) -> str:

@@ -18,7 +18,17 @@ from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, Opened, TimerDue
 from ventoux.case.timers import TimerRefused, next_due, utc
 from ventoux.core.sensitive import Sensitive
-from ventoux.testing import CATALOG, DAY, FAKES, START, later, load_definition, run_case
+from ventoux.testing import (
+    CATALOG,
+    DAY,
+    FAKES,
+    START,
+    close,
+    later,
+    load_definition,
+    run_case,
+    send,
+)
 
 REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "omar": ["operations"]}
@@ -39,10 +49,10 @@ CHASE = {
 }
 
 
-def chased(on: object = None) -> dict[str, Any]:
+def chased(on: object = None, **changes: Any) -> dict[str, Any]:
     """The quickstart's refund, with the guide's timer chasing a review left open; `on` replaces
-    the timer's moment."""
-    definition = copy.deepcopy(REFUND)
+    the timer's moment, and `changes` top-level keys."""
+    definition = copy.deepcopy(REFUND) | copy.deepcopy(changes)
     definition["steps"]["chase"] = copy.deepcopy(CHASE)
     definition["rules"] = {"chase_review": copy.deepcopy(CHASE_REVIEW)}
     if on is not None:
@@ -288,3 +298,153 @@ def test_due_times_read_as_dates_in_utc() -> None:
 
     for seconds in (0, START, 951_782_400, 4_107_542_399, 1_709_164_800, 253_402_300_799, 86_399):
         assert utc(seconds) == datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# --- Slice 3: a timer ends with its purpose, and with any close ---
+
+APPROVED = ("review", "approve", "ana", {"approved_amount": 40})
+CLOSABLE = {"duplicate": {"display": {"title": "Duplicate request"}, "roles": ["support"]}}
+
+
+def down(inputs: dict[str, Any]) -> dict[str, Any]:
+    raise ConnectionError("orders unreachable")
+
+
+def test_a_timer_set_on_a_run_ends_with_it() -> None:
+    # Ana answers on the first day: the review is done, and the chase has no purpose left. It
+    # needs no `when` saying "if the review is still open" (brief, D44).
+    run = run_case(
+        chased(), file=SMALL, answers=[later("1d"), APPROVED, later("2d")], people=PEOPLE
+    )
+    assert "cancelled chase_review, 2d after started review#1: review#1 is done" in run.history
+    assert not any(line.startswith("chase_review#") for line in run.history)
+    assert run.closed and run.timers == []
+
+
+def test_a_stopped_runs_timers_end_with_it() -> None:
+    # A rule stops the review: the run is cancelled, and its timer with it (brief, D40).
+    definition = chased()
+    definition["events"] = {
+        "cancelled": {
+            "display": {"title": "Cancelled"},
+            "sent_by": {"system": "portal"},
+            "payload": {},
+        }
+    }
+    definition["rules"]["withdraw"] = {
+        "display": {"title": "Withdraw"},
+        "on": {"event": "cancelled"},
+        "then": {"stop": ["review"]},
+    }
+    run = run_case(
+        definition, file=SMALL, answers=[send("cancelled", {}, "system:portal")], people=PEOPLE
+    )
+    assert "cancelled chase_review, 2d after started review#1: review#1 is cancelled" in run.history
+    assert run.closed
+
+
+def test_a_failed_runs_timer_stays_set() -> None:
+    # A failed run waits for a person, and an operator's retry runs it again as the same run, so
+    # it hasn't ended for its timers: the lead is still told (brief, D17) (D40, as amended).
+    definition = chased({"after": "1h", "since": {"started": "look_up"}})
+    definition["steps"]["look_up"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[later("2h")],
+        people=PEOPLE,
+        activities={"orders.lookup@1": down},
+    )
+    assert run.needs_attention[0].startswith("look_up#1: orders.lookup@1 failed")
+    assert "chase_review#1 on 1h after started look_up#1: starting chase" in run.history
+
+
+def test_a_timer_set_on_an_instant_keeps_the_case_open_until_it_fires() -> None:
+    # Set on the review's answer, it lives until it fires: the paid refund stays open, and the
+    # case map would say so (brief, D10: "a rule that fires 30 days after payment keeps the case
+    # open 30 days").
+    definition = chased({"after": "30d", "since": {"answered": "review"}})
+    paid = run_case(definition, file=SMALL, answers=[APPROVED, later("29d")], people=PEOPLE)
+    assert paid.reached("pay") and not paid.closed
+    assert paid.timers == ["chase_review: 30d after answered review#1, due 2026-01-31T00:00:00Z"]
+    fired = run_case(definition, file=SMALL, answers=[APPROVED, later("30d")], people=PEOPLE)
+    assert "chase_review#1 on 30d after answered review#1: starting chase" in fired.history
+
+
+def test_a_close_cancels_every_timer() -> None:
+    run = run_case(
+        chased(close_reasons=CLOSABLE),
+        file=SMALL,
+        answers=[close("duplicate", "ana"), later("3d")],
+        people=PEOPLE,
+    )
+    assert (
+        "cancelled chase_review, 2d after started review#1: closed as duplicate by ana"
+    ) in run.history
+    assert run.closed and not any(line.startswith("chase_review#") for line in run.history)
+
+
+def test_a_timer_due_as_the_case_closes_fires_first() -> None:
+    # Due the very second Ana closes the case: it fires first, and its chase is then cancelled
+    # by the close, each said; never lost (brief, D44).
+    run = run_case(
+        chased(close_reasons=CLOSABLE),
+        file=SMALL,
+        answers=[later("2d"), close("duplicate", "ana")],
+        people=PEOPLE,
+    )
+    assert run.history.index("chase_review#1 on 2d after started review#1: starting chase") < (
+        run.history.index("ana closed the case as duplicate, as support")
+    )
+    assert "cancelled chase#1: closed as duplicate by ana" in run.history
+
+
+def holding(**changes: Any) -> dict[str, Any]:
+    """The refund with a lookup beside the review that fails, closing once paid: paid reached,
+    the failed lookup holds the close (brief, D34)."""
+    definition = chased(on={"after": "5d", "since": "opened"}) | changes
+    definition["steps"]["look_up"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+    }
+    definition["milestones"] = {"paid": {"display": {"title": "Paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["closes_when"] = ["paid"]
+    return definition
+
+
+def test_a_held_close_cancels_every_timer() -> None:
+    # Nothing new is decided while a failed run holds the close, and the hold never goes back to
+    # deciding: the timer could never act, so it is cancelled, once (brief, D34) (brief, D44).
+    run = run_case(
+        holding(),
+        file=SMALL,
+        answers=[APPROVED, later("6d")],
+        people=PEOPLE,
+        activities={"orders.lookup@1": down},
+    )
+    assert run.status == "open" and "reached paid" in run.history
+    assert (
+        "cancelled chase_review, 5d after opened: paid is reached, so the case closes and "
+        "nothing new is decided"
+    ) in run.history
+    assert run.timers == [] and not any(line.startswith("chase_review#") for line in run.history)
+
+
+def test_a_timer_isnt_set_once_nothing_new_is_decided() -> None:
+    # Its moment is the very one that completes closes_when: a timer set then could never act.
+    definition = holding()
+    definition["rules"]["chase_review"]["on"] = {"after": "1d", "since": {"reached": "paid"}}
+    run = run_case(definition, file=SMALL, answers=[APPROVED], people=PEOPLE)
+    assert (
+        "chase_review on reached paid: not set: paid is reached, so the case closes and nothing "
+        "new is decided"
+    ) in run.history
+    assert run.closed

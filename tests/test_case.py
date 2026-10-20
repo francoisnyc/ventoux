@@ -13,6 +13,9 @@ from typing import Annotated, Any
 import pytest
 from pydantic import BaseModel
 
+# pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
+from test_timers import chased
+
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseState, Opened
@@ -686,6 +689,7 @@ def test_the_guides_examples_run_as_written() -> None:
         "PEOPLE": OPERATORS,
         "refund_with_plan": guide_refund_with_plan(),
         "refund_order": refund_order(),
+        "refund_with_chase": chased(),  # "Rules on time", whose blocks test_timers.py checks
     }
     for code in blocks("python"):
         exec(code, namespace)  # noqa: S102 -- our guide, as in layer 7

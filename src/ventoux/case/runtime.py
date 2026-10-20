@@ -48,7 +48,7 @@ from ventoux.case.definition import (
 )
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
-from ventoux.case.rules import fire_rules, reach, retry_rule, said_steered
+from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     CLOSING,
@@ -79,7 +79,7 @@ from ventoux.case.state import (
     WorkflowCancelled,
 )
 from ventoux.case.stopping import stop_children
-from ventoux.case.timers import fire_timer
+from ventoux.case.timers import cancel_timers, end_with_their_runs, fire_timer
 from ventoux.case.types import expression_problem
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.case.writers import OPENER, read_sources, untrusted_of
@@ -199,6 +199,11 @@ def decide(
     fire_rules(case, catalog, state, commands, event.at)
     left_unstarted(case, state)  # none is taken up once the case no longer decides (brief, D38)
     state.started_by_rules.clear()
+    # A timer ends with its purpose: its run ended, or nothing new is decided while the close is
+    # held, which never goes back to deciding, so it could never act (brief, D34) (brief, D44).
+    end_with_their_runs(state)
+    if state.timers and (held := nothing_decided(case, state)) is not None:
+        cancel_timers(state, held)
     settle(case, state)
     return state, commands
 

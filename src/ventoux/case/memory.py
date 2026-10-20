@@ -26,7 +26,7 @@ from ventoux.case.state import (
     StopPlan,
     WorkflowCancelled,
 )
-from ventoux.case.timers import next_due
+from ventoux.case.timers import next_due, set_timers
 from ventoux.case.visibility import ApprovalSheet, CaseView, case_view, sheet_of
 from ventoux.core.catalog import Catalog
 from ventoux.core.interpreter import Outcome, failed_with
@@ -58,6 +58,9 @@ class CaseRun:
     definition: CaseDefinition  # what ran, so a view can be filtered by it
     state: CaseState  # where it ended
     registered: tuple[str, ...]  # the catalog's roles: only these give sight (brief, D22)
+    # Each timer still set, soonest first, with its due time: pending work that waits on nobody,
+    # so never in `waiting_for` (brief, D24) (brief, D44).
+    timers: list[str]
 
     def view(self, roles: Iterable[str]) -> CaseView:
         """The case file as a person holding `roles` sees it (brief, D30)."""
@@ -124,8 +127,18 @@ def run_case_in_memory(
     attention = needs_attention(state)
     waiting = list(state.waiting.values())
     registered = tuple(catalog.roles)
+    timers = set_timers(state)
     return CaseRun(
-        state.phase, waiting, attention, state.flags, state.history, done, case, state, registered
+        state.phase,
+        waiting,
+        attention,
+        state.flags,
+        state.history,
+        done,
+        case,
+        state,
+        registered,
+        timers,
     )
 
 
