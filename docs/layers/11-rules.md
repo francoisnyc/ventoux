@@ -31,7 +31,9 @@ part, D42 and a draft Promises table written before building; built, slices 0–
 table checked against the tests, the same day (see 11e, "Decided while building"). 11f: the
 warm-up (learning question 33's follow-up) walked through, 2026-10-19; sixteen choices put with a
 recommendation each, recorded as a draft awaiting answers, then answered "all as recommended,
-one pull request", 2026-10-20 (see 11f).
+one pull request", 2026-10-20; D44, the guide's part and the slices' plan written before
+building; built, slices 0–9, and the Promises table checked against the tests, the same day (see
+11f, "Decided while building").
 
 ## What this layer is for
 
@@ -2290,7 +2292,94 @@ Each starts with its negative test, seen failing for the right reason.
 8. Staleness noticed by a timer an author writes.
 9. The guide, run as written, and the Promises table checked against the tests.
 
+### Decided while building
+
+- **A timer's firing is its own rule's moment alone** (slice 2): two rules may wait the same age
+  after the same moment, so the firing names its rule (`Moment.rule`) rather than being matched
+  by what the history says. A moment now also names the entry it came from (`review#1`,
+  `cancelled#2`), so a timer reads `2d after started review#1`; for a start, the entry is the run
+  whose steering it carries (D43), which the trust check needed no other change to find
+  (slice 5, seen failing with the firing's run left out).
+- **The driver asks for one firing at a time** (`next_due`, slice 2): a firing may set a timer due
+  before time stops moving, or end another, so the next is worked out afresh. It ends: each
+  firing removes a timer, and a new one is due at least a minute after the firing's own time.
+- **A set timer is pending work from slice 2,** not slice 3: without it, a case whose only work is
+  a timer closed as it opened, with the timer still set.
+- **Timers cross continue-as-new from slice 2,** as firings did in 11a: the guard on the carried
+  state failed as soon as the state had a new field.
+- **Due dates in UTC are worked out by hand** (`utc`, slice 2): `case` may import no `datetime`
+  (layer 0's boundary), so a small named function, Howard Hinnant's `civil_from_days`, does it,
+  and a test checks it against Python's own over leap years and centuries.
+- **The guide's `run.timers` example runs on its own case** (slice 4): the guide test runs every
+  Python block in one namespace, so the block opens the guide's refund itself.
+- **What a timer that starts a read again does to an open approval** (slice 8), found by running
+  it: the approval is withdrawn as its step's requirement starts again, and asked again once the
+  fresh value lands, whether or not it changed (layer 8's "an open approval follows the case
+  file"). The guide said "asked again if what it saw changed"; it now says what happens, and D44
+  too, before merging.
+- **On Temporal, one workflow timer at a time** (slice 7): `wait_condition` with a timeout, for the
+  soonest timer, which Temporal cancels when an event comes first. With no timer set it is called
+  as before, with no timeout, so a history recorded before 11f replays (two fixtures, recorded
+  under `main` in slice 0). A timer already due when the loop comes round (one carried across a
+  switch) fires without waiting.
+- **Checked by mutation, not only by running:** the order test with the driver firing only at
+  `later`; the trust tests with the firing's run left out; `CLOSES_AT_OPENING` and `NEVER_STARTS`
+  with the anchor removed; the Temporal tests with no workflow timer. Each failed, then passed
+  with the code put back.
+
 ### Promises
 
-Drafted before building; each test is named once written, and the table checked against the
-tests before the pull request.
+Every test is in `tests/test_timers.py` unless said otherwise. Each negative test was seen failing
+for the right reason before its code was written.
+
+| Promise | Test that would fail |
+|---|---|
+| A timer waits an age in D33's format, at least a minute | `test_a_timer_waits_an_age_of_at_least_a_minute` |
+| A timer is never set on another timer | `test_a_timer_is_never_set_on_another_timer` |
+| A timer set on what the case doesn't declare is refused, each name checked as on the moment itself | `test_a_timer_since_what_the_case_doesnt_declare_is_refused` |
+| A timer names its age and its moment, and nothing else | `test_a_timer_names_its_age_and_its_moment` |
+| A timer may be set on any of the five moments | `test_a_timer_is_set_on_any_of_the_five_moments` |
+| A rule's `on` lists the timer among the moments it takes | `test_an_unknown_moment_is_refused_in_one_line` (`tests/test_rules.py`) |
+| A firing for no timer set is refused, and changes nothing | `test_a_firing_for_a_timer_that_isnt_set_is_refused` |
+| A firing stamped with another time than its due time is refused | `test_a_firing_stamped_with_another_time_is_refused` |
+| A timer is set when its moment comes, due its moment's time plus its age, and keeps the case open | `test_a_timer_is_set_when_its_moment_comes` |
+| It fires once its time has passed, its rule acts, and nothing is cancelled because time passed | `test_a_timer_fires_once_its_time_has_passed_and_its_rule_acts` |
+| It never fires before its time | `test_a_timer_doesnt_fire_before_its_time` |
+| A firing is stamped with its due time, never "now" | `test_the_firing_is_stamped_with_its_due_time`, `test_a_firing_stamped_with_another_time_is_refused`, `test_a_timer_that_fell_due_during_the_switch_fires_at_once_stamped_with_its_due_time` (`tests/test_temporal_timers.py`) |
+| A timer due the second an event comes fires before it | `test_a_timer_due_with_an_event_fires_before_it` |
+| Timers fire soonest first, two due at one second in the order set | `test_timers_fire_soonest_first_and_in_the_order_set_at_one_second` |
+| `later` fires what falls due, even at the end of a script, and timers set on the way fire in turn | `test_a_timer_falling_due_at_the_end_of_the_script_fires`, `test_a_timer_set_while_time_moves_on_fires_in_turn` |
+| A timer's `when` is read at its firing, on the case file then | `test_a_timers_condition_is_read_when_it_fires` |
+| Due times read as dates in UTC, with no `datetime` in `case` | `test_due_times_read_as_dates_in_utc` |
+| A timer set on a run's start ends with it, needing no `when` | `test_a_timer_set_on_a_run_ends_with_it` |
+| A stopped run's timers end with it; one asked to stop that runs on keeps them until it ends | `test_a_stopped_runs_timers_end_with_it`, `test_a_run_asked_to_stop_keeps_its_timers_until_it_ends` |
+| A failed run's timer stays set, and its rule acts (D40, as amended by D44) | `test_a_failed_runs_timer_stays_set` |
+| A timer set on an instant lives until it fires, keeping the case open | `test_a_timer_set_on_an_instant_keeps_the_case_open_until_it_fires` |
+| A close cancels every timer, saying so | `test_a_close_cancels_every_timer`, `test_a_close_cancels_a_timer_on_temporal_and_the_case_ends` (`tests/test_temporal_timers.py`) |
+| A timer due as the case closes fires first, never lost | `test_a_timer_due_as_the_case_closes_fires_first` |
+| A close held by a failed run cancels every timer, once | `test_a_held_close_cancels_every_timer` |
+| A timer isn't set once nothing new is decided, and a line says so | `test_a_timer_isnt_set_once_nothing_new_is_decided` |
+| Reports list set timers soonest first, with their due time, never in `waiting_for` | `test_a_report_lists_set_timers_soonest_first_never_in_waiting_for`, `test_a_timer_fires_on_temporal_as_in_memory` (`tests/test_temporal_timers.py`) |
+| No set timer outlives its purpose, after every decision | `test_the_invariant_finds_a_timer_that_outlived_its_purpose`, and the invariant (`tests/conftest.py`, `tests/invariants.py`) run after every decision of the tests above |
+| A timer on a start untrusted data steered reaches nothing, saying what steered, never the value | `test_a_timer_on_a_start_untrusted_data_steered_reaches_nothing` |
+| A value set on such a timer carries what steered the start | `test_a_timer_on_a_steered_start_sets_a_value_that_carries_it` |
+| Time passing after an arrival is a fact: its rule decides | `test_time_passing_after_an_arrival_is_a_fact` |
+| `ventoux check` reads the guide's timer with no issue | `test_check_reads_the_guides_timer` |
+| A timer whose moment never comes, or comes only once every `closes_when` milestone is reached, is `NEVER_FIRES` | `test_a_timer_whose_moment_never_comes_never_fires`, `test_a_timer_on_the_last_closes_when_milestone_never_acts` |
+| A timer set as the case opens keeps it open: no `CLOSES_AT_OPENING` | `test_a_timer_set_as_the_case_opens_keeps_it_open` |
+| A timer's condition is read as firing at its moment: `MAY_BE_UNSET`, never `SET_AFTER`, where the value may be set by then | `test_a_timer_reads_what_may_be_set_by_then` |
+| A step reading what only a timer after its own answer sets fails every time (`SET_AFTER`) | `test_a_step_reading_what_only_a_timer_after_it_sets_fails_every_time` |
+| What steered a start reaches a timer on it: `UNTRUSTED_TRIGGER`, `WRITER_DECIDES` | `test_check_follows_what_steered_a_timers_start` |
+| An input a timer on a steered start would send is `INPUT_POLICY` | `test_check_refuses_an_input_a_timer_on_a_steered_start_would_send` |
+| A timer on its step's own start can never start it (`NEVER_STARTS`) | `test_a_timer_on_its_steps_start_can_never_start_it` |
+| No timer re-arms itself: nothing to claim, and the run ends | `test_a_timer_cant_re_arm_itself` |
+| A timer that may stop a loop lets it end: no `NEVER_CLOSES` | `test_a_timer_that_may_stop_a_loop_lets_it_end` |
+| The engine sets no timer for a fact's age; an author's timer fetches a read again before anyone acts | `test_a_timer_an_author_writes_fetches_a_read_again_before_anyone_acts` |
+| An open approval follows what the timer's read gives | `test_an_open_approval_follows_what_the_timers_read_gives` |
+| On Temporal, a timer fires as in memory | `test_a_timer_fires_on_temporal_as_in_memory` (`tests/test_temporal_timers.py`) |
+| A timer crosses continue-as-new and fires once; one that fell due during the switch fires at once | `test_a_timer_crosses_continue_as_new_and_fires_once`, `test_a_timer_that_fell_due_during_the_switch_fires_at_once_stamped_with_its_due_time` (`tests/test_temporal_timers.py`) |
+| Timers cross in the carried state; a state from before 11f has none | `test_a_timer_crosses_in_the_carried_state` (`tests/test_temporal_timers.py`), `test_a_carried_state_reads_back_as_it_was` (`tests/test_temporal_case.py`) |
+| A case whose timer fired replays; histories from before 11f replay | `test_a_case_whose_timer_fired_replays`, `test_a_history_from_before_11f_replays` (`tests/test_temporal_timers.py`) |
+| The guide's definitions, histories and `run.timers` are what the engine does | `test_the_guides_definitions_are_these_tests`, `test_the_guides_histories_are_what_the_engine_records`, `test_the_guides_examples_run_as_written` (`tests/test_case.py`) |
+| No timer line or issue quotes a value from a case file | `test_no_timer_line_or_issue_quotes_a_value_from_the_case_file` |
+| The runtime refuses what the check refuses, on nothing validation did | each runtime test above runs through `run_case` alone |

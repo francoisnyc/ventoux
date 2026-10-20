@@ -6,6 +6,7 @@ See docs/layers/11-rules.md (11f), the brief, D44, and docs/guides/cases.md, "Ru
 """
 
 import copy
+import json
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ from ventoux.testing import (
     FAKES,
     START,
     close,
+    finish,
     later,
     load_definition,
     run_case,
@@ -316,6 +318,7 @@ def test_due_times_read_as_dates_in_utc() -> None:
 
 APPROVED = ("review", "approve", "ana", {"approved_amount": 40})
 CLOSABLE = {"duplicate": {"display": {"title": "Duplicate request"}, "roles": ["support"]}}
+NOTED = {"noted": {"display": {"title": "A note"}, "sent_by": {"system": "portal"}, "payload": {}}}
 
 
 def down(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -353,6 +356,29 @@ def test_a_stopped_runs_timers_end_with_it() -> None:
     )
     assert "cancelled chase_review, 2d after started review#1: review#1 is cancelled" in run.history
     assert run.closed
+
+
+def test_a_run_asked_to_stop_keeps_its_timers_until_it_ends() -> None:
+    # A payment can't be cut off halfway: asked to stop, it runs on, and hasn't ended, so its
+    # timer stays set until it finishes (brief, D40).
+    definition = chased({"after": "1d", "since": {"started": "pay"}}, events=NOTED)
+    definition["rules"]["withdraw"] = {
+        "display": {"title": "Withdraw"},
+        "on": {"event": "noted"},
+        "then": {"stop": ["pay"]},
+    }
+    asked = [APPROVED, send("noted", {}, "system:portal")]
+    running = run_case(definition, file=SMALL, answers=asked, people=PEOPLE, held=["pay"])
+    assert "pay#1: stop requested by withdraw#1" in running.history
+    assert running.timers == ["chase_review: 1d after started pay#1, due 2026-01-02T00:00:00Z"]
+    ended = run_case(
+        definition,
+        file=SMALL,
+        answers=[*asked, finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+    )
+    assert "cancelled chase_review, 1d after started pay#1: pay#1 is done" in ended.history
 
 
 def test_a_failed_runs_timer_stays_set() -> None:
@@ -848,3 +874,72 @@ def test_an_open_approval_follows_what_the_timers_read_gives() -> None:
     assert "withdrew pay.approval#1: check_order started again" in run.history
     assert "asked pay.approval#2: approval of pay by support-lead" not in run.history
     assert run.closed  # the order is lost: nothing is paid, and nothing is left to do
+
+
+# --- Slice 9: the guide, as the engine does it ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+TIME_SECTION = GUIDE.split("## Rules on time\n")[1].split("\n## ")[0]
+
+
+def guide_blocks(language: str) -> list[str]:
+    """The section's code blocks in `language` (`""` for plain ones), in order."""
+    found: list[str] = []
+    opened: str | None = None
+    body: list[str] = []
+    for line in TIME_SECTION.splitlines():
+        if not line.startswith("```"):
+            body.append(line)
+        elif opened is None:
+            opened, body = line.removeprefix("```"), []
+        else:
+            if opened == language:
+                found.append("\n".join(body))
+            opened = None
+    return found
+
+
+def guide_json(index: int) -> dict[str, Any]:
+    """The section's JSON block `index`, a fragment (`"name": {...}`) read as an object."""
+    loaded: dict[str, Any] = json.loads("{" + guide_blocks("json")[index] + "}")
+    return loaded
+
+
+def shown_lines(index: int) -> list[str]:
+    """The section's plain block `index`, as history lines."""
+    return guide_blocks("")[index].splitlines()
+
+
+def test_the_guides_definitions_are_these_tests() -> None:
+    assert guide_json(0) == {"chase_review": CHASE_REVIEW}
+    assert guide_json(1) == {"chase": CHASE}
+    assert guide_json(2) == {"look_again": looked_up_again()["rules"]["look_again"]}
+
+
+def test_the_guides_histories_are_what_the_engine_records() -> None:
+    fired = run_case(chased(), file=SMALL, answers=[later("2d")], people=PEOPLE)
+    assert appears_in_order(shown_lines(0), fired.history)
+    answered = run_case(chased(), file=SMALL, answers=[later("1d"), APPROVED], people=PEOPLE)
+    assert appears_in_order(shown_lines(1), answered.history)
+    fresh = run_fresh(looked_up_again(), FRESH_FILE, [BIG, later("1d")], FRESH_PEOPLE)
+    assert appears_in_order(shown_lines(2), fresh.history)
+
+
+def test_no_timer_line_or_issue_quotes_a_value_from_the_case_file() -> None:
+    # A timer's lines name its rule, its moment, its age and its due time: never a value of the
+    # case file (brief, D30) (brief, D35).
+    file = {"order_id": "ord-zebra", "amount": 4321}
+    definition = chased()
+    definition["rules"]["chase_review"]["when"] = {">": [{"var": "amount"}, 0]}
+    runs = [
+        run_case(definition, file=file, answers=[later("2d")], people=PEOPLE),
+        run_case(
+            definition,
+            file=file,
+            answers=[("review", "approve", "ana", {"approved_amount": 4321}), later("3d")],
+            people=PEOPLE,
+        ),
+    ]
+    said = [line for run in runs for line in run.history + run.timers if "chase_review" in line]
+    said += [issue.message for issue in issues(waiting_a_day()) + issues(holding())]
+    assert said and not any("zebra" in line or "4321" in line for line in said)
