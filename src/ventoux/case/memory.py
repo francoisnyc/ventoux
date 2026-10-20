@@ -7,6 +7,7 @@ effect happens outside this module.
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from ventoux.case.called import unbound
@@ -222,3 +223,21 @@ def outcome_of(
         # What it said is never recorded: it may quote a sensitive value (brief, D31).
         said = Sensitive(str(error))
         return Failed(command.entry, f"{called} failed with {failed_with(error)}: {said}", at=at)
+
+
+def as_json(values: Mapping[str, Any]) -> dict[str, Any]:
+    """`values` as the API would pass them on from JSON, whose numbers are exact decimals
+    (brief, D20): a whole number in a test is one. A float is passed on as it is, and refused by
+    the type check, since it may already have lost its exact value."""
+    return {
+        name: Decimal(value) if isinstance(value, int) and not isinstance(value, bool) else value
+        for name, value in values.items()
+    }
+
+
+def wrapped(case: CaseDefinition, file: Mapping[str, Any]) -> dict[str, Any]:
+    """`file` as the client sends it: each sensitive field's value wrapped (brief, D31)."""
+    return {
+        name: Sensitive(value) if name in case.fields and case.fields[name].sensitive else value
+        for name, value in file.items()
+    }
