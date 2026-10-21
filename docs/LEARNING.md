@@ -82,6 +82,16 @@ and record the key points. A question is closed once you can explain the answer 
   have reached for two tasks, which neither follow the case file nor lapse (D46). The reviewer's
   key question is whether a change uses a capability the format has, or invents one: a new
   capability is a decision in the brief (D47), never just a code change.
+- Retrieval (layer 11 walk-through warm-up, 2026-10-21): "the developer sees the Python method
+  Approval with a count of 2, the business sees plain English."
+  - **Came back:** two of the seven: the builder's code (1; in layer 14 it is `four_eyes`, the
+    builder's name for `count: 2`, never a key in the JSON, D47) and the plain-language view for
+    the business (3, the semantic diff; and part of 5, the reading, which since 11h2 says
+    `by 2 people`, D45, D47).
+  - **Didn't:** the JSON diff, which is the real contract and what CI compares with the code (2);
+    what the check says and can't claim (4: a malformed `count` refused; never that two eligible
+    people exist); a story showing two people approve and the second refused if excluded (5);
+    tests and replay of open cases (6); the release, whose notes are the semantic diff (7).
 - Status: open, until the list comes back from memory, the release (7) included.
 
 ## 3. Intuitive and shared
