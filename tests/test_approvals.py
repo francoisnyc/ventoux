@@ -11,9 +11,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from test_retry_rejected import DELIVERED, down_once, generated_definition, refund_retried
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
+from test_case_validation import (
+    ACCEPTED,
+    CLAIM_FILE,
+    CLAIM_PEOPLE,
+    REFUND,
+    claim_paying_below_a_fraud_score,
+    issues,
+    refund_with,
+)
+from test_retry_rejected import DELIVERED, down_once, generated_definition, refund_retried
 from test_retry_rejected import FILE as RETRIED_FILE
 from test_rules import APPROVED_40, CHECKED_OK, LEADS, SMALL, WITHDRAWS, with_goodwill, withdrawable
 from test_set import FILE, with_owed
@@ -21,6 +30,7 @@ from test_set import FILE, with_owed
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered
+from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
     START,
@@ -657,3 +667,56 @@ def test_no_approval_line_quotes_a_value_from_the_case_file() -> None:
     assert approval_lines
     for line in approval_lines:
         assert SECRET_ORDER not in line and str(SECRET_AMOUNT) not in line, line
+
+
+# --- Slice 8: validation stays a proof ---
+
+
+def test_the_approval_checks_hold_for_every_approver() -> None:
+    # `APPROVAL_ROLE` and `APPROVER_CANT_SEE` are claimed per role on the approval, and every
+    # approver holds one of its roles, so each holds for every approver: shown with two, and a
+    # run where the second is refused. Nothing is claimed about how many people exist
+    # (brief, D11, D34, D47).
+    refund = refund_with(
+        approval=REFUND["steps"]["pay"]["approval"]
+        | {"roles": ["support-lead", "adjuster"], "count": 2}
+    )
+    refused = "adjuster may approve no risk, and payments.refund@2 is high risk"
+    assert issues(refund) == [
+        Issue(
+            "steps.pay.approval.roles",
+            "APPROVAL_ROLE",
+            f"{refused}: name a role that may approve high risk",
+        )
+    ]
+    review = ("review", "approve", "ana", {"approved_amount": 250})
+    with pytest.raises(AnswerRefused, match=f"^{refused}$"):
+        run_case(
+            refund,
+            file={"order_id": "ord-1", "amount": 250},
+            answers=[review, ("pay", "approve", "sam"), ("pay", "approve", "lee")],
+            people={**PEOPLE, "lee": ["adjuster"]},
+        )
+    claim = claim_paying_below_a_fraud_score()
+    claim["steps"]["pay"]["approval"]["count"] = 2
+    assert issues(claim) == [
+        Issue(
+            "steps.pay.approval.roles",
+            "APPROVER_CANT_SEE",
+            "support-lead can't see fraud_score, which pay reads: a person approving pay needs "
+            "fraud as well; let support-lead see fraud_score, or approve with a role that does",
+            "warning",
+        )
+    ]
+
+    def paid(second: list[str]) -> Any:
+        return run_case(
+            claim,
+            file=CLAIM_FILE | {"fraud_score": 10},
+            answers=[ACCEPTED, ("pay", "approve", "kim"), ("pay", "approve", "lee")],
+            people={**CLAIM_PEOPLE, "kim": ["support-lead", "fraud"], "lee": second},
+        )
+
+    with pytest.raises(AnswerRefused, match="^lee can't see fraud_score, which pay reads"):
+        paid(["support-lead"])
+    assert paid(["support-lead", "fraud"]).reached("pay")

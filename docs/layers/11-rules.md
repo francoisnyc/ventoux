@@ -50,7 +50,8 @@ in two, recorded as a draft awaiting answers; answered by number, 2026-10-21 (se
 "Decided while building 11h1"). 11h2: started 2026-10-21 once #35 merged; the warm-up (learning
 question 2) put, 11h2 explained and twenty choices put with a recommendation each, recorded as a
 draft awaiting answers; answered "all as recommended", with one addition (13a), the same day;
-D47 and the guide's "Several approvers" written before building (see 11h2).
+D47 and the guide's "Several approvers" written before building; 11h2 built, slices 0–8, and its
+Promises table checked against the tests, the same day (see 11h2, "Decided while building").
 
 ## What this layer is for
 
@@ -3592,6 +3593,63 @@ Left out, it is 1, and with 1 the engine must decide, record, report and carry e
        fixtures;
     8. validation with `count: 2`, the guide run as tests, and the Promises table checked.
 
+### Where the code went (11h2)
+
+- `case/definition.py`: `count` on `Approval`, and `whole_count`, which refuses what isn't a
+  whole number of at least 1 as written.
+- `case/state.py`: `OpenApproval.count` and `.approved` (each approver and their role, in
+  order); `GivenApproval.also` and `.approvers`.
+- `case/approvals.py`: `ask` with the count, `waiting_line`, `tally`, `with_given`; a lapse
+  naming every approver.
+- `case/answers.py`: the last check, one person one answer on an entry.
+- `case/runtime.py`: `answer_approval` collecting answers until the count, and the rejection's
+  line.
+- `case/stopping.py`, `case/closing.py`: a cancelled entry says how many approvals it had.
+- `case/visibility.py`: the sheet's `approved_by` and `needed`.
+- `case/reading.py`: `its_approval`, "by 2 people" where a reading mentions an approval.
+- `temporal/carried.py`: the count, the approvals given and the other approvers cross, and a
+  state from before 11h2 reads as it was.
+- `examples/refund/refund-four-eyes.json` and its two stories; `tests/histories/before_11h2_*`.
+- The brief: D47, with amendment lines on D11 and D23. The cases guide: "Several approvers".
+  The learning log: question 2.
+
+### Not in 11h2
+
+- Different roles for different approvers; `count` in a plan's approval state (D47).
+- D11's "shown as blocked" when nobody eligible is left (D47, a known limit).
+- The builder's `four_eyes` (layer 14).
+
+### Decided while building
+
+- **The count is kept on the open entry** (slice 2): it is what the entry asked for, and the
+  sheet, `waiting_for` and the withdrawal's line read it there. The definition can't change
+  under an open case, so the two agree; a state from before 11h2 has none, and reads 1.
+- **A given approval keeps `by` as its first approver** and the others in `also` (slice 2), so
+  a given approval written by `main` reads back as it was, by its one person, with no others.
+- **The refusal of a second answer says "has already approved"** (slice 3): a person who
+  rejects closes the entry, so the only one who can answer an open entry twice is someone who
+  approved it.
+- **The counts are said only when several people approve** (slices 2–5): `0 of 2` included on a
+  withdrawal or a cancel, never `1 of 1`; the rejection's line says how many had approved only
+  when some had.
+- **Freshness once the count is reached** (13a, slice 5): a step whose approval is open isn't
+  admitted to start, so a fact it needs fresh isn't fetched again while the entry is half given;
+  it is fetched once the count is reached. A refresh that changes it then lapses the given
+  approval, every approver with it, and a new entry counts from nothing; an open entry is
+  withdrawn by a refresh made for another step, as with one approver
+  (`test_a_changed_refresh_withdraws_another_steps_open_approval`).
+- **The guide's section is run in `tests/test_approvals.py`** (slice 0): `tests/test_case.py`
+  reads the guide's blocks by position, so a new section among them is left out there.
+- **The sheet's approvers are a tuple** (slice 6), so the sheet keeps no mutable default.
+- **On Temporal a refusal names the entry** (`refused sam's answer approve to pay.approval#1:
+  …`), as every refusal of an answer does since layer 8c.
+- **The fixtures were recorded with `main`'s code**, in a worktree at `20c7fe0`, by a script kept
+  outside the repository, as the fixes did: two histories with their keys, and the two states
+  `main` carried (a case waiting for its approval; one paid on an approval its run keeps),
+  numbers written as text.
+- **Checked by mutation:** without the "already approved" check, its test and the no-value test
+  fail; without the carried count and approvals, the switch test pays on Sam's approval alone.
+
 ### Seams the tests use
 
 - `parse_case(d)`: `count` read, and its refusals.
@@ -3606,30 +3664,30 @@ Left out, it is 1, and with 1 the engine must decide, record, report and carry e
 
 ### Promises
 
-A draft, to be checked against the tests before the pull request; each test is in
-`tests/test_approvals.py` unless said otherwise.
+Every test is in `tests/test_approvals.py` unless said otherwise.
 
 | Promise | Test that would fail |
 |---|---|
-| `count` that isn't a whole number of at least 1 (`0`, `-1`, `"2"`, `2.0`, `true`) is refused at its path | `test_a_count_that_isnt_a_whole_number_of_at_least_one_is_refused` |
+| `count` that isn't a whole number of at least 1 (`0`, `-1`, `"2"`, `2.0`, `true`, `null`) is refused at its path | `test_a_count_that_isnt_a_whole_number_of_at_least_one_is_refused` |
+| `count` is read, and is 1 when left out | `test_a_count_is_read` |
 | `count` in a plan's approval is refused | `test_a_plans_approval_takes_no_count` (`tests/test_plan.py`) |
-| With `count` left out, the history, `waiting_for`, the sheet and the reading are exactly as before | `test_a_count_of_one_changes_nothing` |
+| With `count` left out or 1, the history and `waiting_for` are exactly as before; the sheet needs one person; a reading says nothing of a count | `test_a_count_of_one_changes_nothing`, `test_the_sheet_says_who_has_approved`, `test_a_reading_says_how_many_approve` (`tests/test_reading.py`) |
 | One approval of two leaves the entry open, `pay` not started, the case open | `test_one_approval_of_two_starts_nothing` |
 | The second distinct approval gives it, and `pay` starts in that decision | `test_the_second_approval_starts_the_step` |
 | `waiting_for` says how many are given, and the history records each answer in order | `test_waiting_for_says_how_many_are_given` |
 | Someone who has approved the entry is refused a second answer, approve or reject, and the entry is unchanged | `test_one_person_one_answer_on_an_entry` |
-| Each of D11's exclusions holds for the second approver: inputs, `when`, the opener, the proposer, a rule's `when`, a retry's first start, a value a rule set | `test_every_approver_is_someone_else` |
+| Each of D11's exclusions holds for the second approver: inputs, the opener, the proposer, a rule's `when`, a value a rule set, a retried run | `test_every_approver_is_someone_else` |
 | A withdrawn entry's approvers may approve the entry asked again, counted from nothing | `test_distinct_within_the_entry` |
 | One rejection rejects the entry, whatever was approved, and the run is recorded rejected | `test_one_rejection_rejects_the_whole_approval` |
-| A rejected retry goes back to failed, needing attention, its approvals gone | `test_a_rejected_retry_of_several_approvers_needs_attention` (`tests/test_retry_rejected.py`) |
+| A rejected retry goes back to failed, needing attention, its approvals gone, the next entry counted from nothing | `test_a_rejected_retry_of_several_approvers_needs_attention` (`tests/test_retry_rejected.py`) |
 | A rejected run a rule started ends the rule's start | `test_a_rejected_run_a_rule_started_ends_its_start` |
-| Someone who rejected may answer a later entry | `test_who_rejected_may_answer_a_later_entry` |
-| A change to a value the step reads, a task answered again, and a rule's `set` withdraw the entry with every approval on it | `test_a_change_withdraws_every_approval` |
-| A refresh that changes a fact withdraws an open entry, or lapses a given one, and a new entry counts from nothing | `test_a_refresh_withdraws_or_lapses_every_approval` (`tests/test_fresh_facts.py`) |
+| Someone who rejected may answer a later entry; the rejected entry is closed | `test_who_rejected_may_answer_a_later_entry` |
+| A value changed by a person, a task answered again, and a rule's `set` withdraw the entry with every approval on it, saying how many | `test_a_change_withdraws_every_approval`, `test_distinct_within_the_entry` |
+| Freshness is checked once the count is reached: a refresh that changes the fact lapses every approval and a new entry counts from nothing; one that changes nothing leaves both and `pay` runs; a fact nothing can fetch again needs attention (13a) | `test_freshness_is_checked_once_the_count_is_reached` (`tests/test_fresh_facts.py`) |
 | A requirement that ended without completing lapses a given approval of several | `test_a_given_approval_of_several_lapses_with_its_requirement` |
-| A stop and a close cancel the entry with every approval on it | `test_a_stop_or_a_close_cancels_every_approval` |
+| A stop and a close cancel the entry with every approval on it | `test_a_stop_or_a_close_cancels_every_approval`, `test_a_reading_says_how_many_approve` (`tests/test_reading.py`) |
 | An approval of several doesn't clear what steered a run | `test_an_approval_of_several_doesnt_end_what_steered_a_run` (`tests/test_untrusted_moment.py`) |
-| A lapse names every approver | `test_a_lapse_names_every_approver` |
+| A lapse names every approver, and a failed run keeps them all for its retry | `test_a_lapse_names_every_approver` |
 | The sheet says who has approved and how many more are needed | `test_the_sheet_says_who_has_approved` |
 | A reading says how many approve; with one, as before | `test_a_reading_says_how_many_approve` (`tests/test_reading.py`) |
 | The two stories: two people approve; the second refused as someone excluded | `test_every_story_holds` (`tests/test_simulate.py`; `examples/refund/stories/two-approve.json`, `second-refused.json`) |
@@ -3638,7 +3696,8 @@ A draft, to be checked against the tests before the pull request; each test is i
 | Two approvals in one workflow task are decided in order; the same person twice is refused | `test_two_approvals_in_one_task` (`tests/test_temporal_approvals.py`) |
 | An approval arriving with the close is refused and never counted | `test_an_approval_with_the_close_is_refused` (`tests/test_temporal_approvals.py`) |
 | Histories recorded on `main` replay | `test_histories_from_before_11h2_replay` (`tests/test_temporal_approvals.py`) |
-| `APPROVAL_ROLE` and `APPROVER_CANT_SEE` hold with `count: 2`, and an approver who can't see is refused | `test_the_approval_checks_hold_for_every_approver` |
-| No new line (history, `waiting_for`, sheet, reading, story) quotes a value from the case file | `test_no_approval_line_quotes_a_value_from_the_case_file` |
+| `APPROVAL_ROLE` and `APPROVER_CANT_SEE` hold with `count: 2`, and a second approver who can't see, or whose role may not approve the risk, is refused | `test_the_approval_checks_hold_for_every_approver` |
+| The guide's "Several approvers" is the engine's: its approval, history, example and quoted lines | `test_the_guides_several_approvers_are_the_engines` |
+| No new line (history, `waiting_for`, needs attention, the sheet, a refusal) quotes a value from the case file | `test_no_approval_line_quotes_a_value_from_the_case_file` |
 | Every decision cited in the code is in the brief, D47 included | `test_every_decision_cited_in_src_is_in_the_brief_and_current` (`tests/test_decisions.py`) |
 | `core` and `case` stay free of the clock, randomness and I/O | `tests/test_layers.py`, as it is |
