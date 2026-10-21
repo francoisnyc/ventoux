@@ -24,6 +24,14 @@ class GivenApproval:
     # The values its step read when it was asked, by field, as the open approval saw them: a
     # refresh that changes one lapses it (brief, D33).
     seen: dict[str, object] = field(default_factory=dict[str, object])
+    # Who else gave it, after `by`, in the order they approved; empty for one approver
+    # (brief, D47).
+    also: tuple[str, ...] = ()
+
+    @property
+    def approvers(self) -> tuple[str, ...]:
+        """Everyone who gave it, in the order they approved."""
+        return (self.by, *self.also)
 
 
 @dataclass
@@ -126,6 +134,10 @@ class OpenApproval:
     entry: str  # the step, `approval`, and how many times it was asked: `pay.approval#1`
     step: str  # the step it guards
     seen: dict[str, object]  # the values its step read when it was asked, by field (brief, D25)
+    count: int = 1  # how many different people must approve it (brief, D47)
+    # Each person who has approved it so far, with the role that let them, in the order they
+    # did: it is given once there are `count` of them (brief, D47).
+    approved: dict[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)

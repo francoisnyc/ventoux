@@ -24,7 +24,15 @@ from ventoux.case.admission import (
     requirements_met,
 )
 from ventoux.case.answers import AnswerRefused, decided_by, judge_approval, judge_task
-from ventoux.case.approvals import ask, asked_anyway, follow, lapsed, needs_approval
+from ventoux.case.approvals import (
+    ask,
+    asked_anyway,
+    follow,
+    lapsed,
+    needs_approval,
+    tally,
+    waiting_line,
+)
 from ventoux.case.called import called
 from ventoux.case.closing import (
     begin_closing,
@@ -636,9 +644,22 @@ def answer_approval(
     step = case.steps[approval.step]
     assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
     role = judge_approval(case, catalog, state, approval.entry, approval.step, step, event)
+    if event.outcome == APPROVE:
+        # One entry collects the answers: it stays open until `count` different people have
+        # approved it (brief, D47).
+        approval.approved[event.by] = role
+        if len(approval.approved) < approval.count:
+            state.waiting[approval.entry] = waiting_line(approval, " or ".join(step.approval.roles))
+            state.history.append(
+                f"{event.by} answered {approval.entry} approve as {role}: {tally(approval)}"
+            )
+            return
     del state.approvals[approval.step]
     del state.waiting[approval.entry]
-    state.history.append(f"{event.by} answered {approval.entry} {event.outcome} as {role}")
+    given_so_far = f": {tally(approval)}" if approval.count > 1 and event.outcome == APPROVE else ""
+    state.history.append(
+        f"{event.by} answered {approval.entry} {event.outcome} as {role}{given_so_far}"
+    )
     if event.outcome == APPROVE:
         try:
             digest = inputs_digest(step.inputs, state.values)
@@ -646,7 +667,10 @@ def answer_approval(
             # Fail closed: an approval of inputs nobody can read approves nothing.
             fail(state, approval.step, f"the inputs of {approval.step} can't be read: {error}")
             return
-        state.given[approval.step] = GivenApproval(approval.entry, event.by, digest, approval.seen)
+        first, *others = approval.approved
+        state.given[approval.step] = GivenApproval(
+            approval.entry, first, digest, approval.seen, tuple(others)
+        )
         return
     latest = latest_run(state, approval.step)
     if latest is not None and latest.status == "retrying":

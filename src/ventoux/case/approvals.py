@@ -50,11 +50,27 @@ def ask(state: CaseState, name: str, step: CallStep, why: str | None = None) -> 
     assert step.approval is not None  # only a step with an approval is asked for one
     state.asked[name] = state.asked.get(name, 0) + 1
     entry = f"{name}.approval#{state.asked[name]}"
-    state.approvals[name] = OpenApproval(entry, name, what_it_reads(step, state.values))
+    count = step.approval.count
+    approval = OpenApproval(entry, name, what_it_reads(step, state.values), count)
+    state.approvals[name] = approval
     roles = " or ".join(step.approval.roles)
-    state.waiting[entry] = f"approval of {name} by {roles}"
+    state.waiting[entry] = waiting_line(approval, roles)
+    people = f", from {count} people" if count > 1 else ""
     asked_why = f": {why}" if why is not None else ""
-    state.history.append(f"asked {entry}: approval of {name} by {roles}{asked_why}")
+    state.history.append(f"asked {entry}: approval of {name} by {roles}{people}{asked_why}")
+
+
+def waiting_line(approval: OpenApproval, roles: str) -> str:
+    """How the inbox lists an open approval: `approval of pay by support-lead`, and, when several
+    people approve it, how far it has got: `…: 1 of 2 given`. The same to everyone, naming
+    nobody (brief, D24) (brief, D47)."""
+    line = f"approval of {approval.step} by {roles}"
+    return f"{line}: {tally(approval)}" if approval.count > 1 else line
+
+
+def tally(approval: OpenApproval) -> str:
+    """How many of the people it needs have approved: `1 of 2 given`."""
+    return f"{len(approval.approved)} of {approval.count} given"
 
 
 def what_it_reads(step: CallStep, values: dict[str, object]) -> dict[str, object]:
