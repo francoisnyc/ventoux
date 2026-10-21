@@ -349,6 +349,17 @@ and record the key points. A question is closed once you can explain the answer 
     cannot approve it`.
   - **Why it matters now (11h, choice 9):** a second approver (`four_eyes`) is excluded by the
     same rule, plus whoever already gave the first approval.
+- Retrieval (layer 11 walk-through warm-up, 2026-10-21): "a support-lead other than the
+  reviewer; the reviewer can't approve." The first part came back, with the role named, for the
+  fifth time; less than in 11h, where all three parts were tried. Didn't come back:
+  - **Why the reviewer can't:** her answer set `approved_amount`, the value `pay` sends
+    (provenance, not position; brief, D11). And the opener and whoever proposed the run are
+    excluded too (D11, D25): the opener, for the fifth time.
+  - **What the case waits for:** `approval of pay by support-lead`; `pay` hasn't run, and the
+    case stays open (D10, D24). Since 11h2, with `count: 2` the same entry says `0 of 2`, and
+    whoever gave the first approval is excluded from the second (D47).
+  - **The test's three assertions:** `run.waiting_for == ["approval of pay by support-lead"]`,
+    `not run.reached("pay")`, `not run.closed`.
 - Status: open, until the opener and the test's three assertions come back with the exclusion.
 
 ## 15. Case data
