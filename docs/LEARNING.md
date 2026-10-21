@@ -60,8 +60,29 @@ and record the key points. A question is closed once you can explain the answer 
 > A developer asks a coding assistant to "require two approvals above 10,000". List what the
 > developer and the reviewer see before it ships: the code diff, then what else?
 
-- Your answer:
-- Discussion:
+- Your answer (layer 11h2 warm-up, 2026-10-21): "show me the answer". Nothing from memory.
+- Discussion: given in full, in the order a reviewer meets each thing:
+  1. **The builder's code diff,** reviewed in a pull request like any code (brief, D1).
+  2. **The JSON diff, the real contract:** CI fails if the committed JSON isn't what the code
+     generates (D1); the reviewer reads `"count": 2` under `"when": approved_amount > 10000`.
+  3. **The plain-language semantic diff,** for the analyst, who approves the meaning while a
+     developer approves the code (D1, D5; layer 13).
+  4. **What the check says** (D34): a malformed `count` refused, `APPROVAL_ROLE`,
+     `APPROVER_CANT_SEE`; and what it can't claim: that two eligible people exist, a staffing
+     fact (D11).
+  5. **The reading and a story** (D45): the rules sheet says how many approve; a story shows two
+     people approving, and the second refused if excluded. Stories run as tests.
+  6. **Tests and CI,** a negative test among them, and replay tests catching a change that would
+     break open cases (D17).
+  7. **A release:** it is behaviour, so the merge makes a new release whose notes are the
+     semantic diff; open cases finish on their release unless migrated by a change request a
+     second person approves (D5).
+
+  Why it matters for 11h2: before it, "two approvals" couldn't be written; an assistant would
+  have reached for two tasks, which neither follow the case file nor lapse (D46). The reviewer's
+  key question is whether a change uses a capability the format has, or invents one: a new
+  capability is a decision in the brief (D47), never just a code change.
+- Status: open, until the list comes back from memory, the release (7) included.
 
 ## 3. Intuitive and shared
 

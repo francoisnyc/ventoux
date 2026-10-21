@@ -618,7 +618,8 @@ def test_a_high_risk_step_with_no_approval_stops() -> None:
 
 # The guide, without cases on Temporal, whose examples run on Temporal's test server
 # (tests/test_temporal_case.py).
-NOT_RUN_HERE = ("## Running a case on Temporal\n",)
+# "Several approvers" is run in test_approvals.py.
+NOT_RUN_HERE = ("## Running a case on Temporal\n", "## Several approvers\n")
 
 
 def without_sections(text: str, headings: tuple[str, ...]) -> str:

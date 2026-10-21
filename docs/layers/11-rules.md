@@ -49,7 +49,8 @@ in two, recorded as a draft awaiting answers; answered by number, 2026-10-21 (se
 11h1 built, slices 0–7, and its Promises table checked against the tests, the same day (see 11h,
 "Decided while building 11h1"). 11h2: started 2026-10-21 once #35 merged; the warm-up (learning
 question 2) put, 11h2 explained and twenty choices put with a recommendation each, recorded as a
-draft awaiting answers (see 11h2).
+draft awaiting answers; answered "all as recommended", with one addition (13a), the same day;
+D47 and the guide's "Several approvers" written before building (see 11h2).
 
 ## What this layer is for
 
@@ -3305,10 +3306,10 @@ Every test is in `tests/test_patterns.py` unless said otherwise.
 
 ## 11h2. Approvals by several people
 
-**Draft, 2026-10-21: awaiting answers by number.** The warm-up put (learning question 2); 11h2
-explained; twenty choices put with a recommendation each. Nothing built, and no decision written:
-D47 is written once the choices are answered (choice 19). Started once #35 (11h1) merged, on
-`main` at `20c7fe0`.
+**Decided, 2026-10-21** (the user, by number): 1–20 all as recommended, with one addition to
+choices 13–14, added below as 13a: freshness is still checked once the count is reached. The
+warm-up answered "show me the answer" (recorded in the log). D47 (brief) records 11h2. Each
+choice below is written as it was put. Started once #35 (11h1) merged, on `main` at `20c7fe0`.
 
 ### The warm-up
 
@@ -3511,6 +3512,14 @@ Left out, it is 1, and with 1 the engine must decide, record, report and carry e
     A rule's `stop` cancels the entry (D40), and a close cancels it (D10), each once, with every
     approval on it. And an approval, by one person or several, doesn't clear what steered a run
     (D43): the people approve its inputs, not what started it.
+13a. **Freshness, once the count is reached** (*added by the user, 2026-10-21*). A fact `pay`
+    needs fresh (`max_age`) may go stale between the first approval and the second. Freshness
+    is still checked before the step starts (D33), after the count is reached, and a test with
+    `count: 2` shows each way it ends:
+    - a refresh that changes the fact withdraws the open entry, or lapses the given approval,
+      with every approval on it, and a new entry counts from nothing;
+    - a refresh that changes nothing leaves both approvals standing, and `pay` runs;
+    - a fact nothing can fetch again leaves the step needing attention.
 14. **A given approval of several people is spent, kept and checked as one.** Recommended: spent
     in the decision that gives it (D25); kept on the run for its retry, with every approver
     (D26); its digest checked before the run, and a lapse names them all (`the inputs of pay
