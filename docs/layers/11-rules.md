@@ -47,7 +47,9 @@ warm-up (learning question 14) put, and answered 2026-10-21; 11h explained, prob
 with a recommendation each, two of them needing a new engine capability and one splitting 11h
 in two, recorded as a draft awaiting answers; answered by number, 2026-10-21 (see 11h); D46, row 33 and the guide's "Patterns" written,
 11h1 built, slices 0–7, and its Promises table checked against the tests, the same day (see 11h,
-"Decided while building 11h1").
+"Decided while building 11h1"). 11h2: started 2026-10-21 once #35 merged; the warm-up (learning
+question 2) put, 11h2 explained and twenty choices put with a recommendation each, recorded as a
+draft awaiting answers (see 11h2).
 
 ## What this layer is for
 
@@ -3300,3 +3302,334 @@ Every test is in `tests/test_patterns.py` unless said otherwise.
 | The guide's table of rule codes is still what `validate_case` says | `test_the_guides_table_of_rule_codes_is_what_validate_case_says` (`tests/test_rules.py`) |
 | Every decision cited in the code is in the brief, D46 included | `test_every_decision_cited_in_src_is_in_the_brief_and_current` (`tests/test_decisions.py`) |
 | `case` stays free of the clock and I/O | `tests/test_layers.py`, as it is |
+
+## 11h2. Approvals by several people
+
+**Draft, 2026-10-21: awaiting answers by number.** The warm-up put (learning question 2); 11h2
+explained; twenty choices put with a recommendation each. Nothing built, and no decision written:
+D47 is written once the choices are answered (choice 19). Started once #35 (11h1) merged, on
+`main` at `20c7fe0`.
+
+### The warm-up
+
+Learning question 2, open and never answered. Put to be answered from memory, before anything
+else:
+
+> A developer asks a coding assistant to "require two approvals above 10,000". List what the
+> developer and the reviewer see before it ships: the code diff, then what else?
+
+It leads straight into 11h2: after this part, "two approvals" is one key in the JSON, and the
+question becomes what each of the things they see says about it (the definition's change, what
+the check says, the reading, a story that shows two people approving, and how open cases replay).
+
+### What this part is for
+
+Today an approval is one person's act (brief, D23): `pay.approval#1` is asked, one person with a
+role it names answers, and an *approve* is spent in the same decision that starts `pay`
+(brief, D25). D11 promised more from the start: "several approvers use `count=2` (distinct
+people, each excluded by the rule above)". 11h1 found that no rule can add a second approver,
+and that tasks standing in for one would neither follow the case file nor lapse (brief, D46,
+its last bullet). So 11h2 is an engine capability, not a pattern: `count` on a step's approval.
+
+Written:
+
+```json
+"pay": {
+  "kind": "activity",
+  "activity": "payments.refund@2",
+  "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+  "when": {"==": [{"var": "review.outcome"}, "approve"]},
+  "approval": {
+    "when": {">": [{"var": "approved_amount"}, 10000]},
+    "roles": ["support-lead"],
+    "count": 2,
+    "display": {"reason": "Two team leads approve a refund above 10,000"}
+  }
+}
+```
+
+and run, as the history would say it (the wording is choice 9's):
+
+```
+ana answered review#1 approve as support, setting approved_amount
+asked pay.approval#1: approval of pay by support-lead, from 2 people
+sam answered pay.approval#1 approve as support-lead: 1 of 2 given
+lee answered pay.approval#1 approve as support-lead: 2 of 2 given
+scheduled pay#1: payments.refund@2 (…)
+```
+
+Between Sam's answer and Lee's, the case waits for one thing, the same entry, with how far it has
+got: `approval of pay by support-lead: 1 of 2 given`. Sam answering again is refused (he has
+already approved it); Ana is refused as she is today (her answer set `approved_amount`, D11).
+
+**The idea in one sentence:** an approval is still one act with one entry (D23); `count` says how
+many distinct people must give it before it is given; until then it is open, and everything that
+withdraws, lapses or cancels an open or given approval today acts on that entry, so on every
+approval collected on it at once. Most of 11h2 is showing that each earlier rule still holds when
+an approval is half given.
+
+**Why nothing changes at `count: 1`.** `Approval` refuses any field it doesn't know (`Shape`,
+`extra="forbid"`, in `case/definition.py`), so no definition written before 11h2 has a `count`.
+Left out, it is 1, and with 1 the engine must decide, record, report and carry exactly as before
+(choices 1, 15, 17).
+
+### Choices
+
+**The shape**
+
+1. **`count` on a step's approval: a whole number, at least 1, default 1.** Recommended: refused
+   when the definition is read unless it is a whole number of at least 1, at its path
+   (`steps.pay.approval.count`), saying what it is and what to write. Pydantic turns `"2"`, `2.0`
+   and `true` into whole numbers by default, so the field is declared strict: each of those is
+   refused, never read as 2 or 1 (fail closed). Left out, it is 1, and nothing anywhere reads
+   differently (choice 17 tests it). `four_eyes` is the Python builder's name for `count: 2`
+   (layer 14), never a key in the JSON (brief, D46).
+2. **Every approver is drawn from the approval's one list of roles.** Recommended: `roles` stays
+   on the approval (brief, D11); each approver needs one of them, and a person holding several
+   counts once. **Set aside, recorded in D47:** different roles for different approvers ("one
+   from finance and one from operations"). It is a different shape (a list of approvals on a
+   step, each with its roles and perhaps its `when`), and it raises questions of its own: which
+   requirement a person holding both roles fills, and what `waiting_for` says for each. No case
+   has asked for it; it would be a decision of its own.
+3. **Plans: set aside.** A plan's approval state (`{"approval": {"of": …, "roles": …, "timeout":
+   …}}`, D23) stays one person. `count` in it is refused, as any unknown key is (a test shows
+   it). Why: a plan's approval moves on at its `timeout`, and what a timeout means for an
+   approval half given (rejected? timed out with one approval kept?) needs its own design; plans
+   are the advanced concept (brief, D13), and a plan step in a case carries its plan's own
+   approvals (D28). Recorded in D47 as set aside.
+
+**One approval, several people**
+
+4. **One entry collects the answers.** Recommended: `pay.approval#1` stays open until `count`
+   distinct people have approved it. Each *approve* is recorded on the entry, in the order the
+   answers arrived, with the person and the role that let them approve. The one that makes the
+   count turns it into a given approval, which carries every approver in order, and is spent in
+   that same decision, as today (D25). Set aside: one entry per approver (`pay.approval#1`,
+   `#2` for one asking). Each could then be withdrawn, lapse or be answered on its own, so "any
+   change withdraws every approval" would need code to keep them together, and an entry's number
+   would stop meaning "the nth time this step's approval was asked" (D25), which
+   `has_been_open`, `waiting_for` and the stories rely on.
+5. **Distinct people, each "someone else" by D11's rule.** Recommended: every answer passes
+   today's checks, in today's order (D23): the entry is open, the outcome is offered, a role
+   counts, it may approve the risk, the person sees what the step reads (D30), and they are not
+   excluded. Each approver is excluded, as today, if they are:
+   - anyone whose answer flows into the step's inputs or its `when` (D11);
+   - the person who opened the case (D11, D25);
+   - the person who proposed this run (D25), or anyone whose answer the `when` of the rule that
+     started it read (D39);
+   - for a retried run, anyone its first start excluded (D26);
+   - anyone whose answer is in a value a rule set and the step reads (D42; today's
+     `computed` path).
+
+   Then one check more, last: **the person hasn't already approved this entry**: `sam has
+   already approved pay.approval#1: it needs 1 more person`. A refused answer changes nothing:
+   the entry stays open with what it had.
+   **Distinct within the entry.** Once an entry is withdrawn and the step asked again, the
+   count starts from nothing, and the people who approved the withdrawn entry may approve the
+   new one: they judge the new values (D25), as Sam may approve 900 today after approving 250.
+   This is how I read "anyone who has already approved this run": the entry open for the run
+   now, not every entry the run has ever been asked under.
+6. **One person, one answer on an entry.** Recommended: a second answer from someone who has
+   approved is refused, *reject* included. Set aside: letting an approver take it back by
+   rejecting. It would be stricter, so the non-negotiables allow it, but an answer that can be
+   taken back is something no task answer is (D9), and it brings the question of what a
+   take-back does once the count is reached in the same workflow task. To stop the run, someone
+   else rejects, or the person asks for a change, which withdraws the entry (choice 13).
+7. **One rejection rejects the entry whole.** Recommended: whatever was approved before, a
+   *reject* by anyone allowed to answer closes the entry: `count` people must agree, and one is
+   enough to refuse, as D23's "an earlier approval never outvotes a later rejection" asks.
+   History: `lee answered pay.approval#1 reject as support-lead`, then the rejection's line as
+   today, with how many had approved (`…: lee rejected pay.approval#1, which 1 of 2 had
+   approved`). What it then means:
+   - **an ordinary run:** a rejection is an outcome (D23): the run is recorded `rejected`, `pay`
+     doesn't run, and the case may close or a rule react, as today;
+   - **a retried run:** it goes back to `failed`, needing attention, as the retry fix decided
+     (brief, D26, amended 2026-10-18; fix-retry-rejected, decision 1): the approvals given
+     before go with the entry, and the operator's next retry asks a new entry, counted from
+     nothing;
+   - **a run a rule started** (D39): as an ordinary run: recorded `rejected`, the rule's start
+     is over, and what it kept (the rule's entry, the people its `when` read) ends with it. A
+     later firing proposes a new run, which asks again.
+8. **What a person who rejected may do next.** Recommended: nothing on that entry, which is
+   closed (`pay.approval#1 is closed`). On any later entry (asked again after a withdrawal, a
+   retry, a new run) they may approve or reject like anyone: rejecting is a judgement, not a
+   conflict of interest, and D11 excludes only from where values came from and who proposed.
+   Set aside: excluding whoever rejected from later entries, which would let one rejection
+   shrink the pool of approvers for good, for a reason D11 doesn't recognise.
+
+**What a half-given approval looks like**
+
+9. **History: one line per answer, with the count.** Recommended:
+   - asked: `asked pay.approval#1: approval of pay by support-lead, from 2 people`;
+   - each *approve*: `sam answered pay.approval#1 approve as support-lead: 1 of 2 given`, the
+     last `…: 2 of 2 given`; the run's start follows as today;
+   - a refusal, as any refusal: raised in memory, a `refused …` line on Temporal (8b).
+
+   With `count: 1`, every line is exactly today's, with no "1 of 1".
+10. **`waiting_for` (D24): one line per entry, saying how far it has got.** Recommended:
+    `approval of pay by support-lead: 0 of 2 given`, then `…: 1 of 2 given`, updated as each
+    approval lands; the entry keeps its place in the order things opened. Who approved isn't in
+    the line: `waiting_for` reads the same to everyone; who approved is in the history and on
+    the sheet (choice 11). With `count: 1`, unchanged: `approval of pay by support-lead`. A test
+    asserts the moment as the warm-up of 11h taught: `run.waiting_for == ["approval of pay by
+    support-lead: 1 of 2 given"]`, `not run.reached("pay")`, `not run.closed`, and the history
+    lines in order. The invariant (fix-retry-rejected, "The invariant") holds unchanged: a
+    half-given approval is open, so it is in `waiting_for`.
+11. **The approval sheet says who has approved, and how many more are needed.** Recommended:
+    `ApprovalSheet` gains who has approved so far, in order, and how many more are needed; its
+    fact lines are unchanged (each approver reads them with their own roles, D30). So Sam,
+    opening the sheet again, sees he has approved; Lee sees one more is needed. With `count: 1`,
+    nobody yet and one needed. On Temporal it is the same query, with the same two fields.
+12. **Readings and stories (D45) say how many.** Recommended: where a reading mentions a step's
+    approval (the start's fine print: "waiting for its approval", "it waits for its approval
+    when one is needed"), it says `by 2 people` when the count is more than one; with one,
+    unchanged, so 11g's witnesses and 11h1's stories read as they do. A simulation's pending
+    work prints `waiting_for` as it is, so the count shows there. Two stories, on a new
+    `examples/refund/refund-four-eyes.json` (the refund, `count: 2` above 10,000):
+    - `examples/refund/stories/two-approve.json`: Sam then Lee approve, and `pay` runs;
+    - `examples/refund/stories/second-refused.json`: Sam approves; Sam again is refused, having
+      approved; Ana is refused, having set `approved_amount`; the case ends waiting for `1 of 2
+      given`, `pay` not run.
+
+**Withdrawals, lapses, stops and closes**
+
+13. **Any change withdraws or lapses the entry whole.** Recommended, and mostly already true,
+    since today's code withdraws, lapses and cancels by entry: every path is shown with one
+    approval of two given, and the line says how many it had (`withdrew pay.approval#1:
+    approved_amount changed, with 1 of 2 approvals given`). The paths:
+    - a task answered again (`review` started again) or a value the step reads changed: the open
+      entry is withdrawn (D25);
+    - a rule's `set` that changes a value the step reads (D42): the same;
+    - a refresh that changes a fact (D33): an open entry is withdrawn; a given approval lapses
+      whole, and the step is checked again and asks a new entry, counted from nothing, if it
+      still needs one;
+    - a change request (layer 12, not built): D25's "a lapse from a change request stops the
+      step" holds as written, for every approval at once;
+    - a step it requires ended without completing (fix-retry-rejected, decision 5): a given
+      approval lapses whole.
+
+    A rule's `stop` cancels the entry (D40), and a close cancels it (D10), each once, with every
+    approval on it. And an approval, by one person or several, doesn't clear what steered a run
+    (D43): the people approve its inputs, not what started it.
+14. **A given approval of several people is spent, kept and checked as one.** Recommended: spent
+    in the decision that gives it (D25); kept on the run for its retry, with every approver
+    (D26); its digest checked before the run, and a lapse names them all (`the inputs of pay
+    changed since sam and lee approved them: a new approval is needed`).
+
+**Temporal**
+
+15. **A half-given approval crosses continue-as-new exactly.** Recommended: the carried state
+    holds, for an open entry, the approvals given on it in order (person and role), and for a
+    given approval every approver in order (D27: "open, given and withdrawn approvals" already
+    cross). A state carried from before 11h2 has neither: an open entry reads as having none
+    given, and a given approval as given by its one person, exactly as it was. How the state
+    holds them is settled in the slice, with two tests: a state written by `main`'s code reads
+    back equal (a fixture), and an approval half given before a switch is completed by the
+    second approver after it.
+16. **Each answer is a signal, decided one at a time.** Recommended, and tested on Temporal's
+    test server:
+    - **two approvals in one workflow task:** the inbox decides them one after the other, in
+      the order history records them (layer 6, D27); the second makes the count and schedules
+      `pay` in its own decision. The same person twice: the second is refused and recorded;
+    - **an approval arriving with the close** (11d's drain): if the close is decided first, the
+      entry is cancelled with every approval on it, and the approval still in the inbox is
+      refused, `the case is closed`, recorded, never counted. If the approval that makes the
+      count was decided first, `pay` is scheduled, and the close finds it running (D10);
+    - replay decides the same, since the order of the signals is in the history.
+17. **Histories recorded on `main` replay.** Recommended, as 11f and the two fixes did: two
+    fixtures recorded with `main`'s code under `tests/histories/` (`before_11h2_approved.json`:
+    an approval asked, given and spent; `before_11h2_switched.json`: an approval open across a
+    continue-as-new, then given), each with its keys, replayed on the branch. With `count`
+    left out, every decision schedules the same commands and writes the same lines.
+
+**Validation stays a proof**
+
+18. **What the check says, and what it doesn't claim.** Recommended:
+    - `count` is refused when read unless it is a whole number of at least 1 (choice 1): a shape
+      error, as any malformed field, not an issue;
+    - `APPROVAL_ROLE` (an error) and `APPROVER_CANT_SEE` (a warning) are claimed per role on the
+      approval, and every approver holds one of those roles, so both already hold for every
+      approver; tests show each with `count: 2`, with a run where the approver who can't see is
+      refused;
+    - **nothing about `count` is claimed statically.** Whether two eligible people exist is a
+      staffing fact (D11): the check can't know how many people hold a role, nor who will be
+      excluded at runtime. D11's "an approval nobody eligible can take is shown as blocked"
+      stays unbuilt, as it is today: it needs to know the staff, which the engine never looks up
+      (D22). A count makes it likelier, so D47 records it as a known limit.
+
+**Records and size**
+
+19. **Records.** Recommended: a new decision, **D47**, adding to D11, D23, D24, D25, D26, D27,
+    D33, D40 and D45, whose text is kept: `count`, its default and refusals; one entry
+    collecting answers; distinct people, each excluded by D11, within the entry; one rejection
+    rejects it, in each kind of run; what someone who rejected may do; the history,
+    `waiting_for` and the sheet; withdrawn, lapsed and cancelled whole; crossing continue-as-new;
+    plans and different roles set aside; nothing claimed statically. D11 and D23 each get an
+    amendment line pointing to D47, dated, their text kept. The cases guide's "Approvals in a
+    case" gets "Several approvers", written before building, its examples run as tests. The
+    learning log records the warm-up. No new dependency.
+20. **Size: one pull request, in slices.** Recommended, each slice starting with its negative
+    test:
+    0. the answers in this note, D47 and the amendment lines, the guide's part;
+    1. the shape: `count` refused unless whole and at least 1; a plan's approval refusing it;
+    2. one entry collects: after one *approve* of two, `pay` hasn't started; the second gives
+       it; history and `waiting_for`; `count: 1` unchanged;
+    3. distinct and excluded: the same person twice, and each of D11's exclusions for the second
+       approver;
+    4. a rejection: an ordinary run, a retry, a run a rule started;
+    5. withdrawals, lapses, a stop and a close, each with one approval of two given;
+    6. the sheet, the readings, the simulation and the two stories;
+    7. Temporal: the carried state, two signals in one task, one with the close, the replay
+       fixtures;
+    8. validation with `count: 2`, the guide run as tests, and the Promises table checked.
+
+### Seams the tests use
+
+- `parse_case(d)`: `count` read, and its refusals.
+- `run_case(..., answers=[...], people={...})`: `waiting_for`, `history`, `reached`, `closed`,
+  `needs_attention`; refusals raised as `AnswerRefused`.
+- `decide(...)` on a `CaseState`, where a test needs two events in one decision's reach.
+- The approval sheet (`approval_sheet(entry, roles, at)` in memory, the `approval_sheet` query on
+  Temporal).
+- `read_rules` and the start's fine print; `simulate(...)` and the stories under `examples/`.
+- `state_as_data` / `state_from_data`, and Temporal's replayer on `tests/histories/`.
+- `validate_case(parse_case(d), CATALOG)`: each issue's code, path and message.
+
+### Promises
+
+A draft, to be checked against the tests before the pull request; each test is in
+`tests/test_approvals.py` unless said otherwise.
+
+| Promise | Test that would fail |
+|---|---|
+| `count` that isn't a whole number of at least 1 (`0`, `-1`, `"2"`, `2.0`, `true`) is refused at its path | `test_a_count_that_isnt_a_whole_number_of_at_least_one_is_refused` |
+| `count` in a plan's approval is refused | `test_a_plans_approval_takes_no_count` (`tests/test_plan.py`) |
+| With `count` left out, the history, `waiting_for`, the sheet and the reading are exactly as before | `test_a_count_of_one_changes_nothing` |
+| One approval of two leaves the entry open, `pay` not started, the case open | `test_one_approval_of_two_starts_nothing` |
+| The second distinct approval gives it, and `pay` starts in that decision | `test_the_second_approval_starts_the_step` |
+| `waiting_for` says how many are given, and the history records each answer in order | `test_waiting_for_says_how_many_are_given` |
+| Someone who has approved the entry is refused a second answer, approve or reject, and the entry is unchanged | `test_one_person_one_answer_on_an_entry` |
+| Each of D11's exclusions holds for the second approver: inputs, `when`, the opener, the proposer, a rule's `when`, a retry's first start, a value a rule set | `test_every_approver_is_someone_else` |
+| A withdrawn entry's approvers may approve the entry asked again, counted from nothing | `test_distinct_within_the_entry` |
+| One rejection rejects the entry, whatever was approved, and the run is recorded rejected | `test_one_rejection_rejects_the_whole_approval` |
+| A rejected retry goes back to failed, needing attention, its approvals gone | `test_a_rejected_retry_of_several_approvers_needs_attention` (`tests/test_retry_rejected.py`) |
+| A rejected run a rule started ends the rule's start | `test_a_rejected_run_a_rule_started_ends_its_start` |
+| Someone who rejected may answer a later entry | `test_who_rejected_may_answer_a_later_entry` |
+| A change to a value the step reads, a task answered again, and a rule's `set` withdraw the entry with every approval on it | `test_a_change_withdraws_every_approval` |
+| A refresh that changes a fact withdraws an open entry, or lapses a given one, and a new entry counts from nothing | `test_a_refresh_withdraws_or_lapses_every_approval` (`tests/test_fresh_facts.py`) |
+| A requirement that ended without completing lapses a given approval of several | `test_a_given_approval_of_several_lapses_with_its_requirement` |
+| A stop and a close cancel the entry with every approval on it | `test_a_stop_or_a_close_cancels_every_approval` |
+| An approval of several doesn't clear what steered a run | `test_an_approval_of_several_doesnt_end_what_steered_a_run` (`tests/test_untrusted_moment.py`) |
+| A lapse names every approver | `test_a_lapse_names_every_approver` |
+| The sheet says who has approved and how many more are needed | `test_the_sheet_says_who_has_approved` |
+| A reading says how many approve; with one, as before | `test_a_reading_says_how_many_approve` (`tests/test_reading.py`) |
+| The two stories: two people approve; the second refused as someone excluded | `test_every_story_holds` (`tests/test_simulate.py`; `examples/refund/stories/two-approve.json`, `second-refused.json`) |
+| A half-given approval crosses continue-as-new, and the second approver completes it after | `test_a_half_given_approval_crosses_continue_as_new` (`tests/test_temporal_approvals.py`) |
+| A state carried from before 11h2 reads back as it was | `test_a_state_from_before_11h2_reads_back` (`tests/test_temporal_approvals.py`) |
+| Two approvals in one workflow task are decided in order; the same person twice is refused | `test_two_approvals_in_one_task` (`tests/test_temporal_approvals.py`) |
+| An approval arriving with the close is refused and never counted | `test_an_approval_with_the_close_is_refused` (`tests/test_temporal_approvals.py`) |
+| Histories recorded on `main` replay | `test_histories_from_before_11h2_replay` (`tests/test_temporal_approvals.py`) |
+| `APPROVAL_ROLE` and `APPROVER_CANT_SEE` hold with `count: 2`, and an approver who can't see is refused | `test_the_approval_checks_hold_for_every_approver` |
+| No new line (history, `waiting_for`, sheet, reading, story) quotes a value from the case file | `test_no_approval_line_quotes_a_value_from_the_case_file` |
+| Every decision cited in the code is in the brief, D47 included | `test_every_decision_cited_in_src_is_in_the_brief_and_current` (`tests/test_decisions.py`) |
+| `core` and `case` stay free of the clock, randomness and I/O | `tests/test_layers.py`, as it is |
