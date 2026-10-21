@@ -23,9 +23,9 @@ from test_rules import (
     stale_notify,
     unreadable,
     welcome_file,
+    with_goodwill,
     with_kyc_rule,
     with_rule,
-    with_goodwill,
     with_welcome,
     withdrawable,
 )

@@ -1,0 +1,223 @@
+{
+  "asked": {
+    "case": "memory",
+    "values": {
+      "order_id": "ord-1",
+      "amount": "250",
+      "review.outcome": "approve",
+      "approved_amount": "250"
+    },
+    "sources": {
+      "order_id": [
+        "system:opener"
+      ],
+      "amount": [
+        "system:opener"
+      ],
+      "review.outcome": [
+        "person:ana"
+      ],
+      "approved_amount": [
+        "person:ana"
+      ]
+    },
+    "obtained": {
+      "order_id": {
+        "at": 1767225600,
+        "run": null
+      },
+      "amount": {
+        "at": 1767225600,
+        "run": null
+      },
+      "review.outcome": {
+        "at": 1767225600,
+        "run": null
+      },
+      "approved_amount": {
+        "at": 1767225600,
+        "run": null
+      }
+    },
+    "milestones": [],
+    "refreshing": {},
+    "runs": [
+      {
+        "entry": "review#1",
+        "step": "review",
+        "status": "done",
+        "reason": "",
+        "approved": null,
+        "refresh": false,
+        "excluded": {},
+        "steered": [],
+        "started": true,
+        "stop_requested": ""
+      }
+    ],
+    "approvals": {
+      "pay": {
+        "entry": "pay.approval#1",
+        "step": "pay",
+        "seen": {
+          "approved_amount": "250",
+          "order_id": "ord-1",
+          "review.outcome": "approve"
+        }
+      }
+    },
+    "given": {},
+    "asked": {
+      "pay": 1
+    },
+    "withdrawn": {},
+    "proposers": {},
+    "waiting_to_start": [],
+    "proposed_by_rules": {},
+    "arrived": {},
+    "waiting": {
+      "pay.approval#1": "approval of pay by support-lead"
+    },
+    "opened_by": null,
+    "phase": "open",
+    "closed_because": "",
+    "flags": [],
+    "history": [
+      "opened by system:opener, with amount and order_id",
+      "started review#1: waiting for approve or reject by support",
+      "ana answered review#1 approve as support, setting approved_amount",
+      "review#1 done",
+      "asked pay.approval#1: approval of pay by support-lead"
+    ],
+    "firings": [],
+    "moments": [],
+    "rule_starts": [],
+    "started_by_rules": [],
+    "timers": []
+  },
+  "paid": {
+    "case": "memory",
+    "values": {
+      "order_id": "ord-1",
+      "amount": "250",
+      "review.outcome": "approve",
+      "approved_amount": "250",
+      "pay.outcome": "done",
+      "pay.refund_id": "refund-ord-1"
+    },
+    "sources": {
+      "order_id": [
+        "system:opener"
+      ],
+      "amount": [
+        "system:opener"
+      ],
+      "review.outcome": [
+        "person:ana"
+      ],
+      "approved_amount": [
+        "person:ana"
+      ],
+      "pay.outcome": [
+        "system:payments.refund@2"
+      ],
+      "pay.refund_id": [
+        "untrusted:undeclared"
+      ]
+    },
+    "obtained": {
+      "order_id": {
+        "at": 1767225600,
+        "run": null
+      },
+      "amount": {
+        "at": 1767225600,
+        "run": null
+      },
+      "review.outcome": {
+        "at": 1767225600,
+        "run": null
+      },
+      "approved_amount": {
+        "at": 1767225600,
+        "run": null
+      },
+      "pay.outcome": {
+        "at": 1767225600,
+        "run": "pay#1"
+      },
+      "pay.refund_id": {
+        "at": 1767225600,
+        "run": "pay#1"
+      }
+    },
+    "milestones": [],
+    "refreshing": {},
+    "runs": [
+      {
+        "entry": "review#1",
+        "step": "review",
+        "status": "done",
+        "reason": "",
+        "approved": null,
+        "refresh": false,
+        "excluded": {},
+        "steered": [],
+        "started": true,
+        "stop_requested": ""
+      },
+      {
+        "entry": "pay#1",
+        "step": "pay",
+        "status": "done",
+        "reason": "",
+        "approved": {
+          "entry": "pay.approval#1",
+          "by": "sam",
+          "digest": "6023d6636173d4388642823d78a64ee5812656259b854f2352de493fd2221542",
+          "seen": {
+            "approved_amount": "250",
+            "order_id": "ord-1",
+            "review.outcome": "approve"
+          }
+        },
+        "refresh": false,
+        "excluded": {},
+        "steered": [],
+        "started": true,
+        "stop_requested": ""
+      }
+    ],
+    "approvals": {},
+    "given": {},
+    "asked": {
+      "pay": 1
+    },
+    "withdrawn": {},
+    "proposers": {},
+    "waiting_to_start": [],
+    "proposed_by_rules": {},
+    "arrived": {},
+    "waiting": {},
+    "opened_by": null,
+    "phase": "closed",
+    "closed_because": "",
+    "flags": [],
+    "history": [
+      "opened by system:opener, with amount and order_id",
+      "started review#1: waiting for approve or reject by support",
+      "ana answered review#1 approve as support, setting approved_amount",
+      "review#1 done",
+      "asked pay.approval#1: approval of pay by support-lead",
+      "sam answered pay.approval#1 approve as support-lead",
+      "scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key memory/pay#1",
+      "pay#1 done, giving refund_id from untrusted:undeclared",
+      "closed: nothing left to do"
+    ],
+    "firings": [],
+    "moments": [],
+    "rule_starts": [],
+    "started_by_rules": [],
+    "timers": []
+  }
+}

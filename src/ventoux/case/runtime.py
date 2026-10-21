@@ -643,6 +643,7 @@ def answer_approval(
     """An approval given, tied to the inputs it saw; or a rejection: the step won't run."""
     step = case.steps[approval.step]
     assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
+    assert step.approval is not None  # only a step with an approval is asked for one
     role = judge_approval(case, catalog, state, approval.entry, approval.step, step, event)
     if event.outcome == APPROVE:
         # One entry collects the answers: it stays open until `count` different people have

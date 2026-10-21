@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from test_retry_rejected import DELIVERED, down_once, generated_definition, refund_retried
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_retry_rejected import FILE as RETRIED_FILE
-from test_retry_rejected import DELIVERED, down_once, generated_definition, refund_retried
 from test_rules import APPROVED_40, CHECKED_OK, LEADS, SMALL, WITHDRAWS, with_goodwill, withdrawable
 from test_set import FILE, with_owed
 
@@ -174,7 +174,7 @@ def test_one_person_one_answer_on_an_entry() -> None:
     lee = Answered("pay.approval#1", "approve", "lee", frozenset(PEOPLE["lee"]), at=START)
     after, commands = decide(case, CATALOG, half.state, lee)
     assert after.history[-2] == "lee answered pay.approval#1 approve as support-lead: 2 of 2 given"
-    assert [command.entry for command in commands] == ["pay#1"]  # type: ignore[union-attr]
+    assert [command.entry for command in commands] == ["pay#1"]
     three = run_case(
         four_eyes(count=3), file=LARGE, answers=[REVIEWED, ("pay", "approve", "sam")], people=PEOPLE
     )
@@ -559,12 +559,12 @@ def test_the_sheet_says_who_has_approved() -> None:
     # are as before (brief, D18, D47).
     half = run_case(FOUR_EYES, file=LARGE, answers=HALF, people=PEOPLE)
     sheet = half.approval_sheet("pay.approval#1", ["support-lead"], START)
-    assert sheet.approved_by == ["sam"]
+    assert sheet.approved_by == ("sam",)
     assert sheet.needed == 1
     assert sheet.lines[0].startswith("Amount approved: 12000, obtained")
     none_yet = run_case(FOUR_EYES, file=LARGE, answers=[REVIEWED], people=PEOPLE)
     sheet = none_yet.approval_sheet("pay.approval#1", ["support-lead"], START)
-    assert (sheet.approved_by, sheet.needed) == ([], 2)
+    assert (sheet.approved_by, sheet.needed) == ((), 2)
     plain = load_definition(ROOT / "examples" / "refund" / "refund.json")
     one = run_case(
         plain,
@@ -573,7 +573,7 @@ def test_the_sheet_says_who_has_approved() -> None:
         people=PEOPLE,
     )
     sheet = one.approval_sheet("pay.approval#1", ["support-lead"], START)
-    assert (sheet.approved_by, sheet.needed) == ([], 1)
+    assert (sheet.approved_by, sheet.needed) == ((), 1)
 
 
 GUIDE = (ROOT / "docs" / "guides" / "cases.md").read_text()

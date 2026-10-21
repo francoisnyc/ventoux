@@ -1735,8 +1735,10 @@ def test_a_rejected_retry_of_several_approvers_needs_attention() -> None:
         "attention again"
     ) in run.history
     assert run.needs_attention == [
-        "pay#1: sam rejected pay.approval#1, the approval of its retry: retry it to ask again, or "
-        "close the case"
+        (
+            "pay#1: sam rejected pay.approval#1, the approval of its retry: retry it to ask "
+            "again, or close the case"
+        )
     ]
     again = run_case(
         definition,
