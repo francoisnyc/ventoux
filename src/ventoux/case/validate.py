@@ -20,6 +20,8 @@ from ventoux.case.definition import (
     CaseDefinition,
     PlanStep,
     Reached,
+    ReminderRule,
+    SlaRule,
     Started,
     anchor,
 )
@@ -129,6 +131,34 @@ def validate_case(
                 "proposal is refused: let a step start by itself with nothing required, start one "
                 "from a rule on the opening, or add stays_open",
             ),
+        )
+    return at_patterns(case, found)
+
+
+def at_patterns(case: CaseDefinition, issues: list[Issue]) -> list[Issue]:
+    """Each issue found on a rule a pattern expanded into, pointing back to the pattern as it is
+    written: its moment is the pattern's `sla` or its reminder's ages, a reminder's start its
+    `start`. A reminder's message names the rule it is about, and the reminder (brief, D46)."""
+    found: list[Issue] = []
+    for issue in issues:
+        parts = issue.path.split(".")
+        pattern = case.pattern_of(parts[1]) if parts[0] == "rules" and len(parts) > 1 else None
+        if pattern is None:
+            found.append(issue)
+            continue
+        rule, rest = parts[1], parts[2:]
+        entry = case.written[pattern]
+        if isinstance(entry, SlaRule) and rest[:1] == ["on"]:
+            rest = ["sla"]
+        elif isinstance(entry, ReminderRule) and rest[:1] == ["on"]:
+            rest = ["reminder", "after"]
+        elif isinstance(entry, ReminderRule) and rest[:1] == ["then"]:
+            rest = ["reminder", "start"]
+        message = issue.message
+        if rule != pattern:
+            message = f"{rule}, from the reminder {pattern}: {message}"
+        found.append(
+            Issue(".".join(["rules", pattern, *rest]), issue.code, message, issue.severity)
         )
     return found
 
