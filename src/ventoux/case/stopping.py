@@ -6,6 +6,7 @@ run is never stopped (brief, D17) (brief, D26). See docs/layers/11-rules.md (11c
 """
 
 from ventoux.case.admission import latest_run, requirements_met
+from ventoux.case.approvals import with_given
 from ventoux.case.closing import close_held
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
 from ventoux.case.freshness import stale_facts
@@ -62,7 +63,7 @@ def stop_coming_run(case: CaseDefinition, state: CaseState, name: str, by: str, 
     if approval is not None:
         del state.waiting[approval.entry]
         state.withdrawn[approval.entry] = why  # an answer to it is refused, saying why
-        state.history.append(f"cancelled {approval.entry}: {why}")
+        state.history.append(f"cancelled {approval.entry}: {why}{with_given(approval)}")
     given = state.given.pop(name, None)  # approved, and waiting for its fact: it lapses
     proposed = name in state.waiting_to_start
     if proposed:

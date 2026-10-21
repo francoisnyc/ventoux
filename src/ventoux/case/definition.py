@@ -11,6 +11,7 @@ from typing import Annotated, Any, Literal
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Discriminator,
     Field,
@@ -187,11 +188,22 @@ class ApprovalDisplay(Shape):
     reason: str = Field(min_length=1)
 
 
+def whole_count(value: object) -> object:
+    """A count of people is a whole number of at least 1, written as one: `"2"`, `2.0` and `true`
+    are refused, never read as a number (brief, D47)."""
+    if type(value) is not int or value < 1:
+        raise ValueError("how many people must approve: a whole number of at least 1, such as 2")
+    return value
+
+
 class Approval(Shape):
-    """A person with one of `roles` approves running the step, when `when` holds (brief, D11)."""
+    """`count` different people with one of `roles` approve running the step, when `when` holds
+    (brief, D11) (brief, D47)."""
 
     when: PlanExpression | None = None  # None: every run needs it
-    roles: Roles  # who may approve
+    roles: Roles  # who may approve; every approver holds one of them
+    # Pydantic: a `BeforeValidator` sees the value as written, before Pydantic turns `"2"` into 2.
+    count: Annotated[int, BeforeValidator(whole_count)] = 1  # how many people must approve
     display: ApprovalDisplay
 
 

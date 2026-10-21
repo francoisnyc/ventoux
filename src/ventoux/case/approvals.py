@@ -50,11 +50,27 @@ def ask(state: CaseState, name: str, step: CallStep, why: str | None = None) -> 
     assert step.approval is not None  # only a step with an approval is asked for one
     state.asked[name] = state.asked.get(name, 0) + 1
     entry = f"{name}.approval#{state.asked[name]}"
-    state.approvals[name] = OpenApproval(entry, name, what_it_reads(step, state.values))
+    count = step.approval.count
+    approval = OpenApproval(entry, name, what_it_reads(step, state.values), count)
+    state.approvals[name] = approval
     roles = " or ".join(step.approval.roles)
-    state.waiting[entry] = f"approval of {name} by {roles}"
+    state.waiting[entry] = waiting_line(approval, roles)
+    people = f", from {count} people" if count > 1 else ""
     asked_why = f": {why}" if why is not None else ""
-    state.history.append(f"asked {entry}: approval of {name} by {roles}{asked_why}")
+    state.history.append(f"asked {entry}: approval of {name} by {roles}{people}{asked_why}")
+
+
+def waiting_line(approval: OpenApproval, roles: str) -> str:
+    """How the inbox lists an open approval: `approval of pay by support-lead`, and, when several
+    people approve it, how far it has got: `…: 1 of 2 given`. The same to everyone, naming
+    nobody (brief, D24) (brief, D47)."""
+    line = f"approval of {approval.step} by {roles}"
+    return f"{line}: {tally(approval)}" if approval.count > 1 else line
+
+
+def tally(approval: OpenApproval) -> str:
+    """How many of the people it needs have approved: `1 of 2 given`."""
+    return f"{len(approval.approved)} of {approval.count} given"
 
 
 def what_it_reads(step: CallStep, values: dict[str, object]) -> dict[str, object]:
@@ -129,7 +145,16 @@ def withdraw(state: CaseState, approval: OpenApproval, reason: str) -> None:
     del state.approvals[approval.step]
     del state.waiting[approval.entry]
     state.withdrawn[approval.entry] = reason
-    state.history.append(f"withdrew {approval.entry}: {reason}")
+    state.history.append(f"withdrew {approval.entry}: {reason}{with_given(approval)}")
+
+
+def with_given(approval: OpenApproval) -> str:
+    """What an entry of several approvers had when it was withdrawn or cancelled, every approval
+    on it going with it: `, with 1 of 2 approvals given` (brief, D47). Nothing for one approver,
+    so its line reads as before."""
+    if approval.count == 1:
+        return ""
+    return f", with {len(approval.approved)} of {approval.count} approvals given"
 
 
 def lapsed(state: CaseState, name: str, step: CallStep, given: GivenApproval) -> None:
@@ -142,6 +167,9 @@ def lapsed(state: CaseState, name: str, step: CallStep, given: GivenApproval) ->
     except ExpressionError:
         return  # can't be read: the input check stops the step, saying why
     if now != given.digest:
+        # Every approver is named: each approved values that are gone (brief, D47).
+        *others, last = given.approvers
+        who = f"{', '.join(others)} and {last}" if others else last
         raise StepStopped(
-            f"the inputs of {name} changed since {given.by} approved them: a new approval is needed"
+            f"the inputs of {name} changed since {who} approved them: a new approval is needed"
         )

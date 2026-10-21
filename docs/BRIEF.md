@@ -339,6 +339,9 @@ be erased on request), has size limits, and a second copy of business records go
 - The validator rejects an approval without roles on a high-risk step. Whether anyone eligible
   exists is a staffing fact, not something the validator can know: at runtime, an approval nobody
   eligible can take is shown as blocked, with the reason.
+- **Amended 2026-10-21, by D47** (the text above stands): `count` is built as one entry
+  collecting distinct people's answers, one rejection rejecting it; "shown as blocked" stays
+  unbuilt.
 
 ### D12. A small vocabulary of sources
 
@@ -592,6 +595,8 @@ be erased on request), has size limits, and a second copy of business records go
   approval recorded (D11), the step stops and needs a new decision; it is never run, and never
   sent back to an approval by the engine on its own.
 - **Several approvers (`count=2`) come with the `four_eyes` pattern** (layer 11).
+- **Amended 2026-10-21, by D47** (the text above stands): several approvers are `count` on the
+  approval, not a rule pattern (D46); one rejection rejects the entry, whatever was approved.
 
 ### D24. A waiting case says what it waits for
 
@@ -1611,6 +1616,57 @@ whose text is kept.*
 - **`four_eyes` is not a rule pattern.** No raw rule can add a second approver, and tasks
   standing in for one would neither follow the case file (D25) nor lapse (D11). It is approvals
   by several people, D11's `count`, a new engine capability built as 11h2 (D47, to come).
+
+### D47. Approvals by several people: one entry, distinct people, one rejection rejects it
+
+*Decided 2026-10-21, in layer 11h2. Adds to D11, D23, D24, D25, D26, D27, D33, D40 and D45, whose
+text is kept.*
+
+- **`count` on a step's approval:** `"approval": {"roles": [...], "count": 2, ...}`, how many
+  distinct people must approve before the approval is given. A whole number of at least 1, refused
+  when the definition is read otherwise (`"2"`, `2.0` and `true` included: never read as a number);
+  left out, it is 1, and with 1 nothing is decided, recorded, reported or carried differently.
+  `four_eyes` is the Python builder's name for `count: 2` (layer 14), never a key in the JSON
+  (D46).
+- **One entry collects the answers.** `pay.approval#1` stays open until `count` people have
+  approved it, each *approve* recorded on it in the order it arrived, with the person and the role
+  that let them approve. The one that makes the count gives the approval, carrying every approver
+  in order, and it is spent in that decision (D25). An entry's number still counts the times the
+  step's approval was asked.
+- **Distinct people, each "someone else".** Every answer passes the checks every approval passes,
+  in their order (D23), so each approver is excluded as one is: from the step's inputs or `when`
+  (D11), the opener (D11), the proposer (D25), the people a starting rule's `when` read (D39), a
+  retried run's first start (D26), a value a rule set (D42). Then, last: someone who has already
+  answered the entry is refused, *reject* included: one person, one answer. Distinct within the
+  entry: once an entry is withdrawn and asked again, the count starts from nothing, and those who
+  approved the old one may approve the new one, judging the new values (D25).
+- **One rejection rejects the entry,** whatever was approved before: `count` people must agree,
+  one is enough to refuse (D23). For an ordinary run, or one a rule started (D39), it is an
+  outcome: the run is recorded rejected, and a rule's start is over. A retried run goes back to
+  failed, needing attention (D26, as amended), its approvals gone with the entry. Whoever rejected
+  may answer any later entry: rejecting is a judgement, not a reason to exclude (D11).
+- **What a half-given approval shows.** The history says `asked pay.approval#1: approval of pay by
+  support-lead, from 2 people` and, for each *approve*, `…: 1 of 2 given`; `waiting_for` (D24)
+  says `approval of pay by support-lead: 1 of 2 given`, the same to everyone, naming nobody; the
+  approval sheet says who has approved and how many more are needed; a reading says `by 2 people`
+  (D45). With a count of 1, each is as it was.
+- **Withdrawn, lapsed and cancelled whole.** Whatever withdraws or lapses an approval today (a
+  task answered again, a value the step reads changed, by a person, a rule's `set` or a refresh,
+  a requirement that ended) acts on the entry, so on every approval on it, and its line says how
+  many were given; a stop (D40) and a close (D10) cancel it the same way. Freshness is checked
+  once the count is reached, before the step starts (D33). An approval, by one person or several,
+  doesn't clear what steered a run (D43).
+- **On Temporal,** each answer is a signal, decided one at a time in the order history records;
+  the approvals given on an open entry, and every approver of a given one, cross continue-as-new
+  (D27), and a state carried from before this decision reads as it was. An answer that comes with
+  the close, after it, is refused, never counted.
+- **Set aside:** different roles for different approvers (a list of approvals on a step, a shape
+  of its own), and `count` in a plan's approval state, whose `timeout` would need a meaning for an
+  approval half given (D13, D23).
+- **Nothing about `count` is claimed statically.** Whether enough eligible people exist is a
+  staffing fact (D11), which the engine never looks up (D22). `APPROVAL_ROLE` and
+  `APPROVER_CANT_SEE` are claimed per role, so they hold for every approver. D11's "shown as
+  blocked" stays unbuilt; a count makes it likelier, a known limit.
 
 ### Simplifications adopted
 

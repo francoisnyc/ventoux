@@ -1,0 +1,96 @@
+{
+  "title": "The second approval is refused as someone excluded",
+  "definition": "../refund-four-eyes.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 12000
+  },
+  "people": {
+    "ana": [
+      "support",
+      "support-lead"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ],
+    "lee": [
+      "support-lead"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 0 09:00",
+      "answer": {
+        "step": "review",
+        "outcome": "approve",
+        "by": "ana",
+        "form": {
+          "approved_amount": 12000
+        }
+      }
+    },
+    {
+      "at": "day 0 10:00",
+      "answer": {
+        "step": "pay",
+        "outcome": "approve",
+        "by": "sam"
+      }
+    },
+    {
+      "at": "day 0 11:00",
+      "answer": {
+        "step": "pay",
+        "outcome": "approve",
+        "by": "sam"
+      }
+    },
+    {
+      "at": "day 0 12:00",
+      "answer": {
+        "step": "pay",
+        "outcome": "approve",
+        "by": "ana"
+      }
+    }
+  ],
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support"
+      ],
+      "day 0 09:00": [
+        "ana answers review: approve, with approved_amount",
+        "ana answered review#1 approve as support, setting approved_amount",
+        "review#1 done",
+        "asked pay.approval#1: approval of pay by support-lead, from 2 people"
+      ],
+      "day 0 10:00": [
+        "sam answers pay: approve",
+        "sam answered pay.approval#1 approve as support-lead: 1 of 2 given"
+      ],
+      "day 0 11:00": [
+        "sam answers pay: approve",
+        "refused: sam has already approved pay.approval#1: it needs 1 more person"
+      ],
+      "day 0 12:00": [
+        "ana answers pay: approve",
+        "refused: ana set approved_amount, which pay uses, so cannot approve it"
+      ]
+    },
+    "end": [
+      "status: open",
+      "waiting for: approval of pay by support-lead: 1 of 2 given"
+    ]
+  }
+}

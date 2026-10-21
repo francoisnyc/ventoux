@@ -189,6 +189,75 @@ stops before it is scheduled, even in a definition nobody checked.
 `pay#1`, with its own idempotency key. A *reject* is an outcome: the step doesn't run, and the case
 closes if nothing else is left.
 
+## Several approvers
+
+Some steps need more than one person's approval: "two team leads approve a refund above 10,000".
+`count` on the approval says how many distinct people must approve (brief, D47); left out, it is
+1. The four-eyes refund (`examples/refund/refund-four-eyes.json`) is the refund with:
+
+```json
+"approval": {
+  "when": {">": [{"var": "approved_amount"}, 10000]},
+  "roles": ["support-lead"],
+  "count": 2,
+  "display": {"reason": "Refunds over 10,000 need two team leads"}
+}
+```
+
+`count` is a whole number of at least 1: `0`, `"2"`, `2.0` and `true` are refused when the
+definition is read. The Python builder (layer 14) will call `count: 2` `four_eyes`.
+
+**One entry collects the answers.** The approval is still one act with one entry,
+`pay.approval#1`. It stays open until two different people have approved it; the second approval
+gives it, and the payment is scheduled in the same decision:
+
+```
+asked pay.approval#1: approval of pay by support-lead, from 2 people
+sam answered pay.approval#1 approve as support-lead: 1 of 2 given
+lee answered pay.approval#1 approve as support-lead: 2 of 2 given
+scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key memory/pay#1
+```
+
+Between the two, the case waits for the same entry, saying how far it has got, the same to
+everyone:
+
+```python
+run = run_case(
+    refund_four_eyes,
+    file={"order_id": "ord-1", "amount": 12000},
+    answers=[("review", "approve", "ana", {"approved_amount": 12000}), ("pay", "approve", "sam")],
+    people=PEOPLE,
+)
+assert run.waiting_for == ["approval of pay by support-lead: 1 of 2 given"]
+assert not run.reached("pay")
+assert not run.closed
+```
+
+The approval sheet says who has approved and how many more are needed (`approved_by`,
+`needed`), beside the facts.
+
+**Each approver is someone else.** Every approver passes the checks one approver passes ("Approvals
+in a case", above): the reviewer who set the amount, the person who opened the case and the
+person who proposed the run approve nothing. Then one more: a person answers an entry once.
+Sam answering again, approve or reject, is refused: `sam has already approved pay.approval#1: it
+needs 1 more person`. Once an entry is withdrawn and asked again, the count starts from nothing,
+and Sam may approve the new entry, since he judges new values.
+
+**One rejection rejects it.** Two people must agree, and one is enough to refuse: a *reject* by
+anyone who may answer closes the entry, whatever was approved before (`pay#1 won't run: lee
+rejected pay.approval#1, which 1 of 2 had approved`). A retried run goes back to failed, needing
+attention, as with one approver. Whoever rejected may answer a later entry like anyone.
+
+**Withdrawn whole.** Anything that withdraws an open approval (a review answered again, a value
+`pay` reads changed, by a person, a rule or a refresh) withdraws the entry with every approval on
+it, saying how many there were: `withdrew pay.approval#1: review started again, with 1 of 2
+approvals given`. A rule's stop and a close cancel it the same way. Freshness is checked once the
+count is reached, before the payment starts: a stale fact is fetched again, and a new value
+withdraws the approvals given.
+
+Set aside (brief, D47): different roles for different approvers, and `count` in a plan's approval
+state.
+
 ## What a waiting case reports
 
 A case closes when nothing is left to do (brief, D10). While a task or an approval is open, it

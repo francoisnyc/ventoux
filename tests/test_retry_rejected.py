@@ -1698,3 +1698,53 @@ def test_a_retry_failed_while_its_requirements_refresh_runs_is_shown_and_retried
     again = [*script, retry("pay#1", "omar")]
     run = run_case(definition, FILE, again, PEOPLE, activities=activities, held=["ping"])
     assert run.waiting_for == ["approval of pay by support-lead"]
+
+
+def test_a_rejected_retry_of_several_approvers_needs_attention() -> None:
+    # One rejection of two rejects the retry's approval: the run goes back to failed, as with one
+    # approver, and the approval given before goes with the entry, so the next retry's entry
+    # counts from nothing, and Kim may approve it again (brief, D26, D47).
+    definition = refund_retried()
+    definition["fields"]["limit"] = {"type": "number", "display": {"title": "Limit"}}
+    definition["steps"]["set_limit"] = {
+        "kind": "task",
+        "display": {"title": "Set the limit"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"set": {"display": {"title": "Set"}, "sets": ["limit"]}},
+    }
+    pay = definition["steps"]["pay"]
+    pay |= {"automatic": False, "proposed_by": ["support"]}
+    pay["approval"] |= {"when": {">": [{"var": "approved_amount"}, {"var": "limit"}]}, "count": 2}
+    definition["stays_open"] = True
+    people = {**PEOPLE, "lee": ["support", "support-lead"], "kim": ["support-lead"]}
+    script = [
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        propose("pay", "lee"),  # limit unset: pay#1 fails before it starts
+        propose("set_limit", "ana"),
+        ("set_limit", "set", "ana", {"limit": 100}),
+        retry("pay#1", "omar"),  # asks pay.approval#1
+        ("pay.approval#1", "approve", "kim"),
+        ("pay.approval#1", "reject", "sam"),
+    ]
+    activities = {"payments.refund@2": down_once([])}
+    run = run_case(definition, FILE, script, people, activities=activities)
+    assert (
+        "pay#1 won't run: sam rejected pay.approval#1, which 1 of 2 had approved, so it needs "
+        "attention again"
+    ) in run.history
+    assert run.needs_attention == [
+        (
+            "pay#1: sam rejected pay.approval#1, the approval of its retry: retry it to ask "
+            "again, or close the case"
+        )
+    ]
+    again = run_case(
+        definition,
+        FILE,
+        [*script, retry("pay#1", "omar"), ("pay.approval#2", "approve", "kim")],
+        people,
+        activities=activities,
+    )
+    assert again.waiting_for == ["approval of pay by support-lead: 1 of 2 given"]

@@ -51,7 +51,13 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
             for run in state.runs
         ],
         "approvals": {
-            step: {"entry": open.entry, "step": open.step, "seen": dict(open.seen)}
+            step: {
+                "entry": open.entry,
+                "step": open.step,
+                "seen": dict(open.seen),
+                "count": open.count,
+                "approved": dict(open.approved),  # in the order they approved: JSON keeps it
+            }
             for step, open in state.approvals.items()
         },
         "given": {step: given_as_data(given) for step, given in state.given.items()},
@@ -134,7 +140,20 @@ def steering_from_data(data: dict[str, Any]) -> Steering:
 
 
 def given_as_data(given: GivenApproval) -> dict[str, Any]:
-    return {"entry": given.entry, "by": given.by, "digest": given.digest, "seen": dict(given.seen)}
+    return {
+        "entry": given.entry,
+        "by": given.by,
+        "digest": given.digest,
+        "seen": dict(given.seen),
+        "also": list(given.also),
+    }
+
+
+def given_from_data(data: dict[str, Any]) -> GivenApproval:
+    """A given approval `given_as_data` wrote; one from before 11h2 has no other approvers."""
+    return GivenApproval(
+        data["entry"], data["by"], data["digest"], dict(data["seen"]), tuple(data.get("also", ()))
+    )
 
 
 def state_from_data(data: dict[str, Any]) -> CaseState:
@@ -157,7 +176,7 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
                 run["step"],
                 run["status"],
                 run["reason"],
-                None if run["approved"] is None else GivenApproval(**run["approved"]),
+                None if run["approved"] is None else given_from_data(run["approved"]),
                 run.get("refresh", False),  # none in a state from before layer 9d
                 # None in a state from before layer 11b: no plan run kept what it started on.
                 dict(run.get("excluded", {})),
@@ -171,10 +190,17 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
             for run in data["runs"]
         ],
         approvals={
-            step: OpenApproval(open["entry"], open["step"], dict(open["seen"]))
+            # Neither in a state from before 11h2: every approval was one person's.
+            step: OpenApproval(
+                open["entry"],
+                open["step"],
+                dict(open["seen"]),
+                open.get("count", 1),
+                dict(open.get("approved", {})),
+            )
             for step, open in data["approvals"].items()
         },
-        given={step: GivenApproval(**given) for step, given in data["given"].items()},
+        given={step: given_from_data(given) for step, given in data["given"].items()},
         asked=dict(data["asked"]),
         withdrawn=dict(data["withdrawn"]),
         proposers=dict(data["proposers"]),

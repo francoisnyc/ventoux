@@ -6,6 +6,7 @@ starts; activities already running finish, since a side effect can't be cut off 
 case is **closed**. Something that completes while closing flags the case for a person.
 """
 
+from ventoux.case.approvals import with_given
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.state import CaseState, CloseAsked
 from ventoux.case.timers import cancel_timers
@@ -62,7 +63,9 @@ def begin_closing(state: CaseState, cancelled_because: str, closed_because: str)
     for approval in list(state.approvals.values()):
         del state.approvals[approval.step]
         del state.waiting[approval.entry]
-        state.history.append(f"cancelled {approval.entry}: {cancelled_because}")
+        state.history.append(
+            f"cancelled {approval.entry}: {cancelled_because}{with_given(approval)}"
+        )
     state.given.clear()  # an approval not yet spent starts nothing now
     state.proposers.clear()
     state.proposed_by_rules.clear()

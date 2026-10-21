@@ -1560,3 +1560,55 @@ def test_a_proposal_on_a_stopped_refresh_is_refused_saying_what_to_do() -> None:
         "refresh check_order#2 was stopped by stop_lookup#2, so it counts for nothing; propose "
         "recheck again once check_order#2 has landed"
     )
+
+
+def test_freshness_is_checked_once_the_count_is_reached() -> None:
+    # The user's addition to 11h2 (choice 13a): Sam approves on day 0, Lee on day 3, when the
+    # order's status, needed at most a day old, is stale. Freshness is checked once the count is
+    # reached, before pay starts (brief, D33, D47).
+    definition = refund_fresh()
+    definition["steps"]["pay"]["approval"]["count"] = 2
+    definition["steps"]["pay"]["when"] = {
+        "in": [{"var": "check_order.status"}, ["delivered", "partly returned"]]
+    }
+    leads = {**PEOPLE, "lee": ["support-lead"]}
+    two = [REVIEWED_LARGE, ("pay", "approve", "sam"), later("3d"), ("pay", "approve", "lee")]
+    # A refresh that changes the fact lapses the approval with both approvals on it, and a new
+    # entry counts from nothing.
+    changed = run_case(
+        definition,
+        file=LARGE,
+        answers=two,
+        people=leads,
+        activities={"orders.lookup@2": answers_in_turn("delivered", "partly returned")},
+    )
+    lapsed = changed.history.index(
+        "lapsed pay.approval#1: check_order.status changed when refreshed"
+    )
+    asked = "asked pay.approval#2: approval of pay by support-lead, from 2 people"
+    assert changed.history.index(asked) > lapsed
+    assert changed.waiting_for == ["approval of pay by support-lead: 0 of 2 given"]
+    assert not changed.reached("pay")
+    # A refresh that changes nothing leaves both approvals standing, and pay runs.
+    unchanged = run_case(
+        definition,
+        file=LARGE,
+        answers=two,
+        people=leads,
+        activities={"orders.lookup@2": answers_in_turn("delivered", "delivered")},
+    )
+    assert "scheduled check_order#2: orders.lookup@2 (order_id from system:opener)" in (
+        unchanged.history
+    )
+    assert not any(line.startswith(("lapsed", "withdrew")) for line in unchanged.history)
+    assert unchanged.reached("pay")
+    # A fact nothing can fetch again (a person's answer) leaves the step needing attention.
+    definition["steps"]["pay"]["max_age"] = {"approved_amount": "1d"}
+    stale = run_case(definition, file=LARGE, answers=two, people=leads)
+    assert stale.needs_attention == [
+        (
+            "pay#1: approved_amount was obtained 3 days ago, and pay needs it at most 1 day old: "
+            "it came from a person, so it can't be fetched again"
+        )
+    ]
+    assert not stale.reached("pay")
