@@ -229,3 +229,17 @@ def test_a_source_is_written_on_its_field() -> None:
     with pytest.raises(PlanInvalid) as refused:
         parse_plan(plan)
     assert str(refused.value) == "sources: not a field here: write each source on its field"
+
+
+def test_a_plans_approval_takes_no_count() -> None:
+    # Approvals by several people are a case's, not a plan's: a plan's approval moves on at its
+    # timeout, which would need a meaning for an approval half given (brief, D47).
+    plan = copy.deepcopy(REFUND_PAY)
+    plan["initial"] = "approve_refund"
+    plan["states"]["approve_refund"] = {
+        "approval": {"of": "pay", "roles": ["support-lead"], "count": 2},
+        "on": {"approve": "pay", "reject": "failed"},
+    }
+    with pytest.raises(PlanInvalid) as refused:
+        parse_plan(plan)
+    assert str(refused.value) == "states.approve_refund.approval.count: not a field here"
