@@ -43,7 +43,7 @@ review of 11g1"). 11g2: started 2026-10-20 once #33 merged; the warm-up put and 
 open; three points put, answered "build 11g2 now, as decided" the same day (see 11g, "Before
 building 11g2"); built, slices 1–7, and the Promises table checked against the tests, the same
 day (see 11g, "Decided while building 11g2"). 11h: started 2026-10-20 once #34 merged; the
-warm-up (learning question 14) put; 11h explained, probed with runs, and eighteen choices put
+warm-up (learning question 14) put, and answered 2026-10-21; 11h explained, probed with runs, and eighteen choices put
 with a recommendation each, two of them needing a new engine capability and one splitting 11h
 in two, recorded as a draft awaiting answers.
 
@@ -2905,7 +2905,8 @@ a pattern can do nothing raw rules can't, so these are put as choices, not hidde
 
 ### The warm-up
 
-Learning question 14 (open since the tracer; last retrieved in 9c), put to be answered from
+Learning question 14 (open since the tracer; last retrieved in 9c), answered 2026-10-21 (recorded
+in the log: the core came back; the opener and the test's three assertions didn't). Put to be answered from
 memory, before anything else:
 
 > In the quickstart, the reviewer approves a 250 refund. Which person can approve the payment, and
