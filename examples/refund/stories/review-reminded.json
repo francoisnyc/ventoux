@@ -1,0 +1,97 @@
+{
+  "title": "A review left open is reminded of twice, and the answer ends the third reminder",
+  "definition": "../refund-reminded.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1 10:00",
+      "answer": {
+        "step": "remind",
+        "outcome": "reminded",
+        "by": "sam"
+      }
+    },
+    {
+      "at": "day 2 10:00",
+      "answer": {
+        "step": "remind",
+        "outcome": "reminded",
+        "by": "sam"
+      }
+    },
+    {
+      "at": "day 3 09:00",
+      "answer": {
+        "step": "review",
+        "outcome": "approve",
+        "by": "ana",
+        "form": {
+          "approved_amount": 40
+        }
+      }
+    }
+  ],
+  "until": "day 5",
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support",
+        "set remind_review_1d: 1d after started review#1, due 2026-01-02T00:00:00Z",
+        "set remind_review_2d: 2d after started review#1, due 2026-01-03T00:00:00Z",
+        "set remind_review_4d: 4d after started review#1, due 2026-01-05T00:00:00Z"
+      ],
+      "day 1 00:00": [
+        "remind_review_1d#1 on 1d after started review#1: starting remind",
+        "started remind#1: waiting for reminded by support-lead"
+      ],
+      "day 1 10:00": [
+        "sam answers remind: reminded",
+        "sam answered remind#1 reminded as support-lead",
+        "remind#1 done"
+      ],
+      "day 2 00:00": [
+        "remind_review_2d#1 on 2d after started review#1: starting remind",
+        "started remind#2: waiting for reminded by support-lead"
+      ],
+      "day 2 10:00": [
+        "sam answers remind: reminded",
+        "sam answered remind#2 reminded as support-lead",
+        "remind#2 done"
+      ],
+      "day 3 09:00": [
+        "ana answers review: approve, with approved_amount",
+        "ana answered review#1 approve as support, setting approved_amount",
+        "review#1 done",
+        "scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key story/pay#1",
+        "cancelled remind_review_4d, 4d after started review#1: review#1 is done",
+        "pay#1 done, giving refund_id from untrusted:undeclared",
+        "closed: nothing left to do"
+      ]
+    },
+    "end": [
+      "status: closed",
+      "nothing pending"
+    ]
+  }
+}
