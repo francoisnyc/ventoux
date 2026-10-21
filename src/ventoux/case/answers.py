@@ -4,8 +4,9 @@ Every answer is judged the same way, in the same order, with `core`'s checks, as
 (brief, D23). The runtime checks the first two: the person is written as an identifier, and the
 entry is open. Then: the outcome is offered, the person has a role it names, the form fits. An
 approval adds its own checks last: the role may approve the activity's risk, the person sees every
-value the step reads (brief, D30), and the person is someone else: not the opener, not the
-proposer, and not whoever's answer feeds the step (brief, D11).
+value the step reads (brief, D30), the person is someone else: not the opener, not the proposer,
+and not whoever's answer feeds the step (brief, D11); and, last, they haven't already approved the
+entry (brief, D47).
 """
 
 from collections.abc import Mapping
@@ -98,6 +99,15 @@ def judge_approval(
     if latest is not None and latest.status == "retrying" and answer.by in latest.excluded:
         raise AnswerRefused(latest.excluded[answer.by])
     refuse_unless(someone_else(case, state.sources, answer.by, name, step))
+    # Last: one person answers an entry once, so `count` approvals are `count` people's
+    # (brief, D47).
+    approved = state.approvals[name].approved
+    if answer.by in approved:
+        more = step.approval.count - len(approved)
+        people = "person" if more == 1 else "people"
+        raise AnswerRefused(
+            f"{answer.by} has already approved {entry}: it needs {more} more {people}"
+        )
     return approver
 
 

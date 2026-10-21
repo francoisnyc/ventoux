@@ -11,8 +11,16 @@ from typing import Any
 
 import pytest
 
+# pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
+from test_retry_rejected import FILE as RETRIED_FILE
+from test_retry_rejected import down_once, refund_retried
+from test_rules import APPROVED_40, CHECKED_OK, LEADS, SMALL, with_goodwill
+from test_set import FILE, with_owed
+
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.testing import load_definition, run_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import Answered
+from ventoux.testing import CATALOG, START, AnswerRefused, load_definition, propose, retry, run_case
 
 ROOT = Path(__file__).parent.parent
 FOUR_EYES = load_definition(ROOT / "examples" / "refund" / "refund-four-eyes.json")
@@ -62,7 +70,9 @@ REVIEWED = ("review", "approve", "ana", {"approved_amount": 12000})
 
 
 def test_one_approval_of_two_starts_nothing() -> None:
-    run = run_case(FOUR_EYES, file=LARGE, answers=[REVIEWED, ("pay", "approve", "sam")], people=PEOPLE)
+    run = run_case(
+        FOUR_EYES, file=LARGE, answers=[REVIEWED, ("pay", "approve", "sam")], people=PEOPLE
+    )
     # The warm-up's three assertions, with the count (learning question 14) (brief, D24).
     assert run.waiting_for == ["approval of pay by support-lead: 1 of 2 given"]
     assert not run.reached("pay")
@@ -80,7 +90,9 @@ def test_the_second_approval_starts_the_step() -> None:
         answers=[REVIEWED, ("pay", "approve", "sam"), ("pay.approval#1", "approve", "lee")],
         people=PEOPLE,
     )
-    asked = run.history.index("asked pay.approval#1: approval of pay by support-lead, from 2 people")
+    asked = run.history.index(
+        "asked pay.approval#1: approval of pay by support-lead, from 2 people"
+    )
     assert run.history[asked : asked + 4] == [
         "asked pay.approval#1: approval of pay by support-lead, from 2 people",
         "sam answered pay.approval#1 approve as support-lead: 1 of 2 given",
@@ -128,3 +140,154 @@ def test_a_count_of_one_changes_nothing() -> None:
         )
         assert "sam answered pay.approval#1 approve as support-lead" in paid.history
         assert paid.reached("pay")
+
+
+# --- Slice 3: distinct people, each someone else ---
+
+
+def test_one_person_one_answer_on_an_entry() -> None:
+    # Sam has approved: a second answer of his, approve or reject, is refused, and the entry is
+    # unchanged, so Lee's approval still makes the count (brief, D47).
+    half = run_case(
+        FOUR_EYES, file=LARGE, answers=[REVIEWED, ("pay", "approve", "sam")], people=PEOPLE
+    )
+    case = parse_case(FOUR_EYES)
+    for outcome in ("approve", "reject"):
+        again = Answered("pay.approval#1", outcome, "sam", frozenset(PEOPLE["sam"]), at=START)
+        with pytest.raises(
+            AnswerRefused, match="^sam has already approved pay.approval#1: it needs 1 more person$"
+        ):
+            decide(case, CATALOG, half.state, again)
+    lee = Answered("pay.approval#1", "approve", "lee", frozenset(PEOPLE["lee"]), at=START)
+    after, commands = decide(case, CATALOG, half.state, lee)
+    assert after.history[-2] == "lee answered pay.approval#1 approve as support-lead: 2 of 2 given"
+    assert [command.entry for command in commands] == ["pay#1"]  # type: ignore[union-attr]
+    three = run_case(
+        four_eyes(count=3), file=LARGE, answers=[REVIEWED, ("pay", "approve", "sam")], people=PEOPLE
+    )
+    with pytest.raises(
+        AnswerRefused, match="^sam has already approved pay.approval#1: it needs 2 more people$"
+    ):
+        decide(parse_case(four_eyes(count=3)), CATALOG, three.state, again)
+
+
+def refused(
+    definition: dict[str, Any], answers: list[Any], people: dict[str, list[str]], **more: Any
+) -> str:
+    """Why the last answer of `answers` was refused."""
+    with pytest.raises(AnswerRefused) as refusal:
+        run_case(definition, answers=answers, people=people, **more)
+    return str(refusal.value)
+
+
+def proposed_four_eyes() -> dict[str, Any]:
+    """The four-eyes refund, whose payment a team lead proposes."""
+    definition = four_eyes()
+    definition["steps"]["pay"] |= {"automatic": False, "proposed_by": ["support-lead"]}
+    definition["stays_open"] = True  # nothing else keeps it open while pay waits to be proposed
+    definition["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate"}, "roles": ["support"]}
+    }
+    return definition
+
+
+def test_every_approver_is_someone_else() -> None:
+    # The second approver passes every check the first does: D11's exclusions hold for each
+    # (brief, D11, D25, D26, D39, D42, D47).
+    first = ("pay", "approve", "sam")
+    leads = {**PEOPLE, "ana": ["support", "support-lead"]}
+    # Whoever's answer flows into the step's inputs.
+    assert refused(FOUR_EYES, [REVIEWED, first, ("pay", "approve", "ana")], leads, file=LARGE) == (
+        "ana set approved_amount, which pay uses, so cannot approve it"
+    )
+    # The person who opened the case.
+    assert refused(
+        FOUR_EYES, [REVIEWED, first, ("pay", "approve", "kim")], PEOPLE, file=LARGE, opened_by="kim"
+    ) == ("kim opened the case, so cannot approve its steps")
+    # The person who proposed the run.
+    assert refused(
+        proposed_four_eyes(),
+        [REVIEWED, propose("pay", "kim"), first, ("pay", "approve", "kim")],
+        PEOPLE,
+        file=LARGE,
+    ) == ("kim proposed pay, so cannot approve it")
+    # Whoever's answer the condition of the rule that started it read.
+    goodwill = with_goodwill(CHECKED_OK)
+    goodwill["steps"]["goodwill"]["approval"]["count"] = 2
+    checked = [APPROVED_40, ("lead_check", "ok", "sam")]
+    assert refused(
+        goodwill,
+        [
+            *checked,
+            ("goodwill.approval#1", "approve", "lee"),
+            ("goodwill.approval#1", "approve", "sam"),
+        ],
+        LEADS,
+        file=SMALL,
+    ) == (
+        "sam set lead_check.outcome, which decided that start_goodwill#1 started goodwill, so "
+        "cannot approve it"
+    )
+    # Whoever's answer is in a value a rule set.
+    owed = with_owed()
+    owed["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    owed["steps"]["pay"]["approval"]["count"] = 2
+    big = ("review", "approve", "sam", {"approved_amount": 500})
+    assert refused(
+        owed, [big, ("pay", "approve", "lee"), ("pay", "approve", "sam")], PEOPLE, file=FILE
+    ) == ("sam's answer is in owed, which a rule computes and pay uses, so cannot approve it")
+    # A retried run: whoever its first start excluded (the retry fix's scenario, with two).
+    retried = refund_retried()
+    retried["fields"]["limit"] = {"type": "number", "display": {"title": "Limit"}}
+    retried["steps"]["set_limit"] = {
+        "kind": "task",
+        "display": {"title": "Set the limit"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"set": {"display": {"title": "Set"}, "sets": ["limit"]}},
+    }
+    pay = retried["steps"]["pay"]
+    pay |= {"automatic": False, "proposed_by": ["support"]}
+    pay["approval"] |= {"when": {">": [{"var": "approved_amount"}, {"var": "limit"}]}, "count": 2}
+    retried["stays_open"] = True
+    operators = {**PEOPLE, "lee": ["support", "support-lead"], "omar": ["operations"]}
+    script = [
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        propose("pay", "lee"),  # limit unset: pay#1 fails before it starts
+        propose("set_limit", "ana"),
+        ("set_limit", "set", "ana", {"limit": 100}),
+        retry("pay#1", "omar"),  # asks pay.approval#1
+        ("pay.approval#1", "approve", "kim"),
+        ("pay.approval#1", "approve", "lee"),
+    ]
+    assert refused(
+        retried, script, operators, file=RETRIED_FILE, activities={"payments.refund@2": down_once([])}
+    ) == ("lee proposed pay, so cannot approve it")
+
+
+def test_distinct_within_the_entry() -> None:
+    # Once the entry is withdrawn, the count starts from nothing, and Sam may approve the new
+    # entry: he judges the new values (brief, D25, D47).
+    definition = four_eyes()
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[
+            REVIEWED,
+            ("pay", "approve", "sam"),
+            propose("review", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 15000}),
+            ("pay", "approve", "sam"),
+            ("pay", "approve", "lee"),
+        ],
+        people=PEOPLE,
+    )
+    assert (
+        "withdrew pay.approval#1: review started again, with 1 of 2 approvals given" in run.history
+    )
+    assert "asked pay.approval#2: approval of pay by support-lead, from 2 people" in run.history
+    assert "sam answered pay.approval#2 approve as support-lead: 1 of 2 given" in run.history
+    assert "lee answered pay.approval#2 approve as support-lead: 2 of 2 given" in run.history
+    assert run.reached("pay")

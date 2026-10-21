@@ -145,7 +145,16 @@ def withdraw(state: CaseState, approval: OpenApproval, reason: str) -> None:
     del state.approvals[approval.step]
     del state.waiting[approval.entry]
     state.withdrawn[approval.entry] = reason
-    state.history.append(f"withdrew {approval.entry}: {reason}")
+    state.history.append(f"withdrew {approval.entry}: {reason}{with_given(approval)}")
+
+
+def with_given(approval: OpenApproval) -> str:
+    """What an entry of several approvers had when it was withdrawn or cancelled, every approval
+    on it going with it: `, with 1 of 2 approvals given` (brief, D47). Nothing for one approver,
+    so its line reads as before."""
+    if approval.count == 1:
+        return ""
+    return f", with {len(approval.approved)} of {approval.count} approvals given"
 
 
 def lapsed(state: CaseState, name: str, step: CallStep, given: GivenApproval) -> None:
