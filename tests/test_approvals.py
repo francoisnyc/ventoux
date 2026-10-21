@@ -262,7 +262,11 @@ def test_every_approver_is_someone_else() -> None:
         ("pay.approval#1", "approve", "lee"),
     ]
     assert refused(
-        retried, script, operators, file=RETRIED_FILE, activities={"payments.refund@2": down_once([])}
+        retried,
+        script,
+        operators,
+        file=RETRIED_FILE,
+        activities={"payments.refund@2": down_once([])},
     ) == ("lee proposed pay, so cannot approve it")
 
 
@@ -290,4 +294,81 @@ def test_distinct_within_the_entry() -> None:
     assert "asked pay.approval#2: approval of pay by support-lead, from 2 people" in run.history
     assert "sam answered pay.approval#2 approve as support-lead: 1 of 2 given" in run.history
     assert "lee answered pay.approval#2 approve as support-lead: 2 of 2 given" in run.history
+    assert run.reached("pay")
+
+
+# --- Slice 4: one rejection rejects it ---
+
+
+def test_one_rejection_rejects_the_whole_approval() -> None:
+    # Two must agree, and one is enough to refuse, whatever was approved before (brief, D23, D47).
+    run = run_case(
+        FOUR_EYES,
+        file=LARGE,
+        answers=[REVIEWED, ("pay", "approve", "sam"), ("pay", "reject", "lee")],
+        people=PEOPLE,
+    )
+    assert run.history[-3:] == [
+        "lee answered pay.approval#1 reject as support-lead",
+        "pay#1 won't run: lee rejected pay.approval#1, which 1 of 2 had approved",
+        "closed: nothing left to do",
+    ]
+    assert not run.reached("pay")
+    first = run_case(
+        FOUR_EYES, file=LARGE, answers=[REVIEWED, ("pay", "reject", "lee")], people=PEOPLE
+    )
+    assert "pay#1 won't run: lee rejected pay.approval#1" in first.history
+
+
+def test_a_rejected_run_a_rule_started_ends_its_start() -> None:
+    # As an ordinary run: recorded rejected, and what the rule's start kept ends with it
+    # (brief, D39, D47).
+    goodwill = with_goodwill(CHECKED_OK)
+    goodwill["steps"]["goodwill"]["approval"]["count"] = 2
+    run = run_case(
+        goodwill,
+        file=SMALL,
+        answers=[
+            APPROVED_40,
+            ("lead_check", "ok", "sam"),
+            ("goodwill.approval#1", "approve", "lee"),
+            ("goodwill.approval#1", "reject", "kim"),
+        ],
+        people={**LEADS, "kim": ["support-lead"]},
+    )
+    assert "goodwill#1 won't run: kim rejected goodwill.approval#1, which 1 of 2 had approved" in (
+        run.history
+    )
+    assert "goodwill" not in run.state.proposed_by_rules
+    assert not run.needs_attention
+
+
+def test_who_rejected_may_answer_a_later_entry() -> None:
+    # Rejecting is a judgement, not a reason to exclude (brief, D11, D47): Lee rejects the first
+    # entry, and approves the one asked for the payment proposed again.
+    definition = four_eyes()
+    definition["steps"]["pay"] |= {"repeatable": True, "proposed_by": ["support"]}
+    definition["stays_open"] = True  # so the payment can be proposed again after the rejection
+    definition["close_reasons"] = {"done": {"display": {"title": "Done"}, "roles": ["support"]}}
+    # The rejected entry is closed: nobody answers it again.
+    with pytest.raises(AnswerRefused, match="^pay.approval#1 is closed$"):
+        run_case(
+            definition,
+            file=LARGE,
+            answers=[REVIEWED, ("pay", "reject", "lee"), ("pay.approval#1", "approve", "sam")],
+            people=PEOPLE,
+        )
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[
+            REVIEWED,
+            ("pay", "reject", "lee"),
+            propose("pay", "ana"),
+            ("pay", "approve", "lee"),
+            ("pay", "approve", "sam"),
+        ],
+        people=PEOPLE,
+    )
+    assert "lee answered pay.approval#2 approve as support-lead: 1 of 2 given" in run.history
     assert run.reached("pay")

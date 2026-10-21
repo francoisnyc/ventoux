@@ -672,6 +672,10 @@ def answer_approval(
             approval.entry, first, digest, approval.seen, tuple(others)
         )
         return
+    # One rejection rejects the entry, whatever was approved before (brief, D23) (brief, D47).
+    rejected = f"{event.by} rejected {approval.entry}"
+    if approval.approved:
+        rejected += f", which {len(approval.approved)} of {approval.count} had approved"
     latest = latest_run(state, approval.step)
     if latest is not None and latest.status == "retrying":
         # A rejected rescue resolves nothing: the failed run may or may not have acted, so it
@@ -681,16 +685,13 @@ def answer_approval(
             f"{event.by} rejected {approval.entry}, the approval of its retry: retry it to ask "
             "again, or close the case"
         )
-        state.history.append(
-            f"{latest.entry} won't run: {event.by} rejected {approval.entry}, so it needs "
-            "attention again"
-        )
+        state.history.append(f"{latest.entry} won't run: {rejected}, so it needs attention again")
         return
     # A rejection is an outcome: the step doesn't run (brief, D23).
     entry = next_entry(state, approval.step)
     proposal_spent(state, approval.step)  # the proposed run is over
     state.runs.append(StepRun(entry, approval.step, "rejected", started=False))
-    state.history.append(f"{entry} won't run: {event.by} rejected {approval.entry}")
+    state.history.append(f"{entry} won't run: {rejected}")
 
 
 def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Completed) -> None:
