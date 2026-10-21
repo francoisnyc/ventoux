@@ -852,8 +852,19 @@ and record the key points. A question is closed once you can explain the answer 
   One sharpening, new since 11a: a milestone is not a value a condition can read (brief, D35),
   so "not assessed" is written over what the assessment gives (its outcome), and how a timer's
   condition says it exactly is 11e's to decide.
-- Status: open. The timer is solid now; the question stays in the rotation until the *if* and
-  replay come back too.
+- Retrieval (layer 11 walk-through warm-up, 2026-10-21), the follow-up: "when a claim is open, if
+  5 days have passed since it opened then escalate. The time comes from the event registered
+  when reaching claim. Temporal uses the event time stamps during replay, not time."
+  - **Came back:** the time comes from an event, never a clock: the timer is set in the decision
+    that handles the opening, due at that event's time plus `5d`, and fires as an event stamped
+    with its due time (brief, D44; `set_timer` and `next_due` in `case/timers.py`). Replay reads
+    the same stamps from history, so it decides the same way.
+  - **Didn't:** the 5 days went into the *if*; it is the *when*, a moment of its own:
+    `"on": {"after": "5d", "since": "opened"}`. And the *if* is the point of the rule: the claim
+    is **not yet assessed**, read on the case file at the firing (D38), over what the assessment
+    gives. Without it, every claim escalates on day 5, even one assessed on day 2. "When a claim
+    is open" needs no condition: any close ends every timer (D44).
+- Status: open, until the *if* (not yet assessed) comes back in its place.
 
 
 ## 33. Layer 3: why plans can be checked and code can't
