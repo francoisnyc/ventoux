@@ -45,7 +45,9 @@ building 11g2"); built, slices 1–7, and the Promises table checked against the
 day (see 11g, "Decided while building 11g2"). 11h: started 2026-10-20 once #34 merged; the
 warm-up (learning question 14) put, and answered 2026-10-21; 11h explained, probed with runs, and eighteen choices put
 with a recommendation each, two of them needing a new engine capability and one splitting 11h
-in two, recorded as a draft awaiting answers; answered by number, 2026-10-21 (see 11h).
+in two, recorded as a draft awaiting answers; answered by number, 2026-10-21 (see 11h); D46, row 33 and the guide's "Patterns" written,
+11h1 built, slices 0–7, and its Promises table checked against the tests, the same day (see 11h,
+"Decided while building 11h1").
 
 ## What this layer is for
 
@@ -3170,73 +3172,131 @@ the repository). Each becomes a test or a story when built.
     continue-as-new; it deserves its own review. The alternative, one pull request, mixes a
     format change with a runtime one.
 
-### Where the code goes (11h1)
+### Where the code went (11h1)
 
-- `case/patterns.py` (new): the `sla` and `reminder` shapes, `expand`, the names.
-- `case/definition.py`: a rule entry is a raw rule or a pattern; the definition keeps both.
-- `case/reading.py`: `read_patterns`.
-- `case/validate.py`, `case/warnings.py`: paths at the pattern; `NEVER_FIRES` extended (if 16);
-  `TIMER_ON_FIRST_START` (if 14).
-- `case/simulate.py`: each pattern's reading, and beside its rules' firings.
-- `examples/claim/` (new): a claim with `assess` and an `sla`, D7's story; `examples/refund/`: a
-  refund with a reminder, and its story; `examples/witnesses/`: the warning's and the extended
-  error's stories.
-- `docs/guides/cases.md`: "Patterns"; the brief: D46.
+- `case/definition.py`: the pattern shapes (`Sla`, `SlaRule`, `Reminder`, `ReminderRule`), an
+  entry of `rules` picked as a raw rule or a pattern (`AnyRule`), `expanded`, and the refusals;
+  `written` holds `rules` as written, and `rules` and `pattern_of` are worked out from it. Not
+  a module of its own: the definition's type names the pattern shapes, and a `patterns` module
+  importing the rule shapes back would be a circle.
+- `case/reading.py`: `PatternReading`, `read_patterns`.
+- `case/simulate.py`: each pattern's reading above its rules', and beside its rules' firings.
+- `case/validate.py`: `at_patterns`, `closed_before` and `never_acts` (`NEVER_FIRES` extended).
+- `case/warnings.py`: `first_start_issues` (`TIMER_ON_FIRST_START`).
+- `examples/claim/` (new): the claim with its sla, and D7's story; `examples/refund/`: the
+  refund with a reminder, and its story; `examples/checks/` (new): the warning's and the
+  extended error's definitions and stories.
+- `docs/guides/cases.md`: "Patterns"; `NEVER_FIRES`'s row in "Rules". The brief: D46 and D7's
+  amendment line. `docs/layers/checkpoint-doors.md`: row 33.
 
 ### Not in 11h1
 
-- Approvals by several people, and `four_eyes` (11h2, if 9a); the builder's `four_eyes` (layer
-  14).
-- `since=first_start` (if 6a), an `every` key, a reminder of an approver.
-- A warning on untrusted data deciding what doesn't happen (the checkpoint).
+- Approvals by several people, and `four_eyes` (11h2); the builder's `four_eyes` (layer 14).
+- `since=first_start`, an `every` key, a reminder of an approver (D46).
+- A warning on untrusted data deciding what doesn't happen (the checkpoint, row 33).
 - `ventoux check` as a command, and the case map (layer 14); the diff (layer 13).
 
 ### Seams the tests use
 
-- `parse_case(d)`: the expanded rules, the definition read back as written, and refusals.
+- `parse_case(d)`: `rules`, `written`, `pattern_of`, and refusals.
 - `validate_case(parse_case(d), CATALOG)`: each issue's code, path and message.
 - `read_rules`, `read_patterns`: each text.
+- `run_case(...)`: the run that shows each issue true.
 - `simulate(story, definition, CATALOG)` and the stories under `examples/`.
 
-### Slices, in order (11h1)
+### Slices, as built
 
-Each starts with its negative test, seen failing for the right reason.
+Each started with its negative test, seen failing for the right reason, or, where noted, checked
+by mutation.
 
-0. D46, the guide's "Patterns", and this note's answers.
-1. A rule entry that is a pattern: negative, an entry neither raw nor a known pattern, and a
-   pattern's own field misspelt; then the definition read back as written.
-2. `sla`: negative, a step it doesn't name, an age under a minute; its exact expansion; its
-   story.
-3. `reminder`: negative, not a task, a step not repeatable, two ages the same time, a name that
-   clashes; its expansions; its story.
-4. Readings and simulations: each pattern's sentence, and beside its rules' firings.
-5. Every check that reads rules, on expanded rules, its path at the pattern (choice 13).
-6. The warnings: `TIMER_ON_FIRST_START` with its story; `NEVER_FIRES` extended with its story.
-7. The guide, run as written, and the Promises table checked against the tests.
+0. The answers in this note, D46 and D7's amendment, checkpoint row 33.
+1. A rule entry that is a pattern: an entry neither raw nor a pattern, a pattern's own field
+   misspelt; then the expansion, kept beside what is written, in the order written.
+2. `sla`: a step it doesn't name, an age under a minute or malformed; its exact expansion; D7's
+   story (`examples/claim/stories/assess-restarts.json`).
+3. `reminder`: not a task, a step that isn't one or isn't repeatable, two ages the same time, no
+   age, a `then`, a name that clashes; its expansions; its story
+   (`examples/refund/stories/review-reminded.json`).
+4. Readings and simulations: each pattern's sentence, above its rules' and beside their firings;
+   a pattern the reader doesn't know refused.
+5. Every check that reads rules, on expanded rules, at the pattern, each with a run.
+6. `TIMER_ON_FIRST_START` and `NEVER_FIRES` extended, each with its story under
+   `examples/checks/stories/`.
+7. The guide's "Patterns", run as written, and the Promises table checked against the tests.
 
-### Promises (draft, 11h1; each test named before it is written)
+### Decided while building 11h1
+
+- **`rules` is worked out from what is written each time it is read** (slice 5), not kept beside
+  it. A first version expanded once into a private attribute; an 11a test that builds a
+  definition with `model_copy` then ran on the old rules, since a copy runs no validator: a
+  definition whose `written` and `rules` disagreed, failing open. Worked out each time, they
+  can't. That test now updates `written`, the field's new name (`rules` is its name in the
+  JSON); its subject, an unknown moment refused, is unchanged.
+- **A pattern that can't expand stops the reading there** (slice 3): its own problem is said, and
+  the definition's other checks aren't, as they would read rules the pattern can't give (a step
+  only it starts would also be "never started": one cause, one issue).
+- **No dump of a definition**: Ventoux never writes one back (its shapes are picked from data),
+  so "reads back as written" became "keeps each pattern as written, beside its expansion".
+- **An issue's path at the pattern** (slice 5): its moment at `sla` or `reminder.after`, a
+  reminder's start at `reminder.start`, its `when` at `when`; a reminder's message is prefixed
+  `remind_review_1d, from the reminder remind_review:`. An sla's rule has the pattern's name, so
+  its message needed nothing.
+- **`CLOSES_AT_OPENING` with an sla** (slice 5): choice 13 put it as "an sla on a step started as
+  the case opens". What holds is the reverse: an sla's timer is set only as a run starts, so it
+  never keeps a case open at its opening, and a case whose steps all wait to be proposed still
+  closes at once. The test shows that.
+- **`SET_AFTER` isn't claimed of an sla's `when`, only `MAY_BE_UNSET`**: D44 reads a timer as
+  firing at its moment, which claims less, as for any timer.
+- **`NEVER_FIRES`'s advice is "fire it on another moment", never "write it before"** (slice 6).
+  A rule written *before* the closing one acts first only for what acts at once (a stop, a set,
+  a reach): its start is a proposal admission decides after the moment's rules, by when the case
+  is closing (`goodbye not started: withdrawn is reached`). **Found, not fixed:** that start is
+  refused every time, and `NEVER_STARTS` doesn't claim it. It is an unclaimed proof, not a false
+  one, so it is left for its own fix rather than widening 11h1.
+- **The closing rule's moment is never a run's start, nor a timer** (slice 6): a start may be
+  steered, and then the closing rule reaches nothing and the rule after it acts (the test runs
+  it: `note_it` sets its field); a timer's firing is its own rule's moment and no other's.
+- **Checked by mutation**, each failing its test and passing with the code put back: the
+  repeatable refusal, the same-time refusal, the sla's step, the clash, the entry-level message;
+  each condition of the closing rule (no `when`, no `set`, not a start, written before); the
+  first-start warning's repeatable and start conditions. Two survived at first (the closer on a
+  start, a milestone reached on an answer), and got their tests.
+
+### Promises
+
+Every test is in `tests/test_patterns.py` unless said otherwise.
 
 | Promise | Test that would fail |
 |---|---|
 | A rule entry that is neither a raw rule nor a known pattern is refused, naming the shapes | `test_a_rule_entry_neither_raw_nor_a_pattern_is_refused` |
-| A pattern expands when the definition is read, and every reader of rules sees its rules | `test_a_pattern_expands_when_the_definition_is_read` |
-| A definition with patterns reads back as written | `test_a_definition_with_patterns_reads_back_as_written` |
+| A pattern's own field misspelt is refused, at its path | `test_a_patterns_own_field_misspelt_is_refused` |
+| A pattern expands when the definition is read, every reader of rules sees its rules, and the definition keeps it as written | `test_a_pattern_expands_when_the_definition_is_read` |
 | A pattern's rules stand where it is written, in the definition's order | `test_a_patterns_rules_stand_where_it_is_written` |
-| Expanded names depend only on the pattern; a clash is refused, naming the pattern | `test_expanded_names_are_stable`, `test_an_expanded_name_that_clashes_is_refused` |
-| `sla` expands into exactly one timer on its step's start, with its `when` and `then` | `test_an_sla_expands_into_a_timer_on_each_run` |
+| A definition built without the validator still reads its rules from what is written | `test_an_unknown_moment_fails_closed` (`tests/test_rules.py`) |
+| `sla` expands into exactly one timer on its step's start, with its `when` and `then`, under its own name | `test_an_sla_expands_into_a_timer_on_each_run` |
 | An `sla` naming no step, or waiting under a minute, is refused | `test_an_sla_that_cant_mean_anything_is_refused` |
-| `reminder` expands into one rule per age, starting its step only | `test_a_reminder_expands_into_one_rule_per_age` |
-| A reminder on a step that isn't a task, of a step not repeatable, or with two ages the same time, is refused | `test_a_reminder_that_cant_mean_anything_is_refused` |
+| `reminder` expands into one rule per age, `<name>_<age>`, starting its step only | `test_a_reminder_expands_into_one_rule_per_age`, `test_a_reminder_does_nothing_but_start_its_step` |
+| A reminder of what isn't a task, of a step that isn't one or isn't repeatable, with two ages the same time or none, is refused | `test_a_reminder_that_cant_mean_anything_is_refused` |
+| Expanded names depend only on the pattern; a clash is refused, naming the pattern | `test_expanded_names_are_stable`, `test_an_expanded_name_that_clashes_is_refused` |
 | A pattern reads as its own sentence, and its rules as any other | `test_a_pattern_reads_as_its_sentence_and_its_rules` |
-| An issue on an expanded rule points to its pattern | `test_an_issue_on_an_expanded_rule_points_to_its_pattern` |
-| Each check that reads rules holds on expanded rules, each with its run (choice 13) | `test_every_check_holds_on_expanded_rules` |
-| A simulation shows each pattern, and its sentence beside its rules' firings | `test_a_firing_of_an_expanded_rule_shows_its_pattern` |
-| The `sla` story: each run measured from its own start, the first run's timer ended | `test_every_story_holds` (`examples/claim/stories/assess-restarts.json`) |
-| The reminder story: two reminders drafted, the third cancelled by the answer | `test_every_story_holds` (`examples/refund/stories/review-reminded.json`) |
-| A timer on a milestone reached as a repeatable step starts warns, and its story shows it counting from the first run | `test_a_timer_on_a_first_start_warns`, `test_every_story_holds` |
-| A timer on a milestone a step's completion reaches gets no such warning | `test_a_timer_after_a_completion_doesnt_warn` |
-| A rule after one that always closes the case on the same moment is `NEVER_FIRES`, and its story shows it not applied | `test_a_rule_after_one_that_always_closes_never_fires` |
-| A rule after one that may not close (a `when`, a `set`, a steered moment) isn't claimed | `test_a_rule_after_one_that_may_not_close_isnt_claimed` |
+| A pattern the reader doesn't know is refused, never left out | `test_a_pattern_the_reader_doesnt_know_is_refused` |
+| A simulation shows each pattern above its rules, and its sentence beside their firings; a raw rule's firing as before | `test_a_firing_of_an_expanded_rule_shows_its_pattern` |
+| The `sla` story: each run measured from its own start, the first run's timer ended | `test_every_story_holds` (`tests/test_simulate.py`; `examples/claim/stories/assess-restarts.json`) |
+| The reminder story: two reminders, the third ended by the answer | `test_every_story_holds` (`tests/test_simulate.py`; `examples/refund/stories/review-reminded.json`) |
+| `NEVER_FIRES` holds on an sla, at the pattern, and its run sets no timer | `test_an_sla_on_a_step_that_can_never_run_never_fires` |
+| `NEVER_STARTS` holds on a reminder, at `reminder.start`, naming rule and reminder, and its run refuses the start | `test_a_reminder_that_starts_its_own_task_never_starts_it` |
+| `UNTRUSTED_TRIGGER` holds on an sla on a steered run, and its run reaches nothing | `test_an_sla_on_a_run_untrusted_data_steers_decides_nothing` |
+| `INPUT_POLICY` holds on a reminder on a steered run, and its run fails on the input | `test_a_reminder_on_a_run_untrusted_data_steers_cant_send_what_its_policy_refuses` |
+| `MAY_BE_UNSET` holds on a pattern's `when`, each reminder's rule naming the reminder, and its run needs attention | `test_a_patterns_condition_reading_what_may_be_unset_warns` |
+| An sla keeps no case open at its opening: `CLOSES_AT_OPENING` still holds, and the run closes | `test_an_sla_keeps_no_case_open_at_its_opening` |
+| A reminder makes no loop, and the reminded refund has no issue | `test_a_reminder_makes_no_loop` |
+| A timer on a milestone a rule reaches as a repeatable step starts warns, and its run counts from the first start | `test_a_timer_on_a_first_start_warns` |
+| No such warning after a completion, on an answer, or on a step that runs once | `test_a_timer_after_a_completion_doesnt_warn` |
+| A rule after one that always closes the case on its moment never acts (`NEVER_FIRES`), and a timer on that moment, wherever written; each run shows it | `test_a_rule_after_one_that_always_closes_never_acts` |
+| Not claimed after a rule with a `when`, a `set`, on a run's start (with a run where it acts), nor of a rule written before | `test_a_rule_after_one_that_may_not_close_isnt_claimed` |
+| Each check's story plays the definition its issue is claimed on | `test_each_checks_story_is_the_run_of_its_issue`, `test_every_story_holds` (`tests/test_simulate.py`) |
+| The guide's patterns, readings, issues and simulated lines are the engine's | `test_the_guides_patterns_are_the_engines` |
 | No pattern's reading, issue or simulated line quotes a value from a case file | `test_no_pattern_line_quotes_a_value_from_the_case_file` |
-| The guide's patterns are what the definition expands and the reader reads | `test_the_guides_patterns_are_the_engines` |
+| The guide's table of rule codes is still what `validate_case` says | `test_the_guides_table_of_rule_codes_is_what_validate_case_says` (`tests/test_rules.py`) |
+| Every decision cited in the code is in the brief, D46 included | `test_every_decision_cited_in_src_is_in_the_brief_and_current` (`tests/test_decisions.py`) |
 | `case` stays free of the clock and I/O | `tests/test_layers.py`, as it is |
