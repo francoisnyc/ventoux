@@ -16,7 +16,7 @@ from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused, needs_attention, pending
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep
 from ventoux.case.memory import Activity, Driver, as_json, no_plans, outcome_of, wrapped
-from ventoux.case.reading import EVERY_RULE, Reading, read_rules
+from ventoux.case.reading import EVERY_RULE, PatternReading, Reading, read_patterns, read_rules
 from ventoux.case.runtime import CaseRefused, EventRefused
 from ventoux.case.state import (
     Answered,
@@ -52,6 +52,7 @@ class Line:
 
     text: str
     reading: Reading | None = None  # the rule's reading, printed beside its first line
+    pattern: PatternReading | None = None  # the pattern the rule was expanded from, if any
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,7 @@ class Simulation:
     story: Story
     case: CaseDefinition
     readings: tuple[Reading, ...]
+    patterns: tuple[PatternReading, ...]  # each pattern's own reading (brief, D46)
     timeline: tuple[Group, ...]
     end_at: str  # when the story ended
     end: tuple[str, ...]  # its status, and every kind of pending work, one line each
@@ -105,13 +107,27 @@ class Simulation:
             "Rules",
             f"  {EVERY_RULE}",
         ]
-        for reading in self.readings:
-            lines += ["", *(f"  {line}" for line in str(reading).splitlines())]
+        rules = {reading.name: reading for reading in self.readings}
+        patterns = {pattern.name: pattern for pattern in self.patterns}
+        for name in self.case.written:
+            if name not in patterns:
+                lines += ["", *(f"  {line}" for line in str(rules[name]).splitlines())]
+                continue
+            # A pattern reads as its own sentence, then each of its rules, under it.
+            lines += ["", *(f"  {line}" for line in str(patterns[name]).splitlines())]
+            for rule in patterns[name].rules:
+                lines += ["", *(f"    {line}" for line in str(rules[rule]).splitlines())]
         lines += ["", "Timeline"]
         for group in self.timeline:
             lines.append(group.at)
             for line in group.lines:
                 lines.append(f"  {line.text}")
+                if line.pattern is not None:
+                    # Beside a firing of an expanded rule, its pattern's sentence first.
+                    pattern = line.pattern
+                    lines.append(
+                        f"    ↳ from the {pattern.kind} {pattern.name}: {pattern.sentence}"
+                    )
                 if line.reading is not None:
                     # Beside a firing, the rule's whole reading, its fine print included.
                     first, *rest = str(line.reading).splitlines()
@@ -137,13 +153,16 @@ def simulate(story: Story, case: CaseDefinition, catalog: Catalog) -> Simulation
     Refuses a story that can't run against `case` before playing anything (fail closed)."""
     refuse_what_cant_run(story, case)
     readings = {reading.name: reading for reading in read_rules(case)}
+    patterns = {pattern.name: pattern for pattern in read_patterns(case)}
     fakes = {reference: run_fake(fake) for reference, fake in story.fakes.items()}
     held = frozenset(
         name
         for name, step in case.steps.items()
         if isinstance(step, CallStep) and story.fakes[step.called].held
     )
-    player = Player(story, case, readings, Driver(case, catalog, fakes, held, no_plans, fakes))
+    player = Player(
+        story, case, readings, patterns, Driver(case, catalog, fakes, held, no_plans, fakes)
+    )
     player.open()
     for entry in story.timeline:
         player.play(entry)
@@ -154,6 +173,7 @@ def simulate(story: Story, case: CaseDefinition, catalog: Catalog) -> Simulation
         story,
         case,
         tuple(readings.values()),
+        tuple(patterns.values()),
         tuple(Group(at, tuple(lines)) for at, lines in player.groups),
         end_at,
         tuple(end_of(player.state)),
@@ -206,9 +226,15 @@ class Player:
     what each decision adds to the history at that decision's time."""
 
     def __init__(
-        self, story: Story, case: CaseDefinition, readings: dict[str, Reading], driver: Driver
+        self,
+        story: Story,
+        case: CaseDefinition,
+        readings: dict[str, Reading],
+        patterns: dict[str, PatternReading],
+        driver: Driver,
     ) -> None:
         self.story, self.case, self.readings, self.driver = story, case, readings, driver
+        self.patterns = patterns
         self.state = CaseState("story")
         self.groups: list[tuple[str, list[Line]]] = []
         self.read_beside: set[str] = set()  # firings already shown with their reading
@@ -300,7 +326,11 @@ class Player:
             firing = self.firing_of(text)
             if firing is not None and firing not in self.read_beside:
                 self.read_beside.add(firing)
-                found.append(Line(text, self.readings[firing.split("#")[0]]))
+                rule = firing.split("#")[0]
+                pattern = self.case.pattern_of(rule)
+                found.append(
+                    Line(text, self.readings[rule], self.patterns[pattern] if pattern else None)
+                )
             else:
                 found.append(Line(text))
         return found

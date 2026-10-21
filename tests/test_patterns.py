@@ -6,6 +6,8 @@ docs/guides/cases.md, "Patterns".
 """
 
 import copy
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -14,6 +16,12 @@ import pytest
 from test_timers import CHASE, CHASE_REVIEW, REFUND
 
 from ventoux.case.definition import CaseInvalid, ReminderRule, SlaRule, parse_case
+from ventoux.case.reading import ReadingRefused, read_patterns, read_rules
+from ventoux.case.simulate import simulate
+from ventoux.case.story import parse_story
+from ventoux.testing import CATALOG
+
+EXAMPLES = Path(__file__).parent.parent / "examples"
 
 # An sla on the refund's review: a team lead chases a review not done within two days of its
 # start. It expands into the guide's timer, `chase_review` ("Rules on time").
@@ -240,3 +248,73 @@ def test_expanded_names_are_stable() -> None:
         "remind_review_1d",
         "remind_review_2d",
     }
+
+
+# --- Slice 4: readings and simulations ---
+
+
+def test_a_pattern_reads_as_its_sentence_and_its_rules() -> None:
+    sla = copy.deepcopy(CHASE_SLA) | {"when": {">": [{"var": "amount"}, 100]}}
+    case = parse_case(reminded(chase_sla=sla, remind_review=REMIND_REVIEW))
+    assert [str(reading) for reading in read_patterns(case)] == [
+        "chase_sla: Chase a review not done within two days\n"
+        "  An sla on review: if a run of review isn't finished within 2d of its latest start, "
+        "and if amount > 100 (read when the timer fires), start chase.\n"
+        "  It expands to the rule chase_sla.",
+        "remind_review: Remind the reviewer of an open review\n"
+        "  A reminder of review: while a run of review is open, start remind 1d and 2d after it "
+        "starts.\n"
+        "  It expands to the rules remind_review_1d and remind_review_2d.",
+    ]
+    # Its rules read as any other: the fine print stays on them.
+    readings = {reading.name: reading for reading in read_rules(case)}
+    assert (
+        readings["remind_review_2d"].sentence == "2d after each run of review starts: start remind."
+    )
+    assert readings["chase_sla"].sentence == (
+        "2d after each run of review starts, if amount > 100 (read when the timer fires, not when "
+        "it is set): start chase."
+    )
+
+
+def test_a_pattern_the_reader_doesnt_know_is_refused() -> None:
+    # `parse_case` refuses an entry that is no pattern first; this one didn't come through it.
+    case = parse_case(with_rules(chase_sla=CHASE_SLA))
+    object.__setattr__(case, "written", {"chase_sla": {"deadline": "2d"}})
+    with pytest.raises(ReadingRefused) as refused:
+        read_patterns(case)
+    assert str(refused.value) == (
+        "can't read chase_sla: {'deadline': '2d'} is neither a raw rule nor a pattern Ventoux knows"
+    )
+
+
+def simulated(path: Path) -> str:
+    """What `ventoux simulate` prints for the story at `path`."""
+    raw = json.loads(path.read_text())
+    definition = json.loads((path.parent / raw["definition"]).read_text())
+    return str(simulate(parse_story(raw), parse_case(definition), CATALOG))
+
+
+def test_a_firing_of_an_expanded_rule_shows_its_pattern() -> None:
+    printed = simulated(EXAMPLES / "refund" / "stories" / "review-reminded.json")
+    # At the top, the pattern's reading, then each of its rules' readings, under it.
+    assert (
+        "  remind_review: Remind the reviewer of an open review\n"
+        "    A reminder of review: while a run of review is open, start remind 1d, 2d and 4d "
+        "after it starts.\n"
+        "    It expands to the rules remind_review_1d, remind_review_2d and remind_review_4d.\n"
+        "\n"
+        "    remind_review_1d: Remind the reviewer of an open review\n"
+        "      1d after each run of review starts: start remind.\n"
+    ) in printed
+    # Beside a firing, the pattern's sentence, then the rule's whole reading.
+    assert (
+        "  remind_review_2d#1 on 2d after started review#1: starting remind\n"
+        "    ↳ from the reminder remind_review: A reminder of review: while a run of review is "
+        "open, start remind 1d, 2d and 4d after it starts.\n"
+        "    ↳ remind_review_2d: Remind the reviewer of an open review\n"
+        "      2d after each run of review starts: start remind.\n"
+    ) in printed
+    # A raw rule's firing shows as before: its reading alone.
+    raw = simulated(EXAMPLES / "refund" / "stories" / "nobody-reviews.json")
+    assert "↳ from the" not in raw

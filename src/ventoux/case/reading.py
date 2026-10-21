@@ -17,7 +17,9 @@ from ventoux.case.definition import (
     EventArrived,
     PlanStep,
     Reached,
+    ReminderRule,
     Rule,
+    SlaRule,
     Started,
     TaskStep,
     Then,
@@ -113,6 +115,69 @@ def read_rule(name: str, rule: Rule, case: CaseDefinition) -> Reading:
         tuple(clause.text for clause in fine),
         tuple(said + [clause.kind for clause in fine]),
     )
+
+
+@dataclass(frozen=True)
+class PatternReading:
+    """A pattern in plain words: its own sentence, and the rules it expands into, each of which
+    reads as any other rule (brief, D46)."""
+
+    name: str  # the name the pattern is written under
+    title: str  # the pattern's own title
+    kind: str  # `sla` or `reminder`
+    sentence: str  # what it does, as one sentence
+    rules: tuple[str, ...]  # the rules it expands into, in order
+
+    def __str__(self) -> str:
+        noun = "the rule" if len(self.rules) == 1 else "the rules"
+        expands = f"{noun} {listed_and(list(self.rules))}"
+        return f"{self.name}: {self.title}\n  {self.sentence}\n  It expands to {expands}."
+
+
+def read_patterns(case: CaseDefinition) -> list[PatternReading]:
+    """Each of `case`'s patterns in plain words, in the order they are written. Its rules are
+    read by `read_rules`, as any other (brief, D46)."""
+    found: list[PatternReading] = []
+    for name, entry in case.written.items():
+        if isinstance(entry, Rule):
+            continue
+        rules = tuple(rule for rule in case.rules if case.pattern_of(rule) == name)
+        if isinstance(entry, SlaRule):
+            step, within = entry.sla.step, entry.sla.within
+            condition = (
+                f", and if {expression(name, 'condition', entry.when)} (read when the timer fires)"
+                if entry.when is not None
+                else ""
+            )
+            sentence = (
+                f"An sla on {step}: if a run of {step} isn't finished within {within} of its "
+                f"latest start{condition}, {', then '.join(actions(name, entry.then))}."
+            )
+            found.append(PatternReading(name, entry.display.title, "sla", sentence, rules))
+        elif isinstance(entry, ReminderRule):
+            reminder = entry.reminder
+            condition = (
+                f", if {expression(name, 'condition', entry.when)} (read at each reminder)"
+                if entry.when is not None
+                else ""
+            )
+            ages = listed_and(list(reminder.after))
+            sentence = (
+                f"A reminder of {reminder.task}: while a run of {reminder.task} is open, start "
+                f"{reminder.start} {ages} after it starts{condition}."
+            )
+            found.append(PatternReading(name, entry.display.title, "reminder", sentence, rules))
+        else:
+            # Fail closed: an entry the reader doesn't know is refused, never left out.
+            raise ReadingRefused(
+                f"can't read {name}: {entry!r} is neither a raw rule nor a pattern Ventoux knows"
+            )
+    return found
+
+
+def listed_and(parts: list[str]) -> str:
+    """`a`, `a and b`, `a, b and c`."""
+    return parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])} and {parts[-1]}"
 
 
 def when(name: str, on: object) -> str:
