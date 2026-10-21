@@ -45,7 +45,7 @@ building 11g2"); built, slices 1–7, and the Promises table checked against the
 day (see 11g, "Decided while building 11g2"). 11h: started 2026-10-20 once #34 merged; the
 warm-up (learning question 14) put, and answered 2026-10-21; 11h explained, probed with runs, and eighteen choices put
 with a recommendation each, two of them needing a new engine capability and one splitting 11h
-in two, recorded as a draft awaiting answers.
+in two, recorded as a draft awaiting answers; answered by number, 2026-10-21 (see 11h).
 
 ## What this layer is for
 
@@ -2899,9 +2899,15 @@ or, where its code came first, by mutation.
 
 ## 11h. Patterns and teaching warnings
 
-**Draft, 2026-10-20: awaiting answers by number.** Nothing here is decided yet; each choice is
-written as it is put, with its recommendation. Choices marked **⚑** need a new engine capability:
-a pattern can do nothing raw rules can't, so these are put as choices, not hidden in a pattern.
+**Decided, 2026-10-21** (the user, by number): 1–5, 7, 8, 10–14, 17 and 18 as recommended; 6 (a),
+`since=first_start` not offered, recorded with its reason in D46, D7's text kept; 9 (a),
+approvals by several people as 11h2, its own pull request and session, after 11h1 is merged; 15
+as recommended, with row 33 added to `docs/layers/checkpoint-doors.md` (docs only), covering a
+step's own `when` and probe B6; 16 yes, `NEVER_FIRES` extended as scoped, each claim shown with a
+run, its message saying the rule **never acts** (it fires and isn't applied, as the history
+says), not that it never fires. D46 (brief) records 11h1. Each choice below is written as it was
+put. Choices marked **⚑** needed a new engine capability: a pattern can do nothing raw rules
+can't, so they were put as choices, not hidden in a pattern.
 
 ### The warm-up
 

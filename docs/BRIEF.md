@@ -248,6 +248,11 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   assess restarts") and shows when each rule fires. Stories are also tests, with simulated time.
 - Steps emit a **started** event, so rules and timers can anchor on it. In the Python builder,
   conditions use `unless=` / `only_if=`, since `if` is reserved.
+- **Amended 2026-10-21, by D46** (the text above stands; this narrows it): a pattern is written
+  in `rules` and expands into raw rules when the definition is read; `sla` and `reminder` are
+  built, `since=first_start` is not offered, and `four_eyes` is approvals by several people
+  (D47, to come), not a rule pattern. Of the teaching warnings, only the timer on a first start
+  is still a warning; the rest are errors or designed behaviour (D46).
 
 ### D8. Ventoux is not a system of record
 
@@ -1540,6 +1545,71 @@ whose text is kept.*
 - **One command, `ventoux simulate STORY.json`,** the first entry point: reading files and
   printing stay out of `core` and `case`. `ventoux check` stays with the builder (D34).
 - **Built in two parts:** the reading in 11g1, the story and the command in 11g2.
+
+### D46. Patterns: data that expands into raw rules when the definition is read
+
+*Decided 2026-10-21, in layer 11h1. Adds to D7, D38, D44 and D45, whose text is kept.*
+
+- **A pattern is written in `rules`, beside raw rules.** An entry with `on` is a raw rule; one
+  with `sla` or `reminder` is a pattern; anything else is refused, naming the shapes. Its rules
+  stand where it is written, since rules on one moment act in the definition's order (D38).
+- **It expands once, when the definition is read,** by a pure function of the entry alone,
+  before any check: every reader of a definition's rules, the runtime and case validation
+  included, sees the expanded rules, and none can miss one (fail closed). The definition keeps
+  what was written, so it reads back as stored. A pattern adds no engine capability: whatever
+  one seems to need is a decision of its own.
+- **Names are stable.** A pattern that expands into one rule gives it its own name, so its
+  firings name the pattern (`assess_sla#1`); a reminder gives one rule per age,
+  `<name>_<age>` as written (`remind_review_2d`). A name depends only on the pattern's name and
+  its own parts, never on position. Expanded names share the namespace of steps, milestones,
+  events and rules; a clash is refused when read, naming the pattern.
+- **An expansion is part of the format,** fixed by the decision that adds the pattern: changing
+  it changes every definition using it and how open cases replay, so it is a decision recorded
+  here, as an operator (D20) or a moment (D38) is.
+- **`sla`** (`{"sla": {"step": …, "within": "5d"}, "when": …, "then": …}`) expands into `{"on":
+  {"after": "5d", "since": {"started": …}}, "when": …, "then": …}`, on any kind of step. It
+  holds no logic of its own: since D44, a timer on a run's start restarts with each run, ends
+  with it, fires once per run, and is kept by a failed run, which is everything D7 asked the
+  pattern to encode.
+- **`since=first_start` is not offered** (adds to D7, whose "available, explicitly" stands as
+  written). Under D44 a raw rule can name a first start only through a milestone a rule reaches
+  on the step's start, and a timer on a milestone lives until it fires: it isn't cancelled when
+  the step is done, fires after it unless a `when` says otherwise, and holds the case open until
+  it is due. That isn't what D7 promised, and a pattern can do nothing raw rules can't. A
+  deadline that mustn't restart anchors on an instant (`opened`, a milestone) in a raw rule,
+  whose reading says it lives until it fires; a moment for a first start, with its own end,
+  would be a decision of its own.
+- **`reminder`** (`{"reminder": {"task": …, "after": ["2d", "4d"], "start": …}, "when": …}`)
+  expands into one rule per age, each `{"on": {"after": <age>, "since": {"started": <task>}},
+  "when": …, "then": {"start": [<step>]}}`. On a task only, for a person waited on; it starts one
+  step and does nothing else (a reminder informs, it never reaches, stops or sets); that step is
+  repeatable, so each reminder is its own run. Two ages that are the same time are refused. A
+  repeat "until answered" isn't offered: a list of ages expands into finitely many timers, and an
+  `every` key would be a timer that re-arms itself, its own key with its own claims (D44). Nor is
+  a reminder of an approver: no moment comes when an approval is asked (D25).
+- **Read and shown with its rules** (D45): a pattern reads as its own sentence, and its rules as
+  any other rule, the fine print staying on them. A simulation prints each pattern's reading
+  above its rules', and beside a firing of one of its rules, the pattern's sentence, then the
+  rule's whole reading. An issue on an expanded rule points to the pattern's entry, and a
+  reminder's message names both its rule and the reminder.
+- **D7's teaching warnings, reconciled with D38–D45:**
+  - **a timer anchored on the first start of a repeatable step** can't be written on `started`
+    (D44), only through a milestone a rule reaches on that start: a warning,
+    `TIMER_ON_FIRST_START`, says the timer counts from the first start that reaches it, once,
+    and holds the case until it fires;
+  - **a rule whose condition reads untrusted data** has nothing left to warn about: one that
+    reaches or stops is `UNTRUSTED_TRIGGER` or `WRITER_DECIDES` (D38, D40, D42), one that starts
+    a step whose inputs refuse it is `INPUT_POLICY` (D39), one that sets or starts a task does
+    what D42 and D39 designed. What is left, untrusted data deciding what doesn't happen, is the
+    checkpoint's (`docs/layers/checkpoint-doors.md`, row 33);
+  - **rules that can never fire**: what depends on values needs a value analysis the check
+    doesn't have, so no claim of it would be proven. One proven case was silent, and is an error
+    (D34, D37), `NEVER_FIRES` extended (adds to D38): a rule after one on the same moment that
+    always closes the case (no `when`, setting nothing, reaching every `closes_when` milestone,
+    on a moment that carries no steering) **never acts**: it fires, and isn't applied.
+- **`four_eyes` is not a rule pattern.** No raw rule can add a second approver, and tasks
+  standing in for one would neither follow the case file (D25) nor lapse (D11). It is approvals
+  by several people, D11's `count`, a new engine capability built as 11h2 (D47, to come).
 
 ### Simplifications adopted
 
