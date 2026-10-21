@@ -420,6 +420,104 @@ class Rule(Shape):
     then: Then
 
 
+# Patterns: a named shape written in `rules`, which expands into raw rules when the definition is
+# read. A pattern adds no engine capability: it is data for raw rules (brief, D7) (brief, D46).
+
+
+class Sla(Shape):
+    """What an sla measures: each run of a step, from its own start (brief, D46)."""
+
+    step: Name  # the step whose runs are measured
+    # How long a run may go on before the sla acts: an age, at least a minute.
+    within: Annotated[str, AfterValidator(a_wait)]
+
+
+class SlaRule(Shape):
+    """An sla: when a run of a step isn't done, rejected or stopped within an age of its start,
+    act. Expands into one timer set on each run's start, which ends with that run (brief, D44)."""
+
+    display: Display
+    sla: Sla
+    when: PlanExpression | None = None  # read when the timer fires, as a raw timer's is
+    then: Then
+
+
+def some_ages(ages: tuple[str, ...]) -> tuple[str, ...]:
+    """A reminder comes at least once: a reminder of nothing would hide a typo."""
+    if not ages:
+        raise ValueError('a reminder comes after at least one age: list them, such as ["2d"]')
+    return ages
+
+
+class Reminder(Shape):
+    """What a reminder nudges: a task left open, after each of some ages (brief, D46)."""
+
+    task: Name  # the task whose open runs are reminded of
+    # After how long each reminder comes, from the run's start: one firing each, never a repeat.
+    after: Annotated[tuple[Annotated[str, AfterValidator(a_wait)], ...], AfterValidator(some_ages)]
+    start: Name  # the repeatable step each reminder starts, such as one drafting a letter
+
+
+class ReminderRule(Shape):
+    """A reminder: while a run of a task is open, start a step after each age. It informs, it
+    never decides: it only starts its step. Expands into one rule per age (brief, D46)."""
+
+    display: Display
+    reminder: Reminder
+    when: PlanExpression | None = None  # read when each reminder's timer fires
+
+
+def rule_kind_of(entry: object) -> str | None:
+    """Whether an entry of `rules` is a raw rule (it names `on`) or a pattern (it names `sla` or
+    `reminder`); None if it is neither."""
+    if isinstance(entry, dict):
+        for key, kind in (("on", "raw rule"), ("sla", "sla rule"), ("reminder", "reminder rule")):
+            if key in entry:
+                return kind
+    return None
+
+
+# What an entry of `rules` takes: a raw rule, or a pattern that expands into raw rules.
+type AnyRule = Annotated[
+    Annotated[Rule, Tag("raw rule")]
+    | Annotated[SlaRule, Tag("sla rule")]
+    | Annotated[ReminderRule, Tag("reminder rule")],
+    Discriminator(rule_kind_of),
+]
+
+RULE_SHAPES = "a rule is a raw rule, with on, when and then, or a pattern: sla or reminder"
+
+
+def expanded(name: str, entry: Rule | SlaRule | ReminderRule) -> dict[str, Rule]:
+    """The raw rules an entry of `rules` stands for, by name: a raw rule itself; an sla's one
+    timer, under its own name; a reminder's timer for each age, `<name>_<age>`. A pure function of
+    the entry alone, so a name never depends on anything written elsewhere (brief, D46)."""
+    # Pydantic: `model_construct` builds an object without checking it again: each part was
+    # checked as the pattern was read.
+    if isinstance(entry, SlaRule):
+        on = After.model_construct(
+            after=entry.sla.within, since=Started.model_construct(started=entry.sla.step)
+        )
+        return {
+            name: Rule.model_construct(
+                display=entry.display, on=on, when=entry.when, then=entry.then
+            )
+        }
+    if isinstance(entry, ReminderRule):
+        since = Started.model_construct(started=entry.reminder.task)
+        then = Then.model_construct(start=(entry.reminder.start,))
+        return {
+            f"{name}_{age}": Rule.model_construct(
+                display=entry.display,
+                on=After.model_construct(after=age, since=since),
+                when=entry.when,
+                then=then,
+            )
+            for age in entry.reminder.after
+        }
+    return {name: entry}
+
+
 def kind_of(step: object) -> str | None:
     """The kind a step says it is, which picks its shape; None if it says none."""
     if isinstance(step, dict):
@@ -447,7 +545,9 @@ class CaseDefinition(Shape):
     milestones: dict[Name, Milestone] = {}
     steps: Annotated[dict[Name, AnyStep], Field(min_length=1)]
     sequence: tuple[Name, ...] = ()  # each step requires the one before it
-    rules: dict[Name, Rule] = {}  # what the case does on a moment (brief, D38)
+    # What the case does on a moment, as written: raw rules and patterns (brief, D46). Written
+    # `rules` in the JSON; the rules the engine runs are read from `rules`, below.
+    written: dict[Name, AnyRule] = Field(default={}, alias="rules")
     events: dict[
         Name, DeclaredEvent
     ] = {}  # what may come from outside, and who sends it (brief, D41)
@@ -458,11 +558,35 @@ class CaseDefinition(Shape):
     # once it is closed (books and records); `never`, always refused.
     forgetting: Literal["allowed", "while_open", "never"] = "allowed"
 
+    @property
+    def rules(self) -> dict[str, Rule]:
+        """Every rule the engine runs, in the order written: each raw rule, and each pattern's
+        expansion where the pattern is written. Worked out from what is written each time it is
+        read, so no reader of rules can miss one, nor see one written since (brief, D46)."""
+        return {
+            rule: raw
+            for name, entry in self.written.items()
+            for rule, raw in expanded(name, entry).items()
+        }
+
+    def pattern_of(self, rule: str) -> str | None:
+        """The pattern `rule` was expanded from, by the name it is written under; None for a raw
+        rule, or a name that is no rule."""
+        for name, entry in self.written.items():
+            if not isinstance(entry, Rule) and rule in expanded(name, entry):
+                return name
+        return None
+
     # Pydantic: a validator with `mode="after"` runs on the whole object, once its fields passed.
     @model_validator(mode="after")
     def names_name_something(self) -> "CaseDefinition":
         """Every name used is declared, and every step can start."""
-        problems = [
+        # A pattern that can't expand is said first, and nothing below is checked: its rules
+        # would be read from it (one cause, one issue).
+        problems = self.expand()
+        if problems:
+            raise ValueError("\n".join(problems))
+        problems += [
             *(
                 f"sequence: {name} is not a step"
                 for name in self.sequence
@@ -497,14 +621,16 @@ class CaseDefinition(Shape):
         for name in self.events:
             # An arrival is an entry beside step runs and firings (`cancelled#1`), and its values
             # are read as `<event>.<field>` beside a step's: so no name is shared.
-            if name in self.steps or name in self.milestones or name in self.rules:
+            if name in self.steps or name in self.milestones or name in self.rules | self.written:
                 problems.append(
                     f"events.{name}: an event is not named like a step, a milestone or a rule"
                 )
         for name, rule in self.rules.items():
             # A rule's firings are entries beside step runs (`flag_large#1`), so no name is shared.
             if name in self.steps or name in self.milestones:
-                problems.append(f"rules.{name}: a rule is not named like a step or a milestone")
+                problems.append(
+                    f"{self.where(name)}: a rule is not named like a step or a milestone"
+                )
             on = f"rules.{name}.on.since" if isinstance(rule.on, After) else f"rules.{name}.on"
             problems += moment_problems(on, anchor(rule.on), self)
             problems += reaching(f"rules.{name}.then.reach", rule.then.reach, self)
@@ -518,6 +644,66 @@ class CaseDefinition(Shape):
         if problems:
             raise ValueError("\n".join(problems))
         return self
+
+    def expand(self) -> list[str]:
+        """What keeps a pattern from expanding into the rules the engine runs (brief, D46): a
+        problem of its own, or a rule it gives that is already a rule."""
+        problems: list[str] = []
+        given: set[str] = set()
+        for name, entry in self.written.items():
+            found = pattern_problems(f"rules.{name}", entry, self)
+            if found:
+                problems += found
+                continue
+            for rule in expanded(name, entry):
+                if rule != name and (rule in self.written or rule in given):
+                    problems.append(
+                        f"rules.{name}: it gives the rule {rule}, which is already a rule: rename "
+                        "one of them"
+                    )
+                given.add(rule)
+        return problems
+
+    def where(self, rule: str) -> str:
+        """Where a rule is written: its own entry, or the pattern it was expanded from."""
+        return f"rules.{self.pattern_of(rule) or rule}"
+
+
+def pattern_problems(
+    path: str, entry: Rule | SlaRule | ReminderRule, case: "CaseDefinition"
+) -> list[str]:
+    """What a pattern names that `case` doesn't declare, or can't mean (brief, D46). A raw rule
+    has none here: its own are checked as any rule's."""
+    if isinstance(entry, SlaRule):
+        if entry.sla.step not in case.steps:
+            return [f"{path}.sla.step: {entry.sla.step} is not a step"]
+        return []
+    if isinstance(entry, ReminderRule):
+        reminder = entry.reminder
+        problems: list[str] = []
+        if not isinstance(case.steps.get(reminder.task), TaskStep):
+            problems.append(f"{path}.reminder.task: {reminder.task} is not a task")
+        started = case.steps.get(reminder.start)
+        if started is None:
+            problems.append(f"{path}.reminder.start: {reminder.start} is not a step")
+        elif not started.repeatable:
+            # Each reminder is its own run: a second start of a step that has run would only be
+            # recorded, and nothing would be sent.
+            problems.append(
+                f"{path}.reminder.start: {reminder.start} isn't repeatable, so only its first "
+                f"reminder would ever run: make {reminder.start} repeatable"
+            )
+        seen: dict[int, str] = {}  # each age's time in seconds, and the age first written for it
+        for age in reminder.after:
+            if seconds_in(age) in seen:
+                problems.append(
+                    f"{path}.reminder.after: {seen[seconds_in(age)]} and {age} are the same time: "
+                    "give each reminder its own"
+                )
+                break
+            seen[seconds_in(age)] = age
+        return problems
+    return []
 
 
 def moment_problems(path: str, moment: object, case: CaseDefinition) -> list[str]:
@@ -735,9 +921,13 @@ def problem(error: Any) -> str:
         for part in loc
         if not part.endswith(" step")
         and not part.endswith(" moment")
+        and not part.endswith(" rule")
         and part not in ("[key]", "moment")
     )
     kind = error["type"]
+    if kind == "union_tag_not_found" and loc[:1] == ["rules"] and len(loc) == 2:
+        # An entry of `rules` that is neither a raw rule nor a pattern (brief, D46).
+        return f"{path}: {RULE_SHAPES}"
     if kind in ("union_tag_invalid", "union_tag_not_found") and loc[:1] == ["rules"]:
         # A timer's own moment takes the five others; a rule's `on`, a timer too.
         return f"{path}: a moment is {MOMENTS if loc[-1] == 'since' else RULE_MOMENTS}"

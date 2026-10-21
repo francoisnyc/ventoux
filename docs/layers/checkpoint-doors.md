@@ -76,6 +76,7 @@ what reading Flowable's tests again turned up; rows 31 and 32 are Ventoux's own,
 | 30 | **Due dates on tasks and cases** | A date by which a task or a case should be done, shown and queried. `tests/task/CmmnTaskDueDateTest.java`, `testDueDateTypes`; `tests/runtime/CaseInstanceDueDateAndClaimTest.java`, `testSetCaseInstanceDueDate` | **11f and 11h:** timers, and `sla` from a step's latest start (D7). A due date shown in the inbox: not planned | **No** | 11f: a timer set on a task's run is the place a later due date reads from, so a shown due date is a view of a timer, never a second clock |
 | 31 | **Ventoux's own, found in 11b:** untrusted data steering a plan's own transitions | Design question 17 began with a plan's transition reading an untrusted field (`llm_says_refund`). 11b builds option a for a case's steps: the untrusted sources a condition reads are checked against its step's input policies, apart from what each input reads (D38, D39) | **Open:** a plan's transitions are unchanged (D39) | **Not yet; from layer 12, yes:** applying option a to plans after definitions are published would refuse plans accepted today | The checkpoint decides it before layer 12, or records it in the brief as a deliberate limit |
 | 32 | **Ventoux's own, found in 11b:** an output's `system:<name>` checked against the registered systems | A reference naming an unregistered system is refused (D30), but a contract may declare an output from `system:kyc` with `kyc` unregistered (`kyc.check@1` does; `catalog.py` checks only `untrusted:` labels) | **Not checked** | **No:** checking it later refuses only contracts naming a system nobody registered | The checkpoint decides whether to check it before layer 12 |
+| 33 | **Ventoux's own, decided in the tutor review of #31 and found again in 11h:** untrusted data deciding what doesn't happen | D38 says untrusted data informs and never decides, and the engine checks it where something happens: a rule that reaches or stops on untrusted data acts on nothing; a start's untrusted condition is checked against the inputs (D39, D43). Nothing is checked where something *doesn't* happen: a step's own `when` reading untrusted data, false, skips the step, and the case may close without it; and a rule whose condition reads untrusted data, false (or written `!`), keeps a step from starting (11h's probe B6, `docs/layers/11-rules.md`) | **Open:** allowed, and `validate_case` says nothing | **Not yet; from layer 12, yes:** a runtime answer (asking a person, as an untrusted approval condition asks anyway, D39) would change what published definitions do; a warning would refuse nothing | The checkpoint decides it before layer 12, or records it in the brief as a deliberate limit |
 
 ## What 11b to 11f must not close off
 
@@ -178,3 +179,12 @@ checkpoint, not fixed here:
 
 Two rows (31 and 32) are not Flowable's: they are open in Ventoux itself, found in 11b's session.
 Row 31 is the one to watch: it is not blocked today, but it would be once plans are published.
+
+## Found in 11h, for the checkpoint
+
+Row 33 was decided in the tutor review of #31 and added in 11h1 (docs only), with 11h's probe B6:
+D7's teaching warning "rules whose condition reads untrusted data" has nothing left to warn about
+where something happens (an error or designed behaviour, `docs/layers/11-rules.md`, 11h, choice
+15), and what is left is untrusted data deciding what doesn't happen, the same for a step's own
+`when` and a rule's. Like row 31, it is not blocked today, and would be once definitions are
+published.

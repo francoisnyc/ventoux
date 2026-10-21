@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from ventoux.case.definition import (
     ActivityStep,
+    After,
     AnsweredTask,
     CallStep,
     CaseDefinition,
@@ -75,6 +76,41 @@ def warning_issues(
     found += [unset_issue(reading, read) for read in unset]
     found += rule_unset_issues(reading, said, missing)
     return found + refresh_issues(case, contracts, missing) + elsewhere_issues(case, missing)
+
+
+def first_start_issues(case: CaseDefinition, said: Collection[str]) -> list[Issue]:
+    """A timer anchored on the first start of a repeatable step (brief, D7): set on a milestone a
+    rule reaches as a run of that step starts. A milestone is reached once, so the timer counts
+    from the first such start, whatever later runs do, and holds the case until it fires. It may
+    be meant, so it warns (brief, D46). A timer on `started` can't be this: it is each run's
+    (brief, D44). A rule an issue already names gets none: one cause, one issue."""
+    found: list[Issue] = []
+    for name, rule in case.rules.items():
+        if not isinstance(rule.on, After) or not isinstance(rule.on.since, Reached):
+            continue
+        if any(path.startswith(f"rules.{name}.") or path == f"rules.{name}" for path in said):
+            continue
+        milestone = rule.on.since.reached
+        for reacher, reaching in case.rules.items():
+            on = reaching.on
+            if milestone not in reaching.then.reach or not isinstance(on, Started):
+                continue
+            if not case.steps[on.started].repeatable:
+                continue
+            found.append(
+                Issue(
+                    f"rules.{name}.on",
+                    "TIMER_ON_FIRST_START",
+                    f"{name}'s timer is set when {milestone} is reached, which {reacher} reaches "
+                    f"as a run of {on.started} starts: {on.started} is repeatable, and a milestone "
+                    "is reached once, so the timer counts from the first such start, whatever "
+                    "later runs do, and keeps the case open until it fires: to count from each "
+                    f'run, set it on {{"started": "{on.started}"}}, or write an sla',
+                    "warning",
+                )
+            )
+            break
+    return found
 
 
 def rule_unset_issues(

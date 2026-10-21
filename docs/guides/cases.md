@@ -776,7 +776,7 @@ nothing ends, or a start refused on the step's own start; and these codes are it
 
 | Code | Kind | What is wrong | Example message |
 |---|---|---|---|
-| `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
+| `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached; or a rule written before it on the same moment always closes the case, so it never acts ("Patterns") | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
 | `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone or stops a step reads, in its `when`, a value that is untrusted whoever writes it, or fires on the start of a step untrusted data steers however it starts, so it never acts; or a call, plan or wait step every start of which is steered so reaches milestones it never will | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
 | `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: on the opening, the step requires what can't be met by then, and the rule's condition can't fail and be retried later; or it fires on the step's own start (unless its condition may fail and the step is repeatable: a retry may come once the step is done; or the step is a task a rule may stop, which a stop cancels at once, letting the start through), or on its own answer when the step isn't repeatable | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
 | `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition, requirement or rule's stop ends (the rework rules above with their `when`s removed, on the refund with the `duplicate` close reason from "Closing a case"), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
@@ -1382,6 +1382,127 @@ readings), and the lines at the end, exactly as printed: a firing nobody expecte
 difference when it doesn't, and 2 when the story or its definition can't be read or can't run.
 Every story under `examples/` runs as a test, among them a witness for each part of a reading's
 fine print, in `examples/witnesses/stories/`.
+
+## Patterns
+
+A raw rule says everything: its moment, its condition, what it does. Some shapes come up again and
+again, so a rule may be written as a **pattern** instead: a name for the shape, which expands into
+raw rules when the definition is read (brief, D7, D46). The engine only ever runs raw rules, and
+the expansion is shown wherever the rules are: in readings, in simulations, and in what the check
+says. A pattern can do nothing raw rules can't.
+
+A pattern is written in `rules`, beside raw rules: an entry with `on` is a raw rule, one with `sla`
+or `reminder` a pattern. Its rules stand where it is written, which matters, since rules on one
+moment act in the order written.
+
+**An sla** acts when a run of a step isn't finished within an age of its start. The guide's chase
+("Rules on time") is one:
+
+```json
+"chase_sla": {
+  "display": {"title": "Chase a review not done within two days"},
+  "sla": {"step": "review", "within": "2d"},
+  "then": {"start": ["chase"]}
+}
+```
+
+It expands into one raw rule, under its own name, so its firings are `chase_sla#1`:
+
+```json
+"chase_sla": {
+  "display": {"title": "Chase a review not done within two days"},
+  "on": {"after": "2d", "since": {"started": "review"}},
+  "then": {"start": ["chase"]}
+}
+```
+
+An sla holds no logic of its own. A timer set on a run's start already measures from the latest
+start, ends with its run, fires once per run, and is kept by a failed run (brief, D44): what
+D7 asked a pattern to encode. It takes any kind of step, an optional `when`, read when the timer
+fires, and any `then`. It reads as its own sentence, then as the rule it expands into:
+
+```
+chase_sla: Chase a review not done within two days
+  An sla on review: if a run of review isn't finished within 2d of its latest start, start chase.
+  It expands to the rule chase_sla.
+```
+
+An sla always measures from each run's own start. A deadline that mustn't restart with the step
+(30 days from the opening, say) is a raw timer on an instant, `opened` or a milestone, which lives
+until it fires.
+
+**A reminder** nudges while a task waits: after each age, from a run's start, it starts a step,
+and does nothing else. A team lead reminds the reviewer a day and two days in:
+
+```json
+"remind_review": {
+  "display": {"title": "Remind the reviewer of an open review"},
+  "reminder": {"task": "review", "after": ["1d", "2d"], "start": "remind"}
+}
+```
+
+```
+remind_review: Remind the reviewer of an open review
+  A reminder of review: while a run of review is open, start remind 1d and 2d after it starts.
+  It expands to the rules remind_review_1d and remind_review_2d.
+```
+
+It expands into one timer per age, each named `<name>_<age>`: a name depends only on the
+reminder and its age, so adding a rule elsewhere renames nothing in a case's history. The
+reminder's task is a task, its step is repeatable (each reminder is its own run), and no two ages
+are the same time; anything else is refused when the definition is read. An answered review ends
+the reminders still to come. A reminder repeats only as often as its ages say: there is no
+"every", which would be a timer that re-arms itself. Its step is the author's, so a reminder that
+writes to someone drafts, as everything that talks to people does.
+
+**What the check says of a pattern** is said at the pattern: an issue on an expanded rule points
+to the entry it was written as, its moment at `sla` or `reminder.after`, a reminder's start at
+`reminder.start`, and a reminder's message names its rule and the reminder:
+
+```
+rules.remind_review.reminder.start  NEVER_STARTS  remind_review_1d, from the reminder
+remind_review: remind_review_1d can never start review: it fires on 1d after started review, while
+review is running: start it on another moment
+```
+
+In a simulation, the rules are listed with each pattern's reading above its rules', and a firing
+of an expanded rule shows its pattern's sentence, then the rule's whole reading:
+
+```
+  remind_review_2d#1 on 2d after started review#1: starting remind
+    ↳ from the reminder remind_review: A reminder of review: while a run of review is open, start remind 1d, 2d and 4d after it starts.
+    ↳ remind_review_2d: Remind the reviewer of an open review
+      2d after each run of review starts: start remind.
+```
+
+Two approvers for one step (`four_eyes`) are not a rule pattern: no rule can add an approver. They
+come with approvals by several people (11h2).
+
+**Two traps the check still names.** A timer on a step's start is always that run's, but one can
+still be timed from a first start by hand, through a milestone a rule reaches as the step starts
+("2 days after the review began"). The milestone is reached once, so on a repeatable step the
+timer counts from the first start, whatever later runs do. A warning says so:
+
+```
+rules.chase_review.on  TIMER_ON_FIRST_START (warning)  chase_review's timer is set when
+review_begun is reached, which mark_begun reaches as a run of review starts: review is
+repeatable, and a milestone is reached once, so the timer counts from the first such start,
+whatever later runs do, and keeps the case open until it fires: to count from each run, set it
+on {"started": "review"}, or write an sla
+```
+
+And a rule written after one on the same moment that always closes the case (no `when`, setting
+nothing, reaching every `closes_when` milestone, on a moment no untrusted data steers) fires, and
+is never applied: an error, since it holds in every case:
+
+```
+rules.say_goodbye.on  NEVER_FIRES  say_goodbye never acts: it fires on event cancelled after
+withdraw, which always reaches withdrawn then, so it isn't applied: refund closes and nothing new
+is decided: fire it on another moment
+```
+
+A timer set on that moment is never set, or is cancelled by the close, wherever it is written.
+Each has its story under `examples/checks/stories/`.
 
 ## Testing a case
 

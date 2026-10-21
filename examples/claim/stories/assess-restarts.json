@@ -1,0 +1,65 @@
+{
+  "title": "The assessment restarts, and the sla measures each run from its own start",
+  "definition": "../claim.json",
+  "file": {
+    "claimed": 1200
+  },
+  "people": {
+    "ana": [
+      "adjuster"
+    ],
+    "sam": [
+      "support-lead"
+    ]
+  },
+  "fakes": {},
+  "timeline": [
+    {
+      "at": "day 2 09:00",
+      "answer": {
+        "step": "assess",
+        "outcome": "done",
+        "by": "ana"
+      }
+    },
+    {
+      "at": "day 3 09:00",
+      "propose": {
+        "step": "assess",
+        "by": "ana"
+      }
+    }
+  ],
+  "until": "day 9",
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with claimed",
+        "started assess#1: waiting for done by adjuster",
+        "set escalate: 5d after started assess#1, due 2026-01-06T00:00:00Z"
+      ],
+      "day 2 09:00": [
+        "ana answers assess: done",
+        "ana answered assess#1 done as adjuster",
+        "assess#1 done",
+        "started settle#1: waiting for settled by support-lead",
+        "cancelled escalate, 5d after started assess#1: assess#1 is done"
+      ],
+      "day 3 09:00": [
+        "ana proposes assess",
+        "ana proposed assess as adjuster",
+        "started assess#2: waiting for done by adjuster",
+        "set escalate: 5d after started assess#2, due 2026-01-09T09:00:00Z"
+      ],
+      "day 8 09:00": [
+        "escalate#1 on 5d after started assess#2: starting lead_review",
+        "started lead_review#1: waiting for reviewed by support-lead"
+      ]
+    },
+    "end": [
+      "status: open",
+      "waiting for: settle by support-lead, assess by adjuster, lead_review by support-lead"
+    ]
+  }
+}

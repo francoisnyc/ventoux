@@ -1448,7 +1448,7 @@ def test_an_unknown_moment_fails_closed() -> None:
     refused = "^'closed' is not a moment Ventoux knows$"
     case = parse_case(with_rule(when=None))
     rule = case.rules["flag_large"].model_copy(update={"on": "closed"})
-    unknown = case.model_copy(update={"rules": {"flag_large": rule}})
+    unknown = case.model_copy(update={"written": {"flag_large": rule}})
     with pytest.raises(ValueError, match=refused):
         validate_case(unknown, CATALOG)
     with pytest.raises(ValueError, match=refused):

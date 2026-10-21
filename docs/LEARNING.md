@@ -300,7 +300,25 @@ and record the key points. A question is closed once you can explain the answer 
     `support-lead`. `pay` hasn't run, and the case stays open (brief, D10, D24).
   - **The test:** `run.waiting_for == ["approval of pay by support-lead"]`, `not
     run.reached("pay")` and `not run.closed`.
-- Status: open, until the opener, `waiting_for` and the test come back with the exclusion.
+- Retrieval (layer 11h warm-up, 2026-10-21): "someone with the right role and other than the
+  reviewer can approve. The case would wait for an approval, and the test would assert that the
+  approver is different from the reviewer." The core came back for the third time in a row; all
+  three parts were attempted, which is new. Sharpened:
+  - **Why "other than the reviewer":** not because she reviewed, but because her answer set
+    `approved_amount`, the value `pay` sends, and her `approve` lets `pay` run: provenance, not
+    position (brief, D11). Someone who only edited a field `pay` doesn't use isn't excluded; and
+    the opener of the case, and whoever proposed the run, are excluded too (D11, D25). The
+    opener didn't come back, for the fourth time.
+  - **What it waits for, in the inbox's words:** one approval, `approval of pay by
+    support-lead` (brief, D24): `pay` hasn't run, and the case stays open (D10).
+  - **The test asserts the moment, not an approver:** at that moment nobody has approved yet, so
+    there is no approver to compare. It asserts `run.waiting_for == ["approval of pay by
+    support-lead"]`, `not run.reached("pay")` and `not run.closed`. That Ana is refused is a
+    second test: her answer is refused, saying `ana set approved_amount, which pay uses, so
+    cannot approve it`.
+  - **Why it matters now (11h, choice 9):** a second approver (`four_eyes`) is excluded by the
+    same rule, plus whoever already gave the first approval.
+- Status: open, until the opener and the test's three assertions come back with the exclusion.
 
 ## 15. Case data
 
