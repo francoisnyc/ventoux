@@ -1,0 +1,58 @@
+{
+  "title": "The customer cancels, and the goodbye written after the withdrawal never starts",
+  "definition": "../closed-before-it-acts.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1",
+      "send": {
+        "event": "cancelled",
+        "payload": {
+          "note": "anything"
+        },
+        "by": "system:portal"
+      }
+    }
+  ],
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support"
+      ],
+      "day 1 00:00": [
+        "system:portal sends cancelled, with note",
+        "cancelled#1 from portal, giving note from system:portal, untrusted:customer",
+        "withdraw#1 on event cancelled: reaching withdrawn",
+        "reached withdrawn",
+        "say_goodbye#1 on event cancelled: not applied: withdrawn is reached, so the case closes and nothing new is decided",
+        "cancelled review#1: the case closes when withdrawn is reached",
+        "closed: withdrawn reached"
+      ]
+    },
+    "end": [
+      "status: closed",
+      "nothing pending"
+    ]
+  }
+}

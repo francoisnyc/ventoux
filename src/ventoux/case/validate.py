@@ -59,7 +59,7 @@ from ventoux.case.rules import said
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
 from ventoux.case.types import case_types
-from ventoux.case.warnings import warning_issues
+from ventoux.case.warnings import first_start_issues, warning_issues
 from ventoux.core.catalog import Catalog
 from ventoux.core.validate import Issue
 
@@ -115,6 +115,7 @@ def validate_case(
     refused |= {name for name in case.steps if name not in can}
     said = {issue.path for issue in found}
     found += warning_issues(case, contracts, supplied, said, missing | refused)
+    found += first_start_issues(case, {issue.path for issue in found})
     # Steps the structure lets run are still kept out if the case closes when it opens. If every
     # step is dead anyway, their own issues say why; and a rule on the opening with its own issue
     # may fail, so the case may need attention instead of closing: one cause, one issue. Said
@@ -509,7 +510,15 @@ def never_fires(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
     else starts, is said by that step's issue: one cause, one issue (brief, D39)."""
     found: list[Issue] = []
     for name, rule in case.rules.items():
-        if name in can or any(
+        if name in can:
+            # Its moment comes, but a rule on it may always close the case first (brief, D46).
+            first = closed_before(case, name)
+            if first is not None:
+                found.append(
+                    Issue(f"rules.{name}.on", "NEVER_FIRES", never_acts(case, name, first))
+                )
+            continue
+        if any(
             on_own_moment(case, name, step) and not can_start(case, catalog, step, can)
             for step in rule.then.start
         ):
@@ -547,3 +556,47 @@ def never_fires(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
                 )
         found.append(Issue(f"rules.{name}.on", "NEVER_FIRES", why))
     return found
+
+
+def closed_before(case: CaseDefinition, name: str) -> str | None:
+    """The rule that always closes the case on the moment `name` waits for, before `name` can
+    act, or None. Such a rule has no condition, sets nothing (which could fail), reaches every
+    `closes_when` milestone, and fires on a moment that carries no steering (brief, D43). Rules on
+    one moment fire in the order written, so it closes the case before a rule written after it;
+    and a close ends every timer, so a timer set on its moment never fires, wherever it is
+    written (brief, D38) (brief, D44). Only this form is claimed: the check says less, never
+    more (brief, D46)."""
+    rule = case.rules[name]
+    timer = isinstance(rule.on, After)
+    for other, closer in case.rules.items():
+        if other == name and not timer:
+            return None  # only the rules written before it act first
+        if other == name or isinstance(closer.on, After | Started):
+            continue
+        same = said(anchor(rule.on)) == said(closer.on)
+        closes = (
+            closer.when is None
+            and not closer.then.set
+            and bool(case.closes_when)
+            and set(case.closes_when) <= set(closer.then.reach)
+        )
+        if same and closes:
+            return other
+    return None
+
+
+def never_acts(case: CaseDefinition, name: str, first: str) -> str:
+    """Why `name` never acts though it fires: `first` always closes the case on its moment."""
+    rule = case.rules[name]
+    milestones = " and ".join(case.closes_when)
+    if isinstance(rule.on, After):
+        return (
+            f"{name} never acts: {first} always reaches {milestones} on {said(rule.on.since)}, so "
+            f"{case.case} closes then, and a timer set on that moment is never set, or is "
+            "cancelled by the close: set it on another moment"
+        )
+    return (
+        f"{name} never acts: it fires on {said(rule.on)} after {first}, which always reaches "
+        f"{milestones} then, so it isn't applied: {case.case} closes and nothing new is decided: "
+        "fire it on another moment"
+    )

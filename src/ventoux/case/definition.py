@@ -14,7 +14,6 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
-    PrivateAttr,
     Tag,
     ValidationError,
     model_validator,
@@ -558,29 +557,35 @@ class CaseDefinition(Shape):
     # Whether a request may forget it (brief, D32): `allowed` open or closed; `while_open`, refused
     # once it is closed (books and records); `never`, always refused.
     forgetting: Literal["allowed", "while_open", "never"] = "allowed"
-    # Pydantic: a private attribute is not a field: never read from the JSON, set by a validator.
-    _rules: dict[str, Rule] = PrivateAttr(default_factory=dict)
-    _patterns: dict[str, str] = PrivateAttr(default_factory=dict)
 
     @property
     def rules(self) -> dict[str, Rule]:
         """Every rule the engine runs, in the order written: each raw rule, and each pattern's
-        expansion where the pattern is written. Expanded once, when the definition is read, so
-        no reader of rules can miss one (brief, D46)."""
-        return self._rules
+        expansion where the pattern is written. Worked out from what is written each time it is
+        read, so no reader of rules can miss one, nor see one written since (brief, D46)."""
+        return {
+            rule: raw
+            for name, entry in self.written.items()
+            for rule, raw in expanded(name, entry).items()
+        }
 
     def pattern_of(self, rule: str) -> str | None:
         """The pattern `rule` was expanded from, by the name it is written under; None for a raw
-        rule."""
-        return self._patterns.get(rule)
+        rule, or a name that is no rule."""
+        for name, entry in self.written.items():
+            if not isinstance(entry, Rule) and rule in expanded(name, entry):
+                return name
+        return None
 
     # Pydantic: a validator with `mode="after"` runs on the whole object, once its fields passed.
     @model_validator(mode="after")
     def names_name_something(self) -> "CaseDefinition":
         """Every name used is declared, and every step can start."""
-        # Each pattern expands first, so every check below reads the rules the engine runs. A
-        # pattern with a problem of its own gives no rule: one cause, one issue.
+        # A pattern that can't expand is said first, and nothing below is checked: its rules
+        # would be read from it (one cause, one issue).
         problems = self.expand()
+        if problems:
+            raise ValueError("\n".join(problems))
         problems += [
             *(
                 f"sequence: {name} is not a step"
@@ -610,9 +615,7 @@ class CaseDefinition(Shape):
             for name, field in self.fields.items()
             if field.sensitive and field.visible_to is None
         ]
-        # Every step a rule starts, read from what is written, so a pattern refused above still
-        # counts: its own problem is the cause (one cause, one issue).
-        started_by_rules = {step for entry in self.written.values() for step in starting(entry)}
+        started_by_rules = {step for rule in self.rules.values() for step in rule.then.start}
         for name, step in self.steps.items():
             problems += step_problems(f"steps.{name}", step, self, name in started_by_rules)
         for name in self.events:
@@ -643,34 +646,27 @@ class CaseDefinition(Shape):
         return self
 
     def expand(self) -> list[str]:
-        """Expand each entry of `rules` into the raw rules the engine runs, in the order written,
-        and say what keeps a pattern from expanding (brief, D46)."""
+        """What keeps a pattern from expanding into the rules the engine runs (brief, D46): a
+        problem of its own, or a rule it gives that is already a rule."""
         problems: list[str] = []
+        given: set[str] = set()
         for name, entry in self.written.items():
             found = pattern_problems(f"rules.{name}", entry, self)
             if found:
                 problems += found
                 continue
-            for rule, raw in expanded(name, entry).items():
-                if rule != name and (rule in self.written or rule in self._rules):
+            for rule in expanded(name, entry):
+                if rule != name and (rule in self.written or rule in given):
                     problems.append(
                         f"rules.{name}: it gives the rule {rule}, which is already a rule: rename "
-                        f"one of them"
+                        "one of them"
                     )
-                    continue
-                self._rules[rule] = raw
-                if not isinstance(entry, Rule):
-                    self._patterns[rule] = name
+                given.add(rule)
         return problems
 
     def where(self, rule: str) -> str:
         """Where a rule is written: its own entry, or the pattern it was expanded from."""
         return f"rules.{self.pattern_of(rule) or rule}"
-
-
-def starting(entry: Rule | SlaRule | ReminderRule) -> tuple[str, ...]:
-    """The steps an entry of `rules` starts, as written."""
-    return (entry.reminder.start,) if isinstance(entry, ReminderRule) else entry.then.start
 
 
 def pattern_problems(

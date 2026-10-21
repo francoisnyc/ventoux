@@ -1555,9 +1555,10 @@ whose text is kept.*
   stand where it is written, since rules on one moment act in the definition's order (D38).
 - **It expands once, when the definition is read,** by a pure function of the entry alone,
   before any check: every reader of a definition's rules, the runtime and case validation
-  included, sees the expanded rules, and none can miss one (fail closed). The definition keeps
-  what was written, so it reads back as stored. A pattern adds no engine capability: whatever
-  one seems to need is a decision of its own.
+  included, sees the expanded rules, worked out from what is written each time they are read,
+  so none can miss one (fail closed). The definition keeps each pattern as written, beside the
+  rules it expands into. A pattern adds no engine capability: whatever one seems to need is a
+  decision of its own.
 - **Names are stable.** A pattern that expands into one rule gives it its own name, so its
   firings name the pattern (`assess_sla#1`); a reminder gives one rule per age,
   `<name>_<age>` as written (`remind_review_2d`). A name depends only on the pattern's name and

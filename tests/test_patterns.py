@@ -22,7 +22,7 @@ from ventoux.case.simulate import simulate
 from ventoux.case.story import parse_story
 from ventoux.case.validate import validate_case
 from ventoux.core.validate import Issue
-from ventoux.testing import CATALOG, later, run_case
+from ventoux.testing import CATALOG, later, propose, run_case
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
@@ -481,3 +481,272 @@ def test_a_reminder_makes_no_loop() -> None:
     # A rule's start never waits, so a reminder can't come round by itself (brief, D39): the
     # check says nothing of the reminded refund, and its story ends.
     assert issues(reminded()) == []
+
+
+# --- Slice 6: D7's teaching warnings, reconciled ---
+
+
+def first_start() -> dict[str, Any]:
+    """A timer "two days after the review began", written by hand: a rule reaches `review_begun`
+    as a run of the review starts, and the chase is timed from that milestone. The review is
+    repeatable, so it may begin again (11h's probe A)."""
+    definition = with_rules(
+        mark_begun={
+            "display": {"title": "Mark the review begun"},
+            "on": {"started": "review"},
+            "then": {"reach": ["review_begun"]},
+        },
+        chase_review=CHASE_REVIEW | {"on": {"after": "2d", "since": {"reached": "review_begun"}}},
+    )
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    definition["milestones"] = {"review_begun": {"display": {"title": "Review begun"}}}
+    return definition
+
+
+FIRST_START = (
+    "chase_review's timer is set when review_begun is reached, which mark_begun reaches as a run "
+    "of review starts: review is repeatable, and a milestone is reached once, so the timer counts "
+    "from the first such start, whatever later runs do, and keeps the case open until it fires: "
+    'to count from each run, set it on {"started": "review"}, or write an sla'
+)
+
+
+def test_a_timer_on_a_first_start_warns() -> None:
+    assert issues(first_start()) == [
+        Issue("rules.chase_review.on", "TIMER_ON_FIRST_START", FIRST_START, "warning")
+    ]
+    # The run where the trap bites: the second review starts at day 1 12:00, and is chased at
+    # day 2, twelve hours on, counted from the first.
+    run = run_case(
+        first_start(),
+        file=SMALL,
+        answers=[later("1d"), ("review", "reject", "ana"), later("12h"), propose("review", "ana")]
+        + [later("12h")],
+        people=PEOPLE,
+    )
+    assert "chase_review#1 on 2d after reached review_begun: starting chase" in run.history
+    assert run.history.index("started review#2: waiting for approve or reject by support") < (
+        run.history.index("chase_review#1 on 2d after reached review_begun: starting chase")
+    )
+
+
+def test_a_timer_after_a_completion_doesnt_warn() -> None:
+    # "30 days after the payment": a milestone a step's completion reaches is meant (brief, D44).
+    definition = with_rules(
+        chase_review=CHASE_REVIEW | {"on": {"after": "30d", "since": {"reached": "paid"}}}
+    )
+    definition["milestones"] = {"paid": {"display": {"title": "Paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    assert not [i for i in issues(definition) if i.code == "TIMER_ON_FIRST_START"]
+    # Nor a milestone reached on an answer: not a start.
+    answered = first_start()
+    answered["rules"]["mark_begun"]["on"] = {"answered": "review"}
+    assert not [i for i in issues(answered) if i.code == "TIMER_ON_FIRST_START"]
+    # Nor a milestone reached as a step starts, if the step runs once.
+    once = first_start()
+    once["steps"]["review"] |= {"repeatable": False, "proposed_by": []}
+    assert not [i for i in issues(once) if i.code == "TIMER_ON_FIRST_START"]
+
+
+def closed_first(**rules: Any) -> dict[str, Any]:
+    """The customer can cancel: on `cancelled`, `withdraw` reaches `withdrawn`, which closes the
+    case, and `say_goodbye`, written after it, starts the goodbye call (11h's probe C5). `rules`
+    replaces or adds to them."""
+    definition = say_goodbye()
+    definition["steps"]["goodbye"]["proposed_by"] = ["support"]
+    definition["rules"] = {
+        "withdraw": {
+            "display": {"title": "Withdraw a cancelled refund"},
+            "on": {"event": "cancelled"},
+            "then": {"reach": ["withdrawn"]},
+        },
+        "say_goodbye": {
+            "display": {"title": "Say goodbye to a customer who cancels"},
+            "on": {"event": "cancelled"},
+            "then": {"start": ["goodbye"]},
+        },
+    } | rules
+    return definition
+
+
+NEVER_ACTS = (
+    "say_goodbye never acts: it fires on event cancelled after withdraw, which always reaches "
+    "withdrawn then, so it isn't applied: refund closes and nothing new is decided: fire it on "
+    "another moment"
+)
+
+
+def test_a_rule_after_one_that_always_closes_never_acts() -> None:
+    assert issues(closed_first()) == [Issue("rules.say_goodbye.on", "NEVER_FIRES", NEVER_ACTS)]
+    run = run_case(closed_first(), file=SMALL, answers=[cancelled("anything")], people=PEOPLE)
+    assert (
+        "say_goodbye#1 on event cancelled: not applied: withdrawn is reached, so the case closes "
+        "and nothing new is decided"
+    ) in run.history
+    assert run.closed
+    # A timer set on that moment, wherever it is written, is never set, or cancelled by the close.
+    timer = {
+        "display": {"title": "Chase the goodbye"},
+        "on": {"after": "1d", "since": {"event": "cancelled"}},
+        "then": {"start": ["goodbye"]},
+    }
+    late = closed_first(late=timer)
+    early = closed_first()
+    early["rules"] = {"early": timer} | early["rules"]
+    for name, definition in (("late", late), ("early", early)):
+        assert [i.message for i in issues(definition) if i.path == f"rules.{name}.on"] == [
+            (
+                f"{name} never acts: withdraw always reaches withdrawn on event cancelled, so refund "
+                "closes then, and a timer set on that moment is never set, or is cancelled by the "
+                "close: set it on another moment"
+            )
+        ]
+        run = run_case(
+            definition, file=SMALL, answers=[cancelled("anything"), later("2d")], people=PEOPLE
+        )
+        assert not [line for line in run.history if " on 1d after " in line]
+
+
+def test_a_rule_after_one_that_may_not_close_isnt_claimed() -> None:
+    # Claimed only where the earlier rule always closes: no condition, nothing set that could
+    # fail, every closes_when milestone, on a moment that carries no steering (brief, D43).
+    withdraw = closed_first()["rules"]["withdraw"]
+    may_not = [
+        withdraw | {"when": {"==": [{"var": "review.outcome"}, "approve"]}},
+        withdraw
+        | {"then": {"reach": ["withdrawn"], "set": {"note_seen": {"var": "cancelled.note"}}}},
+        withdraw | {"on": {"started": "goodbye"}},
+    ]
+    for changed in may_not:
+        definition = closed_first(withdraw=changed)
+        definition["fields"]["note_seen"] = {"type": "string", "display": {"title": "Note seen"}}
+        assert not [
+            i for i in issues(definition) if i.code == "NEVER_FIRES" and "never acts" in i.message
+        ], changed
+    # Nor on a run's start, which untrusted data may steer: then the earlier rule reaches
+    # nothing, and the one after it acts. Here the customer's note starts goodbye.
+    on_goodbye = {"on": {"started": "goodbye"}}
+    steered = say_goodbye()
+    steered["rules"] = {
+        "say_goodbye": steered["rules"]["say_goodbye"],
+        "withdraw": withdraw | on_goodbye,
+        "note_it": {
+            "display": {"title": "Keep the note once goodbye starts"},
+            "then": {"set": {"note_seen": {"var": "cancelled.note"}}},
+        }
+        | on_goodbye,
+    }
+    steered["fields"]["note_seen"] = {"type": "string", "display": {"title": "Note seen"}}
+    assert not [i for i in issues(steered) if "never acts" in i.message]
+    run = run_case(steered, file=SMALL, answers=[cancelled()], people=PEOPLE)
+    assert not run.reached("withdrawn")
+    assert [line for line in run.history if line.startswith("note_it#1")] == [
+        "note_it#1 on started goodbye: setting note_seen, from system:portal, untrusted:customer"
+    ]
+    # Nor a rule written before it, which acts first: here a stop, which acts at once.
+    stop_review = {
+        "display": {"title": "Stop the review of a cancelled refund"},
+        "on": {"event": "cancelled"},
+        "then": {"stop": ["review"]},
+    }
+    before = closed_first()
+    before["rules"] = {"stop_review": stop_review, "withdraw": withdraw}
+    del before["steps"]["goodbye"]
+    assert issues(before) == []
+    run = run_case(before, file=SMALL, answers=[cancelled("anything")], people=PEOPLE)
+    assert [line for line in run.history if line.startswith("stop_review#1")] == [
+        "stop_review#1 on event cancelled: stopping review"
+    ]
+
+
+def test_each_checks_story_is_the_run_of_its_issue() -> None:
+    # Each story under examples/checks/ plays the definition its issue is claimed on, and holds
+    # (`test_every_story_holds`); here, its definition gives that issue, and its run the line.
+    for name, code, line in (
+        (
+            "timer-on-a-first-start",
+            "TIMER_ON_FIRST_START",
+            "chase_review#1 on 2d after reached review_begun: starting chase",
+        ),
+        (
+            "closed-before-it-acts",
+            "NEVER_FIRES",
+            (
+                "say_goodbye#1 on event cancelled: not applied: withdrawn is reached, so the case "
+                "closes and nothing new is decided"
+            ),
+        ),
+    ):
+        definition = json.loads((EXAMPLES / "checks" / f"{name}.json").read_text())
+        assert [issue.code for issue in issues(definition)] == [code]
+        assert f"  {line}\n" in simulated(EXAMPLES / "checks" / "stories" / f"{name}.json")
+
+
+# --- Slice 7: the guide, and what no line quotes ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+PATTERNS_SECTION = GUIDE.split("## Patterns\n")[1].split("\n## ")[0]
+
+
+def blocks(language: str) -> list[str]:
+    """The Patterns section's code blocks in `language` (`""` for plain ones), in order."""
+    found: list[tuple[str, str]] = []  # each block's language, and its text
+    inside = False
+    for line in PATTERNS_SECTION.splitlines(keepends=True):
+        if line.startswith("```"):
+            if not inside:
+                found.append((line.strip().removeprefix("```"), ""))
+            inside = not inside
+        elif inside:
+            kind, text = found[-1]
+            found[-1] = (kind, text + line)
+    return [text for kind, text in found if kind == language]
+
+
+def fragment(text: str) -> dict[str, Any]:
+    """A JSON block written as a fragment, `"name": {...}`, read as an object."""
+    loaded: dict[str, Any] = json.loads("{" + text + "}")
+    return loaded
+
+
+def flat(text: str) -> str:
+    """Text with its line breaks and runs of spaces read as one space: the guide wraps lines."""
+    return " ".join(text.split())
+
+
+def test_the_guides_patterns_are_the_engines() -> None:
+    sla, raw, reminder = (fragment(block) for block in blocks("json"))
+    sla_read, reminder_read, at_pattern, beside, first, never = blocks("")
+    assert sla == {"chase_sla": CHASE_SLA}
+    assert reminder == {"remind_review": REMIND_REVIEW}
+    case = parse_case(with_rules(**sla))
+    assert case.rules == parse_case(with_rules(**raw)).rules
+    assert sla_read == f"{read_patterns(case)[0]}\n"
+    assert reminder_read == f"{read_patterns(parse_case(reminded(**reminder)))[0]}\n"
+    own = {"task": "review", "after": ["1d"], "start": "review"}
+    own_task = reminded(remind_review=REMIND_REVIEW | {"reminder": own})
+    own_task["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    del own_task["steps"]["remind"]
+    [issue] = issues(own_task)
+    assert flat(at_pattern) == flat(f"{issue.path}  {issue.code}  {issue.message}")
+    printed = simulated(EXAMPLES / "refund" / "stories" / "review-reminded.json")
+    assert beside in printed
+    [warned] = issues(first_start())
+    assert flat(first) == flat(f"{warned.path}  {warned.code} (warning)  {warned.message}")
+    [refused] = issues(closed_first())
+    assert flat(never) == flat(f"{refused.path}  {refused.code}  {refused.message}")
+
+
+def test_no_pattern_line_quotes_a_value_from_the_case_file() -> None:
+    # A reading is never given a case file, a story's lines name values, and the check's messages
+    # name fields: no value the opening, a form or a fake gave is quoted (brief, D30) (brief, D45).
+    for story, values in (
+        (EXAMPLES / "claim" / "stories" / "assess-restarts.json", ["1200"]),
+        (EXAMPLES / "refund" / "stories" / "review-reminded.json", ["ord-1", "refund-1"]),
+        (EXAMPLES / "checks" / "stories" / "closed-before-it-acts.json", ["anything", "ord-1"]),
+    ):
+        printed = simulated(story)
+        assert not [value for value in values if value in printed], story.name
+    sla = copy.deepcopy(CHASE_SLA) | {"when": {">": [{"var": "approved_amount"}, 100]}}
+    for issue in issues(with_rules(chase_sla=sla)) + issues(closed_first()):
+        assert "ord-1" not in issue.message and "40" not in issue.message

@@ -1,0 +1,73 @@
+{
+  "title": "The review begins again, and the chase still counts from its first start",
+  "definition": "../timer-on-a-first-start.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 40
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 1",
+      "answer": {
+        "step": "review",
+        "outcome": "reject",
+        "by": "ana"
+      }
+    },
+    {
+      "at": "day 1 12:00",
+      "propose": {
+        "step": "review",
+        "by": "ana"
+      }
+    }
+  ],
+  "until": "day 3",
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support",
+        "mark_begun#1 on started review: reaching review_begun",
+        "reached review_begun",
+        "set chase_review: 2d after reached review_begun, due 2026-01-03T00:00:00Z"
+      ],
+      "day 1 00:00": [
+        "ana answers review: reject",
+        "ana answered review#1 reject as support",
+        "review#1 done"
+      ],
+      "day 1 12:00": [
+        "ana proposes review",
+        "ana proposed review as support",
+        "started review#2: waiting for approve or reject by support",
+        "mark_begun#2 on started review: reaching review_begun"
+      ],
+      "day 2 00:00": [
+        "chase_review#1 on 2d after reached review_begun: starting chase",
+        "started chase#1: waiting for chased by support-lead"
+      ]
+    },
+    "end": [
+      "status: open",
+      "waiting for: review by support, chase by support-lead"
+    ]
+  }
+}
