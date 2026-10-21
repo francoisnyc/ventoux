@@ -167,6 +167,9 @@ def lapsed(state: CaseState, name: str, step: CallStep, given: GivenApproval) ->
     except ExpressionError:
         return  # can't be read: the input check stops the step, saying why
     if now != given.digest:
+        # Every approver is named: each approved values that are gone (brief, D47).
+        *others, last = given.approvers
+        who = f"{', '.join(others)} and {last}" if others else last
         raise StepStopped(
-            f"the inputs of {name} changed since {given.by} approved them: a new approval is needed"
+            f"the inputs of {name} changed since {who} approved them: a new approval is needed"
         )

@@ -586,3 +586,25 @@ def test_no_line_or_issue_of_the_fix_quotes_a_value_from_the_case_file() -> None
         said = run.history + run.needs_attention + [message for *_, message in issues(definition)]
         assert any("untrusted:customer" in line for line in said)
         assert not [line for line in said if typed in line or "99123" in line]
+
+
+def test_an_approval_of_several_doesnt_end_what_steered_a_run() -> None:
+    # Sam and Lee approve the lookup the customer's note started: two people approve what it is
+    # sent, still not what other rules do once it starts (brief, D43, D47).
+    approval = {"roles": ["support-lead"], "count": 2, "display": {"reason": "Check"}}
+    close_on_start = rule({"started": "lookup"}, {"reach": ["withdrawn"]})
+    steps = {"lookup": LOOKUP | {"approval": approval}}
+    definition = starting("lookup", steps, {"close_it": close_on_start})
+    answers = [
+        cancelled(),
+        ("lookup.approval#1", "approve", "sam"),
+        ("lookup.approval#1", "approve", "lee"),
+    ]
+    leads = {**PEOPLE, "lee": ["support-lead"]}
+    run = run_case(definition, file=SMALL, answers=answers, people=leads)
+    assert "lee answered lookup.approval#1 approve as support-lead: 2 of 2 given" in run.history
+    assert run.state.phase == "open"
+    assert (
+        f"close_it#1 on started lookup: reaches nothing: its moment comes from untrusted data: "
+        f"{STEERED_LOOKUP}, and untrusted data can't decide"
+    ) in run.history

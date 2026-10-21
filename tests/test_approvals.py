@@ -13,14 +13,26 @@ import pytest
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_retry_rejected import FILE as RETRIED_FILE
-from test_retry_rejected import down_once, refund_retried
-from test_rules import APPROVED_40, CHECKED_OK, LEADS, SMALL, with_goodwill
+from test_retry_rejected import DELIVERED, down_once, generated_definition, refund_retried
+from test_rules import APPROVED_40, CHECKED_OK, LEADS, SMALL, WITHDRAWS, with_goodwill, withdrawable
 from test_set import FILE, with_owed
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered
-from ventoux.testing import CATALOG, START, AnswerRefused, load_definition, propose, retry, run_case
+from ventoux.testing import (
+    CATALOG,
+    START,
+    AnswerRefused,
+    close,
+    finish,
+    later,
+    load_definition,
+    propose,
+    retry,
+    run_case,
+    send,
+)
 
 ROOT = Path(__file__).parent.parent
 FOUR_EYES = load_definition(ROOT / "examples" / "refund" / "refund-four-eyes.json")
@@ -372,3 +384,167 @@ def test_who_rejected_may_answer_a_later_entry() -> None:
     )
     assert "lee answered pay.approval#2 approve as support-lead: 1 of 2 given" in run.history
     assert run.reached("pay")
+
+
+# --- Slice 5: withdrawn, lapsed and cancelled whole ---
+
+HALF = [REVIEWED, ("pay", "approve", "sam")]  # one approval of two given
+
+
+def test_a_change_withdraws_every_approval() -> None:
+    # Nobody approves values they didn't see, however many approved (brief, D25, D42, D47).
+    # A task answered again: in `test_distinct_within_the_entry`. A person changes a value pay reads:
+    adjusted = four_eyes()
+    adjusted["steps"]["adjust"] = {
+        "kind": "task",
+        "display": {"title": "Adjust the approved amount"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "requires": ["review"],
+        "outcomes": {"adjust": {"display": {"title": "Adjust"}, "sets": ["approved_amount"]}},
+    }
+    run = run_case(
+        adjusted,
+        file=LARGE,
+        answers=[
+            *HALF,
+            propose("adjust", "ana"),
+            ("adjust", "adjust", "ana", {"approved_amount": 11000}),
+        ],
+        people=PEOPLE,
+    )
+    assert "withdrew pay.approval#1: approved_amount changed, with 1 of 2 approvals given" in (
+        run.history
+    )
+    assert run.waiting_for == ["approval of pay by support-lead: 0 of 2 given"]
+    with pytest.raises(
+        AnswerRefused, match="^pay.approval#1 was withdrawn: approved_amount changed$"
+    ):
+        run_case(
+            adjusted,
+            file=LARGE,
+            answers=[
+                *HALF,
+                propose("adjust", "ana"),
+                ("adjust", "adjust", "ana", {"approved_amount": 11000}),
+                ("pay.approval#1", "approve", "lee"),
+            ],
+            people=PEOPLE,
+        )
+    # A rule's `set` changes what is owed.
+    owed = with_owed()
+    owed["steps"]["pay"]["inputs"]["amount"] = {"var": "owed"}
+    owed["steps"]["pay"]["approval"]["count"] = 2
+    owed["events"] = {
+        "fee_changed": {
+            "display": {"title": "The fee changes"},
+            "sent_by": {"system": "portal"},
+            "payload": {"fee": {"type": "number", "display": {"title": "The new fee"}}},
+        }
+    }
+    owed["rules"]["refigure"] = {
+        "display": {"title": "Work out what is owed again"},
+        "on": {"event": "fee_changed"},
+        "then": {"set": {"owed": {"-": [{"var": "approved_amount"}, {"var": "fee_changed.fee"}]}}},
+    }
+    big = ("review", "approve", "ana", {"approved_amount": 500})
+    run = run_case(
+        owed,
+        file=FILE,
+        answers=[big, ("pay", "approve", "sam"), send("fee_changed", {"fee": 50}, "system:portal")],
+        people=PEOPLE,
+    )
+    assert "withdrew pay.approval#1: owed changed, with 1 of 2 approvals given" in run.history
+    assert run.waiting_for == ["approval of pay by support-lead: 0 of 2 given"]
+
+
+def test_a_given_approval_of_several_lapses_with_its_requirement() -> None:
+    # The retry fix's path L, with two approvers: approved by Sam and Lee while the order's status
+    # is fetched again, then the review it requires is stopped. Nothing can spend the approval,
+    # so it lapses, every approval with it (fix-retry-rejected, decision 5) (brief, D47).
+    definition = generated_definition(fresh=True, audited=False)
+    definition["steps"]["pay"]["approval"]["count"] = 2
+    script = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        later("2d"),
+        ("pay.approval#1", "approve", "sam"),
+        ("pay.approval#1", "approve", "lee"),  # given: the order's status is fetched again
+        propose("review", "ana"),
+        finish("check_order#2"),
+        propose("hold", "ana"),
+        ("hold#1", "hold", "ana"),  # halt stops review#2
+    ]
+    run = run_case(
+        definition,
+        {"order_id": "ord-1", "amount": 300},
+        script,
+        PEOPLE,
+        activities=DELIVERED,
+        held=["check_order"],
+    )
+    assert run.history[-2:] == [
+        "lapsed pay.approval#1: pay requires review, which hasn't completed",
+        "closed: nothing left to do",
+    ]
+    assert run.state.given == {}
+
+
+def test_a_stop_or_a_close_cancels_every_approval() -> None:
+    # A rule's stop does what a close does, to one step (brief, D10, D40, D47).
+    stopping = withdrawable()
+    stopping["steps"]["pay"]["approval"]["count"] = 2
+    stopping |= {
+        "stays_open": True,
+        "close_reasons": {"duplicate": {"display": {"title": "Duplicate"}, "roles": ["support"]}},
+    }
+    review = ("review", "approve", "ana", {"approved_amount": 250})
+    run = run_case(
+        stopping,
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[review, ("pay", "approve", "sam"), *WITHDRAWS],
+        people=PEOPLE,
+    )
+    assert "cancelled pay.approval#1: stopped by withdraw#1, with 1 of 2 approvals given" in (
+        run.history
+    )
+    assert run.waiting_for == []
+    closing = four_eyes()
+    closing["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate"}, "roles": ["support"]}
+    }
+    run = run_case(closing, file=LARGE, answers=[*HALF, close("duplicate", "ana")], people=PEOPLE)
+    assert "cancelled pay.approval#1: closed as duplicate by ana, with 1 of 2 approvals given" in (
+        run.history
+    )
+    assert run.closed
+
+
+def test_a_lapse_names_every_approver() -> None:
+    # Sam and Lee approve 12,000, needed at most a day old; it is three days old, from a person,
+    # so pay fails, keeping their approval for a retry (brief, D26). Ana reworks it to 11,000, and
+    # the retry finds the inputs changed since both approved them (brief, D11, D47).
+    definition = four_eyes()
+    definition["steps"]["pay"]["max_age"] = {"approved_amount": "1d"}
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    operators = {**PEOPLE, "omar": ["operations"]}
+    run = run_case(
+        definition,
+        file=LARGE,
+        answers=[
+            REVIEWED,
+            later("3d"),
+            ("pay", "approve", "sam"),
+            ("pay", "approve", "lee"),
+            propose("review", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 11000}),
+            retry("pay#1", "omar"),
+        ],
+        people=operators,
+    )
+    [failed] = [r for r in run.state.runs if r.step == "pay"]
+    assert failed.approved is not None and failed.approved.approvers == ("sam", "lee")
+    assert run.needs_attention == [
+        "pay#1: the inputs of pay changed since sam and lee approved them: a new approval is needed"
+    ]
