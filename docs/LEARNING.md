@@ -44,6 +44,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 37 | Layer 9c: what the audit keeps after forgetting | open |
 | 38 | Layer 9d: stale facts, and why replay decides the same way | open |
 | 39 | Layer 10: why a fixpoint is needed | open |
+| 40 | Layer 11: arrival is a fact, content is not | open |
 
 ---
 
@@ -1295,4 +1296,52 @@ and record the key points. A question is closed once you can explain the answer 
     happen", stays sound; what has to be checked again are the claims that something always or
     never happens (11c's audit of the proofs).
 - Status: open.
+
+## 40. Layer 11: arrival is a fact, content is not
+
+> "Arrival is a fact, content is not": give an example.
+
+- Your answer (layer 11's check-yourself, after the walk-through, 2026-10-21): "an email received
+  is an event; on arrival a rule will evaluate the event, not its content, because it can't be
+  trusted."
+- Discussion: the core is right, and it is the layer's lesson: what a customer wrote can't be
+  trusted. Sharpened:
+  - **Why the arrival is a fact:** the engine checks who sent it before anything lands
+    (`sender_role` and `refuse_payload` in `case/runtime.py`; brief, D41). An email is sent by a
+    system the platform team registered, say `mail`, so "an email from the customer arrived" is
+    the mail system's fact, and a rule on `{"event": ...}` may decide on it: reach a milestone,
+    stop a step, start one, set a field.
+  - **Why the content isn't:** the body is what the customer typed, declared on the payload
+    field as `untrusted:customer`. The mark adds distrust whoever sends it, never removes it
+    (D12): the value carries `system:mail, untrusted:customer`.
+  - **"Not its content" is too strong:** a rule's `when` *may* read the content, and the content
+    *informs*: it may start a step (its inputs' policies are checked, D39), set a field (the value
+    carries the mark, D42), and be shown to a person who decides. It never *decides*: a rule
+    that reaches or stops on it does nothing at all (D38, D40), and since D43 neither does a
+    rule on the start of a step it steered (walk-through part 5).
+  - **What the engine and validation say,** with the walk-through's `cancelled` event (`note`
+    marked `untrusted:customer`), one rule on its arrival and one on its content:
+    ```
+    cancelled#1 from portal, giving note from system:portal, untrusted:customer
+    withdraw#1 on event cancelled: reaching withdrawn
+    urgent_note#1 on event cancelled: reaches nothing: its condition reads cancelled.note, from
+      untrusted:customer, and untrusted data can't decide
+    UNTRUSTED_TRIGGER (error) at rules.urgent_note.when: ... so it never reaches urgent: read a
+      value a person or a trusted system gives, such as a task's answer
+    ```
+  In one line: a rule may decide *that* the email came; what it *says* only informs, and a person
+  decides on it.
+- Didn't come back: the sender check that makes arrival a fact; that content may still start
+  steps and set fields (informs); the line and `UNTRUSTED_TRIGGER`.
+- Found in the walk-through, not fixed (recorded for their own fix, as asked):
+  - **The false `INPUT_POLICY` is still on `main`** (`docs/layers/fix-untrusted-moment.md`,
+    "Found, not fixed"). Traced in part 4: `rule_writes` (`case/writers.py`) gives a field
+    with no mark an empty mark, `frozenset()`, not `None`; `always` then asks the policy
+    `refused(frozenset())`, and `only_from` refuses a value with no source ("it comes from no
+    system"). So any unmarked field a rule sets counts as always refused by an `only_from`
+    input. It errs on the safe side, but the error claims what the run doesn't do.
+  - **11h1's unclaimed `NEVER_STARTS`** (`docs/layers/11-rules.md`, "Decided while building
+    11h1"): a start written before a rule that always closes is refused every time, and the
+    check doesn't claim it. No later commit fixes it.
+- Status: open, until an example comes back with the sender check and "informs, never decides".
 
