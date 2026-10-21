@@ -5,6 +5,7 @@ See docs/layers/11-rules.md, 11h2, docs/guides/cases.md, "Several approvers", an
 """
 
 import copy
+import json
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -548,3 +549,111 @@ def test_a_lapse_names_every_approver() -> None:
     assert run.needs_attention == [
         "pay#1: the inputs of pay changed since sam and lee approved them: a new approval is needed"
     ]
+
+
+# --- Slice 6: the sheet, the readings and the stories ---
+
+
+def test_the_sheet_says_who_has_approved() -> None:
+    # Sam, opening the sheet again, sees he has approved; Lee sees one more is needed. The facts
+    # are as before (brief, D18, D47).
+    half = run_case(FOUR_EYES, file=LARGE, answers=HALF, people=PEOPLE)
+    sheet = half.approval_sheet("pay.approval#1", ["support-lead"], START)
+    assert sheet.approved_by == ["sam"]
+    assert sheet.needed == 1
+    assert sheet.lines[0].startswith("Amount approved: 12000, obtained")
+    none_yet = run_case(FOUR_EYES, file=LARGE, answers=[REVIEWED], people=PEOPLE)
+    sheet = none_yet.approval_sheet("pay.approval#1", ["support-lead"], START)
+    assert (sheet.approved_by, sheet.needed) == ([], 2)
+    plain = load_definition(ROOT / "examples" / "refund" / "refund.json")
+    one = run_case(
+        plain,
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[("review", "approve", "ana", {"approved_amount": 250})],
+        people=PEOPLE,
+    )
+    sheet = one.approval_sheet("pay.approval#1", ["support-lead"], START)
+    assert (sheet.approved_by, sheet.needed) == ([], 1)
+
+
+GUIDE = (ROOT / "docs" / "guides" / "cases.md").read_text()
+SECTION = GUIDE.split("## Several approvers\n")[1].split("\n## ")[0]
+
+
+def guide_blocks(language: str) -> list[str]:
+    """The section's code blocks in `language` (`""` for plain ones), in order."""
+    parts = SECTION.split("```")
+    return [
+        part.removeprefix(language + "\n")
+        for part in parts[1::2]
+        if part.split("\n")[0] == language
+    ]
+
+
+def test_the_guides_several_approvers_are_the_engines() -> None:
+    # Our own documentation, run so it can't drift from the code; never a definition (data).
+    [shown] = guide_blocks("json")
+    approval = json.loads("{" + shown + "}", parse_float=Decimal)["approval"]
+    assert approval == FOUR_EYES["steps"]["pay"]["approval"]
+    [history] = guide_blocks("")
+    run = run_case(
+        FOUR_EYES,
+        file=LARGE,
+        answers=[REVIEWED, ("pay", "approve", "sam"), ("pay.approval#1", "approve", "lee")],
+        people=PEOPLE,
+    )
+    lines = history.splitlines()
+    first = run.history.index(lines[0])
+    assert run.history[first : first + len(lines)] == lines
+    [code] = guide_blocks("python")
+    exec(code, {"run_case": run_case, "refund_four_eyes": FOUR_EYES, "PEOPLE": PEOPLE})  # noqa: S102
+    # The refusals and lines the prose quotes are the engine's.
+    for said in (
+        "sam has already approved pay.approval#1: it needs 1 more person",
+        "pay#1 won't run: lee rejected pay.approval#1, which 1 of 2 had approved",
+        "withdrew pay.approval#1: review started again, with 1 of 2 approvals given",
+    ):
+        assert f"`{said}`" in " ".join(SECTION.split()), said
+
+
+SECRET_ORDER = "ORD-7-SECRET"  # an order, and an amount, to look for where they mustn't be
+SECRET_AMOUNT = 12345
+
+
+def test_no_approval_line_quotes_a_value_from_the_case_file() -> None:
+    # Every line 11h2 adds names entries, steps, roles, people and counts, never a value
+    # (brief, D31, D47).
+    definition = four_eyes()
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    file = {"order_id": SECRET_ORDER, "amount": SECRET_AMOUNT}
+    review = ("review", "approve", "ana", {"approved_amount": SECRET_AMOUNT})
+    runs = [
+        run_case(definition, file=file, answers=[review, ("pay", "approve", "sam")], people=PEOPLE),
+        run_case(
+            definition,
+            file=file,
+            answers=[review, ("pay", "approve", "sam"), ("pay", "reject", "lee")],
+            people=PEOPLE,
+        ),
+        run_case(
+            definition,
+            file=file,
+            answers=[review, ("pay", "approve", "sam"), propose("review", "ana")],
+            people=PEOPLE,
+        ),
+    ]
+    said = [line for run in runs for line in [*run.history, *run.waiting_for, *run.needs_attention]]
+    sheet = runs[0].approval_sheet("pay.approval#1", ["support-lead"], START)
+    said += [*sheet.approved_by]
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            definition,
+            file=file,
+            answers=[review, ("pay", "approve", "sam"), ("pay", "approve", "sam")],
+            people=PEOPLE,
+        )
+    said.append(str(refused.value))
+    approval_lines = [line for line in said if "approv" in line and "opened" not in line]
+    assert approval_lines
+    for line in approval_lines:
+        assert SECRET_ORDER not in line and str(SECRET_AMOUNT) not in line, line

@@ -7,7 +7,7 @@ See docs/layers/09-case-data.md and docs/guides/case-data.md.
 """
 
 from collections.abc import Collection, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
@@ -116,6 +116,9 @@ class ApprovalSheet:
 
     entry: str  # the open approval, such as `pay.approval#1`
     lines: list[str]  # one per field its step reads, by name: `Order: ord-1, obtained 3 days ago`
+    # Who has approved it so far, in order, and how many more people it needs (brief, D47).
+    approved_by: list[str] = field(default_factory=list[str])
+    needed: int = 1
 
 
 def sheet_of(
@@ -138,7 +141,8 @@ def sheet_of(
     held = frozenset(roles)
     reads = sorted({field for expression in read_by(step) for field in fields_read(expression)})
     lines = [fact_line(case, state, name, held, at, registered) for name in reads]
-    return ApprovalSheet(entry, lines)
+    needed = approval.count - len(approval.approved)
+    return ApprovalSheet(entry, lines, list(approval.approved), needed)
 
 
 def fact_line(

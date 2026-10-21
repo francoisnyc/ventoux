@@ -1,0 +1,86 @@
+{
+  "title": "Two team leads approve a large refund",
+  "definition": "../refund-four-eyes.json",
+  "file": {
+    "order_id": "ord-1",
+    "amount": 12000
+  },
+  "people": {
+    "ana": [
+      "support"
+    ],
+    "sam": [
+      "support",
+      "support-lead"
+    ],
+    "lee": [
+      "support-lead"
+    ]
+  },
+  "fakes": {
+    "payments.refund@2": {
+      "gives": {
+        "refund_id": "refund-1"
+      }
+    }
+  },
+  "timeline": [
+    {
+      "at": "day 0 09:00",
+      "answer": {
+        "step": "review",
+        "outcome": "approve",
+        "by": "ana",
+        "form": {
+          "approved_amount": 12000
+        }
+      }
+    },
+    {
+      "at": "day 0 10:00",
+      "answer": {
+        "step": "pay",
+        "outcome": "approve",
+        "by": "sam"
+      }
+    },
+    {
+      "at": "day 1 09:00",
+      "answer": {
+        "entry": "pay.approval#1",
+        "outcome": "approve",
+        "by": "lee"
+      }
+    }
+  ],
+  "expect": {
+    "timeline": {
+      "day 0 00:00": [
+        "the case opens",
+        "opened by system:opener, with amount and order_id",
+        "started review#1: waiting for approve or reject by support"
+      ],
+      "day 0 09:00": [
+        "ana answers review: approve, with approved_amount",
+        "ana answered review#1 approve as support, setting approved_amount",
+        "review#1 done",
+        "asked pay.approval#1: approval of pay by support-lead, from 2 people"
+      ],
+      "day 0 10:00": [
+        "sam answers pay: approve",
+        "sam answered pay.approval#1 approve as support-lead: 1 of 2 given"
+      ],
+      "day 1 09:00": [
+        "lee answers pay.approval#1: approve",
+        "lee answered pay.approval#1 approve as support-lead: 2 of 2 given",
+        "scheduled pay#1: payments.refund@2 (order_id from system:opener; amount from person:ana), key story/pay#1",
+        "pay#1 done, giving refund_id from untrusted:undeclared",
+        "closed: nothing left to do"
+      ]
+    },
+    "end": [
+      "status: closed",
+      "nothing pending"
+    ]
+  }
+}

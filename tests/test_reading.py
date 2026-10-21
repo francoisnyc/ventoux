@@ -25,6 +25,7 @@ from test_rules import (
     welcome_file,
     with_kyc_rule,
     with_rule,
+    with_goodwill,
     with_welcome,
     withdrawable,
 )
@@ -745,3 +746,38 @@ def test_the_guides_readings_are_the_renderers() -> None:
     [flagged] = read_rules(parse_case(risky))
     assert flag == f"{flagged}\n"
     assert every == f"{EVERY_RULE}\n"
+
+
+def test_a_reading_says_how_many_approve() -> None:
+    # Where a reading mentions a step's approval, it says how many people give it; with one, as
+    # before (brief, D45, D47).
+    four_eyes = halting()
+    four_eyes["steps"]["pay"]["approval"]["count"] = 2
+    stop = reading_of(four_eyes, "flag_large")
+    assert (
+        "Stopping pay cancels a run waiting for its approval by 2 people, or to start, at once; a "
+        "running call is only asked to stop, may still finish, and is flagged if it does; a "
+        "failed run isn't stopped."
+    ) in stop.fine_print
+    goodwill = with_goodwill()
+    goodwill["steps"]["goodwill"]["approval"]["count"] = 2
+    start = reading_of(goodwill, "start_goodwill")
+    [said] = [text for text in start.fine_print if text.startswith("Starting goodwill")]
+    assert "it is already running or waiting for its approval by 2 people" in said
+    assert said.endswith(" It waits for its approval by 2 people when one is needed.")
+    one = reading_of(with_goodwill(), "start_goodwill")
+    [said] = [text for text in one.fine_print if text.startswith("Starting goodwill")]
+    assert "by 2 people" not in said
+    assert said.endswith(" It waits for its approval when one is needed.")
+    # The run: Sam's approval of two is cancelled with the entry.
+    big = ("review", "approve", "ana", {"approved_amount": 250})
+    leads = {**PEOPLE, "lee": ["support-lead"]}
+    asked = run_case(
+        four_eyes,
+        file=SMALL,
+        answers=[big, ("pay", "approve", "sam"), PORTAL_CANCELS],
+        people=leads,
+    )
+    assert "cancelled pay.approval#1: stopped by flag_large#1, with 1 of 2 approvals given" in (
+        asked.history
+    )

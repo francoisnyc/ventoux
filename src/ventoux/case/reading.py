@@ -389,7 +389,9 @@ def stops(then: Then, case: CaseDefinition) -> list[Clause]:
             text = f"Stopping {name} cancels its open wait at once."
         elif isinstance(step, CallStep | PlanStep):
             waiting = (
-                "waiting for its approval, or to start" if approved(step) else "waiting to start"
+                f"waiting for {its_approval(step)}, or to start"
+                if approved(step)
+                else "waiting to start"
             )
             text = (
                 f"Stopping {name} cancels a run {waiting}, at once; a running call is only asked "
@@ -409,6 +411,12 @@ def approved(step: object) -> bool:
     return isinstance(step, CallStep) and step.approval is not None
 
 
+def its_approval(step: object) -> str:
+    """`its approval`, saying how many give it when several people do (brief, D47)."""
+    count = step.approval.count if isinstance(step, CallStep) and step.approval else 1
+    return f"its approval by {count} people" if count > 1 else "its approval"
+
+
 def starts(then: Then, case: CaseDefinition) -> list[Clause]:
     """What a start does: the engine proposes a run, and admission decides at once, as for a
     person's proposal; a start it can't make is recorded, and nothing runs, then or later
@@ -421,7 +429,8 @@ def starts(then: Then, case: CaseDefinition) -> list[Clause]:
         why = [
             *(["its requirements aren't met"] if required[name] else []),
             *(["its condition is false"] if step.when is not None else []),
-            "it is already running" + (" or waiting for its approval" if approved(step) else ""),
+            "it is already running"
+            + (f" or waiting for {its_approval(step)}" if approved(step) else ""),
             *(["it has run and isn't repeatable"] if not step.repeatable else []),
             *(["its latest run needs attention"] if calls else []),
         ]
@@ -437,7 +446,7 @@ def starts(then: Then, case: CaseDefinition) -> list[Clause]:
                 "start doesn't wait for it to be fetched again."
             )
         if approved(step):
-            text += " It waits for its approval when one is needed."
+            text += f" It waits for {its_approval(step)} when one is needed."
         fine.append(Clause("a start is a proposal", text))
     return fine
 
