@@ -332,7 +332,7 @@ class CaseWorkflow:
     @workflow.query(name="worded_view")
     def worded_view(self, asked: ViewAsked) -> ViewAnswer:
         """The view, in a wording revision of the case's release: its titles, the case's
-        decisions. A refusal comes back as data, as a sheet's does (brief, D31, D51)."""
+        decisions. A refusal comes back as data, as a sheet's does (brief, D31) (brief, D51)."""
         try:
             case = self.worded(asked.wording)
         except WordingRefused as refused:
@@ -444,7 +444,7 @@ class CaseWorkflow:
     def released_on(self, case: Any, release: ReleaseStart) -> str:
         """The release's name, `refund 1`, once the case has checked that what it was given is
         that release's package; otherwise `CaseRefused`, so it never opens on behaviour nobody
-        released. Depends on nothing the client did (brief, D34, D51)."""
+        released. Depends on nothing the client did (brief, D34) (brief, D51)."""
         named = f"{release.name} {release.release}"
         if not is_release(case, release.plans, release.digest):
             raise CaseRefused(

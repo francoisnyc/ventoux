@@ -379,3 +379,22 @@ def test_an_answer_says_which_wording_it_saw(tmp_path: Path) -> None:
         "ana answered review#1 approve as support, setting approved_amount, as worded in "
         "refund 1, wording 2"
     ) in now.history
+
+
+CASES_GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "cases.md"
+
+
+def test_the_guides_release_example_runs_as_written(tmp_path: Path) -> None:
+    # The cases guide's "A case runs its release": the history it shows is the one a case opened
+    # on the example package's first release begins with.
+    section = CASES_GUIDE.read_text().split("### A case runs its release")[1].split("\n## ")[0]
+    shown = section.split("Its history begins")[1].split("```\n")[1].split("```")[0].splitlines()
+    refund_1 = released(tmp_path)
+
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, DevelopmentCases, refund_1, LARGE, "refund-1", QUEUE)
+        return await reported(case, lambda now: now.waiting_at == ["review#1"])
+
+    now = on_temporal(scenario)
+    assert now.history[: len(shown)] == shown
+    assert (now.release, now.engine) == ("refund 1", 1)

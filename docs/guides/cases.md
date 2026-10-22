@@ -1800,7 +1800,7 @@ Its history begins with the release and the engine version that decide it:
 
 ```
 opened on refund 1, engine 1
-opened by system:opener, with amount, order_id
+opened by system:opener, with amount and order_id
 ```
 
 - **It runs that release to the end.** The release's case and plans travel in the case's start

@@ -19,8 +19,8 @@ KNOWN = (1,)
 
 class EngineUnknown(Exception):
     """A case decided as a version this code doesn't know. Not a refusal of the case: on Temporal
-    it fails the workflow task, which is retried until code that knows it is deployed (brief,
-    D17)."""
+    it fails the workflow task, which is retried until code that knows it is deployed
+    (brief, D17)."""
 
 
 def known(version: int) -> int:

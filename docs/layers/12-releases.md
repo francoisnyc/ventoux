@@ -453,7 +453,9 @@ Each claim this section makes about behaviour, and the test that would fail if i
 Status: drafted 2026-10-22, from `main` at `b734098` (12a merged, #42); the histories from
 before 12b recorded and replayed first (slice 0). Answered "all as recommended" the same day:
 choices 17 to 28, 27 as (b). The warm-up (learning question 38) put and not answered, left open.
-D51, its amendment lines (D5, D27, D28, D50) and the guides' parts written before building.
+D51, its amendment lines (D5, D27, D28, D50) and the guides' parts written before building; 12b
+built, slices 0–7, and its Promises table checked against the tests, the same day (see 12b,
+"Decided while building").
 
 User-facing description, written first once you agree: `docs/guides/cases.md`, "Running a case on
 Temporal" ("A case runs its release"), and `docs/guides/releases.md` ("Open cases and new
@@ -642,24 +644,56 @@ Each starts with its negative test, seen failing for the right reason.
    answer's wording on its line.
 7. **The guides, D51, and every fixture replaying,** slice 0's and the earlier layers'.
 
-### Promises (draft)
+### Decided while building
+
+- **An answer's wording goes at the end of its line,** as its other parts do: `ana answered
+  review#1 approve as support, setting approved_amount, as worded in refund 1, wording 2`
+  (choice 26 wrote `ana answered review#1: approve, …`, which isn't how an answer's line reads).
+- **A draft refuses an answer naming a wording revision** (slice 6): its line would claim a
+  wording nothing can check. Refused and recorded, as every refusal on Temporal is.
+- **The worded view is its own query,** `worded_view`, answering a refusal as data, as the sheet
+  does: a failure's message is sealed (D31), and the reader must learn why. `view(case, roles)`
+  with no wording is the query it was.
+- **A case checks its start in every run,** not only the first: a run continued as new checks the
+  release it carries again before it reads its state. It costs a digest per run, and depends on
+  nothing the previous run did.
+- **`FolderStore.get(name, release, wording=1)`,** for the guide's example, refusing a release that
+  has no record.
+- **Two tests had to be made to bite** (slices 4 and 6): the crossing test first started its plan
+  step before any switch, so a release left out of `switch` went unseen; its `settle` is now
+  proposed after a switch, on the worker that switches after every event, and the case stays open
+  until closed. And the wording refusal had no case where only the digest differs: a revision
+  claiming `refund 1` with release 2's behaviour is now refused by its digest alone.
+- **A test that starts a case's workflow by hand makes its key first,** as `start_case` does: the
+  case's failure is sealed with it (D31), and without it the refusal hung, unsealable.
+- **The guide's opening line was wrong:** the engine writes `with amount and order_id`.
+- **Each test was seen failing on a deliberate break:** the version check skipped; a deployment's
+  plans used; the digest check skipped (at the opening, and for a wording); the release left out
+  of `switch`; the draft checks skipped (a wording, an answer); the wording left off a line; an
+  older record not recomputed; a stray file in the releases folder skipped; a revert reworded.
+
+### Promises
 
 `C` is `tests/test_temporal_case_release.py`, `E` is `tests/test_engine.py` (new), `R` is
-`tests/test_releases.py`. Each test is named here before it is written; the table is checked
-against the tests before the pull request.
+`tests/test_releases.py`. Checked against the tests, 2026-10-22: every test named here exists, and
+every test `C` and `E` hold, and every test 12b added to `R`, is named here.
 
 | Promise | Test |
 |---|---|
 | Histories recorded before 12b replay: paid, waiting, continued as new, a plan step | C `test_histories_from_before_12b_replay` |
-| A revert with new wording is refused (or recorded and said, per choice 27); the guide says which | R `test_a_revert_with_new_wording_is_refused` |
+| A package with an older release's behaviour and other wording is refused; with that release's wording back, it is the same as that release; the guide shows the refusal | R `test_a_revert_with_new_wording_is_refused`, `test_the_guide_says_what_a_revert_with_new_wording_gets` |
 | A plan field's source changed is named `fields.<name>.source` | R `test_a_plan_fields_source_is_named_as_written` |
-| A state carried before 12b reads as engine 1; the engine version crosses continue-as-new | E `test_a_state_from_before_12b_is_engine_1`, C `test_the_engine_version_crosses_continue_as_new` |
-| An engine version the code doesn't know stops the workflow task, never read as an older one | E `test_an_unknown_engine_version_is_refused` |
-| `opening_engine` asks newest first, takes the first yes, and means 1 when none says yes; with one version it asks nothing | E `test_the_opening_asks_the_newest_version_first`, `test_one_version_asks_nothing` |
-| A case opened on a release records it, with its engine, in the report and its first line; a draft's history is as before | C `test_a_case_opens_on_its_release`, `test_a_draft_is_as_before` |
-| A start whose package doesn't give its release's digest is refused, nothing decided | C `test_a_start_that_isnt_its_release_is_refused` |
+| Every record is read again, not only the latest; any other file in a releases folder refuses the run | R `test_every_record_is_read_again_not_only_the_latest`, `test_a_stray_file_in_the_releases_folder_refuses_the_run` |
+| A release with no record isn't found, saying so | R `test_a_release_not_recorded_isnt_found` |
+| A state carried before 12b reads as engine 1 | E `test_a_state_from_before_12b_is_engine_1` |
+| An engine version the code doesn't know is refused, never read as an older one; on Temporal the workflow task fails and the case waits | E `test_an_unknown_engine_version_is_refused`, C `test_an_unknown_engine_version_waits_for_its_code` |
+| The opening asks the newest version first, takes the first yes, and means 1 when none says yes; with one version it asks nothing | E `test_the_opening_asks_the_newest_version_first`, `test_one_version_asks_nothing` |
+| A case opened on a release says its release and engine, in its report and its first line, with no marker written; a draft's history is as before | C `test_a_case_opens_on_its_release`, `test_a_draft_is_as_before` |
+| A start that isn't its release's package is refused, nothing decided | C `test_a_start_that_isnt_its_release_is_refused` |
+| The release and engine version cross continue-as-new, and a plan step started after a switch runs the release's plan on a worker that supplies none | C `test_the_release_and_engine_cross_continue_as_new` |
 | A released case runs its release's plans, never the deployment's changed one | C `test_a_released_case_runs_its_releases_plans` |
-| The view and the sheet read a wording revision of the case's release; another release's is refused; a decision never changes | C `test_new_wording_is_read_when_shown`, `test_wording_of_another_release_is_refused` |
-| An answer's wording is recorded on its line | C `test_an_answer_says_which_wording_it_saw` |
-| The guides' examples run as written | C `test_the_guides_release_example_runs_as_written` |
+| The view and the sheet show a wording revision of the case's release; without one, its own; nothing decided or recorded changes | C `test_new_wording_is_read_when_shown` |
+| A wording of another release, one claiming the release with another digest, or any wording for a draft, is refused | C `test_wording_of_another_release_is_refused` |
+| An answer's line says which wording its person read; a draft refuses an answer naming one | C `test_an_answer_says_which_wording_it_saw` |
+| The cases guide's release example is what the engine records | C `test_the_guides_release_example_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |

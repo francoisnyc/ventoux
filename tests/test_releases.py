@@ -573,3 +573,22 @@ def test_a_stray_file_in_the_releases_folder_refuses_the_run(tmp_path: Path) -> 
     stray = tmp_path / "releases" / "refund" / "notes.txt"
     stray.write_text("to do")
     assert refusal_of(tmp_path, folder).startswith(f"{stray} can't be read as a release record")
+
+
+def test_a_release_not_recorded_isnt_found(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    release(folder, store, "a1", CATALOG)
+    assert store.get("refund", 1).release == 1
+    with pytest.raises(RecordRefused) as refusal:
+        store.get("refund", 2)
+    where = tmp_path / "releases" / "refund"
+    assert str(refusal.value) == f"refund 2 isn't released: no record of it in {where}"
+
+
+def test_the_guide_says_what_a_revert_with_new_wording_gets() -> None:
+    guide = GUIDE.read_text().split("**Only the latest release takes new wording.**")[1]
+    shown = guide.split("```\n")[1].split("```")[0].strip()
+    assert shown == (
+        "same behaviour as refund 1, other wording: rewording an older release reaches its open "
+        "cases; bring back its wording"
+    )
