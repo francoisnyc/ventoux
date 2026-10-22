@@ -6,6 +6,7 @@ See docs/layers/12-releases.md (12a) and docs/guides/releases.md.
 import copy
 import json
 import shutil
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ from ventoux.case.releases import (
 )
 from ventoux.core.contract_hash import contract_hash
 from ventoux.testing import CATALOG
+from ventoux.tooling.cli import main
 from ventoux.tooling.releases import FolderStore, read_package, release
 
 ROOT = Path(__file__).parent.parent
@@ -155,8 +157,13 @@ def test_a_title_changed_is_wording_only() -> None:
     records = released_once(case, plans)
     case["steps"]["settle"]["display"]["title"] = "Pay the refund"
     case["steps"]["review"]["outcomes"]["reject"]["display"]["title"] = "Turn the refund down"
+    case["display"]["description"] = "A customer asks for their money back."
     outcome = next_release(packed(case, plans), records)
-    paths = ("steps.review.outcomes.reject.display.title", "steps.settle.display.title")
+    paths = (
+        "display.description",
+        "steps.review.outcomes.reject.display.title",
+        "steps.settle.display.title",
+    )
     assert outcome == Reworded(1, 2, Changed(wording=paths))
 
 
@@ -430,3 +437,89 @@ def test_a_record_out_of_place_is_refused(tmp_path: Path) -> None:
     folder = kept_as(tmp_path, lambda data: data.update(release=7))
     where = tmp_path / "releases" / "refund" / "1.json"
     assert refusal_of(tmp_path, folder) == f"{where} holds 7.json's record: put it back"
+
+
+def command(folder: Path, releases: Path, commit: str, capsys: Any) -> tuple[int, str, str]:
+    """`ventoux release` run on `folder`: its exit code, what it printed, and its errors."""
+    code = main(["release", str(folder), "--releases", str(releases), "--commit", commit])
+    printed = capsys.readouterr()
+    return code, printed.out, printed.err
+
+
+def test_the_command_says_what_it_did(tmp_path: Path, capsys: Any) -> None:
+    folder, releases = copied(tmp_path), tmp_path / "releases"
+    code, out, _ = command(folder, releases, "a1", capsys)
+    (kept,) = FolderStore(releases).records("refund")
+    assert (code, out) == (0, f"refund 1 released: digest {kept.digest.sha256[:12]} (method 1)\n")
+    assert command(folder, releases, "a1", capsys)[:2] == (
+        0,
+        "refund: nothing changed since release 1; nothing written\n",
+    )
+    edited(folder, requiring())
+    edited(folder, requiring("review"))
+    edited(folder, retitled("Pay the refund"))
+    assert command(folder, releases, "a2", capsys)[:2] == (
+        0,
+        "refund 1, wording 2: steps.settle.display.title changed; no release\n",
+    )
+    # Refused: exit 1, each problem said; unreadable: exit 2.
+    (folder / "notes.txt").write_text("to do")
+    assert command(folder, releases, "a3", capsys) == (
+        1,
+        "",
+        f"{folder}: notes.txt isn't part of a package: a package holds case.json and plans/\n",
+    )
+    (folder / "notes.txt").unlink()
+    (folder / "case.json").write_text("{")
+    code, out, err = command(folder, releases, "a3", capsys)
+    assert (code, out) == (2, "")
+    assert err.startswith(f"{folder}: case.json isn't JSON: ")
+
+
+def test_the_tool_names_paths_never_values(tmp_path: Path, capsys: Any) -> None:
+    folder, releases = tmp_path / "letter", tmp_path / "releases"
+    folder.mkdir()
+    (folder / "case.json").write_text(json.dumps(lettered("We are pleased to confirm.")))
+    command(folder, releases, "a1", capsys)
+    (folder / "case.json").write_text(json.dumps(lettered("We are happy to confirm.")))
+    code, out, _ = command(folder, releases, "a2", capsys)
+    assert code == 0 and out.endswith("; behaviour changed at steps.draft.inputs.template\n")
+    record = (releases / "letter" / "2.json").read_text()
+    changed = json.loads(record)["changed"]
+    assert changed == {"behaviour": ["steps.draft.inputs.template"], "wording": []}
+    for value in ("pleased", "happy"):
+        assert value not in out and value not in json.dumps(changed)
+
+
+GUIDE = ROOT / "docs" / "guides" / "releases.md"
+
+
+def guide_runs() -> list[tuple[list[str], str]]:
+    """Each `$ ventoux release …` in the guide's "Running it", with what it prints."""
+    section = GUIDE.read_text().split("## Running it")[1].split("\n## ")[0]
+    runs = []
+    for block in section.split("```\n")[1::2]:
+        command_line, *printed = block.strip().splitlines()
+        assert command_line.startswith("$ ventoux ")
+        runs.append((command_line.removeprefix("$ ventoux ").split(), "\n".join(printed) + "\n"))
+    return runs
+
+
+def test_the_guides_example_runs_as_written(tmp_path: Path, capsys: Any, monkeypatch: Any) -> None:
+    shutil.copytree(REFUND, tmp_path / "examples" / "packages" / "refund")
+    monkeypatch.chdir(tmp_path)  # the guide's paths are relative, from the repository's root
+    folder = tmp_path / "examples" / "packages" / "refund"
+    # Between its runs the guide rewords a title, then gives the plan's approval 72 hours.
+    changes: list[Callable[[], object]] = [
+        lambda: None,
+        lambda: edited(folder, retitled("Pay the refund")),
+        lambda: (folder / "plans" / "refund-order.json").write_text(
+            (folder / "plans" / "refund-order.json").read_text().replace('"48h"', '"72h"')
+        ),
+    ]
+    runs = guide_runs()
+    assert len(runs) == len(changes)
+    for change, (arguments, printed) in zip(changes, runs, strict=True):
+        change()
+        assert main(arguments) == 0
+        assert capsys.readouterr().out == printed

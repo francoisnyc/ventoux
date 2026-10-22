@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import TypeAdapter, ValidationError
 
 from ventoux.case.releases import (
+    Hash,
     Outcome,
     Package,
     PackageRefused,
@@ -22,6 +23,7 @@ from ventoux.case.releases import (
     RecordRefused,
     Released,
     Reworded,
+    digest,
     next_release,
     package,
     record,
@@ -122,6 +124,8 @@ def record_from(path: Path) -> Record:
 class Run:
     """What one run of the tool did, and the warnings it printed."""
 
+    package: str  # the package's name: `refund`
+    digest: Hash  # its behaviour digest, now
     outcome: Outcome
     warnings: Sequence[Issue]
     written: bool  # a record was written now; False when it was already there, or nothing was due
@@ -136,7 +140,7 @@ def release(folder: Path, store: FolderStore, commit: str, catalog: Catalog) -> 
     wrote = False
     if isinstance(outcome, Released | Reworded):
         wrote = store.write(record(released, outcome, commit, catalog))
-    return Run(outcome, warnings, wrote)
+    return Run(released.name, digest(released), outcome, warnings, wrote)
 
 
 def checked(released: Package, catalog: Catalog) -> list[Issue]:

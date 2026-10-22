@@ -52,7 +52,7 @@ was really behaviour would reach every open case unreviewed.
 
 ```
 $ ventoux release examples/packages/refund --releases releases --commit 4f2a9c1
-refund 1 released: digest DIGEST1 (method 1)
+refund 1 released: digest 89420f53b3d3 (method 1)
 ```
 
 A title reworded (`steps.settle.display.title`, "Settle the refund" to "Pay the refund"):
@@ -66,7 +66,7 @@ The plan's approval given 72 hours instead of 48 (`"timeout": "72h"`):
 
 ```
 $ ventoux release examples/packages/refund --releases releases --commit c90d4e2
-refund 2 released: digest DIGEST2 (method 1); behaviour changed at plans.refund-order@1.states.approve_refund.approval.timeout
+refund 2 released: digest dfdac910acbb (method 1); behaviour changed at plans.refund-order@1.states.approve_refund.approval.timeout
 ```
 
 The commit is given by CI; the tool never reads git. It exits with:

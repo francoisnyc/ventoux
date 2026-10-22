@@ -5,7 +5,8 @@ docs at `82ac5bd`, Flowable's engine at `f6017e3`, the `chartering` prototype at
 explained, split into five parts, and 12a's choices put with a recommendation each, the same day.
 Answered "all as recommended", 2026-10-22: choices 1 to 16. The warm-up (learning question 11) was
 put and not answered, so it stays open, asked again at 12a's walk-through. D50 and the releases
-guide written before building 12a.
+guide written before building 12a; 12a built, slices 0–5, and its Promises table checked
+against the tests, the same day (see 12a, "Decided while building").
 
 ## Warm-up: learning question 11, behaviour vs wording
 
@@ -349,8 +350,8 @@ refund 2 released: digest 51aa…3f90 (method 1); behaviour changed at steps.pay
 
 - `case/releases.py` (pure, no I/O): `Package` (the case and its plans, parsed, and as written);
   `package(case, plans)`, refusing a missing, unused or doubled plan; `behaviour(package)`, the
-  canonical data with `display` left out by type; `digest(package)`; `changed_paths(old, new)`;
-  `next_release(package, records)`, which says what to do: release `n`, wording revision `n.k`,
+  canonical data with `display` left out by type; `digest(package)`; `changed(old, new)`;
+  `next_release(package, records)`, which says what to do: release `n`, wording revision `k` of `n`,
   already released, or nothing. It reads no clock (a record's time is the commit's, given) and
   imports no Temporal.
 - `tooling/releases.py`: reading a package folder; the folder store (`records(package)`, `write`,
@@ -373,7 +374,7 @@ refund 2 released: digest 51aa…3f90 (method 1); behaviour changed at steps.pay
 ### Seams the tests use
 
 - `package(case_data, plans_data)`, `digest(package)`, `next_release(package, records)`,
-  `changed_paths(old, new)`: what the tool decides, in memory.
+  `changed(old, new)`: what the tool decides, in memory.
 - `release(folder, store, commit, catalog)` with a folder store under pytest's `tmp_path`: what
   it writes and refuses.
 - `main(["release", …])`: what the command prints and exits with.
@@ -384,7 +385,7 @@ refund 2 released: digest 51aa…3f90 (method 1); behaviour changed at steps.pay
 Each starts with its negative test, seen failing for the right reason.
 
 0. **The digest, and the curriculum's negative test first:** the refund's literal input changed
-   (the warm-up's letter, on `letters.draft@1`) is not wording-only; then rules reordered, a field
+   (the warm-up's letter, on `letters.draft@2`, since `@1` is retired) is not wording-only; then rules reordered, a field
    named `display` retyped, an explicit default (no change), a title (wording).
 1. **Packages:** a missing plan, an unused plan, the same plan twice, a stray file, each refused; a
    plan's transition changed is behaviour.
@@ -396,28 +397,52 @@ Each starts with its negative test, seen failing for the right reason.
    unknown method refused.
 5. **The command and the guide:** exit codes; the guide's example run as written; D50.
 
+### Decided while building
+
+- **A field's `type` was dropped at its default** (slice 0, found writing the digest): `"type":
+  "number"` is the default of the number shape's one field, so leaving defaults out made a number
+  field and a text field digest alike, a behaviour change read as nothing. A field that names
+  its object's shape (a `Literal`) is now always kept; `test_a_fields_type_changed_is_a_release`
+  and the field named `display` both fail without it. D50 says so.
+- **Paths read as the JSON writes them** (slice 0): the model keeps a field's type under
+  `declared`, the JSON beside its `display`, so a retyped field is `fields.amount.type`.
+- **Slice 0 built `package` and `next_release` with the digest,** so slices 1 and 2's tests passed
+  at once; each was seen failing on a deliberate break: plans not checked for use or doubles,
+  stray files allowed, a record written over, validation skipped, warnings refusing, only the
+  latest release compared, plan contracts left out of the record. Slice 3's (the first wording
+  read as the latest, the revision always 2) and slice 4's (no recompute, the method unchecked,
+  the place unchecked) the same.
+- **A wording revision is read against the wording people see now** (slice 3): putting a title back
+  as it was is a new revision, since people read the one between.
+- **A record out of place in the store is refused** (slice 4): a file whose record says another
+  number would be compared as the wrong release.
+- **The command prints a digest's first 12 hex characters;** the record keeps all 64.
+- **The lockfile's hashes are method 1,** said in `core/hash_check.py` (choice 12).
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
-`R` is `tests/test_releases.py` (new). Drafted before building: each test is named here first, and
-the table is checked against the tests before the pull request.
+`R` is `tests/test_releases.py` (new). Drafted before building; checked against the tests,
+2026-10-22: every test named here exists, and every test in `R` is named here.
 
 | Promise | Test |
 |---|---|
 | A literal input changed is a release, never wording-only | R `test_a_literal_input_changed_is_a_release` |
 | Rules reordered are a release, never wording-only; steps reordered too | R `test_rules_reordered_are_a_release`, `test_steps_reordered_are_a_release` |
 | `display` is found by its type: a case-file field named `display` changed is a release | R `test_a_field_named_display_is_behaviour` |
+| A field's `type` is kept even at its default: a number field made a text is a release | R `test_a_fields_type_changed_is_a_release` |
 | A plan's transition changed is a release of its package | R `test_a_plans_change_is_a_release_of_its_package` |
 | A title, a description, an outcome's title and an approval's reason changed are wording only: no new number, a wording revision naming the paths | R `test_a_title_changed_is_wording_only`, `test_an_approval_reason_changed_is_wording_only` |
 | Whitespace, an object's key order and a value written at its default change no digest | R `test_reformatting_changes_no_digest`, `test_an_explicit_default_changes_no_digest` |
 | A package names exactly the plans its steps run: missing, unused, doubled or a stray file refused, nothing written | R `test_a_missing_plan_is_refused`, `test_a_plan_nobody_runs_is_refused`, `test_a_plan_given_twice_is_refused`, `test_a_stray_file_is_refused` |
 | A package with a validation error is not released, saying the issues; a warning doesn't stop it | R `test_a_package_with_an_error_is_not_released`, `test_a_warning_lets_a_release_through` |
 | The first release is 1; a new digest is the latest + 1 | R `test_releases_are_numbered_from_1` |
+| A wording revision is numbered from 2, recorded at once, read against the wording people see now; a release after it is numbered on | R `test_wording_revisions_are_numbered_and_recorded_at_once` |
 | A digest already released makes no new release, naming it | R `test_a_digest_already_released_makes_none` |
 | The same package again writes nothing | R `test_the_same_package_again_writes_nothing` |
 | A record is written once: the same bytes again are accepted, different ones refused naming the file | R `test_a_record_is_never_written_over` |
 | The record holds the package as written, its contracts with their hashes, the commit and the changed paths | R `test_the_record_holds_what_activation_needs` |
-| Every digest and hash records its method; a release is recomputed under the current method before comparing; an unknown method is refused | R `test_every_hash_records_its_method`, `test_a_release_is_compared_under_the_current_method`, `test_a_record_of_an_unknown_method_is_refused` |
+| Every digest and hash records its method; a release is compared by recomputing its digest from its stored package, a record whose package doesn't give its digest refused; an unknown method is refused; a record out of place in the store is refused | R `test_every_hash_records_its_method`, `test_a_release_is_compared_by_recomputing_its_digest`, `test_a_record_of_an_unknown_method_is_refused`, `test_a_record_out_of_place_is_refused` |
 | No message quotes a value from the package, only paths and names | R `test_the_tool_names_paths_never_values` |
 | The command exits 0, 1 or 2 as the guide says, and prints what it did | R `test_the_command_says_what_it_did` |
 | The guide's example runs as written | R `test_the_guides_example_runs_as_written` |
