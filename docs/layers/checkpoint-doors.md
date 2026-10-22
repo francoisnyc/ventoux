@@ -10,6 +10,11 @@ and the sections below use the new letters. Two things found in 11b are added as
 *Renumbered again 2026-10-19, in 11d's session:* 11d was split into 11d (events from outside) and
 11e (rules that update the case file), so time, reading rules and patterns became 11f to 11h;
 the table and the sections below use the new letters (brief, D41).
+*Brought up to date 2026-10-22, after layer 11 was merged in full* (11a–11h2, the fixes of the
+retry rejected, the untrusted moment and the check's proofs, and the wrap-up: pull requests #24
+and #26–38). The table now says what layer 11 built and where each door held; rows 34 to 37 are
+added from the notes' known limits; "Choices before layer 12" lists what the user decides. Still a
+draft: the brief is unchanged until those answers.
 
 ## What this note is for
 
@@ -23,6 +28,11 @@ need a merged decision rewritten. Adding a new optional key, a new step kind, a 
 value is not blocking: a definition has no unknown keys (every shape refuses them), so an old
 definition simply doesn't use the new one. Such an addition is still a decision recorded in the
 brief (D38: "adding a moment is a decision recorded here, like an operator").
+
+One consequence, used in the choices below: **refusing now keeps a door open; allowing now may
+close one.** A shape refused today can be accepted later, and no published definition changes
+meaning, since none uses it. A shape accepted today and refused (or read differently) later breaks
+every definition that uses it.
 
 ## Where the Flowable references come from
 
@@ -39,46 +49,238 @@ Flowable's words (stage, plan item, sentry, event listener) stay in the first tw
 
 ## The table
 
-The first six rows are the curriculum's list; the others are what the layer 11 research found, or
-what reading Flowable's tests again turned up; rows 31 and 32 are Ventoux's own, found in 11b.
+The first six rows are the curriculum's list; rows 7–30 are what the layer 11 research found, or
+what reading Flowable's tests again turned up; rows 31–37 are Ventoux's own.
 
-| # | Flowable offers | What it is for (and where it comes from) | Ventoux today | Blocked by a decision so far? | What keeps it open |
+The answer column uses the curriculum's four answers: **built**, **planned** (at layer *N*, or
+after layer 15 in v1.0), **after v1.0**, **out of scope** (by design, or by a non-negotiable).
+"Unplaced" marks a row that had none; choice 10 places them. The last column says where layer 11
+was asked to keep the door open, and whether it held.
+
+| # | Flowable offers | What it is for (and where it comes from) | Ventoux's answer now | Blocked by anything merged? | Where layer 11 kept it open, and whether it held |
 |---|---|---|---|---|---|
-| 1 | **Stages** (steps that close together) | A group of plan items that is entered, completed and exited as one, possibly nested. `model/Stage.java`; `tests/runtime/StageTest.java`, `testOneNestedStage` and `testThreeNestedStagesWithCriteria` ("Triggering Task C should exit stage 2, which should also exit the inner nested stage") | **Not planned:** no layer, not in the brief's "Deferred", not out of scope. The checkpoint must place it | **No.** `steps` is a flat map by name, and a stage would be a new optional key (a step's `stage`, or a `stages` map). Steps, milestones and rules already share one namespace (11a refuses a rule named like a step), so a stage's name could stand in `requires` without clashing. "A stage completed" would be a new moment (11a, choice 10), recorded like any (D38). A stage's state can be worked out from its steps' runs, so cases still have no position (idea 4) and continue-as-new carries nothing new (D27). One meaning is new only for new definitions: inside a stage that runs again, `requires: [step]` ("its latest run is done") would have to mean "done in this run of the stage" | 11c: `stop` acts step by step, so "exit a stage" can later be "stop each step in it". `stop` refuses a name that is not a step (fail closed), so a stage's name there later is a new meaning, never a changed one |
-| 2 | **Exit criteria on a stage or on the whole case** | Ending a stage, or the whole case, when something happens, with everything inside it. `tests/runtime/ExitCriteriaTest.java`, `testExitPlanModelWithNestedCaseTasks` (exiting the plan model ends the case and its three child cases); `tests/eventlistener/TimerEventListenerTest.java`, `testExitPlanModelOnTimerOccurrence` | **Whole case: built,** as a close, not a cut: `closes_when` and a person's close reason (layer 8, D10), "closing" letting running work finish (D10, D28), held by a failed run (D26, D34). **A step: 11c** (`stop`). **A stage:** with row 1 | **No.** A rule closing the case would be a new action (`then: close`), and would do what `closes_when` does; nothing written today changes | 11b–11f: rules keep stopping with the close (D38), so a later `then: close` lands on the same "closing", never on a cut |
-| 3 | **Exit types:** exit only what is running, or also what hasn't started | Whether "stop B" also means "B won't start later". `engine/agenda/operation/ExitPlanItemInstanceOperation.java`, `shouldPlanItemStayInCurrentState`; `tests/runtime/PlanItemExitSentryTest.java`, `testExitSentryTerminatingAvailableTaskB` ("nothing must be changed") and `testExitSentryTerminatingActiveTaskB` | **11c decides** (research, finding 2: "this becomes part of the definition of the stop action") | **Not yet, but 11c could block it.** Whichever meaning 11c gives `stop` is what every definition written with it means for good. If the shape has no room for the other meaning, adding it later is a second action, or a migration | 11c: say the default in the note and the guide (Ventoux has no "available instance", so the natural default is "stop the run that is open or running; the step may start again if admitted"), and give `stop` a shape that can take an option later (an object, or a list now with a documented object form later) |
-| 4 | **Exit as "complete" or "force complete"** | Ending a case or stage as completed: refused while work is active, or regardless. `tests/runtime/CaseCompletionExitSentryTest.java`, `testCompleteCaseThroughExitSentryWithException` | **Out by design:** Ventoux chose a third answer, closing, where running work finishes and nothing new starts (D10; research, finding 5) | **Rejected on purpose,** not blocked: nothing to add | — |
-| 5 | **Required items** | A plan item that must complete before its stage or case may complete by itself. `model/RequiredRule.java`; `tests/itemcontrol/RequiredRuleTest.java`, `testOneRequiredHumanTask` | **Planned:** "required steps", after layer 15, in v1.0 (curriculum) | **No.** A `required` flag, false by default, keeps every existing definition's meaning (D10's "nothing left to do"). It would add one kind of pending work (a required step not yet done) and a case to D34's `NEVER_CLOSES`. `closes_when` still closes the case over it, as it does over all pending work | 11c: a stopped run ends as itself (neither done nor failed), so a later `required` can say whether a stopped step counts. 11d: the "step explicitly waiting for an event" (D10) is Flowable's required event listener (`tests/eventlistener/UserEventListenerTest.java`, `testRequiredUserEventListenerInAutoCompletableStage`), so one word, later, can serve both |
-| 6 | **One plan item per element of a collection** | Creating one instance per element of a list (one review per document), each seeing its element, results gathered back. `model/RepetitionRule.java` (`collectionVariable`); `tests/itemcontrol/PlanItemRepetitionWithCollectionVariableTest.java`, `testRepetitionOnCollectionTriggeredByUserTask` ("now we need to have 4 instances of Task B"); `tests/itemcontrol/RepetitionVariableAggregationTest.java`, `testParallelRepeatingUserTask` | **Planned:** "one step per item of a collection", after layer 15, in v1.0 (curriculum). A case can already hold a list field, read with `count`, `sum` and `item` (D20) | **No, for existing definitions:** it would be a new option or kind. But it can't be a plain reading of today's step: admission refuses a step whose run is still open ("already running", layer 8), outputs land as `<step>.<field>` from the latest run (D29), and outputs and inputs take no lists (D29, D36). So it needs its own runs, named by entry (`review#3`, keys unchanged, D27), and its own way of gathering results: Flowable's aggregation | 11d: an event's payload takes the case's value types, a list only as a declared list field, never a list packed into a text (which a later list type would have to read differently). 11b: `start` starts one run of a step; nothing should depend on a step never having two runs open, beyond today's "already running" refusal |
-| 7 | **Human waits inside a called process** | A child process or case that waits for people, while the case waits for it. `engine/behavior/impl/ProcessTaskActivityBehavior.java`; `tests/runtime/CaseTaskTest.java`, `testBasicSubHumanTask` | **After v1.0:** a `workflow` step must not wait for people in v1 (D6: "Declared human waits may come later"). A `plan` step may wait, answered on its child (D28) | **No, for definitions:** a workflow contract declaring waits is a new contract version (D5). **But two merged rules would need an addition:** closing lets a workflow step finish (D10, D29), and one waiting for a person might never finish, so the close would hang; and a case continues as new only when nothing is running (D27; `temporal/cases.py`, `running == 0`), which a long wait would postpone for ever. Neither changes a definition's meaning; both are decisions to extend before this is built | 11c: keep **one place in the case that stops every running child** (a plan, a workflow step, later a child case or a workflow waiting for people), each by the mechanism its kind declares, so closing and `stop` reach every child the same way. Which mechanism a workflow step uses (Temporal's cancellation, as D6's "whether it can be cancelled" suggests, or a declared signal; D29's `cancellable`) is 11c's decision: a workflow step is another team's code, possibly in another SDK, unlike the plan workflow Ventoux writes and stops by a signal (D28) |
-| 8 | **Child cases** | A case task starts another case and waits for it (or not); ending the parent ends the children. `model/CaseTask.java`; `tests/runtime/CaseTaskTest.java`, `testSimpleBlockingSubCase` and `testSubCaseExitsParentCase`; `ExitCriteriaTest.testExitPlanModelWithNestedCaseTasks` | **Planned:** "child cases", after layer 15, in v1.0 (curriculum) | **No, for definitions:** a new step kind (the kinds are a closed list, Simplifications and D13; adding one is a decision), modelled on D28: a child workflow `<case ID>/<entry>`, keys prefixed, the case's exclusions crossing (D25), closing the parent stopping the child. A child case in another package is referenced by release, as a shared plan library is (D5). **But D27's quiet point would need an addition:** a child case runs for weeks, and the parent continues as new only when nothing is running. **Flagged:** this is a merged decision (D27) to extend before child cases, without changing any definition | 11c: one place in the case stops every running child, each by the mechanism its kind declares (row 7), so a child case later adds a kind there, not a second way to stop. 11d: events are addressed to the case's workflow ID (D27), not a run, so a parent and a child can later send each other events |
-| 9 | **Claiming and reassigning tasks** | A person takes a task from a group's queue, or gives it to someone else; a case can be claimed too. `tests/runtime/HumanTaskTest.java`, `testFillTaskLifecycleValues` (`claim`) and `testTaskAssigneeSyncedWithPlanItemInstance` (`setAssignee`); `tests/runtime/CaseInstanceDueDateAndClaimTest.java`, `testClaimCaseInstance` | **Planned:** after layer 15, in v1.0 (curriculum; `docs/layers/07-people.md`, "Not in this layer") | **No.** It is case state and the inbox's, not the definition's: who claimed is state, which crosses continue-as-new as "the whole state of the case" (D27). Roles are still checked when the answer comes (D22), and a claim can't get round an exclusion (D11, D25). `waiting_for`'s words (`review by support`, D24) can grow a "claimed by" without changing what is there | Nothing in 11b–11f touches it |
-| 10 | **Manual activation** | A plan item that becomes *enabled* and waits for a person to start it. `model/ManualActivationRule.java`; `tests/itemcontrol/ManualActivationRuleTest.java`, `testSingleHumanTask` | **Built** (layer 8): `automatic: false` and `proposed_by`. Unlike Flowable's non-auto-complete case, a step waiting to be proposed never holds the case (D10) | **No** | 11b: a rule's `start` goes through admission (the 11b row of the split), so "a rule makes a manual step start" stays a proposal by the engine, and `proposed_by` keeps meaning "who may propose" |
-| 11 | **Repetition, and its counter** | Running a plan item again each time its entry fires, or while a condition holds, with a counter each run can read; a maximum count. `model/RepetitionRule.java`; `tests/itemcontrol/RepetitionRuleTest.java`, `testSimpleRepeatingTask`, `testCustomCounterVariable` and `testPlanItemLocalVariables` (`repetitionCounter` 1, 2, 3); `tests/itemcontrol/PlanItemRepetitionMaxCountTest.java` | **Built in part:** `repeatable` runs again when proposed (layer 8); each run is named by its entry (`review#2`, D27), in history and keys. **11b:** a rule restarting a step (the rework loop). **Not planned:** reading the run count in a condition: an entry is not a value (D35: "nothing else is a value") | **No.** A run count as a value (`review.runs`) would be new in D35's list of values, read by nothing that exists. A maximum would be a new optional key | 11b: the termination argument (11a, choice 4: "a decision starts finitely many runs") must hold with `start`, and `NEVER_CLOSES` for "a rule that restarts a step for ever" is claimed only where nothing could stop it (no `when`), so a later counter can bound a restart without turning an error into a non-error |
-| 12 | **User event listeners** | A button a person presses ("Kill active tasks B") whose only effect is to fire sentries; it never becomes active work. `model/UserEventListener.java`; `tests/eventlistener/UserEventListenerTest.java`, `testCaseWithoutFiringTheEvent`; `PlanItemExitSentryTest.testExitSentryTerminatingActiveTaskB` | **11d:** declared events with a source (D12). Today a person acts only by answering, proposing or closing | **No** | 11d: a declared event says who may send it. Leave room for a person as the sender, with roles checked as for a close reason (D10, D22) and the source `person:`, rather than making the declaration name only a system |
-| 13 | **Signal, generic and intent event listeners** | Reacting to something sent from outside the case, through the API or a signal. `tests/eventlistener/SignalEventListenerTest.java`, `GenericEventListenerTest.java` and `IntentEventListenerTest.java`, each `testSimpleEnableTask` | **11d:** `on: {"event": …}`, one Temporal signal for events | **No** | 11d: one event shape, one signal: a kind of sender is data on the declaration, never a new signal per kind |
-| 14 | **Variable event listeners** | Reacting when a case variable is created or changed. `tests/eventlistener/VariableEventListenerTest.java`, `testTriggerVariableEventListenerOnUpdate` | **Not planned.** Not one of the moments (D38's three, D39's `answered`) | **No:** a new moment ("a field set") is a decision recorded in the brief, as D39 recorded `answered`, without changing the shape (11a, choice 10) | 11e (11d as first planned): if `set` comes with a "field set" moment, the termination argument must still hold: a rule setting a field on a field being set can loop within one decision |
-| 15 | **Timer event listeners**, started by another item | A timer set when something happens ("5 days after B starts"), firing once. `model/TimerEventListener.java`; `tests/eventlistener/TimerEventListenerTest.java`, `testTimerExpressionDuration` and `testTimerStartTrigger`; `testDateExpression` (a timer at a date read from a variable) | **11f:** `on: {"after": "5d", "since": <moment>}` | **No** | 11f: `since` takes D38's moment shape (`"opened"`, `{"started": …}`, `{"reached": …}`), so a new moment (a stage completed, row 1) is a timer anchor at once, and a later anchor on a date in the case file is one more shape, not a new reading of an existing one |
-| 16 | **Repeating timers** (every hour, three times, cron) | A timer that fires again and again. `tests/itemcontrol/RepetitionRuleTest.java`, `testRepeatingTimer`, `testLimitedRepeatingTimer` and `testRepeatingTimerWithCronExpression` | **11f:** a timer that re-arms itself is `NEVER_CLOSES` (D10, D34). A repeating timer as such: **not planned.** Cron: **after v1.0**, since it needs a calendar and time zones, while time is whole seconds on events (D33) | **No** | 11f: `after` keeps meaning one firing. A repeat, if it comes, is its own key (an "every", with a count), never a new reading of `after`'s text; durations keep the one format the case uses (`30m`, `12h`, `1d`, D33) |
-| 17 | **Available conditions** on event listeners | A listener that listens only while a condition holds. `tests/eventlistener/TimerEventListenerTest.java`, `testTimerWithAvailableCondition`; `VariableEventListenerTest.testVariableEventListenerWithAvailableCondition`; `tests/listener/AvailableConditionTest.java` | **Built in effect** for rules: a rule's `when` is read at its moment (D38). **11f** for timers | **No** | 11f: say when a timer's `when` is read. D38 says "once the moment has come", which for a timer is its firing, on the case file then. A condition on *setting* the timer would be a second, explicit key later, not a change of when `when` is read |
-| 18 | **Completion-neutral items** | An item that never keeps its stage open, fired or not. `model/CompletionNeutralRule.java`; `tests/itemcontrol/CompletionNeutralTest.java`, `testEventListenerBypassed` | **Built in effect:** listening is not waiting (D10); a rule never holds the case | **No** | 11d: an event listened for never becomes pending work, unless a step or rule explicitly waits for it (D10) |
-| 19 | **Orphan event listener removal** | Removing a listener nothing can react to any more, so it doesn't hold the case. `engine/persistence/entity/PlanItemInstanceEntityManagerImpl.java` (the "orphan" comment); `UserEventListenerTest.testCaseWithoutFiringTheEvent` | **Nothing to remove for events** (row 18). **11f** for timers, which are pending work: "cancelled by their rule's purpose ending and by any close" | **No** | 11f: define a timer's purpose ending in general (the run or moment it was set for having ended, the case closing), so a stopped step (11c), a stage exited (row 1) or a child case ending (row 8) cancels its timers without a new rule each |
-| 20 | **Auto-complete,** or a person completes | Whether a stage or case completes by itself once no work is active, or waits for a person once it is completable. `engine/util/PlanItemInstanceContainerUtil.java` (lines 60–66, 143–146); `RequiredRuleTest.testCompleteCaseInstanceManually` | **Built** (D10): auto-complete is the default, `stays_open` waits for a person or a rule. Per stage: with row 1 | **No** | 11b–11f: rules run before the case settles (research, finding 5), so whatever a stage adds later is judged at the same point |
-| 21 | **Parent completion rules** (ignore, ignore after first completion, ignore if available or enabled) | Telling a container which children not to wait for. `model/ParentCompletionRule.java`; `tests/runtime/PlanItemCompletionTest.java`, `testManualActivatedTaskWithRepetitionIgnoreAfterFirstCompletion` | **Not needed so far:** a step not started never holds the case, and a running one always does (D10) | **Partly, on purpose:** "ignore a running step" would contradict D10's "running activities finish", deliberately. The rest has nothing to add until stages (row 1) | — |
-| 22 | **Repeating milestones** | A milestone that can be reached again, each time with its own variables. `tests/runtime/MilestoneTest.java`, `testRepeatingMilestoneWithLocalVariables` | **Out by design:** a milestone is reached once and never undone (D2); the rework loop uses a repeatable step's latest answer instead (D2, D9) | **Yes, by D2 and D38:** `{"reached": m}` fires once "since it is never undone"; admission, `can_happen`, `NEVER_FIRES`, `MAY_BE_UNSET` and `SET_AFTER` all read a reached milestone as reached for good. Reaching one again would change what every existing definition means. **Flagged:** to record as a deliberate limit at the checkpoint | Nothing: keep it closed. If repeated facts are ever needed, they are a new concept beside milestones, never a milestone reached twice |
-| 23 | **Fault transitions** | A business error firing sentries ("insufficient funds" starts B). `tests/runtime/FaultTransitionTest.java`, `testFaultCodeMatchingViaIfPart` | **Built:** an activity's declared outcomes (D17), a plan's `failed` (D28), read in `when` | **No** | — |
-| 24 | **Non-blocking tasks and case tasks** | Starting an item and moving on at once, without waiting for it. `model/Task.java` (`blocking`); `tests/runtime/CaseTaskTest.java`, `testBasicNonBlocking`; `tests/runtime/HumanTaskTest.java`, `testTaskNonBlockingWithEntryAndExitCriterion` | **Not planned:** a running step is pending work until it ends (D10) | **No, for definitions** (an explicit option, false by default). It would need its own answer to D10's "what completed after the close is flagged" and D28's "what ran on after the close is flagged, never hidden": a step the case doesn't wait for has nobody to flag its result | — |
-| 25 | **Case reactivation** | Reopening a completed case on an event. `model/ReactivateEventListener.java`; `tests/reactivation/SimpleCaseReactivationTest.java`, `simpleCaseReactivationTest` | **Not planned.** A closed case's workflow has ended | **No, for definitions:** a reopened case would be a new chain of runs with a new first run ID, so its keys differ and never repeat (D27). Whether "closed" can ever be undone is a decision nobody has needed | 11d: an event reaching a closed case is refused and reported, never a way back in |
-| 26 | **Plan item injection, discretionary items** | Adding a plan item to a running case or stage. `tests/runtime/PlanItemInjectionTest.java`, `testDynamicPlanItemInjection` | **After v1.0:** ad hoc steps with inline plans drafted at runtime (Simplifications, "Deferred"; D13). A changed definition for open cases is a migration by change request (layer 12) | **No** | — |
-| 27 | **Changing a case's state by hand** | Moving a running case: activating or terminating items directly. `tests/dynamic/ChangeStateTest.java`, `testChangeHumanTask` | **Out by design:** a case has no position to move (idea 4); case-file edits and migrations are change requests (layer 12), and a skip is an approved change request, never automatic (D17) | **No:** nothing to add | — |
-| 28 | **Lifecycle listeners, task listeners, script tasks** | Code in the model, run on transitions. `tests/listener/TaskListenerTest.java`; `tests/task/CmmnScriptTaskTest.java`, `testSimpleScript` | **Out of scope:** "code inside definitions (scripts, listeners)" (brief, "Out of scope for v1.0"; non-negotiables: definitions are data) | **Yes, on purpose:** a non-negotiable | — |
-| 29 | **Decision tasks** (DMN decision tables) | Deciding a value from a table of rules, as one plan item. `model/DecisionTask.java`; `engine/behavior/impl/DecisionTaskActivityBehavior.java` (its tests live in Flowable's DMN modules, not cloned) | **Built in effect:** an expression (D20) or a `compute` activity (D20: "logic that doesn't fit becomes a registered activity with `effect: compute`") | **No:** a decision table as data would be a new step kind or a contract, recorded in the brief | — |
-| 30 | **Due dates on tasks and cases** | A date by which a task or a case should be done, shown and queried. `tests/task/CmmnTaskDueDateTest.java`, `testDueDateTypes`; `tests/runtime/CaseInstanceDueDateAndClaimTest.java`, `testSetCaseInstanceDueDate` | **11f and 11h:** timers, and `sla` from a step's latest start (D7). A due date shown in the inbox: not planned | **No** | 11f: a timer set on a task's run is the place a later due date reads from, so a shown due date is a view of a timer, never a second clock |
-| 31 | **Ventoux's own, found in 11b:** untrusted data steering a plan's own transitions | Design question 17 began with a plan's transition reading an untrusted field (`llm_says_refund`). 11b builds option a for a case's steps: the untrusted sources a condition reads are checked against its step's input policies, apart from what each input reads (D38, D39) | **Open:** a plan's transitions are unchanged (D39) | **Not yet; from layer 12, yes:** applying option a to plans after definitions are published would refuse plans accepted today | The checkpoint decides it before layer 12, or records it in the brief as a deliberate limit |
-| 32 | **Ventoux's own, found in 11b:** an output's `system:<name>` checked against the registered systems | A reference naming an unregistered system is refused (D30), but a contract may declare an output from `system:kyc` with `kyc` unregistered (`kyc.check@1` does; `catalog.py` checks only `untrusted:` labels) | **Not checked** | **No:** checking it later refuses only contracts naming a system nobody registered | The checkpoint decides whether to check it before layer 12 |
-| 33 | **Ventoux's own, decided in the tutor review of #31 and found again in 11h:** untrusted data deciding what doesn't happen | D38 says untrusted data informs and never decides, and the engine checks it where something happens: a rule that reaches or stops on untrusted data acts on nothing; a start's untrusted condition is checked against the inputs (D39, D43). Nothing is checked where something *doesn't* happen: a step's own `when` reading untrusted data, false, skips the step, and the case may close without it; and a rule whose condition reads untrusted data, false (or written `!`), keeps a step from starting (11h's probe B6, `docs/layers/11-rules.md`) | **Open:** allowed, and `validate_case` says nothing | **Not yet; from layer 12, yes:** a runtime answer (asking a person, as an untrusted approval condition asks anyway, D39) would change what published definitions do; a warning would refuse nothing | The checkpoint decides it before layer 12, or records it in the brief as a deliberate limit |
+| 1 | **Stages** (steps that close together) | A group of plan items entered, completed and exited as one, possibly nested. `model/Stage.java`; `tests/runtime/StageTest.java`, `testOneNestedStage`, `testThreeNestedStagesWithCriteria` | **Unplaced** (choice 10: after v1.0) | **No.** A new optional key (a step's `stage`, or a `stages` map) in the one namespace of steps, milestones, events and rules (11a, D46). "A stage completed" would be a new moment (D38), and at once a timer anchor (D44). Inside a stage that runs again, `requires: [step]` would mean "done in this run of the stage": new meaning only for new definitions | **Held.** `stop` refuses a name that isn't a step (D40), so a stage's name there later is new meaning; "exit a stage" can be "stop each step in it" through the one place (D40); a timer's purpose ending is general (D44), so an exited stage cancels its timers with no new rule |
+| 2 | **Exit criteria on a stage or on the whole case** | Ending a stage, or the whole case, with everything inside it. `tests/runtime/ExitCriteriaTest.java`, `testExitPlanModelWithNestedCaseTasks`; `TimerEventListenerTest.testExitPlanModelOnTimerOccurrence` | **Whole case: built** as a close (layer 8, D10, D28, D34). **A step: built** (`stop`, 11c, D40). **A stage:** with row 1 | **No.** A rule closing the case would be a new action (`then: close`) landing on what `closes_when` does | **Held.** A close stops children through the one place (D40), and rules stop with the close (D38), so a later `then: close` lands on "closing", never on a cut |
+| 3 | **Exit types:** exit only what is running, or also what hasn't started | Whether "stop B" also means "B won't start later". `engine/agenda/operation/ExitPlanItemInstanceOperation.java`; `tests/runtime/PlanItemExitSentryTest.java` | **Built** (11c): `stop` ends the run going on now and doesn't keep the step from starting later (D40) | **No:** the other meaning is an option of `stop`'s documented object form (`{"step": …, "<option>": …}`, D40), a plain name keeping its meaning | **Held** (D40's first bullet) |
+| 4 | **Exit as "complete" or "force complete"** | Ending a case or stage as completed, refused while work is active, or regardless. `tests/runtime/CaseCompletionExitSentryTest.java` | **Out of scope, by design:** closing, where running work finishes and nothing new starts (D10; research, finding 5) | **Rejected on purpose,** not blocked | — |
+| 5 | **Required items** | A plan item that must complete before its stage or case completes by itself. `model/RequiredRule.java`; `tests/itemcontrol/RequiredRuleTest.java` | **Planned:** "required steps", after layer 15, in v1.0 (curriculum) | **No.** A `required` flag, false by default; one more kind of pending work and of `NEVER_CLOSES` | **Held.** A stopped run ends `cancelled`, neither done nor failed (D40), so `required` can say whether it counts; the explicit wait is a step (`wait`, D41), so one flag serves it and every other step |
+| 6 | **One plan item per element of a collection** | One instance per element of a list, each seeing its element, results gathered back. `model/RepetitionRule.java`; `tests/itemcontrol/PlanItemRepetitionWithCollectionVariableTest.java`; `RepetitionVariableAggregationTest.java` | **Planned:** after layer 15, in v1.0 (curriculum) | **No, for existing definitions:** a new option or kind, with runs named by entry (`review#3`, D27) and its own gathering of results | **Held.** A list payload is refused (11d), a list field is never set (D42): never packed into a text. A rule's `start` proposes one run (D39); nothing depends on a step never having two runs open beyond "already running" |
+| 7 | **Human waits inside a called process** | A child that waits for people while the case waits for it. `engine/behavior/impl/ProcessTaskActivityBehavior.java`; `tests/runtime/CaseTaskTest.java`, `testBasicSubHumanTask` | **After v1.0** for a `workflow` step (D6: "Declared human waits may come later"). **Built** for a `plan` step: its waits are answered on the child (D28) | **No, for definitions:** a contract declaring waits is a new contract version (D5). **Two merged rules need an addition before it is built:** D27's quiet point (a case continues as new only when nothing runs, `temporal/cases.py`, `time_to_switch`, `running == 0`), which a long wait postpones; and closing letting a non-cancellable workflow finish (D10, D29, D40), which would wait for a person. **Already true today for plan steps:** `running` counts child plans, so a plan waiting for an approval holds the switch until it is answered or times out | **Held** for the close: D40 built one place that stops every child by its kind's mechanism, and a cancellable workflow is cancelled by a close. **Not held for D27:** nothing in layer 11 touched it. Choices 2 and 3 |
+| 8 | **Child cases** | A case task starts another case and waits for it (or not); ending the parent ends the children. `model/CaseTask.java`; `tests/runtime/CaseTaskTest.java`; `ExitCriteriaTest.testExitPlanModelWithNestedCaseTasks` | **Planned:** after layer 15, in v1.0 (curriculum) | **No, for definitions:** a new step kind (Simplifications, D13), modelled on D28. **But D27's quiet point needs an addition:** a child case runs for weeks | **Held** for stopping (a child case adds a kind to D40's one place) and for events (addressed to the case's workflow ID, `sent_by` takes a later kind of sender, D41). **D27 not held:** choice 2 |
+| 9 | **Claiming and reassigning tasks** | A person takes a task from a queue, or gives it to someone else. `tests/runtime/HumanTaskTest.java`; `tests/runtime/CaseInstanceDueDateAndClaimTest.java` | **Planned:** after layer 15, in v1.0 (curriculum; `docs/layers/07-people.md`) | **No.** Case state and the inbox's, not the definition's; roles still checked when the answer comes (D22), exclusions still hold (D11, D25, D47) | Nothing in layer 11 touched it. **Held** |
+| 10 | **Manual activation** | A plan item enabled and waiting for a person to start it. `model/ManualActivationRule.java`; `tests/itemcontrol/ManualActivationRuleTest.java` | **Built** (layer 8): `automatic: false` and `proposed_by` | **No** | **Held.** A rule's `start` is a proposal through admission (D39). D39's one loosening (a step a rule starts may leave out `proposed_by`) keeps its meaning, "which people may propose it" |
+| 11 | **Repetition, and its counter** | Running an item again on each entry, with a counter each run reads; a maximum. `model/RepetitionRule.java`; `tests/itemcontrol/RepetitionRuleTest.java`; `PlanItemRepetitionMaxCountTest.java` | **Built:** `repeatable` (layer 8), each run named by its entry (D27); the rework loop through `answered` (D39). **Unplaced:** a run count read in a condition, a maximum (choice 10: after v1.0) | **No.** A run count as a value would be new in D35's list; a maximum a new optional key | **Held.** `NEVER_CLOSES` is claimed only for a loop nothing in the case can end, no rule stopping it (D39, D40), so a later counter bounds a loop without turning an error into a non-error |
+| 12 | **User event listeners** | A button a person presses whose only effect is to fire sentries. `model/UserEventListener.java`; `tests/eventlistener/UserEventListenerTest.java` | **Built** (11d): an event `sent_by` people with roles, checked as for a close reason (D41) | **No** | **Held** (D41) |
+| 13 | **Signal, generic and intent event listeners** | Reacting to something sent from outside. `tests/eventlistener/SignalEventListenerTest.java` and others | **Built** (11d): `on: {"event": …}`, one Temporal signal, `event` (D41) | **No** | **Held:** a kind of sender is data on the declaration, never a signal of its own (D41) |
+| 14 | **Variable event listeners** | Reacting when a case variable is created or changed. `tests/eventlistener/VariableEventListenerTest.java` | **Unplaced** (choice 10: after v1.0) | **No:** a "field set" moment is a decision recorded in the brief (D38) | **Held.** `set` brings no such moment; a later one would fire at most once per field in a decision, so each decision stays finite (D42) |
+| 15 | **Timer event listeners**, started by another item | A timer set when something happens, firing once. `model/TimerEventListener.java`; `tests/eventlistener/TimerEventListenerTest.java` | **Built** (11f): `on: {"after": "5d", "since": <moment>}` (D44); `sla` (D46) | **No** | **Held.** `since` takes the five other moments, so a later moment is an anchor at once; a date from the case file is a later shape of its own (D44) |
+| 16 | **Repeating timers** (every hour, three times, cron) | A timer that fires again and again. `tests/itemcontrol/RepetitionRuleTest.java`, `testRepeatingTimer` and others | **Built:** `after` means one firing; a `reminder` takes a finite list of ages (D46). **Unplaced:** an `every` with a count (choice 10: after v1.0). Cron: **after v1.0** (a calendar and time zones) | **No** | **Held.** A repeat is its own key with a count, never a new reading of `after` (D44); no timer re-arms itself, so `NEVER_CLOSES` has nothing new to claim |
+| 17 | **Available conditions** on event listeners | A listener that listens only while a condition holds. `tests/listener/AvailableConditionTest.java` and others | **Built:** a rule's `when` is read at its moment (D38), a timer's at its firing (D44) | **No:** a condition on *setting* a timer would be a later, explicit key (D44) | **Held** |
+| 18 | **Completion-neutral items** | An item that never keeps its stage open. `model/CompletionNeutralRule.java`; `tests/itemcontrol/CompletionNeutralTest.java` | **Built:** listening is not waiting (D10, D41) | **No** | **Held:** a rule on an event is never pending work; only a `wait` step is (D41) |
+| 19 | **Orphan event listener removal** | Removing a listener nothing can react to any more. `engine/persistence/entity/PlanItemInstanceEntityManagerImpl.java` | **Built:** nothing to remove for events (row 18); a timer's purpose ends in general (D44) | **No** | **Held,** with one change: a failed run keeps its timers (D40 as amended by D44), so an `sla` still escalates during an outage (D17) |
+| 20 | **Auto-complete,** or a person completes | Whether a stage or case completes by itself. `engine/util/PlanItemInstanceContainerUtil.java`; `RequiredRuleTest.testCompleteCaseInstanceManually` | **Built** (D10): auto-complete by default, `stays_open` waits for a person or a rule | **No** | **Held:** rules run before the case settles (D38) |
+| 21 | **Parent completion rules** | Telling a container which children not to wait for. `model/ParentCompletionRule.java`; `tests/runtime/PlanItemCompletionTest.java` | **Out of scope, by design:** a step not started never holds the case, a running one always does (D10); the rest waits for stages (row 1) | **Partly, on purpose:** "ignore a running step" contradicts D10's "running activities finish" | — |
+| 22 | **Repeating milestones** | A milestone reached again, each time with its own variables. `tests/runtime/MilestoneTest.java`, `testRepeatingMilestoneWithLocalVariables` | **Out of scope, by design** (D2: "milestones are never undone"); the rework loop uses a repeatable step's latest answer (D2, D9) | **Yes, by D2 and D38,** and layer 11 built more on it: `{"reached": m}` fires once (D38); a timer on a milestone lives until it fires (D44); `TIMER_ON_FIRST_START` and `since=first_start` rest on it (D46); 11h1's `NEVER_FIRES` and the fix's `NEVER_STARTS` read "always closes" from milestones reached for good. Reaching one again would change what every existing definition means | Nothing: kept closed. **Choice 1:** record as a deliberate limit |
+| 23 | **Fault transitions** | A business error firing sentries. `tests/runtime/FaultTransitionTest.java` | **Built:** declared outcomes (D17), a plan's `failed` (D28), read in `when` | **No** | — |
+| 24 | **Non-blocking tasks and case tasks** | Starting an item and moving on at once. `model/Task.java` (`blocking`); `tests/runtime/CaseTaskTest.java`, `testBasicNonBlocking` | **Unplaced** (choice 10: after v1.0) | **No, for definitions** (an explicit option, false by default), but it needs its own answer to D10's and D28's flags: a step the case doesn't wait for has nobody to flag its result | — |
+| 25 | **Case reactivation** | Reopening a completed case on an event. `model/ReactivateEventListener.java`; `tests/reactivation/SimpleCaseReactivationTest.java` | **Unplaced** (choice 10: after v1.0) | **No, for definitions:** a reopened case would be a new chain of runs with new keys (D27) | **Held:** an event to a closed case raises `EventRefused` at the client, never starts a workflow; one that comes with the close is refused and recorded (D41, amended) |
+| 26 | **Plan item injection, discretionary items** | Adding an item to a running case. `tests/runtime/PlanItemInjectionTest.java` | **After v1.0:** ad hoc steps with inline plans (Simplifications, "Deferred"; D13); a changed definition for open cases is a migration (layer 12) | **No** | — |
+| 27 | **Changing a case's state by hand** | Activating or terminating items directly. `tests/dynamic/ChangeStateTest.java` | **Out of scope, by design:** no position to move (idea 4); edits and skips are change requests (layer 12, D17) | **No:** nothing to add | — |
+| 28 | **Lifecycle listeners, task listeners, script tasks** | Code in the model. `tests/listener/TaskListenerTest.java`; `tests/task/CmmnScriptTaskTest.java` | **Out of scope:** "code inside definitions" (brief, "Out of scope"; non-negotiables) | **Yes, on purpose:** a non-negotiable, already recorded | — |
+| 29 | **Decision tasks** (DMN) | Deciding a value from a table of rules. `model/DecisionTask.java` | **Built in effect:** an expression (D20), a `set` (D42), or a `compute` activity (D20) | **No** | — |
+| 30 | **Due dates on tasks and cases** | A date a task or case should be done by. `tests/task/CmmnTaskDueDateTest.java`; `CaseInstanceDueDateAndClaimTest.java` | **Built:** timers with their due time in reports, and `sla` (D44, D46). **Unplaced:** a due date shown in the inbox (choice 10: with claiming, after layer 15, in v1.0) | **No** | **Held:** a due date is a view of the timer set on a run (D44), never a second clock |
+| 31 | **Ventoux's own, found in 11b:** untrusted data steering a plan's own transitions | Design question 17 began with a plan's transition reading an untrusted field (`llm_says_refund`). D39 and D43 answer it for a case's steps; a plan's transitions are left open (D39, DQ 17) | **Open, and wider than the draft said.** Run on `main` at `24b5d03`: a plan step whose plan reads the case's `note` (`untrusted:customer`) in a transition to its success state reaches `settled`, the case's `closes_when`, on `"go"`, and gives `failed` on anything else. The customer's text closed the case, against D38; `validate_case` says nothing | **Not yet; from layer 12, yes:** refusing or reading it differently after plans are published would change plans accepted today | Nothing in layer 11 was asked to. **Choice 4:** unblock now |
+| 32 | **Ventoux's own, found in 11b:** an output's `system:<name>` not checked against the registered systems | D30 refuses a reference naming an unregistered system, but `Catalog.register` checks only `untrusted:` labels on outputs (`check_output_labels`): `kyc.check@1` declares `system:kyc` and `kyc` isn't registered in the development catalog | **Not checked** | **Not for definitions** (a contract is the catalog's); but layer 12's activation would then refuse at startup a worker serving such a contract, so later is costlier | **Choice 5:** unblock now |
+| 33 | **Ventoux's own, decided in the tutor review of #31, found again in 11h:** untrusted data deciding what doesn't happen | A step's own `when` reading untrusted data, false, keeps the step from starting, and the case may close without it; a rule whose condition reads untrusted data, false (or written with `!`), keeps a step from starting (11h's probe B6). D46 leaves it to the checkpoint | **Open:** allowed, and `validate_case` says nothing | **Not yet; from layer 12, yes:** a runtime answer as the default (asking a person) would change what published definitions do; a warning refuses nothing and can come any time | **Choice 6:** record as a deliberate limit |
+| 34 | **Ventoux's own, from 11e:** what a case did is seen by every role | D42's known limit: a milestone a rule reaches on a field narrowed by `visible_to` is seen by everyone. The same holds wider, by D30's design: `visible_to` filters values in the view (`case/visibility.py`, `case_view`), never the history, milestones or step runs, and outcomes and outputs are seen by every role the case names | **Built as it is;** recorded only as D42's known limit | **No:** a `visible_to` on a milestone (or an output) would be a new optional key, absent meaning "every role", as today | **Choice 7:** record as a deliberate limit |
+| 35 | **Ventoux's own, carried by the tutor session:** a misleading flag, on `main` since the held close (D26, D34) | When a failed run holds the close (D34) and an operator's retry completes it, the closed case is flagged `notify#1 completed after the close was requested`, though the retry is what the close waited for. Run on `main` at `24b5d03`: `omar retried notify#1`, `notify#1 done`, `flagged: notify#1 completed after the close was requested`, `closed: paid reached`. `flag_if_stopping` (`case/runtime.py`) reads only the phase | **Built, wrongly worded** | **No:** a flag is a history line, not a command, so replay decides the same; not part of the format | **Choice 8:** fix in a small pull request |
+| 36 | **Ventoux's own, from 11g2:** `ventoux simulate` reads the development catalog only | 11g2, choice 10: the command passes `ventoux.testing.CATALOG`; `simulate(story, case, catalog)` already takes a catalog | **Planned at layer 14,** with `ventoux check` and the builder (11g2, "Decided while building") | **No:** a story names its definition and fakes by contract reference, never a catalog; choosing one is the command's | **Choice 9:** leave it at layer 14 |
+| 37 | **Ventoux's own, from 11d, 11h1 and 11h2:** shapes refused for now | No sensitive, list or `visible_to` payload field (11d); no `since=first_start` (D46); no `count` on a plan's approval, no different roles per approver (D47); no list field set by a rule (D42); one sender per event (D41) | **Refused, each** | **No:** each is refused today, so accepting it later changes no published definition | **Choice 11:** nothing to decide; listed so layer 12 knows they stay refused |
+
+## Did the doors hold?
+
+Each part of layer 11 was asked to keep some rows open ("What 11b to 11f must not close off",
+below), and each recorded its answer in `docs/layers/11-rules.md`, "The doors left open":
+
+- **11b:** rows 6, 10, 11 held (D39).
+- **11c:** rows 1, 2, 3, 5, 19 held; rows 7 and 8 held for stopping (one place, D40), and left
+  D27 as it was, as the table said they would.
+- **11d:** rows 5, 6, 8, 12, 13, 18, 25 held (D41).
+- **11e:** rows 6 and 14 held (D42); found the visibility limit (row 34).
+- **11f:** rows 15, 16, 17, 19, 30 held (D44), with D40 amended for a failed run's timers.
+- **11g, 11h:** touched no row; 11h1 sent row 33 back here (D46), and 11h2 adds row 37's
+  set-aside shapes (D47).
+- **The three fixes:** none touched a row. The untrusted moment (D43) closed the paths a case's
+  steps had; a plan's transitions are row 31's, still open.
+
+One door did not hold as the draft described it: row 31 is not only "which trusted value a plan
+sends" but a milestone reached on untrusted data, the bug D43 fixed for steps, still open through a
+plan (the run above).
+
+## Choices before layer 12
+
+Each is numbered so you can answer by number. "Record" means a new decision in the brief, or a
+dated amendment line on an existing one, never a rewrite. I'd gather every deliberate limit into
+**one new decision, D48** ("Deliberate limits, recorded at the checkpoint before layer 12"), each
+limit a bullet saying what is refused or not offered, why, and which door stays open, with a
+dated amendment line on each decision it adds to (D2, D27, D38, D42, D46).
+
+1. **Row 22, repeating milestones.** *Recommended: record as a deliberate limit* (D48, and an
+   amendment line on D2 and D38). A milestone is reached once and never undone; repeated facts,
+   if ever needed, are a new concept beside milestones (a step's latest answer, or an event's
+   latest arrival, already serve), never a milestone reached twice. Why: D38's "once", D44's
+   timers on a milestone, D46's first-start warning, and the "always closes" proofs all read a
+   milestone as reached for good; changing it would change every definition.
+
+2. **Rows 7 and 8, D27's quiet point.** A case continues as new only when nothing is running,
+   and a child that waits for people (a child case, a workflow waiting for people, and already
+   today a plan waiting for an approval) holds the switch for as long as it waits.
+   *Recommended: record now, build with rows 7 and 8* (a dated amendment line on D27, and a D48
+   bullet): today's limit, stated (a plan step waiting for a person postpones continue-as-new
+   until it is answered or times out; Temporal's history limit is the bound), and the direction
+   each row must take when built: a long-running child reports its end to the case by a signal to
+   the case's workflow ID (D27: "people address the case, not a run"), so the switch no longer
+   waits for it. No definition changes meaning; nothing is built now, since neither row is in
+   v1.0 before layer 15. Set aside: building the signal-back now for plans; it is engine work no
+   published definition depends on.
+
+3. **Row 7, a close waiting for a person.** D10 and D29 let a non-cancellable workflow step
+   finish when the case closes, and D40 cancels a cancellable one. *Recommended: record now* (a
+   D48 bullet, adding to D6 and D40): a workflow contract that declares human waits must declare
+   `cancellable: true`, refused at registration otherwise, so a close never waits for a person.
+   It uses D40's one place and contract test as built, and refusing is the fail-closed default.
+
+4. **Row 31, a plan's transition reading untrusted data.** The run above shows untrusted data
+   deciding through a plan. *Recommended: unblock now, by refusing* (option b), in its own pull
+   request, test-first, after the docs one:
+   - at runtime, a transition whose `when` reads an untrusted (or unrecognised) source stops the
+     plan, naming the field and source, never the value; the plan step fails and needs attention
+     (D17, D28): nothing is skipped;
+   - plan validation refuses a transition reading a field the plan declares untrusted, and case
+     validation refuses (`UNTRUSTED_TRIGGER`) a plan step whose input feeding such a field is
+     untrusted whoever writes it, as D34 claims only what is proven;
+   - recorded as a new decision (D49, "a plan's path is never chosen by untrusted data"), with an
+     amendment line on D39 and on design question 17's "left open".
+   Option (a), D43's way inside a plan (the plan reports what steered the transitions it took, so
+   its run reaches nothing and its outcome and outputs carry it, and each entered state's inputs
+   are checked, D39) is the later loosening, if a team needs it: refusing now keeps it open;
+   allowing now and refusing later would not. Set aside: recording it as a limit, since it breaks
+   D38 and a non-negotiable ("untrusted data never decides" is fail-closed, not a preference).
+
+5. **Row 32, `system:<name>` on an output.** *Recommended: unblock now*, in its own small pull
+   request, test-first: `Catalog.register` refuses an output whose `system:` names an unregistered
+   system, as `check_output_labels` does for labels (one more branch there), the development
+   catalog registers `kyc`, and the test catalogs register the systems their own contracts name
+   (`accounts`, `ledger`, `letters`, `payments` appear in tests; the suite will say which
+   catalogs lack them). More than a line or two, since several test files change. No decision changes meaning: D30 says systems are registered; this enforces it
+   at one more place, with an amendment line on D29.
+
+6. **Row 33, untrusted data deciding what doesn't happen.** A `when` is one condition: true lets
+   a step start, false keeps it from starting. D39 allows a start on untrusted data (inputs
+   checked), so refusing the false side would refuse the true side too, and rewrite D39.
+   *Recommended: record as a deliberate limit* (D48, amendment line on D38 and D46): untrusted data
+   may keep a step from starting or a rule from acting; a step that must happen is guarded by
+   something it can't skip (a `closes_when` milestone only it reaches, or a task, where a person
+   decides). The doors kept: a runtime answer ("ask a person when an untrusted condition is
+   false") would be an opt-in key, never a changed default; a teaching warning refuses nothing, so
+   it can come with `ventoux check` (layer 14).
+
+   **But today the run says nothing either.** Run on `main` at `24b5d03`: a task `check` whose
+   `when` is `note != "skip"`, `note` declared `untrusted:customer`, opened with `"skip"`: the
+   history is `opened by system:opener, with note` then `closed: nothing left to do`. Nobody can
+   tell the step was kept from starting, nor by what. A limit nobody can see is a silent skip
+   (D17: "nothing is skipped automatically"). So, with the limit: *a small pull request,
+   test-first,* adding one line when the case closes with a step that never ran because a
+   condition reading untrusted data was false, naming the step, the field and the source, never
+   the value (`check never started: its condition reads note (untrusted:customer)`). A history
+   line and no command, so replay decides the same. Set aside: recording the limit with no line.
+
+7. **Row 34, what a case did is seen by every role.** *Recommended: record as a deliberate limit*
+   (D48, amendment line on D30 and D42): `visible_to` narrows who sees a value, never what the
+   case did; milestones, step runs, the history, and outcomes and outputs are seen by every role
+   the case names, and no history line quotes a value (D30). A case needing more gives its steps
+   narrower roles, or keeps the fact out of a milestone. The door kept: a later `visible_to` on a
+   milestone or an output is an optional key, absent meaning "every role", as today.
+
+8. **Row 35, the misleading flag.** *Recommended: fix it, in a small pull request after the docs
+   one*, test-first, with a dated amendment line on D34. The run the held close waited for still
+   gets a flag (D28: "flagged, never hidden"; a payment retried after the case's `withdrawn` was
+   reached may still need a reversal), but a true one, naming the retry: `notify#1 completed on
+   omar's retry, after paid was reached`. A line or two in `flag_if_stopping` plus its test; a
+   history line and no command, so replay decides the same. Set aside: dropping the flag (it would
+   hide what ran after the case's end was reached).
+
+9. **Row 36, `ventoux simulate`'s catalog.** *Recommended: leave it at layer 14*, as 11g2
+   decided. Nothing in the story format names a catalog, so nothing freezes; no brief change.
+
+10. **Placing the unplaced rows.** The curriculum asks for one of four answers per row; rows 1,
+    11 (a run count, a maximum), 14, 16 (`every`), 24, 25 and 30 (an inbox due date) had "not
+    planned". *Recommended:* 30's inbox due date with claiming (after layer 15, in v1.0, both the
+    inbox's); the others **after v1.0**, added to the brief's "Deferred until after v1.0" by a
+    dated amendment line (Simplifications), each "a decision recorded in the brief when it comes".
+    None is blocked.
+
+11. **Row 37, shapes refused for now.** *Recommended: nothing to decide.* Each is refused, so
+    accepting it later is a new decision that changes no published definition. Listed so layer 12
+    publishes them as refused, not as missing.
+
+## Layer 12's own, not decided here
+
+Gathered so layer 12 starts from them. None is decided in this note.
+
+**Open cases replaying differently after an engine change** (layer 12's "behaviour version stored
+with each case", 11b's note):
+
+- 10b: a case failed by G1 can't be retried (the same check refuses the retry) and waits for a
+  change request; and a running case that skipped such a step under the old code would replay
+  differently (`docs/layers/10-case-validation.md`, "Not in 10b").
+- 11b: three paths decided differently, on a case open under 11a's code: a proposal on a stale
+  fact, a proposal beside a failed run, a condition reading an unset untrusted field
+  (`docs/layers/11-rules.md`, "Not in 11b").
+- The untrusted moment (D43): paths 0a–4 and 6 replay differently; a fixture shows it
+  (`docs/layers/fix-untrusted-moment.md`, decision 7).
+- The retry rejected: decision 4's paths (A, D, C, F, C′, E′, L) where the case later went on, and
+  decision 6's (N) (`docs/layers/fix-retry-rejected.md`); closing the gap "would need a patch
+  marker passed to `decide` as event data; not built".
+- If choice 4 is taken: a plan run whose transition read untrusted data stops, where `main` went
+  on, so such a history replays differently.
+- D46: a pattern's expansion is part of the format; changing one changes how open cases replay.
+- Design question 16: the hash method needs a version recorded with each hash ("to decide by
+  layer 12").
+
+**Change requests** (layer 12's one mechanism):
+
+- skipping a failed step, never automatic (D17; `docs/layers/08-case.md`);
+- case-file edits, and the lapse they cause: D25's "a lapse from a change request stops the step",
+  for every approval on an entry at once (D47);
+- forget as the first change request, made general (D32; `docs/layers/09-case-data.md`, 9c);
+- migrations of open cases, mapping names, not positions (D2, D5).
+
+**Bindings changing while cases are open:**
+
+- a workflow contract's workflow type may not move under open cases; its task queue may (D29);
+- activation checking bindings, served contract hashes and live pollers (8c, 8d; curriculum,
+  layer 12).
+
+## "Done when", row by row
+
+To fill once the choices are answered: each row that is blocked, or would be from layer 12, and
+where it was settled.
+
+| Row | Blocked? | Settled by |
+|---|---|---|
+| 7, 8 | an addition to D27 (and to D10, D29, D40 for row 7) | choices 2, 3 |
+| 21 | partly, on purpose (D10) | already decided (D10) |
+| 22 | yes (D2, D38) | choice 1 |
+| 28 | yes, a non-negotiable | already recorded ("Out of scope") |
+| 31 | from layer 12 | choice 4 |
+| 33 | from layer 12 | choice 6 |
+| 34 | no, but a known limit to record | choice 7 |
+| every other row | no | the table |
 
 ## What 11b to 11f must not close off
+
+Kept as written in the draft, each with the answer its part recorded.
 
 ### 11b: rules that start steps
 
@@ -139,7 +341,7 @@ is 11e's to decide, with `set`.
 *Answered in 11e's session, 2026-10-19:* `set` brings no "field set" moment; a later one would fire
 at most once per field in a decision, so each decision stays finite (`docs/layers/11-rules.md`, 11e,
 "The doors left open"; brief, D42). Found there, for the checkpoint: a milestone a rule reaches on
-a field narrowed by `visible_to` is seen by everyone (brief, D42, known limit).
+a field narrowed by `visible_to` is seen by everyone (brief, D42, known limit). Now row 34.
 
 ### 11f: time
 
@@ -161,24 +363,11 @@ Rows touched: 15, 16, 17, 19, 30.
 a stopped step, an exited stage or an ended child case through one rule: a timer set on a run's
 start ends with the run.
 
-## Rows blocked by a decision already merged
-
-None blocks the six rows the curriculum names, for existing definitions. Recorded for the
-checkpoint, not fixed here:
-
-- **Repeating milestones (row 22): blocked by D2 and D38,** on purpose. To record in the brief as
-  a deliberate limit at the checkpoint.
-- **Child cases (row 8) and human waits in a workflow step (row 7): not blocked for definitions,
-  but D27's quiet point** (a case continues as new only when nothing is running) would postpone
-  continue-as-new for as long as a child case or a waiting workflow runs. And for row 7, D10 and
-  D29's "closing lets a workflow step finish" would wait for a person. Both need an addition to a
-  merged decision before those rows are built.
-- **Code in definitions (row 28)** is closed by a non-negotiable, on purpose.
-
 ## Found in 11b, for the checkpoint
 
 Two rows (31 and 32) are not Flowable's: they are open in Ventoux itself, found in 11b's session.
 Row 31 is the one to watch: it is not blocked today, but it would be once plans are published.
+*2026-10-22:* row 31 is wider than this said; see the table and choice 4.
 
 ## Found in 11h, for the checkpoint
 
