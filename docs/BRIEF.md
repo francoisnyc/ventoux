@@ -1780,7 +1780,7 @@ choice 4; `docs/layers/fix-plan-transitions.md`). Adds to D28, D34 and D39, whos
   the plan declares untrusted (`UNTRUSTED_TRANSITION`). Case validation refuses a plan step's
   input that is untrusted whoever writes it and feeds a field a transition reads
   (`UNTRUSTED_TRIGGER`), and warns where only some writers make it so (`WRITER_DECIDES`, D42).
-  The runtime refuses on nothing validation did.
+  The runtime refuses whether or not validation ran (D34).
 - **The planned loosening: D43's way, inside a plan.** The plan would carry what steered each
   transition it took: its run reaches nothing (D43), its outcome and outputs carry the untrusted
   sources, and every state entered after such a transition has them checked against its
