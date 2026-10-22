@@ -132,6 +132,10 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   available steps.
 - Short sequences without people stay inside a plan. Anything that waits on people or runs for
   days is a case step, where it can change.
+- **Amended 2026-10-22, by D48** (the text above stands; this adds to it): a milestone reached
+  once and never undone is a deliberate limit, recorded at the checkpoint before layer 12.
+  Repeated facts, if ever needed, are a new concept beside milestones, never a milestone reached
+  twice.
 
 ### D3. Expressions are a small JSONata subset (superseded by D20)
 
@@ -230,6 +234,9 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
 - Choosing between a `workflow` step and the other kinds: see D13.
 - Later: workflows owned by other teams or namespaces through Temporal Nexus, building on the same
   contracts.
+- **Amended 2026-10-22, by D48** (the text above stands; this adds to it): when a workflow
+  contract may declare human waits, it must also declare `cancellable: true` (D40), and is refused
+  when registered otherwise, so a close never waits for a person.
 
 ### D7. Rules are written through patterns, explained back in plain language
 
@@ -713,6 +720,12 @@ be erased on request), has size limits, and a second copy of business records go
   switch is still open after it, under the same name.
 - **People address the case, not a run:** answers, proposals, retries, closes and reports go to
   the workflow ID alone, which always reaches its latest run.
+- **Amended 2026-10-22, by D48** (the text above stands; this adds to it): the quiet point waits
+  for every running child, so a plan step waiting for a person already postpones the switch until
+  it is answered or times out; Temporal's history limit is the bound. Child cases and workflows
+  that wait for people each come with an addition here before they are built: a long-running
+  child reports its end to the case by a signal to the case's workflow ID, so the switch no longer
+  waits for it.
 
 ### D28. A plan step runs as a child workflow of its case
 
@@ -820,6 +833,11 @@ be erased on request), has size limits, and a second copy of business records go
   read from it, reaches people who may not see a field; a message quoting its value would show it
   to them. Only a `shown` line names a reference, as D16 asks. *Added in the tutor review of 9a,
   before D30 was merged.*
+- **Amended 2026-10-22, by D48** (the text above stands; this adds to it): `visible_to` narrows
+  who sees a value, never what the case did. Milestones, step runs, the history, and outcomes and
+  outputs are seen by every role the case names, a deliberate limit; no history line quotes a
+  value. A later `visible_to` on a milestone or an output would be an optional key, absent meaning
+  every role, as today.
 
 ### D31. Sensitive values are wrapped, encrypted one by one, and never written out
 
@@ -1123,6 +1141,11 @@ be erased on request), has size limits, and a second copy of business records go
   for the first time, and `started` fires then, once. A retry of a run that had already started
   is the same run, and fires nothing. Why: 11e's timers `since` a start and 11g's `sla` from a
   step's latest start (D7) would otherwise miss the run an operator had to rescue.
+- **Amended 2026-10-22, by D48** (the text above stands; this adds to it): two deliberate limits.
+  A milestone is reached once and never undone (D2). And untrusted data may keep something from
+  happening: a step's `when`, or a rule's condition, that reads untrusted data and is false keeps
+  the step from starting, as D39 allows the true side; the history says so, naming the field and
+  its source, never the value.
 
 ### D39. Rules that start steps: the engine proposes, and an untrusted condition can't choose what is sent
 
@@ -1283,6 +1306,9 @@ kept.*
   failed run hasn't ended. It waits for a person, and an operator's retry runs it again as the
   same run (D26), so a timer set on its start stays set, as D17's "an sla still escalates during
   a long outage" asks.
+- **Amended 2026-10-22, by D48** (the text above stands; this adds to it): a workflow that waits
+  for people, when contracts may declare one, must be `cancellable` (D6, as amended), so the one
+  place stops it, and a close never waits for a person.
 
 ### D41. Events from outside: declared with one sender, a fact on arrival, and a step that waits for one
 
@@ -1405,6 +1431,9 @@ text is kept.*
 - **Amended 2026-10-19, by D43** (the text above stands; this narrows it): "the moment doesn't
   count" holds for who may approve, not for trust. A rule on the start of a run that untrusted
   data steered sets a value that carries what steered it, as if its condition had read it.
+- **Amended 2026-10-22, by D48** (the text above stands; this adds to it): the known limit above is
+  recorded as a deliberate limit, and is wider than milestones: `visible_to` narrows who sees a
+  value, never what the case did (D30, as amended).
 
 ### D43. A run carries what steered it, and passes it on
 
@@ -1616,6 +1645,10 @@ whose text is kept.*
 - **`four_eyes` is not a rule pattern.** No raw rule can add a second approver, and tasks
   standing in for one would neither follow the case file (D25) nor lapse (D11). It is approvals
   by several people, D11's `count`, a new engine capability built as 11h2 (D47, to come).
+- **Amended 2026-10-22, by D48** (the text above stands; this adds to it): what the teaching
+  warnings left to the checkpoint, untrusted data deciding what doesn't happen, is a deliberate
+  limit (D38, as amended). A warning about it refuses nothing, so it may come with `ventoux check`
+  (layer 14).
 
 ### D47. Approvals by several people: one entry, distinct people, one rejection rejects it
 
@@ -1668,6 +1701,56 @@ text is kept.*
   `APPROVER_CANT_SEE` are claimed per role, so they hold for every approver. D11's "shown as
   blocked" stays unbuilt; a count makes it likelier, a known limit.
 
+### D48. Deliberate limits, recorded at the checkpoint before layer 12
+
+*Decided 2026-10-22, at the checkpoint (`docs/layers/checkpoint-doors.md`). Adds to D2, D6, D27,
+D30, D38, D40, D42 and D46, whose text is kept.*
+
+- **Why now.** Layer 12 publishes the definition format, and open cases then depend on it: a
+  concept missing from it costs a migration, not an edit. The checkpoint compared Ventoux with
+  Flowable's CMMN engine and with its own notes' known limits, row by row. Each row is built,
+  planned, after v1.0 or out of scope; each that is blocked is unblocked before layer 12 or
+  recorded here. A shape refused today can still be accepted later, since no published definition
+  uses it; a shape accepted today can't be refused later without breaking those that do.
+- **A milestone is reached once, never again** (doors row 22; D2, D38). D38's `{"reached": m}`
+  fires once, a timer on a milestone lives until it fires (D44), and D46's warnings and the
+  "always closes" proofs read a milestone as reached for good. A milestone reached again would
+  change what every definition means. Repeated facts, if ever needed, are a new concept beside
+  milestones; a repeatable step's latest answer and an event's latest arrival already serve.
+- **A running child holds continue-as-new** (rows 7 and 8; D27). The quiet point waits for every
+  running child, so a plan step waiting for a person already postpones the switch until it is
+  answered or times out; Temporal's history limit is the bound. Child cases and workflows that
+  wait for people each come with an addition to D27 before they are built: a long-running child
+  reports its end by a signal to the case's workflow ID, so the switch no longer waits for it.
+- **A workflow that waits for people is cancellable** (row 7; D6, D40). When a workflow contract
+  may declare human waits, it must also declare `cancellable: true`, refused when registered
+  otherwise, so D40's one place stops it and a close never waits for a person.
+- **Untrusted data may keep something from happening** (row 33; D38, D39, D46). A `when` is one
+  condition: true lets a step start, false keeps it from starting, and D39 allows the true side
+  on untrusted data, its inputs checked. So a step's own `when`, or a rule's condition, that
+  reads untrusted data and is false keeps the step from starting, and the case may close without
+  it. A step that must happen is guarded by what untrusted data can't skip: a `closes_when`
+  milestone only it reaches, or a task, where a person decides. The history says when it happens,
+  naming the step, the field and its source, never the value (built after the checkpoint, in its
+  own pull request): a limit nobody can see would be a silent skip (D17). The doors kept: asking
+  a person when an untrusted condition is false would be an opt-in key, never a changed default;
+  a warning refuses nothing, so it may come with `ventoux check` (layer 14).
+- **`visible_to` narrows values, never what the case did** (row 34; D30, D42). Milestones, step
+  runs, the history, and outcomes and outputs are seen by every role the case names; no history
+  line quotes a value (D30). A case that needs more gives its steps narrower roles, or keeps the
+  fact out of a milestone. The door kept: a `visible_to` on a milestone or an output would be an
+  optional key, absent meaning every role, as today.
+- **Shapes refused for now stay refused when the format is published** (row 37): a sensitive, list
+  or `visible_to` payload field (D41); more than one sender per event (D41); a list field set by a
+  rule (D42); `since=first_start` (D46); `count` on a plan's approval, and different roles per
+  approver (D47). Each is refused, so accepting it later changes no published definition, and is a
+  decision of its own.
+- **Not limits, and decided apart:** a plan's path chosen by untrusted data is refused (D49, to
+  come), and an output's `system:<name>` is checked against the registered systems (an amendment
+  to D29, to come), each in its own pull request after the checkpoint. What layer 12 decides (open cases replaying
+  differently after an engine change, change requests, bindings changing under open cases) is
+  listed in the checkpoint's note, not decided here.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
@@ -1682,6 +1765,12 @@ text is kept.*
 - **Deferred until after v1.0:** signed approvals (D19), ad hoc steps with inline plans drafted at
   runtime (D13), restarting running steps on a new version, advanced parallel joins, automatic
   compensation (sagas).
+- **Amended 2026-10-22, at the checkpoint before layer 12** (`docs/layers/checkpoint-doors.md`,
+  choice 10; the list above stands): also deferred until after v1.0, each a decision recorded
+  here when it comes: stages, or steps that close together; a run count read in a condition, and
+  a maximum on a repeatable step; a "field set" moment; a repeating timer (`every`, with a count);
+  steps the case doesn't wait for; reopening a closed case. A due date shown in the inbox comes
+  with claiming and reassigning tasks, after layer 15, in v1.0.
 
 ## Concepts
 
