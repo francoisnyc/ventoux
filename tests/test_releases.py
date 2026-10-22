@@ -6,6 +6,7 @@ See docs/layers/12-releases.md (12a) and docs/guides/releases.md.
 import copy
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -16,16 +17,19 @@ from ventoux.case.releases import (
     Outcome,
     Package,
     PackageRefused,
+    RecordRefused,
     Record,
     Released,
     Reworded,
+    SameAs,
     Unchanged,
     next_release,
     package,
     record,
 )
+from ventoux.core.contract_hash import contract_hash
 from ventoux.testing import CATALOG
-from ventoux.tooling.releases import read_package
+from ventoux.tooling.releases import FolderStore, read_package, release
 
 ROOT = Path(__file__).parent.parent
 REFUND = ROOT / "examples" / "packages" / "refund"
@@ -235,3 +239,120 @@ def copied(tmp_path: Path) -> Path:
     folder = tmp_path / "refund"
     shutil.copytree(REFUND, folder)
     return folder
+
+
+def edited(folder: Path, change: Any) -> None:
+    """Change the case in `folder` with `change`, which edits its data in place."""
+    case = json.loads((folder / "case.json").read_text())
+    change(case)
+    (folder / "case.json").write_text(json.dumps(case, indent=2))
+
+
+def retitled(title: str) -> Any:
+    def change(case: dict[str, Any]) -> None:
+        case["steps"]["settle"]["display"]["title"] = title
+
+    return change
+
+
+def requiring(*names: str) -> Any:
+    def change(case: dict[str, Any]) -> None:
+        case["steps"]["settle"]["requires"] = list(names)
+
+    return change
+
+
+def test_releases_are_numbered_from_1(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    assert release(folder, store, "a1", CATALOG).outcome == Released(1, Changed())
+    edited(folder, requiring())  # settle no longer waits for the review: behaviour
+    second = release(folder, store, "a2", CATALOG)
+    assert second.outcome == Released(2, Changed(behaviour=("steps.settle.requires",)))
+    edited(folder, lambda case: case["steps"]["settle"].pop("when"))
+    assert release(folder, store, "a3", CATALOG).outcome.release == 3  # type: ignore[union-attr]
+    names = sorted(path.name for path in (tmp_path / "releases" / "refund").iterdir())
+    assert names == ["1.json", "2.json", "3.json"]
+
+
+def test_a_digest_already_released_makes_none(tmp_path: Path) -> None:
+    # One digest, one release: a revert merged is a rollback, which is activating it (brief, D50).
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    release(folder, store, "a1", CATALOG)
+    edited(folder, requiring())
+    release(folder, store, "a2", CATALOG)
+    edited(folder, requiring("review"))  # back to release 1's behaviour
+    run = release(folder, store, "a3", CATALOG)
+    assert run.outcome == SameAs(1) and not run.written
+    assert len(store.records("refund")) == 2
+
+
+def test_the_same_package_again_writes_nothing(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    assert release(folder, store, "a1", CATALOG).written
+    again = release(folder, store, "a1", CATALOG)
+    assert again.outcome == Unchanged(1) and not again.written
+
+
+def test_a_record_is_never_written_over(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    first = release(folder, store, "a1", CATALOG)
+    assert isinstance(first.outcome, Released)
+    kept = store.records("refund")[0]
+    assert store.write(kept) is False  # the same bytes again: a CI job run twice
+    other = replace(kept, commit="b2")
+    with pytest.raises(RecordRefused) as refusal:
+        store.write(other)
+    where = tmp_path / "releases" / "refund" / "1.json"
+    assert str(refusal.value) == (
+        f"{where} already exists, with other content: a record is never written over"
+    )
+    assert store.records("refund") == [kept]
+
+
+def test_a_package_with_an_error_is_not_released(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+
+    def misspelt(case: dict[str, Any]) -> None:
+        case["steps"]["settle"]["when"] = {"==": [{"var": "review.outcome"}, "aprove"]}
+
+    edited(folder, misspelt)
+    with pytest.raises(PackageRefused) as refusal:
+        release(folder, store, "a1", CATALOG)
+    assert str(refusal.value) == (
+        'steps.settle.when: EXPRESSION_INVALID: ==[1]: review.outcome has no outcome "aprove"; '
+        "its outcomes are approve, reject"
+    )
+    assert not (tmp_path / "releases").exists()
+
+
+def test_a_warning_lets_a_release_through(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+
+    def unreached(case: dict[str, Any]) -> None:
+        case["milestones"] = {"escalated": {"display": {"title": "Escalated"}}}
+
+    edited(folder, unreached)
+    run = release(folder, store, "a1", CATALOG)
+    assert run.outcome == Released(1, Changed()) and run.written
+    assert [issue.code for issue in run.warnings] == ["UNREACHABLE_MILESTONE"]
+
+
+def test_the_record_holds_what_activation_needs(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    release(folder, store, "a1", CATALOG)
+    edited(folder, requiring())
+    release(folder, store, "a2", CATALOG)
+    second = json.loads((tmp_path / "releases" / "refund" / "2.json").read_text())
+    assert second["name"] == "refund" and second["release"] == 2 and second["wording"] == 1
+    assert second["commit"] == "a2"
+    assert second["digest"]["method"] == 1 and len(second["digest"]["sha256"]) == 64
+    # Every contract it needs, its plan's included, each with its hash (brief, D5).
+    assert second["contracts"] == {
+        reference: {"method": 1, "sha256": contract_hash(CATALOG.lookup(reference))}
+        for reference in ("orders.lookup@1", "payments.refund@2")
+    }
+    # The package as written, read again exactly.
+    assert second["written"]["case"] == (folder / "case.json").read_text()
+    plan = (folder / "plans" / "refund-order.json").read_text()
+    assert second["written"]["plans"] == {"refund-order@1": plan}
+    assert second["changed"] == {"behaviour": ["steps.settle.requires"], "wording": []}
