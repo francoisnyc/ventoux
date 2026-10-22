@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from ventoux.case.releases import (
+    METHOD,
     Changed,
     Outcome,
     Package,
@@ -380,3 +381,52 @@ def test_wording_revisions_are_numbered_and_recorded_at_once(tmp_path: Path) -> 
     assert names == ["1.json", "1.wording-2.json", "1.wording-3.json", "2.json"]
     revision = json.loads((tmp_path / "releases" / "refund" / "1.wording-2.json").read_text())
     assert (revision["release"], revision["wording"], revision["commit"]) == (1, 2, "a2")
+
+
+def kept_as(tmp_path: Path, change: Any) -> Path:
+    """Release the example once, then change its record's data with `change`; the folder."""
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    release(folder, store, "a1", CATALOG)
+    path = tmp_path / "releases" / "refund" / "1.json"
+    data = json.loads(path.read_text())
+    change(data)
+    path.write_text(json.dumps(data))
+    return folder
+
+
+def refusal_of(tmp_path: Path, folder: Path) -> str:
+    with pytest.raises(RecordRefused) as refusal:
+        release(folder, FolderStore(tmp_path / "releases"), "a2", CATALOG)
+    return str(refusal.value)
+
+
+def test_every_hash_records_its_method(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    release(folder, store, "a1", CATALOG)
+    (kept,) = store.records("refund")
+    assert kept.digest.method == METHOD == 1
+    assert {hash.method for hash in kept.contracts.values()} == {1}
+
+
+def test_a_release_is_compared_by_recomputing_its_digest(tmp_path: Path) -> None:
+    # A record whose digest its own package doesn't give is refused, never compared: the record
+    # was changed, or the method was (design question 16).
+    folder = kept_as(tmp_path, lambda data: data["digest"].update(sha256="0" * 64))
+    assert refusal_of(tmp_path, folder) == (
+        "refund 1's digest isn't what its own package gives under method 1: the record was "
+        "changed, or the method was; it can't be compared"
+    )
+
+
+def test_a_record_of_an_unknown_method_is_refused(tmp_path: Path) -> None:
+    folder = kept_as(tmp_path, lambda data: data["digest"].update(method=2))
+    assert refusal_of(tmp_path, folder) == (
+        "refund 1 was made with hash method 2, which this tool doesn't know (it computes "
+        "method 1): run a tool that knows it"
+    )
+
+
+def test_a_record_out_of_place_is_refused(tmp_path: Path) -> None:
+    folder = kept_as(tmp_path, lambda data: data.update(release=7))
+    where = tmp_path / "releases" / "refund" / "1.json"
+    assert refusal_of(tmp_path, folder) == f"{where} holds 7.json's record: put it back"
