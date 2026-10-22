@@ -39,6 +39,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.called import unbound
     from ventoux.case.closing import CloseRefused, needs_attention
     from ventoux.case.definition import CaseInvalid, parse_case
+    from ventoux.case.engine import KNOWN, opening_engine
     from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.freshness import TimeRefused
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
@@ -292,7 +293,7 @@ class CaseWorkflow:
         try:
             case = self.case = parse_case(start.definition)
             if start.carried is None:
-                self.decide(case, Opened(start.file, start.opened_by, at=now()))
+                self.decide(case, Opened(start.file, start.opened_by, at=now(), engine=engine()))
             else:
                 self.state = state_from_data(start.carried)  # a case continued as new
         except (CaseInvalid, CaseRefused) as refused:
@@ -613,6 +614,13 @@ def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWor
     said = cause.message if isinstance(cause, FailureError) else str(error)
     # Its type, never what it said (brief, D31).
     return f"{reference} failed with {raised(error)}: {Sensitive(said)}"
+
+
+def engine() -> int:
+    """The engine version a case opens at: asked of Temporal's patch markers, newest first, so a
+    replay reads the version its history recorded (brief, D51). Temporal: `patched` says whether
+    a marker is in force, adding it when the run is new; asked only at the opening."""
+    return opening_engine(KNOWN, lambda version: workflow.patched(f"ventoux-engine-{version}"))
 
 
 def now() -> int:

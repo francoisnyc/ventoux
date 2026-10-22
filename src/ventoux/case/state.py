@@ -219,6 +219,9 @@ class Opened:
     # (brief, D33). Python: `kw_only` makes it a keyword with no default, `Opened(..., at=t)`, so
     # no event is ever made without its time.
     at: int = field(kw_only=True)
+    # The engine version the case opens at, learnt by the driver: on Temporal from its patch
+    # markers, in memory this code's own. Event data, so `decide` reads no Temporal (brief, D51).
+    engine: int = field(kw_only=True, default=ENGINE)
 
 
 @dataclass(frozen=True)

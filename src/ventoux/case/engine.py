@@ -6,6 +6,8 @@ differently, its old branch stays, chosen by the case's version, so a history re
 recorded (brief, D51). See docs/layers/12-releases.md (12b).
 """
 
+from collections.abc import Callable, Sequence
+
 # The version this code opens new cases at. Version 1 is the engine as merged at `b734098`: every
 # path decided before then is version 1's, with no older branch kept (brief, D51).
 ENGINE = 1
@@ -31,3 +33,15 @@ def known(version: int) -> int:
             f"{versions}): deploy code that knows it"
         )
     return version
+
+
+def opening_engine(versions: Sequence[int], asked: Callable[[int], bool]) -> int:
+    """The version a case opens at: each version above 1, newest first, is `asked` (on Temporal,
+    whether its patch marker is in force, `workflow.patched`); the first that says yes is it, and
+    none means 1, which writes no marker. So a new case opens at the newest version, and a
+    replayed one at the version its history recorded (brief, D51). Asked once, at the opening:
+    a run that starts from a carried state reads its version from the state."""
+    for version in versions:
+        if version > 1 and asked(version):
+            return version
+    return 1

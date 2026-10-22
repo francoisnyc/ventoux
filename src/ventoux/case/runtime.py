@@ -54,6 +54,7 @@ from ventoux.case.definition import (
     form_fields,
     rule_fields,
 )
+from ventoux.case.engine import known
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
 from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
@@ -362,6 +363,7 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
     refuse_to_open(case, catalog, event.file)
     refuse_unless_wrapped(case, event.file, CaseRefused)
     state.opened_by = event.by
+    state.engine = known(event.engine)  # set once, here, never by itself after (brief, D51)
     origin = OPENER if event.by is None else f"person:{event.by}"
     for name, value in event.file.items():
         state.values[name] = value

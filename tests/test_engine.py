@@ -3,9 +3,11 @@
 See docs/layers/12-releases.md (12b).
 """
 
+from collections.abc import Callable
+
 import pytest
 
-from ventoux.case.engine import ENGINE, EngineUnknown
+from ventoux.case.engine import ENGINE, EngineUnknown, opening_engine
 from ventoux.case.state import CaseState
 from ventoux.temporal.carried import state_as_data, state_from_data
 
@@ -28,3 +30,33 @@ def test_an_unknown_engine_version_is_refused() -> None:
         "this case decides as engine 2, which this code doesn't know (it knows 1): deploy code "
         "that knows it"
     )
+
+
+def asking(yes: set[int]) -> tuple[list[int], Callable[[int], bool]]:
+    """What was asked, and an `asked` that says yes to the versions in `yes`."""
+    asked: list[int] = []
+
+    def ask(version: int) -> bool:
+        asked.append(version)
+        return version in yes
+
+    return asked, ask
+
+
+def test_the_opening_asks_the_newest_version_first() -> None:
+    # On Temporal each version above 1 is a patch marker: a new case's run says yes to the newest,
+    # a replayed one to the version its history recorded (research 1.5; brief, D51).
+    asked, ask = asking({3, 2})
+    assert opening_engine((3, 2, 1), ask) == 3 and asked == [3]
+    asked, ask = asking({2})
+    assert opening_engine((3, 2, 1), ask) == 2 and asked == [3, 2]
+    # No marker: a history recorded under version 1, which writes none.
+    asked, ask = asking(set())
+    assert opening_engine((3, 2, 1), ask) == 1 and asked == [3, 2]
+
+
+def test_one_version_asks_nothing() -> None:
+    # With version 1 alone nothing is asked, so no marker is written: a case opened under 12b has
+    # a history of the same shape as one opened before it.
+    asked, ask = asking({1})
+    assert opening_engine((1,), ask) == 1 and asked == []
