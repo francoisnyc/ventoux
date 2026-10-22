@@ -7,8 +7,10 @@ See docs/layers/fix-plan-transitions.md.
 from decimal import Decimal
 from typing import Any
 
+from ventoux.core.plan import parse_plan
 from ventoux.core.provenance import sourced
-from ventoux.testing import run_case, run_plan
+from ventoux.core.validate import validate
+from ventoux.testing import CATALOG, run_case, run_plan
 
 
 def branching(note_source: str | None = None) -> dict[str, Any]:
@@ -152,3 +154,23 @@ def test_a_plan_step_branching_on_untrusted_data_needs_attention() -> None:
         ]
         assert "reached settled" not in run.history
         assert not run.closed
+
+
+def test_plan_validation_refuses_a_transition_on_an_untrusted_field() -> None:
+    # A field the plan declares untrusted stays untrusted whatever the case gives (a mark adds
+    # distrust), so a transition reading it is refused every time it is tried (brief, D49).
+    issues = validate(parse_plan(branching("untrusted:llm")), CATALOG)
+    assert [(i.path, i.code, i.message, i.severity) for i in issues] == [
+        (
+            "states.check_order.on.done[0].when",
+            "UNTRUSTED_TRANSITION",
+            (
+                "the transition to paid reads note, which the plan declares untrusted:llm, and "
+                "untrusted data can't choose a plan's path: branch in the case instead, where a "
+                "step's condition or a person's task decides"
+            ),
+            "error",
+        )
+    ]
+    # Unmarked, the plan can't know: the case's check and the runtime say it.
+    assert validate(parse_plan(branching()), CATALOG) == []

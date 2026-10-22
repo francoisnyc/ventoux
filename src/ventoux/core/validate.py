@@ -33,7 +33,7 @@ from ventoux.core.plan import (
     set_by,
 )
 from ventoux.core.policy import OnlyFrom, Policy, refusal
-from ventoux.core.provenance import CASE, answering, provenance
+from ventoux.core.provenance import CASE, answering, fields_read, provenance
 from ventoux.core.roles import may_approve
 
 TIMEOUT = "timeout"  # the event of a wait's timeout, so never one of its outcomes
@@ -87,10 +87,30 @@ def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
                         Issue(path, "UNKNOWN_TARGET", not_a_state(transition.target, plan))
                     )
                 if transition.when is not None:
-                    issues += expression_issues(
+                    problems = expression_issues(
                         f"{path}.when", transition.when, plan.fields, condition=True
                     )
+                    # One cause, one issue: a condition that can't be read isn't asked what it reads.
+                    issues += problems or transition_issues(f"{path}.when", transition, plan)
     return issues + graph_issues(plan, catalog)
+
+
+def transition_issues(path: str, transition: Transition, plan: Plan) -> list[Issue]:
+    """A transition whose condition reads a field the plan declares untrusted: the run stops each
+    time it is tried, since untrusted data never chooses a plan's path (brief, D49)."""
+    assert transition.when is not None
+    for name in fields_read(transition.when):
+        if name in plan.sources:
+            return [
+                Issue(
+                    path,
+                    "UNTRUSTED_TRANSITION",
+                    f"the transition to {transition.target} reads {name}, which the plan declares "
+                    f"{plan.sources[name]}, and untrusted data can't choose a plan's path: branch "
+                    "in the case instead, where a step's condition or a person's task decides",
+                )
+            ]
+    return []
 
 
 def source_issues(plan: Plan, catalog: Catalog) -> list[Issue]:
