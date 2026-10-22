@@ -7,9 +7,11 @@ See docs/layers/fix-plan-transitions.md.
 from decimal import Decimal
 from typing import Any
 
+from ventoux.case.definition import parse_case
+from ventoux.case.validate import validate_case
 from ventoux.core.plan import parse_plan
 from ventoux.core.provenance import sourced
-from ventoux.core.validate import validate
+from ventoux.core.validate import Issue, validate
 from ventoux.testing import CATALOG, run_case, run_plan
 
 
@@ -174,3 +176,75 @@ def test_plan_validation_refuses_a_transition_on_an_untrusted_field() -> None:
     ]
     # Unmarked, the plan can't know: the case's check and the runtime say it.
     assert validate(parse_plan(branching()), CATALOG) == []
+
+
+def case_issues(definition: dict[str, Any], plan: dict[str, Any]) -> list[Issue]:
+    """What case validation says of trust at the plan step's inputs, given the plan."""
+    found = validate_case(parse_case(definition), CATALOG, {"check-only@1": plan})
+    trust = ("UNTRUSTED_TRIGGER", "WRITER_DECIDES")
+    return [i for i in found if i.path.startswith("steps.settle.inputs") and i.code in trust]
+
+
+def test_case_validation_refuses_an_untrusted_input_a_transition_reads() -> None:
+    # The customer's note reaches the plan's transition whoever writes it: the plan stops each
+    # time it tries it, so the case's check refuses the input that carries it (brief, D34, D49).
+    assert case_issues(branching_case(), branching()) == [
+        Issue(
+            "steps.settle.inputs.note",
+            "UNTRUSTED_TRIGGER",
+            "check-only@1 branches on note (in check_order, the transition to paid), and this "
+            "input reads note, which comes from untrusted:customer whoever writes it, and "
+            "untrusted data can't choose a plan's path, so the plan stops whenever it tries that "
+            "transition: give it a value a person or a trusted system gives, or branch in the "
+            "case",
+        )
+    ]
+
+
+def with_two_writers() -> dict[str, Any]:
+    """The case with `note` set by rules as it opens: from the customer's text by one, from the
+    team's own remark by the other."""
+    definition = branching_case()
+    fields = definition["fields"]
+    fields["customer_note"] = fields["note"]
+    fields["team_note"] = {"type": "string", "display": {"title": "What the team wrote"}}
+    fields["note"] = {"type": "string", "display": {"title": "The note the plan reads"}}
+    definition["rules"] = {
+        "from_customer": {
+            "display": {"title": "Take the customer's note"},
+            "on": "opened",
+            "then": {"set": {"note": {"var": "customer_note"}}},
+        },
+        "from_team": {
+            "display": {"title": "Take the team's note"},
+            "on": "opened",
+            "then": {"set": {"note": {"var": "team_note"}}},
+        },
+    }
+    return definition
+
+
+def test_case_validation_warns_when_only_some_writers_make_it_untrusted() -> None:
+    # Whether the plan stops depends on which rule set note last: a warning, never an error,
+    # which must hold for every case (brief, D34, D42).
+    assert case_issues(with_two_writers(), branching()) == [
+        Issue(
+            "steps.settle.inputs.note",
+            "WRITER_DECIDES",
+            "check-only@1 branches on note (in check_order, the transition to paid), and this "
+            "input reads note, which comes from untrusted:customer when from_customer sets it, "
+            "and not when from_team does, and untrusted data can't choose a plan's path, so "
+            "whether the plan stops there depends on which rule set note last: set note only "
+            "from trusted values",
+            "warning",
+        )
+    ]
+
+
+def test_case_validation_says_nothing_of_a_trusted_input_a_transition_reads() -> None:
+    definition = branching_case()
+    del definition["fields"]["note"]["source"]
+    assert case_issues(definition, branching()) == []
+    # A field the plan itself declares untrusted is the plan's check to say, whatever the case
+    # gives it (one cause, one issue).
+    assert case_issues(branching_case(), branching("untrusted:llm")) == []
