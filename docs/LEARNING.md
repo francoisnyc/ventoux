@@ -44,6 +44,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 37 | Layer 9c: what the audit keeps after forgetting | open |
 | 38 | Layer 9d: stale facts, and why replay decides the same way | open |
 | 39 | Layer 10: why a fixpoint is needed | open |
+| 40 | Layer 11: arrival is a fact, content is not | open |
 
 ---
 
@@ -82,6 +83,16 @@ and record the key points. A question is closed once you can explain the answer 
   have reached for two tasks, which neither follow the case file nor lapse (D46). The reviewer's
   key question is whether a change uses a capability the format has, or invents one: a new
   capability is a decision in the brief (D47), never just a code change.
+- Retrieval (layer 11 walk-through warm-up, 2026-10-21): "the developer sees the Python method
+  Approval with a count of 2, the business sees plain English."
+  - **Came back:** two of the seven: the builder's code (1; in layer 14 it is `four_eyes`, the
+    builder's name for `count: 2`, never a key in the JSON, D47) and the plain-language view for
+    the business (3, the semantic diff; and part of 5, the reading, which since 11h2 says
+    `by 2 people`, D45, D47).
+  - **Didn't:** the JSON diff, which is the real contract and what CI compares with the code (2);
+    what the check says and can't claim (4: a malformed `count` refused; never that two eligible
+    people exist); a story showing two people approve and the second refused if excluded (5);
+    tests and replay of open cases (6); the release, whose notes are the semantic diff (7).
 - Status: open, until the list comes back from memory, the release (7) included.
 
 ## 3. Intuitive and shared
@@ -339,6 +350,17 @@ and record the key points. A question is closed once you can explain the answer 
     cannot approve it`.
   - **Why it matters now (11h, choice 9):** a second approver (`four_eyes`) is excluded by the
     same rule, plus whoever already gave the first approval.
+- Retrieval (layer 11 walk-through warm-up, 2026-10-21): "a support-lead other than the
+  reviewer; the reviewer can't approve." The first part came back, with the role named, for the
+  fifth time; less than in 11h, where all three parts were tried. Didn't come back:
+  - **Why the reviewer can't:** her answer set `approved_amount`, the value `pay` sends
+    (provenance, not position; brief, D11). And the opener and whoever proposed the run are
+    excluded too (D11, D25): the opener, for the fifth time.
+  - **What the case waits for:** `approval of pay by support-lead`; `pay` hasn't run, and the
+    case stays open (D10, D24). Since 11h2, with `count: 2` the same entry says `0 of 2`, and
+    whoever gave the first approval is excluded from the second (D47).
+  - **The test's three assertions:** `run.waiting_for == ["approval of pay by support-lead"]`,
+    `not run.reached("pay")`, `not run.closed`.
 - Status: open, until the opener and the test's three assertions come back with the exclusion.
 
 ## 15. Case data
@@ -852,8 +874,19 @@ and record the key points. A question is closed once you can explain the answer 
   One sharpening, new since 11a: a milestone is not a value a condition can read (brief, D35),
   so "not assessed" is written over what the assessment gives (its outcome), and how a timer's
   condition says it exactly is 11e's to decide.
-- Status: open. The timer is solid now; the question stays in the rotation until the *if* and
-  replay come back too.
+- Retrieval (layer 11 walk-through warm-up, 2026-10-21), the follow-up: "when a claim is open, if
+  5 days have passed since it opened then escalate. The time comes from the event registered
+  when reaching claim. Temporal uses the event time stamps during replay, not time."
+  - **Came back:** the time comes from an event, never a clock: the timer is set in the decision
+    that handles the opening, due at that event's time plus `5d`, and fires as an event stamped
+    with its due time (brief, D44; `set_timer` and `next_due` in `case/timers.py`). Replay reads
+    the same stamps from history, so it decides the same way.
+  - **Didn't:** the 5 days went into the *if*; it is the *when*, a moment of its own:
+    `"on": {"after": "5d", "since": "opened"}`. And the *if* is the point of the rule: the claim
+    is **not yet assessed**, read on the case file at the firing (D38), over what the assessment
+    gives. Without it, every claim escalates on day 5, even one assessed on day 2. "When a claim
+    is open" needs no condition: any close ends every timer (D44).
+- Status: open, until the *if* (not yet assessed) comes back in its place.
 
 
 ## 33. Layer 3: why plans can be checked and code can't
@@ -1263,4 +1296,52 @@ and record the key points. A question is closed once you can explain the answer 
     happen", stays sound; what has to be checked again are the claims that something always or
     never happens (11c's audit of the proofs).
 - Status: open.
+
+## 40. Layer 11: arrival is a fact, content is not
+
+> "Arrival is a fact, content is not": give an example.
+
+- Your answer (layer 11's check-yourself, after the walk-through, 2026-10-21): "an email received
+  is an event; on arrival a rule will evaluate the event, not its content, because it can't be
+  trusted."
+- Discussion: the core is right, and it is the layer's lesson: what a customer wrote can't be
+  trusted. Sharpened:
+  - **Why the arrival is a fact:** the engine checks who sent it before anything lands
+    (`sender_role` and `refuse_payload` in `case/runtime.py`; brief, D41). An email is sent by a
+    system the platform team registered, say `mail`, so "an email from the customer arrived" is
+    the mail system's fact, and a rule on `{"event": ...}` may decide on it: reach a milestone,
+    stop a step, start one, set a field.
+  - **Why the content isn't:** the body is what the customer typed, declared on the payload
+    field as `untrusted:customer`. The mark adds distrust whoever sends it, never removes it
+    (D12): the value carries `system:mail, untrusted:customer`.
+  - **"Not its content" is too strong:** a rule's `when` *may* read the content, and the content
+    *informs*: it may start a step (its inputs' policies are checked, D39), set a field (the value
+    carries the mark, D42), and be shown to a person who decides. It never *decides*: a rule
+    that reaches or stops on it does nothing at all (D38, D40), and since D43 neither does a
+    rule on the start of a step it steered (walk-through part 5).
+  - **What the engine and validation say,** with the walk-through's `cancelled` event (`note`
+    marked `untrusted:customer`), one rule on its arrival and one on its content:
+    ```
+    cancelled#1 from portal, giving note from system:portal, untrusted:customer
+    withdraw#1 on event cancelled: reaching withdrawn
+    urgent_note#1 on event cancelled: reaches nothing: its condition reads cancelled.note, from
+      untrusted:customer, and untrusted data can't decide
+    UNTRUSTED_TRIGGER (error) at rules.urgent_note.when: ... so it never reaches urgent: read a
+      value a person or a trusted system gives, such as a task's answer
+    ```
+  In one line: a rule may decide *that* the email came; what it *says* only informs, and a person
+  decides on it.
+- Didn't come back: the sender check that makes arrival a fact; that content may still start
+  steps and set fields (informs); the line and `UNTRUSTED_TRIGGER`.
+- Found in the walk-through, not fixed (recorded for their own fix, as asked):
+  - **The false `INPUT_POLICY` is still on `main`** (`docs/layers/fix-untrusted-moment.md`,
+    "Found, not fixed"). Traced in part 4: `rule_writes` (`case/writers.py`) gives a field
+    with no mark an empty mark, `frozenset()`, not `None`; `always` then asks the policy
+    `refused(frozenset())`, and `only_from` refuses a value with no source ("it comes from no
+    system"). So any unmarked field a rule sets counts as always refused by an `only_from`
+    input. It errs on the safe side, but the error claims what the run doesn't do.
+  - **11h1's unclaimed `NEVER_STARTS`** (`docs/layers/11-rules.md`, "Decided while building
+    11h1"): a start written before a rule that always closes is refused every time, and the
+    check doesn't claim it. No later commit fixes it.
+- Status: open, until an example comes back with the sender check and "informs, never decides".
 
