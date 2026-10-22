@@ -185,6 +185,10 @@ def read_json(text: str, what: str) -> Any:
 # field's `declared` type is `"type": "number"` next to its `display`.
 WRITTEN_BESIDE = {"declared"}
 
+# A plan keeps each field's source in a map of its own; the JSON writes it on the field, as
+# `fields.amount.source`, so a changed one is named there.
+WRITTEN_ON_FIELDS = {"sources"}
+
 ABSENT = object()  # a field the digest leaves out: wording, or a value at its default
 
 
@@ -315,9 +319,13 @@ def differences(before: object, after: object, path: str) -> list[str]:
         for name in type(before).model_fields:
             old, new = behaviour_of(before, name), behaviour_of(after, name)
             if old != new:
+                old_value, new_value = getattr(before, name), getattr(after, name)
+                if name in WRITTEN_ON_FIELDS and isinstance(before, Plan):
+                    found += sources_changed(old_value, new_value, path)
+                    continue
                 # A field's declared type is written beside its display, not under a key.
                 where = path if name in WRITTEN_BESIDE else joined(path, key_of(before, name))
-                found += differences(getattr(before, name), getattr(after, name), where) or [where]
+                found += differences(old_value, new_value, where) or [where]
         return found
     if isinstance(before, Mapping) and isinstance(after, Mapping):
         found = []
@@ -328,6 +336,16 @@ def differences(before: object, after: object, path: str) -> list[str]:
                 found += differences(before[key], after[key], joined(path, str(key)))
         return found or [path]  # the same entries, in another order
     return [path]
+
+
+def sources_changed(before: Mapping[str, str], after: Mapping[str, str], path: str) -> list[str]:
+    """Each plan field whose source changed, named where the JSON writes it."""
+    names = [*before, *(name for name in after if name not in before)]
+    return [
+        joined(path, f"fields.{name}.source")
+        for name in names
+        if before.get(name) != after.get(name)
+    ]
 
 
 # --- The next release ----------------------------------------------------------------------------
@@ -356,6 +374,14 @@ def next_release(released: Package, records: Sequence[Record]) -> Outcome:
     number = same[0]
     record, before = latest[number]
     if wording(before) != wording(released):
+        if number != newest:
+            # Only the latest release takes new wording: an older one's open cases would read it
+            # at once, and a behaviour reverted with the newer release's titles is how one gets
+            # here (brief, D51).
+            raise PackageRefused(
+                f"same behaviour as {released.name} {number}, other wording: rewording an older "
+                "release reaches its open cases; bring back its wording"
+            )
         return Reworded(number, record.wording + 1, changed(before, released))
     return Unchanged(number) if number == newest else SameAs(number)
 
