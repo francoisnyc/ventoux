@@ -212,7 +212,7 @@ def decide(
     end_with_their_runs(state)
     if state.timers and (held := nothing_decided(case, state)) is not None:
         cancel_timers(state, held)
-    settle(case, state)
+    settle(case, catalog, state)
     return state, commands
 
 

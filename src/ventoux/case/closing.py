@@ -6,11 +6,14 @@ starts; activities already running finish, since a side effect can't be cut off 
 case is **closed**. Something that completes while closing flags the case for a person.
 """
 
+from ventoux.case.admission import latest_run, requirements_met
 from ventoux.case.approvals import with_given
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.state import CaseState, CloseAsked
 from ventoux.case.timers import cancel_timers
+from ventoux.case.writers import read_sources, untrusted_of
 from ventoux.core.catalog import Catalog
+from ventoux.core.expressions import ExpressionError, evaluate
 from ventoux.core.person import identifier_problem
 from ventoux.core.roles import role_that_counts
 
@@ -73,15 +76,38 @@ def begin_closing(state: CaseState, cancelled_because: str, closed_because: str)
     cancel_timers(state, cancelled_because)  # nor can a timer act (brief, D10) (brief, D44)
 
 
-def settle(case: CaseDefinition, state: CaseState) -> None:
+def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
     """Close the case if it is done: open with nothing left to do (unless it stays open), or
     closing with nothing still running (brief, D10)."""
     if state.phase == "open" and not case.stays_open and not pending(state):
         state.phase = "closed"
+        say_kept_from_starting(case, catalog, state)
         state.history.append("closed: nothing left to do")
     elif state.phase == "closing" and not any(run.status == "running" for run in state.runs):
         state.phase = "closed"
+        say_kept_from_starting(case, catalog, state)
         state.history.append(f"closed: {state.closed_because}")
+
+
+def say_kept_from_starting(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
+    """As the case closes, say each step that would have started by itself but for its own
+    condition, read false on untrusted data. Untrusted data may keep something from happening,
+    but never silently (brief, D17) (brief, D48): the line names the value and its source, never
+    the value (brief, D30)."""
+    for name, step in case.steps.items():
+        if step.when is None or not step.automatic or latest_run(state, name) is not None:
+            continue
+        if not requirements_met(step.requires, state):
+            continue  # what kept it is a requirement, not its condition
+        untrusted = untrusted_of(read_sources(case, catalog, state, step.when))
+        try:
+            kept = evaluate(step.when, state.values) is False
+        except ExpressionError:
+            continue  # a condition that can't be read is admission's to stop on, not this line's
+        if not untrusted or not kept:
+            continue
+        reads = "; ".join(f"{field}, from {', '.join(sorted(s))}" for field, s in untrusted.items())
+        state.history.append(f"{name} not started: its condition reads {reads}, and is false")
 
 
 def close_when_reached(case: CaseDefinition, state: CaseState) -> None:

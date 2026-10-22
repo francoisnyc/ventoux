@@ -774,6 +774,20 @@ reads untrusted data is asked whatever it says: untrusted data can add an approv
 one. A rule that reaches a milestone still reaches nothing on untrusted data (above), and starts
 nothing either: it doesn't act at all.
 
+**Untrusted data may keep something from happening** (brief, D48). A `when` is one condition:
+true lets the step start, false keeps it from starting. So a step's own `when`, or a rule's, that
+reads untrusted data and is false keeps the step from starting, and the case may close without it.
+It is never silent: the rule's line, or a line as the case closes, names the value and its
+source, never the value:
+
+```
+say_goodbye#1 on event cancelled: its condition reads cancelled.note, from untrusted:customer, and is false
+check not started: its condition reads note, from untrusted:customer, and is false
+```
+
+A step that must happen is guarded by what untrusted data can't skip: a `closes_when` milestone
+only it reaches, or a task, where a person decides.
+
 **The influence goes on with the run.** A run keeps what steered its start, and passes it on: a
 rule on its start counts it as read by its condition, so one that reaches or stops doesn't act,
 here on the start of a goodbye call a rule began because of what the customer wrote:

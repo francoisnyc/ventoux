@@ -191,7 +191,8 @@ def act(
     # fields acts: what it read counts for their inputs' policies (brief, D39), and goes with the
     # values it sets (brief, D42). The message names the value and its source,
     # never the value (brief, D30).
-    untrusted = untrusted_read(case, catalog, state, firing.rule)
+    read_untrusted = untrusted_read(case, catalog, state, firing.rule)
+    untrusted = read_untrusted
     # What steered the start the rule fires on counts as read by its condition: a run started on
     # untrusted data passes it on, so no rule on its start decides on it either (brief, D43).
     if untrusted is None and firing.steered:
@@ -213,7 +214,10 @@ def act(
         )
         return
     if not decided:
-        state.history.append(f"{firing.entry} on {firing.moment}: its condition is false")
+        # Untrusted data may keep a rule from acting, and the history says so, naming the value
+        # and its source, never the value (brief, D48).
+        reads = "" if read_untrusted is None else f" reads {read_untrusted}, and"
+        state.history.append(f"{firing.entry} on {firing.moment}: its condition{reads} is false")
         return
     if then.stop:
         # At once, so the rules after it and admission's next round see the stopped run.
