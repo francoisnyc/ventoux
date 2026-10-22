@@ -778,7 +778,7 @@ nothing either: it doesn't act at all.
 **Untrusted data may keep something from happening** (brief, D48). A `when` is one condition:
 true lets the step start, false keeps it from starting. So a step's own `when`, or a rule's, that
 reads untrusted data and is false keeps the step from starting, and the case may close without it.
-It is never silent: the rule's line, or a line as the case closes, names the value and its
+It is never silent: the rule's line, or a line as the case closes, names the field and its
 source, never the value:
 
 ```

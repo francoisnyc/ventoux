@@ -189,7 +189,7 @@ def act(
     # for the case, so a condition reading an untrusted value stops the rule whatever it gave, its
     # starts and sets included (brief, D38) (brief, D40). A rule that only starts steps or sets
     # fields acts: what it read counts for their inputs' policies (brief, D39), and goes with the
-    # values it sets (brief, D42). The message names the value and its source,
+    # values it sets (brief, D42). The message names the field and its source,
     # never the value (brief, D30).
     read_untrusted = untrusted_read(case, catalog, state, firing.rule)
     untrusted = read_untrusted
@@ -214,7 +214,7 @@ def act(
         )
         return
     if not decided:
-        # Untrusted data may keep a rule from acting, and the history says so, naming the value
+        # Untrusted data may keep a rule from acting, and the history says so, naming the field
         # and its source, never the value (brief, D48).
         reads = "" if read_untrusted is None else f" reads {read_untrusted}, and"
         state.history.append(f"{firing.entry} on {firing.moment}: its condition{reads} is false")

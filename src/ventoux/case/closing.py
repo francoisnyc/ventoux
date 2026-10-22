@@ -92,7 +92,7 @@ def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
 def say_kept_from_starting(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
     """As the case closes, say each step that would have started by itself but for its own
     condition, read false on untrusted data. Untrusted data may keep something from happening,
-    but never silently (brief, D17) (brief, D48): the line names the value and its source, never
+    but never silently (brief, D17) (brief, D48): the line names the field and its source, never
     the value (brief, D30)."""
     for name, step in case.steps.items():
         if step.when is None or not step.automatic or latest_run(state, name) is not None:

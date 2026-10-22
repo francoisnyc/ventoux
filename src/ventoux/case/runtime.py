@@ -752,7 +752,9 @@ def reach_unless_steered(state: CaseState, run: StepRun, milestones: tuple[str, 
 def flag_if_stopping(state: CaseState, run: StepRun) -> None:
     """Flag a run that completed though a close or a stop was asked: what it did stands, and a
     person decides on a reversal (brief, D10) (brief, D40)."""
-    if state.phase == "closing" and run.held_retry:
+    if run.held_retry:
+        # The close waited for it, whether the case is closing yet or still held by another
+        # failed run: flagged as that retry, never hidden (brief, D28) (brief, D34).
         flag(state, f"{run.entry} completed on {run.held_retry}")
     elif state.phase == "closing":
         flag(state, f"{run.entry} completed after the close was requested")
