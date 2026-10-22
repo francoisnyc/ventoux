@@ -9,7 +9,7 @@ import asyncio
 import copy
 import json
 import shutil
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
@@ -33,6 +33,7 @@ from test_temporal_case import (
     QUEUE,
     REFUND,
     REVIEW_FORM,
+    Case,
     CasesWithPlans,
     child_waiting_at,
     on_temporal,
@@ -50,14 +51,19 @@ from ventoux.temporal.cases import (
     CaseReport,
     CaseStart,
     CaseWorkflow,
+    WordingRefused,
     answer,
+    approval_sheet,
     close,
     opening,
     propose,
+    report,
     start_case,
+    view,
+    wording_of,
 )
 from ventoux.temporal.converter import keys_of
-from ventoux.testing import CATALOG, DevelopmentCases, fixture_converter
+from ventoux.testing import CATALOG, START, DevelopmentCases, fixture_converter
 from ventoux.tooling.releases import FolderStore, release
 
 HERE = Path(__file__).parent / "histories"
@@ -256,3 +262,120 @@ def test_a_released_case_runs_its_releases_plans(tmp_path: Path) -> None:
     )
     assert waited == "approve_refund#1"
     assert ended.status == "closed" and ended.needs_attention == []
+
+
+# --- Slice 6: wording, read when it is shown ---
+
+QUICKSTART = Path(__file__).parent.parent / "examples" / "refund" / "refund.json"
+
+
+def retitle_amount(title: str) -> Callable[[dict[str, Any]], None]:
+    def change(case: dict[str, Any]) -> None:
+        case["fields"]["approved_amount"]["display"]["title"] = title
+
+    return change
+
+
+def quickstart_released(tmp_path: Path, *changes: Callable[[dict[str, Any]], None]) -> FolderStore:
+    """The quickstart's refund as a package, released, then each change released in turn."""
+    folder = tmp_path / "quickstart"
+    folder.mkdir()
+    shutil.copy(QUICKSTART, folder / "case.json")
+    store = FolderStore(tmp_path / "releases")
+    release(folder, store, "a0", CATALOG)
+    for number, change in enumerate(changes, start=1):
+        case = json.loads((folder / "case.json").read_text())
+        change(case)
+        (folder / "case.json").write_text(json.dumps(case))
+        release(folder, store, f"a{number}", CATALOG)
+    return store
+
+
+async def waiting_for_approval(client: Client, opening_on: Any) -> Case:
+    case = await start_case(client, DevelopmentCases, opening_on, LARGE, "refund-1", QUEUE)
+    await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+    await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+    return case
+
+
+def test_new_wording_is_read_when_shown(tmp_path: Path) -> None:
+    # Reworded after the case opened: the view and the sheet show the new title when given the
+    # revision, the old one without it, and nothing the case decided or recorded changes
+    # (brief, D51).
+    store = quickstart_released(tmp_path, retitle_amount("Amount the team agreed"))
+    refund_1, reworded = store.get("refund", 1), store.get("refund", 1, wording=2)
+
+    async def scenario(client: Client) -> tuple[list[str], list[str], list[str], CaseReport]:
+        case = await waiting_for_approval(client, refund_1)
+        before = await report(case)
+        new = (await view(case, ["support"], wording_of(reworded))).lines
+        old = (await view(case, ["support"])).lines
+        sheet = await approval_sheet(
+            case, "pay.approval#1", ["support-lead"], START, wording_of(reworded)
+        )
+        after = await report(case)
+        assert after.history == before.history
+        return new, old, sheet.lines, after
+
+    new, old, sheet, now = on_temporal(scenario)
+    assert any(line.startswith("Amount the team agreed: 250") for line in new)
+    assert any(line.startswith("Amount approved: 250") for line in old)
+    assert any(line.startswith("Amount the team agreed: 250") for line in sheet)
+    assert now.waiting_at == ["pay.approval#1"]
+
+
+def test_wording_of_another_release_is_refused(tmp_path: Path) -> None:
+    # Fail closed: a revision of another release, or any revision for a draft, is refused,
+    # never read in its place (brief, D51).
+    store = quickstart_released(
+        tmp_path,
+        lambda case: case["steps"]["pay"]["approval"].update(
+            when={">": [{"var": "approved_amount"}, 200]}
+        ),
+    )
+    refund_1, refund_2 = store.get("refund", 1), store.get("refund", 2)
+
+    async def scenario(client: Client) -> tuple[str, str]:
+        case = await waiting_for_approval(client, refund_1)
+        with pytest.raises(WordingRefused) as other:
+            await view(case, ["support"], wording_of(refund_2))
+        # Claiming to be refund 1, with refund 2's behaviour: its digest isn't refund 1's.
+        claiming = replace(wording_of(refund_2), release=1)
+        with pytest.raises(WordingRefused) as claimed:
+            await approval_sheet(case, "pay.approval#1", ["support-lead"], START, claiming)
+        assert str(claimed.value) == (
+            "refund 1, wording 1 isn't a wording of refund 1, which this case runs"
+        )
+        draft = await start_case(client, DevelopmentCases, REFUND, LARGE, "refund-2", QUEUE)
+        with pytest.raises(WordingRefused) as drafted:
+            await view(draft, ["support"], wording_of(refund_1))
+        return str(other.value), str(drafted.value)
+
+    other, drafted = on_temporal(scenario)
+    assert other == "refund 2, wording 1 isn't a wording of refund 1, which this case runs"
+    assert drafted == "refund 1, wording 1 isn't a wording of this case: it is a draft"
+
+
+def test_an_answer_says_which_wording_it_saw(tmp_path: Path) -> None:
+    store = quickstart_released(tmp_path, retitle_amount("Amount the team agreed"))
+
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(
+            client, DevelopmentCases, store.get("refund", 1), LARGE, "refund-1", QUEUE
+        )
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM, wording=2)
+        # A draft has no wording revisions: an answer naming one is refused, and recorded.
+        draft = await start_case(client, DevelopmentCases, REFUND, LARGE, "refund-2", QUEUE)
+        await answer(draft, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM, wording=2)
+        drafted = await reported(draft, lambda now: now.history[-1].startswith("refused"))
+        assert drafted.history[-1] == (
+            "refused ana's answer approve to review#1: wording 2 names no wording of this case: "
+            "it is a draft"
+        )
+        return await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+
+    now = on_temporal(scenario)
+    assert (
+        "ana answered review#1 approve as support, setting approved_amount, as worded in "
+        "refund 1, wording 2"
+    ) in now.history

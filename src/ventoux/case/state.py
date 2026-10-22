@@ -239,6 +239,9 @@ class Answered:
     roles: frozenset[str]  # their roles, stated with the answer (brief, D22)
     form: Mapping[str, object] | None = None  # the values the outcome sets
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+    # The wording revision of the case's release its person read, as the trusted caller states
+    # it; None: not said (brief, D51).
+    wording: int | None = field(kw_only=True, default=None)
 
 
 @dataclass(frozen=True)
