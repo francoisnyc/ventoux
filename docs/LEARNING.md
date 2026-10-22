@@ -257,6 +257,8 @@ and record the key points. A question is closed once you can explain the answer 
 
 - Your answer:
 - Discussion:
+- Retrieval (layer 12 warm-up, 2026-10-22): put, not answered; left open, to be asked again at
+  12a's walk-through, where the release tool gives it a concrete answer.
 
 ## 12. Releases
 

@@ -1,10 +1,11 @@
 # Layer 12: releases and changing open cases
 
-Status: draft, 2026-10-22, awaiting answers by number. The warm-up (learning question 11) put;
-research done (`docs/layers/12-research.md`: Temporal's SDK at `c4de91d` and docs at `82ac5bd`,
-Flowable's engine at `f6017e3`, the `chartering` prototype at `197d519`); layer 12 explained,
-split into five parts, and 12a's choices put with a recommendation each. Nothing is decided, and
-nothing in the brief changes, until you answer. Only 12a is built after you agree.
+Status: research done, 2026-10-22 (`docs/layers/12-research.md`: Temporal's SDK at `c4de91d` and
+docs at `82ac5bd`, Flowable's engine at `f6017e3`, the `chartering` prototype at `197d519`); layer 12
+explained, split into five parts, and 12a's choices put with a recommendation each, the same day.
+Answered "all as recommended", 2026-10-22: choices 1 to 16. The warm-up (learning question 11) was
+put and not answered, so it stays open, asked again at 12a's walk-through. D50 and the releases
+guide written before building 12a.
 
 ## Warm-up: learning question 11, behaviour vs wording
 
