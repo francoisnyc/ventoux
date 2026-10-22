@@ -803,6 +803,11 @@ be erased on request), has size limits, and a second copy of business records go
 - **The contract test checks shape, not truth:** it runs the bound workflow on Temporal's test
   server and reports a missing, extra or mistyped output, a timeout and a failure. Whether a
   declared source is true is for review (D6).
+- **Amended 2026-10-22, at the checkpoint before layer 12** (`docs/layers/checkpoint-doors.md`,
+  row 32, choice 5; the text above stands, this adds to it): an output's `system:<name>` names a
+  system the platform team registered (D30), and a contract declaring one nobody registered is
+  refused when it is registered, as a reference to one is: a typo is caught, never a system
+  nobody runs.
 
 ### D30. References go where their system is expected; the case file is filtered by role
 

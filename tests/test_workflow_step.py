@@ -130,8 +130,9 @@ accounts_open = WorkflowContract(
 
 
 def with_accounts() -> Catalog:
-    """The development catalog, and `accounts.open@1`."""
+    """The development catalog, the accounts system, and `accounts.open@1`."""
     catalog = copy.deepcopy(CATALOG)
+    catalog.register_system("accounts")  # its output's source names it (brief, D29)
     catalog.register(accounts_open)
     return catalog
 
