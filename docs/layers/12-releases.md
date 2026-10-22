@@ -447,3 +447,218 @@ Each claim this section makes about behaviour, and the test that would fail if i
 | The command exits 0, 1 or 2 as the guide says, and prints what it did | R `test_the_command_says_what_it_did` |
 | The guide's example runs as written | R `test_the_guides_example_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |
+
+## 12b. A case's release, and its engine version
+
+Status: drafted 2026-10-22, from `main` at `b734098` (12a merged, #42), awaiting answers by number;
+the warm-up put. The histories from before 12b are recorded and replay (slice 0, already built:
+nothing on Temporal has changed). Nothing else is decided or built until you answer.
+
+User-facing description, written first once you agree: `docs/guides/cases.md`, "Running a case on
+Temporal" ("A case runs its release"), and `docs/guides/releases.md` ("Open cases and new
+wording"). Decision: brief D51, drafted with them.
+
+### Warm-up: learning question 38, stale facts, and why replay decides the same way
+
+> Sam approves a refund on day 3. Ana's review set `approved_amount` on day 0, and
+> `check_order.status` came from an order lookup on day 0. `pay` needs both at most a day old.
+> a) What happens to each fact, and why are they treated differently? b) On Temporal the worker
+> restarts and replays the case. Why does it decide the same way, given that "3 days old"
+> depends on time?
+
+Open; last asked at 11g's warm-up. It is 12b's question too: a case's release and its engine
+version are what replay must read from history, as it reads each event's time. Answer from memory
+first. (Question 11 stays open for the walk-through at the end of layer 12.)
+
+### What this part is for
+
+12a gives a package a release and a record. Nothing yet runs on one: a case opens on a definition
+handed to it, and nothing says which release or which engine decides it. 12b makes a case open on
+a release, keep it to the end, and say which engine version decides it.
+
+A small example. `refund` 1 is released and a case `refund-7` opens on it. Its history begins
+`opened on refund 1, engine 1`. A week later `refund` 2 is released, and the deployment also
+changes the `refund-order@1` plan it supplies to drafts. `refund-7`'s plan step starts the next
+day: it runs `refund 1`'s `refund-order@1`, from its own start, never the deployment's, never
+release 2's. Marketing rewords a title: `refund 1, wording 2` is recorded (12a), and the next time
+Ana opens `refund-7` she reads the new title, while every decision stays exactly what it was.
+
+### What the code does today
+
+Read on `main` at `b734098`, before drafting:
+
+- **The definition is in the case's history already.** `CaseStart.definition` is the workflow's
+  input, and `switch` passes it on at each continue-as-new (`temporal/cases.py`), so replay reads
+  the definition the case opened with, never a later one. 12b only has to say which release it
+  is, and check it.
+- **Its plans are not.** A plan step reads `CaseWorkflow.plans`, a class attribute of the worker
+  (`run_plan`, `supplied`, `wrong_references`). A deployment that changes `refund-order@1` reaches
+  every open case's next plan step, and the case's own checks read the changed plan.
+- **Wording is read inside the workflow,** by two queries: the view's field titles
+  (`case_view`, `case/visibility.py`) and the approval sheet's (`sheet_of`). Nothing that decides
+  reads `display` (12a's checks found none).
+- **No engine version exists anywhere.** `decide(case, catalog, state, event)` has one behaviour.
+
+### Choices for 12b
+
+Numbered on from 12a's. Answer by number.
+
+17. **A case opens on a release.** `start_case` takes a release record (from the store, 12a) or,
+    as today, a definition, which makes a draft (choice 20). `CaseStart` gains `release`: the
+    package's name, the release's number, its digest (method and SHA-256), and its plans as
+    stored data, by reference; `definition` stays, holding the release's case. `switch` carries
+    `release` across continue-as-new as it carries `definition`. *Recommended.* Set aside: a
+    second start function (two ways in, one of them a draft by omission).
+
+18. **The workflow checks what it was given,** depending on nothing the client did (D34's rule):
+    at the opening it recomputes the digest from the definition and plans in its start, and a
+    case whose package doesn't give the release's digest, or whose digest names a method this
+    code doesn't know, is refused at once, as an unreadable definition is (`CaseRefused`, the
+    workflow fails, nothing is decided): `refund-7 can't open on refund 1: what it was given
+    isn't refund 1's package`. *Recommended.* Set aside: trusting the client's start (a record
+    edited in the store, or a client bug, would open a case on behaviour nobody released).
+
+19. **A released case runs its release's plans, and only those.** `run_plan` and the case's plan
+    checks read the plans in its start; the worker's `CaseWorkflow.plans` serve drafts only. The
+    plan's child workflow already carries its plan in its own start (`PlanStart`, D28), so its
+    history holds it. The negative test: the deployment supplies a changed `refund-order@1`, and
+    a case opened on `refund` 1 still runs `refund` 1's. *Recommended.*
+
+20. **A case with no release is a draft,** as every case before 12b is, and runs as it does
+    today; its report says `draft`. D5's "drafts never run in production" needs to know which
+    environment is production: 12e's registry, where activation refuses a draft. *Recommended.*
+    Set aside: refusing drafts in 12b (every test and the development worker run drafts, and
+    nothing yet tells production apart).
+
+21. **The engine version is in the case's state** (layer choice 2): `CaseState.engine`, a whole
+    number, set when the case opens and never by itself after; it crosses continue-as-new with
+    the state (`carried.py`), and `decide` reads it like any value, so `core` and `case` stay free
+    of Temporal and clocks. A state carried before 12b has no `engine` and reads as 1 (layer
+    choice 3). A version this code doesn't know, newer than its own, stops the workflow task
+    (`state_from_data` raises), and the case waits for code that knows it (D17): never read as
+    an older one. With one version, `decide` has no branch yet. *Recommended.*
+
+22. **How the driver learns the version at the opening:** a pure function in `case`,
+    `opening_engine(known, asked)`: the versions this code knows, newest first, each above 1
+    asked through `asked` (on Temporal, `workflow.patched("ventoux-engine-<n>")`, research 1.5);
+    the first that says yes is the case's version, and none means 1. Asked once, at the opening,
+    before the first decision: a run that starts from a carried state reads its version from the
+    state, never asks. So Temporal's patching only records the answer, and its memoising (research
+    1.3) can't move a case. **With version 1 alone, nothing is asked and no marker is written:**
+    a case opened under 12b has a history of the same shape as one opened before. Unit-tested now
+    with a pretend chain (2, then 1); version 2's own Temporal test comes with version 2. In
+    memory, `run_case` opens at the code's version. *Recommended.* Set aside: the client stating it
+    (it doesn't know which code the worker runs); a marker for version 1 now (a command in every
+    new history, for nothing).
+
+23. **The seven paths, and what version 1 is** (layer choice 3): version 1 is the engine as merged
+    at `b734098`, 12b's own changes included, since 12b changes nothing a recorded history
+    decides (slice 0's fixtures prove it). No old branch is kept for paths merged before; their
+    fixtures stay as their proof. From 12b on, a change that decides a recorded path differently
+    is version *n*+1: its old branch kept behind `state.engine`, a fixture recorded under version
+    *n* that must replay, and a line in the brief. A changed pattern expansion (D46), operator
+    (D20) or moment (D38) is such a change. Recorded in D51. *Recommended.*
+
+24. **What a case says about it.** The report gains `release` (`refund 1`, or `draft`) and
+    `engine`; a released case's history begins `opened on refund 1, engine 1`, before its opening
+    line; a draft's history is as today, so every earlier test's history stands. *Recommended.*
+
+25. **Wording reaches open cases when it is shown, never by changing the case.** The view and the
+    approval sheet take, optionally, a wording revision: the package as written of `refund 1,
+    wording k`. The workflow uses its `display` only if it names the case's release and gives its
+    digest; any other is refused, saying so (fail closed), and never falls back silently. A query
+    is read-only and never recorded (Temporal), so wording can't change a decision or a replay.
+    Who passes it: the caller (the API, and here the client functions' callers) reads the latest
+    revision from the release store (12a). *Recommended.* Set aside: a signal sending each
+    revision to every open case of its release (it needs the list of open cases per release,
+    which 12e's registry brings, and a history line per revision per case); rendering titles
+    outside the workflow (the view is filtered inside it, D30).
+
+26. **Which wording a person saw** (D5: "the audit log records which wording a person saw"). An
+    answer may carry the wording revision its sheet showed (`wording=2`), stated by the trusted
+    caller like its roles (D22), and recorded on its history line: `ana answered review#1:
+    approve, as worded in refund 1, wording 2`. Without it the line is as today. *Recommended.*
+    Set aside: leaving the audit to the inbox (after layer 15): D5 asks it of the audit log.
+
+27. **A revert that brings new wording** (the tutor's review of #42, first point). Release 1,
+    release 2, then a merge back to release 1's behaviour with a new title: 12a records `refund
+    1, wording 2`, and once choice 25 is built, every open case on release 1 reads it at once.
+    The likely way to get there is a behaviour revert that keeps release 2's titles, written for
+    release 2's behaviour (`Pay after the fraud check`), now shown on cases that have no fraud
+    check. Three options, each with its test and a line in the releases guide:
+    - **(a)** keep D50 as written: a wording revision of the older release, the tool saying so
+      (`refund 1 isn't the latest release: its open cases read this wording at once`);
+    - **(b)** refuse: a package whose behaviour is an older release's and whose wording isn't
+      that release's latest is refused (exit 1): `same behaviour as refund 1, other wording:
+      rewording an older release reaches its open cases; bring back its wording`. Only the latest
+      release takes wording revisions;
+    - **(c)** (b), plus an explicit opt-in to reword an older release on purpose (a typo fixed in
+      release 1's open cases while 2 is the latest).
+    *Recommended: (b).* Refusing now keeps (c) open as a later loosening; (a) can't be taken back
+    once open cases have read such wording. The limit: an older release's typo can't be fixed
+    until (c) is decided. An amendment line on D50.
+
+Two points from the same review are fixes, not choices, as you said; they land in 12b's first
+slice:
+
+- **A plan field's source is named as the JSON writes it:** `plans.refund-order@1.fields.amount.source`,
+  not the model's `sources.amount`, as 12a did for a case field's `type`.
+- **The releases guide says what the tool checks:** every record is read again and its digest
+  recomputed, not only the latest's; and any other file in a package's releases folder refuses
+  the run.
+
+28. **Where it is recorded.** D51 ("A case runs the release it opened on, and says its engine
+    version"), with dated amendment lines on D5 (drafts, choice 20; wording read when shown,
+    choices 25–26), D27 (what crosses, choices 17, 21), D28 (a released case's plans, choice 19)
+    and D50 (choice 27). The guides' parts written first, their examples run by tests. No new
+    dependency. *Recommended.*
+
+### Seams the tests use
+
+- `start_case(client, workflow, record_or_definition, file, id, queue, opened_by)`; `report(case)`:
+  `release`, `engine`, `history`; `view(case, roles, wording)`, `approval_sheet(…, wording)`;
+  `answer(…, wording=…)`.
+- `opening_engine(known, asked)`; `state_as_data`, `state_from_data` (`engine`).
+- `run_case(...)`: the engine version in memory.
+- The releases tool (`next_release`, `ventoux release`) for choice 27 and the path fix.
+- The Temporal test server, and the `Replayer` on slice 0's fixtures and the earlier ones.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **The histories from before 12b, recorded and replayed** (built: `tests/histories/before_12b_*`,
+   `tests/test_temporal_case_release.py`, recorded under `main` at `b734098`).
+1. **The tutor's points:** a plan field's source path; the guide's two lines; choice 27 (a revert
+   with new wording refused, or recorded, as decided).
+2. **The engine version in the state:** carried and read back; a state from before 12b reads as 1;
+   an unknown version stops the task.
+3. **`opening_engine`:** the chain, newest first; nothing asked with one version.
+4. **Opening on a release:** `CaseStart.release`, crossing continue-as-new; a package that doesn't
+   give its digest refused; the report and the opening line; a draft as before.
+5. **Plans from the release:** the deployment's changed plan never reaches a released case.
+6. **Wording when shown:** the view and the sheet with a revision; another release's refused; an
+   answer's wording on its line.
+7. **The guides, D51, and every fixture replaying,** slice 0's and the earlier layers'.
+
+### Promises (draft)
+
+`C` is `tests/test_temporal_case_release.py`, `E` is `tests/test_engine.py` (new), `R` is
+`tests/test_releases.py`. Each test is named here before it is written; the table is checked
+against the tests before the pull request.
+
+| Promise | Test |
+|---|---|
+| Histories recorded before 12b replay: paid, waiting, continued as new, a plan step | C `test_histories_from_before_12b_replay` |
+| A revert with new wording is refused (or recorded and said, per choice 27); the guide says which | R `test_a_revert_with_new_wording_is_refused` |
+| A plan field's source changed is named `fields.<name>.source` | R `test_a_plan_fields_source_is_named_as_written` |
+| A state carried before 12b reads as engine 1; the engine version crosses continue-as-new | E `test_a_state_from_before_12b_is_engine_1`, C `test_the_engine_version_crosses_continue_as_new` |
+| An engine version the code doesn't know stops the workflow task, never read as an older one | E `test_an_unknown_engine_version_is_refused` |
+| `opening_engine` asks newest first, takes the first yes, and means 1 when none says yes; with one version it asks nothing | E `test_the_opening_asks_the_newest_version_first`, `test_one_version_asks_nothing` |
+| A case opened on a release records it, with its engine, in the report and its first line; a draft's history is as before | C `test_a_case_opens_on_its_release`, `test_a_draft_is_as_before` |
+| A start whose package doesn't give its release's digest is refused, nothing decided | C `test_a_start_that_isnt_its_release_is_refused` |
+| A released case runs its release's plans, never the deployment's changed one | C `test_a_released_case_runs_its_releases_plans` |
+| The view and the sheet read a wording revision of the case's release; another release's is refused; a decision never changes | C `test_new_wording_is_read_when_shown`, `test_wording_of_another_release_is_refused` |
+| An answer's wording is recorded on its line | C `test_an_answer_says_which_wording_it_saw` |
+| The guides' examples run as written | C `test_the_guides_release_example_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |
