@@ -219,6 +219,10 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   the plan's name. One digest is one release: a digest already released makes no new number. A
   wording-only change is a wording revision of its release. Every digest and hash records its
   method.
+- **Amended 2026-10-22, by D51** (the text above stands; this adds to it): a case runs the release
+  it opened on, its plans included; a case opened on a definition is a draft, refused in
+  production once environments exist (layer 12e). Wording reaches open cases when it is shown,
+  and an answer's line says which wording revision its reader saw.
 
 ### D6. Existing Temporal workflows as steps
 
@@ -731,6 +735,8 @@ be erased on request), has size limits, and a second copy of business records go
   that wait for people each come with an addition here before they are built: a long-running
   child reports its end to the case by a signal to the case's workflow ID, so the switch no longer
   waits for it.
+- **Amended 2026-10-22, by D51** (the text above stands; this adds to it): what crosses includes
+  the case's release (its name, number, digest and plans) and its engine version.
 
 ### D28. A plan step runs as a child workflow of its case
 
@@ -771,6 +777,9 @@ be erased on request), has size limits, and a second copy of business records go
 - **No approval of the whole plan yet.** A plan carries its own approvals, checked when it is
   read (layer 3); "Approve this plan" (D14), for plans an AI drafts, comes with authoring
   (layer 15).
+- **Amended 2026-10-22, by D51** (the text above stands; this adds to it): a case opened on a
+  release runs the plans of its release, carried in its start; the plans the deployment supplies
+  serve drafts.
 
 ### D29. Outputs carry their contract's sources; workflow steps are bound children
 
@@ -1851,6 +1860,48 @@ answers design question 16, whose text is kept.*
 - **`ventoux release FOLDER --releases DIR --commit SHA`:** the commit is CI's, never read from
   git. Exit 0 when it released, recorded wording or had nothing to do; 1 when the package or a
   record is refused; 2 when something can't be read.
+- **Amended 2026-10-22, by D51** (the text above stands; this narrows it): only the latest release
+  takes a wording revision; a package with an older release's behaviour and other wording than
+  that release's latest is refused.
+
+### D51. A case runs the release it opened on, and says its engine version
+
+*Decided 2026-10-22, in layer 12b (`docs/layers/12-releases.md`, choices 17 to 28). Adds to D5,
+D27, D28 and D50, whose text is kept.*
+
+- **A case opens on a release,** or on a definition, which makes it a draft. Its start carries the
+  release's name, number and digest, its case and its plans; they cross continue-as-new with the
+  definition, so a case decides on its release to the end, never on a later one, unless a
+  migration moves it (layer 12d).
+- **The case checks what it was given,** depending on nothing the client did: at the opening it
+  recomputes the digest from the case and plans in its start, and refuses to open on a package
+  that doesn't give its release's digest, or on a hash method it doesn't know.
+- **A released case runs its release's plans, and only those.** The plans a deployment supplies
+  serve drafts. A draft runs as every case did before this decision; refusing drafts in
+  production comes with environments (layer 12e).
+- **The engine version is data in the case's state,** a whole number set once at the opening and
+  crossing continue-as-new; `decide` reads it like any value, so `core` and `case` stay free of
+  Temporal and clocks. On Temporal the driver learns it at the opening from Temporal's patch
+  markers, newest version first, each above 1 asked once, and passes it to `decide` with the
+  opening; with version 1 alone nothing is asked and no marker written. A state carried before
+  this decision reads as version 1; a version the code doesn't know stops the workflow task until
+  code that knows it is deployed (D17), never read as an older one.
+- **Version 1 is the engine as merged at `b734098`,** the checkpoint's seven paths included: no old
+  branch is kept for a path merged before it. From this decision on, a change that decides a
+  recorded path differently is the next version: its old branch kept behind the case's version,
+  a fixture recorded under the old version that replays, and a line here. A changed pattern
+  expansion (D46), operator (D20) or moment (D38) is such a change.
+- **A case says so:** its report gives its release (`refund 1`, or `draft`) and its engine
+  version, and a released case's history begins `opened on refund 1, engine 1`.
+- **Wording is read when it is shown, never by changing the case.** The view and the approval
+  sheet may be given a wording revision of the case's release; it is used only if it names that
+  release and gives its digest, and refused otherwise. A query is read-only, so wording never
+  changes a decision or a replay. An answer may say which wording revision its reader saw, as
+  the trusted caller states its roles (D22), and its history line says so.
+- **Only the latest release takes a wording revision.** A package with an older release's
+  behaviour and other wording than that release's latest is refused: rewording an older release
+  would reach its open cases, and the usual way there is a behaviour reverted with the newer
+  release's titles kept. Refusing keeps open a later, explicit opt-in.
 
 ### Simplifications adopted
 

@@ -450,9 +450,10 @@ Each claim this section makes about behaviour, and the test that would fail if i
 
 ## 12b. A case's release, and its engine version
 
-Status: drafted 2026-10-22, from `main` at `b734098` (12a merged, #42), awaiting answers by number;
-the warm-up put. The histories from before 12b are recorded and replay (slice 0, already built:
-nothing on Temporal has changed). Nothing else is decided or built until you answer.
+Status: drafted 2026-10-22, from `main` at `b734098` (12a merged, #42); the histories from
+before 12b recorded and replayed first (slice 0). Answered "all as recommended" the same day:
+choices 17 to 28, 27 as (b). The warm-up (learning question 38) put and not answered, left open.
+D51, its amendment lines (D5, D27, D28, D50) and the guides' parts written before building.
 
 User-facing description, written first once you agree: `docs/guides/cases.md`, "Running a case on
 Temporal" ("A case runs its release"), and `docs/guides/releases.md` ("Open cases and new

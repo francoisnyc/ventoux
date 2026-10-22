@@ -1777,6 +1777,47 @@ What changes from memory, and what doesn't:
   the case from its history; code changed to ask for something else fails the replay,
   and Temporal holds the case until the code is fixed (brief, D17).
 
+### A case runs its release
+
+A case opened on a definition, as above, is a **draft**: fine in tests and in development. In
+production a case opens on a **release**, the record CI wrote for it (see the releases guide):
+
+```python
+from pathlib import Path
+
+from ventoux.tooling.releases import FolderStore
+
+refund_1 = FolderStore(Path("releases")).get("refund", 1)
+case = await start_case(
+    client, RefundCases, refund_1, file={"order_id": "ord-1", "amount": Decimal("250")},
+    id="refund-A-1002", task_queue="refunds",
+)
+now = await report(case)
+assert (now.release, now.engine) == ("refund 1", 1)
+```
+
+Its history begins with the release and the engine version that decide it:
+
+```
+opened on refund 1, engine 1
+opened by system:opener, with amount, order_id
+```
+
+- **It runs that release to the end.** The release's case and plans travel in the case's start
+  and cross every continue-as-new, so a later release, or a plan your deployment changes under
+  the same reference, never reaches it. Your workflow's `plans` serve drafts only. Moving an open
+  case to a later release is a migration (layer 12d).
+- **It checks what it was given.** The case recomputes the release's digest from what it was
+  started with, and refuses to open if they differ (`refund-A-1002 can't open on refund 1: what it
+  was given isn't refund 1's package`).
+- **It says which engine decides it.** Ventoux's own code has a version too: when a later version
+  decides some path differently, a case keeps deciding as the version it opened under, so its
+  history replays. A worker older than a case's version doesn't guess: the case waits until a
+  worker that knows it is deployed.
+- **New wording reaches it when it is shown.** Pass the latest wording revision to `view` and
+  `approval_sheet` (`wording=…`), and an answer can say which wording its person read; the
+  releases guide, "Open cases and new wording", says how.
+
 ## What `ventoux check` proves about a case
 
 `ventoux check` reads the whole definition before any case opens and lists every problem at once,
