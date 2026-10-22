@@ -752,7 +752,9 @@ def reach_unless_steered(state: CaseState, run: StepRun, milestones: tuple[str, 
 def flag_if_stopping(state: CaseState, run: StepRun) -> None:
     """Flag a run that completed though a close or a stop was asked: what it did stands, and a
     person decides on a reversal (brief, D10) (brief, D40)."""
-    if state.phase == "closing":
+    if state.phase == "closing" and run.held_retry:
+        flag(state, f"{run.entry} completed on {run.held_retry}")
+    elif state.phase == "closing":
         flag(state, f"{run.entry} completed after the close was requested")
     elif run.stop_requested:
         flag(state, f"{run.entry} completed after its stop was requested by {run.stop_requested}")
@@ -965,6 +967,12 @@ def retry(
             raise RetryRefused(f"{event.entry} can't be retried: {render(step.when)} is false now")
     # A person decided to try again: no longer a run whose stop was asked (brief, D40).
     run.status, run.reason, run.stop_requested = "retrying", "", ""
+    if close_held(case, state):
+        # The close waits for this retry: if it completes, its flag says so, never that it ran on
+        # after a close (brief, D28) (brief, D34).
+        names = " and ".join(case.closes_when)
+        verb = "were" if len(case.closes_when) > 1 else "was"
+        run.held_retry = f"{event.by}'s retry, after {names} {verb} reached"
     state.history.append(f"{event.by} retried {event.entry} as {counted[0]}")
     # A person decided to try again: a fact the step needs fresh may be fetched again, unless a
     # refresh of it is still on its way (brief, D33). A stopped refresh counts for nothing, even

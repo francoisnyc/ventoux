@@ -1000,6 +1000,13 @@ be erased on request), has size limits, and a second copy of business records go
   as safe as before.
 - **`ventoux check` comes with the builder** (layer 14), which reads the Python file and maps
   errors to source lines; `validate_case` is its engine.
+- **Amended 2026-10-22, at the checkpoint before layer 12** (`docs/layers/checkpoint-doors.md`,
+  row 35, choice 8; the text above stands, this adds to it): the failed run retried while the
+  close is held is what the close waits for, so its completion is flagged as that retry, never
+  as something that ran on after a close: `notify#1 completed on omar's retry, after paid was
+  reached`. It is still flagged, never hidden (D28): a payment retried after the case's end was
+  reached may still need a person's look. A history line and no command, so replay decides the
+  same.
 
 ### D35. Case validation reads each step against what it calls; the runtime refuses the same
 

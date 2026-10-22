@@ -407,7 +407,8 @@ new starts: a step waiting for `paid` doesn't start, a proposal is refused (`pai
 the case closes once notify#1 is retried, or a person closes it: nothing new starts`), an
 approval given meanwhile is let go, saying so (`goodwill not started: paid is reached, …`), and a
 proposal waiting for a fact is dropped; the retried run still runs, and closes the case when it
-completes.
+completes. Its completion is flagged for a person to look at, saying it was the retry the close
+waited for: `notify#1 completed on omar's retry, after paid was reached`.
 
 A person closes a case with a **close reason** the definition declares, with who may use it:
 
