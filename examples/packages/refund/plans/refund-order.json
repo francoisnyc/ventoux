@@ -1,0 +1,25 @@
+{
+  "plan": "refund-order",
+  "version": 1,
+  "display": {"title": "Refund an order"},
+  "fields": {"order_id": {"type": "reference", "system": "orders"}, "amount": {"type": "number"}},
+  "initial": "check_order",
+  "states": {
+    "check_order": {
+      "activity": "orders.lookup@1",
+      "inputs": {"order_id": {"var": "order_id"}},
+      "on": {"done": "approve_refund", "not_found": "failed"}
+    },
+    "approve_refund": {
+      "approval": {"of": "pay", "roles": ["support-lead"], "timeout": "48h"},
+      "on": {"approve": "pay", "reject": "failed", "timeout": "failed"}
+    },
+    "pay": {
+      "activity": "payments.refund@2",
+      "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "amount"}},
+      "on": {"done": "paid", "declined": "failed"}
+    },
+    "paid": {"final": "succeeded"},
+    "failed": {"final": "failed"}
+  }
+}

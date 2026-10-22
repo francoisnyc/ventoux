@@ -214,6 +214,11 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   is kept forever for audit and replay.
 - **Drafts.** Unreleased definitions run in tests and the development inbox, never in production.
 - **Release notes** are the semantic diff between releases, with wording changes listed separately.
+- **Amended 2026-10-22, by D50** (the text above stands; this adds to it): a package is a folder,
+  `case.json` and the plans it names; a plan reference keeps its `@n`, which inside a package is
+  the plan's name. One digest is one release: a digest already released makes no new number. A
+  wording-only change is a wording revision of its release. Every digest and hash records its
+  method.
 
 ### D6. Existing Temporal workflows as steps
 
@@ -1802,6 +1807,51 @@ choice 4; `docs/layers/fix-plan-transitions.md`). Adds to D28, D34 and D39, whos
 - **Cases already open** on a plan that branched on untrusted data replay differently, and wait
   until the code is fixed (D17): carried to layer 12, with the other paths there.
 
+### D50. Releases: a package's behaviour digest, its number and its immutable record
+
+*Decided 2026-10-22, in layer 12a (`docs/layers/12-releases.md`, choices 6 to 16). Adds to D5 and
+answers design question 16, whose text is kept.*
+
+- **A package is one folder:** `case.json`, one case definition, and `plans/`, each plan its plan
+  steps name, one per file, known by its own `plan` and `version`. A plan a step names that the
+  folder lacks, a plan nobody names, the same plan twice, or any other file is refused, and
+  nothing is released. Plan references keep their `@n` (D28): inside a package, `refund-order@1`
+  is the plan's name, so D5's "references inside a package carry no versions" needs no format
+  change. A shared plan library as its own package waits until after v1.0.
+- **The behaviour digest reads the package as the engine reads it.** The case and its plans are
+  parsed, then written out canonically and hashed (SHA-256): every `display` block is left out,
+  found by its type in the schema, never by its key's name (a case-file field may be called
+  `display`, and is behaviour); a value at its default is left out, unless it names which shape
+  its object is (a field's `type`), so writing a default changes nothing and a key a later
+  decision adds changes no digest; maps keep their written order (steps are admitted, and rules on
+  one moment act, in the order written, D38), an object's keys don't; a number is the decimal the
+  engine holds (`100` and `100.0` differ). So whitespace and key order change nothing; everything
+  that can change a decision does. Every doubt is a release: a change of behaviour taken for
+  wording would reach open cases unreviewed as behaviour.
+- **Only a package that passes is released:** any error from plan validation (layer 3) or case
+  validation (layer 10) refuses it, naming the issues; warnings are printed and let it through
+  (D34). Against the development catalog until `ventoux check` brings the deployment's (layer 14).
+- **One digest, one release.** A package's first release is 1; a digest new to it is the latest
+  plus 1. A digest equal to an existing release makes none (`same behaviour as refund 2`): a
+  revert merged is a rollback, which is activating that release.
+- **The record is immutable.** `releases/<package>/<n>.json` holds the package's name, its number,
+  its digest, the commit CI gives, every contract it needs (its plans' included) with its hash,
+  the package as written, and the paths that changed since the release before, behaviour and
+  wording apart. A record is written once: the same bytes again are accepted, other bytes refused.
+- **Wording only:** a package whose digest equals a release's while its `display` blocks differ is
+  recorded at once as a wording revision of that release (`<n>.wording-<k>.json`, from 2), never
+  a new number; open cases reading it at once comes with a case knowing its release (12b).
+- **The hash method has a version** (design question 16). Every digest and contract hash written
+  carries `method: 1`. A release is compared by recomputing its digest from its stored package;
+  a record whose method the tool doesn't know, or whose digest its own package doesn't give, is
+  refused, never compared. `contracts.lock.json` keeps its shape: its hashes are method 1.
+- **What changed is said by path, never by value:** `behaviour changed at
+  steps.pay.approval.when`. Until the semantic diff (layer 13), those paths are the release notes;
+  a contract's readable diff is layer 13's too.
+- **`ventoux release FOLDER --releases DIR --commit SHA`:** the commit is CI's, never read from
+  git. Exit 0 when it released, recorded wording or had nothing to do; 1 when the package or a
+  record is refused; 2 when something can't be read.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
@@ -1993,6 +2043,10 @@ New questions found while building go here, numbered from 10.
     the layer 1 review: changing *how* the hash is computed (sorting outcomes, a Pydantic upgrade
     changing the generated JSON Schema) changes existing hashes with no change of promise, so the
     hash method itself needs a version recorded with each hash.
+    *Decided 2026-10-22, by D50:* every digest and contract hash records its method (`method: 1`,
+    the lockfile's hashes included), and a release is compared by recomputing its digest from its
+    stored package. The release tool says which paths changed; a readable diff of a contract is
+    the semantic diff's (layer 13).
 17. **May an untrusted value steer a condition?** (found in layer 4) An input policy checks the
     values an activity receives, not *whether* it runs. In a plan, a transition's `when` that reads
     an untrusted field (`{"==": [{"var": "llm_says_refund"}, true]}`) decides which activity runs
