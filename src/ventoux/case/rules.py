@@ -216,8 +216,16 @@ def act(
     if not decided:
         # Untrusted data may keep a rule from acting, and the history says so, naming the field
         # and its source, never the value (brief, D48).
-        reads = "" if read_untrusted is None else f" reads {read_untrusted}, and"
-        state.history.append(f"{firing.entry} on {firing.moment}: its condition{reads} is false")
+        if read_untrusted is None:
+            state.history.append(f"{firing.entry} on {firing.moment}: its condition is false")
+            return
+        # A rule that reaches or stops never got here on untrusted data: it starts or sets.
+        kept = [f"{' and '.join(then.start)} not started"] if then.start else []
+        kept += [f"{' and '.join(then.set)} not set"] if then.set else []
+        state.history.append(
+            f"{firing.entry} on {firing.moment}: its condition reads {read_untrusted}, and is "
+            f"false: {'; '.join(kept)}"
+        )
         return
     if then.stop:
         # At once, so the rules after it and admission's next round see the stopped run.

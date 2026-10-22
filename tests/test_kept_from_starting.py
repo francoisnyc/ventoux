@@ -63,9 +63,10 @@ def test_a_rule_its_untrusted_condition_kept_from_acting_is_said() -> None:
         answers=[send("cancelled", {"note": "never mind"}, "system:portal")],
         people={},
     )
+    # It names what the rule would have done, the step it would have started (brief, D48).
     assert run.history[-1] == (
         "say_goodbye#1 on event cancelled: its condition reads cancelled.note, from "
-        "untrusted:customer, and is false"
+        "untrusted:customer, and is false: goodbye not started"
     )
     assert not any("never mind" in line for line in run.history)
 
@@ -82,3 +83,21 @@ def test_only_what_the_condition_kept_from_starting_is_said() -> None:
         run = run_case(definition, file={"note": "skip"}, answers=[], people={})
         assert run.history[-1] == "closed: nothing left to do"
         assert not any("not started" in line for line in run.history)
+
+
+def test_a_rule_that_only_sets_names_the_field_it_kept_from_being_set() -> None:
+    definition = load_definition(WITNESS / "untrusted-data-decides-nothing.json")
+    del definition["rules"]["close_it"]
+    definition["fields"]["cancel_note"] = {"type": "string", "display": {"title": "Cancel note"}}
+    definition["rules"]["say_goodbye"]["then"] = {"set": {"cancel_note": {"var": "cancelled.note"}}}
+    del definition["steps"]["goodbye"]  # nothing starts it now
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[send("cancelled", {"note": "never mind"}, "system:portal")],
+        people={},
+    )
+    assert run.history[-1] == (
+        "say_goodbye#1 on event cancelled: its condition reads cancelled.note, from "
+        "untrusted:customer, and is false: cancel_note not set"
+    )

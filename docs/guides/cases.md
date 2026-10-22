@@ -782,7 +782,7 @@ It is never silent: the rule's line, or a line as the case closes, names the fie
 source, never the value:
 
 ```
-say_goodbye#1 on event cancelled: its condition reads cancelled.note, from untrusted:customer, and is false
+say_goodbye#1 on event cancelled: its condition reads cancelled.note, from untrusted:customer, and is false: goodbye not started
 check not started: its condition reads note, from untrusted:customer, and is false
 ```
 
