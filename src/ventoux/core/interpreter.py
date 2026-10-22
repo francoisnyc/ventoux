@@ -59,7 +59,7 @@ from ventoux.core.plan import (
     set_by,
 )
 from ventoux.core.plan import Wait as Question
-from ventoux.core.provenance import CASE, Sourced, provenance
+from ventoux.core.provenance import CASE, Sourced, fields_read, is_trusted, provenance
 from ventoux.core.references import unregistered
 from ventoux.core.roles import no_role, role_that_counts
 from ventoux.core.sensitive import Sensitive, plain
@@ -205,7 +205,7 @@ async def interpret(
                     state, values, sources, key, catalog, call, run, plan.fields, steered
                 )
                 run.history.append(gave)
-                here = choose(here, state.on, gave.event, values)
+                here = choose(here, state.on, gave.event, values, sources)
                 run.history.append(Moved(gave.event, here))
             elif isinstance(state, WaitState | ApprovalState):
                 if isinstance(state, ApprovalState):
@@ -242,7 +242,7 @@ async def interpret(
                     mark = {plan.sources[name]} if name in plan.sources else set()
                     sources[name] = frozenset({f"person:{answer.by}"} | mark)
                 since_a_wait = 0  # someone answered: a loop through a wait isn't spinning
-                here = choose(here, state.on, answer.outcome, values)
+                here = choose(here, state.on, answer.outcome, values, sources)
                 run.history.append(Moved(answer.outcome, here))
             else:
                 # Fail closed: a kind of state this loop has no case for stops the step, never
@@ -468,15 +468,37 @@ def choose(
     on: Mapping[str, tuple[Transition, ...]],
     event: str,
     values: Mapping[str, object],
+    sources: Mapping[str, frozenset[str]],
 ) -> str:
     """Where `on` says to go from `here` on `event`: the first transition that holds."""
     # Fail closed: an event the plan doesn't handle is never read as "stay" or "end".
     if event not in on:
         raise Stop(f"on {event}, {here} says nowhere to go")
     for transition in on[event]:
-        if transition.when is None or holds(transition.when, event, values):
+        if transition.when is None:
+            return transition.target
+        refuse_untrusted_path(transition, event, sources)
+        if holds(transition.when, event, values):
             return transition.target
     raise Stop(f"on {event}, no transition holds")
+
+
+def refuse_untrusted_path(
+    transition: Transition, event: str, sources: Mapping[str, frozenset[str]]
+) -> None:
+    """Stop before reading a transition's condition that reads a value from a source the engine
+    doesn't trust, whatever it would give: untrusted data never chooses a plan's path
+    (brief, D49). Names the field and its sources, never the value."""
+    assert transition.when is not None
+    for name in fields_read(transition.when):
+        # Fail closed: a source the engine doesn't recognise counts as untrusted. A field not set
+        # yet has none, and its condition then stops when it is read.
+        untrusted = sorted(source for source in sources.get(name, ()) if not is_trusted(source))
+        if untrusted:
+            raise Stop(
+                f"on {event}, the transition to {transition.target} reads {name} "
+                f"({', '.join(untrusted)}), and untrusted data can't choose a plan's path"
+            )
 
 
 def holds(when: Expression, event: str, values: Mapping[str, object]) -> bool:
