@@ -17,8 +17,8 @@ from ventoux.case.releases import (
     Outcome,
     Package,
     PackageRefused,
-    RecordRefused,
     Record,
+    RecordRefused,
     Released,
     Reworded,
     SameAs,
@@ -269,7 +269,7 @@ def test_releases_are_numbered_from_1(tmp_path: Path) -> None:
     second = release(folder, store, "a2", CATALOG)
     assert second.outcome == Released(2, Changed(behaviour=("steps.settle.requires",)))
     edited(folder, lambda case: case["steps"]["settle"].pop("when"))
-    assert release(folder, store, "a3", CATALOG).outcome.release == 3  # type: ignore[union-attr]
+    assert release(folder, store, "a3", CATALOG).outcome.release == 3
     names = sorted(path.name for path in (tmp_path / "releases" / "refund").iterdir())
     assert names == ["1.json", "2.json", "3.json"]
 
@@ -356,3 +356,27 @@ def test_the_record_holds_what_activation_needs(tmp_path: Path) -> None:
     plan = (folder / "plans" / "refund-order.json").read_text()
     assert second["written"]["plans"] == {"refund-order@1": plan}
     assert second["changed"] == {"behaviour": ["steps.settle.requires"], "wording": []}
+
+
+def test_wording_revisions_are_numbered_and_recorded_at_once(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    release(folder, store, "a1", CATALOG)
+    edited(folder, retitled("Pay the refund"))
+    second = release(folder, store, "a2", CATALOG)
+    assert second.outcome == Reworded(1, 2, Changed(wording=("steps.settle.display.title",)))
+    assert second.written
+    # Back to the first title: still a new revision, since people now read the second.
+    edited(folder, retitled("Settle the refund"))
+    assert release(folder, store, "a3", CATALOG).outcome == Reworded(
+        1, 3, Changed(wording=("steps.settle.display.title",))
+    )
+    # A release after it is compared with the wording people read now, and is numbered on.
+    edited(folder, requiring())
+    edited(folder, retitled("Refund the order"))
+    assert release(folder, store, "a4", CATALOG).outcome == Released(
+        2, Changed(("steps.settle.requires",), ("steps.settle.display.title",))
+    )
+    names = sorted(path.name for path in (tmp_path / "releases" / "refund").iterdir())
+    assert names == ["1.json", "1.wording-2.json", "1.wording-3.json", "2.json"]
+    revision = json.loads((tmp_path / "releases" / "refund" / "1.wording-2.json").read_text())
+    assert (revision["release"], revision["wording"], revision["commit"]) == (1, 2, "a2")
