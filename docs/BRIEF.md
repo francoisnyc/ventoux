@@ -1747,9 +1747,9 @@ D30, D38, D40, D42 and D46, whose text is kept.*
   decision of its own.
 - **Not limits, and decided apart:** a plan's path chosen by untrusted data is refused (D49, to
   come), and an output's `system:<name>` is checked against the registered systems (an amendment
-  to D29, to come), each in its own pull request after the checkpoint. What layer 12 decides (open cases replaying
-  differently after an engine change, change requests, bindings changing under open cases) is
-  listed in the checkpoint's note, not decided here.
+  to D29, to come), each in its own pull request after the checkpoint. What layer 12 decides
+  (open cases replaying differently after an engine change, change requests, bindings changing
+  under open cases) is listed in the checkpoint's note, not decided here.
 
 ### Simplifications adopted
 
