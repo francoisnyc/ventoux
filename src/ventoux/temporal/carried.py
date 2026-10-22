@@ -9,6 +9,7 @@ lists, and are read back as sets.
 from decimal import Decimal
 from typing import Any
 
+from ventoux.case.engine import known
 from ventoux.case.state import (
     CaseState,
     GivenApproval,
@@ -106,6 +107,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
             }
             for t in state.timers
         ],
+        "engine": state.engine,  # the version it decides as, crossing as it is (brief, D51)
     }
 
 
@@ -235,6 +237,9 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
             Timer(t["rule"], t["after"], t["since"], whole(t["due"]), t["run"])
             for t in data.get("timers", [])
         ],
+        # None in a state from before 12b: it was decided by version 1. A version this code
+        # doesn't know raises, never read as an older one (brief, D51).
+        engine=known(data.get("engine", 1)),
     )
 
 

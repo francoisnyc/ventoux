@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
+from ventoux.case.engine import ENGINE
 from ventoux.core.before_activity import Steering
 from ventoux.core.provenance import Sourced
 from ventoux.core.sensitive import Sensitive
@@ -203,6 +204,9 @@ class CaseState:
     # Each timer set and not yet fired or ended, in the order set: pending work (brief, D10)
     # (brief, D44).
     timers: list[Timer] = field(default_factory=list[Timer])
+    # The version of Ventoux's deciding code the case decides as, set once when it opens and
+    # never by itself after (brief, D51).
+    engine: int = ENGINE
 
 
 @dataclass(frozen=True)
