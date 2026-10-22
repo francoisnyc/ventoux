@@ -118,6 +118,7 @@ Every problem it finds:
 | `APPROVAL_REUSED` | one approval would unlock two high-risk runs | `one approval would unlock two high-risk runs: after pay, refund_fee can run without a new approval: add an approval before refund_fee` |
 | `UNKNOWN_SOURCE` | a field's source label isn't registered | `untrusted:lml has a label nobody registered: the labels are customer, document, email, llm, web; use one of them, or ask the platform team to register it` |
 | `INPUT_POLICY` | an input could get a value its policy refuses | `letters.draft@2 takes to_customer only from a system or a person, never from untrusted data, and this value comes from suggested_recipient (untrusted:llm): use a value a system or a person gave` |
+| `UNTRUSTED_TRANSITION` | a transition's condition reads a field the plan declares untrusted | `the transition to approve_refund reads note, which the plan declares untrusted:llm, and untrusted data can't choose a plan's path: branch in the case instead, where a step's condition or a person's task decides` |
 
 A wait handles a `timeout` event exactly when it declares a `timeout`; without one, `timeout` is an
 unknown event.
@@ -181,10 +182,19 @@ Three things to know:
   either.
 
 What the check doesn't prove yet: that an input's type matches the contract's (checked when the
-step runs: see below), and whether an untrusted value steers a transition's condition (design
-question 17). In a case, a step's condition that reads untrusted data counts for its inputs'
-policies (the cases guide, "Untrusted data can't choose what is sent"); inside a plan, a
-transition's condition is not checked that way, and whether it should be is left open.
+step runs: see below).
+
+**Untrusted data never chooses a plan's path** (brief, D49). A transition whose condition reads a
+value from an untrusted source (or one the engine doesn't recognise) stops the plan when it is
+tried, before the condition is read, whatever it would give: `on done, the transition to paid
+reads note (untrusted:customer), and untrusted data can't choose a plan's path`. A plan step then
+needs attention, as for any stop. The check refuses it where the plan declares the field untrusted
+(`UNTRUSTED_TRANSITION`); a field the case gives untrusted is refused by the case's check, at the
+plan step's input. So a plan can't branch on a customer's text or a model's classification at all:
+branch in the case, where a step's condition counts for its inputs' policies and a run carries
+what steered it (the cases guide, "Untrusted data can't choose what is sent"), or let a person's
+task decide. Carrying what steered a transition through the rest of the plan, as a case does, is
+the planned loosening.
 
 ## Running a plan
 

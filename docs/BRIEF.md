@@ -1248,6 +1248,9 @@ text is kept.*
   outcome, its outputs and the steps requiring it carry it on; a rule on its start that reaches
   or stops doesn't act, and the run itself reaches nothing unless it is a task, whose answer is a
   person's. A person in a task is where it ends; an approval is not.
+- **Amended 2026-10-22, by D49** (the text above stands; this narrows it): a plan's own
+  transitions are no longer left open. A transition whose condition reads untrusted data stops the
+  plan, and the plan step needs attention.
 
 ### D40. Rules that stop steps: what a close does, to one step, through one place
 
@@ -1747,9 +1750,45 @@ D30, D38, D40, D42 and D46, whose text is kept.*
   decision of its own.
 - **Not limits, and decided apart:** a plan's path chosen by untrusted data is refused (D49, to
   come), and an output's `system:<name>` is checked against the registered systems (an amendment
-  to D29, to come), each in its own pull request after the checkpoint. What layer 12 decides (open cases replaying
-  differently after an engine change, change requests, bindings changing under open cases) is
-  listed in the checkpoint's note, not decided here.
+  to D29, to come), each in its own pull request after the checkpoint. What layer 12 decides
+  (open cases replaying differently after an engine change, change requests, bindings changing
+  under open cases) is listed in the checkpoint's note, not decided here.
+
+### D49. A plan's path is never chosen by untrusted data
+
+*Decided 2026-10-22, at the checkpoint before layer 12 (`docs/layers/checkpoint-doors.md`, row 31,
+choice 4; `docs/layers/fix-plan-transitions.md`). Adds to D28, D34 and D39, whose text is kept.*
+
+- **The bug it fixes.** D39 and D43 keep untrusted data from deciding through a case's steps, and
+  left a plan's own transitions open (design question 17). Run on `main`: a plan step given the
+  case's `note` (`untrusted:customer`), whose plan goes to its success state when `note` is
+  `"go"` and to its failed state otherwise, reached the step's milestone and closed the case on
+  the customer's word, against D38; `validate_case` said nothing.
+- **A transition whose condition reads untrusted data stops the plan.** When the run tries a
+  transition whose `when` reads a field holding a source the engine doesn't trust (`untrusted:`,
+  or one it doesn't recognise), it stops before reading the condition, whatever the value would
+  give, saying which field and source, never the value: `on done, the transition to paid reads
+  note (untrusted:customer), and untrusted data can't choose a plan's path`. The plan step fails
+  and needs attention (D17, D28): nothing is skipped, and a person decides. A transition that is
+  never tried (an earlier one held) reads nothing, and refuses nothing.
+- **What it blocks, plainly.** Until the loosening below is built, a plan can't branch on
+  untrusted data at all: not on a customer's text, and not on a model's classification
+  (`llm_says_refund`, `untrusted:llm`) either, however low the risk of each branch. Branching on
+  such a value is done in the case, where D39 and D43 check it: a step's `when` or a rule starts
+  the step that carries each branch, or a person's task decides.
+- **Checked when read** (D34), as proofs. Plan validation refuses a transition reading a field
+  the plan declares untrusted (`UNTRUSTED_TRANSITION`). Case validation refuses a plan step's
+  input that is untrusted whoever writes it and feeds a field a transition reads
+  (`UNTRUSTED_TRIGGER`), and warns where only some writers make it so (`WRITER_DECIDES`, D42).
+  The runtime refuses whether or not validation ran (D34).
+- **The planned loosening: D43's way, inside a plan.** The plan would carry what steered each
+  transition it took: its run reaches nothing (D43), its outcome and outputs carry the untrusted
+  sources, and every state entered after such a transition has them checked against its
+  activity's input policies (D39), since a state machine has no point where the influence ends.
+  Refusing now keeps it open: accepting later what is refused today changes no published plan;
+  allowing now and refusing later would break them.
+- **Cases already open** on a plan that branched on untrusted data replay differently, and wait
+  until the code is fixed (D17): carried to layer 12, with the other paths there.
 
 ### Simplifications adopted
 
@@ -1959,6 +1998,9 @@ New questions found while building go here, numbered from 10.
     11b, 2026-10-18:* built for a case's steps, narrowed by D39 (only the condition's untrusted
     sources count, checked apart from the input's); a plan's own transitions are
     left open, recorded in `docs/layers/checkpoint-doors.md` for the checkpoint before layer 12.
+    *Added 2026-10-22, at the checkpoint before layer 12:* a plan's transitions are answered by
+    D49: a transition whose condition reads untrusted data is refused, so untrusted data never
+    chooses a plan's path; D43's way inside a plan is the planned loosening.
 18. **When does a run continue as new, and what does it carry?** (found in layer 6) Temporal
     warns at about 10,000 history events and ends a run at 51,200; continue-as-new ends a run and
     starts a fresh one with its state carried over. A plan doesn't need it yet: the bound of 1,000

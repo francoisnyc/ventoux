@@ -42,7 +42,7 @@ from ventoux.core.expressions import (
     check,
 )
 from ventoux.core.expressions.check import a_type
-from ventoux.core.plan import Plan, set_by
+from ventoux.core.plan import FinalState, Plan, set_by
 from ventoux.core.policy import OnlyFrom, Policy, refusal
 from ventoux.core.provenance import answering, fields_read, is_trusted, provenance
 from ventoux.core.references import references
@@ -574,6 +574,74 @@ def plan_policy_issues(
                     given.add(plan_field)
                     issues.append(issue)
     return issues
+
+
+def plan_transition_issues(
+    case: CaseDefinition, contracts: Mapping[str, Contract], plans: Mapping[str, Plan]
+) -> list[Issue]:
+    """A plan step's input carrying untrusted data into a field one of its plan's transitions
+    reads: the plan stops whenever it tries that transition, since untrusted data never chooses a
+    plan's path (brief, D49). An error (`UNTRUSTED_TRIGGER`) only for a value untrusted whichever
+    writer wrote it; a warning (`WRITER_DECIDES`) for one only some rules make untrusted
+    (brief, D42). A field the plan itself declares untrusted is the plan's check to say."""
+    sources = case_sources(case, contracts, BY_A_SYSTEM)  # who opens it changes no trust
+    untrusted = always(case, contracts, BY_A_SYSTEM, is_untrusted)
+    found: list[Issue] = []
+    for name, plan in plans.items():
+        step = case.steps[name]
+        assert isinstance(step, PlanStep)  # only a plan step runs a plan
+        for plan_field, where in branched_on(plan).items():
+            if plan_field not in step.inputs or plan_field in plan.sources:
+                continue
+            for field in fields_read(step.inputs[plan_field]):
+                labels = ", ".join(sorted(s for s in sources.get(field, ()) if not is_trusted(s)))
+                if not labels:
+                    continue
+                path = f"steps.{name}.inputs.{plan_field}"
+                said = (
+                    f"{step.plan} branches on {plan_field} ({where}), and this input reads {field}"
+                )
+                if field in untrusted:
+                    found.append(
+                        Issue(
+                            path,
+                            "UNTRUSTED_TRIGGER",
+                            f"{said}, which comes from {labels} whoever writes it, and untrusted "
+                            "data can't choose a plan's path, so the plan stops whenever it tries "
+                            "that transition: give it a value a person or a trusted system gives, "
+                            "or branch in the case",
+                        )
+                    )
+                else:
+                    when = writer_decides(case, contracts, BY_A_SYSTEM, field, is_untrusted)
+                    found.append(
+                        Issue(
+                            path,
+                            "WRITER_DECIDES",
+                            f"{said}, which comes from {labels} {when}, and untrusted data can't "
+                            "choose a plan's path, so whether the plan stops there depends on "
+                            f"which rule set {field} last: set {field} only from trusted values",
+                            "warning",
+                        )
+                    )
+                break  # one cause, one issue
+    return found
+
+
+def branched_on(plan: Plan) -> dict[str, str]:
+    """Each field a transition's condition reads, with the first transition that reads it:
+    `in check_order, the transition to paid`."""
+    found: dict[str, str] = {}
+    for state_name, state in plan.states.items():
+        if isinstance(state, FinalState):
+            continue  # a final state goes nowhere
+        for transitions in state.on.values():
+            for transition in transitions:
+                for field in [] if transition.when is None else fields_read(transition.when):
+                    found.setdefault(
+                        field, f"in {state_name}, the transition to {transition.target}"
+                    )
+    return found
 
 
 def never_does(then: Then) -> str:

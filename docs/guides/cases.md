@@ -454,6 +454,15 @@ from, so the plan's checks see the real sources: an amount a customer typed is s
 may not approve crosses into the plan too: the person who opened the case, and the person who
 proposed the step, approve nothing inside it (brief, D25).
 
+**A plan never branches on untrusted data** (brief, D49). A plan transition whose condition reads
+a value from an untrusted source stops the plan when it is tried, whatever the value says, and the
+step needs attention: `settle#1: check-only@1 stopped: on done, the transition to paid reads note
+(untrusted:customer), and untrusted data can't choose a plan's path`. `ventoux check` refuses the
+input that carries such a value into a field a transition reads (`UNTRUSTED_TRIGGER`), or warns
+when only some writers make it untrusted (`WRITER_DECIDES`). Branch in the case instead: a step's
+`when`, or a rule, starts the step that carries each branch, and its inputs are checked (see
+"Rules that start steps"); or a person's task decides.
+
 How the plan ends decides how the step ends:
 
 | The plan | The step |
@@ -846,7 +855,7 @@ nothing ends, or a start refused on the step's own start; and these codes are it
 | Code | Kind | What is wrong | Example message |
 |---|---|---|---|
 | `NEVER_FIRES` | error | a rule's moment can never come, or comes only once every `closes_when` milestone is reached; or a rule written before it on the same moment always closes the case, so it never acts ("Patterns") | `flag_high_risk can never act: it fires on reached checked, and refund closes once checked is reached, when nothing new is decided: fire it on an earlier moment, or remove checked from closes_when` |
-| `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone or stops a step reads, in its `when`, a value that is untrusted whoever writes it, or fires on the start of a step untrusted data steers however it starts, so it never acts; or a call, plan or wait step every start of which is steered so reaches milestones it never will | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
+| `UNTRUSTED_TRIGGER` | error | a rule that reaches a milestone or stops a step reads, in its `when`, a value that is untrusted whoever writes it, or fires on the start of a step untrusted data steers however it starts, so it never acts; or a call, plan or wait step every start of which is steered so reaches milestones it never will; or a plan step's input that carries such a value into a field one of its plan's transitions reads, so the plan stops there | `flag_high_risk's condition reads kyc.analyst_notes, which comes from untrusted:llm whoever writes it, and untrusted data can't decide, so it never reaches high_risk: read a value a person or a trusted system gives, such as a task's answer` |
 | `NEVER_STARTS` | error | a rule's start of a step is refused every time it fires: on the opening, the step requires what can't be met by then, and the rule's condition can't fail and be retried later; or it fires on the step's own start (unless its condition may fail and the step is repeatable: a retry may come once the step is done; or the step is a task a rule may stop, which a stop cancels at once, letting the start through), or on its own answer when the step isn't repeatable; or it fires on a moment where it, or a rule written before it, always closes the case (no condition, nothing set, every `closes_when` milestone reached, not on a step's start): a start is decided after the moment's rules, and nothing new starts then | `start_pay can never start pay: it fires on opened, and pay requires lead_checked, which nothing can reach by then: start it on a later moment, or remove the requirement` |
 | `LOOPS_UNTIL_CLOSED` | warning | rules start steps in a loop that comes round on each answer and that no condition, requirement or rule's stop ends (the rework rules above with their `when`s removed, on the refund with the `duplicate` close reason from "Closing a case"), so the case closes only through a close reason or `closes_when` | `check_review and send_back start lead_check and review again on every answer, and nothing ends it: refund closes only through a close reason or closes_when: give one of the rules a when that ends the loop` |
 

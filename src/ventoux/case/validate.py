@@ -30,6 +30,7 @@ from ventoux.case.flow import (
     condition_issues,
     no_sources_issues,
     plan_policy_issues,
+    plan_transition_issues,
     policy_issues,
     reference_issues,
     sensitive_issues,
@@ -103,6 +104,7 @@ def validate_case(
     found += condition_issues(case, contracts, {i.path for i in found if i.severity == "error"})
     found += type_issues(case, catalog, contracts, supplied, {issue.path for issue in found})
     found += plan_policy_issues(case, catalog, contracts, supplied, {i.path for i in found})
+    found += plan_transition_issues(case, contracts, supplied)
     found += sensitive_issues(case, contracts, {issue.path for issue in found})
     found += approver_issues(case, catalog, contracts)
     found += trigger_issues(case, contracts)

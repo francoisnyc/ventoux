@@ -486,7 +486,27 @@ GUIDE_EXAMPLES: dict[str, Any] = {
     ),
     "UNKNOWN_SOURCE": lambda: with_source("amount", "untrusted:lml"),
     "INPUT_POLICY": lambda: guide_injection(),
+    "UNTRUSTED_TRANSITION": lambda: guide_branching_on_a_note(),
 }
+
+
+def guide_branching_on_a_note() -> dict[str, Any]:
+    """The guide's plan with a model's `note`, declared untrusted, choosing whether the lookup
+    goes on to the approval (brief, D49)."""
+    plan = changed(
+        check_order={
+            **guide_plan()["states"]["check_order"],
+            "on": {
+                "done": [
+                    {"target": "approve_refund", "when": {"==": [{"var": "note"}, "go"]}},
+                    {"target": "failed"},
+                ],
+                "not_found": "failed",
+            },
+        }
+    )
+    plan["fields"]["note"] = {"type": "string", "source": "untrusted:llm"}
+    return plan
 
 
 def guide_review_with(**wait: Any) -> dict[str, Any]:
