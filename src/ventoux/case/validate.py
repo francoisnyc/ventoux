@@ -40,6 +40,7 @@ from ventoux.case.loops import endless_loops
 from ventoux.case.reach import (
     Through,
     acts_after_close,
+    always_closes,
     can_happen,
     can_start,
     on_own_moment,
@@ -398,12 +399,12 @@ def never_starts(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[
     issue."""
     found: list[Issue] = []
     for rule, written in case.rules.items():
-        if rule not in can:
-            continue
+        if rule not in can or closed_before(case, rule) is not None:
+            continue  # it never fires, or never acts: `NEVER_FIRES` says so (one cause, one issue)
         for name in written.then.start:
             if name not in can and can_start(case, catalog, name, can):
                 continue  # its requirements are the cause, and its own issue says so
-            if (why := start_refused(case, rule, name)) is not None:
+            if (why := start_refused(case, catalog, rule, name)) is not None:
                 found.append(Issue(f"rules.{rule}.then.start", "NEVER_STARTS", why))
     return found
 
@@ -560,27 +561,17 @@ def never_fires(case: CaseDefinition, catalog: Catalog, can: set[str]) -> list[I
 
 def closed_before(case: CaseDefinition, name: str) -> str | None:
     """The rule that always closes the case on the moment `name` waits for, before `name` can
-    act, or None. Such a rule has no condition, sets nothing (which could fail), reaches every
-    `closes_when` milestone, and fires on a moment that carries no steering (brief, D43). Rules on
-    one moment fire in the order written, so it closes the case before a rule written after it;
-    and a close ends every timer, so a timer set on its moment never fires, wherever it is
-    written (brief, D38) (brief, D44). Only this form is claimed: the check says less, never
-    more (brief, D46)."""
+    act, or None (`always_closes` says which rules do). Rules on one moment fire in the order
+    written, so it closes the case before a rule written after it; and a close ends every timer,
+    so a timer set on its moment never fires, wherever it is written (brief, D38) (brief, D44)."""
     rule = case.rules[name]
     timer = isinstance(rule.on, After)
     for other, closer in case.rules.items():
         if other == name and not timer:
             return None  # only the rules written before it act first
-        if other == name or isinstance(closer.on, After | Started):
+        if other == name or not always_closes(case, other):
             continue
-        same = said(anchor(rule.on)) == said(closer.on)
-        closes = (
-            closer.when is None
-            and not closer.then.set
-            and bool(case.closes_when)
-            and set(case.closes_when) <= set(closer.then.reach)
-        )
-        if same and closes:
+        if said(anchor(rule.on)) == said(closer.on):
             return other
     return None
 

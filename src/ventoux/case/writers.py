@@ -97,7 +97,9 @@ def always(
             for field, writes in computed.items()
             if field not in found
             and all(
-                (mark is not None and refused(mark)) or any(read in found for read in reads)
+                # No mark adds no source: the write comes from what its rule read, and nothing
+                # more, so it is never refused for coming from nothing (brief, D12) (brief, D42).
+                bool(mark and refused(mark)) or any(read in found for read in reads)
                 for reads, mark in writes
             )
         }

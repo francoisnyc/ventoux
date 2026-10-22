@@ -189,7 +189,8 @@ def can_start(case: CaseDefinition, catalog: Catalog, name: str, can: Collection
         step.automatic
         or any(role in catalog.roles for role in step.proposed_by)
         or any(
-            rule in can and start_refused(case, rule, name) is None for rule in starters(case, name)
+            rule in can and start_refused(case, catalog, rule, name) is None
+            for rule in starters(case, name)
         )
     )
 
@@ -199,7 +200,7 @@ def starters(case: CaseDefinition, name: str) -> list[str]:
     return [rule for rule, written in case.rules.items() if name in written.then.start]
 
 
-def start_refused(case: CaseDefinition, rule: str, name: str) -> str | None:
+def start_refused(case: CaseDefinition, catalog: Catalog, rule: str, name: str) -> str | None:
     """Why the rule's start of the step `name` is refused every time it fires, as the check says
     it, or None if it may be taken. Claimed only where proven (brief, D34): a failed firing is
     retried later, on the case file as it is then, so a condition that may fail proves nothing
@@ -231,6 +232,45 @@ def start_refused(case: CaseDefinition, rule: str, name: str) -> str | None:
             f"{fires}, once {name} has run, and {name} is not repeatable: make {name} "
             "repeatable, or start it on another moment"
         )
+    # On a moment a rule always closes the case: a start is a proposal, decided after the
+    # moment's rules, and nothing new starts once every closes_when milestone is reached
+    # (brief, D34) (brief, D39). Whatever the rule's own condition: false, it starts nothing; true,
+    # it is refused; unreadable, its retry comes once the case is closing. Unless what the step
+    # requires already comes only once the case closes: then no start of it is ever taken, and
+    # its own `NEVER_RUNS` says why (one cause, one issue).
+    after = set(case.closes_when) <= set(reached_before(case, catalog, name))
+    if not after and (closer := closing_on(case, rule)) is not None:
+        milestones = " and ".join(case.closes_when)
+        closes = f"so {case.case} closes and nothing new starts: start it on another moment"
+        if closer == rule:
+            return f"{fires} and always reaches {milestones}, {closes}"
+        return f"{fires}, where {closer} always reaches {milestones}, {closes}"
+    return None
+
+
+def always_closes(case: CaseDefinition, rule: str) -> bool:
+    """Whether the rule always closes the case when it fires: it has no condition, sets nothing
+    (which could fail), reaches every `closes_when` milestone, and fires on a moment that carries
+    no steering (brief, D43), so not a step's start, nor a timer, its own rule's moment. Only this
+    form is claimed: the check says less, never more (brief, D46)."""
+    closer = case.rules[rule]
+    return (
+        not isinstance(closer.on, After | Started)
+        and closer.when is None
+        and not closer.then.set
+        and bool(case.closes_when)
+        and set(case.closes_when) <= set(closer.then.reach)
+    )
+
+
+def closing_on(case: CaseDefinition, rule: str) -> str | None:
+    """The first rule that always closes the case on the moment `rule` fires on, or None: rules
+    on one moment fire in the order written, so the case is closing before a start of `rule` is
+    decided, wherever the closing rule is written (brief, D38)."""
+    moment = said(anchor(case.rules[rule].on))
+    for other, closer in case.rules.items():
+        if always_closes(case, other) and said(closer.on) == moment:
+            return other
     return None
 
 
