@@ -139,6 +139,8 @@ Each starts with its negative test, seen failing for the right reason.
   it: `writers.always` reads a rule's write with no mark as stamped with no source, which
   `only_from` refuses. It errs on the safe side, but the check stops being a proof there; it isn't
   a path where untrusted data decides, so it is left for its own fix.
+  *Fixed 2026-10-22, in `docs/layers/fix-check-proofs.md` (1): a write with no mark comes from
+  what its rule read, and nothing more.*
 
 ## Promises
 

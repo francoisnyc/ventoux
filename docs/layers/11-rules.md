@@ -3257,6 +3257,8 @@ by mutation.
   is closing (`goodbye not started: withdrawn is reached`). **Found, not fixed:** that start is
   refused every time, and `NEVER_STARTS` doesn't claim it. It is an unclaimed proof, not a false
   one, so it is left for its own fix rather than widening 11h1.
+  *Fixed 2026-10-22, in `docs/layers/fix-check-proofs.md` (2): `NEVER_STARTS` claims it, and a
+  step only such starts start is `NEVER_RUNS`.*
 - **The closing rule's moment is never a run's start, nor a timer** (slice 6): a start may be
   steered, and then the closing rule reaches nothing and the rule after it acts (the test runs
   it: `note_it` sets its field); a timer's firing is its own rule's moment and no other's.
