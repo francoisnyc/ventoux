@@ -1762,9 +1762,9 @@ D30, D38, D40, D42 and D46, whose text is kept.*
   decision of its own.
 - **Not limits, and decided apart:** a plan's path chosen by untrusted data is refused (D49, to
   come), and an output's `system:<name>` is checked against the registered systems (an amendment
-  to D29, to come), each in its own pull request after the checkpoint. What layer 12 decides (open cases replaying
-  differently after an engine change, change requests, bindings changing under open cases) is
-  listed in the checkpoint's note, not decided here.
+  to D29, to come), each in its own pull request after the checkpoint. What layer 12 decides
+  (open cases replaying differently after an engine change, change requests, bindings changing
+  under open cases) is listed in the checkpoint's note, not decided here.
 
 ### D49. A plan's path is never chosen by untrusted data
 
@@ -1792,7 +1792,7 @@ choice 4; `docs/layers/fix-plan-transitions.md`). Adds to D28, D34 and D39, whos
   the plan declares untrusted (`UNTRUSTED_TRANSITION`). Case validation refuses a plan step's
   input that is untrusted whoever writes it and feeds a field a transition reads
   (`UNTRUSTED_TRIGGER`), and warns where only some writers make it so (`WRITER_DECIDES`, D42).
-  The runtime refuses on nothing validation did.
+  The runtime refuses whether or not validation ran (D34).
 - **The planned loosening: D43's way, inside a plan.** The plan would carry what steered each
   transition it took: its run reaches nothing (D43), its outcome and outputs carry the untrusted
   sources, and every state entered after such a transition has them checked against its

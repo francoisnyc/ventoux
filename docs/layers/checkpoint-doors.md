@@ -169,19 +169,20 @@ dated amendment line on each decision it adds to (D2, D27, D38, D42, D46).
    Option (a), D43's way inside a plan (the plan reports what steered the transitions it took, so
    its run reaches nothing and its outcome and outputs carry it, and each entered state's inputs
    are checked, D39) is the later loosening, if a team needs it: refusing now keeps it open;
-   allowing now and refusing later would not.
+   allowing now and refusing later would not. Set aside: recording it as a limit, since it breaks
+   D38 and a non-negotiable ("untrusted data never decides" is fail-closed, not a preference).
    *The user's addition, 2026-10-22:* D49 says plainly that this blocks a plan from branching on
    untrusted data at all, an LLM's classification included, until option (a) is built, and
-   records (a) as the planned loosening, so it isn't forgotten. Set aside: recording it as a limit, since it breaks
-   D38 and a non-negotiable ("untrusted data never decides" is fail-closed, not a preference).
+   records (a) as the planned loosening, so it isn't forgotten.
 
 5. **Row 32, `system:<name>` on an output.** *Recommended: unblock now*, in its own small pull
    request, test-first: `Catalog.register` refuses an output whose `system:` names an unregistered
    system, as `check_output_labels` does for labels (one more branch there), the development
    catalog registers `kyc`, and the test catalogs register the systems their own contracts name
    (`accounts`, `ledger`, `letters`, `payments` appear in tests; the suite will say which
-   catalogs lack them). More than a line or two, since several test files change. No decision changes meaning: D30 says systems are registered; this enforces it
-   at one more place, with an amendment line on D29.
+   catalogs lack them). More than a line or two, since several test files change. No decision
+   changes meaning: D30 says systems are registered; this enforces it at one more place, with an
+   amendment line on D29.
 
 6. **Row 33, untrusted data deciding what doesn't happen.** A `when` is one condition: true lets
    a step start, false keeps it from starting. D39 allows a start on untrusted data (inputs
