@@ -172,7 +172,8 @@ class KycOutput(BaseModel):
 - **`system:<name>`** says a system produced the value, and you vouch for it: it is trusted, and
   `only_from("<name>")` accepts it. Write the system that decides the content, not the one that
   carries it: an amount a customer typed into a portal is `untrusted:customer`, even when the
-  portal returns it.
+  portal returns it. The system is one you registered (see "Systems and resolvers"), so a typo
+  is refused when the contract is registered, as a reference's is.
 - **`untrusted:<label>`**, with a label you registered, says where untrusted content came from.
 - **Nothing declared is untrusted,** read as `untrusted:undeclared` (brief, D6): forgetting a
   source can only make a value less trusted, never more. A step whose `trusted_only` input reads it
@@ -377,10 +378,11 @@ writes them.
 | A policy kind of your own, `class Unless(Policy)` on `amount` | `payments.refund@2`: input `amount` has a policy Ventoux doesn't know (`Unless`). The kinds are `trusted_only` and `only_from`; a new kind is added to the engine, never in a contract. |
 | `source("person:ana")` or `source("trusted:kyc")` on an output field | `kyc.check@1`: output `status` has the source `'person:ana'`. An output's source is `system:<name>` or `untrusted:<label>`: an activity is never a person, and trust is earned, not declared. |
 | `source("untrusted:fax")`, a label nobody registered | `kyc.check@1`: output `analyst_notes` is `untrusted:fax`, and `fax` is not a registered label. Register it first, or use one of: customer, document, email, llm, web. |
+| `source("system:kcy")`, a system nobody registered | `kyc.check@1`: output `status` is `system:kcy`, and `kcy` is not a registered system. Register it first, or use one of: kyc. |
 | An output field named `outcome` | `kyc.check@1`: an output can't be named `outcome`: `<step>.outcome` is the step's outcome. Rename the field. |
 | An output field `score: float` | `kyc.check@1`: output `score` is `float`, which the case file can't hold exactly. An output is a decimal (Decimal), a text (str) or true or false (bool): numbers are exact decimals, never binary floats (brief, D20). |
 | An input field `amount: float` | `payments.refund@2`: input `amount` is `float`, which no value of a case is. An input is a decimal (Decimal), a text (str), true or false (bool) or one of some texts (a Literal of str), each possibly optional: numbers are exact decimals, never binary floats (brief, D20). |
-| `reference("sail")`, a system nobody registered | `letters.draft@3`: input `customer` is a reference to `sail`, which is not a registered system. Register it first, or use one of: crm, documents, orders, policies, portal. |
+| `reference("sail")`, a system nobody registered | `letters.draft@3`: input `customer` is a reference to `sail`, which is not a registered system. Register it first, or use one of: crm, documents, kyc, orders, policies, portal. |
 | `reference("crm")` on a field that isn't a `str` | `letters.draft@3`: input `customer` is a reference, so it is a text (str), and this one is `Decimal`. |
 | `catalog.register_system("CRM")` | `'CRM'` is not a system name: a system is lowercase, such as `crm` or `claims-archive`. |
 | `resolvers.register("sail", …)`, a system nobody registered | `sail` is not a registered system: register it in the catalog first. |

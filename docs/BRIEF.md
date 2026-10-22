@@ -803,6 +803,11 @@ be erased on request), has size limits, and a second copy of business records go
 - **The contract test checks shape, not truth:** it runs the bound workflow on Temporal's test
   server and reports a missing, extra or mistyped output, a timeout and a failure. Whether a
   declared source is true is for review (D6).
+- **Amended 2026-10-22, at the checkpoint before layer 12** (`docs/layers/checkpoint-doors.md`,
+  row 32, choice 5; the text above stands, this adds to it): an output's `system:<name>` names a
+  system the platform team registered (D30), and a contract declaring one nobody registered is
+  refused when it is registered, as a reference to one is: a typo is caught, never a system
+  nobody runs.
 
 ### D30. References go where their system is expected; the case file is filtered by role
 
@@ -995,6 +1000,13 @@ be erased on request), has size limits, and a second copy of business records go
   as safe as before.
 - **`ventoux check` comes with the builder** (layer 14), which reads the Python file and maps
   errors to source lines; `validate_case` is its engine.
+- **Amended 2026-10-22, at the checkpoint before layer 12** (`docs/layers/checkpoint-doors.md`,
+  row 35, choice 8; the text above stands, this adds to it): the failed run retried while the
+  close is held is what the close waits for, so its completion is flagged as that retry, never
+  as something that ran on after a close: `notify#1 completed on omar's retry, after paid was
+  reached`. It is still flagged, never hidden (D28): a payment retried after the case's end was
+  reached may still need a person's look. A history line and no command, so replay decides the
+  same.
 
 ### D35. Case validation reads each step against what it calls; the runtime refuses the same
 

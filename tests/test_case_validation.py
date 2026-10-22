@@ -1007,7 +1007,7 @@ def test_a_system_nobody_registered_is_refused() -> None:
             "fields.order_id",
             "UNKNOWN_SYSTEM",
             "order_id is a reference to ordrs, which is not a registered system: the systems are "
-            "crm, documents, orders, policies, portal; use one of them, or ask the platform team "
+            "crm, documents, kyc, orders, policies, portal; use one of them, or ask the platform team "
             "to register it",
         )
     ]
@@ -2354,8 +2354,11 @@ class NoteOutput(BaseModel):
 
 
 def noting() -> Catalog:
-    """The development catalog, and `refunds.note@1`, which notes a refund by its ID."""
+    """The development catalog, the ledger and letters systems, and `refunds.note@1`, which notes
+    a refund by its ID."""
     catalog = copy.deepcopy(CATALOG)
+    for system in ("ledger", "letters"):  # its outputs' sources name them (brief, D29)
+        catalog.register_system(system)
     catalog.register(
         ActivityContract(
             name="refunds.note",

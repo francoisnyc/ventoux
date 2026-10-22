@@ -1614,6 +1614,80 @@ def test_closes_when_waits_while_a_step_needs_attention() -> None:
     assert retried.history[-1] == "closed: paid reached"
 
 
+def test_a_retry_the_held_close_waited_for_is_flagged_as_the_retry() -> None:
+    # The letter failed, and `paid` was reached: the close waits for it (brief, D26, D34). Omar's
+    # retry completes it. That is what the close waited for, not something that ran on after a
+    # close: the flag says so, and still flags it, never hides it (brief, D28; checkpoint,
+    # choice 8).
+    definition = refund(closes_when=["paid"])
+    definition["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter about the refund"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+    }
+    calls: list[str] = []
+
+    def letter_down_once(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs["idempotency_key"])
+        if len(calls) == 1:
+            raise ConnectionError("provider unreachable")
+        return {"draft_id": "draft-refund"}
+
+    retried = run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW, retry("notify#1", "omar")],
+        people=OPERATORS,
+        activities={"letters.draft@2": letter_down_once},
+    )
+    assert retried.flags == ["notify#1 completed on omar's retry, after paid was reached"]
+    assert retried.history[-2:] == [
+        "flagged: notify#1 completed on omar's retry, after paid was reached",
+        "closed: paid reached",
+    ]
+
+
+def test_every_retry_the_held_close_waited_for_is_flagged() -> None:
+    # From the tutor review: two failed letters hold the close once `paid` is reached. The first
+    # retried completes while the case is still held open, before it closes: it is flagged as
+    # well, never only the retry that completes while closing (brief, D28, D34).
+    definition = refund(closes_when=["paid"])
+    definition["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    for name in ("notify", "copy"):
+        definition["steps"][name] = {
+            "kind": "activity",
+            "display": {"title": "Draft a letter about the refund"},
+            "activity": "letters.draft@2",
+            "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+        }
+    failed: set[str] = set()
+
+    def each_letter_down_once(inputs: dict[str, Any]) -> dict[str, Any]:
+        key = inputs["idempotency_key"]
+        if key not in failed:
+            failed.add(key)
+            raise ConnectionError("provider unreachable")
+        return {"draft_id": "draft-refund"}
+
+    people = {**OPERATORS, "lee": ["operations"]}
+    run = run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW, retry("notify#1", "omar"), retry("copy#1", "lee")],
+        people=people,
+        activities={"letters.draft@2": each_letter_down_once},
+    )
+    assert run.flags == [
+        "notify#1 completed on omar's retry, after paid was reached",
+        "copy#1 completed on lee's retry, after paid was reached",
+    ]
+    assert run.history[-1] == "closed: paid reached"
+
+
 # --- Layer 10a, tutor review: nothing new starts once closes_when is reached ---
 
 

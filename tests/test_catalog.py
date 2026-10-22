@@ -302,6 +302,10 @@ class KycNotesFromFax(BaseModel):
     analyst_notes: Annotated[str, source("untrusted:fax")]
 
 
+class KycStatusFromKcy(BaseModel):
+    status: Annotated[str, source("system:kcy")]  # a typo for kyc
+
+
 class KycNamedOutcome(BaseModel):
     outcome: str
 
@@ -349,6 +353,9 @@ GUIDE_REFUSALS: dict[str, Any] = {
     ),
     '`source("untrusted:fax")`, a label nobody registered': lambda: labelled_catalog().register(
         kyc(KycNotesFromFax)
+    ),
+    '`source("system:kcy")`, a system nobody registered': lambda: labelled_catalog().register(
+        kyc(KycStatusFromKcy)
     ),
     "An output field named `outcome`": lambda: kyc(KycNamedOutcome),
     "An output field `score: float`": lambda: kyc(KycAsFloat),
@@ -610,10 +617,12 @@ def kyc_output(*sources: OutputSource) -> type[BaseModel]:
 
 
 def labelled_catalog() -> Catalog:
-    """A catalog with the development labels, `customer` to `web`, and nothing else."""
+    """A catalog with the development labels, `customer` to `web`, the system `kyc`, and nothing
+    else."""
     catalog = Catalog()
     for label in CATALOG.labels:
         catalog.register_label(label)
+    catalog.register_system("kyc")
     return catalog
 
 
@@ -646,6 +655,20 @@ def test_an_output_source_names_a_registered_label() -> None:
     with pytest.raises(ValueError, match="status is untrusted:fax, and fax is not a registered"):
         labelled_catalog().register(contract)
     labelled_catalog().register(lookup_contract(output=kyc_output(source("system:kyc"))))
+
+
+def test_an_output_source_names_a_registered_system() -> None:
+    # A `system:` source names a system the platform team registered, as a reference does: a typo
+    # is caught when the contract is registered, never a system nobody runs (brief, D29, D30).
+    contract = lookup_contract(output=kyc_output(source("system:kcy")))
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"^orders.lookup@1: output status is system:kcy, and kcy is not a registered system\. "
+            r"Register it first, or use one of: kyc\.$"
+        ),
+    ):
+        labelled_catalog().register(contract)
 
 
 def test_undeclared_is_the_engines_label() -> None:

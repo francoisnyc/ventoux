@@ -60,6 +60,9 @@ class StepRun:
     # The rule's firing that asked to stop it while it runs, such as `withdraw#1`; empty if none.
     # A run whose stop is asked hasn't ended: it runs on, and is never asked twice (brief, D40).
     stop_requested: str = ""
+    # An operator's retry made while every `closes_when` milestone was reached, which the close
+    # waits for (brief, D34), as its flag says it: `omar's retry, after paid was reached`.
+    held_retry: str = ""
 
 
 @dataclass

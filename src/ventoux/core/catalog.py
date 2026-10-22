@@ -117,7 +117,8 @@ class Catalog:
 
     def check_output_labels(self, contract: Contract) -> None:
         """Every `untrusted:` label an output declares is registered, as a field's must be
-        (brief, D12): a typo in a label is caught, never a new kind of untrusted."""
+        (brief, D12): a typo in a label is caught, never a new kind of untrusted. Every `system:`
+        it declares names a registered system, as a reference must (brief, D29) (brief, D30)."""
         for name, declared in declared_sources(contract.output).items():
             origin, _, label = declared.partition(":")
             if origin == "untrusted" and label not in self._labels:
@@ -125,6 +126,12 @@ class Catalog:
                 raise ValueError(
                     f"{contract.reference}: output {name} is {declared}, and {label} is not a "
                     f"registered label. Register it first, or use one of: {registered}."
+                )
+            if origin == "system" and label not in self._systems:
+                registered = ", ".join(self.systems) or "none yet"
+                raise ValueError(
+                    f"{contract.reference}: output {name} is {declared}, and {label} is not a "
+                    f"registered system. Register it first, or use one of: {registered}."
                 )
 
     def check_reference_systems(self, contract: Contract) -> None:

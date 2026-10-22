@@ -407,7 +407,8 @@ new starts: a step waiting for `paid` doesn't start, a proposal is refused (`pai
 the case closes once notify#1 is retried, or a person closes it: nothing new starts`), an
 approval given meanwhile is let go, saying so (`goodwill not started: paid is reached, …`), and a
 proposal waiting for a fact is dropped; the retried run still runs, and closes the case when it
-completes.
+completes. Its completion is flagged for a person to look at, saying it was the retry the close
+waited for: `notify#1 completed on omar's retry, after paid was reached`.
 
 A person closes a case with a **close reason** the definition declares, with who may use it:
 
@@ -773,6 +774,20 @@ opener), is still sent when its step's `when` reads a person's answer. An approv
 reads untrusted data is asked whatever it says: untrusted data can add an approval, never remove
 one. A rule that reaches a milestone still reaches nothing on untrusted data (above), and starts
 nothing either: it doesn't act at all.
+
+**Untrusted data may keep something from happening** (brief, D48). A `when` is one condition:
+true lets the step start, false keeps it from starting. So a step's own `when`, or a rule's, that
+reads untrusted data and is false keeps the step from starting, and the case may close without it.
+It is never silent: the rule's line, or a line as the case closes, names the field and its
+source, never the value:
+
+```
+say_goodbye#1 on event cancelled: its condition reads cancelled.note, from untrusted:customer, and is false: goodbye not started
+check not started: its condition reads note, from untrusted:customer, and is false
+```
+
+A step that must happen is guarded by what untrusted data can't skip: a `closes_when` milestone
+only it reaches, or a task, where a person decides.
 
 **The influence goes on with the run.** A run keeps what steered its start, and passes it on: a
 rule on its start counts it as read by its condition, so one that reaches or stops doesn't act,
@@ -1940,7 +1955,7 @@ Anything else is not a value: reading it is an error.
 | `ENGINE_INPUT` | error | a step gives the input the engine fills: the idempotency key | `idempotency_key is filled by the engine, never by a definition: remove it` |
 | `UNKNOWN_ROLE` | error | a role nobody registered: it counts for nothing when the case runs | `supprt is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead; use one of them, or ask the platform team to register it` |
 | `UNKNOWN_SOURCE` | error | a field is declared untrusted with a label nobody registered | `untrusted:custmer has a label nobody registered: the labels are customer, document, email, llm, web; use one of them, or ask the platform team to register it` |
-| `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are crm, documents, orders, policies, portal; use one of them, or ask the platform team to register it` |
+| `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are crm, documents, kyc, orders, policies, portal; use one of them, or ask the platform team to register it` |
 | `EXPRESSION_INVALID` | error | an expression reads something that isn't a value, mixes types, or names an outcome that can't happen | as above |
 | `APPROVAL_REQUIRED` | error | a high-risk step has no approval | `payments.refund@2 is high risk, and pay has no approval: add one` |
 | `APPROVAL_ROLE` | error | a role on an approval may not approve the step's risk | `adjuster may approve no risk, and payments.refund@2 is high risk: name a role that may approve high risk` |
