@@ -5,13 +5,17 @@ See docs/layers/12-releases.md (12a) and docs/guides/releases.md.
 
 import copy
 import json
+import shutil
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from ventoux.case.releases import (
     Changed,
     Outcome,
     Package,
+    PackageRefused,
     Record,
     Released,
     Reworded,
@@ -21,6 +25,7 @@ from ventoux.case.releases import (
     record,
 )
 from ventoux.testing import CATALOG
+from ventoux.tooling.releases import read_package
 
 ROOT = Path(__file__).parent.parent
 REFUND = ROOT / "examples" / "packages" / "refund"
@@ -175,3 +180,58 @@ def test_an_explicit_default_changes_no_digest() -> None:
     case["steps"]["review"]["repeatable"] = False
     case["steps"]["settle"]["max_age"] = {}
     assert next_release(packed(case, plans), records) == Unchanged(1)
+
+
+def refused(case: dict[str, Any], plans: list[dict[str, Any]]) -> str:
+    """Why the package of `case` and `plans` is refused."""
+    with pytest.raises(PackageRefused) as refusal:
+        packed(case, plans)
+    return str(refusal.value)
+
+
+def test_a_missing_plan_is_refused() -> None:
+    case, _ = written()
+    assert refused(case, []) == "refund-order@1 is run by a plan step and isn't in plans/: add it"
+
+
+def test_a_plan_nobody_runs_is_refused() -> None:
+    # Shipped and never run: fail closed, as a plan supplied under another reference is (D28).
+    case, plans = written()
+    spare = {**plans[0], "version": 2}
+    assert refused(case, [*plans, spare]) == (
+        "refund-order@2 is run by no plan step: remove it, or name it in a step"
+    )
+
+
+def test_a_plan_given_twice_is_refused() -> None:
+    case, plans = written()
+    assert refused(case, [*plans, plans[0]]) == (
+        "refund-order@1 is given twice: keep one file for it"
+    )
+
+
+def test_a_stray_file_is_refused(tmp_path: Path) -> None:
+    folder = copied(tmp_path)
+    (folder / "notes.txt").write_text("to do")
+    (folder / "plans" / "draft.yaml").write_text("plan: draft")
+    with pytest.raises(PackageRefused) as refusal:
+        read_package(folder)
+    assert str(refusal.value) == (
+        "notes.txt isn't part of a package: a package holds case.json and plans/\n"
+        "plans/draft.yaml isn't a plan's file: each plan is a .json file"
+    )
+
+
+def test_a_plans_change_is_a_release_of_its_package() -> None:
+    case, plans = written()
+    records = released_once(case, plans)
+    plans[0]["states"]["approve_refund"]["approval"]["timeout"] = "72h"
+    path = "plans.refund-order@1.states.approve_refund.approval.timeout"
+    assert next_release(packed(case, plans), records) == Released(2, Changed(behaviour=(path,)))
+
+
+def copied(tmp_path: Path) -> Path:
+    """The example package, copied where a test may change it."""
+    folder = tmp_path / "refund"
+    shutil.copytree(REFUND, folder)
+    return folder
