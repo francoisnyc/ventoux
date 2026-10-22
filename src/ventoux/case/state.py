@@ -207,6 +207,8 @@ class CaseState:
     # The version of Ventoux's deciding code the case decides as, set once when it opens and
     # never by itself after (brief, D51).
     engine: int = ENGINE
+    # The release it opened on, as people name it (`refund 1`); None for a draft (brief, D51).
+    release: str | None = None
 
 
 @dataclass(frozen=True)
@@ -222,6 +224,9 @@ class Opened:
     # The engine version the case opens at, learnt by the driver: on Temporal from its patch
     # markers, in memory this code's own. Event data, so `decide` reads no Temporal (brief, D51).
     engine: int = field(kw_only=True, default=ENGINE)
+    # The release it opens on, as people name it (`refund 1`), once the driver has checked it is
+    # that release's package; None: a draft (brief, D51).
+    release: str | None = field(kw_only=True, default=None)
 
 
 @dataclass(frozen=True)

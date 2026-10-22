@@ -108,6 +108,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
             for t in state.timers
         ],
         "engine": state.engine,  # the version it decides as, crossing as it is (brief, D51)
+        "release": state.release,  # the release it opened on; None for a draft (brief, D51)
     }
 
 
@@ -240,6 +241,7 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         # None in a state from before 12b: it was decided by version 1. A version this code
         # doesn't know raises, never read as an older one (brief, D51).
         engine=known(data.get("engine", 1)),
+        release=data.get("release"),  # None in a state from before 12b: a draft
     )
 
 

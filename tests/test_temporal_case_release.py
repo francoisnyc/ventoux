@@ -6,19 +6,59 @@ See docs/layers/12-releases.md (12b).
 """
 
 import asyncio
+import copy
+import json
+import shutil
+from collections.abc import Awaitable, Mapping
+from dataclasses import replace
 from pathlib import Path
+from typing import Any, ClassVar
 
+import pytest
+from temporalio import workflow
 from temporalio.api.enums.v1 import EventType
-from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHistory
+from temporalio.client import (
+    Client,
+    WorkflowExecutionStatus,
+    WorkflowFailureError,
+    WorkflowHistory,
+)
+from temporalio.exceptions import ApplicationError
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_temporal_approvals import EveryEventCases
-from test_temporal_case import QUEUE, REFUND, CasesWithPlans, on_temporal, replay
+from test_temporal_case import (
+    LARGE,
+    PEOPLE,
+    QUEUE,
+    REFUND,
+    REVIEW_FORM,
+    CasesWithPlans,
+    child_waiting_at,
+    on_temporal,
+    replay,
+    reported,
+    runs_of,
+    unapproved_refund_order,
+)
 
+from ventoux.case.releases import Record
 from ventoux.case.state import CaseState
+from ventoux.temporal import client as plans
 from ventoux.temporal.carried import state_as_data
-from ventoux.temporal.cases import CaseStart, CaseWorkflow
-from ventoux.testing import DevelopmentCases, fixture_converter
+from ventoux.temporal.cases import (
+    CaseReport,
+    CaseStart,
+    CaseWorkflow,
+    answer,
+    close,
+    opening,
+    propose,
+    start_case,
+)
+from ventoux.temporal.converter import keys_of
+from ventoux.testing import CATALOG, DevelopmentCases, fixture_converter
+from ventoux.tooling.releases import FolderStore, release
 
 HERE = Path(__file__).parent / "histories"
 
@@ -65,3 +105,154 @@ def test_an_unknown_engine_version_waits_for_its_code() -> None:
     kinds, running = on_temporal(scenario)
     assert "EVENT_TYPE_WORKFLOW_TASK_FAILED" in kinds
     assert running
+
+
+# --- Slice 4: a case opens on its release ---
+
+PACKAGE = Path(__file__).parent.parent / "examples" / "packages" / "refund"
+
+
+def released(tmp_path: Path, proposed: bool = False) -> Record:
+    """The example package released once, as CI would, and its record read back; `proposed`:
+    with `settle` started only when a team lead proposes it."""
+    folder = tmp_path / "refund"
+    shutil.copytree(PACKAGE, folder)
+    if proposed:
+        case = json.loads((folder / "case.json").read_text())
+        case["steps"]["settle"] |= {"automatic": False, "proposed_by": ["support-lead"]}
+        # Open until a person closes it, so it continues as new before settle is proposed.
+        case["stays_open"] = True
+        case["close_reasons"] = {"settled": {"display": {"title": "Settled"}, "roles": ["support"]}}
+        (folder / "case.json").write_text(json.dumps(case))
+    store = FolderStore(tmp_path / "releases")
+    release(folder, store, "4f2a9c1", CATALOG)
+    return store.get("refund", 1)
+
+
+def kinds_of(history: WorkflowHistory) -> list[str]:
+    return [EventType.Name(event.event_type) for event in history.events]
+
+
+def test_a_case_opens_on_its_release(tmp_path: Path) -> None:
+    refund_1 = released(tmp_path)
+
+    async def scenario(client: Client) -> tuple[CaseReport, WorkflowHistory]:
+        case = await start_case(client, DevelopmentCases, refund_1, LARGE, "refund-1", QUEUE)
+        now = await reported(case, lambda now: now.waiting_at == ["review#1"])
+        return now, await case.fetch_history()
+
+    now, history = on_temporal(scenario)
+    assert (now.release, now.engine) == ("refund 1", 1)
+    assert now.history[:2] == [
+        "opened on refund 1, engine 1",
+        "opened by system:opener, with amount and order_id",
+    ]
+    # With version 1 alone, nothing is asked and no marker written (brief, D51).
+    assert "EVENT_TYPE_MARKER_RECORDED" not in kinds_of(history)
+
+
+def test_a_draft_is_as_before() -> None:
+    async def scenario(client: Client) -> tuple[CaseReport, WorkflowHistory]:
+        case = await start_case(client, DevelopmentCases, REFUND, LARGE, "refund-1", QUEUE)
+        now = await reported(case, lambda now: now.waiting_at == ["review#1"])
+        return now, await case.fetch_history()
+
+    now, history = on_temporal(scenario)
+    assert (now.release, now.engine) == ("draft", 1)
+    assert now.history[0] == "opened by system:opener, with amount and order_id"
+    assert "EVENT_TYPE_MARKER_RECORDED" not in kinds_of(history)
+
+
+def test_a_start_that_isnt_its_release_is_refused(tmp_path: Path) -> None:
+    # The case checks what it was given, depending on nothing the client did (brief, D34, D51):
+    # a start whose case or plans aren't the release's package is refused, nothing decided.
+    refund_1 = released(tmp_path)
+    start = opening(refund_1, LARGE)
+    assert start.release is not None
+    # A valid case, but not refund 1's: settle no longer waits for the review.
+    definition = copy.deepcopy(start.definition)
+    definition["steps"]["settle"]["requires"] = []
+    tampered = replace(start, definition=definition)
+
+    async def scenario(client: Client) -> Any:
+        keys_of(client).create("refund-1")  # as `start_case` does: its failure is sealed with it
+        case = await client.start_workflow(
+            DevelopmentCases.run, tampered, id="refund-1", task_queue=QUEUE
+        )
+        with pytest.raises(WorkflowFailureError) as failed:
+            await case.result()
+        return failed.value.cause
+
+    cause = on_temporal(scenario)
+    assert isinstance(cause, ApplicationError) and cause.type == "CaseRefused"
+    assert cause.message == (
+        "refund-1 can't open on refund 1: what it was given isn't refund 1's package"
+    )
+
+
+def settled_on(
+    client: Client, cases: type[CaseWorkflow], refund_1: Record, proposing: bool = False
+) -> Awaitable[tuple[CaseReport, str | None]]:
+    """Open a case of `cases` on refund 1, review it, and answer its plan's approval: its report
+    once settled, and where the plan waited."""
+
+    async def scenario() -> tuple[CaseReport, str | None]:
+        case = await start_case(client, cases, refund_1, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+        if proposing:
+            for _ in range(100):  # until the case has continued as new since it opened
+                first, current = await runs_of(client, "refund-1")
+                if current != first:
+                    break
+                await asyncio.sleep(0.05)
+            assert current != first
+            await propose(case, "settle", "lee", PEOPLE["lee"])
+        plan = await child_waiting_at(client, "refund-1/settle#1", "approve_refund#1")
+        waited = (await plans.report(plan)).waiting_at
+        await plans.answer(plan, "approve_refund#1", "approve", "sam", PEOPLE["sam"])
+        await plan.result()
+        if proposing:
+            await reported(case, lambda now: "settle#1 done" in now.history)
+            await close(case, "settled", "ana", PEOPLE["ana"])
+        return await case.result(), waited
+
+    return scenario()
+
+
+def test_the_release_and_engine_cross_continue_as_new(tmp_path: Path) -> None:
+    # A case switching after every event keeps its release and engine version, and its plan,
+    # proposed after a switch, comes from the release it carries: this worker supplies no plans at
+    # all (brief, D27, D51).
+    refund_1 = released(tmp_path, proposed=True)
+    ended, waited = on_temporal(
+        lambda client: settled_on(client, EveryEventCases, refund_1, proposing=True),
+        cases=EveryEventCases,
+    )
+    assert waited == "approve_refund#1"
+    assert (ended.status, ended.release, ended.engine) == ("closed", "refund 1", 1)
+    assert "settle#1 done" in ended.history
+
+
+# Temporal: a deployment whose own `refund-order@1` was changed under the same reference: it pays
+# straight after the lookup, with no approval, so the engine stops it.
+@workflow.defn(name="ventoux.case")
+class ChangedPlans(CaseWorkflow):
+    catalog = DevelopmentCases.catalog
+    plans: ClassVar[Mapping[str, Any]] = {
+        "refund-order@1": unapproved_refund_order() | {"version": 1}
+    }
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+def test_a_released_case_runs_its_releases_plans(tmp_path: Path) -> None:
+    # The deployment's changed plan never reaches a case opened on refund 1: it runs refund 1's,
+    # which waits for a team lead (brief, D28, D51).
+    refund_1 = released(tmp_path)
+    ended, waited = on_temporal(
+        lambda client: settled_on(client, ChangedPlans, refund_1), cases=ChangedPlans
+    )
+    assert waited == "approve_refund#1"
+    assert ended.status == "closed" and ended.needs_attention == []

@@ -240,18 +240,39 @@ def key_of(model: BaseModel, name: str) -> str:
     return alias if alias is not None else name
 
 
-def behaviour(released: Package) -> object:
-    """The package's behaviour, as plain data: its case, then its plans by reference."""
+def behaviour(case: CaseDefinition, plans: Mapping[str, Plan]) -> object:
+    """A package's behaviour, as plain data: its case, then its plans in their references' order."""
     return {
-        "case": canonical(released.case),
-        "plans": {"#map": [[ref, canonical(plan)] for ref, plan in released.plans.items()]},
+        "case": canonical(case),
+        "plans": {"#map": [[ref, canonical(plans[ref])] for ref in sorted(plans)]},
     }
 
 
 def digest(released: Package) -> Hash:
     """The behaviour digest: SHA-256 of the behaviour written canonically (brief, D50)."""
-    text = json.dumps(behaviour(released), sort_keys=True, separators=(",", ":"))
+    return behaviour_digest(released.case, released.plans)
+
+
+def behaviour_digest(case: CaseDefinition, plans: Mapping[str, Plan]) -> Hash:
+    """The digest of a case and its plans, however they were read."""
+    text = json.dumps(behaviour(case, plans), sort_keys=True, separators=(",", ":"))
     return Hash(METHOD, hashlib.sha256(text.encode()).hexdigest())
+
+
+def is_release(case: CaseDefinition, plans: Mapping[str, object], given: Hash) -> bool:
+    """Whether `case` and `plans`, stored data by reference as a case's start holds them, are the
+    package whose digest is `given`: a method this code knows, each plan under its own reference,
+    and the same digest. A case checks it when it opens, depending on nothing the client did
+    (brief, D51)."""
+    if given.method != METHOD:
+        return False
+    try:
+        parsed = {reference: parse_plan(data) for reference, data in plans.items()}
+    except PlanInvalid:
+        return False
+    if any(f"{plan.plan}@{plan.version}" != reference for reference, plan in parsed.items()):
+        return False
+    return behaviour_digest(case, parsed) == given
 
 
 # --- What changed --------------------------------------------------------------------------------

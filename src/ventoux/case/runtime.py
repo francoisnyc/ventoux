@@ -364,6 +364,9 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
     refuse_unless_wrapped(case, event.file, CaseRefused)
     state.opened_by = event.by
     state.engine = known(event.engine)  # set once, here, never by itself after (brief, D51)
+    state.release = event.release
+    if event.release is not None:  # a draft's history is as it was before releases
+        state.history.append(f"opened on {event.release}, engine {state.engine}")
     origin = OPENER if event.by is None else f"person:{event.by}"
     for name, value in event.file.items():
         state.values[name] = value
