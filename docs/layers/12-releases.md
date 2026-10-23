@@ -1381,10 +1381,11 @@ or, where the code was written with the seam, the rule was taken out and its tes
 
 ## 12e. Activation
 
-Status: drafted 2026-10-23, from `main` at `2fde255` (12d merged, #45). Choices 60 to 80 put, each
-with a recommendation; not answered yet. The warm-up (learning question 28) put and answered, left open (recorded in the log). Nothing built:
-the histories from before 12e are recorded and replayed first, as slice 0, once the choices are
-answered.
+Status: drafted 2026-10-23, from `main` at `2fde255` (12d merged, #45); the histories from before
+12e recorded and replayed first (slice 0). Answered the same day: choices 60 to 80, all as
+recommended, with four changes, written into choices 67, 68, 76 and 77 below, each marked
+*Changed in the answers*, and one line for the cases guide (choice 67). The warm-up (learning
+question 28) put and answered, left open (recorded in the log).
 
 User-facing description, written first once you agree: `docs/guides/releases.md`, "Activating a
 release in an environment" and "Rolling back and retiring"; `docs/guides/cases.md`, "Running a
@@ -1593,6 +1594,14 @@ Numbered on from 12d's. Answer by number.
     *Recommended.* Set aside: listing open cases by a search attribute (the time-skipping server
     doesn't list workflows, and the registry needs the list inside its own decisions, to refuse a
     retirement).
+    *Changed in the answers:* **a case ended from outside never blocks its release's retirement
+    for ever.** At a retirement the registry asks Temporal, through an activity of its own
+    (`ventoux.registry.ended`, its answer in the registry's history), how each case listed on the
+    release stands (`DescribeWorkflowExecution`, which the time-skipping server implements); it
+    drops each that has ended, saying so (`refund-7 ended (terminated) without saying it closed:
+    no longer open on refund 1`), and refuses only for the rest. And the cases guide says that a
+    case's workflow can't end while its registry is unreachable, which delays forgetting it
+    (D32) too: the safe side.
 
 68. **A case checks that its release is the registry's, from its history alone** (D51, D53: "12e's
     environment registry is where the case can check the release itself").
@@ -1616,6 +1625,11 @@ Numbered on from 12d's. Answer by number.
     nothing the client did. *Recommended.* Set aside: a signal to the registry and a signal back
     (the case would wait on a second workflow's reply, with no retry of its own); trusting the
     client's start in an environment (D53's interim, which this choice ends).
+    *Changed in the answers:* **the case also checks the task queue it opens on is the one its
+    release was activated on.** Activation checked those workers only, and a case on another queue
+    would run on workers nobody checked: `refund-7 can't open on refund 2 on refunds-old:
+    production activated it on refunds`. The case says its own queue (`workflow.info()`, recorded
+    in its history), and the registry compares.
 
 69. **Retiring: `ventoux retire PACKAGE RELEASE --environment ENV --by PERSON`.** Refused while the
     release is active (`refund 1 is active in production: activate another first`) or while a
@@ -1698,6 +1712,10 @@ Numbered on from 12d's. Answer by number.
 
     *Recommended.* Set aside: a monitoring workflow inside Temporal (a schedule and an activity
     describing queues: more moving parts than a command a cron runs).
+    *Changed in the answers:* **the check covers every release that is active or has open cases,**
+    each on the queue it was activated on (D5: "an old contract version stays served while any
+    active release or open case uses it"). A deploy dropping `payments.refund@2` while `refund 1`
+    cases are open fails the check, not only those cases' schedule-to-start.
 
 77. **What the tests run on.** The time-skipping server for everything it can: manifests, the
     registry, opening, closing, migrating, retiring, bindings, drafts, schedule-to-start. The
@@ -1709,6 +1727,8 @@ Numbered on from 12d's. Answer by number.
     choice 63), the tests give them, and the one function calling `DescribeTaskQueue` goes untested
     against a server: cheaper, but the call the curriculum's negative tests rest on would be
     proven only by reading it.
+    *Changed in the answers:* **yes to the dev server,** with a CI cache step for the CLI; a test
+    that can't start it fails, never skips.
 
 78. **Histories recorded before 12e replay, recorded first** (slice 0): a draft waiting, a released
     case waiting for an approval, one continued as new, a migrated case. 12e's changes to the case

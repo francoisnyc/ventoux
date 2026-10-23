@@ -1,0 +1,79 @@
+{
+  "events": [
+    {
+      "eventId": "1",
+      "eventTime": "2026-10-23T21:45:05.940Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED",
+      "workflowExecutionStartedEventAttributes": {
+        "workflowType": {
+          "name": "ventoux.case"
+        },
+        "taskQueue": {
+          "name": "cases"
+        },
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJkZWZpbml0aW9uIjogeyJjYXNlIjogInJlZnVuZCIsICJkaXNwbGF5IjogeyJ0aXRsZSI6ICJDdXN0b21lciByZWZ1bmQifSwgImZpZWxkcyI6IHsib3JkZXJfaWQiOiB7InR5cGUiOiAicmVmZXJlbmNlIiwgInN5c3RlbSI6ICJvcmRlcnMiLCAiZGlzcGxheSI6IHsidGl0bGUiOiAiT3JkZXIifX0sICJhbW91bnQiOiB7InR5cGUiOiAibnVtYmVyIiwgImRpc3BsYXkiOiB7InRpdGxlIjogIkFtb3VudCByZXF1ZXN0ZWQifX0sICJhcHByb3ZlZF9hbW91bnQiOiB7InR5cGUiOiAibnVtYmVyIiwgImRpc3BsYXkiOiB7InRpdGxlIjogIkFtb3VudCBhcHByb3ZlZCJ9fX0sICJzdGVwcyI6IHsicmV2aWV3IjogeyJraW5kIjogInRhc2siLCAiZGlzcGxheSI6IHsidGl0bGUiOiAiUmV2aWV3IHRoZSByZWZ1bmQgcmVxdWVzdCJ9LCAicm9sZXMiOiBbInN1cHBvcnQiXSwgIm91dGNvbWVzIjogeyJhcHByb3ZlIjogeyJkaXNwbGF5IjogeyJ0aXRsZSI6ICJBcHByb3ZlIHRoZSByZWZ1bmQifSwgInNldHMiOiBbImFwcHJvdmVkX2Ftb3VudCJdfSwgInJlamVjdCI6IHsiZGlzcGxheSI6IHsidGl0bGUiOiAiUmVqZWN0IHRoZSByZWZ1bmQifX19fSwgInBheSI6IHsia2luZCI6ICJhY3Rpdml0eSIsICJkaXNwbGF5IjogeyJ0aXRsZSI6ICJSZWZ1bmQgdGhlIGN1c3RvbWVyIn0sICJhY3Rpdml0eSI6ICJwYXltZW50cy5yZWZ1bmRAMiIsICJpbnB1dHMiOiB7Im9yZGVyX2lkIjogeyJ2YXIiOiAib3JkZXJfaWQifSwgImFtb3VudCI6IHsidmFyIjogImFwcHJvdmVkX2Ftb3VudCJ9fSwgIndoZW4iOiB7Ij09IjogW3sidmFyIjogInJldmlldy5vdXRjb21lIn0sICJhcHByb3ZlIl19LCAiYXBwcm92YWwiOiB7IndoZW4iOiB7Ij4iOiBbeyJ2YXIiOiAiYXBwcm92ZWRfYW1vdW50In0sIDEwMF19LCAicm9sZXMiOiBbInN1cHBvcnQtbGVhZCJdLCAiZGlzcGxheSI6IHsicmVhc29uIjogIlJlZnVuZHMgb3ZlciAxMDAgbmVlZCBhIHRlYW0gbGVhZCJ9fX0sICJjYWxsX2N1c3RvbWVyIjogeyJraW5kIjogInRhc2siLCAiZGlzcGxheSI6IHsidGl0bGUiOiAiQ2FsbCB0aGUgY3VzdG9tZXIgYWJvdXQgdGhlIGRlY2xpbmVkIHJlZnVuZCJ9LCAicm9sZXMiOiBbInN1cHBvcnQiXSwgInJlcXVpcmVzIjogWyJwYXkiXSwgIndoZW4iOiB7Ij09IjogW3sidmFyIjogInBheS5vdXRjb21lIn0sICJkZWNsaW5lZCJdfSwgIm91dGNvbWVzIjogeyJjYWxsZWQiOiB7ImRpc3BsYXkiOiB7InRpdGxlIjogIkN1c3RvbWVyIGNhbGxlZCJ9fX19fSwgInNlcXVlbmNlIjogWyJyZXZpZXciLCAicGF5Il19LCAiZmlsZSI6IHt9LCAib3BlbmVkX2J5IjogbnVsbCwgImNhcnJpZWQiOiB7ImNhc2UiOiAicmVmdW5kLTEvMTk0MjliMmQtNzRlZi00MDdhLWJkZGMtZTNhZWZlMDQxZTUzIiwgInZhbHVlcyI6IHsib3JkZXJfaWQiOiAib3JkLTEiLCAiYW1vdW50IjogMjUwRTAsICJyZXZpZXcub3V0Y29tZSI6ICJhcHByb3ZlIiwgImFwcHJvdmVkX2Ftb3VudCI6IDI1MEUwfSwgInNvdXJjZXMiOiB7Im9yZGVyX2lkIjogWyJzeXN0ZW06b3BlbmVyIl0sICJhbW91bnQiOiBbInN5c3RlbTpvcGVuZXIiXSwgInJldmlldy5vdXRjb21lIjogWyJwZXJzb246YW5hIl0sICJhcHByb3ZlZF9hbW91bnQiOiBbInBlcnNvbjphbmEiXX0sICJvYnRhaW5lZCI6IHsib3JkZXJfaWQiOiB7ImF0IjogMTc5Mjc5MTkwNSwgInJ1biI6IG51bGx9LCAiYW1vdW50IjogeyJhdCI6IDE3OTI3OTE5MDUsICJydW4iOiBudWxsfSwgInJldmlldy5vdXRjb21lIjogeyJhdCI6IDE3OTI3OTE5MDUsICJydW4iOiBudWxsfSwgImFwcHJvdmVkX2Ftb3VudCI6IHsiYXQiOiAxNzkyNzkxOTA1LCAicnVuIjogbnVsbH19LCAibWlsZXN0b25lcyI6IFtdLCAicmVmcmVzaGluZyI6IHt9LCAicnVucyI6IFt7ImVudHJ5IjogInJldmlldyMxIiwgInN0ZXAiOiAicmV2aWV3IiwgInN0YXR1cyI6ICJkb25lIiwgInJlYXNvbiI6ICIiLCAiYXBwcm92ZWQiOiBudWxsLCAicmVmcmVzaCI6IGZhbHNlLCAiZXhjbHVkZWQiOiB7fSwgInN0ZWVyZWQiOiBbXSwgInN0YXJ0ZWQiOiB0cnVlLCAic3RvcF9yZXF1ZXN0ZWQiOiAiIiwgImhlbGRfcmV0cnkiOiAiIn1dLCAiYXBwcm92YWxzIjogeyJwYXkiOiB7ImVudHJ5IjogInBheS5hcHByb3ZhbCMxIiwgInN0ZXAiOiAicGF5IiwgInNlZW4iOiB7ImFwcHJvdmVkX2Ftb3VudCI6IDI1MEUwLCAib3JkZXJfaWQiOiAib3JkLTEiLCAicmV2aWV3Lm91dGNvbWUiOiAiYXBwcm92ZSJ9LCAiY291bnQiOiAxLCAiYXBwcm92ZWQiOiB7fX19LCAiZ2l2ZW4iOiB7fSwgImFza2VkIjogeyJwYXkiOiAxfSwgIndpdGhkcmF3biI6IHt9LCAicHJvcG9zZXJzIjoge30sICJ3YWl0aW5nX3RvX3N0YXJ0IjogW10sICJwcm9wb3NlZF9ieV9ydWxlcyI6IHt9LCAiYXJyaXZlZCI6IHt9LCAid2FpdGluZyI6IHsicGF5LmFwcHJvdmFsIzEiOiAiYXBwcm92YWwgb2YgcGF5IGJ5IHN1cHBvcnQtbGVhZCJ9LCAib3BlbmVkX2J5IjogbnVsbCwgInBoYXNlIjogIm9wZW4iLCAiY2xvc2VkX2JlY2F1c2UiOiAiIiwgImZsYWdzIjogW10sICJoaXN0b3J5IjogWyJvcGVuZWQgb24gcmVmdW5kIDEsIGVuZ2luZSAyIiwgIm9wZW5lZCBieSBzeXN0ZW06b3BlbmVyLCB3aXRoIGFtb3VudCBhbmQgb3JkZXJfaWQiLCAic3RhcnRlZCByZXZpZXcjMTogd2FpdGluZyBmb3IgYXBwcm92ZSBvciByZWplY3QgYnkgc3VwcG9ydCIsICJhbmEgYW5zd2VyZWQgcmV2aWV3IzEgYXBwcm92ZSBhcyBzdXBwb3J0LCBzZXR0aW5nIGFwcHJvdmVkX2Ftb3VudCIsICJyZXZpZXcjMSBkb25lIiwgImFza2VkIHBheS5hcHByb3ZhbCMxOiBhcHByb3ZhbCBvZiBwYXkgYnkgc3VwcG9ydC1sZWFkIl0sICJmaXJpbmdzIjogW10sICJtb21lbnRzIjogW10sICJydWxlX3N0YXJ0cyI6IFtdLCAic3RhcnRlZF9ieV9ydWxlcyI6IFtdLCAidGltZXJzIjogW10sICJlbmdpbmUiOiAyLCAicmVsZWFzZSI6ICJyZWZ1bmQgMSIsICJjaGFuZ2VzIjoge30sICJyZXF1ZXN0ZWQiOiAwfSwgInJlbGVhc2UiOiB7Im5hbWUiOiAicmVmdW5kIiwgInJlbGVhc2UiOiAxLCAiZGlnZXN0IjogeyJtZXRob2QiOiAxLCAic2hhMjU2IjogImZlMGEyMWJhMDZmNWQ1OTI1N2IxYmRiYjU0MTlkNTlhMWFkM2E1NjdiYmIxZjEwMGQ5Y2FlNmEwYThkM2QyYzAifSwgInBsYW5zIjoge319fQ=="
+            }
+          ]
+        },
+        "workflowExecutionTimeout": "315360000s",
+        "workflowRunTimeout": "315360000s",
+        "workflowTaskTimeout": "10s",
+        "continuedExecutionRunId": "19429b2d-74ef-407a-bddc-e3aefe041e53",
+        "lastCompletionResult": {},
+        "originalExecutionRunId": "0c1054f0-eab4-4f18-bdf0-0f08506093b3",
+        "identity": "461@vm",
+        "firstExecutionRunId": "19429b2d-74ef-407a-bddc-e3aefe041e53",
+        "attempt": 1,
+        "firstWorkflowTaskBackoff": "0s"
+      }
+    },
+    {
+      "eventId": "2",
+      "eventTime": "2026-10-23T21:45:05.940Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "cases"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "3",
+      "eventTime": "2026-10-23T21:45:05.941Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "461@vm",
+        "historySizeBytes": "3416"
+      }
+    },
+    {
+      "eventId": "4",
+      "eventTime": "2026-10-23T21:45:06.202Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "461@vm",
+        "binaryChecksum": "2fa55552bb00ca2767a3206986e16126",
+        "sdkMetadata": {
+          "coreUsedFlags": [
+            2,
+            1,
+            3
+          ],
+          "sdkName": "temporal-python",
+          "sdkVersion": "1.34.0"
+        },
+        "meteringMetadata": {}
+      }
+    }
+  ]
+}
