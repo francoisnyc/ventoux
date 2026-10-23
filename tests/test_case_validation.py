@@ -535,7 +535,7 @@ def test_an_unchecked_deadlock_still_runs_safely() -> None:
         people={"ana": ["adjuster"]},
     )
     assert run.closed
-    assert run.history[-1] == "closed: nothing left to do"
+    assert run.history[-1] == "closed: nothing left to do; paid not reached"  # #44's review
     assert any(line.startswith("check#1 done") for line in run.history)
     assert not any(line.startswith(("started assess", "scheduled pay")) for line in run.history)
 

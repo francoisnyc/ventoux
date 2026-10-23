@@ -397,7 +397,10 @@ as a payment, the new run's new key could make them happen twice (brief, D17, D2
 
 ## Closing a case
 
-A case closes by itself when nothing is left to do (brief, D10). Two definition keys change that:
+A case closes by itself when nothing is left to do (brief, D10). If it declares `closes_when`
+and closes that way without reaching it (a failed payment skipped, say), its last line says
+which it didn't reach: `closed: nothing left to do; paid not reached`. Two definition keys change
+that:
 `"closes_when": ["paid"]` closes it as soon as the milestones are reached, and `"stays_open":
 true` keeps it open when nothing is left to do, until a person closes it or `closes_when` does. A
 case whose steps all wait to be proposed needs `stays_open`: otherwise nothing is pending when it

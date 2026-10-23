@@ -37,6 +37,7 @@ from ventoux.testing import (
     retry,
     run_case,
     send,
+    skip,
 )
 
 ROOT = Path(__file__).parent.parent
@@ -1111,3 +1112,26 @@ def test_a_strict_workflow_graduates() -> None:
     assert graduated.reached("call_customer")  # at any time, while the payment ran
     assert not graduated.reached("notify")  # the letter, now optional, wasn't asked for
     assert graduated.reached("pay") and graduated.closed
+
+
+# --- Slice 9: from #44's review, a close says what it didn't reach ---
+
+
+def test_a_close_names_what_it_didnt_reach() -> None:
+    # A refund that closes once paid: its payment can never succeed, and is skipped. The case
+    # then closes with nothing left to do, never paid, and its last line says so (#44's review).
+    paid = copy.deepcopy(REFUND)
+    paid["closes_when"] = ["paid"]
+    paid["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    paid["steps"]["pay"]["reaches"] = ["paid"]
+    skipped = run_case(
+        paid,
+        file=SMALL,
+        answers=[SMALL_REVIEW, skip("pay#1", "omar"), ("case.change#1", "approve", "olga")],
+        people={**PEOPLE, "omar": ["operations"], "olga": ["operations"]},
+        activities={"payments.refund@2": account_closed},
+    )
+    assert skipped.history[-1] == "closed: nothing left to do; paid not reached"
+    # Reaching it closes the case as before, saying so.
+    closed = run_case(paid, file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE)
+    assert closed.history[-1] == "closed: paid reached"
