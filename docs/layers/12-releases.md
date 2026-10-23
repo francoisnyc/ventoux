@@ -1433,7 +1433,7 @@ branch where `@3`'s timeout differs:
 
 ```
 refund 2 not activated in production:
-payments.refund@3: worker refunds-b (build 7b0e311) serves it with hash 51aa1c09e4f2, and refund 2 needs 89420f53b3d3: deploy the build that serves the released contract
+payments.refund@3: worker refunds-b (build 7b0e311) serves it with hash 51aa1c09e4f2, and refund 2 needs c3e07d1a9b52: deploy the build that serves the released contract
 ```
 
 Once every worker polling `refunds` serves it with the right hash:
@@ -1648,7 +1648,7 @@ Numbered on from 12d's. Answer by number.
       record's hash.
     - **the curriculum's two negative tests:** `payments.refund@3: no worker on refunds serves it:
       deploy a build that does`; `payments.refund@3: worker refunds-b (build 7b0e311) serves it with
-      hash 51aa1c09e4f2, and refund 2 needs 89420f53b3d3: deploy the build that serves the released
+      hash 51aa1c09e4f2, and refund 2 needs c3e07d1a9b52: deploy the build that serves the released
       contract`. Also: `refunds-c polls refunds and published no manifest: it may serve anything`;
       `no worker polls refunds now`.
 
