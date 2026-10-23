@@ -1,7 +1,7 @@
 """What a case must show after every decision: nothing pending is silent (brief, D17, D24).
 
 An open case, whether or not it stays open, has nothing pending, or shows each pending item: an
-open run or approval in `waiting_for`; a failed run or rule in `needs_attention` (which lists
+open run, approval or change request in `waiting_for`; a failed run or rule in `needs_attention` (which lists
 every one); a running run as running work; a run an operator retried, an approval given, or a
 proposal waiting to start, by what it waits for; and a timer set, in `timers`, while its purpose
 lasts (brief, D44). See docs/layers/fix-retry-rejected.md, "The invariant".
@@ -42,13 +42,16 @@ def unshown(case: CaseDefinition, state: CaseState) -> list[str]:
                 pass  # in needs_attention, which lists every failed run
             case "running":
                 pass  # running work
-            case "done" | "rejected" | "cancelled":
+            case "done" | "rejected" | "cancelled" | "skipped":
                 pass  # ended: nothing pending
             case _:
                 assert_never(run.status)
     for approval in state.approvals.values():
         if approval.entry not in state.waiting:
             silent.append(f"{approval.entry} is open, and waiting_for doesn't list it")
+    for request in state.changes:  # a change request waits for its approver (brief, D52)
+        if request not in state.waiting:
+            silent.append(f"{request} is proposed, and waiting_for doesn't list it")
     for name, given in state.given.items():
         if not waits_for_what_can_let_it_start(case, state, name):
             silent.append(f"{given.entry} is given, and {name} waits for no fact or requirement")
@@ -66,7 +69,7 @@ def outlived(case: CaseDefinition, state: CaseState) -> list[str]:
     found: list[str] = []
     for timer in state.timers:
         said = f"{named(timer)} is set, and"
-        if runs.get(timer.run) in ("done", "rejected", "cancelled"):
+        if runs.get(timer.run) in ("done", "rejected", "cancelled", "skipped"):
             found.append(f"{said} {timer.run} has ended")
         elif close_held(case, state):
             found.append(f"{said} the close is held: it can never act")

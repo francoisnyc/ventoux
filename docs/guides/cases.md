@@ -429,6 +429,109 @@ flagged: pay#1 completed after the close was requested
 closed: duplicate, by ana
 ```
 
+## Changing an open case
+
+Some changes are none of the ones a definition offers. Ana typed 2500 for 250, and the payment
+that reads it hasn't run. A payment provider closed the account, so `pay#1` can never succeed,
+and nothing should be paid in its place. These are **change requests** (brief, D52): one person
+proposes the change, someone else approves it, and the case applies it, checking it again against
+the case as it is then. There are two kinds: an **edit** of a value in the case file, and a
+**skip** of a failed step run. Forgetting a case is the third, with a request of its own (the
+case data guide, "Forgetting a person"), under the same rules.
+
+**Who may.** Your platform team registers the roles that may, as for operating (brief, D26):
+
+```python
+catalog.register_role("support", edits=True)  # may edit a case file
+catalog.register_role("support-lead", approves="high", edits=True)
+catalog.register_role("operations", operates=True)  # may retry, and skip, a failed run
+```
+
+The proposer and the approver each hold such a role. Nobody approves a change they proposed, nor
+one to a case they opened; an edit is also never approved by whoever's answer gave the value it
+changes, and a skip never by anyone who may not approve the run it skips, nor whoever proposed or
+approved that run. Each is refused, saying why, and the request waits on.
+
+```python
+typo = run_case(refund, file={"order_id": "ord-1", "amount": 250},
+                answers=[("review", "approve", "ana", {"approved_amount": 2500}),
+                         edit("approved_amount", 250, "ana"),
+                         ("case.change#1", "approve", "lee")],
+                people=PEOPLE)
+assert typo.waiting_for == ["approval of pay by support-lead"]
+```
+
+```
+ana proposed case.change#1: edit approved_amount, to be approved by support or support-lead
+lee answered case.change#1 approve as support-lead
+applied case.change#1: approved_amount edited by ana, approved by lee
+withdrew pay.approval#1: approved_amount changed
+asked pay.approval#2: approval of pay by support-lead
+```
+
+The open approval of `pay` saw the old value, so it is withdrawn, every approval on it at once,
+and asked again; an approval already given lapses, and is asked again too. The edited value comes
+from the two people who decided it (`person:ana`, `person:lee`), so neither approves `pay` now:
+Sam does. A field declared untrusted keeps its mark: an edit never makes untrusted data trusted.
+
+**Checked twice.** A request is checked when it is proposed, and refused at once if it can't
+apply; then again when it is approved, against the case as it is then. An edit is refused:
+
+- of a field the case doesn't declare, such as an outcome or a step's output, which record what
+  happened: `pay.outcome is not a field of refund: only a declared field is edited`;
+- of a field that holds no value yet: `approved_amount holds no value yet: an edit changes a
+  value, never gives the first`;
+- with a value of another type, as an answer's form is: `approved_amount is a number, and the
+  edit gives a text`;
+- to the value the field already holds, which would only make the value read as someone else's:
+  `approved_amount already holds that value: an edit changes it`.
+
+And once approved, it isn't applied if the field changed since it was proposed: the approver
+judged a correction of a value that is gone: `case.change#1 not applied: approved_amount changed since
+it was proposed: propose it again`.
+
+**Skipping a failed run.** Nothing is skipped automatically (brief, D17): an operator proposes it,
+and another approves it.
+
+```python
+skipped = run_case(refund, file={"order_id": "ord-1", "amount": 40},
+                   answers=[("review", "approve", "ana", {"approved_amount": 40}),
+                            skip("pay#1", "omar"),
+                            ("case.change#1", "approve", "olga")],
+                   people=PEOPLE, activities={"payments.refund@2": account_closed})
+assert skipped.closed
+```
+
+```
+omar proposed case.change#1: skip pay#1, to be approved by operations
+olga answered case.change#1 approve as operations
+applied case.change#1: pay#1 skipped by omar, approved by olga
+closed: nothing left to do
+```
+
+A skipped run is neither done nor failed: a step that requires it doesn't start, it reaches no
+milestone, and nothing it would have given is in the case file. A close it held completes. Only a
+step's latest run, failed, is skipped: `pay#1 can't be skipped: it hasn't failed`.
+
+**A request is not pending work.** It doesn't keep the case open: when the case closes, each
+pending request is cancelled, saying so (`cancelled case.change#1: the case is closing`). While a
+failed run holds the case's close (see "Closing a case"), skipping that run is the request the
+case still takes.
+
+**What the history says.** Who proposed what, who approved or rejected it, what was applied or
+why not, naming people, roles, fields and runs, never a value: `lee answered case.change#1 reject as
+support-lead`, then `case.change#1 not applied: lee rejected it`.
+
+On Temporal, a request is proposed with `propose_change` and answered as any entry:
+
+```python
+await propose_change(case, "edit", "approved_amount", 250, "ana", ["support"])
+await answer(case, "case.change#1", "approve", "lee", ["support-lead"])
+```
+
+A sensitive field's new value crosses sealed, as an answer's form does (brief, D31), and a pending
+request crosses continue-as-new with the rest of the case (brief, D27).
+
 ## Plan steps
 
 A **plan step** runs a plan (see the plans guide) as one step of the case: several calls and

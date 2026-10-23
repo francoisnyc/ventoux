@@ -12,6 +12,7 @@ from typing import Any
 from ventoux.case.engine import known
 from ventoux.case.state import (
     CaseState,
+    ChangeRequest,
     GivenApproval,
     Moment,
     Obtained,
@@ -109,6 +110,21 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         ],
         "engine": state.engine,  # the version it decides as, crossing as it is (brief, D51)
         "release": state.release,  # the release it opened on; None for a draft (brief, D51)
+        # Each change request pending, in the order proposed: it crosses as it is, a sensitive
+        # field's new value sealed (brief, D31) (brief, D52).
+        "changes": {
+            entry: {
+                "entry": request.entry,
+                "kind": request.kind,
+                "target": request.target,
+                "by": request.by,
+                "role": request.role,
+                "value": request.value,
+                "against": request.against,
+            }
+            for entry, request in state.changes.items()
+        },
+        "requested": state.requested,
     }
 
 
@@ -242,6 +258,20 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
         # doesn't know raises, never read as an older one (brief, D51).
         engine=known(data.get("engine", 1)),
         release=data.get("release"),  # None in a state from before 12b: a draft
+        # None in a state from before 12c: no change was requested.
+        changes={
+            entry: ChangeRequest(
+                request["entry"],
+                request["kind"],
+                request["target"],
+                request["by"],
+                request["role"],
+                request["value"],
+                request["against"],
+            )
+            for entry, request in data.get("changes", {}).items()
+        },
+        requested=whole(data.get("requested", 0)),
     )
 
 

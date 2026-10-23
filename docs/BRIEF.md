@@ -1915,6 +1915,54 @@ D27, D28 and D50, whose text is kept.*
   of the release's plans doesn't reach a running plan, a known limit. *Added in the tutor review of
   12b, before D51 was merged.*
 
+### D52. Change requests: proposed, approved by someone else, checked again, applied
+
+*Drafted 2026-10-23, in layer 12c (`docs/layers/12-releases.md`, choices 29 to 41). Adds to D11,
+D17, D25, D26 and D32, whose text is kept.*
+
+- **One mechanism for every change to an open case** a definition doesn't offer: a person
+  proposes it, someone else approves it, and the case applies it. A request is an entry of the
+  case, `case.change#1`, numbered by the case (a dot no name holds, so it never shares a step's
+  runs' entries); it is answered approve or reject as any entry, and its state is the case's, so
+  it crosses continue-as-new (D27) and the case's history tells it all. Kinds are data around one
+  lifecycle: an **edit** of a declared field's value, and a **skip** of a failed step run; a
+  migration (layer 12d) is one more. Forgetting keeps its own request (D32), since a closed case
+  can be forgotten and its key goes after its workflow ends, and follows the same rules.
+- **Who may:** a role the platform team registers for the kind: `edits=True` for an edit, an
+  operating role for a skip (D26). Proposer and approver each hold one, stated with their message
+  (D22).
+- **Never approved by its proposer, nor by the person who opened the case** (D25: a change
+  decides as much as a step's run). An edit is also never approved by anyone whose answer gave
+  the field its current value (D11); a skip never by anyone who may not approve the run it skips
+  (D11, D25, D39), nor whoever proposed or approved that run. Refused, recorded, and the request
+  waits on.
+- **Checked when proposed, and again when applied,** against the case as it is then, depending
+  on nothing the proposal's check did. An edit is refused of anything but a declared field (an
+  outcome or an output records what happened), of a field that holds no value yet, with a value
+  of another type, unsealed for a sensitive field (D31), or to the value the field already holds;
+  and it isn't applied if the field changed since it was proposed (its digest kept, never its
+  value). A skip is refused unless its run is its step's latest, and failed.
+- **An edited value is the decision of its two people:** its sources are the proposer and the
+  approver, so neither approves a step that reads it (D11). A field declared untrusted keeps its
+  mark. An edit to the value already held is refused, so an untrusted value never becomes a
+  person's by being edited to itself.
+- **An edit lapses what saw the old value:** an open approval reading it is withdrawn, every
+  approval on the entry at once (D47); a given one lapses; each is asked again. An approval spent
+  on a failed run whose inputs the edit changed lapses with it, so the run's retry asks again.
+  So D25's "a lapse from a change request stops the step" reads: the step doesn't start on that
+  approval, and asks again, never needing an operator for it.
+- **A skipped run is neither done nor failed:** a step requiring it doesn't start, it reaches
+  nothing and gives nothing, its timers end, and a close it held completes (D34).
+- **A pending request is not pending work** (D10): it keeps no case open, and is cancelled,
+  saying so, when the case closes. While a failed run holds the close, skipping it is the one
+  request the case still takes.
+- **The history says each step,** naming people, roles, fields and runs, never a value.
+- **Engine version 2: the case excludes the opener from approving its forgetting.** It decides a
+  recorded path differently, so a case opened before it keeps 9c's rule (D51), and a history
+  recorded under version 1 replays as it was; a request proposed under this code refuses the
+  opener's approval whatever the case's version. Edits and skips are new events on new paths, and
+  need no version of their own.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step

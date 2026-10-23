@@ -29,9 +29,11 @@ from ventoux.case.memory import (
     wrapped,
 )
 from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
+from ventoux.case.requests import ChangeRefused
 from ventoux.case.runtime import CaseRefused, EventRefused
 from ventoux.case.state import (
     Answered,
+    ChangeProposed,
     CloseAsked,
     Completed,
     Event,
@@ -71,6 +73,8 @@ __all__ = [
     "Activity",
     "AnswerRefused",
     "CaseRefused",
+    "Change",
+    "ChangeRefused",
     "CloseRefused",
     "DevelopmentCases",
     "DevelopmentPlans",
@@ -83,6 +87,7 @@ __all__ = [
     "as_json",
     "check_workflow_contract",
     "close",
+    "edit",
     "finish",
     "load_definition",
     "propose",
@@ -284,8 +289,8 @@ for contract in (
 ):
     CATALOG.register(contract)
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
-CATALOG.register_role("support")
-CATALOG.register_role("support-lead", approves="high")
+CATALOG.register_role("support", edits=True)  # and may edit a case file (brief, D52)
+CATALOG.register_role("support-lead", approves="high", edits=True)
 # The case data guide's claim: an adjuster assesses it, and only fraud sees its fraud score.
 CATALOG.register_role("adjuster")
 CATALOG.register_role("fraud")
@@ -450,6 +455,13 @@ def run_case(
         if isinstance(item, Close):
             roles = frozenset(people.get(item.by, ()))
             events.append(CloseAsked(item.reason, item.by, roles, at=now))
+            continue
+        if isinstance(item, Change):
+            # Every value wrapped, as the client sends it: it can't tell which fields are
+            # sensitive (brief, D31).
+            value = None if item.value is None else Sensitive(as_json({"v": item.value})["v"])
+            roles = frozenset(people.get(item.by, ()))
+            events.append(ChangeProposed(item.kind, item.target, value, item.by, roles, at=now))
             continue
         if isinstance(item, Forget):
             events.append(
@@ -617,6 +629,21 @@ def forget(proposed_by: str, approved_by: str) -> Forget:
     """A script's approved request to forget the case: `forget("pia", "olu")` (brief, D32). On
     Temporal it is its own workflow, `<case ID>/forget`; here it reaches the case as approved."""
     return Forget(proposed_by, approved_by)
+
+
+class Change(NamedTuple):
+    """A scripted change request: `by` proposes a change of `kind` to `target` (brief, D52)."""
+
+    kind: str
+    target: str  # the field to edit, or the run to skip
+    value: Any  # an edit's new value; None for a skip
+    by: str
+
+
+def edit(field: str, value: Any, who: str) -> Change:
+    """A script's proposed edit: `edit("approved_amount", 250, "ana")`. Someone else approves it
+    by answering its entry: `("case.change#1", "approve", "lee")` (brief, D52)."""
+    return Change("edit", field, value, who)
 
 
 class ShownTo(NamedTuple):
