@@ -8,6 +8,7 @@ See docs/layers/12-releases.md (12d).
 
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from temporalio.client import Client, WorkflowHistory
 from test_migrations import PEOPLE, REFUND_1, REFUND_2, REFUND_3, RENAMES
@@ -19,6 +20,7 @@ from ventoux.temporal.cases import (
     CaseWorkflow,
     PreviewAnswer,
     answer,
+    case_handle,
     preview_migrations,
     propose_migration,
     report,
@@ -107,3 +109,46 @@ def test_a_cohort_preview_names_every_case() -> None:
     assert seen["refund-2"] == PreviewAnswer(["the case is closed: nothing changes it"], [])
     assert seen["refund-9"] == PreviewAnswer(["refund-9 is not a case: no workflow has its ID"], [])
     assert after == before
+
+
+# --- Slice 10: the guide ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "releases.md").read_text()
+SNIPPET = (
+    GUIDE.split("## Moving open cases to a later release\n")[1]
+    .split("\n## ")[0]
+    .split("```python\n")[3]
+    .split("```")[0]
+)
+
+
+def test_the_guides_cohort_example_runs_as_written() -> None:
+    # The releases guide's preview and proposals on Temporal, run as written inside a coroutine,
+    # as a client would (our own documentation, never a definition).
+    code = "async def snippet():\n" + "".join(f"    {line}\n" for line in SNIPPET.splitlines())
+
+    async def scenario(client: Client) -> list[list[str]]:
+        cohort = ["refund-A-1001", "refund-A-1002"]
+        for id in cohort:
+            case = await start_case(client, DevelopmentCases, REFUND_1, LARGE, id, QUEUE)
+            await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+            await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        namespace: dict[str, Any] = {
+            "client": client,
+            "RefundCases": DevelopmentCases,
+            "refund_3": REFUND_3,
+            "renames": RENAMES,
+            "preview_migrations": preview_migrations,
+            "propose_migration": propose_migration,
+            "case_handle": case_handle,
+        }
+        exec(code, namespace)  # noqa: S102
+        await namespace["snippet"]()
+        waiting = []
+        for id in cohort:
+            case = case_handle(client, DevelopmentCases, id)
+            now = await reported(case, lambda now: "case.change#1" in now.waiting_at)
+            waiting.append(now.waiting_at)
+        return waiting
+
+    assert on_temporal(scenario) == [["pay.approval#1", "case.change#1"]] * 2

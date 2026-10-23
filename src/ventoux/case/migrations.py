@@ -224,7 +224,7 @@ def depending(
         if (new := renamed(migration, "steps", step)) not in target.steps:
             wait = ", or migrate after it finishes" if run.status == "running" else ""
             problems.append(
-                f"{run.entry} is {run.status}, and {label} has no step {new}: map it{wait}"
+                f"{run.entry} {state_of(run)}, and {label} has no step {new}: map it{wait}"
             )
         elif run.status in UNTIL:
             problems += unfinished(case, target, migration, run, new)
@@ -263,6 +263,23 @@ def depending(
     return list(dict.fromkeys(problems))  # each said once
 
 
+# Each status of a run, as a refusal says it: `pay#1 is running`, `pay#1 failed`.
+STATES = {
+    "open": "is open",
+    "running": "is running",
+    "done": "is done",
+    "rejected": "was rejected",
+    "failed": "failed",
+    "retrying": "is being retried",
+    "cancelled": "was cancelled",
+    "skipped": "was skipped",
+}
+
+
+def state_of(run: StepRun) -> str:
+    return STATES[run.status]
+
+
 # What a run that hasn't ended waits for, as a refusal tells when to migrate.
 UNTIL = {
     "open": "it is answered",
@@ -281,7 +298,7 @@ def unfinished(
     before, after, label = case.steps[run.step], target.steps[new], migration.label
     when = f"migrate after {UNTIL[run.status]}"
     if type(before) is not type(after):
-        return [f"{run.entry} is {run.status}, and {label}'s {new} is another kind of step: {when}"]
+        return [f"{run.entry} {state_of(run)}, and {label}'s {new} is another kind of step: {when}"]
     if (
         isinstance(before, CallStep)
         and isinstance(after, CallStep)
@@ -289,14 +306,14 @@ def unfinished(
     ):
         return [
             (
-                f"{run.entry} is {run.status} on {before.called}, and {label}'s {new} calls "
+                f"{run.entry} {state_of(run)} on {before.called}, and {label}'s {new} calls "
                 f"{after.called}: {when}"
             )
         ]
     if isinstance(before, PlanStep) and isinstance(after, PlanStep) and before.plan != after.plan:
         return [
             (
-                f"{run.entry} is {run.status} on {before.plan}, and {label}'s {new} runs "
+                f"{run.entry} {state_of(run)} on {before.plan}, and {label}'s {new} runs "
                 f"{after.plan}: {when}"
             )
         ]

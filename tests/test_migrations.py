@@ -22,6 +22,7 @@ from ventoux.case.definition import parse_case
 from ventoux.case.migrations import migration_of
 from ventoux.case.releases import Written
 from ventoux.case.runtime import preview_migration
+from ventoux.core.catalog import Catalog
 from ventoux.testing import (
     CATALOG,
     START,
@@ -535,7 +536,7 @@ def test_running_work_finishes_on_its_contract() -> None:
             activities={"payments.refund@2": account_closed},
         )
     assert str(failed.value) == (
-        "pay#1 is failed on payments.refund@2, and refund 2's pay calls orders.lookup@1: "
+        "pay#1 failed on payments.refund@2, and refund 2's pay calls orders.lookup@1: "
         "migrate after it is retried or skipped"
     )
 
@@ -1135,3 +1136,101 @@ def test_a_close_names_what_it_didnt_reach() -> None:
     # Reaching it closes the case as before, saying so.
     closed = run_case(paid, file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE)
     assert closed.history[-1] == "closed: paid reached"
+
+
+# --- Slice 10: the guide, and what the history says ---
+
+GUIDE = (ROOT / "docs" / "guides" / "releases.md").read_text()
+SECTION = GUIDE.split("## Moving open cases to a later release\n")[1].split("\n## ")[0]
+
+
+def guide_blocks(language: str) -> list[str]:
+    """The section's code blocks in `language` (`""` for plain ones), in order."""
+    parts = SECTION.split("```")
+    return [
+        part.removeprefix(language + "\n")
+        for part in parts[1::2]
+        if part.split("\n")[0] == language
+    ]
+
+
+def test_the_guides_migration_example_runs_as_written() -> None:
+    # Our own documentation, run so it can't drift from the code; never a definition (data).
+    registering, in_a_test, _on_temporal = guide_blocks("python")
+    catalog = Catalog()
+    exec(registering, {"catalog": catalog})  # noqa: S102
+    assert catalog.migrators == ["platform"]
+    [mapping] = guide_blocks("json")
+    assert json.loads(mapping) == RENAMES
+    namespace: dict[str, Any] = {
+        "run_case": run_case,
+        "refund": REFUND,
+        "migrate": migrate,
+        "refund_1": REFUND_1,
+        "refund_3": REFUND_3,
+        "renames": RENAMES,
+        "PEOPLE": PEOPLE,
+    }
+    exec(in_a_test, namespace)  # noqa: S102
+    [shown] = guide_blocks("")
+    lines = shown.splitlines()
+    history = namespace["moved"].history
+    first = history.index(lines[0])
+    assert history[first : first + len(lines)] == lines
+    # The refusals the prose quotes are the engine's: each is said by a test above.
+    said = " ".join(SECTION.split())
+    for quoted in (
+        "pay#1 is running, and refund 3 has no step pay: map it, or migrate after it finishes",
+        (
+            "paid is reached, and refund 2 has no milestone paid: map it, since a milestone "
+            "reached is never undone"
+        ),
+        "note holds a value, and refund 2 has no field note: map it",
+        (
+            "note is a string in refund 1, and note is a number in refund 2: values are never "
+            "converted"
+        ),
+        "note is sensitive in refund 1, and note isn't in refund 2: a migration never loosens it",
+        (
+            "pay#1 is running on payments.refund@2, and refund 2's pay calls orders.lookup@1: "
+            "migrate after it finishes"
+        ),
+        "migrated from refund 1, engine 1 to refund 1, engine 2",
+    ):
+        assert quoted in said, quoted
+
+
+SECRET_ORDER = "ORD-7-SECRET"  # an order, and amounts, to look for where they mustn't be
+SECRET_AMOUNT = 12345
+
+
+def test_a_migrations_history_names_no_value() -> None:
+    # Every line a migration adds names people, roles, releases, engine versions, names and
+    # entries, never a value: a history reaches people who may not see one (brief, D30)
+    # (brief, D53).
+    file = {"order_id": SECRET_ORDER, "amount": SECRET_AMOUNT}
+    review = ("review", "approve", "ana", {"approved_amount": SECRET_AMOUNT})
+    moved = run_case(
+        REFUND,
+        file=file,
+        answers=[
+            review,
+            migrate(REFUND_3, RENAMES, "pia"),
+            ("case.change#1", "reject", "pat"),
+            migrate(REFUND_3, RENAMES, "pat"),
+            ("case.change#2", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=REFUND_1,
+    )
+    preview = preview_migration(
+        parse_case(REFUND),
+        CATALOG,
+        on_refund_1([review]).state,
+        migration_of(REFUND_3, {}, 2),
+        START,
+    )
+    lines = [*moved.history, *preview.refused, *preview.lines]
+    assert any("migrated" in line for line in lines) and preview.refused
+    for line in lines:
+        assert SECRET_ORDER not in line and str(SECRET_AMOUNT) not in line, line

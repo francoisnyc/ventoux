@@ -1050,7 +1050,8 @@ Status: drafted 2026-10-23, from `main` at `66e2cff` (12c merged, #44); the hist
 before 12d recorded and replayed first (slice 0). Answered the same day: choices 42 to 59, all as
 recommended, with three changes, written into choices 43, 45, 55 and 57 below, each marked
 *Changed in the answers*. The warm-up (learning question 34's follow-up) put and not answered,
-left open.
+left open. Built the same day, slices 0 to 10; see "Decided while building" and the Promises
+table.
 
 User-facing description, written first once you agree: `docs/guides/releases.md`, "Moving open
 cases to a later release", and the cases guide's "Changing an open case" gaining its third kind.
@@ -1282,12 +1283,14 @@ Numbered on from 12c's. Answer by number.
 
 ### Seams the tests use
 
-- `run_case(...)` with a script's `migrate(record, mapping, by)` and answers to `case.change#n`;
-  a release record made in memory from a definition and its plans; `history`, `waiting_for`,
-  `needs_attention`, `state`.
-- A pure `preview_migration(...)` on a case's state.
-- On Temporal: `propose_migration(case, record, mapping, by, roles)`, `preview_migrations(client,
-  workflow, cases, record, mapping)`, `report`, the `Replayer` on fixtures recorded before 12d.
+- `run_case(...)` with a script's `migrate(record, mapping, by)`, `release=` to open on a release
+  and `engine=` for its version; answers to `case.change#n`; `release_of(definition, number,
+  plans)` to release a definition in memory; `history`, `waiting_for`, `timers`, `state`.
+- `preview_migration(case, catalog, state, migration, at)` and `migration_of(record, mapping,
+  engine)`, pure; `decide`, for a state a script can't reach (an approval given and waiting).
+- On Temporal: `propose_migration(case, record, mapping, by, roles)`,
+  `preview_migrations(client, workflow, ids, record, mapping)`, `report`, the `Replayer` on
+  fixtures recorded before 12d.
 - The guides' examples, run as written.
 
 ### Slices, in order
@@ -1308,28 +1311,70 @@ Each starts with its negative test, seen failing for the right reason.
 9. **#44's close line.**
 10. **The guides, D53, the Promises table checked.**
 
-### Promises (draft)
+### Decided while building
 
-Named before the tests are written; checked against them before the pull request. `Q` is
-`tests/test_migrations.py` (new), `T` is `tests/test_temporal_migrations.py` (new).
+- **What waits on a step refuses its removal too:** an approval asked or given, a person's
+  proposal, a rule's start (choice 45 listed runs; these wait on the step as much). A gone
+  step's runs are said once, by its latest run.
+- **`visible_to`: only what a field declares may not widen.** A field with none is seen by every
+  role its case names (D30), so `refund 2` adding a fraud check for the `fraud` role widened
+  every such field, and refused every migration that adds a role. A field declaring
+  `visible_to` may not drop it or add a role; one declaring none follows the target.
+- **An approval's step is compared word for word, what it requires included:** a `sequence` says
+  a step's requirements outside it, so the comparison reads them too; a renamed step, or one
+  reading a renamed field, is changed, and its approval withdrawn (never kept on a guess).
+- **A pending edit's digest names its field** (12c's): across a rename, one still on the value it
+  was proposed against has its digest taken again under the new name; one whose field changed
+  meanwhile keeps its old digest, and isn't applied. 12c's formula is unchanged, so edits pending
+  when 12d is deployed are read as before.
+- **One applied line:** `applied case.change#1: migrated from refund 1, engine 2 to refund 3,
+  engine 2, proposed by pia, approved by lee`, the same whether the release, the engine or both
+  move (choice 54 had two forms). A refusal names a run's state as people say it: `pay#1 failed`,
+  `pay#1 is running`, `pay#1 was skipped`.
+- **The preview decides as the apply does,** through the end of `decide`, factored out as
+  `decide_again`, so it says what the case does after (the fraud check starting, a close); its
+  first line is `from refund 1, engine 2 to refund 3, engine 2`, since nobody has proposed it
+  yet. It lives in the runtime, beside `decide`. A closed case's preview is refused.
+- **`decide` gives a command, `UseRelease`,** once a migration is applied: the rest of that
+  decision is the target's, and the driver (in memory and on Temporal) decides with the target
+  from then on. The case workflow keeps its definition as data for the next run's start, and its
+  loop reads the definition it has now, never the one it opened with.
+- **A timer moved into the past is due at the migration's time,** so it fires right after it,
+  stamped then. Its test caught the moment compared the wrong way round (the old one is renamed
+  into the target's names, never the target's into the old).
+- **`sent_by` moves next to the declared event** (`case/definition.py`), so a migration can say a
+  wait's sender without importing the runtime.
+- **The development catalog registers `platform` to migrate.** The listings of the registered
+  roles that two tests and two guides' tables quote now name it.
+- **Graduating needed nothing new in the engine:** its story test passed as written, which is
+  D2's claim.
+
+### Promises
+
+Checked against the tests before the pull request. `Q` is `tests/test_migrations.py`, `T` is
+`tests/test_temporal_migrations.py`, both new. Each test was seen failing for the right reason,
+or, where the code was written with the seam, the rule was taken out and its test seen failing.
 
 | Promise | Test |
 |---|---|
-| A migration is never approved by its proposer, nor by the case's opener | Q `test_a_self_approved_migration_is_refused` |
-| A target is checked: a release of the same package, its contracts in the catalog, something to move | Q `test_a_target_is_checked` |
-| Names map by name, never position; a bad mapping is refused | Q `test_names_map_by_name`, `test_a_bad_mapping_is_refused` |
-| An unmapped name something depends on refuses the migration, proposed and applied | Q `test_an_unmapped_rename_running_work_depends_on_is_refused`, `test_what_depends_on_a_name_refuses` |
-| Running work finishes under what it started with, or the migration waits for it | Q `test_running_work_finishes_on_its_contract` |
-| Open tasks, waits and failed runs stay, under the target | Q `test_open_and_failed_runs_stay` |
-| Approvals stay only if their step is unchanged | Q `test_changed_steps_lose_their_approvals` |
-| Timers keep, move or cancel, saying so, never firing in the past | Q `test_timers_across_a_migration` |
-| Pending requests and events follow the release current when decided | Q `test_pending_requests_and_events_across_a_migration` |
-| The case decides again after, and no rule fires on the migration | Q `test_the_case_decides_again_under_the_target` |
-| Values keep their sources; nothing loosens | Q `test_values_keep_their_sources`, `test_nothing_loosens` |
-| The engine moves forward only, as data | Q `test_the_engine_moves_forward_only` |
+| A migration is never approved by its proposer (the curriculum's), nor by the case's opener (12c) | Q `test_a_self_approved_migration_is_refused` |
+| A migration moves the release and engine, and the case decides as the target from then on | Q `test_a_migration_moves_the_case` |
+| A target is checked: a role that may migrate, the same package, a package giving its digest, contracts in the catalog, something to move | Q `test_a_target_is_checked` |
+| The engine moves forward only, as data; it may move alone | Q `test_a_target_is_checked`, `test_the_engine_moves_forward_only` |
+| Names map by name, never position; a run keeps its entry and key; a bad mapping is refused | Q `test_names_map_by_name`, `test_a_bad_mapping_is_refused` |
+| An unmapped rename that running work depends on is refused, proposed and applied (the curriculum's) | Q `test_an_unmapped_rename_running_work_depends_on_is_refused` |
+| What depends on a name refuses: a milestone, a value, an outcome, an output, a payload, a failed rule, what waits on a step; values never converted; nothing loosens | Q `test_what_depends_on_a_name_refuses`, `test_what_waits_on_a_step_refuses_its_removal` |
+| Running work finishes under what it started with, or the migration waits for it; plans don't migrate | Q `test_running_work_finishes_on_its_contract`, `test_a_running_plan_finishes_on_its_plan` |
+| Open tasks and waits stay, under the target's rules and lines | Q `test_open_and_failed_runs_stay`, `test_an_open_wait_stays_on_its_event` |
+| Approvals stay only if their step is unchanged; every approval on an entry goes at once; spent and given ones lapse | Q `test_changed_steps_lose_their_approvals`, `test_a_given_approval_lapses_with_its_step` |
+| Timers keep, move or cancel, saying so, never firing in the past; they follow renamed moments | Q `test_timers_across_a_migration`, `test_a_timer_follows_its_renamed_milestone` |
+| Pending edits follow their field; a migration against a left release isn't applied; events decide under the current release | Q `test_pending_requests_and_events_across_a_migration` |
+| The case decides again after; no rule fires on the migration | Q `test_the_case_decides_again_under_the_target` |
+| Values keep their sources; a target's mark is added, never removed | Q `test_values_keep_their_sources` |
 | The history says each step, naming no value | Q `test_a_migrations_history_names_no_value` |
-| The preview says what the apply would do, with no side effect | Q `test_the_preview_is_the_apply_without_effect`, T `test_a_cohort_preview_names_every_case` |
+| The preview says what the apply would do, with no side effect; a cohort preview names every case given | Q `test_the_preview_is_the_apply_without_effect`, T `test_a_cohort_preview_names_every_case` |
 | On Temporal, a migrated case runs the target across continue-as-new, and replays; histories from before 12d replay | T `test_a_migrated_case_runs_its_new_release`, `test_histories_from_before_12d_replay` |
 | A strict workflow graduates to a looser case | Q `test_a_strict_workflow_graduates` |
-| A case closing without its `closes_when` says which it didn't reach | Q `test_a_close_names_what_it_didnt_reach` |
-| The guides' examples run as written | Q `test_the_guides_migration_example_runs_as_written` |
+| A case closing without its `closes_when` says which it didn't reach (#44's review) | Q `test_a_close_names_what_it_didnt_reach` |
+| The guides' examples run as written | Q `test_the_guides_migration_example_runs_as_written`, T `test_the_guides_cohort_example_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |

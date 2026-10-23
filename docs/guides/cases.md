@@ -438,9 +438,10 @@ Some changes are none of the ones a definition offers. Ana typed 2500 for 250, a
 that reads it hasn't run. A payment provider closed the account, so `pay#1` can never succeed,
 and nothing should be paid in its place. These are **change requests** (brief, D52): one person
 proposes the change, someone else approves it, and the case applies it, checking it again against
-the case as it is then. There are two kinds: an **edit** of a value in the case file, and a
-**skip** of a failed step run. Forgetting a case is the third, with a request of its own (the
-case data guide, "Forgetting a person"), under the same rules.
+the case as it is then. There are three kinds: an **edit** of a value in the case file, a
+**skip** of a failed step run, and a **migration**, moving the case to another release (the
+releases guide, "Moving open cases to a later release"). Forgetting a case has a request of
+its own (the case data guide, "Forgetting a person"), under the same rules.
 
 **Who may.** Your platform team registers the roles that may, as for operating (brief, D26):
 
