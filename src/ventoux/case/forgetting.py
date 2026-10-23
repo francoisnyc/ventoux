@@ -66,6 +66,11 @@ def forget(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Forg
     )
     if approved is not None:
         raise ForgetRefused(approved)
+    # Nor does the person who opened the case approve forgetting it, as no change to it, from
+    # engine 2 on; a case opened at engine 1 keeps 9c's rule, so its history replays as recorded
+    # (brief, D51) (brief, D52).
+    if state.engine >= 2 and event.approved_by == state.opened_by:
+        raise ForgetRefused(f"{event.approved_by} opened the case, so cannot approve forgetting it")
     approver = forgetting_role(catalog, event.approver_roles)
     proposer = forgetting_role(catalog, event.proposer_roles)
     state.history.append(

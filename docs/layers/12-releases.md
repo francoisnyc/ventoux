@@ -735,3 +735,311 @@ and every test 12b added to `R`, is named here.
 | On a run that continued as new, a release that no longer gives its digest, or a definition that no longer reads, fails the workflow task and the case waits, running; code that reads it again lets it go on; at the opening, refusing stays | C `test_a_continued_run_whose_digest_changed_waits_for_its_code`, `test_a_continued_run_whose_definition_no_longer_reads_waits_for_its_code`, `test_a_start_that_isnt_its_release_is_refused` |
 | Method 1 gives the digests it pinned, for packages that between them write every field of the format | D `test_method_1_gives_the_digests_it_pinned`, `test_the_pinned_packages_use_every_shape` |
 | `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |
+
+## 12c. Change requests
+
+Status: drafted 2026-10-23, from `main` at `5801ca0` (12b merged, #43); the histories from
+before 12c recorded and replayed first (slice 0). Answered "all as recommended" the same day:
+choices 29 to 41. The warm-up (learning question 37's follow-up) put and not answered, left open.
+Built the same day, slices 0 to 7; see "Decided while building" and the Promises table.
+
+User-facing description, written first once you agree: `docs/guides/cases.md`, "Changing an open
+case". Decision: brief D52, drafted with it.
+
+### Warm-up: learning question 37's follow-up, what the audit keeps after forgetting
+
+> A regulator asks why claim-7 was denied. After forgetting, which of their questions can you
+> still answer, and which not?
+
+Open since 9c. Forgetting is the first change request, and 12c makes it one of several. Answer
+from memory first.
+
+### What this part is for
+
+Until now, the only ways a person changes an open case are the ones its definition offers:
+answering a task, proposing a step, retrying a failed run, closing it with a declared reason.
+Some changes are none of these:
+
+- **a fact is wrong** (Ana typed 2500 for 250), and the step that reads it hasn't run;
+- **a failed run can't succeed** (the payment provider closed the account) and nothing else should
+  happen in its place, but the case must not close as if it had;
+- **the customer asks to be forgotten** (9c built that one);
+- **the rules changed**, and an open case should follow them (12d).
+
+D17 says nothing is skipped automatically; D25 that a lapse can only come from a change request;
+D32 that forgetting is the first change request and layer 12 makes the mechanism general. 12c
+builds that mechanism: a person proposes, a second person approves, and the case applies it,
+checking it again against the case as it is then.
+
+A small example. Refund `refund-7` waits for Sam's approval of `pay` at 2500. Ana, who answered the
+review, sees she typed 2500 for 250. She proposes an edit; Lee (`support-lead`) approves it. The
+history says:
+
+```
+ana proposed change#1: edit approved_amount, approved by support-lead
+lee approved change#1 as support-lead
+applied change#1: approved_amount edited by ana, approved by lee
+withdrew pay.approval#1: approved_amount changed
+asked pay.approval#2: approval of pay by support-lead
+```
+
+Sam's approval of the old value is gone with its entry, and the step asks again on the new value.
+Neither 2500 nor 250 appears anywhere in the history.
+
+### What the code does today
+
+Read on `main` at `5801ca0`, before drafting:
+
+- **Forgetting is a request with its own workflow,** `<case ID>/forget` (`temporal/forget.py`): it
+  checks the proposer's and approver's roles and that they differ, then signals the case, whose
+  `forget` (`case/forgetting.py`) checks both again, depending on nothing the request did. **It
+  excludes only the proposer;** the case's opener may approve forgetting it, unlike any of its
+  steps (D25).
+- **An approval already follows the case file** (`case/approvals.py`, `follow`): when a value a
+  step reads changes, its open entry is withdrawn, every approval on it at once (D47), and a given
+  approval lapses, the step asked again. So an edit needs no new lapse code, only a value that
+  changes.
+- **D25's "a lapse from a change request stops the step"** is `lapsed`, which stops a step whose
+  inputs changed between the decision that gave its approval and the start: today nothing can come
+  between them.
+- **A run records who may not approve it** (`StepRun.excluded`: the people its `when`, its inputs
+  and its starting rule read, D11, D39), and a failed run has no way out but a retry or a close
+  (D26).
+- **Answers name an entry** (`review#1`, `pay.approval#1`), and the inbox decides them in order.
+
+### Choices for 12c
+
+Numbered on from 12b's. Answer by number.
+
+29. **Where a request lives: in the case's own workflow.** A request is an entry of the case,
+    `change#1`, `change#2`, numbered by the case, proposed by a signal and answered like any entry
+    (`answer(case, "change#1", "approve", …)`); its state, pending until answered, is the case's,
+    so it crosses continue-as-new with the rest (D27), and the case's history tells the whole
+    story. **Forget keeps its own workflow,** since a closed case can be forgotten (its workflow
+    has ended, nothing to signal) and the key is destroyed only after the case's workflow ends,
+    outside it (brief, D32); it shares the rules (choices 31–33) through the same module.
+    *Recommended.* Set aside: a workflow per request, as forget has (the case's
+    history would show only the apply, and a pending request would be another workflow to find);
+    moving forget into the case (its request's history must outlive the key, 9c).
+
+30. **One lifecycle, kinds as data.** proposed → (approved → applied | not applied) | rejected |
+    cancelled. A request names its kind and what it changes: `edit` (a field and its new value),
+    `skip` (a failed run), and, in 12d, `migrate` (a release and its mapping). Each kind is three
+    pure functions in `case`: what it refuses when proposed, who it excludes from approving, and
+    what it does when applied; the lifecycle around them is one, so 12d adds a kind without
+    touching it. *Recommended.*
+
+31. **Who may propose and approve: a role registered for the kind,** as forgetting is (D32):
+    `register_role(..., edits=True)` for an edit (new); for a skip, an operating role
+    (`operates=True`, D26: operators act on failed steps, D17); `forgets=True` for forgetting, as
+    today; `migrates=True` in 12d. Proposer and approver each hold one, stated with their message
+    (D22), and are people, never a system (an identifier, checked as for an answer). One approver;
+    a count on requests is set aside until a kind needs it (D47's shape would fit). *Recommended.*
+
+32. **Never approved by the proposer or the case's opener, and what else D11 and D25 exclude.**
+    Excluded from approving a request, whatever its kind: the person who proposed it, and the
+    person who opened the case (D25: the opener approves none of its steps, and a change decides as
+    much as a step's run). And, by kind:
+    - **an edit:** also each person whose answer gave the field its current value (D11: whoever's
+      answer flows in): the edit overrules them;
+    - **a skip:** also everyone excluded from approving the failed run (its `excluded`: the people
+      its `when`, its inputs and its starting rule read, D11, D39), whoever proposed it (D25), and
+      whoever approved it (D47's approvers): skipping decides that run's fate as approving it did.
+
+    Refused, recorded, and the request waits on, as a refused approval does. **The curriculum's
+    negative test lands here:** a self-approved edit and a self-approved skip, each refused,
+    saying who proposed it. *Recommended.*
+
+33. **Forgetting gets the same exclusions, as engine version 2.** Adding the opener to forget's
+    exclusions changes what a recorded history decides (an opener who approved a forget would now
+    be refused), so D51 makes it the next engine version: `KNOWN = (2, 1)`, a case opened under 12c
+    records version 2 at its opening (one patch marker in its history, D51's chain), and a case
+    opened before keeps 9c's rule, its old branch kept behind `state.engine`. Its fixture: a
+    forget approved by the opener, recorded under `main`, still replays. The first real use of
+    D51. *Recommended.* Set aside: leaving forget with the proposer alone excluded (two rules for
+    the same act of approving a change, and the weaker one for erasure).
+
+34. **Checked when proposed, and again when applied, against the case as it is then.** A proposal
+    is refused at once, recorded and nothing pending, if: the case is closed or closing; the field
+    isn't a declared case-file field (an outcome or an output is a record of what happened, never
+    edited); the value isn't the field's type (as an answer's form, strictly, G6); a sensitive
+    value comes unsealed (D31); the value is the one the field already holds (choice 37); the run
+    to skip isn't its step's latest run, or isn't failed. When the approval comes, every check runs
+    again on the case then, and one more: **what the request was proposed against hasn't
+    changed** (the field's value, kept as a digest, never the value; the run still failed). If it
+    has, the request isn't applied, saying why (`change#1 not applied: approved_amount changed since
+    it was proposed: propose it again`): the approver judged a correction of a value that is gone.
+    Depending on nothing the proposal's check did (D34). *Recommended.*
+
+35. **What applying an edit does.** The field takes the value, obtained at the event's time by no
+    run (D33). Then the case decides as after any change of value: open approvals reading it are
+    withdrawn, every approval on the entry at once (D47); a given approval lapses, and its step is
+    asked again. **Asked again, never needing attention:** D25's "a lapse from a change request
+    stops the step" is kept as "the step doesn't start on that approval", and an amendment line
+    says so, as D33 did for a refresh: the change was approved by a second person, so a new
+    approval on the new value is the next step, not an operator. A running step keeps the inputs it
+    started with (D10). No rule fires on it (D42: there is no "field set" moment). *Recommended.*
+
+36. **What applying a skip does.** The failed run ends `skipped`: neither done nor failed, as a
+    stopped run is `cancelled` (D40). So `requires` doesn't count it as done, it reaches nothing,
+    gives no outcome or output, fires nothing, and its timers end with it (D44); its step may run
+    again only as any step may (repeatable, proposed). A close it held completes (D34), and a case
+    with nothing else pending closes. Set aside: skipping as `done` (steps requiring it would run on
+    a result that never was).
+
+37. **What an edited value carries as its source, and never making untrusted data trusted.** Its
+    sources are `person:<proposer>` and `person:<approver>`, both of whom decided it, so D11
+    excludes both from approving any step that reads it, by its sources alone. A field declared
+    untrusted keeps its mark (`untrusted:customer` is added to every writer's stamp, as today). An
+    edit never carries the old value's sources, and never re-stamps the old value: an edit to the
+    value the field already holds is refused when proposed and when applied (`approved_amount
+    already holds that value: an edit changes it`), since its only effect would be to make an
+    untrusted value read as a person's (the prototype's laundering, research 5). A new value is a
+    person's decision, where untrusted influence ends (D43). *Recommended.*
+
+38. **What the history says,** at each step, naming people, roles, fields, runs and requests,
+    never a value:
+    - proposed: `ana proposed change#1: edit approved_amount, approved by support-lead`;
+      `omar proposed change#2: skip pay#1, approved by operations`;
+    - refused: `refused sam's answer approve to change#1: ana proposed change#1, so cannot approve
+      it`, and the same shapes for the opener and the other exclusions;
+    - rejected: `lee rejected change#1 as support-lead`;
+    - applied: `applied change#1: approved_amount edited by ana, approved by lee`, then the
+      lines its effects bring (`withdrew …`, `lapsed …`, `asked …`); `applied change#2: pay#1
+      skipped by omar, approved by olu`, then `pay#1 skipped`;
+    - not applied: `change#1 not applied: …: propose it again`;
+    - cancelled: `cancelled change#1: the case is closing`.
+
+    `waiting_for` shows a pending request as `approval of change#1 (edit approved_amount) by
+    support-lead`, the same to everyone. *Recommended.*
+
+39. **A pending request is not pending work** (D10): it doesn't keep the case open, as listening
+    doesn't (D41). When the case begins closing, each pending request is cancelled, saying so,
+    except a skip of the run that holds the close (D34): that is the one request a held close
+    takes, and the way out D17 promises. *Recommended.* Set aside: a request holding the case open
+    (an edit nobody answers would keep a finished case open for ever).
+
+40. **On Temporal.** Proposing is a signal, `propose_change`, as answering is; requests are decided
+    in the order history records them, one at a time. Pending requests are in the state, so they
+    cross continue-as-new (a state carried before 12c has none); an edit's sensitive value crosses
+    sealed, as an answer's form does (D31). **Edits and skips are new events on new paths,** so no
+    recorded history decides differently and they need no engine version (D51); forgetting's
+    exclusions do (choice 33). Fixtures: histories recorded before 12c replay, recorded first;
+    a pending request crossing continue-as-new; and choice 33's forget. *Recommended.*
+
+41. **Where it is recorded:** D52 ("Change requests: one mechanism, proposed, approved by someone
+    else, checked again and applied"), with dated amendment lines on D11, D17, D25, D26, D32 and
+    D51. The cases guide's "Changing an open case" written first, its example run by a test. No
+    new dependency. *Recommended.*
+
+### The negative tests
+
+| Negative test | Where |
+|---|---|
+| A self-approved change (the curriculum's) | an edit and a skip, each refused, recorded, the request waiting on |
+| The case's opener approving a change | refused, for an edit, a skip, and a forget on a case opened under 12c |
+| An edit that would launder an untrusted value | the same value refused, proposed and applied |
+| An edit approved after its field changed | not applied, saying so |
+| A skip of a run that no longer failed (retried meanwhile) | not applied |
+| An edit of an outcome or an output | refused when proposed |
+
+### Seams the tests use
+
+- `run_case(...)` with a script's `edit(field, value, by)` and `skip(run, by)`, and answers to
+  `case.change#n`; `history`, `waiting_for`, `needs_attention`, `closed`, `state`.
+- `parse_case`, `decide` (for what a script can't send: a value in plain text, a later run beside
+  a failed one), and the catalog's `register_role(..., edits=True)`.
+- On Temporal: `propose_change(case, kind, target, value, by, roles)`, `answer(case,
+  "case.change#1", …)`, `report`, the `Replayer` on fixtures recorded before 12c, and a forget
+  request (`propose_forget`, `answer_forget`).
+- The guide's examples, run as written.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **Histories recorded before 12c,** replayed: a case with an approval given, one that continued
+   as new, a forget approved by someone who isn't the opener, and, for choice 33, one approved by
+   the opener.
+1. **The lifecycle, in memory:** a request proposed, refused when self-approved, rejected, applied;
+   the case's opener excluded.
+2. **Edits:** the checks when proposed and applied; the value's sources; the lapses; the laundering
+   refusal; outcomes and outputs refused.
+3. **Skips:** the exclusions from the run; `skipped` and what it means for `requires`, the close
+   it held, its timers.
+4. **Pending requests and the close:** cancelled, except the skip a held close takes.
+5. **On Temporal:** signals, continue-as-new, sealed values, the fixtures.
+6. **Forgetting under the same rules:** engine version 2, its marker, the old branch.
+7. **The guide, D52, the Promises table checked.**
+
+### Decided while building
+
+- **Requests are `case.change#1`, not `change#1`:** a name is `[a-z][a-z0-9_]*`, so a step may be
+  named `change`, and its runs would share the entries. A dot no name holds keeps them apart, as
+  `pay.approval#1` does. Reserving `change` instead would refuse a definition that reads today,
+  which on a continued run is a change of behaviour (D51).
+- **The lines, as built:** a proposal says `to be approved by support or support-lead` (choice 38
+  wrote `approved by`, which reads as done); an approval's line is an answer's, `lee answered
+  case.change#1 approve as support-lead`, as for an approval; a rejection adds `case.change#1 not
+  applied: lee rejected it`. Skipping adds no line beyond `applied case.change#1: pay#1 skipped by
+  omar, approved by olga`.
+- **Nobody proposes or approves an edit of a field hidden from them** (D30: an approver judges
+  what they see), which the choices didn't list; and **an edit of a field that holds no value
+  yet is refused:** it would give a first value no step asked for.
+- **An approval spent on a failed run lapses with the edit.** It stays with the run for its retry
+  (D26), so `follow` never sees it, and the retry would stop on it for ever (`the inputs of pay
+  changed since sam approved them`), keeping it each time. The edit lapses it (`lapsed
+  pay.approval#1: approved_amount changed`), and the retry asks again: choice 35's "asked again,
+  never needing attention", for the one approval the existing code didn't follow.
+- **The request to forget asks who opened the case,** when someone approves, from the case's
+  start (a new activity, `ventoux.forget.opener`, behind the patch `ventoux-forget-opener`, so
+  the request recorded in slice 0 replays). Without it, a request whose approval the case
+  refuses would wait for the case to end, then destroy its key when it closed for any other
+  reason. It refuses anyone if who opened the case can't be told. So a request proposed now
+  refuses the opener on an engine 1 case too; the case's engine 1 branch decides only histories
+  approved before.
+- **Every new case writes the marker `ventoux-engine-2`,** a draft included: the engine decides
+  drafts too. 12b's tests that said no marker is written now say this one is; the version they
+  call unknown is 3.
+- **A held close takes edits too:** they start nothing. Choice 39's exception is the held close
+  (open, its milestones reached); a close that has begun cancels the failed run itself, and with
+  it any skip of it. A case closing with nothing left to do cancels its pending requests too:
+  `cancelled case.change#1: nothing left to do`.
+- **Not built:** skipping a failed rule's firing. It holds a close as a failed run does, and is
+  retried, or the case closed (D38); a kind for it is one more function when it is needed.
+- **The guide's Temporal example passes `Decimal("250")`:** written `250`, it was refused (`the
+  edit gives an int`) when the test ran it, as numbers are exact decimals (D20).
+- **The development catalog lets `support` and `support-lead` edit,** so the guide's Ana proposes
+  and Lee approves.
+
+### Promises
+
+Checked against the tests before the pull request. `Q` is `tests/test_change_requests.py`, `T` is
+`tests/test_temporal_change_requests.py`, both new. Each test was seen failing for the right
+reason, or, where the seam already held the rule, the rule was taken out and its test seen
+failing.
+
+| Promise | Test |
+|---|---|
+| A change is never approved by its proposer, nor by the case's opener | Q `test_a_self_approved_change_is_refused`, `test_a_self_approved_skip_is_refused`, `test_the_opener_approves_no_change`, `test_a_skip_excludes_who_the_run_excluded` |
+| A kind, an outcome or a role the engine doesn't know is refused | Q `test_what_a_request_doesnt_know_is_refused` |
+| A rejected request changes nothing, and is closed | Q `test_a_rejected_change_changes_nothing` |
+| An edit excludes whoever's answer gave the field its value, and anyone it is hidden from | Q `test_an_edit_excludes_the_values_writer`, `test_an_edit_is_judged_by_people_who_see_it` |
+| A skip excludes whoever the failed run excluded, proposed or approved, and whoever's answer flows into it | Q `test_a_skip_excludes_who_the_run_excluded` |
+| A request is checked when proposed and again when applied, against the case then | Q `test_a_proposal_is_checked_when_made`, `test_an_edit_whose_field_changed_is_not_applied`, `test_only_a_failed_latest_run_is_skipped`, `test_a_skip_of_a_run_retried_meanwhile_is_not_applied` |
+| An edited value's sources are its proposer and approver, so neither approves a step reading it; a declared untrusted mark stays | Q `test_an_edited_value_is_its_deciders` |
+| An edit to the value already held is refused, proposed and applied, so an untrusted value is never made a person's | Q `test_an_edit_never_launders_a_value` |
+| An outcome or an output is never edited | Q `test_a_record_of_what_happened_is_never_edited` |
+| A sensitive field's new value is sealed, refused in plain text, and in no history | Q `test_a_sensitive_value_is_edited_sealed`, T `test_a_sensitive_edit_crosses_sealed` |
+| An edit withdraws open approvals that saw the old value, every approval on the entry, and lapses an approval spent on a failed run; the step is asked again | Q `test_an_edit_withdraws_and_lapses_what_saw_the_old_value` |
+| A skipped run is neither done nor failed: `requires` doesn't count it, it gives nothing, its timers end | Q `test_a_skipped_run_is_neither_done_nor_failed`, `test_a_skipped_runs_timers_end_with_it` |
+| A held close takes a skip of the run holding it, and completes | Q `test_a_skip_lets_a_held_close_complete` |
+| A pending request doesn't hold the case open, and is cancelled when it closes | Q `test_a_pending_request_is_cancelled_by_the_close` |
+| The history says each step, naming no value | Q `test_the_history_names_no_value` |
+| On Temporal, a refused proposal or approval is recorded and the request waits on | T `test_refused_changes_are_recorded_and_the_case_waits_on` |
+| On Temporal, a pending request crosses continue-as-new and replays; histories recorded before 12c replay | T `test_a_pending_request_crosses_continue_as_new`, `test_histories_from_before_12c_replay` |
+| From engine 2 the case refuses its opener's forget; a case opened at engine 1 keeps 9c's rule, and its history replays | Q `test_forget_excludes_the_opener_from_engine_2`, T `test_the_case_refuses_its_openers_forget_from_engine_2`, `test_histories_from_before_12c_replay` |
+| The request to forget refuses the opener's approval, or anyone's if who opened the case can't be told | T `test_a_request_to_forget_refuses_the_opener`; `tests/test_temporal_forget.py` `test_the_guides_refusals_are_what_the_engine_says` |
+| New cases open at engine 2, with its marker; version 3 is unknown | `tests/test_temporal_case_release.py` `test_a_case_opens_on_its_release`, `test_a_draft_is_as_before`; `tests/test_engine.py` `test_an_unknown_engine_version_is_refused` |
+| The guide's examples run as written | Q `test_the_guides_change_example_runs_as_written`, T `test_the_guides_temporal_example_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |

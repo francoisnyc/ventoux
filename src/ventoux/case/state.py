@@ -43,8 +43,11 @@ class StepRun:
     step: str
     # rejected: its approval was refused; failed: it needs attention, with the reason (brief, D17);
     # retrying: an operator retried it, and it runs again as the same run (brief, D26).
-    # cancelled: the case was closed while it waited (brief, D10).
-    status: Literal["open", "running", "done", "rejected", "failed", "retrying", "cancelled"]
+    # cancelled: the case was closed while it waited (brief, D10). skipped: it had failed, and a
+    # change request approved by someone else skipped it; neither done nor failed (brief, D52).
+    status: Literal[
+        "open", "running", "done", "rejected", "failed", "retrying", "cancelled", "skipped"
+    ]
     reason: str = ""  # why it failed
     approved: GivenApproval | None = None  # the approval spent on it, which a retry keeps
     refresh: bool = (
@@ -144,6 +147,24 @@ class OpenApproval:
     approved: dict[str, str] = field(default_factory=dict[str, str])
 
 
+@dataclass
+class ChangeRequest:
+    """A change to the case a person proposed, waiting for someone else to approve it:
+    `case.change#1` (brief, D52)."""
+
+    entry: str  # `case.change#1`, numbered by the case
+    kind: Literal["edit", "skip"]  # edit: a field's value; skip: a failed step run
+    target: str  # the field it edits, or the run it skips, such as `pay#1`
+    by: str  # who proposed it
+    role: str  # the role that let them
+    # An edit's new value, as the case file would keep it: sealed for a sensitive field
+    # (brief, D31). None for a skip.
+    value: object = None
+    # An edit's digest of the field's value when it was proposed, never the value itself: it is
+    # applied only if the field still holds that value (brief, D52). Empty for a skip.
+    against: str | Sensitive = ""
+
+
 @dataclass(frozen=True)
 class Obtained:
     """When a value of the case file was obtained, and by which step run (brief, D33)."""
@@ -209,6 +230,12 @@ class CaseState:
     engine: int = ENGINE
     # The release it opened on, as people name it (`refund 1`); None for a draft (brief, D51).
     release: str | None = None
+    # Each change request proposed and not yet answered, by entry, in the order proposed: not
+    # pending work, so it keeps no case open (brief, D52).
+    changes: dict[str, ChangeRequest] = field(default_factory=dict[str, ChangeRequest])
+    requested: int = (
+        0  # how many change requests the case has numbered: the next is `case.change#2`
+    )
 
 
 @dataclass(frozen=True)
@@ -342,6 +369,21 @@ class ForgetApproved:
 
 
 @dataclass(frozen=True)
+class ChangeProposed:
+    """A person proposes a change to the case: an edit of a field's value, or a skip of a failed
+    run. Someone else approves it, by answering its entry (brief, D52)."""
+
+    kind: str  # `edit` or `skip`; any other is refused, never guessed
+    target: str  # the field to edit, or the run to skip, such as `pay#1`
+    # An edit's new value, wrapped as the client sends every value, since it can't tell which
+    # fields are sensitive (brief, D31); None for a skip.
+    value: object
+    by: str  # who proposed it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with the proposal (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
 class Sent:
     """An event from outside reaches the case: the declared event, what it carries, and who sent
     it, as the Ventoux API states (brief, D19) (brief, D41)."""
@@ -375,6 +417,7 @@ type Event = (
     | WorkflowCancelled
     | Shown
     | ForgetApproved
+    | ChangeProposed
     | Sent
     | TimerDue
 )

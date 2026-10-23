@@ -74,6 +74,17 @@ def begin_closing(state: CaseState, cancelled_because: str, closed_because: str)
     state.proposed_by_rules.clear()
     state.waiting_to_start.clear()  # nor does a proposal waiting for a fact (brief, D39)
     cancel_timers(state, cancelled_because)  # nor can a timer act (brief, D10) (brief, D44)
+    cancel_changes(state, cancelled_because)  # nor is any change applied (brief, D52)
+
+
+def cancel_changes(state: CaseState, because: str) -> None:
+    """Cancel every change request still waiting for its approver, saying why: a request is not
+    pending work, so it keeps no case open, and nothing changes a case that stopped deciding
+    (brief, D52)."""
+    for entry in list(state.changes):
+        del state.changes[entry]
+        del state.waiting[entry]
+        state.history.append(f"cancelled {entry}: {because}")
 
 
 def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
@@ -81,6 +92,7 @@ def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
     closing with nothing still running (brief, D10)."""
     if state.phase == "open" and not case.stays_open and not pending(state):
         state.phase = "closed"
+        cancel_changes(state, "nothing left to do")
         say_kept_from_starting(case, catalog, state)
         state.history.append("closed: nothing left to do")
     elif state.phase == "closing" and not any(run.status == "running" for run in state.runs):

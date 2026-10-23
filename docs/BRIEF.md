@@ -358,6 +358,11 @@ be erased on request), has size limits, and a second copy of business records go
 - **Amended 2026-10-21, by D47** (the text above stands): `count` is built as one entry
   collecting distinct people's answers, one rejection rejecting it; "shown as blocked" stays
   unbuilt.
+- **Amended 2026-10-23, by D52** (the text above stands; this adds to it): a change request is
+  approved by someone else too: never its proposer, nor the person who opened the case; an edit
+  never by anyone whose answer gave the value it changes, nor anyone the field is hidden from; a
+  skip never by anyone who may not approve the run it skips. An edited value comes from its
+  proposer and its approver, so neither approves a step that reads it.
 
 ### D12. A small vocabulary of sources
 
@@ -472,6 +477,9 @@ be erased on request), has size limits, and a second copy of business records go
 - **Engine and definition bugs block, they don't lose.** A failing workflow task keeps its state and
   resumes once fixed code is deployed; runtime expression errors become "needs attention"; replay
   tests in CI catch changes that would break running cases.
+- **Amended 2026-10-23, by D52** (the text above stands; this adds to it): the skip is built as a
+  change request an operator proposes and another operator approves; the run ends `skipped`,
+  neither done nor failed.
 
 ### D18. Facts know when they were obtained; steps can require fresh ones
 
@@ -646,6 +654,10 @@ be erased on request), has size limits, and a second copy of business records go
   step runs, so its proposer is excluded like anyone whose answer decides it (D11), as change
   requests are "applied only after someone else approves". *Added in the tutor review of layer 8a,
   before D25 was merged.*
+- **Amended 2026-10-23, by D52** (the text above stands; this narrows it): a lapse from a change
+  request doesn't need an operator: the step doesn't start on that approval, and asks again. An
+  edit withdraws the open approvals that saw the old value and lapses the given ones; one spent on
+  a failed run lapses too, so the run's retry asks again.
 
 ### D26. Who operates a case, and what a retry is
 
@@ -697,6 +709,8 @@ be erased on request), has size limits, and a second copy of business records go
     and run on what was kept; a retry once refused on a stale fact and now taken; or, once a
     retry's condition was false, any later event after a fact it needs fresh went stale) may not
     replay: Temporal refuses it, and the case waits until the code is fixed (D17).
+- **Amended 2026-10-23, by D52** (the text above stands; this adds to it): an operating role may
+  also propose or approve skipping a failed run, a change request; never the same person both.
 
 ### D27. A case continues as new, keeping its keys (design question 18)
 
@@ -932,6 +946,11 @@ be erased on request), has size limits, and a second copy of business records go
   every sensitive value, every form value in the answers people sent (D31 encrypts them all),
   and every failure's message and stack trace. Staff identifiers stay: forgetting is about the
   case's subject, through its sensitive fields.
+- **Amended 2026-10-23, by D52** (the text above stands; this narrows it): the person who opened
+  the case doesn't approve forgetting it either. The case checks it from engine version 2, so a
+  case opened before keeps this decision's rule; the request refuses the opener's approval
+  whatever the case's version, asking the case's start who opened it when someone approves, and
+  refuses anyone if that can't be told.
 
 ### D33. Fresh facts: time on events, refreshing a read, and a given approval's lapse
 
@@ -1914,6 +1933,58 @@ D27, D28 and D50, whose text is kept.*
   in its start (D28), so its approval sheet shows the wording the plan had then; a wording revision
   of the release's plans doesn't reach a running plan, a known limit. *Added in the tutor review of
   12b, before D51 was merged.*
+- **Amended 2026-10-23, by D52** (the text above stands; this adds to it): version 2 is the
+  first: the case refuses its opener's approval of forgetting it. New cases record the marker
+  `ventoux-engine-2` at their opening; a history recorded under version 1 replays as version 1.
+
+### D52. Change requests: proposed, approved by someone else, checked again, applied
+
+*Drafted 2026-10-23, in layer 12c (`docs/layers/12-releases.md`, choices 29 to 41). Adds to D11,
+D17, D25, D26 and D32, whose text is kept.*
+
+- **One mechanism for every change to an open case** a definition doesn't offer: a person
+  proposes it, someone else approves it, and the case applies it. A request is an entry of the
+  case, `case.change#1`, numbered by the case (a dot no name holds, so it never shares a step's
+  runs' entries); it is answered approve or reject as any entry, and its state is the case's, so
+  it crosses continue-as-new (D27) and the case's history tells it all. Kinds are data around one
+  lifecycle: an **edit** of a declared field's value, and a **skip** of a failed step run; a
+  migration (layer 12d) is one more. Forgetting keeps its own request (D32), since a closed case
+  can be forgotten and its key goes after its workflow ends, and follows the same rules.
+- **Who may:** a role the platform team registers for the kind: `edits=True` for an edit, an
+  operating role for a skip (D26). Proposer and approver each hold one, stated with their message
+  (D22).
+- **Never approved by its proposer, nor by the person who opened the case** (D25: a change
+  decides as much as a step's run). An edit is also never approved by anyone whose answer gave
+  the field its current value (D11), nor by anyone the field is hidden from, who couldn't judge
+  it (D30); a skip never by anyone who may not approve the run it skips (D11, D25, D39), nor
+  whoever proposed or approved that run. Refused, recorded, and the request waits on.
+- **Checked when proposed, and again when applied,** against the case as it is then, depending
+  on nothing the proposal's check did. An edit is refused of anything but a declared field (an
+  outcome or an output records what happened), of a field that holds no value yet, with a value
+  of another type, unsealed for a sensitive field (D31), or to the value the field already holds;
+  and it isn't applied if the field changed since it was proposed (its digest kept, never its
+  value). A skip is refused unless its run is its step's latest, and failed.
+- **An edited value is the decision of its two people:** its sources are the proposer and the
+  approver, so neither approves a step that reads it (D11). A field declared untrusted keeps its
+  mark. An edit to the value already held is refused, so an untrusted value never becomes a
+  person's by being edited to itself.
+- **An edit lapses what saw the old value:** an open approval reading it is withdrawn, every
+  approval on the entry at once (D47); a given one lapses; each is asked again. An approval spent
+  on a failed run whose inputs the edit changed lapses with it, so the run's retry asks again.
+  So D25's "a lapse from a change request stops the step" reads: the step doesn't start on that
+  approval, and asks again, never needing an operator for it.
+- **A skipped run is neither done nor failed:** a step requiring it doesn't start, it reaches
+  nothing and gives nothing, its timers end, and a close it held completes (D34).
+- **A pending request is not pending work** (D10): it keeps no case open, and is cancelled,
+  saying so, when the case closes. While a failed run holds the close, skipping it is the one
+  request the case still takes.
+- **The history says each step,** naming people, roles, fields and runs, never a value.
+- **Engine version 2: the case excludes the opener from approving its forgetting.** It decides a
+  recorded path differently, so a case opened before it keeps 9c's rule (D51), and a history
+  recorded under version 1 replays as it was. The request to forget asks the case's start who
+  opened it when someone approves, behind a patch of its own, and refuses the opener's approval
+  whatever the case's version, or anyone's if that can't be told, rather than wait for a case
+  that refuses. Edits and skips are new events on new paths, and need no version of their own.
 
 ### Simplifications adopted
 

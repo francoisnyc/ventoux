@@ -57,12 +57,14 @@ from ventoux.case.definition import (
 from ventoux.case.engine import known
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
+from ventoux.case.requests import answer_change, propose_change
 from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
 from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     CLOSING,
     Answered,
     CaseState,
+    ChangeProposed,
     CloseAsked,
     Command,
     Completed,
@@ -188,6 +190,8 @@ def decide(
         receive(case, catalog, state, event)
     elif isinstance(event, ForgetApproved):
         forget(case, catalog, state, event)
+    elif isinstance(event, ChangeProposed):
+        propose_change(case, catalog, state, event)
     elif isinstance(event, TimerDue):
         fire_timer(state, event)
     elif isinstance(event, CloseAsked):
@@ -455,6 +459,9 @@ def answer(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Answ
     # Who answered is written one way, before anything is checked against it (brief, D22).
     if (wrong := identifier_problem(event.by)) is not None:
         raise AnswerRefused(wrong)
+    if (request := state.changes.get(event.entry)) is not None:
+        answer_change(case, catalog, state, request, event, as_worded(state, event))
+        return
     found = open_entry(state, event.entry)
     if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
         # Only its event ends it, sent by its sender: nobody answers it (brief, D41).
@@ -485,6 +492,9 @@ def open_entry(state: CaseState, entry: str) -> StepRun | OpenApproval:
 def has_been_open(state: CaseState, entry: str) -> bool:
     """Whether `entry` names a step run the case has had, or an approval it has asked for."""
     if any(run.entry == entry for run in state.runs):
+        return True
+    _, _, number = entry.partition("case.change#")  # a change request (brief, D52)
+    if number.isdigit() and 1 <= int(number) <= state.requested:
         return True
     step, _, count = entry.partition(".approval#")  # `pay.approval#2`: `pay`, `2`
     return count.isdigit() and 1 <= int(count) <= state.asked.get(step, 0)

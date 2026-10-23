@@ -53,6 +53,7 @@ from ventoux.temporal.cases import (
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import (
     CaseLookup,
+    CaseOpener,
     ForgetActivities,
     ForgetReport,
     ForgetWorkflow,
@@ -60,6 +61,7 @@ from ventoux.temporal.forget import (
     closed_first,
     forget_report,
     lookup_refusal,
+    opener_refusal,
     propose_forget,
 )
 from ventoux.temporal.worker import SANDBOX, case_worker
@@ -839,6 +841,12 @@ def refusal(when: str, tmp: Path) -> str:
         "the proposer approves their own request": lambda: approval_refusal(
             CATALOG, "claim-7", "pia", "pia", frozenset({"privacy"})
         ),
+        "the person who opened the case approves forgetting it": lambda: opener_refusal(
+            "claim-7", "olu", CaseOpener("olu")
+        ),
+        "who opened the case can't be told any more": lambda: opener_refusal(
+            "claim-7", "olu", CaseOpener(None, known=False)
+        ),
         "no case has that ID": lambda: lookup_refusal(
             "claim-9", CaseLookup("never made", False, "")
         ),
@@ -860,6 +868,9 @@ def refusal(when: str, tmp: Path) -> str:
         "a forgotten case's history is read or replayed": lambda: destroyed_key(tmp),
     }
     assert lookup_refusal("claim-7", kept) is None  # a case that may be forgotten goes on
+    # Anyone but its opener approves; a case a system opened has no opener to refuse.
+    assert opener_refusal("claim-7", "eli", CaseOpener("olu")) is None
+    assert opener_refusal("claim-7", "eli", CaseOpener(None)) is None
     if when not in said:
         raise LookupError(when)
     message = said[when]()

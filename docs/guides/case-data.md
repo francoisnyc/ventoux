@@ -318,8 +318,11 @@ worker = case_worker(client, "claims", ClaimCases, ClaimPlans, implementations, 
 
 Forgetting is proposed by one person with such a role and approved by **another**: erasure can
 conflict with keeping records, so it is a decision, made by two people. The proposer can't approve
-their own request; anyone with the role may reject it, the proposer included, which changes
-nothing.
+their own request, nor can the person who opened the case, who approves no change to it (the
+cases guide, "Changing an open case"); anyone with the role may reject it, the proposer included,
+which changes nothing. A case opened before Ventoux's engine version 2 lets its opener approve,
+as it did then, so its history replays as it was recorded; a request proposed since refuses
+the opener whatever the case's version.
 
 ```python
 from ventoux.temporal.forget import answer_forget, forget_report, propose_forget
@@ -383,6 +386,8 @@ says so:
 | the proposer's roles may not forget | `forgetting claim-7 is proposed by privacy, and lee has support` |
 | the approver's roles may not forget | `forgetting claim-7 is approved by privacy, and lee has support` |
 | the proposer approves their own request | `pia proposed forgetting claim-7, so cannot approve it` |
+| the person who opened the case approves forgetting it | `olu opened claim-7, so cannot approve forgetting it` |
+| who opened the case can't be told any more | `who opened claim-7 can't be told: Temporal holds no history of it` |
 | no case has that ID | `there is no case claim-9: no key was ever made for it` |
 | the case was already forgotten | `claim-7 was already forgotten: its key was destroyed` |
 | the case is closed and keeps its records | `claim-7 is closed, and its definition keeps closed cases (forgetting: while_open)` |
