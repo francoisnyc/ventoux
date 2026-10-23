@@ -24,7 +24,9 @@ from ventoux.testing import (
     AnswerRefused,
     Change,
     ChangeRefused,
+    close,
     edit,
+    finish,
     propose,
     retry,
     run_case,
@@ -678,3 +680,36 @@ def test_a_skipped_runs_timers_end_with_it() -> None:
     )
     assert skipped.history[-1] == "cancelled chase_pay, 2d after started pay#1: pay#1 is skipped"
     assert skipped.timers == []
+
+
+# --- Slice 4: pending requests and the close ---
+
+
+def test_a_pending_request_is_cancelled_by_the_close() -> None:
+    # Not pending work: a request keeps no case open (brief, D10). When the case closes, it is
+    # cancelled, saying so, as an open approval is (brief, D52).
+    closable = copy.deepcopy(REFUND)
+    closable["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate request"}, "roles": ["support"]}
+    }
+    closed = run_case(
+        closable,
+        file=LARGE,
+        answers=[TYPED_WRONG, edit("approved_amount", 250, "ana"), close("duplicate", "sam")],
+        people=PEOPLE,
+    )
+    assert "cancelled case.change#1: closed as duplicate by sam" in closed.history
+    assert closed.closed and closed.state.changes == {}
+    # Closing by itself, with nothing left to do, cancels it too.
+    paid = run_case(
+        REFUND,
+        file=SMALL,
+        answers=[SMALL_REVIEW, edit("approved_amount", 45, "ana"), finish("pay#1")],
+        people=PEOPLE,
+        held=["pay"],
+    )
+    assert paid.history[-2:] == [
+        "cancelled case.change#1: nothing left to do",
+        "closed: nothing left to do",
+    ]
+    assert paid.waiting_for == []
