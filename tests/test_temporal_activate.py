@@ -41,9 +41,11 @@ def on_dev_server[T](scenario: Callable[[Client, str], Awaitable[T]], create: bo
     address."""
 
     async def go() -> T:
+        folder = os.environ.get("TEMPORAL_CLI_DIR")  # where CI keeps the dev server it caches
+        if folder is not None:
+            Path(folder).mkdir(parents=True, exist_ok=True)  # the SDK downloads into it, as is
         environment = await WorkflowEnvironment.start_local(
-            data_converter=development_converter(),
-            download_dest_dir=os.environ.get("TEMPORAL_CLI_DIR"),
+            data_converter=development_converter(), download_dest_dir=folder
         )
         async with environment, registry_worker(environment.client):
             if create:
