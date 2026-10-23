@@ -7,17 +7,31 @@ the preview and the apply, so the approver reads what will happen, and the apply
 on the case as it is then (brief, D34). See docs/layers/12-releases.md (12d).
 """
 
+import dataclasses
+import functools
 import json
+from collections.abc import Collection
 from dataclasses import dataclass
 from decimal import Decimal
 
 from ventoux.case.approvals import withdraw
-from ventoux.case.definition import CallStep, CaseDefinition, CaseInvalid, parse_case
+from ventoux.case.definition import (
+    ActivityStep,
+    CallStep,
+    CaseDefinition,
+    CaseInvalid,
+    PlanStep,
+    TaskStep,
+    parse_case,
+)
 from ventoux.case.engine import KNOWN
 from ventoux.case.releases import Hash, Record, canonical, is_release
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState, Migration
+from ventoux.case.visibility import seen_by
 from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.contract import ActivityContract
+from ventoux.core.expressions.check import a_type
 from ventoux.core.plan import ActivityState, PlanInvalid, parse_plan
 
 
@@ -117,19 +131,250 @@ def in_catalog(catalog: Catalog, reference: str) -> bool:
     return True
 
 
+# The kinds of name a mapping renames, each its section, and how a line names one of it.
+SECTIONS = {
+    "steps": "step",
+    "milestones": "milestone",
+    "fields": "field",
+    "rules": "rule",
+    "events": "event",
+}
+
+
+def declared(case: CaseDefinition, section: str) -> Collection[str]:
+    """The names of one kind `case` declares: its steps, milestones, fields, rules or events."""
+    names: dict[str, Collection[str]] = {
+        "steps": case.steps,
+        "milestones": case.milestones,
+        "fields": case.fields,
+        "rules": case.rules,
+        "events": case.events,
+    }
+    return names[section]
+
+
+def renamed(migration: Migration, section: str, name: str) -> str:
+    """`name`, of the kind `section`, as the target names it: mapped, or its own (brief, D53)."""
+    return migration.mapping.get(section, {}).get(name, name)
+
+
+def mapping_problems(
+    case: CaseDefinition, target: CaseDefinition, state: CaseState, migration: Migration
+) -> list[str]:
+    """What is wrong with the mapping: a section it doesn't know, a name either release doesn't
+    declare as that kind, two names mapped to one. Data, read strictly: nothing is guessed."""
+    problems: list[str] = []
+    sections = ", ".join(list(SECTIONS)[:-1]) + f" and {list(SECTIONS)[-1]}"
+    current = state.release or "the draft"
+    for section, names in migration.mapping.items():
+        if section not in SECTIONS:
+            problems.append(f"the mapping has no section {section}: its sections are {sections}")
+            continue
+        kind = SECTIONS[section]
+        mapped_to: dict[str, str] = {}
+        for old, new in names.items():
+            if old not in declared(case, section):
+                problems.append(f"{section}.{old}: {current} has no {kind} {old}")
+            if new not in declared(target, section):
+                problems.append(f"{section}.{old}: {migration.label} has no {kind} {new}")
+            if new in mapped_to:
+                problems.append(f"{section}: {mapped_to[new]} and {old} are both mapped to {new}")
+            mapped_to[new] = old
+    return problems
+
+
 def problems_of(
     case: CaseDefinition, catalog: Catalog, state: CaseState, migration: Migration
 ) -> list[str]:
-    """Everything that refuses the migration now, all at once; empty if it may apply."""
-    _, problems = target_problems(case, catalog, state, migration)
-    return problems
+    """Everything that refuses the migration now, all at once; empty if it may apply. The target
+    first, then the mapping, then what the case holds: each needs the one before to be read."""
+    target, problems = target_problems(case, catalog, state, migration)
+    if target is None or problems:
+        return problems
+    if problems := mapping_problems(case, target, state, migration):
+        return problems
+    return depending(case, target, catalog, state, migration)
+
+
+def depending(
+    case: CaseDefinition,
+    target: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    migration: Migration,
+) -> list[str]:
+    """What the case holds under a name the target lacks, or in a shape it can't hold: refused,
+    never terminated, each said with what to map or wait for (brief, D53)."""
+    label = migration.label
+    problems: list[str] = []
+    latest = {run.step: run for run in state.runs}  # each step's latest run
+    for step, run in latest.items():
+        if (new := renamed(migration, "steps", step)) not in target.steps:
+            wait = ", or migrate after it finishes" if run.status == "running" else ""
+            problems.append(
+                f"{run.entry} is {run.status}, and {label} has no step {new}: map it{wait}"
+            )
+    for milestone in state.milestones:
+        if (new := renamed(migration, "milestones", milestone)) not in target.milestones:
+            problems.append(
+                f"{milestone} is reached, and {label} has no milestone {new}: map it, since a "
+                "milestone reached is never undone"
+            )
+    for name in state.values:
+        problems += value_problems(case, target, catalog, state, migration, name)
+    for firing in state.firings:
+        new = renamed(migration, "rules", firing.rule)
+        if firing.status == "failed" and new not in target.rules:
+            problems.append(
+                f"{firing.entry} failed, and {label} has no rule {new}: map it, or retry it first"
+            )
+    waiting = [
+        *((approval.entry, approval.step, "is open") for approval in state.approvals.values()),
+        *((given.entry, step, "is given") for step, given in state.given.items()),
+        *((step, step, f"waits on {who}'s proposal") for step, who in state.proposers.items()),
+        *(
+            (asked.step, asked.step, f"waits on {asked.entry}")
+            for asked in state.proposed_by_rules.values()
+        ),
+    ]
+    for what, step, how in waiting:
+        if (new := renamed(migration, "steps", step)) not in target.steps:
+            problems.append(f"{what} {how}, and {label} has no step {new}: map it")
+    for asked in state.proposed_by_rules.values():
+        rule = asked.entry.rpartition("#")[0]
+        if (new := renamed(migration, "rules", rule)) not in target.rules:
+            problems.append(
+                f"{asked.step} waits on {asked.entry}, and {label} has no rule {new}: map it"
+            )
+    return list(dict.fromkeys(problems))  # each said once
+
+
+def value_problems(
+    case: CaseDefinition,
+    target: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    migration: Migration,
+    name: str,
+) -> list[str]:
+    """Why the target can't hold the value of `name` as it is: values are never converted, and
+    nothing loosens on the way (brief, D53). Never quotes the value, save an outcome, which is a
+    name the definition declares."""
+    label, current = migration.label, state.release or "the draft"
+    if name in case.fields:
+        new = renamed(migration, "fields", name)
+        if new not in target.fields:
+            return [f"{name} holds a value, and {label} has no field {new}: map it"]
+        before, after = case.fields[name], target.fields[new]
+        if before.declared != after.declared:
+            return [
+                (
+                    f"{name} is {a_type(before.declared)} in {current}, and {new} is "
+                    f"{a_type(after.declared)} in {label}: values are never converted"
+                )
+            ]
+        if before.sensitive and not after.sensitive:
+            return [
+                f"{name} is sensitive in {current}, and {new} isn't in {label}: a migration never loosens it"
+            ]
+        if widened(case, target, name, new):
+            return [
+                (
+                    f"{new} is seen by more roles in {label} than {name} in {current}: a "
+                    "migration never loosens it"
+                )
+            ]
+        return []
+    owner, _, part = name.partition(".")
+    if owner in case.steps:
+        new_step = renamed(migration, "steps", owner)
+        if new_step not in target.steps:
+            return []  # its run says so
+        if part == "outcome":
+            outcome = state.values[name]
+            if outcome not in outcomes_of(target.steps[new_step], catalog):
+                return [
+                    (
+                        f"{name} is {outcome}, which {label}'s {new_step} doesn't declare: "
+                        "values are never converted"
+                    )
+                ]
+            return []
+        return output_problems(case, target, catalog, migration, owner, new_step, part)
+    if owner in case.events:
+        new_event = renamed(migration, "events", owner)
+        if new_event not in target.events:
+            return [f"{owner} has arrived, and {label} has no event {new_event}: map it"]
+        before_field = case.events[owner].payload[part]
+        after_field = target.events[new_event].payload.get(part)
+        if after_field is None or after_field.declared != before_field.declared:
+            return [
+                (
+                    f"{name} was carried by {owner}, and {label}'s {new_event} doesn't carry "
+                    f"{part} as it was: values are never converted"
+                )
+            ]
+        return []
+    # Fail closed: a value nothing declares is never carried over unread.
+    return [f"{name} is in the case file, and {label} declares nothing that holds it"]
+
+
+def output_problems(
+    case: CaseDefinition,
+    target: CaseDefinition,
+    catalog: Catalog,
+    migration: Migration,
+    step: str,
+    new_step: str,
+    part: str,
+) -> list[str]:
+    """Why the target can't hold the output `part` a run of `step` gave: its step in the target
+    calls a contract that gives the same field, of the same type."""
+    before, after = case.steps[step], target.steps[new_step]
+    assert isinstance(before, CallStep)  # only an activity or a workflow gives outputs
+    given = catalog.lookup(before.called).output.model_fields[part].annotation
+    if isinstance(after, CallStep) and in_catalog(catalog, after.called):
+        fields = catalog.lookup(after.called).output.model_fields
+        if part in fields and fields[part].annotation == given:
+            return []
+    calls = f"calls {after.called}, " if isinstance(after, CallStep) else ""
+    return [
+        (
+            f"{step}.{part} was given by {before.called}, and {migration.label}'s {new_step} "
+            f"{calls}which doesn't give {part} as it was: values are never converted"
+        )
+    ]
+
+
+def outcomes_of(step: object, catalog: Catalog) -> tuple[str, ...]:
+    """The outcomes a step declares: a task's, `done` and its contract's for an activity, `done`
+    for a workflow, `done` and `failed` for a plan (brief, D9) (brief, D28)."""
+    if isinstance(step, TaskStep):
+        return tuple(step.outcomes)
+    if isinstance(step, ActivityStep) and in_catalog(catalog, step.called):
+        contract = catalog.lookup(step.called)
+        assert isinstance(contract, ActivityContract)  # an activity step calls an activity
+        return ("done", *contract.outcomes)
+    if isinstance(step, PlanStep):
+        return ("done", "failed")
+    return ("done",)
+
+
+def widened(case: CaseDefinition, target: CaseDefinition, name: str, new: str) -> bool:
+    """Whether the target widens the field's declared `visible_to`: drops it, or adds a role to
+    it (brief, D30). A field declaring none is seen by every role its case names, and follows
+    the target's: a release adding a step for a new role lets that role see it."""
+    before = case.fields[name].visible_to
+    if before is None:
+        return False
+    return not set(seen_by(target, new)) <= set(before)
 
 
 def apply(
     case: CaseDefinition, catalog: Catalog, state: CaseState, migration: Migration
 ) -> CaseDefinition:
-    """Move the case to the target, once nothing refuses it: what it holds follows the target,
-    each change said; the case then decides as the target (brief, D53)."""
+    """Move the case to the target, once nothing refuses it: approvals of what changed withdrawn,
+    names renamed, then the case decides as the target; each change said (brief, D53)."""
     target, problems = target_problems(case, catalog, state, migration)
     assert target is not None and not problems  # checked by the caller, just before
     label = migration.label
@@ -144,9 +389,60 @@ def apply(
         if run.approved is not None and not same_behaviour(case, target, run.step):
             state.history.append(f"lapsed {run.approved.entry}: {label} changed {run.step}")
             run.approved = None
+    rename(case, target, state, migration)
     state.release = label
     state.engine = migration.engine
     return target
+
+
+def rename(
+    case: CaseDefinition, target: CaseDefinition, state: CaseState, migration: Migration
+) -> None:
+    """Every name the case holds, as the target names it; a run keeps its entry, so its key. A
+    value keeps its sources, and takes a mark the target declares (brief, D12) (brief, D53)."""
+    for section, names in migration.mapping.items():
+        for old, new in names.items():
+            state.history.append(f"renamed {SECTIONS[section]} {old} to {new}")
+
+    def key(name: str) -> str:
+        if name in case.fields:
+            return renamed(migration, "fields", name)
+        owner, dot, part = name.partition(".")
+        for section in ("steps", "events"):
+            if owner in declared(case, section):
+                return renamed(migration, section, owner) + dot + part
+        return name
+
+    state.values = {key(name): value for name, value in state.values.items()}
+    state.sources = {key(name): sources for name, sources in state.sources.items()}
+    state.obtained = {key(name): obtained for name, obtained in state.obtained.items()}
+    for name in state.sources:
+        if name in target.fields and (mark := target.fields[name].source) is not None:
+            state.sources[name] = state.sources[name] | {mark}  # adds distrust, never removes it
+    state.milestones = [renamed(migration, "milestones", m) for m in state.milestones]
+    state.refreshing = {key(name): run for name, run in state.refreshing.items()}
+    for run in state.runs:
+        run.step = renamed(migration, "steps", run.step)
+    step = functools.partial(renamed, migration, "steps")
+    state.approvals = {step(name): approval for name, approval in state.approvals.items()}
+    state.given = {step(name): given for name, given in state.given.items()}
+    state.asked = {step(name): count for name, count in state.asked.items()}
+    state.proposers = {step(name): who for name, who in state.proposers.items()}
+    state.waiting_to_start = [step(name) for name in state.waiting_to_start]
+    state.proposed_by_rules = {
+        step(name): dataclasses.replace(
+            asked,
+            step=step(asked.step),
+            read_from={person: key(field) for person, field in asked.read_from.items()},
+            untrusted={key(field): sources for field, sources in asked.untrusted.items()},
+        )
+        for name, asked in state.proposed_by_rules.items()
+    }
+    for firing in state.firings:
+        firing.rule = renamed(migration, "rules", firing.rule)
+    state.arrived = {
+        renamed(migration, "events", event): count for event, count in state.arrived.items()
+    }
 
 
 def same_behaviour(case: CaseDefinition, target: CaseDefinition, name: str) -> bool:

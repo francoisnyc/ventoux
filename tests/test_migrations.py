@@ -19,8 +19,10 @@ from ventoux.testing import (
     AnswerRefused,
     ChangeRefused,
     migrate,
+    propose,
     release_of,
     run_case,
+    send,
 )
 
 LARGE = {"order_id": "ord-1", "amount": 250}
@@ -155,3 +157,302 @@ def test_the_engine_moves_forward_only() -> None:
         "proposed by pia, approved by lee"
     ) in moved.history
     assert (moved.state.release, moved.state.engine) == ("refund 1", 2)
+
+
+# --- Slice 2: the mapping, and what depends on a name ---
+
+SMALL = {"order_id": "ord-1", "amount": 40}
+SMALL_REVIEW = ("review", "approve", "ana", {"approved_amount": 40})
+
+
+def renamed() -> dict[str, Any]:
+    """Refund 2, its approved amount renamed `amount_approved`, and its payment step `payment`."""
+    text = json.dumps(refund_2(), default=int)
+    text = text.replace("approved_amount", "amount_approved")
+    text = text.replace('"pay"', '"payment"').replace('"pay.outcome"', '"payment.outcome"')
+    renaming: dict[str, Any] = json.loads(text)
+    return renaming
+
+
+REFUND_3 = release_of(renamed(), 3)
+RENAMES = {"steps": {"pay": "payment"}, "fields": {"approved_amount": "amount_approved"}}
+
+
+def test_names_map_by_name() -> None:
+    # What Ana answered is the same value under its new name, from the same person, and the run
+    # keeps its entry, so its key (brief, D53).
+    moved = on_refund_1(
+        [REVIEWED, migrate(REFUND_3, RENAMES, "pia"), ("case.change#1", "approve", "lee")]
+    )
+    assert moved.history[-5:] == [
+        (
+            "applied case.change#1: migrated from refund 1, engine 2 to refund 3, engine 2, "
+            "proposed by pia, approved by lee"
+        ),
+        "withdrew pay.approval#1: refund 3 changed pay",
+        "renamed step pay to payment",
+        "renamed field approved_amount to amount_approved",
+        "started fraud_check#1: waiting for clear by fraud",
+    ]
+    values, sources = moved.state.values, moved.state.sources
+    assert "approved_amount" not in values and values["amount_approved"] == 250
+    assert sources["amount_approved"] == frozenset({"person:ana"})
+    paid = on_refund_1(
+        [
+            REVIEWED,
+            migrate(REFUND_3, RENAMES, "pia"),
+            ("case.change#1", "approve", "lee"),
+            ("fraud_check", "clear", "fay"),
+            ("payment.approval#2", "approve", "sam"),
+        ]
+    )
+    assert paid.closed and paid.reached("payment")
+    assert [run.entry for run in paid.state.runs] == ["review#1", "fraud_check#1", "payment#1"]
+    # A run of a renamed step keeps its entry, and so its key, under its new step; what it gave
+    # is under the new name.
+    moved_done = run_case(
+        kept_open(REFUND),
+        file=SMALL,
+        answers=[
+            SMALL_REVIEW,
+            migrate(release_of(kept_open(renamed()), 3), RENAMES, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=release_of(kept_open(REFUND), 1),
+    )
+    assert [(run.entry, run.step) for run in moved_done.state.runs] == [
+        ("review#1", "review"),
+        ("pay#1", "payment"),
+        ("fraud_check#1", "fraud_check"),
+    ]
+    assert moved_done.state.values["payment.outcome"] == "done"
+    assert "pay.outcome" not in moved_done.state.values
+
+
+def refused_mapping(mapping: dict[str, dict[str, str]]) -> str:
+    with pytest.raises(ChangeRefused) as refused:
+        on_refund_1([REVIEWED, migrate(REFUND_3, mapping, "pia")])
+    return str(refused.value)
+
+
+def test_a_bad_mapping_is_refused() -> None:
+    # The mapping is data, read strictly: nothing in it is guessed (brief, D53).
+    assert refused_mapping({**RENAMES, "tasks": {}}) == (
+        "the mapping has no section tasks: its sections are steps, milestones, fields, rules and "
+        "events"
+    )
+    # Every problem at once.
+    assert refused_mapping({**RENAMES, "milestones": {"paid": "settled"}}) == (
+        "milestones.paid: refund 1 has no milestone paid\n"
+        "milestones.paid: refund 3 has no milestone settled"
+    )
+    assert refused_mapping({**RENAMES, "steps": {"pay": "settle"}}) == (
+        "steps.pay: refund 3 has no step settle"
+    )
+    assert (
+        refused_mapping({**RENAMES, "steps": {"pay": "payment", "call_customer": "payment"}})
+        == "steps: pay and call_customer are both mapped to payment"
+    )
+
+
+def test_an_unmapped_rename_running_work_depends_on_is_refused() -> None:
+    # The curriculum's negative test. Refund 3 renames pay, the mapping doesn't say so, and pay#1
+    # is running: refused, never terminated (brief, D53). When proposed:
+    with pytest.raises(ChangeRefused) as refused:
+        run_case(
+            REFUND,
+            file=SMALL,
+            answers=[SMALL_REVIEW, migrate(REFUND_3, {"fields": RENAMES["fields"]}, "pia")],
+            people=PEOPLE,
+            release=REFUND_1,
+            held=["pay"],
+        )
+    assert str(refused.value) == (
+        "pay#1 is running, and refund 3 has no step pay: map it, or migrate after it finishes"
+    )
+    # And when applied: proposed while nothing depended on it, pay#1 started since.
+    started = run_case(
+        REFUND,
+        file=SMALL,
+        answers=[
+            migrate(REFUND_3, {"fields": RENAMES["fields"]}, "pia"),
+            SMALL_REVIEW,
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=REFUND_1,
+        held=["pay"],
+    )
+    assert started.history[-1] == (
+        "case.change#1 not applied: pay#1 is running, and refund 3 has no step pay: map it, or "
+        "migrate after it finishes"
+    )
+    assert started.state.release == "refund 1"
+
+
+def kept_open(definition: dict[str, Any]) -> dict[str, Any]:
+    """`definition`, open until a person closes it, so a case can migrate once its work is done."""
+    definition = copy.deepcopy(definition)
+    definition["stays_open"] = True
+    definition["close_reasons"] = {"done": {"display": {"title": "Done"}, "roles": ["support"]}}
+    return definition
+
+
+def refused_on(
+    source: dict[str, Any],
+    target: dict[str, Any],
+    answers: list[Any],
+    file: dict[str, Any] = SMALL,
+    activities: dict[str, Any] | None = None,
+) -> str:
+    """What the engine says when Pia proposes moving a case of `source`, after `answers`, to
+    `target`, nothing renamed."""
+    with pytest.raises(ChangeRefused) as refused:
+        run_case(
+            source,
+            file=file,
+            answers=[*answers, migrate(release_of(target, 2), {}, "pia")],
+            people=PEOPLE,
+            release=release_of(source, 1),
+            activities=activities or {},
+        )
+    return str(refused.value)
+
+
+def without(definition: dict[str, Any], change: Any) -> dict[str, Any]:
+    """A copy of `definition`, changed by `change`."""
+    changed = copy.deepcopy(definition)
+    change(changed)
+    return changed
+
+
+def test_what_depends_on_a_name_refuses() -> None:
+    # Each is said, with what to map or wait for; values are never converted, and nothing
+    # loosens (brief, D53).
+    paid = kept_open(REFUND)
+    paid["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    paid["steps"]["pay"]["reaches"] = ["paid"]
+    unpaid = without(paid, lambda d: (d.pop("milestones"), d["steps"]["pay"].pop("reaches")))
+    assert refused_on(paid, unpaid, [SMALL_REVIEW]) == (
+        "paid is reached, and refund 2 has no milestone paid: map it, since a milestone reached "
+        "is never undone"
+    )
+    # A value, of the same type, in a field that doesn't loosen.
+    noted = kept_open(REFUND)
+    noted["fields"]["note"] = {
+        "type": "string",
+        "display": {"title": "A note"},
+        "sensitive": True,
+        "visible_to": ["support"],
+    }
+    with_note = {**SMALL, "note": "call after 5"}
+    assert refused_on(noted, kept_open(REFUND), [], with_note) == (
+        "note holds a value, and refund 2 has no field note: map it"
+    )
+    as_number = without(noted, lambda d: d["fields"]["note"].update(type="number"))
+    assert refused_on(noted, as_number, [], with_note) == (
+        "note is a string in refund 1, and note is a number in refund 2: values are never converted"
+    )
+    plain = without(noted, lambda d: d["fields"]["note"].update(sensitive=False))
+    assert refused_on(noted, plain, [], with_note) == (
+        "note is sensitive in refund 1, and note isn't in refund 2: a migration never loosens it"
+    )
+    wider = without(noted, lambda d: d["fields"]["note"].update(visible_to=["support", "fraud"]))
+    assert refused_on(noted, wider, [], with_note) == (
+        "note is seen by more roles in refund 2 than note in refund 1: a migration never loosens it"
+    )
+    # What a finished run recorded: its outcome, its outputs.
+    accepting = without(
+        kept_open(REFUND),
+        lambda d: d["steps"]["review"]["outcomes"].update(
+            accept=d["steps"]["review"]["outcomes"].pop("approve")
+        ),
+    )
+    assert refused_on(kept_open(REFUND), accepting, [SMALL_REVIEW]) == (
+        "review.outcome is approve, which refund 2's review doesn't declare: values are never "
+        "converted"
+    )
+    looking_up = without(
+        kept_open(REFUND),
+        lambda d: d["steps"]["pay"].update(
+            activity="orders.lookup@1", inputs={"order_id": {"var": "order_id"}}
+        ),
+    )
+    assert refused_on(kept_open(REFUND), looking_up, [SMALL_REVIEW]) == (
+        "pay.refund_id was given by payments.refund@2, and refund 2's pay calls orders.lookup@1, "
+        "which doesn't give refund_id as it was: values are never converted"
+    )
+    # What an arrival carried.
+    cancellable = kept_open(REFUND)
+    cancellable["events"] = {
+        "cancelled": {
+            "display": {"title": "The customer cancels"},
+            "sent_by": {"system": "portal"},
+            "payload": {
+                "note": {
+                    "type": "string",
+                    "display": {"title": "What the customer wrote"},
+                    "source": "untrusted:customer",
+                }
+            },
+        }
+    }
+    cancel = send("cancelled", {"note": "changed my mind"}, "system:portal")
+    as_count = without(
+        cancellable, lambda d: d["events"]["cancelled"]["payload"]["note"].update(type="number")
+    )
+    assert refused_on(cancellable, as_count, [cancel]) == (
+        "cancelled.note was carried by cancelled, and refund 2's cancelled doesn't carry note as "
+        "it was: values are never converted"
+    )
+    assert refused_on(cancellable, without(cancellable, lambda d: d.pop("events")), [cancel]) == (
+        "cancelled has arrived, and refund 2 has no event cancelled: map it"
+    )
+    # A rule whose firing waits for a person.
+    flagging = kept_open(REFUND)
+    flagging["milestones"] = {"large": {"display": {"title": "A large refund"}}}
+    flagging["rules"] = {
+        "flag_large": {
+            "display": {"title": "Mark a large refund"},
+            "on": "opened",
+            "when": {">": [{"var": "approved_amount"}, 1000]},
+            "then": {"reach": ["large"]},
+        }
+    }
+    assert refused_on(flagging, without(flagging, lambda d: d.pop("rules")), []) == (
+        "flag_large#1 failed, and refund 2 has no rule flag_large: map it, or retry it first"
+    )
+
+
+def test_what_waits_on_a_step_refuses_its_removal() -> None:
+    # An approval asked, a person's proposal, a rule's start: each waits on the step (brief, D53).
+    no_payment = without(
+        kept_open(REFUND),
+        lambda d: (
+            d["steps"].pop("pay"),
+            d["steps"].pop("call_customer"),
+            d.update(sequence=["review"]),
+        ),
+    )
+    proposed = without(
+        kept_open(REFUND),
+        lambda d: d["steps"]["pay"].update(automatic=False, proposed_by=["support"]),
+    )
+    assert refused_on(proposed, no_payment, [REVIEWED, propose("pay", "sam")], LARGE) == (
+        "pay.approval#1 is open, and refund 2 has no step pay: map it\n"
+        "pay waits on sam's proposal, and refund 2 has no step pay: map it"
+    )
+    started = without(kept_open(REFUND), lambda d: d["steps"]["pay"].update(automatic=False))
+    started["rules"] = {
+        "start_pay": {
+            "display": {"title": "Pay once reviewed"},
+            "on": {"answered": "review"},
+            "then": {"start": ["pay"]},
+        }
+    }
+    assert refused_on(started, no_payment, [REVIEWED], LARGE) == (
+        "pay.approval#1 is open, and refund 2 has no step pay: map it\n"
+        "pay waits on start_pay#1, and refund 2 has no step pay: map it\n"
+        "pay waits on start_pay#1, and refund 2 has no rule start_pay: map it"
+    )
