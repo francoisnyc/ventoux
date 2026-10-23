@@ -83,6 +83,15 @@ class FolderStore:
             found.append(kept)
         return found
 
+    def get(self, name: str, release: int, wording: int = 1) -> Record:
+        """The record of `name`'s release `release` (its wording revision `wording`), or
+        `RecordRefused` if there is none."""
+        for kept in self.records(name):
+            if (kept.release, kept.wording) == (release, wording):
+                return kept
+        wanted = f"{name} {release}" + (f", wording {wording}" if wording > 1 else "")
+        raise RecordRefused(f"{wanted} isn't released: no record of it in {self.root / name}")
+
     def write(self, kept: Record) -> bool:
         """Write `kept` as its file; False if that file already holds the same bytes. A file is
         never written over: other bytes are refused (brief, D50)."""

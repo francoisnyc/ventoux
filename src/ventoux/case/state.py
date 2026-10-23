@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
+from ventoux.case.engine import ENGINE
 from ventoux.core.before_activity import Steering
 from ventoux.core.provenance import Sourced
 from ventoux.core.sensitive import Sensitive
@@ -203,6 +204,11 @@ class CaseState:
     # Each timer set and not yet fired or ended, in the order set: pending work (brief, D10)
     # (brief, D44).
     timers: list[Timer] = field(default_factory=list[Timer])
+    # The version of Ventoux's deciding code the case decides as, set once when it opens and
+    # never by itself after (brief, D51).
+    engine: int = ENGINE
+    # The release it opened on, as people name it (`refund 1`); None for a draft (brief, D51).
+    release: str | None = None
 
 
 @dataclass(frozen=True)
@@ -215,6 +221,12 @@ class Opened:
     # (brief, D33). Python: `kw_only` makes it a keyword with no default, `Opened(..., at=t)`, so
     # no event is ever made without its time.
     at: int = field(kw_only=True)
+    # The engine version the case opens at, learnt by the driver: on Temporal from its patch
+    # markers, in memory this code's own. Event data, so `decide` reads no Temporal (brief, D51).
+    engine: int = field(kw_only=True, default=ENGINE)
+    # The release it opens on, as people name it (`refund 1`), once the driver has checked it is
+    # that release's package; None: a draft (brief, D51).
+    release: str | None = field(kw_only=True, default=None)
 
 
 @dataclass(frozen=True)
@@ -227,6 +239,9 @@ class Answered:
     roles: frozenset[str]  # their roles, stated with the answer (brief, D22)
     form: Mapping[str, object] | None = None  # the values the outcome sets
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+    # The wording revision of the case's release its person read, as the trusted caller states
+    # it; None: not said (brief, D51).
+    wording: int | None = field(kw_only=True, default=None)
 
 
 @dataclass(frozen=True)

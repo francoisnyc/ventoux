@@ -523,3 +523,72 @@ def test_the_guides_example_runs_as_written(tmp_path: Path, capsys: Any, monkeyp
         change()
         assert main(arguments) == 0
         assert capsys.readouterr().out == printed
+
+
+def test_a_revert_with_new_wording_is_refused(tmp_path: Path) -> None:
+    # Only the latest release takes new wording: a behaviour reverted with the newer release's
+    # titles kept would show them on the older release's open cases (brief, D51).
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    release(folder, store, "a1", CATALOG)
+    edited(folder, requiring())
+    edited(folder, retitled("Pay once nothing else is needed"))
+    release(folder, store, "a2", CATALOG)
+    edited(folder, requiring("review"))  # release 1's behaviour, release 2's title
+    with pytest.raises(PackageRefused) as refusal:
+        release(folder, store, "a3", CATALOG)
+    assert str(refusal.value) == (
+        "same behaviour as refund 1, other wording: rewording an older release reaches its open "
+        "cases; bring back its wording"
+    )
+    assert len(store.records("refund")) == 2
+    # Its wording brought back too, as a revert does: nothing released.
+    edited(folder, retitled("Settle the refund"))
+    assert release(folder, store, "a4", CATALOG).outcome == SameAs(1)
+
+
+def test_a_plan_fields_source_is_named_as_written() -> None:
+    # A plan keeps each field's source beside its type; the JSON writes it on the field.
+    case, plans = written()
+    records = released_once(case, plans)
+    plans[0]["fields"]["amount"]["source"] = "untrusted:customer"
+    path = "plans.refund-order@1.fields.amount.source"
+    assert next_release(packed(case, plans), records) == Released(2, Changed(behaviour=(path,)))
+
+
+def test_every_record_is_read_again_not_only_the_latest(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    release(folder, store, "a1", CATALOG)
+    edited(folder, requiring())
+    release(folder, store, "a2", CATALOG)
+    first = tmp_path / "releases" / "refund" / "1.json"
+    data = json.loads(first.read_text())
+    data["digest"]["sha256"] = "0" * 64
+    first.write_text(json.dumps(data))
+    assert refusal_of(tmp_path, folder).startswith("refund 1's digest isn't what its own package")
+
+
+def test_a_stray_file_in_the_releases_folder_refuses_the_run(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    release(folder, store, "a1", CATALOG)
+    stray = tmp_path / "releases" / "refund" / "notes.txt"
+    stray.write_text("to do")
+    assert refusal_of(tmp_path, folder).startswith(f"{stray} can't be read as a release record")
+
+
+def test_a_release_not_recorded_isnt_found(tmp_path: Path) -> None:
+    folder, store = copied(tmp_path), FolderStore(tmp_path / "releases")
+    release(folder, store, "a1", CATALOG)
+    assert store.get("refund", 1).release == 1
+    with pytest.raises(RecordRefused) as refusal:
+        store.get("refund", 2)
+    where = tmp_path / "releases" / "refund"
+    assert str(refusal.value) == f"refund 2 isn't released: no record of it in {where}"
+
+
+def test_the_guide_says_what_a_revert_with_new_wording_gets() -> None:
+    guide = GUIDE.read_text().split("**Only the latest release takes new wording.**")[1]
+    shown = guide.split("```\n")[1].split("```")[0].strip()
+    assert shown == (
+        "same behaviour as refund 1, other wording: rewording an older release reaches its open "
+        "cases; bring back its wording"
+    )

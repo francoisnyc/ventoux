@@ -7,9 +7,11 @@ clock, randomness or I/O, so replay rebuilds the same case. See docs/layers/08-c
 """
 
 import asyncio
+import json
 from collections.abc import Coroutine, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any, ClassVar
 
 from temporalio import workflow
@@ -39,9 +41,11 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.called import unbound
     from ventoux.case.closing import CloseRefused, needs_attention
     from ventoux.case.definition import CaseInvalid, parse_case
+    from ventoux.case.engine import KNOWN, opening_engine
     from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.freshness import TimeRefused
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
+    from ventoux.case.releases import Hash, Record, is_release
     from ventoux.case.runtime import CaseRefused, EventRefused, ShownRefused, decide
     from ventoux.case.state import (
         Answered,
@@ -79,8 +83,24 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.tooling.keys import FORGOTTEN
 
 
+class StartUnread(Exception):
+    """A run continued as new whose start, read and checked when the case opened, no longer reads
+    or no longer gives its release's digest: a change of code. Not a refusal of the case: it fails
+    the workflow task, retried until code that reads it is deployed (brief, D17) (brief, D51)."""
+
+
 class CaseForgotten(Exception):
     """A forgotten case read for what it held: its key is gone (brief, D32)."""
+
+
+@dataclass
+class ReleaseStart:
+    """The release a case opens on: which, its digest, and its plans (brief, D51)."""
+
+    name: str  # the package: `refund`
+    release: int  # its number
+    digest: Hash  # its behaviour digest, which the case checks what it was given against
+    plans: dict[str, Any]  # its plans, as stored data, by reference (`refund-order@1`)
 
 
 @dataclass
@@ -93,6 +113,9 @@ class CaseStart:
     # The state of the case, when it continues as new: the new run decides from it alone
     # (brief, D27). None: the case opens now.
     carried: dict[str, Any] | None = None
+    # The release it opens on, crossing every continue-as-new with the definition; None: a draft,
+    # as every case before 12b (brief, D51).
+    release: ReleaseStart | None = None
 
 
 @dataclass
@@ -108,6 +131,8 @@ class CaseReport:
     # Each timer still set, soonest first, with its due time: never in `waiting_for` (brief, D24)
     # (brief, D44). Empty from a worker before 11f.
     timers: list[str] = field(default_factory=list[str])
+    release: str = "draft"  # the release it runs, `refund 1`; a draft's says so (brief, D51)
+    engine: int = 1  # the engine version it decides as; 1 from a worker before 12b
 
 
 @dataclass
@@ -121,6 +146,8 @@ class CaseAnswer:
     # replay decides as the first run did, whatever their roles are now (brief, D22).
     roles: list[str]
     form: dict[str, Any] | None = None  # the values the outcome sets, if any
+    # The wording revision of the case's release its person read; None: not said (brief, D51).
+    wording: int | None = None
 
 
 @dataclass
@@ -154,12 +181,48 @@ class CaseRequest:
 
 
 @dataclass
+class Wording:
+    """A wording revision of a release, to show a case in: its package as written (brief, D51)."""
+
+    name: str  # the package: `refund`
+    release: int
+    wording: int  # 1: the release's own wording
+    case: str  # case.json's text
+    plans: dict[str, str]  # each plan's text, by reference
+
+    def __str__(self) -> str:
+        return f"{self.name} {self.release}, wording {self.wording}"
+
+
+@dataclass
 class SheetAsked:
     """A person reading an open approval's sheet: which, with which roles, at what time."""
 
     entry: str  # the open approval, such as `pay.approval#1`
     roles: list[str]  # the reader's roles, as the trusted caller states them (brief, D22)
     at: int  # the reader's time, in seconds since the epoch, against which ages are told
+    # The wording to show it in: a revision of the case's release; None: the case's own.
+    wording: Wording | None = None
+
+
+@dataclass
+class ViewAsked:
+    """A person reading the case file in a wording revision of its release."""
+
+    roles: list[str]  # the reader's roles, as the trusted caller states them (brief, D22)
+    wording: Wording
+
+
+@dataclass
+class ViewAnswer:
+    """What a worded view answers: the view, or why it can't be read in that wording."""
+
+    view: CaseView | None
+    refused: str = ""  # why not, naming the wording, never a value
+
+
+class WordingRefused(Exception):
+    """A wording that isn't a revision of the case's release: never shown in its place."""
 
 
 @dataclass
@@ -168,6 +231,8 @@ class SheetAnswer:
 
     sheet: ApprovalSheet | None
     refused: str = ""  # why not, naming the entry, never a value
+    # Why the wording it was asked in was refused, naming the wording; then `refused` is empty.
+    wording_refused: str = ""
 
 
 class CaseWorkflow:
@@ -190,6 +255,10 @@ class CaseWorkflow:
     def __init__(self) -> None:
         self.state = CaseState("")  # named when the case opens
         self.case: Any = None  # the case definition, once read
+        # The plans its plan steps run: its release's, for a released case; the deployment's,
+        # for a draft (brief, D51).
+        self.its_plans: Mapping[str, Any] = self.plans
+        self.release: ReleaseStart | None = None  # the release it runs; None: a draft
         self.inbox: list[Event] = []  # events not yet decided, in the order they came
         self.decided = 0  # events this run has decided
         self.running = 0  # activities and child plans started and not yet back
@@ -206,9 +275,9 @@ class CaseWorkflow:
     @workflow.signal(name="answer")
     def answer(self, sent: CaseAnswer) -> None:
         form = None if sent.form is None else dict(sent.form)
-        self.inbox.append(
-            Answered(sent.entry, sent.outcome, sent.by, frozenset(sent.roles), form, at=now())
-        )
+        roles = frozenset(sent.roles)
+        answered = Answered(sent.entry, sent.outcome, sent.by, roles, form, at=now())
+        self.inbox.append(replace(answered, wording=sent.wording))
 
     @workflow.signal(name="propose")
     def propose(self, sent: CaseRequest) -> None:
@@ -258,6 +327,8 @@ class CaseWorkflow:
             list(state.flags),
             list(state.history),
             set_timers(state),
+            state.release or "draft",
+            state.engine,
         )
 
     @workflow.query(name="view")
@@ -266,6 +337,39 @@ class CaseWorkflow:
         nothing hidden from them leaves it (brief, D30)."""
         return case_view(self.case, self.state, roles, self.catalog.roles)
 
+    @workflow.query(name="worded_view")
+    def worded_view(self, asked: ViewAsked) -> ViewAnswer:
+        """The view, in a wording revision of the case's release: its titles, the case's
+        decisions. A refusal comes back as data, as a sheet's does (brief, D31) (brief, D51)."""
+        try:
+            case = self.worded(asked.wording)
+        except WordingRefused as refused:
+            return ViewAnswer(None, str(refused))
+        return ViewAnswer(case_view(case, self.state, asked.roles, self.catalog.roles))
+
+    def worded(self, wording: Wording | None) -> Any:
+        """The case definition to show the case in: its own, or `wording`'s, once it is checked to
+        be a revision of the release the case runs, with that release's digest. Only `display`
+        can differ, so nothing it shows is decided differently (brief, D51)."""
+        if wording is None:
+            return self.case
+        if self.release is None:
+            raise WordingRefused(f"{wording} isn't a wording of this case: it is a draft")
+        runs = f"{self.release.name} {self.release.release}"
+        refused = WordingRefused(f"{wording} isn't a wording of {runs}, which this case runs")
+        if (wording.name, wording.release) != (self.release.name, self.release.release):
+            raise refused
+        try:
+            case = parse_case(json.loads(wording.case, parse_float=Decimal))
+            plans = {
+                ref: json.loads(text, parse_float=Decimal) for ref, text in wording.plans.items()
+            }
+        except (CaseInvalid, ValueError):
+            raise refused from None
+        if not is_release(case, plans, self.release.digest):
+            raise refused
+        return case
+
     @workflow.query(name="approval_sheet")
     def approval_sheet(self, asked: SheetAsked) -> SheetAnswer:
         """An open approval's sheet, with each fact's age at the reader's time, filtered here as
@@ -273,10 +377,13 @@ class CaseWorkflow:
         nothing. A refusal comes back as data: a failure's message is sealed whoever raised it
         (brief, D31), and the reader must learn why; it names the entry, never a value."""
         try:
+            case = self.worded(asked.wording)
             sheet = sheet_of(
-                self.case, self.state, asked.entry, asked.roles, asked.at, self.catalog.roles
+                case, self.state, asked.entry, asked.roles, asked.at, self.catalog.roles
             )
             return SheetAnswer(sheet)
+        except WordingRefused as refused:
+            return SheetAnswer(None, wording_refused=str(refused))
         except (SheetRefused, TimeRefused) as refused:
             return SheetAnswer(None, str(refused))
 
@@ -291,11 +398,24 @@ class CaseWorkflow:
         self.state = CaseState(f"{info.workflow_id}/{info.first_execution_run_id}")
         try:
             case = self.case = parse_case(start.definition)
+            named = None if start.release is None else self.released_on(case, start.release)
             if start.carried is None:
-                self.decide(case, Opened(start.file, start.opened_by, at=now()))
+                opened = Opened(
+                    start.file, start.opened_by, at=now(), engine=engine(), release=named
+                )
+                self.decide(case, opened)
             else:
                 self.state = state_from_data(start.carried)  # a case continued as new
         except (CaseInvalid, CaseRefused) as refused:
+            if start.carried is not None:
+                # A run continued as new: its start was read and checked when the case opened, so
+                # one that no longer reads, or no longer gives its release's digest, means the code
+                # changed. The workflow task fails, and the case waits for code that reads it,
+                # never failed for good (brief, D17) (brief, D51).
+                raise StartUnread(
+                    f"{info.workflow_id} can't read the start it continued with: {refused}: deploy "
+                    "code that reads it"
+                ) from None
             # A case that can't open fails at once, saying why. Any other exception fails only the
             # workflow task, which Temporal retries until fixed code is deployed (brief, D17).
             kind = type(refused).__name__
@@ -340,6 +460,20 @@ class CaseWorkflow:
         self.inbox.clear()
         return self.report()
 
+    def released_on(self, case: Any, release: ReleaseStart) -> str:
+        """The release's name, `refund 1`, once the case has checked that what it was given is
+        that release's package; otherwise `CaseRefused`, so it never opens on behaviour nobody
+        released. Depends on nothing the client did (brief, D34) (brief, D51)."""
+        named = f"{release.name} {release.release}"
+        if not is_release(case, release.plans, release.digest):
+            raise CaseRefused(
+                f"{workflow.info().workflow_id} can't open on {named}: what it was given isn't "
+                f"{named}'s package"
+            )
+        self.its_plans = release.plans  # only its release's plans, never the deployment's
+        self.release = release
+        return named
+
     async def until_something_comes(self) -> None:
         """Wait for an event, the time to continue as new, an engine bug, or the earliest timer's
         due time, whichever comes first. A case with no timer waits as it did before 11f, so its
@@ -382,7 +516,9 @@ class CaseWorkflow:
         switch is committed fails it, and this run decides that signal first: no answer is ever
         carried as a queue (brief, D27)."""
         assert not self.inbox and self.running == 0 and workflow.all_handlers_finished()
-        carried = CaseStart(start.definition, {}, start.opened_by, state_as_data(self.state))
+        carried = CaseStart(
+            start.definition, {}, start.opened_by, state_as_data(self.state), start.release
+        )
         # Temporal: ends this run and starts the next one of the same workflow, with `carried`.
         workflow.continue_as_new(carried)
 
@@ -438,7 +574,7 @@ class CaseWorkflow:
         the inbox (brief, D28): succeeded is done, a failed final state the outcome `failed`, a
         plan that stops or can't start fails the step."""
         try:
-            plan = supplied(self.plans, command.plan)
+            plan = supplied(self.its_plans, command.plan)
         except PlanNotSupplied as missing:
             self.inbox.append(Failed(command.entry, str(missing), at=now()))  # fail closed
             return
@@ -451,7 +587,11 @@ class CaseWorkflow:
         }
         steered = {steering.said: sorted(steering.sources) for steering in command.steered}
         start = PlanStart(
-            self.plans[command.plan], fields, command.run, dict(command.excluded), steered or None
+            self.its_plans[command.plan],
+            fields,
+            command.run,
+            dict(command.excluded),
+            steered or None,
         )
         try:
             # Temporal: a child workflow is a workflow the case starts and waits for; its own
@@ -615,6 +755,13 @@ def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWor
     return f"{reference} failed with {raised(error)}: {Sensitive(said)}"
 
 
+def engine() -> int:
+    """The engine version a case opens at: asked of Temporal's patch markers, newest first, so a
+    replay reads the version its history recorded (brief, D51). Temporal: `patched` says whether
+    a marker is in force, adding it when the run is new; asked only at the opening."""
+    return opening_engine(KNOWN, lambda version: workflow.patched(f"ventoux-engine-{version}"))
+
+
 def now() -> int:
     """The workflow's time as each event reaches the case, in whole seconds since the epoch.
     Temporal's workflow time is recorded in history, so a replay stamps the same times; the case
@@ -657,20 +804,45 @@ def asked(event: Event) -> str:
 async def start_case(
     client: Client,
     workflow: type[CaseWorkflow],
-    definition: dict[str, Any],
+    opening_on: Record | dict[str, Any],
     file: Mapping[str, Any],
     id: str,
     task_queue: str,
     opened_by: str | None = None,
 ) -> WorkflowHandle[CaseWorkflow, CaseReport]:
-    """Open a case of `definition` with `file`, as a run of `workflow`. `id` is the case
-    (`refund-A-1001`): a second case with the same ID is refused (brief, D27). The case's key is
-    made first, and never again: if starting then fails, the ID is spent (brief, D31)."""
+    """Open a case with `file`, as a run of `workflow`, on a release's record, or on a definition,
+    which makes it a draft (brief, D51). `id` is the case (`refund-A-1001`): a second case with the
+    same ID is refused (brief, D27). The case's key is made first, and never again: if starting
+    then fails, the ID is spent (brief, D31)."""
     keys = keys_of(client)
     # The codec finds a key from the part of a workflow ID before its first `/` (brief, D31).
     if "/" in id:
         raise ValueError(f'{id} can\'t name a case: a case ID has no "/"')
     keys.create(id)
+    await client.start_workflow(
+        workflow.run,
+        opening(opening_on, file, opened_by),
+        id=id,
+        task_queue=task_queue,
+        id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+    )
+    return case_handle(client, workflow, id)
+
+
+def opening(
+    opening_on: Record | dict[str, Any], file: Mapping[str, Any], opened_by: str | None = None
+) -> CaseStart:
+    """What a case opens with: a release's case and plans, read from its record as the engine
+    reads a definition, numbers as exact decimals (brief, D20); or a definition, for a draft."""
+    if isinstance(opening_on, Record):
+        definition = json.loads(opening_on.written.case, parse_float=Decimal)
+        plans = {
+            reference: json.loads(text, parse_float=Decimal)
+            for reference, text in opening_on.written.plans.items()
+        }
+        release = ReleaseStart(opening_on.name, opening_on.release, opening_on.digest, plans)
+    else:
+        definition, release = opening_on, None
     # Each sensitive field's value wrapped: it crosses Temporal in its own part, sealed with the
     # case's key (brief, D31). The workflow checks the definition; here a field marked anything
     # but `false` counts as sensitive, so a malformed mark never sends a value in plain text.
@@ -681,15 +853,13 @@ async def start_case(
     sealed = {
         name: Sensitive(value) if name in sensitive else value for name, value in file.items()
     }
-    start = CaseStart(definition, sealed, opened_by)
-    await client.start_workflow(
-        workflow.run,
-        start,
-        id=id,
-        task_queue=task_queue,
-        id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
-    )
-    return case_handle(client, workflow, id)
+    return CaseStart(definition, sealed, opened_by, None, release)
+
+
+def wording_of(kept: Record) -> Wording:
+    """The wording of a release record, or of one of its wording revisions, to show a case in."""
+    plans = dict(kept.written.plans)
+    return Wording(kept.name, kept.release, kept.wording, kept.written.case, plans)
 
 
 def case_handle(
@@ -706,6 +876,7 @@ async def answer(
     by: str,
     roles: list[str],
     form: Mapping[str, Any] | None = None,
+    wording: int | None = None,
 ) -> None:
     """Answer the open `entry` (`review#1`, as `report` shows it in `waiting_at`) with `outcome`,
     as the person `by`, who has `roles`. The caller vouches for who `by` is and their roles: only
@@ -713,7 +884,7 @@ async def answer(
     client can't tell which fields are sensitive, and the case keeps sealed only those
     (brief, D31)."""
     sealed = None if form is None else {name: Sensitive(value) for name, value in form.items()}
-    sent = CaseAnswer(entry, outcome, by, sorted(roles), sealed)
+    sent = CaseAnswer(entry, outcome, by, sorted(roles), sealed, wording)
     await case.signal(CaseWorkflow.answer, sent)
 
 
@@ -776,10 +947,19 @@ async def send_event(
         raise EventRefused(f"{case.id} is closed: it takes no more events") from None
 
 
-async def view(case: WorkflowHandle[CaseWorkflow, CaseReport], roles: list[str]) -> CaseView:
-    """The case file as a person holding `roles` sees it, filtered in the worker (brief, D30).
-    A forgotten case has no case file left to read: refused, saying so (brief, D32)."""
+async def view(
+    case: WorkflowHandle[CaseWorkflow, CaseReport], roles: list[str], wording: Wording | None = None
+) -> CaseView:
+    """The case file as a person holding `roles` sees it, filtered in the worker (brief, D30);
+    with `wording`, in that wording revision of the case's release, refused if it isn't one
+    (brief, D51). A forgotten case has no case file left to read: refused, saying so
+    (brief, D32)."""
     try:
+        if wording is not None:
+            worded = await case.query(CaseWorkflow.worded_view, ViewAsked(sorted(roles), wording))
+            if worded.view is None:
+                raise WordingRefused(worded.refused)
+            return worded.view
         return await case.query(CaseWorkflow.view, sorted(roles))
     except WorkflowQueryFailedError as failed:
         # The worker replays the case to answer, and its key provider refuses a destroyed key.
@@ -828,6 +1008,7 @@ async def approval_sheet(
     entry: str,
     roles: list[str],
     at: int | None = None,
+    wording: Wording | None = None,
 ) -> ApprovalSheet:
     """The open approval `entry`'s sheet as a person holding `roles` reads it at `at`, seconds
     since the epoch: by default the API's own clock, now. A sheet is a query, read and never
@@ -837,7 +1018,7 @@ async def approval_sheet(
         at = int(datetime.now(UTC).timestamp())  # whole seconds, rounded down
     try:
         answered = await case.query(
-            CaseWorkflow.approval_sheet, SheetAsked(entry, sorted(roles), at)
+            CaseWorkflow.approval_sheet, SheetAsked(entry, sorted(roles), at, wording)
         )
     except WorkflowQueryFailedError as failed:
         # The worker replays the case to answer, and its key provider refuses a destroyed key.
@@ -845,5 +1026,7 @@ async def approval_sheet(
             raise CaseForgotten(f"{case.id} was forgotten: its case file can't be read") from None
         raise
     if answered.sheet is None:
+        if answered.wording_refused:
+            raise WordingRefused(answered.wording_refused)
         raise SheetRefused(answered.refused)
     return answered.sheet

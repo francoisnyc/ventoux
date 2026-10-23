@@ -185,6 +185,10 @@ def read_json(text: str, what: str) -> Any:
 # field's `declared` type is `"type": "number"` next to its `display`.
 WRITTEN_BESIDE = {"declared"}
 
+# A plan keeps each field's source in a map of its own; the JSON writes it on the field, as
+# `fields.amount.source`, so a changed one is named there.
+WRITTEN_ON_FIELDS = {"sources"}
+
 ABSENT = object()  # a field the digest leaves out: wording, or a value at its default
 
 
@@ -236,18 +240,39 @@ def key_of(model: BaseModel, name: str) -> str:
     return alias if alias is not None else name
 
 
-def behaviour(released: Package) -> object:
-    """The package's behaviour, as plain data: its case, then its plans by reference."""
+def behaviour(case: CaseDefinition, plans: Mapping[str, Plan]) -> object:
+    """A package's behaviour, as plain data: its case, then its plans in their references' order."""
     return {
-        "case": canonical(released.case),
-        "plans": {"#map": [[ref, canonical(plan)] for ref, plan in released.plans.items()]},
+        "case": canonical(case),
+        "plans": {"#map": [[ref, canonical(plans[ref])] for ref in sorted(plans)]},
     }
 
 
 def digest(released: Package) -> Hash:
     """The behaviour digest: SHA-256 of the behaviour written canonically (brief, D50)."""
-    text = json.dumps(behaviour(released), sort_keys=True, separators=(",", ":"))
+    return behaviour_digest(released.case, released.plans)
+
+
+def behaviour_digest(case: CaseDefinition, plans: Mapping[str, Plan]) -> Hash:
+    """The digest of a case and its plans, however they were read."""
+    text = json.dumps(behaviour(case, plans), sort_keys=True, separators=(",", ":"))
     return Hash(METHOD, hashlib.sha256(text.encode()).hexdigest())
+
+
+def is_release(case: CaseDefinition, plans: Mapping[str, object], given: Hash) -> bool:
+    """Whether `case` and `plans`, stored data by reference as a case's start holds them, are the
+    package whose digest is `given`: a method this code knows, each plan under its own reference,
+    and the same digest. A case checks it when it opens, depending on nothing the client did
+    (brief, D51)."""
+    if given.method != METHOD:
+        return False
+    try:
+        parsed = {reference: parse_plan(data) for reference, data in plans.items()}
+    except PlanInvalid:
+        return False
+    if any(f"{plan.plan}@{plan.version}" != reference for reference, plan in parsed.items()):
+        return False
+    return behaviour_digest(case, parsed) == given
 
 
 # --- What changed --------------------------------------------------------------------------------
@@ -315,9 +340,13 @@ def differences(before: object, after: object, path: str) -> list[str]:
         for name in type(before).model_fields:
             old, new = behaviour_of(before, name), behaviour_of(after, name)
             if old != new:
+                old_value, new_value = getattr(before, name), getattr(after, name)
+                if name in WRITTEN_ON_FIELDS and isinstance(before, Plan):
+                    found += sources_changed(old_value, new_value, path)
+                    continue
                 # A field's declared type is written beside its display, not under a key.
                 where = path if name in WRITTEN_BESIDE else joined(path, key_of(before, name))
-                found += differences(getattr(before, name), getattr(after, name), where) or [where]
+                found += differences(old_value, new_value, where) or [where]
         return found
     if isinstance(before, Mapping) and isinstance(after, Mapping):
         found = []
@@ -328,6 +357,16 @@ def differences(before: object, after: object, path: str) -> list[str]:
                 found += differences(before[key], after[key], joined(path, str(key)))
         return found or [path]  # the same entries, in another order
     return [path]
+
+
+def sources_changed(before: Mapping[str, str], after: Mapping[str, str], path: str) -> list[str]:
+    """Each plan field whose source changed, named where the JSON writes it."""
+    names = [*before, *(name for name in after if name not in before)]
+    return [
+        joined(path, f"fields.{name}.source")
+        for name in names
+        if before.get(name) != after.get(name)
+    ]
 
 
 # --- The next release ----------------------------------------------------------------------------
@@ -356,6 +395,14 @@ def next_release(released: Package, records: Sequence[Record]) -> Outcome:
     number = same[0]
     record, before = latest[number]
     if wording(before) != wording(released):
+        if number != newest:
+            # Only the latest release takes new wording: an older one's open cases would read it
+            # at once, and a behaviour reverted with the newer release's titles is how one gets
+            # here (brief, D51).
+            raise PackageRefused(
+                f"same behaviour as {released.name} {number}, other wording: rewording an older "
+                "release reaches its open cases; bring back its wording"
+            )
         return Reworded(number, record.wording + 1, changed(before, released))
     return Unchanged(number) if number == newest else SameAs(number)
 

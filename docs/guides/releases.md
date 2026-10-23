@@ -106,10 +106,45 @@ exists is never written over: the same bytes again are accepted, anything else i
 release (a revert), no new number is made: `same behaviour as refund 1; nothing released`. Rolling
 back is activating that release.
 
+**Only the latest release takes new wording.** A revert must bring back the earlier release's
+wording too, as `git revert` does. A package with an earlier release's behaviour and other wording
+is refused (exit 1):
+
+```
+same behaviour as refund 1, other wording: rewording an older release reaches its open cases; bring back its wording
+```
+
+The usual way there is a behaviour reverted while the newer release's titles stay, titles written
+for steps the older release's cases don't have; and open cases read new wording at once (below).
+
 **The hash method has a version.** Every digest and contract hash records its method. Before
-comparing, the tool recomputes the latest release's digest from the package it stored, so a later
-change of method is never mistaken for a change of behaviour. A record made by a method it doesn't
-know, or whose digest its own package doesn't give, is refused.
+comparing, the tool reads every record of the package again and recomputes its digest from the
+package it stored, so a later change of method is never mistaken for a change of behaviour. A
+record made by a method it doesn't know, or whose digest its own package doesn't give, is refused,
+and so is the run.
+
+**A package's releases folder holds its records and nothing else.** Any other file there, or a
+record under another record's name, refuses the run: the tool never guesses which file is which
+release.
+
+## Open cases and new wording
+
+A case runs the release it opened on, to the end (the cases guide, "A case runs its release").
+Wording is the one thing that reaches it later: when a person reads the case, the view and the
+approval sheet are given the latest wording revision of the case's release, and its titles are
+the ones shown. Nothing the case decides changes, and nothing is recorded, since reading a case is
+a query. A revision is used only if it is of the case's own release, with that release's digest;
+any other is refused. An answer can say which wording its person read (`wording=2`), and its
+history line says so: `… as worded in refund 1, wording 2`.
+
+A plan step's own approval, asked inside the plan's child workflow, shows the plan as its run
+started: a new wording of the release's plans reaches the next run of the plan, never one already
+running.
+
+**Method 1 is pinned.** Every open case recomputes its release's digest each time it continues as
+new, so method 1 must give the same digest for ever. Ventoux's tests pin it for packages that
+between them use every shape of the format; a change to the engine that would change a digest
+fails there first. A new method would be method 2, recorded as a decision of its own.
 
 ## What the tool says
 

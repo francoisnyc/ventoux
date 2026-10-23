@@ -1245,6 +1245,7 @@ and record the key points. A question is closed once you can explain the answer 
     the events' times, so a timeline in simulated time decides exactly as a real case would.
   In one line: a stale read is refreshed, a stale answer goes to a person; replay decides the
   same because each event's time is recorded, never read from a clock.
+- Retrieval (layer 12b warm-up, 2026-10-22): put, not answered; left open.
 - Status: open, until a (a read refreshed, a person's answer to a person) comes back from memory.
 
 

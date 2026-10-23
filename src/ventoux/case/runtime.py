@@ -54,6 +54,7 @@ from ventoux.case.definition import (
     form_fields,
     rule_fields,
 )
+from ventoux.case.engine import known
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
 from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
@@ -362,6 +363,10 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
     refuse_to_open(case, catalog, event.file)
     refuse_unless_wrapped(case, event.file, CaseRefused)
     state.opened_by = event.by
+    state.engine = known(event.engine)  # set once, here, never by itself after (brief, D51)
+    state.release = event.release
+    if event.release is not None:  # a draft's history is as it was before releases
+        state.history.append(f"opened on {event.release}, engine {state.engine}")
     origin = OPENER if event.by is None else f"person:{event.by}"
     for name, value in event.file.items():
         state.values[name] = value
@@ -613,6 +618,7 @@ def answer_task(
     assert isinstance(step, TaskStep)  # only a task's run is ever open
     role = judge_task(case, catalog, run.entry, run.step, step, event)
     refuse_unless_wrapped(case, event.form or {}, AnswerRefused)
+    worded = as_worded(state, event)
     run.status = "done"
     del state.waiting[run.entry]
     who = f"person:{event.by}"
@@ -626,11 +632,24 @@ def answer_task(
         state.sources[name] = marked(case, name, who)
         state.obtained[name] = Obtained(event.at, None)
     setting = f", setting {listed(list(sets))}" if sets else ""
-    state.history.append(f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}")
+    state.history.append(
+        f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}{worded}"
+    )
     state.history.append(f"{run.entry} done")
     # Each answer, whatever the outcome (brief, D39).
     state.moments.append(Moment(f"answered {run.step}", entry=run.entry))
     reach(state, (*step.outcomes[event.outcome].reaches, *step.reaches))
+
+
+def as_worded(state: CaseState, event: Answered) -> str:
+    """What an answer's line adds when its sender says which wording its person read: `, as
+    worded in refund 1, wording 2`. A draft has no wording revisions, so one naming a revision
+    is refused (brief, D51)."""
+    if event.wording is None:
+        return ""
+    if state.release is None:
+        raise AnswerRefused(f"wording {event.wording} names no wording of this case: it is a draft")
+    return f", as worded in {state.release}, wording {event.wording}"
 
 
 def answer_approval(
@@ -645,6 +664,7 @@ def answer_approval(
     assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
     assert step.approval is not None  # only a step with an approval is asked for one
     role = judge_approval(case, catalog, state, approval.entry, approval.step, step, event)
+    worded = as_worded(state, event)
     if event.outcome == APPROVE:
         # One entry collects the answers: it stays open until `count` different people have
         # approved it (brief, D47).
@@ -652,14 +672,14 @@ def answer_approval(
         if len(approval.approved) < approval.count:
             state.waiting[approval.entry] = waiting_line(approval, " or ".join(step.approval.roles))
             state.history.append(
-                f"{event.by} answered {approval.entry} approve as {role}: {tally(approval)}"
+                f"{event.by} answered {approval.entry} approve as {role}: {tally(approval)}{worded}"
             )
             return
     del state.approvals[approval.step]
     del state.waiting[approval.entry]
     given_so_far = f": {tally(approval)}" if approval.count > 1 and event.outcome == APPROVE else ""
     state.history.append(
-        f"{event.by} answered {approval.entry} {event.outcome} as {role}{given_so_far}"
+        f"{event.by} answered {approval.entry} {event.outcome} as {role}{given_so_far}{worded}"
     )
     if event.outcome == APPROVE:
         try:
