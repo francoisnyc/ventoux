@@ -22,6 +22,8 @@ from ventoux.case.releases import Written
 from ventoux.testing import (
     AnswerRefused,
     ChangeRefused,
+    EventRefused,
+    edit,
     finish,
     later,
     migrate,
@@ -840,3 +842,159 @@ def test_a_timer_follows_its_renamed_milestone() -> None:
         release=release_of(checked, 1),
     )
     assert moved.timers == ["chase_review: 2d after reached reviewed, due 2026-01-03T00:00:00Z"]
+
+
+# --- Slice 5: pending requests, events, deciding again ---
+
+
+def test_pending_requests_and_events_across_a_migration() -> None:
+    # A pending edit follows its field's new name, checked again when applied (brief, D52).
+    edited = on_refund_1(
+        [
+            REVIEWED,
+            edit("approved_amount", 240, "ana"),
+            migrate(REFUND_3, RENAMES, "pia"),
+            ("case.change#2", "approve", "lee"),
+        ]
+    )
+    assert (
+        "approval of case.change#1 (edit amount_approved) by support or support-lead"
+        in edited.waiting_for
+    )
+    applied = on_refund_1(
+        [
+            REVIEWED,
+            edit("approved_amount", 240, "ana"),
+            migrate(REFUND_3, RENAMES, "pia"),
+            ("case.change#2", "approve", "lee"),
+            ("case.change#1", "approve", "lee"),
+        ]
+    )
+    assert "applied case.change#1: amount_approved edited by ana, approved by lee" in (
+        applied.history
+    )
+    # One whose field changed before the migration stays apart: it isn't applied.
+    reworkable = without(
+        REFUND, lambda d: d["steps"]["review"].update(repeatable=True, proposed_by=["support"])
+    )
+    reworkable_3 = json.loads(
+        json.dumps(
+            without(
+                refund_2(),
+                lambda d: d["steps"]["review"].update(repeatable=True, proposed_by=["support"]),
+            ),
+            default=int,
+        ).replace("approved_amount", "amount_approved")
+    )
+    reworked = run_case(
+        reworkable,
+        file=LARGE,
+        answers=[
+            REVIEWED,
+            edit("approved_amount", 240, "ana"),
+            propose("review", "sam"),
+            ("review#2", "approve", "sam", {"approved_amount": 300}),
+            migrate(release_of(reworkable_3, 3), {"fields": RENAMES["fields"]}, "pia"),
+            ("case.change#2", "approve", "lee"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=release_of(reworkable, 1),
+    )
+    assert reworked.history[-1] == (
+        "case.change#1 not applied: amount_approved changed since it was proposed: propose it again"
+    )
+    # A migration proposed against the release the case has left isn't applied.
+    twice = on_refund_1(
+        [
+            REVIEWED,
+            migrate(REFUND_2, {}, "pia"),
+            migrate(REFUND_3, RENAMES, "pat"),
+            ("case.change#1", "approve", "lee"),
+            ("case.change#2", "approve", "lee"),
+        ]
+    )
+    assert twice.history[-1] == (
+        "case.change#2 not applied: the case moved to refund 2, engine 2 since it was proposed: "
+        "propose it again"
+    )
+    # An event is decided under the release current when its turn comes: its old name refused.
+    with pytest.raises(
+        EventRefused, match="^cancelled is not an event of refund: its events are withdrawn$"
+    ):
+        run_case(
+            waiting_for_cancellation(),
+            file=SMALL,
+            answers=[
+                migrate(
+                    release_of(
+                        json.loads(
+                            json.dumps(waiting_for_cancellation()).replace("cancelled", "withdrawn")
+                        ),
+                        2,
+                    ),
+                    {"events": {"cancelled": "withdrawn"}},
+                    "pia",
+                ),
+                ("case.change#1", "approve", "lee"),
+                send("cancelled", {}, "system:portal"),
+            ],
+            people=PEOPLE,
+            release=release_of(waiting_for_cancellation(), 1),
+        )
+
+
+def test_the_case_decides_again_under_the_target() -> None:
+    # Admission reads every condition again (the fraud check starts, slice 1); a `closes_when`
+    # the case has reached closes it; and no rule fires on the migration: it isn't a moment
+    # (brief, D38) (brief, D53).
+    paid = kept_open(REFUND)
+    paid["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    paid["steps"]["pay"]["reaches"] = ["paid"]
+    closing = without(paid, lambda d: d.update(closes_when=["paid"]))
+    closing["rules"] = {
+        "greet": {
+            "display": {"title": "Greet when opened"},
+            "on": "opened",
+            "then": {"reach": ["paid"]},
+        }
+    }
+    closed = run_case(
+        paid,
+        file=SMALL,
+        answers=[
+            SMALL_REVIEW,
+            migrate(release_of(closing, 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=release_of(paid, 1),
+    )
+    assert closed.history[-1] == "closed: paid reached"
+    assert not any(line.startswith("greet#") for line in closed.history)
+
+
+def test_values_keep_their_sources() -> None:
+    # Never re-stamped; a mark the target declares is added, one it drops stays (brief, D12)
+    # (brief, D43).
+    marked = without(
+        refund_2(), lambda d: d["fields"]["approved_amount"].update(source="untrusted:customer")
+    )
+    moved = on_refund_1(
+        [REVIEWED, migrate(release_of(marked, 2), {}, "pia"), ("case.change#1", "approve", "lee")]
+    )
+    assert moved.state.sources["approved_amount"] == frozenset({"person:ana", "untrusted:customer"})
+    unmarked = run_case(
+        marked,
+        file=LARGE,
+        answers=[
+            REVIEWED,
+            migrate(release_of(refund_2(), 3), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=release_of(marked, 2),
+    )
+    assert unmarked.state.sources["approved_amount"] == frozenset(
+        {"person:ana", "untrusted:customer"}
+    )

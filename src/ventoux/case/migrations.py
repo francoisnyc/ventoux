@@ -38,10 +38,13 @@ from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState, Migration, StepRun, Timer
 from ventoux.case.timers import named, utc
 from ventoux.case.visibility import seen_by
+from ventoux.core.approval import inputs_digest
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
+from ventoux.core.expressions import Var
 from ventoux.core.expressions.check import a_type
 from ventoux.core.plan import ActivityState, PlanInvalid, parse_plan
+from ventoux.core.sensitive import Sensitive
 
 
 @dataclass(frozen=True)
@@ -477,6 +480,13 @@ def rename(
                 return renamed(migration, section, owner) + dot + part
         return name
 
+    # A pending edit's digest names its field: one still on the value it was proposed against is
+    # taken again under the new name; one that isn't stays apart, and isn't applied (brief, D52).
+    unchanged = {
+        request.entry
+        for request in state.changes.values()
+        if request.kind == "edit" and digest_of(request.target, state) == request.against
+    }
     state.values = {key(name): value for name, value in state.values.items()}
     state.sources = {key(name): sources for name, sources in state.sources.items()}
     state.obtained = {key(name): obtained for name, obtained in state.obtained.items()}
@@ -507,6 +517,15 @@ def rename(
     state.arrived = {
         renamed(migration, "events", event): count for event, count in state.arrived.items()
     }
+    # A pending edit follows its field's new name, and is checked again when applied (brief, D52).
+    for request in state.changes.values():
+        old = request.target
+        if request.kind == "edit" and (new := key(old)) != old:
+            request.target = new
+            if request.entry in unchanged:
+                request.against = digest_of(new, state)
+            line = state.waiting[request.entry]
+            state.waiting[request.entry] = line.replace(f"(edit {old})", f"(edit {new})")
     # What an open run waits for, as the target says it: its roles, its event's sender
     # (brief, D24).
     for run in state.runs:
@@ -571,6 +590,11 @@ def moment(on: object, migration: Migration | None = None) -> tuple[str, str]:
         )
         return kind, name if migration is None else renamed(migration, section, name)
     return str(on), ""
+
+
+def digest_of(field: str, state: CaseState) -> str | Sensitive:
+    """The digest of `field`'s value, as an edit records what it was proposed against."""
+    return inputs_digest({field: Var(var=field)}, state.values)
 
 
 def same_behaviour(case: CaseDefinition, target: CaseDefinition, name: str) -> bool:
