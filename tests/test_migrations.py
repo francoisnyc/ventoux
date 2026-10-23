@@ -1038,3 +1038,76 @@ def test_the_preview_is_the_apply_without_effect() -> None:
         "approved_amount holds a value, and refund 3 has no field approved_amount: map it",
         "pay.approval#1 is open, and refund 3 has no step pay: map it",
     )
+
+
+# --- Slice 8: graduating a strict workflow ---
+
+
+def strict() -> dict[str, Any]:
+    """The refund as a strict workflow: review, pay, then a letter, each starting by itself once
+    the one before is done (brief, D2)."""
+    definition = copy.deepcopy(REFUND)
+    del definition["steps"]["call_customer"]
+    definition["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter about the refund"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+    }
+    definition["sequence"] = ["review", "pay", "notify"]
+    return definition
+
+
+def loose() -> dict[str, Any]:
+    """The same refund as a looser case: support may call the customer at any time, and the
+    letter is drafted only if someone asks for it."""
+    definition = strict()
+    definition["sequence"] = ["review", "pay"]
+    definition["steps"]["notify"] |= {
+        "requires": ["pay"],
+        "automatic": False,
+        "proposed_by": ["support"],
+    }
+    definition["steps"]["call_customer"] = {
+        "kind": "task",
+        "display": {"title": "Call the customer"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"called": {"display": {"title": "Customer called"}}},
+    }
+    return definition
+
+
+def test_a_strict_workflow_graduates() -> None:
+    # Half-way through the strict refund, its payment running, the case moves to the looser one:
+    # nothing in the engine is new, since a case has no position (brief, D2) (brief, D53).
+    strict_1 = release_of(strict(), 1)
+    halfway = [SMALL_REVIEW]
+    stayed = run_case(
+        strict(),
+        file=SMALL,
+        answers=[*halfway, finish("pay#1")],
+        people=PEOPLE,
+        release=strict_1,
+        held=["pay"],
+    )
+    assert stayed.reached("notify")  # strict: the letter follows the payment by itself
+    graduated = run_case(
+        strict(),
+        file=SMALL,
+        answers=[
+            *halfway,
+            migrate(release_of(loose(), 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+            propose("call_customer", "ana"),
+            ("call_customer#1", "called", "ana"),
+            finish("pay#1"),
+        ],
+        people=PEOPLE,
+        release=strict_1,
+        held=["pay"],
+    )
+    assert graduated.reached("call_customer")  # at any time, while the payment ran
+    assert not graduated.reached("notify")  # the letter, now optional, wasn't asked for
+    assert graduated.reached("pay") and graduated.closed
