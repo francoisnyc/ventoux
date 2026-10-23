@@ -211,7 +211,7 @@ def answer_change(
     elif request.kind == SKIP:
         apply_skip(case, state, request, event.by)
     else:
-        return apply_migration(case, catalog, state, request, event.by)
+        return apply_migration(case, catalog, state, request, event.by, event.at)
     return None
 
 
@@ -313,8 +313,9 @@ def apply_migration(
     state: CaseState,
     request: ChangeRequest,
     approved_by: str,
+    at: int,
 ) -> Moved | None:
-    """Move the case to the target, checked again against the case as it is now, depending on
+    """Move the case to the target, at `at`, checked again against the case as it is now, depending on
     nothing the proposal's check did; unless something refuses it, every problem said at once
     (brief, D34) (brief, D53)."""
     migration = request.value
@@ -330,7 +331,7 @@ def apply_migration(
         f"applied {request.entry}: migrated from {request.against} to {migration.label}, engine "
         f"{migration.engine}, proposed by {request.by}, approved by {approved_by}"
     )
-    return Moved(apply(case, catalog, state, migration), migration)
+    return Moved(apply(case, catalog, state, migration, at), migration)
 
 
 def lapse_spent(case: CaseDefinition, state: CaseState, name: str) -> None:

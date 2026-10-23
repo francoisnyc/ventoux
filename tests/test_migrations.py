@@ -15,15 +15,19 @@ from typing import Any
 
 import pytest
 from test_case import REFUND
+from test_fresh_facts import refund_fresh
+from test_fresh_facts import run_case as run_fresh
 
 from ventoux.case.releases import Written
 from ventoux.testing import (
     AnswerRefused,
     ChangeRefused,
     finish,
+    later,
     migrate,
     propose,
     release_of,
+    retry,
     run_case,
     send,
 )
@@ -655,3 +659,184 @@ def test_an_open_wait_stays_on_its_event() -> None:
         "await_cancel#1 waits for cancelled, and refund 2's await_cancel waits for withdrawn: "
         "migrate after it arrives"
     )
+
+
+# --- Slice 4: approvals and timers ---
+
+
+def test_changed_steps_lose_their_approvals() -> None:
+    # An approval approved a step as it was: it stays only if the target's step is the same,
+    # word for word (brief, D53).
+    beside = without(
+        refund_2(), lambda d: d["steps"]["pay"].pop("requires")
+    )  # the fraud check added, the payment unchanged
+    kept = on_refund_1(
+        [REVIEWED, migrate(release_of(beside, 2), {}, "pia"), ("case.change#1", "approve", "lee")]
+    )
+    assert kept.waiting_for[0] == "approval of pay by support-lead"
+    assert not any(line.startswith("withdrew") for line in kept.history)
+    # Every approval on an entry goes at once (brief, D47).
+    two = without(REFUND, lambda d: d["steps"]["pay"]["approval"].update(count=2))
+    half = run_case(
+        two,
+        file=LARGE,
+        answers=[
+            REVIEWED,
+            ("pay.approval#1", "approve", "sam"),
+            migrate(release_of(refund_2(), 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=release_of(two, 1),
+    )
+    assert "withdrew pay.approval#1: refund 2 changed pay, with 1 of 2 approvals given" in (
+        half.history
+    )
+    # One spent on a run that failed lapses too: its retry asks again, of two people now.
+    stricter = without(REFUND, lambda d: d["steps"]["pay"]["approval"].update(count=2))
+    retried = run_case(
+        REFUND,
+        file=LARGE,
+        answers=[
+            REVIEWED,
+            ("pay.approval#1", "approve", "sam"),
+            migrate(release_of(stricter, 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+            retry("pay#1", "omar"),
+        ],
+        people={**PEOPLE, "omar": ["operations"]},
+        release=REFUND_1,
+        activities={"payments.refund@2": account_closed},
+    )
+    assert retried.history[-3:] == [
+        "lapsed pay.approval#1: refund 2 changed pay",
+        "omar retried pay#1 as operations",
+        "asked pay.approval#2: approval of pay by support-lead, from 2 people",
+    ]
+
+
+def chasing(after: str = "2d", since: dict[str, str] | None = None) -> dict[str, Any]:
+    """The refund kept open, chasing a review left open for `after`."""
+    definition = kept_open(REFUND)
+    definition["milestones"] = {"chased": {"display": {"title": "Review chased"}}}
+    definition["rules"] = {
+        "chase_review": {
+            "display": {"title": "Chase a review left open"},
+            "on": {"after": after, "since": since or {"started": "review"}},
+            "then": {"reach": ["chased"]},
+        }
+    }
+    return definition
+
+
+def timers_after(target: dict[str, Any], *before: Any, after: str = "2d") -> Any:
+    """A chased refund, `before` played, migrated to `target` by Pia and Lee."""
+    return run_case(
+        chasing(after),
+        file=SMALL,
+        answers=[
+            *before,
+            migrate(release_of(target, 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=release_of(chasing(after), 1),
+    )
+
+
+def test_timers_across_a_migration() -> None:
+    # Kept, with its due time, if its rule, moment and age are the same (brief, D44).
+    same = without(chasing(), lambda d: d["display"].update(title="Customer refund, v2"))
+    kept = timers_after(
+        without(
+            same,
+            lambda d: d["steps"]["review"]["outcomes"].update(
+                escalate={"display": {"title": "Escalate"}}
+            ),
+        )
+    )
+    assert kept.timers == ["chase_review: 2d after started review#1, due 2026-01-03T00:00:00Z"]
+    # A new age is measured from when it was set.
+    moved = timers_after(chasing("3d"))
+    assert moved.history[-1] == (
+        "moved chase_review, 2d after started review#1: now 3d after it, due 2026-01-04T00:00:00Z"
+    )
+    assert moved.timers == ["chase_review: 3d after started review#1, due 2026-01-04T00:00:00Z"]
+    # If that time has passed, it fires right after the migration, never in the past.
+    late = timers_after(chasing("1d"), later("36h"), after="5d")
+    assert late.history[-1] == (
+        "moved chase_review, 5d after started review#1: now 1d after it, already past, so it "
+        "fires now"
+    )
+    fired = run_case(
+        chasing("5d"),
+        file=SMALL,
+        answers=[
+            later("36h"),
+            migrate(release_of(chasing("1d"), 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+            later("1m"),
+        ],
+        people=PEOPLE,
+        release=release_of(chasing("5d"), 1),
+    )
+    assert "reached chased" in fired.history
+    # Its rule gone, or waiting on another moment: cancelled, saying so.
+    gone = timers_after(without(chasing(), lambda d: (d.pop("rules"), d.pop("milestones"))))
+    assert gone.history[-1] == (
+        "cancelled chase_review, 2d after started review#1: refund 2 has no rule chase_review"
+    )
+    other = timers_after(chasing("2d", {"answered": "review"}))
+    assert other.history[-1] == (
+        "cancelled chase_review, 2d after started review#1: refund 2's chase_review waits on "
+        "another moment"
+    )
+    assert gone.timers == other.timers == []
+
+
+def test_a_given_approval_lapses_with_its_step() -> None:
+    # Given and not yet spent, since the payment waits for its stale order status to be fetched
+    # again (brief, D33): it lapses as an open one is withdrawn.
+    fresh = refund_fresh()
+    stricter = without(fresh, lambda d: d["steps"]["pay"]["approval"].update(count=2))
+    given = [
+        finish("check_order#1"),
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        later("3d"),
+        ("pay.approval#1", "approve", "sam"),
+    ]
+    moved = run_fresh(
+        fresh,
+        file=LARGE,
+        answers=[
+            *given,
+            migrate(release_of(stricter, 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        held=["check_order"],
+        release=release_of(fresh, 1),
+    )
+    assert moved.history[-1] == "lapsed pay.approval#1: refund 2 changed pay"
+    assert moved.state.given == {}
+
+
+def test_a_timer_follows_its_renamed_milestone() -> None:
+    # Set on `reached checked`, renamed `reviewed`: its moment is named as the target names it.
+    checked = chasing("2d", {"reached": "checked"})
+    checked["milestones"]["checked"] = {"display": {"title": "Review done"}}
+    checked["steps"]["review"]["reaches"] = ["checked"]
+    checked["steps"]["pay"]["when"] = {"==": [{"var": "review.outcome"}, "reject"]}  # not paid
+    reviewed = json.loads(json.dumps(checked, default=int).replace("checked", "reviewed"))
+    moved = run_case(
+        checked,
+        file=SMALL,
+        answers=[
+            SMALL_REVIEW,
+            migrate(release_of(reviewed, 2), {"milestones": {"checked": "reviewed"}}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=release_of(checked, 1),
+    )
+    assert moved.timers == ["chase_review: 2d after reached reviewed, due 2026-01-03T00:00:00Z"]

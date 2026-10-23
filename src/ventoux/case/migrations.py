@@ -17,19 +17,26 @@ from decimal import Decimal
 from ventoux.case.approvals import withdraw
 from ventoux.case.definition import (
     ActivityStep,
+    After,
+    AnsweredTask,
     CallStep,
     CaseDefinition,
     CaseInvalid,
+    EventArrived,
     PlanStep,
+    Reached,
+    Started,
     TaskStep,
     WaitStep,
     parse_case,
     sent_by,
 )
 from ventoux.case.engine import KNOWN
+from ventoux.case.freshness import seconds_in
 from ventoux.case.releases import Hash, Record, canonical, is_release
 from ventoux.case.sequence import requirements
-from ventoux.case.state import CaseState, Migration, StepRun
+from ventoux.case.state import CaseState, Migration, StepRun, Timer
+from ventoux.case.timers import named, utc
 from ventoux.case.visibility import seen_by
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
@@ -426,10 +433,11 @@ def widened(case: CaseDefinition, target: CaseDefinition, name: str, new: str) -
 
 
 def apply(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, migration: Migration
+    case: CaseDefinition, catalog: Catalog, state: CaseState, migration: Migration, at: int
 ) -> CaseDefinition:
-    """Move the case to the target, once nothing refuses it: approvals of what changed withdrawn,
-    names renamed, then the case decides as the target; each change said (brief, D53)."""
+    """Move the case to the target at `at`, once nothing refuses it: approvals of what changed
+    withdrawn, names renamed, timers kept, moved or cancelled, then the case decides as the
+    target; each change said (brief, D53)."""
     target, problems = target_problems(case, catalog, state, migration)
     assert target is not None and not problems  # checked by the caller, just before
     label = migration.label
@@ -445,6 +453,7 @@ def apply(
             state.history.append(f"lapsed {run.approved.entry}: {label} changed {run.step}")
             run.approved = None
     rename(case, target, state, migration)
+    follow_timers(case, target, state, migration, at)
     state.release = label
     state.engine = migration.engine
     return target
@@ -508,6 +517,60 @@ def rename(
             state.waiting[run.entry] = f"{run.step} by {' or '.join(waits.roles)}"
         elif isinstance(waits, WaitStep):
             state.waiting[run.entry] = f"{waits.event} {sent_by(target.events[waits.event])}"
+
+
+def follow_timers(
+    case: CaseDefinition,
+    target: CaseDefinition,
+    state: CaseState,
+    migration: Migration,
+    at: int,
+) -> None:
+    """Each timer set, as its rule in the target says: kept if its rule waits on the same moment
+    for the same age; measured again from when it was set if the age changed, firing right after
+    the migration if that has passed, never in the past; cancelled if the rule is gone or waits
+    on another moment. Nothing is set for a moment that came before (brief, D44) (brief, D53)."""
+    kept: list[Timer] = []
+    for timer in state.timers:
+        rule = renamed(migration, "rules", timer.rule)
+        before = case.rules[timer.rule].on
+        after = target.rules[rule].on if rule in target.rules else None
+        if after is None:
+            state.history.append(f"cancelled {named(timer)}: {migration.label} has no rule {rule}")
+            continue
+        assert isinstance(before, After)  # only a rule waiting for time sets a timer
+        # The old moment, named as the target names it, against the target's own.
+        if not isinstance(after, After) or moment(before.since, migration) != moment(after.since):
+            state.history.append(
+                f"cancelled {named(timer)}: {migration.label}'s {rule} waits on another moment"
+            )
+            continue
+        since = timer.since
+        if isinstance(before.since, Reached):  # `reached paid` names its milestone
+            since = f"reached {renamed(migration, 'milestones', before.since.reached)}"
+        moved = dataclasses.replace(timer, rule=rule, since=since)
+        if after.after != timer.after:
+            due = timer.due - seconds_in(timer.after) + seconds_in(after.after)
+            if due > at:
+                said = f"due {utc(due)}"
+            else:
+                due, said = at, "already past, so it fires now"
+            state.history.append(f"moved {named(timer)}: now {after.after} after it, {said}")
+            moved = dataclasses.replace(moved, after=after.after, due=due)
+        kept.append(moved)
+    state.timers = kept
+
+
+def moment(on: object, migration: Migration | None = None) -> tuple[str, str]:
+    """A rule's moment as a pair, its kind and what it names, renamed as the target names it if
+    `migration` is given: so two releases' moments compare."""
+    if isinstance(on, Started | AnsweredTask | Reached | EventArrived):
+        kind, name = next(iter(on.model_dump().items()))
+        section = {"started": "steps", "answered": "steps", "reached": "milestones"}.get(
+            kind, "events"
+        )
+        return kind, name if migration is None else renamed(migration, section, name)
+    return str(on), ""
 
 
 def same_behaviour(case: CaseDefinition, target: CaseDefinition, name: str) -> bool:
