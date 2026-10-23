@@ -482,7 +482,7 @@ apply; then again when it is approved, against the case as it is then. An edit i
 - of a field that holds no value yet: `approved_amount holds no value yet: an edit changes a
   value, never gives the first`;
 - with a value of another type, as an answer's form is: `approved_amount is a number, and the
-  edit gives a text`;
+  edit gives a string`;
 - to the value the field already holds, which would only make the value read as someone else's:
   `approved_amount already holds that value: an edit changes it`.
 

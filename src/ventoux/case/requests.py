@@ -8,11 +8,12 @@ See docs/layers/12-releases.md (12c).
 """
 
 from ventoux.case.answers import AnswerRefused, offers
-from ventoux.case.definition import CaseDefinition
+from ventoux.case.definition import CallStep, CaseDefinition
 from ventoux.case.state import Answered, CaseState, ChangeProposed, ChangeRequest, Obtained
+from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.approval import inputs_digest
 from ventoux.core.catalog import Catalog
-from ventoux.core.expressions import Var, a_kind
+from ventoux.core.expressions import ExpressionError, Var, a_kind
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits, form_problem
 from ventoux.core.person import identifier_problem
@@ -55,6 +56,8 @@ def propose_change(
     role = kind_role(catalog, event.roles)
     if role is None:
         raise ChangeRefused(no_role(catalog, event.kind, event.by, event.roles, "proposed"))
+    if (hidden := unseen(case, catalog, event.target, event.by, event.roles)) is not None:
+        raise ChangeRefused(hidden)
     value = kept(case, event.target, event.value)
     if (problem := edit_problem(case, state, event.target, value)) is not None:
         raise ChangeRefused(problem)
@@ -77,6 +80,16 @@ def no_role(catalog: Catalog, kind: str, by: str, roles: frozenset[str], act: st
     allowed = " or ".join(who_may(catalog)) or "a role registered for it"
     known = ", ".join(sorted(role for role in roles if role in catalog.roles)) or "no role"
     return f"an {kind} is {act} by {allowed}, and {by} has {known}"
+
+
+def unseen(
+    case: CaseDefinition, catalog: Catalog, name: str, by: str, roles: frozenset[str]
+) -> str | None:
+    """Why `by` can't judge an edit of `name`: it is hidden from their roles. None: they see it,
+    or it isn't a declared field, which the edit's own checks refuse."""
+    if name in case.fields and not may_see(case, name, roles, catalog.roles):
+        return f"{by} can't see {name}: it needs {' or '.join(seen_by(case, name))}"
+    return None
 
 
 def kept(case: CaseDefinition, name: str, value: object) -> object:
@@ -103,6 +116,10 @@ def edit_problem(case: CaseDefinition, state: CaseState, name: str, value: objec
     # The type, never the value: a refusal reaches people who may not see it (brief, D30).
     if not fits(plain(value), declared.declared):
         return f"{name} is {a_type(declared.declared)}, and the edit gives {a_kind(plain(value))}"
+    # Its only effect would be to re-stamp the value's sources: an untrusted value would read as
+    # two people's. A new value is a person's decision; the same one is not (brief, D52).
+    if plain(value) == plain(state.values[name]):
+        return f"{name} already holds that value: an edit changes it"
     return None
 
 
@@ -125,8 +142,11 @@ def answer_change(
         raise AnswerRefused(no_role(catalog, request.kind, event.by, event.roles, act))
     if (problem := form_problem(event.outcome, (), event.form, {})) is not None:
         raise AnswerRefused(problem)
-    if event.outcome == APPROVE and (why := not_someone_else(state, request, event.by)) is not None:
-        raise AnswerRefused(why)
+    if event.outcome == APPROVE:
+        # An approver judges what they see: never a value hidden from them (brief, D30).
+        hidden = unseen(case, catalog, request.target, event.by, event.roles)
+        if (why := hidden or not_someone_else(state, request, event.by)) is not None:
+            raise AnswerRefused(why)
     del state.changes[request.entry]
     del state.waiting[request.entry]
     state.history.append(f"{event.by} answered {request.entry} {event.outcome} as {role}{worded}")
@@ -144,6 +164,9 @@ def not_someone_else(state: CaseState, request: ChangeRequest, by: str) -> str |
         return f"{by} proposed {request.entry}, so cannot approve it"
     if by == state.opened_by:
         return f"{by} opened the case, so cannot approve a change to it"
+    # An edit overrules whoever gave the field its value: they don't judge it (brief, D11).
+    if f"person:{by}" in state.sources.get(request.target, ()):
+        return f"{by} set {request.target}, so cannot approve a change to it"
     return None
 
 
@@ -160,8 +183,31 @@ def apply_edit(
         state.history.append(f"{request.entry} not applied: {problem}")
         return
     state.values[name] = request.value
-    state.sources[name] = frozenset({f"person:{request.by}", f"person:{approved_by}"})
+    # Both people decided it, so neither approves a step that reads it (brief, D11); a mark the
+    # field declares adds distrust, never removed by an edit (brief, D12).
+    deciders = {f"person:{request.by}", f"person:{approved_by}"}
+    declared = case.fields[name].source
+    state.sources[name] = frozenset(deciders | ({declared} if declared else set()))
     state.obtained[name] = Obtained(at, None)  # from people, not a run
     state.history.append(
         f"applied {request.entry}: {name} edited by {request.by}, approved by {approved_by}"
     )
+    lapse_spent(case, state, name)
+
+
+def lapse_spent(case: CaseDefinition, state: CaseState, name: str) -> None:
+    """An approval spent on a run that failed, whose inputs the edit changed, lapses: its retry
+    asks again, never stops on a change two people approved. An open or given approval follows
+    the case file by itself (`approvals.follow`); one spent on a failed run is kept for its retry
+    (brief, D26), so the edit lapses it here (brief, D25) (brief, D52)."""
+    for run in state.runs:
+        step = case.steps[run.step]
+        if run.status != "failed" or run.approved is None or not isinstance(step, CallStep):
+            continue
+        try:
+            changed = inputs_digest(step.inputs, state.values) != run.approved.digest
+        except ExpressionError:
+            continue  # can't be read: the retry's own checks stop it, saying why
+        if changed:
+            state.history.append(f"lapsed {run.approved.entry}: {name} changed")
+            run.approved = None
