@@ -1046,8 +1046,11 @@ failing.
 
 ## 12d. Migrations
 
-Status: drafted 2026-10-23, from `main` at `66e2cff` (12c merged, #44), awaiting answers by number;
-the warm-up put. Nothing is decided or built until you answer.
+Status: drafted 2026-10-23, from `main` at `66e2cff` (12c merged, #44); the histories from
+before 12d recorded and replayed first (slice 0). Answered the same day: choices 42 to 59, all as
+recommended, with three changes, written into choices 43, 45, 55 and 57 below, each marked
+*Changed in the answers*. The warm-up (learning question 34's follow-up) put and not answered,
+left open.
 
 User-facing description, written first once you agree: `docs/guides/releases.md`, "Moving open
 cases to a later release", and the cases guide's "Changing an open case" gaining its third kind.
@@ -1122,11 +1125,14 @@ Numbered on from 12c's. Answer by number.
 43. **What a request carries, and what the case checks of it.** The target release as its record
     gives it (name, number, digest, case and plans), the mapping (choice 44), and the engine
     version to move to (choice 53). The case refuses it, at once and again when applying, if: the
-    case is closing or closed; the target isn't a release (its package doesn't give its digest,
-    D51), or is another package's (`claim 3` for a refund); a contract or plan it names isn't in
+    case is closing or closed; the target's package doesn't give the digest it comes with (D51),
+    or is another package's (`claim 3` for a refund); a contract or plan it names isn't in
     the worker's catalog; it moves neither the release nor the engine. A draft may migrate to a
     release (its line says `from draft`); a migration back to an earlier release is a migration
-    like any other. *Recommended.*
+    like any other. *Recommended.* *Changed in the answers:* the case checks that **the target's
+    package gives its digest, not that the digest is the store's release:** a request comes
+    through the trusted API, built from the release store (D19), and 12e's environment registry is
+    where the case can check the release itself. D53 says so.
 
 44. **The mapping, by names, never positions** (D2, D5; research 4.1). Data, one section per kind
     of name: `steps`, `milestones`, `fields`, `rules`, `events`, each `{"old": "new"}`. A name not
@@ -1147,6 +1153,11 @@ Numbered on from 12c's. Answer by number.
     - an event: a wait open for it, or a value it carried;
     - and nothing loosens on the way: a field holding a value may not lose `sensitive`, widen
       `visible_to`, or change its type (stricter is taken, never looser).
+    - *Changed in the answers:* **what a finished run or an arrival recorded must be what the
+      target can hold.** A done run's outcome is one the target's step declares (a task's
+      outcomes, its contract's, or a plan's `done` and `failed`); its outputs are the target
+      contract's, same names and types; an event's carried payload is declared by the target's
+      event, same names and types. Values are never converted.
     Each problem is said, with what to map or what to wait for, all of them at once. *Recommended.*
     Set aside: dropping a name and its values on request (the prototype's `null`): a value a
     person gave would go, and its provenance with it.
@@ -1221,6 +1232,9 @@ Numbered on from 12c's. Answer by number.
     never recorded); a client function previews every case it is given, and lists the open cases
     of a workflow type through Temporal's visibility; each case is in the result, with what it
     would get or why not, a case it can't read included: none skipped silently (research 5.4).
+    *Changed in the answers:* the cohort is **the case IDs it is given.** Temporal's time-skipping
+    test server doesn't implement `ListWorkflowExecutions` (the tutor checked), so finding the
+    open cases of a release comes with 12e's environment registry; the note and the guide say so.
     Each case then gets its own request, approved on its own: the approver's one decision is sent
     as one answer per case, each case checking it for itself. *Recommended.* Set aside: one
     request for the cohort (the cases would trust what another workflow checked).
@@ -1237,6 +1251,8 @@ Numbered on from 12c's. Answer by number.
     state, its target with it. Histories recorded before 12d replay, recorded first; a migrated
     case's history replays; a migration request pending across a switch is applied in a later run.
     Not a new engine version: a migration is a new event on a new path (D51). *Recommended.*
+    *Changed in the answers:* as in 43, the case checks the target's package gives its digest; the
+    release itself is the trusted API's to vouch for until 12e.
 
 58. **From #44's review: a case that closes without reaching its `closes_when` says so.** Its close
     line names what it didn't reach: `closed: nothing left to do; paid not reached`. A line, not a
@@ -1257,7 +1273,8 @@ Numbered on from 12c's. Answer by number.
 | An unmapped rename that running work depends on (the curriculum's) | refused, proposed and applied, saying what to map |
 | A reached milestone, a value, a failed run, an open task the target lacks | refused, each said |
 | A running run whose step calls another contract in the target | refused: migrate after it finishes |
-| A target that isn't a release, another package's, or names a contract the worker lacks | refused |
+| A target whose package doesn't give its digest, another package's, or naming a contract the worker lacks | refused |
+| A done run's outcome or outputs, or an event's payload, the target can't hold (from the answers) | refused: values are never converted |
 | An engine version the case doesn't know, or older than its own | refused |
 | A mapping naming what doesn't exist, or two names to one | refused |
 | A field that would lose `sensitive` or widen `visible_to` | refused |
