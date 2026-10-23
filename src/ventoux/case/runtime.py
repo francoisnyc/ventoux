@@ -8,6 +8,7 @@ See docs/layers/08-case.md.
 
 import copy
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import ValidationError
@@ -53,10 +54,12 @@ from ventoux.case.definition import (
     WorkflowStep,
     form_fields,
     rule_fields,
+    sent_by,
 )
 from ventoux.case.engine import known
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
+from ventoux.case.migrations import Moved, apply, problems_of, released
 from ventoux.case.requests import answer_change, propose_change
 from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
 from ventoux.case.sequence import requirements
@@ -72,6 +75,7 @@ from ventoux.case.state import (
     Failed,
     ForgetApproved,
     GivenApproval,
+    Migration,
     Moment,
     Obtained,
     OpenApproval,
@@ -87,6 +91,7 @@ from ventoux.case.state import (
     StartWorkflow,
     StepRun,
     TimerDue,
+    UseRelease,
     WorkflowCancelled,
 )
 from ventoux.case.stopping import stop_children
@@ -173,7 +178,11 @@ def decide(
     elif isinstance(event, Answered):
         if state.phase != "open":
             raise AnswerRefused(f"the case is {state.phase}: nothing waits for an answer")
-        answer(case, catalog, state, event)
+        if (moved := answer(case, catalog, state, event)) is not None:
+            # A migration applied: the rest of this decision, and every one after, is the
+            # target's, and the driver is told to use it from now on (brief, D53).
+            case = moved.case
+            commands.append(UseRelease(moved.migration))
     elif isinstance(event, Proposed):
         propose(case, catalog, state, event, commands)
     elif isinstance(event, Failed):
@@ -201,15 +210,29 @@ def decide(
         begin_closing(state, why, f"{event.reason}, by {event.by}")
     else:
         complete(case, catalog, state, event)
+    decide_again(case, catalog, state, commands, event.at, was_open)
+    return state, commands
+
+
+def decide_again(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    commands: list[Command],
+    at: int,
+    was_open: bool,
+) -> None:
+    """What the case decides once an event has landed, at `at`: whether it closes, what may start
+    now, what the rules say, which timers end, and whether it is done."""
     close_when_reached(case, state)
     if state.phase == "open":
-        admit(case, catalog, state, commands, event.at)  # nothing new starts once closing
+        admit(case, catalog, state, commands, at)  # nothing new starts once closing
         close_when_reached(case, state)  # a rule may have reached the last of closes_when
     if was_open and state.phase == "closing":
         stop_children(case, catalog, state, commands)
     # Moments left because the case is no longer open: each rule on them says it wasn't applied
     # (brief, D38).
-    fire_rules(case, catalog, state, commands, event.at)
+    fire_rules(case, catalog, state, commands, at)
     left_unstarted(case, state)  # none is taken up once the case no longer decides (brief, D38)
     state.started_by_rules.clear()
     # A timer ends with its purpose: its run ended, or nothing new is decided while the close is
@@ -218,7 +241,35 @@ def decide(
     if state.timers and (held := nothing_decided(case, state)) is not None:
         cancel_timers(state, held)
     settle(case, catalog, state)
-    return state, commands
+
+
+@dataclass(frozen=True)
+class MigrationPreview:
+    """What a migration would do to a case now: every problem refusing it, or the lines its
+    history would gain. Never both (brief, D53)."""
+
+    refused: tuple[str, ...] = ()
+    lines: tuple[str, ...] = ()
+
+
+def preview_migration(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, migration: Migration, at: int
+) -> MigrationPreview:
+    """What applying `migration` at `at` would do to the case, decided as the apply decides it,
+    on a copy of its state: the approver reads it before approving, and the case is unchanged.
+    The apply checks again, depending on nothing this said (brief, D34) (brief, D53)."""
+    state = copy.deepcopy(state)  # the state passed in is never changed
+    if state.phase != "open":
+        return MigrationPreview(refused=(f"the case is {state.phase}: nothing changes it",))
+    if problems := problems_of(case, catalog, state, migration):
+        return MigrationPreview(refused=tuple(problems))
+    seen = len(state.history)
+    state.history.append(
+        f"from {released(case, state)} to {migration.label}, engine {migration.engine}"
+    )
+    target = apply(case, catalog, state, migration, at)
+    decide_again(target, catalog, state, [], at, was_open=True)  # its commands are never carried
+    return MigrationPreview(lines=tuple(state.history[seen:]))
 
 
 def receive(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Sent) -> None:
@@ -281,13 +332,6 @@ def arrive(case: CaseDefinition, state: CaseState, event: Sent, role: str | None
             del state.waiting[run.entry]
             state.history.append(f"{run.entry} done: {entry} arrived")
             reach_unless_steered(state, run, waits.reaches)
-
-
-def sent_by(declared: DeclaredEvent) -> str:
-    """Who sends an event, as the inbox says it: `from portal`, `by support or fraud`."""
-    if declared.sent_by.system is not None:
-        return f"from {declared.sent_by.system}"
-    return f"by {' or '.join(declared.sent_by.roles or ())}"
 
 
 def sender_role(catalog: Catalog, name: str, declared: DeclaredEvent, event: Sent) -> str | None:
@@ -454,14 +498,16 @@ def marked(case: CaseDefinition, name: str, origin: str) -> frozenset[str]:
     return frozenset({origin} | ({declared} if declared else set()))
 
 
-def answer(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Answered) -> None:
-    """Record a person's answer, once judged (brief, D23); or `AnswerRefused`."""
+def answer(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, event: Answered
+) -> Moved | None:
+    """Record a person's answer, once judged (brief, D23); or `AnswerRefused`. An approved
+    migration gives the release the case moved to (brief, D53)."""
     # Who answered is written one way, before anything is checked against it (brief, D22).
     if (wrong := identifier_problem(event.by)) is not None:
         raise AnswerRefused(wrong)
     if (request := state.changes.get(event.entry)) is not None:
-        answer_change(case, catalog, state, request, event, as_worded(state, event))
-        return
+        return answer_change(case, catalog, state, request, event, as_worded(state, event))
     found = open_entry(state, event.entry)
     if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
         # Only its event ends it, sent by its sender: nobody answers it (brief, D41).
@@ -470,6 +516,7 @@ def answer(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Answ
         answer_task(case, catalog, state, found, event)
     else:
         answer_approval(case, catalog, state, found, event)
+    return None
 
 
 def open_entry(state: CaseState, entry: str) -> StepRun | OpenApproval:

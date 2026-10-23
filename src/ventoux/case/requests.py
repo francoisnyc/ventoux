@@ -10,11 +10,13 @@ See docs/layers/12-releases.md (12c).
 from ventoux.case.admission import latest_run
 from ventoux.case.answers import AnswerRefused, offers
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, rule_fields
+from ventoux.case.migrations import Moved, apply, problems_of, released
 from ventoux.case.state import (
     Answered,
     CaseState,
     ChangeProposed,
     ChangeRequest,
+    Migration,
     Obtained,
     StepRun,
 )
@@ -31,7 +33,10 @@ from ventoux.core.sensitive import Sensitive, plain
 
 EDIT = "edit"  # a declared field's value
 SKIP = "skip"  # a failed step run
-KINDS = (EDIT, SKIP)
+MIGRATE = "migrate"  # the case's release (brief, D53)
+KINDS = (EDIT, SKIP, MIGRATE)
+# Each kind as a refusal names it: `an edit is proposed by …`.
+NOUNS = {EDIT: "an edit", SKIP: "a skip", MIGRATE: "a migration"}
 
 
 class ChangeRefused(Exception):
@@ -40,8 +45,17 @@ class ChangeRefused(Exception):
 
 def who_may(catalog: Catalog, kind: str) -> list[str]:
     """The roles that may propose or approve a change of `kind`: an edit, the roles registered to
-    edit; a skip, the operating roles, who act on failed steps (brief, D26) (brief, D52)."""
+    edit; a skip, the operating roles, who act on failed steps (brief, D26) (brief, D52); a
+    migration, the roles registered to migrate (brief, D53)."""
+    if kind == MIGRATE:
+        return catalog.migrators
     return catalog.editors if kind == EDIT else catalog.operators
+
+
+def described(kind: str, target: str) -> str:
+    """A request as its lines name it: `edit approved_amount`, `skip pay#1`, `migrate to refund
+    2`."""
+    return f"migrate to {target}" if kind == MIGRATE else f"{kind} {target}"
 
 
 def kind_role(catalog: Catalog, kind: str, roles: frozenset[str]) -> str | None:
@@ -62,7 +76,9 @@ def propose_change(
         raise ChangeRefused(f"the case is {state.phase}: nothing changes it")
     # Fail closed: a kind the engine doesn't know is refused, never read as one it does.
     if event.kind not in KINDS:
-        raise ChangeRefused(f"{event.kind} is not a kind of change: a change is an edit or a skip")
+        raise ChangeRefused(
+            f"{event.kind} is not a kind of change: a change is an edit, a skip or a migration"
+        )
     role = kind_role(catalog, event.kind, event.roles)
     if role is None:
         raise ChangeRefused(no_role(catalog, event.kind, event.by, event.roles, "proposed"))
@@ -77,23 +93,31 @@ def propose_change(
             raise ChangeRefused(problem)
         against = inputs_digest({event.target: Var(var=event.target)}, state.values)
         request = ChangeRequest(entry, "edit", event.target, event.by, role, value, against)
-    else:
+    elif event.kind == SKIP:
         if (problem := skip_problem(case, state, event.target)) is not None:
             raise ChangeRefused(problem)
         request = ChangeRequest(entry, "skip", event.target, event.by, role)
+    else:
+        migration = event.value
+        # Fail closed: a migration is its release and its mapping, never anything else.
+        if not isinstance(migration, Migration) or migration.label != event.target:
+            raise ChangeRefused(f"a migration to {event.target} carries that release")
+        if problems := problems_of(case, catalog, state, migration):
+            raise ChangeRefused("\n".join(problems))
+        where = released(case, state)  # applied only if the case is still there
+        request = ChangeRequest(entry, "migrate", event.target, event.by, role, migration, where)
     state.changes[entry] = request
     approvers = " or ".join(who_may(catalog, event.kind))
-    state.waiting[entry] = f"approval of {entry} ({event.kind} {event.target}) by {approvers}"
-    state.history.append(
-        f"{event.by} proposed {entry}: {event.kind} {event.target}, to be approved by {approvers}"
-    )
+    said = described(event.kind, event.target)
+    state.waiting[entry] = f"approval of {entry} ({said}) by {approvers}"
+    state.history.append(f"{event.by} proposed {entry}: {said}, to be approved by {approvers}")
 
 
 def no_role(catalog: Catalog, kind: str, by: str, roles: frozenset[str], act: str) -> str:
     """`an edit is proposed by support or support-lead, and omar has operations`."""
     allowed = " or ".join(who_may(catalog, kind)) or "a role registered for it"
     known = ", ".join(sorted(role for role in roles if role in catalog.roles)) or "no role"
-    return f"{'an' if kind == EDIT else 'a'} {kind} is {act} by {allowed}, and {by} has {known}"
+    return f"{NOUNS[kind]} is {act} by {allowed}, and {by} has {known}"
 
 
 def unseen(
@@ -161,9 +185,10 @@ def answer_change(
     request: ChangeRequest,
     event: Answered,
     worded: str,
-) -> None:
+) -> Moved | None:
     """Judge an answer to the request, then apply it if approved; or `AnswerRefused`, and the
-    request waits on. `worded` is what the answer's line says of the wording its person read."""
+    request waits on. `worded` is what the answer's line says of the wording its person read. An
+    applied migration gives the release the case moved to (brief, D53)."""
     # A request's outcomes are a closed list: a misspelling is refused, never "not approved".
     if event.outcome not in (APPROVE, REJECT):
         raise AnswerRefused(offers(request.entry, (APPROVE, REJECT), event.outcome))
@@ -180,11 +205,14 @@ def answer_change(
     state.history.append(f"{event.by} answered {request.entry} {event.outcome} as {role}{worded}")
     if event.outcome == REJECT:
         state.history.append(f"{request.entry} not applied: {event.by} rejected it")
-        return
+        return None
     if request.kind == EDIT:
         apply_edit(case, state, request, event.by, event.at)
-    else:
+    elif request.kind == SKIP:
         apply_skip(case, state, request, event.by)
+    else:
+        return apply_migration(case, catalog, state, request, event.by, event.at)
+    return None
 
 
 def excluded(
@@ -277,6 +305,33 @@ def apply_skip(
     state.history.append(
         f"applied {request.entry}: {run.entry} skipped by {request.by}, approved by {approved_by}"
     )
+
+
+def apply_migration(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    request: ChangeRequest,
+    approved_by: str,
+    at: int,
+) -> Moved | None:
+    """Move the case to the target, at `at`, checked again against the case as it is now, depending on
+    nothing the proposal's check did; unless something refuses it, every problem said at once
+    (brief, D34) (brief, D53)."""
+    migration = request.value
+    assert isinstance(migration, Migration)  # a migration's request carries its migration
+    if released(case, state) != request.against:
+        moved = f"the case moved to {released(case, state)} since it was proposed"
+        state.history.append(f"{request.entry} not applied: {moved}: propose it again")
+        return None
+    if problems := problems_of(case, catalog, state, migration):
+        state.history.append(f"{request.entry} not applied: {'; '.join(problems)}")
+        return None
+    state.history.append(
+        f"applied {request.entry}: migrated from {request.against} to {migration.label}, engine "
+        f"{migration.engine}, proposed by {request.by}, approved by {approved_by}"
+    )
+    return Moved(apply(case, catalog, state, migration, at), migration)
 
 
 def lapse_spent(case: CaseDefinition, state: CaseState, name: str) -> None:

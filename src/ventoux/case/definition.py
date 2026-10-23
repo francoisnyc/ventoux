@@ -207,6 +207,13 @@ class Approval(Shape):
     display: ApprovalDisplay
 
 
+def sent_by(declared: DeclaredEvent) -> str:
+    """Who sends an event, as the inbox says it: `from portal`, `by support or fraud`."""
+    if declared.sent_by.system is not None:
+        return f"from {declared.sent_by.system}"
+    return f"by {' or '.join(declared.sent_by.roles or ())}"
+
+
 class CloseReason(Shape):
     """A declared reason a person may close the case with, and who may (brief, D10)."""
 

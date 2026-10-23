@@ -108,7 +108,7 @@ Every problem it finds:
 | `MISSING_EVENT` | an event the state can give isn't handled | `declined is not handled: say where the plan goes on declined` |
 | `RESERVED_OUTCOME` | a wait offers `timeout` as an outcome | `timeout is the event of a wait's timeout, not an outcome: name the outcome differently` |
 | `APPROVAL_TARGET` | an approval's `approve` leads somewhere other than its `of`, or `of` isn't an activity state | `approve_refund approves pay, and its approve goes to refund_fee: send approve to pay` |
-| `UNKNOWN_ROLE` | a wait or an approval names a role nobody registered | `support-laed is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead; use one of them, or ask the platform team to register it` |
+| `UNKNOWN_ROLE` | a wait or an approval names a role nobody registered | `support-laed is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, platform, privacy, support, support-lead; use one of them, or ask the platform team to register it` |
 | `APPROVAL_ROLE` | an approval names a role that may not approve its activity's risk | `support may approve no risk, and payments.refund@2 is high risk: name a role that may approve high risk` |
 | `UNKNOWN_FIELD` | a wait's outcome sets a field the plan doesn't declare | `review's accept sets approved_amout, which is not a field: the fields are approved_amount, order_id` |
 | `EXPRESSION_INVALID` | an input or a condition fails the expression check | `amout is not a declared field` |

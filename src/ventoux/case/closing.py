@@ -94,11 +94,18 @@ def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
         state.phase = "closed"
         cancel_changes(state, "nothing left to do")
         say_kept_from_starting(case, catalog, state)
-        state.history.append("closed: nothing left to do")
+        state.history.append(f"closed: nothing left to do{not_reached(case, state)}")
     elif state.phase == "closing" and not any(run.status == "running" for run in state.runs):
         state.phase = "closed"
         say_kept_from_starting(case, catalog, state)
         state.history.append(f"closed: {state.closed_because}")
+
+
+def not_reached(case: CaseDefinition, state: CaseState) -> str:
+    """What a close with nothing left to do adds when the case never reached its `closes_when`:
+    `; paid not reached`, so the end never reads as done (from #44's review) (brief, D53)."""
+    missing = [m for m in case.closes_when if m not in state.milestones]
+    return f"; {' and '.join(missing)} not reached" if missing else ""
 
 
 def say_kept_from_starting(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:

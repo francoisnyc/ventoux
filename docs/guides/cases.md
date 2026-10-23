@@ -397,7 +397,10 @@ as a payment, the new run's new key could make them happen twice (brief, D17, D2
 
 ## Closing a case
 
-A case closes by itself when nothing is left to do (brief, D10). Two definition keys change that:
+A case closes by itself when nothing is left to do (brief, D10). If it declares `closes_when`
+and closes that way without reaching it (a failed payment skipped, say), its last line says
+which it didn't reach: `closed: nothing left to do; paid not reached`. Two definition keys change
+that:
 `"closes_when": ["paid"]` closes it as soon as the milestones are reached, and `"stays_open":
 true` keeps it open when nothing is left to do, until a person closes it or `closes_when` does. A
 case whose steps all wait to be proposed needs `stays_open`: otherwise nothing is pending when it
@@ -435,9 +438,10 @@ Some changes are none of the ones a definition offers. Ana typed 2500 for 250, a
 that reads it hasn't run. A payment provider closed the account, so `pay#1` can never succeed,
 and nothing should be paid in its place. These are **change requests** (brief, D52): one person
 proposes the change, someone else approves it, and the case applies it, checking it again against
-the case as it is then. There are two kinds: an **edit** of a value in the case file, and a
-**skip** of a failed step run. Forgetting a case is the third, with a request of its own (the
-case data guide, "Forgetting a person"), under the same rules.
+the case as it is then. There are three kinds: an **edit** of a value in the case file, a
+**skip** of a failed step run, and a **migration**, moving the case to another release (the
+releases guide, "Moving open cases to a later release"). Forgetting a case has a request of
+its own (the case data guide, "Forgetting a person"), under the same rules.
 
 **Who may.** Your platform team registers the roles that may, as for operating (brief, D26):
 
@@ -2099,7 +2103,7 @@ Anything else is not a value: reading it is an error.
 | `UNKNOWN_INPUT` | error | a step gives an input its contract or plan doesn't take | `payments.refund@2 has no input amout: its inputs are amount, order_id` |
 | `MISSING_INPUT` | error | a step doesn't give an input its contract or plan needs | `payments.refund@2 needs the input amount: add it to inputs` |
 | `ENGINE_INPUT` | error | a step gives the input the engine fills: the idempotency key | `idempotency_key is filled by the engine, never by a definition: remove it` |
-| `UNKNOWN_ROLE` | error | a role nobody registered: it counts for nothing when the case runs | `supprt is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead; use one of them, or ask the platform team to register it` |
+| `UNKNOWN_ROLE` | error | a role nobody registered: it counts for nothing when the case runs | `supprt is a role nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, platform, privacy, support, support-lead; use one of them, or ask the platform team to register it` |
 | `UNKNOWN_SOURCE` | error | a field is declared untrusted with a label nobody registered | `untrusted:custmer has a label nobody registered: the labels are customer, document, email, llm, web; use one of them, or ask the platform team to register it` |
 | `UNKNOWN_SYSTEM` | error | a reference names a system nobody registered | `order_id is a reference to ordrs, which is not a registered system: the systems are crm, documents, kyc, orders, policies, portal; use one of them, or ask the platform team to register it` |
 | `EXPRESSION_INVALID` | error | an expression reads something that isn't a value, mixes types, or names an outcome that can't happen | as above |

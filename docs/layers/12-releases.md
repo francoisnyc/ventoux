@@ -1043,3 +1043,338 @@ failing.
 | New cases open at engine 2, with its marker; version 3 is unknown | `tests/test_temporal_case_release.py` `test_a_case_opens_on_its_release`, `test_a_draft_is_as_before`; `tests/test_engine.py` `test_an_unknown_engine_version_is_refused` |
 | The guide's examples run as written | Q `test_the_guides_change_example_runs_as_written`, T `test_the_guides_temporal_example_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |
+
+## 12d. Migrations
+
+Status: drafted 2026-10-23, from `main` at `66e2cff` (12c merged, #44); the histories from
+before 12d recorded and replayed first (slice 0). Answered the same day: choices 42 to 59, all as
+recommended, with three changes, written into choices 43, 45, 55 and 57 below, each marked
+*Changed in the answers*. The warm-up (learning question 34's follow-up) put and not answered,
+left open. Built the same day, slices 0 to 10; see "Decided while building" and the Promises
+table.
+
+User-facing description, written first once you agree: `docs/guides/releases.md`, "Moving open
+cases to a later release", and the cases guide's "Changing an open case" gaining its third kind.
+Decision: brief D53, drafted with it.
+
+### Warm-up: learning question 34's follow-up, why keep the static check
+
+> If the runtime check catches everything with the real sources, why keep the static one at all?
+
+Open since layer 5; "who hears of it" hasn't come back yet. It is 12d's question too: a
+migration is previewed before anyone approves it, and checked again when it is applied. Answer
+from memory first.
+
+### What this part is for
+
+A case runs the release it opened on, to the end (12b). Sometimes the business can't wait for the
+end: a fraud check is now required before every payout, and three hundred refunds are open on
+`refund 1`. 12d moves an open case to a later release, as one more kind of 12c's change request:
+someone proposes it, someone else approves it, the case checks it again and applies it.
+
+A small example. `refund 2` adds `fraud_check`, which `pay` now requires, renames the field
+`approved_amount` to `amount_approved`, and chases a review after 3 days instead of 2. Refund
+`refund-7` is on `refund 1`, its review answered, `pay.approval#1` open. Pia proposes the
+migration with its mapping, `{"fields": {"approved_amount": "amount_approved"}}`; Lee approves it:
+
+```
+pia proposed case.change#1: migrate to refund 2, to be approved by platform
+lee answered case.change#1 approve as platform
+applied case.change#1: migrated from refund 1 to refund 2, engine 2, proposed by pia, approved by lee
+renamed field approved_amount to amount_approved
+withdrew pay.approval#1: refund 2 changed pay
+started fraud_check#1: …
+```
+
+Nothing Ana answered is lost, nothing is quoted, and a payment waiting for its approval now waits
+for the fraud check too. Had `pay#1` been running on `payments.refund@2` while `refund 2` called
+`@3`, the migration would be refused, saying to migrate after it finishes: never terminated.
+
+### What the code does today
+
+Read on `main` at `66e2cff`, before drafting:
+
+- **A case's definition lives outside its state:** the workflow keeps it, with the release and its
+  plans (`CaseWorkflow.case`, `release`, `its_plans`), and `switch` carries them across
+  continue-as-new in the start (D27, D51). `decide` takes the definition as its first argument, so
+  nothing in the state can change it.
+- **A run's entry and its step are apart** (`StepRun.entry`, `StepRun.step`): the entry names the
+  run's key (`refund-7/…/pay#1`), and the next entry counts the step's runs. So a step can be
+  renamed while its run keeps its entry and its key.
+- **Everything else the state holds is by name:** values by field (`pay.outcome` for an outcome,
+  `pay.refund_id` for an output, `cancelled.note` for a payload), milestones, approvals and their
+  counts by step, proposers, timers by rule and the moment they were set on, firings by rule,
+  arrivals by event, change requests by target.
+- **12c's change requests** (`case/requests.py`) are one lifecycle with kinds as data; each kind is
+  what it refuses when proposed, who it excludes, and what applying it does. `migrates=True` was
+  left for 12d.
+- **The engine version** is set once at the opening, from patch markers (12b). A run memoises a
+  patch's answer, so a marker can't be asked a second time in a run.
+
+### Choices for 12d
+
+Numbered on from 12c's. Answer by number.
+
+42. **A migration is one more kind of change request, `migrate`,** with 12c's lifecycle: an entry
+    `case.change#n`, answered approve or reject, checked again when applied, cancelled if the case
+    closes first. Proposed and approved by a role registered for it, `register_role(...,
+    migrates=True)`, never by a system or a rule. Excluded from approving it, as from every change:
+    its proposer and the case's opener (D52). **The curriculum's negative test: a self-approved
+    migration, refused,** saying who proposed it. *Recommended.* Set aside: a request approved
+    once for a cohort (below, choice 55).
+
+43. **What a request carries, and what the case checks of it.** The target release as its record
+    gives it (name, number, digest, case and plans), the mapping (choice 44), and the engine
+    version to move to (choice 53). The case refuses it, at once and again when applying, if: the
+    case is closing or closed; the target's package doesn't give the digest it comes with (D51),
+    or is another package's (`claim 3` for a refund); a contract or plan it names isn't in
+    the worker's catalog; it moves neither the release nor the engine. A draft may migrate to a
+    release (its line says `from draft`); a migration back to an earlier release is a migration
+    like any other. *Recommended.* *Changed in the answers:* the case checks that **the target's
+    package gives its digest, not that the digest is the store's release:** a request comes
+    through the trusted API, built from the release store (D19), and 12e's environment registry is
+    where the case can check the release itself. D53 says so.
+
+44. **The mapping, by names, never positions** (D2, D5; research 4.1). Data, one section per kind
+    of name: `steps`, `milestones`, `fields`, `rules`, `events`, each `{"old": "new"}`. A name not
+    in the mapping keeps its name. Timers are named by their rule and the moment they were set on,
+    so they follow the `rules`, `steps` and `milestones` sections. Refused: a section it doesn't
+    know; an old name the case's release doesn't declare; a new name the target doesn't declare,
+    or declares as another kind; two old names mapped to one. No condition, no expression, nothing
+    evaluated. *Recommended.*
+
+45. **What refuses a migration: a name something depends on, gone from the target and unmapped.**
+    **The curriculum's negative test:** `refund 2` renames `pay` to `payment`, the mapping doesn't
+    say so, and `pay#1` is running: refused, `pay#1 is running, and refund 2 has no step pay: map
+    it, or migrate after it finishes`. What depends on a name:
+    - a step: any run of it, in any status, since its outcome and outputs are in the case file;
+    - a milestone: reached, since a milestone is never undone (D48);
+    - a field: a value in the case file, of the same type in the target (a value never converted);
+    - a rule: a failed firing waiting for a person, or a start it asked for not yet taken up;
+    - an event: a wait open for it, or a value it carried;
+    - and nothing loosens on the way: a field holding a value may not lose `sensitive`, widen
+      `visible_to`, or change its type (stricter is taken, never looser).
+    - *Changed in the answers:* **what a finished run or an arrival recorded must be what the
+      target can hold.** A done run's outcome is one the target's step declares (a task's
+      outcomes, its contract's, or a plan's `done` and `failed`); its outputs are the target
+      contract's, same names and types; an event's carried payload is declared by the target's
+      event, same names and types. Values are never converted.
+    Each problem is said, with what to map or what to wait for, all of them at once. *Recommended.*
+    Set aside: dropping a name and its values on request (the prototype's `null`): a value a
+    person gave would go, and its provenance with it.
+
+46. **Running work finishes under what it started with** (D10; research 5.3). A running run keeps
+    its entry and its key; its result lands under the mapped names. Refused unless its step, in
+    the target, is the same kind calling the same contract (or plan): a result checked against
+    another contract than the one that ran would be wrong (`pay#1 is running payments.refund@2,
+    and refund 2's pay calls payments.refund@3: migrate after it finishes`). A running plan
+    finishes on the plan in its start (D28): plans don't migrate. *Recommended.*
+
+47. **Open tasks, waits and failed runs stay, under the target's rules.** An open task's step
+    stays a task: it is answered as the target says (its outcomes, roles, the fields it sets); a
+    wait stays a wait for its mapped event; a failed run's step calls the same contract, since its
+    retry is the same run with the same key (D26), and it is retried, skipped or the case closed,
+    as before. A step that changed kind under an open or failed run is refused. *Recommended.*
+
+48. **Approvals: kept only if what they approved is unchanged.** An open approval, one given and
+    not yet spent, and one spent on a failed run stay if the step, names mapped, is the same
+    behaviour in the target (its method 1 digest, D50); otherwise each is withdrawn or lapses,
+    every approval on its entry at once (D47), saying so (`withdrew pay.approval#1: refund 2
+    changed pay`), and admission asks again under the target. *Recommended.* Set aside: comparing
+    only what the approval read (a changed approval rule, more approvers, would then keep an
+    approval the target asks differently).
+
+49. **Timers.** A timer whose rule keeps its name (mapped), its moment and its age keeps its due
+    time. One whose rule changed its age is measured again from when it was set (`since` plus the
+    new age); if that has passed, it fires right after the migration, stamped with the
+    migration's time, saying so: a timer never fires in the past. One whose rule is gone, or now
+    waits on another moment, is cancelled, saying so; nothing is set for a moment that came
+    before the migration. *Recommended.* Set aside: refusing any change to a set timer (an SLA
+    change is a common reason to migrate); keeping the old due time silently (the prototype's).
+
+50. **Pending change requests and events in flight.** A pending edit follows the field mapping
+    (its target renamed), a pending skip keeps its run's entry, and both are checked again when
+    applied, as always; another pending migration, proposed against the old release, isn't
+    applied when approved (`the case moved to refund 2 since it was proposed: propose it again`).
+    An event is decided under the release current when its turn comes: one the target renamed,
+    sent under its old name, is refused and recorded, as any undeclared event (D41); the preview
+    names the events a target renames, for their senders. *Recommended.*
+
+51. **After the migration, the case decides again, under the target.** Admission reads every
+    condition again (research 4.6), so a step the target adds may start, and one it now requires
+    waits; a `closes_when` reached closes the case, or holds the close (D34). A migration isn't a
+    moment for rules (D38's moments stay as they are): no rule fires because of it. *Recommended.*
+
+52. **Values keep their sources, never re-stamped** (D43; research 5.3). A mark the target
+    declares on a field is added to its value's sources, as every writer's is (D12); a mark the
+    target drops stays on values already written. So a migration never makes untrusted data
+    trusted. *Recommended.*
+
+53. **The engine version a migration moves to is data in the request** (D51). Its proposer's
+    client sends the version it was built with (`ENGINE`); the case refuses one its code doesn't
+    know, or one older than its own (the engine never goes back), and records it, so a replay
+    reads it from the history. A migration may move the engine alone, keeping the release: how an
+    open case adopts a later engine. *Recommended.* Set aside: asking patch markers at the
+    migration (a run memoises a marker's answer from the opening, so a migration in that run
+    couldn't move the engine).
+
+54. **What the history says,** naming people, roles, releases, engine versions, names and entries,
+    never a value: the request's lines as 12c's (`pia proposed case.change#1: migrate to refund
+    2, to be approved by platform`); when applied, `applied case.change#1: migrated from refund 1
+    to refund 2, engine 2, proposed by pia, approved by lee` (or `engine 1 to engine 2`), then one
+    line for each thing it did: a name renamed, an approval withdrawn or lapsed, a timer kept on a
+    new due time, fired late or cancelled. When not applied, why, all at once. The report's
+    `release` and `engine` read the new ones. *Recommended.*
+
+55. **A preview, case by case and across a cohort, with no side effect.** One pure function does
+    the migration's decision on a copy of a case's state; the preview returns what it would say
+    (the lines of choice 54, or every refusal), and the apply runs it again on the case as it is
+    then, depending on nothing the preview said (D34). On Temporal the preview is a query (read,
+    never recorded); a client function previews every case it is given, and lists the open cases
+    of a workflow type through Temporal's visibility; each case is in the result, with what it
+    would get or why not, a case it can't read included: none skipped silently (research 5.4).
+    *Changed in the answers:* the cohort is **the case IDs it is given.** Temporal's time-skipping
+    test server doesn't implement `ListWorkflowExecutions` (the tutor checked), so finding the
+    open cases of a release comes with 12e's environment registry; the note and the guide say so.
+    Each case then gets its own request, approved on its own: the approver's one decision is sent
+    as one answer per case, each case checking it for itself. *Recommended.* Set aside: one
+    request for the cohort (the cases would trust what another workflow checked).
+
+56. **Graduating a strict workflow to a looser case lands in 12d** (D2), as the guide's story, with
+    nothing new in the engine: `refund 1` is a `sequence` (each step requires the one before and
+    starts by itself); `refund 2` lets support propose `call_customer` at any time and makes the
+    letter optional. A case half-way through `refund 1` migrates, and what it may do next is the
+    target's. *Recommended.*
+
+57. **On Temporal.** Applying a migration gives the driver one more command, `UseRelease`: its
+    definition, release and plans replace the workflow's, and cross every continue-as-new in the
+    start; a running plan child keeps its own. A pending migration crosses continue-as-new in the
+    state, its target with it. Histories recorded before 12d replay, recorded first; a migrated
+    case's history replays; a migration request pending across a switch is applied in a later run.
+    Not a new engine version: a migration is a new event on a new path (D51). *Recommended.*
+    *Changed in the answers:* as in 43, the case checks the target's package gives its digest; the
+    release itself is the trusted API's to vouch for until 12e.
+
+58. **From #44's review: a case that closes without reaching its `closes_when` says so.** Its close
+    line names what it didn't reach: `closed: nothing left to do; paid not reached`. A line, not a
+    decision, so no engine version: replay compares what the case does, not what its history
+    says. A skip is the usual way there, and 12d makes it likelier (a migrated case may drop a
+    step). *Recommended,* as a slice of its own.
+
+59. **Where it is recorded:** D53 ("Migrations: one more change request, by names, refused never
+    terminated, previewed"), with dated amendment lines on D2, D5, D44, D51 and D52; the releases
+    guide's "Moving open cases to a later release" and the cases guide's third kind written first,
+    their examples run by tests. No new dependency. *Recommended.*
+
+### The negative tests
+
+| Negative test | Where |
+|---|---|
+| A self-approved migration (the curriculum's) | refused, recorded, the request waiting on |
+| An unmapped rename that running work depends on (the curriculum's) | refused, proposed and applied, saying what to map |
+| A reached milestone, a value, a failed run, an open task the target lacks | refused, each said |
+| A running run whose step calls another contract in the target | refused: migrate after it finishes |
+| A target whose package doesn't give its digest, another package's, or naming a contract the worker lacks | refused |
+| A done run's outcome or outputs, or an event's payload, the target can't hold (from the answers) | refused: values are never converted |
+| An engine version the case doesn't know, or older than its own | refused |
+| A mapping naming what doesn't exist, or two names to one | refused |
+| A field that would lose `sensitive` or widen `visible_to` | refused |
+| A preview with a side effect | none: the preview leaves the case's history as it was |
+
+### Seams the tests use
+
+- `run_case(...)` with a script's `migrate(record, mapping, by)`, `release=` to open on a release
+  and `engine=` for its version; answers to `case.change#n`; `release_of(definition, number,
+  plans)` to release a definition in memory; `history`, `waiting_for`, `timers`, `state`.
+- `preview_migration(case, catalog, state, migration, at)` and `migration_of(record, mapping,
+  engine)`, pure; `decide`, for a state a script can't reach (an approval given and waiting).
+- On Temporal: `propose_migration(case, record, mapping, by, roles)`,
+  `preview_migrations(client, workflow, ids, record, mapping)`, `report`, the `Replayer` on
+  fixtures recorded before 12d.
+- The guides' examples, run as written.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **Histories recorded before 12d,** replayed: a released refund waiting for its approval, one
+   that continued as new, a pending edit across a switch.
+1. **The kind:** a migration proposed, refused when self-approved, applied on a target with
+   nothing renamed; the target checked; the engine moved.
+2. **The mapping and what depends on names:** renames, and every refusal of choice 45.
+3. **Running work, open tasks, waits and failed runs.**
+4. **Approvals and timers.**
+5. **Pending requests, events, and deciding again after.**
+6. **The preview, in memory.**
+7. **On Temporal:** `UseRelease`, continue-as-new, the preview query and the cohort, the fixtures.
+8. **Graduating a strict workflow.**
+9. **#44's close line.**
+10. **The guides, D53, the Promises table checked.**
+
+### Decided while building
+
+- **What waits on a step refuses its removal too:** an approval asked or given, a person's
+  proposal, a rule's start (choice 45 listed runs; these wait on the step as much). A gone
+  step's runs are said once, by its latest run.
+- **`visible_to`: only what a field declares may not widen.** A field with none is seen by every
+  role its case names (D30), so `refund 2` adding a fraud check for the `fraud` role widened
+  every such field, and refused every migration that adds a role. A field declaring
+  `visible_to` may not drop it or add a role; one declaring none follows the target.
+- **An approval's step is compared word for word, what it requires included:** a `sequence` says
+  a step's requirements outside it, so the comparison reads them too; a renamed step, or one
+  reading a renamed field, is changed, and its approval withdrawn (never kept on a guess).
+- **A pending edit's digest names its field** (12c's): across a rename, one still on the value it
+  was proposed against has its digest taken again under the new name; one whose field changed
+  meanwhile keeps its old digest, and isn't applied. 12c's formula is unchanged, so edits pending
+  when 12d is deployed are read as before.
+- **One applied line:** `applied case.change#1: migrated from refund 1, engine 2 to refund 3,
+  engine 2, proposed by pia, approved by lee`, the same whether the release, the engine or both
+  move (choice 54 had two forms). A refusal names a run's state as people say it: `pay#1 failed`,
+  `pay#1 is running`, `pay#1 was skipped`.
+- **The preview decides as the apply does,** through the end of `decide`, factored out as
+  `decide_again`, so it says what the case does after (the fraud check starting, a close); its
+  first line is `from refund 1, engine 2 to refund 3, engine 2`, since nobody has proposed it
+  yet. It lives in the runtime, beside `decide`. A closed case's preview is refused.
+- **`decide` gives a command, `UseRelease`,** once a migration is applied: the rest of that
+  decision is the target's, and the driver (in memory and on Temporal) decides with the target
+  from then on. The case workflow keeps its definition as data for the next run's start, and its
+  loop reads the definition it has now, never the one it opened with.
+- **A timer moved into the past is due at the migration's time,** so it fires right after it,
+  stamped then. Its test caught the moment compared the wrong way round (the old one is renamed
+  into the target's names, never the target's into the old).
+- **`sent_by` moves next to the declared event** (`case/definition.py`), so a migration can say a
+  wait's sender without importing the runtime.
+- **The development catalog registers `platform` to migrate.** The listings of the registered
+  roles that two tests and two guides' tables quote now name it.
+- **Graduating needed nothing new in the engine:** its story test passed as written, which is
+  D2's claim.
+
+### Promises
+
+Checked against the tests before the pull request. `Q` is `tests/test_migrations.py`, `T` is
+`tests/test_temporal_migrations.py`, both new. Each test was seen failing for the right reason,
+or, where the code was written with the seam, the rule was taken out and its test seen failing.
+
+| Promise | Test |
+|---|---|
+| A migration is never approved by its proposer (the curriculum's), nor by the case's opener (12c) | Q `test_a_self_approved_migration_is_refused` |
+| A migration moves the release and engine, and the case decides as the target from then on | Q `test_a_migration_moves_the_case` |
+| A target is checked: a role that may migrate, the same package, a package giving its digest, contracts in the catalog, something to move | Q `test_a_target_is_checked` |
+| The engine moves forward only, as data; it may move alone | Q `test_a_target_is_checked`, `test_the_engine_moves_forward_only` |
+| Names map by name, never position; a run keeps its entry and key; a bad mapping is refused | Q `test_names_map_by_name`, `test_a_bad_mapping_is_refused` |
+| An unmapped rename that running work depends on is refused, proposed and applied (the curriculum's) | Q `test_an_unmapped_rename_running_work_depends_on_is_refused` |
+| What depends on a name refuses: a milestone, a value, an outcome, an output, a payload, a failed rule, what waits on a step; values never converted; nothing loosens | Q `test_what_depends_on_a_name_refuses`, `test_what_waits_on_a_step_refuses_its_removal` |
+| Running work finishes under what it started with, or the migration waits for it; plans don't migrate | Q `test_running_work_finishes_on_its_contract`, `test_a_running_plan_finishes_on_its_plan` |
+| Open tasks and waits stay, under the target's rules and lines | Q `test_open_and_failed_runs_stay`, `test_an_open_wait_stays_on_its_event` |
+| Approvals stay only if their step is unchanged; every approval on an entry goes at once; spent and given ones lapse | Q `test_changed_steps_lose_their_approvals`, `test_a_given_approval_lapses_with_its_step` |
+| Timers keep, move or cancel, saying so, never firing in the past; they follow renamed moments | Q `test_timers_across_a_migration`, `test_a_timer_follows_its_renamed_milestone` |
+| Pending edits follow their field; a migration against a left release isn't applied; events decide under the current release | Q `test_pending_requests_and_events_across_a_migration` |
+| The case decides again after; no rule fires on the migration | Q `test_the_case_decides_again_under_the_target` |
+| Values keep their sources; a target's mark is added, never removed | Q `test_values_keep_their_sources` |
+| The history says each step, naming no value | Q `test_a_migrations_history_names_no_value` |
+| The preview says what the apply would do, with no side effect; a cohort preview names every case given | Q `test_the_preview_is_the_apply_without_effect`, T `test_a_cohort_preview_names_every_case` |
+| On Temporal, a migrated case runs the target across continue-as-new, and replays; histories from before 12d replay | T `test_a_migrated_case_runs_its_new_release`, `test_histories_from_before_12d_replay` |
+| A strict workflow graduates to a looser case | Q `test_a_strict_workflow_graduates` |
+| A case closing without its `closes_when` says which it didn't reach (#44's review) | Q `test_a_close_names_what_it_didnt_reach` |
+| The guides' examples run as written | Q `test_the_guides_migration_example_runs_as_written`, T `test_the_guides_cohort_example_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |

@@ -12,7 +12,7 @@ from typing import Any
 
 from ventoux.case.called import unbound
 from ventoux.case.closing import needs_attention
-from ventoux.case.definition import CaseDefinition
+from ventoux.case.definition import CaseDefinition, parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import (
     CancelWorkflow,
@@ -25,6 +25,7 @@ from ventoux.case.state import (
     StartPlan,
     StartWorkflow,
     StopPlan,
+    UseRelease,
     WorkflowCancelled,
 )
 from ventoux.case.timers import next_due, set_timers
@@ -136,7 +137,7 @@ def run_case_in_memory(
         state.flags,
         state.history,
         done,
-        case,
+        driver.case,  # the definition it ended on: a migration may have moved it
         state,
         registered,
         timers,
@@ -179,7 +180,10 @@ class Driver:
         while queue:
             state, commands = decide(self.case, self.catalog, state, queue.pop(0))
             for command in commands:
-                if isinstance(command, StopPlan):
+                if isinstance(command, UseRelease):
+                    # The case moved: every decision from now on is the target's (brief, D53).
+                    self.case = parse_case(dict(command.migration.case))
+                elif isinstance(command, StopPlan):
                     # In memory a running plan step waits for an answer (its plan runs at once to
                     # its end or its first unanswered wait): nothing runs in it, so it ends now.
                     queue.append(PlanCancelled(command.entry, at=at))

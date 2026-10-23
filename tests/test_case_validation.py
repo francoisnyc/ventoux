@@ -535,7 +535,7 @@ def test_an_unchecked_deadlock_still_runs_safely() -> None:
         people={"ana": ["adjuster"]},
     )
     assert run.closed
-    assert run.history[-1] == "closed: nothing left to do"
+    assert run.history[-1] == "closed: nothing left to do; paid not reached"  # #44's review
     assert any(line.startswith("check#1 done") for line in run.history)
     assert not any(line.startswith(("started assess", "scheduled pay")) for line in run.history)
 
@@ -913,7 +913,7 @@ def test_a_plan_step_gives_the_fields_its_plan_takes_at_its_start() -> None:
 
 # --- 10b, slice 3: roles, labels and systems nobody registered ---
 
-ROLES = "adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead"
+ROLES = "adjuster, claims-sensitive, fraud, operations, platform, privacy, support, support-lead"
 
 
 def unknown_role(path: str, role: str) -> Issue:

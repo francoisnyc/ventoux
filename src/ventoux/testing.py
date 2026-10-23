@@ -17,6 +17,7 @@ from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import parse_case
+from ventoux.case.engine import ENGINE
 from ventoux.case.freshness import seconds_in
 from ventoux.case.memory import (
     Activity,
@@ -28,7 +29,9 @@ from ventoux.case.memory import (
     run_case_in_memory,
     wrapped,
 )
+from ventoux.case.migrations import migration_of
 from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
+from ventoux.case.releases import Record, digest, package
 from ventoux.case.requests import ChangeRefused
 from ventoux.case.runtime import CaseRefused, EventRefused
 from ventoux.case.state import (
@@ -90,7 +93,9 @@ __all__ = [
     "edit",
     "finish",
     "load_definition",
+    "migrate",
     "propose",
+    "release_of",
     "retry",
     "run_case",
     "run_plan",
@@ -300,6 +305,7 @@ CATALOG.register_role("claims-sensitive")
 # Operations acts on a case's failed steps: retries them, or closes the case (brief, D26).
 CATALOG.register_role("operations", operates=True)
 CATALOG.register_role("privacy", forgets=True)  # the guide's data protection role (layer 9c)
+CATALOG.register_role("platform", migrates=True)  # runs releases, migrates cases (layer 12d)
 
 
 # Fake implementations, against no real system: nothing is paid, read or sent.
@@ -412,6 +418,8 @@ def run_case(
     catalog: Catalog = CATALOG,
     workflows: Mapping[str, Activity] = WORKFLOW_FAKES,
     at: int = START,
+    release: Record | None = None,
+    engine: int = ENGINE,
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
@@ -428,8 +436,11 @@ def run_case(
     by then fires, and every event after it happens then."""
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
     now = at
+    # On `release`, the case is named as opened on it; on Temporal its start carries it, and the
+    # case checks its digest (brief, D51).
+    named = None if release is None else f"{release.name} {release.release}"
     events: list[Event | Finish | Advance] = [
-        Opened(wrapped(case, as_json(file)), opened_by, at=now)
+        Opened(wrapped(case, as_json(file)), opened_by, at=now, engine=engine, release=named)
     ]
     for item in answers:
         if isinstance(item, Later):
@@ -458,9 +469,11 @@ def run_case(
             events.append(CloseAsked(item.reason, item.by, roles, at=now))
             continue
         if isinstance(item, Change):
-            # Every value wrapped, as the client sends it: it can't tell which fields are
+            # An edit's value wrapped, as the client sends it: it can't tell which fields are
             # sensitive (brief, D31).
-            value = None if item.value is None else Sensitive(as_json({"v": item.value})["v"])
+            value = item.value
+            if item.kind == "edit":
+                value = Sensitive(as_json({"v": item.value})["v"])
             roles = frozenset(people.get(item.by, ()))
             events.append(ChangeProposed(item.kind, item.target, value, item.by, roles, at=now))
             continue
@@ -645,6 +658,29 @@ def edit(field: str, value: Any, who: str) -> Change:
     """A script's proposed edit: `edit("approved_amount", 250, "ana")`. Someone else approves it
     by answering its entry: `("case.change#1", "approve", "lee")` (brief, D52)."""
     return Change("edit", field, value, who)
+
+
+def migrate(
+    record: Record, mapping: dict[str, dict[str, str]], who: str, engine: int = ENGINE
+) -> Change:
+    """A script's proposed migration to the release `record` keeps: `migrate(refund_2, {"fields":
+    {"approved_amount": "amount_approved"}}, "pia")`, moving the case to `engine`, by default
+    this code's (brief, D53)."""
+    return Change(
+        "migrate", f"{record.name} {record.release}", migration_of(record, mapping, engine), who
+    )
+
+
+def release_of(definition: dict[str, Any], number: int, plans: Sequence[Any] = ()) -> Record:
+    """`definition` and its `plans` released in memory as release `number`, as CI would record
+    it: what a migration's target is in a test. Numbers are written as JSON writes them."""
+    released = package(as_text(definition), [as_text(plan) for plan in plans])
+    return Record(released.name, number, 1, digest(released), "memory", {}, released.written)
+
+
+def as_text(data: Any) -> str:
+    """Stored data as a file's JSON text: an exact decimal written as the number it is."""
+    return json.dumps(data, default=lambda number: json.loads(str(number)))
 
 
 def skip(entry: str, who: str) -> Change:

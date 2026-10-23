@@ -146,6 +146,107 @@ new, so method 1 must give the same digest for ever. Ventoux's tests pin it for 
 between them use every shape of the format; a change to the engine that would change a digest
 fails there first. A new method would be method 2, recorded as a decision of its own.
 
+## Moving open cases to a later release
+
+A case runs its release to the end, unless it is **migrated**: moved, open, to another release
+(brief, D53). A migration is a change request, as an edit is (the cases guide, "Changing an open
+case"): one person proposes it, someone else approves it, and the case checks it again when it
+applies it. Both hold a role your platform team registered to migrate:
+
+```python
+catalog.register_role("platform", migrates=True)
+```
+
+Say `refund 3` adds a fraud check, which the payment now requires, and renames two names: the step
+`pay` is now `payment`, and the field `approved_amount` is `amount_approved`. A migration says each
+rename, by name, never by position; a name it doesn't rename keeps its own:
+
+```json
+{"steps": {"pay": "payment"}, "fields": {"approved_amount": "amount_approved"}}
+```
+
+In a test, `migrate` proposes it, and the approver answers its entry:
+
+```python
+moved = run_case(refund, file={"order_id": "ord-1", "amount": 250},
+                 answers=[("review", "approve", "ana", {"approved_amount": 250}),
+                          migrate(refund_3, renames, "pia"),
+                          ("case.change#1", "approve", "lee")],
+                 people=PEOPLE, release=refund_1)
+assert moved.waiting_for == ["fraud_check by fraud"]
+```
+
+```
+pia proposed case.change#1: migrate to refund 3, to be approved by platform
+lee answered case.change#1 approve as platform
+applied case.change#1: migrated from refund 1, engine 2 to refund 3, engine 2, proposed by pia, approved by lee
+withdrew pay.approval#1: refund 3 changed pay
+renamed step pay to payment
+renamed field approved_amount to amount_approved
+started fraud_check#1: waiting for clear by fraud
+```
+
+What Ana answered is the same value under its new name, still hers; the approval Sam would have
+given approved the payment as it was, so it is withdrawn and asked again once the fraud check is
+done.
+
+**Refused, never terminated.** Anything the case holds under a name the target lacks, unmapped,
+refuses the migration, every problem said at once with what to map or wait for:
+
+- a run of a step, whatever its state: `pay#1 is running, and refund 3 has no step pay: map it, or
+  migrate after it finishes`;
+- a milestone reached, never undone: `paid is reached, and refund 2 has no milestone paid: map it,
+  since a milestone reached is never undone`;
+- a value: `note holds a value, and refund 2 has no field note: map it`; and the target must hold
+  it as it is, never converted: `note is a string in refund 1, and note is a number in refund 2:
+  values are never converted`. So must what a finished run gave (its outcome, its outputs) and
+  what an event carried;
+- nothing loosens: `note is sensitive in refund 1, and note isn't in refund 2: a migration never
+  loosens it`.
+
+**Running work finishes under what it started with.** A running payment keeps its entry and its
+key; if the target's step calls another contract, the migration waits for it: `pay#1 is running on
+payments.refund@2, and refund 2's pay calls orders.lookup@1: migrate after it finishes`. A running
+plan finishes on its plan: plans don't migrate. An open task stays open, answered as the target
+says.
+
+**What else follows the target:** an approval stays only if its step is the same, word for word;
+a timer keeps its due time if its rule waits on the same moment for the same age, is measured
+again from when it was set if the age changed (firing right away if that time has passed), and is
+cancelled, saying so, if its rule is gone; a pending edit follows its field's new name; an event
+sent under a name the target renamed is refused. Then the case decides as the target: a step it
+adds may start at once, as the fraud check does.
+
+**The engine version moves too, forward only.** The request carries the version the proposer's
+code was built with; a case refuses one it doesn't know, or one older than its own. A migration
+may move the engine alone, keeping the release: `migrated from refund 1, engine 1 to refund 1,
+engine 2`.
+
+**Preview first.** On Temporal, `preview_migrations` asks each case you give it what the migration
+would do, with no effect on any of them; then each case gets its own request:
+
+```python
+seen = await preview_migrations(client, RefundCases, ["refund-A-1001", "refund-A-1002"],
+                                refund_3, renames)
+for id, preview in seen.items():
+    if not preview.refused:
+        await propose_migration(case_handle(client, RefundCases, id), refund_3, renames,
+                                "pia", ["platform"])
+```
+
+Each case is in the answer, with the lines its history would gain or every problem refusing it; a
+case that isn't one, or was forgotten, is in it too, saying so. The cohort is the IDs you give:
+finding every open case of a release comes with the environment registry (layer 12e), since
+Temporal's test server can't list workflows. The case checks that the target's package gives its
+digest; that it is the store's release is your API's to vouch for, as it reads it from the store,
+until the registry lets the case check it itself.
+
+**Graduating a strict workflow.** A strict workflow is a case whose steps each require the one
+before and start by themselves (a `sequence`); loosening it is a release like any other, and open
+cases move to it by a migration, since a case has no position (brief, D2). Half-way through the
+payment, a refund can be moved to a release where support calls the customer at any time and the
+letter is drafted only if asked for.
+
 ## What the tool says
 
 Paths and names, never values: `behaviour changed at steps.settle.when`. The semantic diff (layer

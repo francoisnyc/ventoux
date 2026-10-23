@@ -41,13 +41,20 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.called import unbound
     from ventoux.case.closing import CloseRefused, needs_attention
     from ventoux.case.definition import CaseInvalid, parse_case
-    from ventoux.case.engine import KNOWN, opening_engine
+    from ventoux.case.engine import ENGINE, KNOWN, opening_engine
     from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.freshness import TimeRefused
+    from ventoux.case.migrations import migration_of
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
     from ventoux.case.releases import Hash, Record, is_release
     from ventoux.case.requests import ChangeRefused
-    from ventoux.case.runtime import CaseRefused, EventRefused, ShownRefused, decide
+    from ventoux.case.runtime import (
+        CaseRefused,
+        EventRefused,
+        ShownRefused,
+        decide,
+        preview_migration,
+    )
     from ventoux.case.state import (
         Answered,
         CancelWorkflow,
@@ -59,6 +66,7 @@ with workflow.unsafe.imports_passed_through():
         Event,
         Failed,
         ForgetApproved,
+        Migration,
         Opened,
         PlanCancelled,
         Proposed,
@@ -69,6 +77,7 @@ with workflow.unsafe.imports_passed_through():
         StartPlan,
         StartWorkflow,
         StopPlan,
+        UseRelease,
         WorkflowCancelled,
     )
     from ventoux.case.timers import next_due, set_timers, soonest
@@ -188,6 +197,53 @@ class CaseChange:
 
 
 @dataclass
+class CaseMigration:
+    """A migration, as a person proposes it to a case: the target release as its record gives it,
+    the names it maps, and the engine version it moves to; someone else approves it
+    (brief, D53)."""
+
+    name: str  # the package: `refund`
+    release: int  # its number
+    method: int  # the hash method of its digest
+    sha256: str  # its behaviour digest, which the case checks the package gives (brief, D51)
+    case: dict[str, Any]  # its case definition, as stored data
+    plans: dict[str, Any]  # its plans, as stored data, by reference
+    mapping: dict[str, dict[str, str]]  # each kind of name renamed, old to new
+    engine: int  # the engine version it moves to
+    by: str  # who proposes it, as the trusted caller states (brief, D19)
+    roles: list[str]  # their roles, stated with the proposal (brief, D22)
+
+    def migration(self) -> Migration:
+        return Migration(
+            self.name,
+            self.release,
+            self.method,
+            self.sha256,
+            self.case,
+            self.plans,
+            self.mapping,
+            self.engine,
+        )
+
+
+@dataclass
+class MigrationAsked:
+    """A migration to preview on a case at the reader's time, never recorded (brief, D53)."""
+
+    target: CaseMigration  # what it would move the case to; its `by` and `roles` aren't read
+    at: int  # the reader's time, in seconds since the epoch
+
+
+@dataclass
+class PreviewAnswer:
+    """What a migration would do to a case: every problem refusing it, or the lines its history
+    would gain."""
+
+    refused: list[str]
+    lines: list[str]
+
+
+@dataclass
 class CaseRequest:
     """A person's request to a case: propose a step, retry a failed run, or close it."""
 
@@ -271,6 +327,7 @@ class CaseWorkflow:
     def __init__(self) -> None:
         self.state = CaseState("")  # named when the case opens
         self.case: Any = None  # the case definition, once read
+        self.definition: dict[str, Any] = {}  # the same, as stored data
         # The plans its plan steps run: its release's, for a released case; the deployment's,
         # for a draft (brief, D51).
         self.its_plans: Mapping[str, Any] = self.plans
@@ -324,6 +381,14 @@ class CaseWorkflow:
         roles = frozenset(sent.roles)
         self.inbox.append(
             ChangeProposed(sent.kind, sent.target, sent.value, sent.by, roles, at=now())
+        )
+
+    @workflow.signal(name="migrate")
+    def migrate(self, sent: CaseMigration) -> None:
+        roles = frozenset(sent.roles)
+        migration = sent.migration()
+        self.inbox.append(
+            ChangeProposed("migrate", migration.label, migration, sent.by, roles, at=now())
         )
 
     @workflow.signal(name="shown")
@@ -410,6 +475,15 @@ class CaseWorkflow:
         except (SheetRefused, TimeRefused) as refused:
             return SheetAnswer(None, str(refused))
 
+    @workflow.query(name="migration_preview")
+    def migration_preview(self, asked: MigrationAsked) -> PreviewAnswer:
+        """What the migration would do to the case now, decided as its apply would be, on a copy
+        of its state: a query changes nothing, and isn't recorded (brief, D53)."""
+        seen = preview_migration(
+            self.case, self.catalog, self.state, asked.target.migration(), asked.at
+        )
+        return PreviewAnswer(list(seen.refused), list(seen.lines))
+
     async def run(self, start: CaseStart) -> CaseReport:
         return await self.drive(start)
 
@@ -421,6 +495,7 @@ class CaseWorkflow:
         self.state = CaseState(f"{info.workflow_id}/{info.first_execution_run_id}")
         try:
             case = self.case = parse_case(start.definition)
+            self.definition = start.definition  # as stored data, for the next run's start
             named = None if start.release is None else self.released_on(case, start.release)
             if start.carried is None:
                 opened = Opened(
@@ -451,7 +526,8 @@ class CaseWorkflow:
                 raise self.broken
             # Before an event stamped `t`, every timer due by `t` fires, each stamped with its own
             # due time; with nothing in the inbox, every timer due by now (brief, D44).
-            if self.fire_due(case, self.inbox[0].at if self.inbox else now()):
+            # The case's definition now: a migration may have moved it (brief, D53).
+            if self.fire_due(self.case, self.inbox[0].at if self.inbox else now()):
                 continue  # the case may have closed: the loop asks again
             if not self.inbox:
                 if self.time_to_switch():
@@ -460,7 +536,7 @@ class CaseWorkflow:
             event = self.inbox.pop(0)
             try:
                 names_its_entry(event, self.state)
-                self.decide(case, event)
+                self.decide(self.case, event)
             except (
                 AnswerRefused,
                 ProposalRefused,
@@ -540,8 +616,9 @@ class CaseWorkflow:
         switch is committed fails it, and this run decides that signal first: no answer is ever
         carried as a queue (brief, D27)."""
         assert not self.inbox and self.running == 0 and workflow.all_handlers_finished()
+        # The definition and release it runs now, which a migration may have moved (brief, D53).
         carried = CaseStart(
-            start.definition, {}, start.opened_by, state_as_data(self.state), start.release
+            self.definition, {}, start.opened_by, state_as_data(self.state), self.release
         )
         # Temporal: ends this run and starts the next one of the same workflow, with `carried`.
         workflow.continue_as_new(carried)
@@ -555,6 +632,9 @@ class CaseWorkflow:
 
     def carry(self, command: Command) -> None:
         """Start the command; what it gives comes back to the inbox when it arrives."""
+        if isinstance(command, UseRelease):
+            self.use_release(command.migration)
+            return
         if isinstance(command, StopPlan):
             self.beside(self.stop_plan(command))
             return
@@ -572,6 +652,17 @@ class CaseWorkflow:
             self.beside(self.until_back(self.run_workflow(command)))
         else:
             self.beside(self.until_back(self.run_activity(command)))
+
+    def use_release(self, migration: Migration) -> None:
+        """Decide from now on with the target's definition, run its plans, and carry both across
+        every continue-as-new, as the start a case opens with does. A plan already running keeps
+        the plan in its own start (brief, D28) (brief, D53)."""
+        self.definition = dict(migration.case)
+        self.case = parse_case(self.definition)
+        digest = Hash(migration.method, migration.sha256)
+        plans = dict(migration.plans)
+        self.release = ReleaseStart(migration.name, migration.release, digest, plans)
+        self.its_plans = plans
 
     def beside(self, work: Coroutine[Any, Any, None]) -> None:
         """Run `work` in a task beside the loop. An exception it raises is an engine bug: kept
@@ -951,6 +1042,78 @@ async def propose_change(
     (brief, D52)."""
     sealed = None if value is None else Sensitive(value)
     await case.signal(CaseWorkflow.change, CaseChange(kind, target, sealed, by, sorted(roles)))
+
+
+async def propose_migration(
+    case: WorkflowHandle[CaseWorkflow, CaseReport],
+    record: Record,
+    mapping: Mapping[str, Mapping[str, str]],
+    by: str,
+    roles: list[str],
+    engine: int = ENGINE,
+) -> None:
+    """Propose moving the case to the release `record` keeps, renaming names by `mapping`, as the
+    person `by`, who has `roles`; the case moves to engine version `engine`, by default this
+    code's. Someone else approves it by answering its entry (`case.change#1`). The caller vouches
+    that `record` is the release store's (brief, D19) (brief, D53)."""
+    await case.signal(CaseWorkflow.migrate, migration_sent(record, mapping, engine, by, roles))
+
+
+def migration_sent(
+    record: Record,
+    mapping: Mapping[str, Mapping[str, str]],
+    engine: int,
+    by: str,
+    roles: list[str],
+) -> CaseMigration:
+    """A migration to `record`, as it crosses to a case."""
+    target = migration_of(record, {kind: dict(names) for kind, names in mapping.items()}, engine)
+    return CaseMigration(
+        target.name,
+        target.release,
+        target.method,
+        target.sha256,
+        dict(target.case),
+        dict(target.plans),
+        {kind: dict(names) for kind, names in target.mapping.items()},
+        target.engine,
+        by,
+        sorted(roles),
+    )
+
+
+async def preview_migrations(
+    client: Client,
+    workflow: type[CaseWorkflow],
+    cases: list[str],
+    record: Record,
+    mapping: Mapping[str, Mapping[str, str]],
+    engine: int = ENGINE,
+    at: int | None = None,
+) -> dict[str, PreviewAnswer]:
+    """What moving each case in `cases`, by ID, to `record` would do, at `at` (the API's own clock
+    by default): each case in the answer, in order, with what it would get or why not, a case
+    that can't be read included, never skipped (brief, D53). The cohort is the IDs given: finding
+    the open cases of a release comes with 12e's registry."""
+    if at is None:
+        at = int(datetime.now(UTC).timestamp())  # whole seconds, rounded down
+    asked = MigrationAsked(migration_sent(record, mapping, engine, "", []), at)
+    seen: dict[str, PreviewAnswer] = {}
+    for id in cases:
+        try:
+            seen[id] = await case_handle(client, workflow, id).query(
+                CaseWorkflow.migration_preview, asked
+            )
+        except RPCError as error:
+            if error.status != RPCStatusCode.NOT_FOUND:
+                raise
+            seen[id] = PreviewAnswer([f"{id} is not a case: no workflow has its ID"], [])
+        except WorkflowQueryFailedError as failed:
+            # The worker replays the case to answer, and its key provider refuses a destroyed key.
+            if FORGOTTEN not in str(failed):
+                raise
+            seen[id] = PreviewAnswer([f"{id} was forgotten: its case file can't be read"], [])
+    return seen
 
 
 async def shown(

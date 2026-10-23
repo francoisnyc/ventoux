@@ -6,6 +6,7 @@ written as the exact-number converter can carry it: sources, sets in the state, 
 lists, and are read back as sets.
 """
 
+import dataclasses
 from decimal import Decimal
 from typing import Any
 
@@ -14,6 +15,7 @@ from ventoux.case.state import (
     CaseState,
     ChangeRequest,
     GivenApproval,
+    Migration,
     Moment,
     Obtained,
     OpenApproval,
@@ -119,7 +121,12 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
                 "target": request.target,
                 "by": request.by,
                 "role": request.role,
-                "value": request.value,
+                # A migration's target crosses as data, read back as a `Migration` (brief, D53).
+                "value": (
+                    dataclasses.asdict(request.value)
+                    if isinstance(request.value, Migration)
+                    else request.value
+                ),
                 "against": request.against,
             }
             for entry, request in state.changes.items()
@@ -266,12 +273,31 @@ def state_from_data(data: dict[str, Any]) -> CaseState:
                 request["target"],
                 request["by"],
                 request["role"],
-                request["value"],
+                (
+                    migration_from_data(request["value"])
+                    if request["kind"] == "migrate"
+                    else request["value"]
+                ),
                 request["against"],
             )
             for entry, request in data.get("changes", {}).items()
         },
         requested=whole(data.get("requested", 0)),
+    )
+
+
+def migration_from_data(data: dict[str, Any]) -> Migration:
+    """A migration `dataclasses.asdict` wrote, its numbers read back as the whole numbers they
+    were written as."""
+    return Migration(
+        data["name"],
+        whole(data["release"]),
+        whole(data["method"]),
+        data["sha256"],
+        dict(data["case"]),
+        dict(data["plans"]),
+        {kind: dict(names) for kind, names in data["mapping"].items()},
+        whole(data["engine"]),
     )
 
 

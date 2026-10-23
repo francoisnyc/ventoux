@@ -29,7 +29,7 @@ from test_set import FILE, with_owed
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered
+from ventoux.case.state import Answered, Schedule
 from ventoux.core.validate import Issue
 from ventoux.testing import (
     CATALOG,
@@ -184,7 +184,8 @@ def test_one_person_one_answer_on_an_entry() -> None:
     lee = Answered("pay.approval#1", "approve", "lee", frozenset(PEOPLE["lee"]), at=START)
     after, commands = decide(case, CATALOG, half.state, lee)
     assert after.history[-2] == "lee answered pay.approval#1 approve as support-lead: 2 of 2 given"
-    assert [command.entry for command in commands] == ["pay#1"]
+    [paying] = commands
+    assert isinstance(paying, Schedule) and paying.entry == "pay#1"
     three = run_case(
         four_eyes(count=3), file=LARGE, answers=[REVIEWED, ("pay", "approve", "sam")], people=PEOPLE
     )
