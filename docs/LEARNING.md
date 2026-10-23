@@ -706,6 +706,24 @@ and record the key points. A question is closed once you can explain the answer 
     not the binding. A binding changes when operations move it, with no version and no release.
   In one line: the catalog lists contracts; a contract is what one entry promises; a binding is
   where it runs here.
+- Retrieval (layer 12e warm-up, 2026-10-23), with 12e's twist (activation checks a contract's
+  task queue, the hash a worker serves, and whether anyone polls now: which word does each read,
+  and which is none of them?). Answer: "catalog of steps and contracts, bindings to queues."
+  Discussion: the binding came back right and short (where it runs: a task queue). Two parts
+  didn't, and the twist wasn't answered.
+  - **Catalog: contracts, not steps,** for the fourth time. A step is in a case definition and
+    *references* a contract (`pay` calls `payments.refund@3`); the catalog lists the contracts
+    (and the roles, labels and systems the platform team registers). It changes when a contract
+    is added or retired.
+  - **Contract:** not said. What one entry promises: schemas, risk, effect, retries and
+    timeouts, idempotency, outcomes, output sources. It never changes: a change is a new `@N`,
+    which is why its hash can be checked at all.
+  - **The twist:** the task queue is the **binding**'s; the hash is the **contract**'s (the
+    record's hash against the one the worker's own catalog gives); "polling now" is none of the
+    three: it is the environment's live state, what Temporal's pollers and the registry's
+    manifests say. That is exactly what 12e adds to the card: a catalog and bindings are code a
+    worker holds, and only a running environment can say whether that code is serving.
+  - The examples and the "changes when…" column didn't come back, again.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
 
 ## 29. Layer 1: why `@1` and not `@1.0`

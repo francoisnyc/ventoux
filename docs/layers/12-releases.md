@@ -1382,7 +1382,7 @@ or, where the code was written with the seam, the rule was taken out and its tes
 ## 12e. Activation
 
 Status: drafted 2026-10-23, from `main` at `2fde255` (12d merged, #45). Choices 60 to 80 put, each
-with a recommendation; not answered yet. The warm-up (learning question 28) put. Nothing built:
+with a recommendation; not answered yet. The warm-up (learning question 28) put and answered, left open (recorded in the log). Nothing built:
 the histories from before 12e are recorded and replayed first, as slice 0, once the choices are
 answered.
 
