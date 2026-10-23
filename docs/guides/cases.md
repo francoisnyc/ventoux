@@ -1809,7 +1809,9 @@ opened by system:opener, with amount and order_id
   case to a later release is a migration (layer 12d).
 - **It checks what it was given.** The case recomputes the release's digest from what it was
   started with, and refuses to open if they differ (`refund-A-1002 can't open on refund 1: what it
-  was given isn't refund 1's package`).
+  was given isn't refund 1's package`). Each time it continues as new it checks again; there, a
+  start that no longer checks out means the code changed, so the case waits for code that reads
+  it, never fails for good.
 - **It says which engine decides it.** Ventoux's own code has a version too: when a later version
   decides some path differently, a case keeps deciding as the version it opened under, so its
   history replays. A worker older than a case's version doesn't guess: the case waits until a

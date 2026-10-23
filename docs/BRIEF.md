@@ -1902,6 +1902,18 @@ D27, D28 and D50, whose text is kept.*
   behaviour and other wording than that release's latest is refused: rewording an older release
   would reach its open cases, and the usual way there is a behaviour reverted with the newer
   release's titles kept. Refusing keeps open a later, explicit opt-in.
+- **A run that continued as new and can't read its start waits for code.** Its start was read and
+  checked when the case opened, so a definition that no longer reads, or a release that no longer
+  gives its digest, on a later run means the code changed: the workflow task fails, and the case
+  waits until code that reads it is deployed (D17), as for an engine version the code doesn't
+  know, never failed for good. At the opening, refusing stays. And method 1 is pinned: its digest
+  of packages that between them write every field of the format is kept in the tests, so a change
+  to the models that would change it fails before any open case meets it; a new method is a
+  decision of its own. *Added in the tutor review of 12b, before D51 was merged.*
+- **A plan's own sheets read the plan as its run started.** A plan step's child carries its plan
+  in its start (D28), so its approval sheet shows the wording the plan had then; a wording revision
+  of the release's plans doesn't reach a running plan, a known limit. *Added in the tutor review of
+  12b, before D51 was merged.*
 
 ### Simplifications adopted
 

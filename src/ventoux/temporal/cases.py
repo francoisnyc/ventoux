@@ -231,6 +231,8 @@ class SheetAnswer:
 
     sheet: ApprovalSheet | None
     refused: str = ""  # why not, naming the entry, never a value
+    # Why the wording it was asked in was refused, naming the wording; then `refused` is empty.
+    wording_refused: str = ""
 
 
 class CaseWorkflow:
@@ -380,7 +382,9 @@ class CaseWorkflow:
                 case, self.state, asked.entry, asked.roles, asked.at, self.catalog.roles
             )
             return SheetAnswer(sheet)
-        except (SheetRefused, TimeRefused, WordingRefused) as refused:
+        except WordingRefused as refused:
+            return SheetAnswer(None, wording_refused=str(refused))
+        except (SheetRefused, TimeRefused) as refused:
             return SheetAnswer(None, str(refused))
 
     async def run(self, start: CaseStart) -> CaseReport:
@@ -1022,7 +1026,7 @@ async def approval_sheet(
             raise CaseForgotten(f"{case.id} was forgotten: its case file can't be read") from None
         raise
     if answered.sheet is None:
-        if answered.refused.startswith(f"{wording} isn't a wording"):
-            raise WordingRefused(answered.refused)
+        if answered.wording_refused:
+            raise WordingRefused(answered.wording_refused)
         raise SheetRefused(answered.refused)
     return answered.sheet

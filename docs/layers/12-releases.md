@@ -672,11 +672,47 @@ Each starts with its negative test, seen failing for the right reason.
   of `switch`; the draft checks skipped (a wording, an answer); the wording left off a line; an
   older record not recomputed; a stray file in the releases folder skipped; a revert reworded.
 
+### From the tutor review
+
+Built test-first, 2026-10-23.
+
+- **A continued run that can't read its start waits for code** (the request, first part). Every
+  run of a released case checks its digest again; on a run that continued as new, a release that
+  no longer gives it, from a change to the models method 1 reads, failed the case for good
+  (`CaseRefused`, non-retryable), its decisions already made. Now that raises `StartUnread`: the
+  workflow task fails, and Temporal retries it until code that reads the start is deployed, as
+  for an unknown engine version (D17). At the opening, refusing stays. **`CaseInvalid` on a
+  continued run gets the same treatment, here:** a definition that read when the case opened and
+  doesn't now is the same kind of thing, a change of code, and it was on `main` already. Tested
+  the tutor's way: workers taken in turn, the second giving another digest; the case stays
+  running with a failed workflow task, and the third, giving the digest again, lets it go on. The
+  test's workers cache no workflow: a cached run's tasks go to its stopped worker's own queue for
+  a while, which made the next worker wait.
+- **Method 1 pinned** (the request, second part): `tests/digests/method-1.json` keeps method 1's
+  digest of every example definition, the example package, and `tests/digests/every-shape`, a
+  package written to use what the examples don't (workflow and wait steps, every operator, list
+  and outcome fields, sensitive and `visible_to` fields, `forgetting`, `max_age`, a plan with a
+  timed wait and approval). It passes validation, so the release tool would release it. One test
+  fails if any digest changes, saying a new method is a decision of its own; another fails unless
+  every field of every model a case or plan can hold is written, other than at its default, in
+  some pinned package, so a model added later must be pinned too. The example package's pin is
+  the guide's `89420f53b3d3`.
+- **A wording refusal is a field of the sheet's answer** (optional point): `SheetAnswer` gains
+  `wording_refused`, as `ViewAnswer` answers a refusal on its own; the client no longer reads the
+  start of a message.
+- **A plan's own sheet reads the plan as its run started** (optional point): said in D51 and the
+  releases guide, a known limit.
+- **D51 gains two bullets,** marked as added in the tutor review, before it is merged.
+- **Each new test was seen failing on a deliberate break:** the old refusal kept on continued runs
+  (both continued-run tests), a key added to the canonical behaviour (the pinned digests), the
+  every-shape package left out (the shapes), the sheet's field ignored by the client.
+
 ### Promises
 
 `C` is `tests/test_temporal_case_release.py`, `E` is `tests/test_engine.py` (new), `R` is
-`tests/test_releases.py`. Checked against the tests, 2026-10-22: every test named here exists, and
-every test `C` and `E` hold, and every test 12b added to `R`, is named here.
+`tests/test_releases.py`, `D` is `tests/test_digests.py` (new, from the tutor review). Checked
+against the tests, 2026-10-23: every test named here exists, and every test `C`, `E` and `D` hold,
+and every test 12b added to `R`, is named here.
 
 | Promise | Test |
 |---|---|
@@ -696,4 +732,6 @@ every test `C` and `E` hold, and every test 12b added to `R`, is named here.
 | A wording of another release, one claiming the release with another digest, or any wording for a draft, is refused | C `test_wording_of_another_release_is_refused` |
 | An answer's line says which wording its person read; a draft refuses an answer naming one | C `test_an_answer_says_which_wording_it_saw` |
 | The cases guide's release example is what the engine records | C `test_the_guides_release_example_runs_as_written` |
+| On a run that continued as new, a release that no longer gives its digest, or a definition that no longer reads, fails the workflow task and the case waits, running; code that reads it again lets it go on; at the opening, refusing stays | C `test_a_continued_run_whose_digest_changed_waits_for_its_code`, `test_a_continued_run_whose_definition_no_longer_reads_waits_for_its_code`, `test_a_start_that_isnt_its_release_is_refused` |
+| Method 1 gives the digests it pinned, for packages that between them write every field of the format | D `test_method_1_gives_the_digests_it_pinned`, `test_the_pinned_packages_use_every_shape` |
 | `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |

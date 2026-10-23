@@ -137,6 +137,15 @@ a query. A revision is used only if it is of the case's own release, with that r
 any other is refused. An answer can say which wording its person read (`wording=2`), and its
 history line says so: `… as worded in refund 1, wording 2`.
 
+A plan step's own approval, asked inside the plan's child workflow, shows the plan as its run
+started: a new wording of the release's plans reaches the next run of the plan, never one already
+running.
+
+**Method 1 is pinned.** Every open case recomputes its release's digest each time it continues as
+new, so method 1 must give the same digest for ever. Ventoux's tests pin it for packages that
+between them use every shape of the format; a change to the engine that would change a digest
+fails there first. A new method would be method 2, recorded as a decision of its own.
+
 ## What the tool says
 
 Paths and names, never values: `behaviour changed at steps.settle.when`. The semantic diff (layer
