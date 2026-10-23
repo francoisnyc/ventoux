@@ -738,8 +738,9 @@ and every test 12b added to `R`, is named here.
 
 ## 12c. Change requests
 
-Status: drafted 2026-10-23, from `main` at `5801ca0` (12b merged, #43), awaiting answers by number;
-the warm-up put. Nothing is decided or built until you answer.
+Status: drafted 2026-10-23, from `main` at `5801ca0` (12b merged, #43); the histories from
+before 12c recorded and replayed first (slice 0). Answered "all as recommended" the same day:
+choices 29 to 41. The warm-up (learning question 37's follow-up) put and not answered, left open.
 
 User-facing description, written first once you agree: `docs/guides/cases.md`, "Changing an open
 case". Decision: brief D52, drafted with it.
