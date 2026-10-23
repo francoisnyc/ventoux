@@ -57,6 +57,7 @@ from ventoux.case.definition import (
 from ventoux.case.engine import known
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
+from ventoux.case.migrations import Moved
 from ventoux.case.requests import answer_change, propose_change
 from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
 from ventoux.case.sequence import requirements
@@ -87,6 +88,7 @@ from ventoux.case.state import (
     StartWorkflow,
     StepRun,
     TimerDue,
+    UseRelease,
     WorkflowCancelled,
 )
 from ventoux.case.stopping import stop_children
@@ -173,7 +175,11 @@ def decide(
     elif isinstance(event, Answered):
         if state.phase != "open":
             raise AnswerRefused(f"the case is {state.phase}: nothing waits for an answer")
-        answer(case, catalog, state, event)
+        if (moved := answer(case, catalog, state, event)) is not None:
+            # A migration applied: the rest of this decision, and every one after, is the
+            # target's, and the driver is told to use it from now on (brief, D53).
+            case = moved.case
+            commands.append(UseRelease(moved.migration))
     elif isinstance(event, Proposed):
         propose(case, catalog, state, event, commands)
     elif isinstance(event, Failed):
@@ -454,14 +460,16 @@ def marked(case: CaseDefinition, name: str, origin: str) -> frozenset[str]:
     return frozenset({origin} | ({declared} if declared else set()))
 
 
-def answer(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Answered) -> None:
-    """Record a person's answer, once judged (brief, D23); or `AnswerRefused`."""
+def answer(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, event: Answered
+) -> Moved | None:
+    """Record a person's answer, once judged (brief, D23); or `AnswerRefused`. An approved
+    migration gives the release the case moved to (brief, D53)."""
     # Who answered is written one way, before anything is checked against it (brief, D22).
     if (wrong := identifier_problem(event.by)) is not None:
         raise AnswerRefused(wrong)
     if (request := state.changes.get(event.entry)) is not None:
-        answer_change(case, catalog, state, request, event, as_worded(state, event))
-        return
+        return answer_change(case, catalog, state, request, event, as_worded(state, event))
     found = open_entry(state, event.entry)
     if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
         # Only its event ends it, sent by its sender: nobody answers it (brief, D41).
@@ -470,6 +478,7 @@ def answer(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Answ
         answer_task(case, catalog, state, found, event)
     else:
         answer_approval(case, catalog, state, found, event)
+    return None
 
 
 def open_entry(state: CaseState, entry: str) -> StepRun | OpenApproval:

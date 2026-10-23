@@ -130,7 +130,8 @@ def test_what_a_request_doesnt_know_is_refused() -> None:
     # Fail closed: a kind, an outcome or a role the engine doesn't know is refused, never read as
     # one it does; a refused proposal leaves nothing pending.
     with pytest.raises(
-        ChangeRefused, match="^rename is not a kind of change: a change is an edit or a skip$"
+        ChangeRefused,
+        match="^rename is not a kind of change: a change is an edit, a skip or a migration$",
     ):
         run_case(
             REFUND,

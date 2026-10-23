@@ -1986,6 +1986,57 @@ D17, D25, D26 and D32, whose text is kept.*
   whatever the case's version, or anyone's if that can't be told, rather than wait for a case
   that refuses. Edits and skips are new events on new paths, and need no version of their own.
 
+### D53. Migrations: one more change request, by names, refused never terminated, previewed
+
+*Drafted 2026-10-23, in layer 12d (`docs/layers/12-releases.md`, choices 42 to 59). Adds to D2,
+D5, D44, D51 and D52, whose text is kept.*
+
+- **A migration moves an open case to another release, as a change request** (D52): proposed and
+  approved by roles registered to migrate (`migrates=True`), never by its proposer nor the case's
+  opener, checked again when applied, against the case as it is then, and cancelled if the case
+  closes first. Its request carries the target as its record gives it (its name, number, digest,
+  case and plans), a mapping of names, and the engine version to move to.
+- **The case checks that the target's package gives its digest,** as at its opening (D51), and
+  that it is the same package, that the worker's catalog has every contract it calls, and that it
+  moves the release or the engine. That the digest is the store's release is not the case's to
+  check: a request comes through the trusted API, built from the release store (D19), and 12e's
+  environment registry is where the case can check the release itself.
+- **Names, never positions** (D2, D5). The mapping renames steps, milestones, fields, rules and
+  events, old to new; a name it doesn't rename keeps its name; timers follow their rule and the
+  moment they were set on. It is data: nothing in it is evaluated.
+- **Refused, never terminated.** Anything the case holds under a name the target lacks, unmapped,
+  refuses the migration, each problem said at once with what to map or wait for: a run of a step
+  in any status, a reached milestone, a value in the case file, a rule's failed firing or pending
+  start, an event's open wait or carried values. What a finished run or an arrival recorded must
+  be what the target can hold: a done run's outcome one its step declares, its outputs its
+  contract's, an event's payload its event's, each of the same type. Values are never converted,
+  and nothing loosens: a field never loses `sensitive`, widens `visible_to` or changes type.
+- **Running work finishes under what it started with.** A running or failed run keeps its entry
+  and its key; its step in the target calls the same contract (or plan), or the migration waits
+  for it. Open tasks and waits stay, under the target's rules. A running plan finishes on the plan
+  in its start (D28): plans don't migrate.
+- **What changed doesn't keep what approved it.** An open, given or spent approval stays only if
+  its step is the same behaviour in the target, word for word; otherwise it is withdrawn or
+  lapses, every approval on its entry at once (D47), and is asked again.
+- **Timers** (D44): kept if their rule, moment and age are; measured again from when they were set
+  if the age changed, firing right after the migration if that time has passed; cancelled, said,
+  if the rule is gone or waits on another moment. Nothing fires in the past.
+- **Pending requests and events:** a pending edit follows the field mapping; a migration proposed
+  against the old release isn't applied; an event is decided under the release current when its
+  turn comes.
+- **After it, the case decides again as the target;** a migration isn't a moment for rules (D38).
+  Values keep their sources, never re-stamped; a mark the target declares is added (D12, D43).
+- **The engine version moves forward only, as data in the request,** sent by the proposer's
+  client; a version the code doesn't know, or one older than the case's, is refused. A migration
+  may move the engine alone.
+- **The preview is the apply without effect,** the same pure check on a copy of the case's state,
+  a query on Temporal. A cohort is the case IDs it is given, each case in the result; finding the
+  open cases of a release comes with 12e's registry (Temporal's time-skipping test server doesn't
+  list workflows). Each case gets its own request.
+- **The history says each step,** naming people, roles, releases, engine versions, names and
+  entries, never a value.
+- **A case that closes without reaching its `closes_when`** says which milestones it didn't reach.
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step

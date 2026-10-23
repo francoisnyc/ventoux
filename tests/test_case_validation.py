@@ -913,7 +913,7 @@ def test_a_plan_step_gives_the_fields_its_plan_takes_at_its_start() -> None:
 
 # --- 10b, slice 3: roles, labels and systems nobody registered ---
 
-ROLES = "adjuster, claims-sensitive, fraud, operations, privacy, support, support-lead"
+ROLES = "adjuster, claims-sensitive, fraud, operations, platform, privacy, support, support-lead"
 
 
 def unknown_role(path: str, role: str) -> Issue:

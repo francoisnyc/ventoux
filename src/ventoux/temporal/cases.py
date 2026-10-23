@@ -59,6 +59,7 @@ with workflow.unsafe.imports_passed_through():
         Event,
         Failed,
         ForgetApproved,
+        Migration,
         Opened,
         PlanCancelled,
         Proposed,
@@ -69,6 +70,7 @@ with workflow.unsafe.imports_passed_through():
         StartPlan,
         StartWorkflow,
         StopPlan,
+        UseRelease,
         WorkflowCancelled,
     )
     from ventoux.case.timers import next_due, set_timers, soonest
@@ -271,6 +273,7 @@ class CaseWorkflow:
     def __init__(self) -> None:
         self.state = CaseState("")  # named when the case opens
         self.case: Any = None  # the case definition, once read
+        self.definition: dict[str, Any] = {}  # the same, as stored data
         # The plans its plan steps run: its release's, for a released case; the deployment's,
         # for a draft (brief, D51).
         self.its_plans: Mapping[str, Any] = self.plans
@@ -421,6 +424,7 @@ class CaseWorkflow:
         self.state = CaseState(f"{info.workflow_id}/{info.first_execution_run_id}")
         try:
             case = self.case = parse_case(start.definition)
+            self.definition = start.definition  # as stored data, for the next run's start
             named = None if start.release is None else self.released_on(case, start.release)
             if start.carried is None:
                 opened = Opened(
@@ -451,7 +455,8 @@ class CaseWorkflow:
                 raise self.broken
             # Before an event stamped `t`, every timer due by `t` fires, each stamped with its own
             # due time; with nothing in the inbox, every timer due by now (brief, D44).
-            if self.fire_due(case, self.inbox[0].at if self.inbox else now()):
+            # The case's definition now: a migration may have moved it (brief, D53).
+            if self.fire_due(self.case, self.inbox[0].at if self.inbox else now()):
                 continue  # the case may have closed: the loop asks again
             if not self.inbox:
                 if self.time_to_switch():
@@ -460,7 +465,7 @@ class CaseWorkflow:
             event = self.inbox.pop(0)
             try:
                 names_its_entry(event, self.state)
-                self.decide(case, event)
+                self.decide(self.case, event)
             except (
                 AnswerRefused,
                 ProposalRefused,
@@ -540,8 +545,9 @@ class CaseWorkflow:
         switch is committed fails it, and this run decides that signal first: no answer is ever
         carried as a queue (brief, D27)."""
         assert not self.inbox and self.running == 0 and workflow.all_handlers_finished()
+        # The definition and release it runs now, which a migration may have moved (brief, D53).
         carried = CaseStart(
-            start.definition, {}, start.opened_by, state_as_data(self.state), start.release
+            self.definition, {}, start.opened_by, state_as_data(self.state), self.release
         )
         # Temporal: ends this run and starts the next one of the same workflow, with `carried`.
         workflow.continue_as_new(carried)
@@ -555,6 +561,9 @@ class CaseWorkflow:
 
     def carry(self, command: Command) -> None:
         """Start the command; what it gives comes back to the inbox when it arrives."""
+        if isinstance(command, UseRelease):
+            self.use_release(command.migration)
+            return
         if isinstance(command, StopPlan):
             self.beside(self.stop_plan(command))
             return
@@ -572,6 +581,17 @@ class CaseWorkflow:
             self.beside(self.until_back(self.run_workflow(command)))
         else:
             self.beside(self.until_back(self.run_activity(command)))
+
+    def use_release(self, migration: Migration) -> None:
+        """Decide from now on with the target's definition, run its plans, and carry both across
+        every continue-as-new, as the start a case opens with does. A plan already running keeps
+        the plan in its own start (brief, D28) (brief, D53)."""
+        self.definition = dict(migration.case)
+        self.case = parse_case(self.definition)
+        digest = Hash(migration.method, migration.sha256)
+        plans = dict(migration.plans)
+        self.release = ReleaseStart(migration.name, migration.release, digest, plans)
+        self.its_plans = plans
 
     def beside(self, work: Coroutine[Any, Any, None]) -> None:
         """Run `work` in a task beside the loop. An exception it raises is an engine bug: kept

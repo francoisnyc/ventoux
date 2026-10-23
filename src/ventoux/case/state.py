@@ -147,21 +147,45 @@ class OpenApproval:
     approved: dict[str, str] = field(default_factory=dict[str, str])
 
 
+@dataclass(frozen=True)
+class Migration:
+    """What a migration moves a case to: a release, as its record gives it, the names it maps,
+    and the engine version it moves to (brief, D53)."""
+
+    name: str  # the package: `refund`
+    release: int  # its number
+    method: int  # the hash method that made its digest (brief, D50)
+    sha256: str  # its behaviour digest, which the case checks the package gives (brief, D51)
+    case: Mapping[str, object]  # its case definition, as stored data
+    plans: Mapping[str, object]  # its plans, as stored data, by reference (`refund-order@1`)
+    # Each kind of name renamed, old to new: `{"fields": {"approved_amount": "amount_approved"}}`;
+    # a name it doesn't say keeps its name (brief, D53).
+    mapping: Mapping[str, Mapping[str, str]]
+    engine: int  # the engine version it moves the case to, never back (brief, D51)
+
+    @property
+    def label(self) -> str:
+        """The release as people name it: `refund 2`."""
+        return f"{self.name} {self.release}"
+
+
 @dataclass
 class ChangeRequest:
     """A change to the case a person proposed, waiting for someone else to approve it:
     `case.change#1` (brief, D52)."""
 
     entry: str  # `case.change#1`, numbered by the case
-    kind: Literal["edit", "skip"]  # edit: a field's value; skip: a failed step run
-    target: str  # the field it edits, or the run it skips, such as `pay#1`
+    # edit: a field's value; skip: a failed step run; migrate: the case's release (brief, D53).
+    kind: Literal["edit", "skip", "migrate"]
+    target: str  # the field it edits, the run it skips (`pay#1`), or the release (`refund 2`)
     by: str  # who proposed it
     role: str  # the role that let them
     # An edit's new value, as the case file would keep it: sealed for a sensitive field
-    # (brief, D31). None for a skip.
+    # (brief, D31). A migration's `Migration`. None for a skip.
     value: object = None
-    # An edit's digest of the field's value when it was proposed, never the value itself: it is
-    # applied only if the field still holds that value (brief, D52). Empty for a skip.
+    # What it was proposed against, applied only if the case still is: an edit's digest of the
+    # field's value, never the value (brief, D52); a migration's release and engine, `refund 1,
+    # engine 2` (brief, D53). Empty for a skip.
     against: str | Sensitive = ""
 
 
@@ -487,4 +511,13 @@ class CancelWorkflow:
     reason: str  # why, naming only the entry that asked: `stopped by withdraw#1`
 
 
-type Command = Schedule | StartWorkflow | StartPlan | StopPlan | CancelWorkflow
+@dataclass(frozen=True)
+class UseRelease:
+    """The case moved to another release: from now on its driver decides with the target's
+    definition and runs the target's plans, and carries them across continue-as-new. A running
+    plan finishes on the plan in its start (brief, D28) (brief, D53)."""
+
+    migration: Migration
+
+
+type Command = Schedule | StartWorkflow | StartPlan | StopPlan | CancelWorkflow | UseRelease
