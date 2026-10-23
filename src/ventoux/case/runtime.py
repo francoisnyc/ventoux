@@ -8,6 +8,7 @@ See docs/layers/08-case.md.
 
 import copy
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import ValidationError
@@ -58,7 +59,7 @@ from ventoux.case.definition import (
 from ventoux.case.engine import known
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
-from ventoux.case.migrations import Moved
+from ventoux.case.migrations import Moved, apply, problems_of, released
 from ventoux.case.requests import answer_change, propose_change
 from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
 from ventoux.case.sequence import requirements
@@ -74,6 +75,7 @@ from ventoux.case.state import (
     Failed,
     ForgetApproved,
     GivenApproval,
+    Migration,
     Moment,
     Obtained,
     OpenApproval,
@@ -208,15 +210,29 @@ def decide(
         begin_closing(state, why, f"{event.reason}, by {event.by}")
     else:
         complete(case, catalog, state, event)
+    decide_again(case, catalog, state, commands, event.at, was_open)
+    return state, commands
+
+
+def decide_again(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    commands: list[Command],
+    at: int,
+    was_open: bool,
+) -> None:
+    """What the case decides once an event has landed, at `at`: whether it closes, what may start
+    now, what the rules say, which timers end, and whether it is done."""
     close_when_reached(case, state)
     if state.phase == "open":
-        admit(case, catalog, state, commands, event.at)  # nothing new starts once closing
+        admit(case, catalog, state, commands, at)  # nothing new starts once closing
         close_when_reached(case, state)  # a rule may have reached the last of closes_when
     if was_open and state.phase == "closing":
         stop_children(case, catalog, state, commands)
     # Moments left because the case is no longer open: each rule on them says it wasn't applied
     # (brief, D38).
-    fire_rules(case, catalog, state, commands, event.at)
+    fire_rules(case, catalog, state, commands, at)
     left_unstarted(case, state)  # none is taken up once the case no longer decides (brief, D38)
     state.started_by_rules.clear()
     # A timer ends with its purpose: its run ended, or nothing new is decided while the close is
@@ -225,7 +241,33 @@ def decide(
     if state.timers and (held := nothing_decided(case, state)) is not None:
         cancel_timers(state, held)
     settle(case, catalog, state)
-    return state, commands
+
+
+@dataclass(frozen=True)
+class MigrationPreview:
+    """What a migration would do to a case now: every problem refusing it, or the lines its
+    history would gain. Never both (brief, D53)."""
+
+    refused: tuple[str, ...] = ()
+    lines: tuple[str, ...] = ()
+
+
+def preview_migration(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, migration: Migration, at: int
+) -> MigrationPreview:
+    """What applying `migration` at `at` would do to the case, decided as the apply decides it,
+    on a copy of its state: the approver reads it before approving, and the case is unchanged.
+    The apply checks again, depending on nothing this said (brief, D34) (brief, D53)."""
+    state = copy.deepcopy(state)  # the state passed in is never changed
+    if problems := problems_of(case, catalog, state, migration):
+        return MigrationPreview(refused=tuple(problems))
+    seen = len(state.history)
+    state.history.append(
+        f"from {released(case, state)} to {migration.label}, engine {migration.engine}"
+    )
+    target = apply(case, catalog, state, migration, at)
+    decide_again(target, catalog, state, [], at, was_open=True)  # its commands are never carried
+    return MigrationPreview(lines=tuple(state.history[seen:]))
 
 
 def receive(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Sent) -> None:

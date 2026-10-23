@@ -18,8 +18,13 @@ from test_case import REFUND
 from test_fresh_facts import refund_fresh
 from test_fresh_facts import run_case as run_fresh
 
+from ventoux.case.definition import parse_case
+from ventoux.case.migrations import migration_of
 from ventoux.case.releases import Written
+from ventoux.case.runtime import preview_migration
 from ventoux.testing import (
+    CATALOG,
+    START,
     AnswerRefused,
     ChangeRefused,
     EventRefused,
@@ -997,4 +1002,39 @@ def test_values_keep_their_sources() -> None:
     )
     assert unmarked.state.sources["approved_amount"] == frozenset(
         {"person:ana", "untrusted:customer"}
+    )
+
+
+# --- Slice 6: the preview ---
+
+
+def test_the_preview_is_the_apply_without_effect() -> None:
+    # What the approver reads before approving: the same check and the same decision as the
+    # apply, on a copy of the case; the case itself is as it was (brief, D34) (brief, D53).
+    reviewed = on_refund_1([REVIEWED])
+    before = copy.deepcopy(reviewed.state)
+    seen = preview_migration(
+        parse_case(REFUND), CATALOG, reviewed.state, migration_of(REFUND_3, RENAMES, 2), START
+    )
+    assert seen.refused == ()
+    applied = on_refund_1(
+        [REVIEWED, migrate(REFUND_3, RENAMES, "pia"), ("case.change#1", "approve", "lee")]
+    )
+    start = applied.history.index(
+        "applied case.change#1: migrated from refund 1, engine 2 to refund 3, engine 2, "
+        "proposed by pia, approved by lee"
+    )
+    assert seen.lines == (
+        "from refund 1, engine 2 to refund 3, engine 2",
+        *applied.history[start + 1 :],
+    )
+    assert reviewed.state == before
+    # A refusal is previewed too, every problem at once.
+    unmapped = preview_migration(
+        parse_case(REFUND), CATALOG, reviewed.state, migration_of(REFUND_3, {}, 2), START
+    )
+    assert unmapped.lines == ()
+    assert unmapped.refused == (
+        "approved_amount holds a value, and refund 3 has no field approved_amount: map it",
+        "pay.approval#1 is open, and refund 3 has no step pay: map it",
     )
