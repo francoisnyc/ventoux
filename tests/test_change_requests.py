@@ -16,7 +16,7 @@ from test_sensitive import FILE, NATIONAL_ID, claim
 
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
-from ventoux.case.state import ChangeProposed
+from ventoux.case.state import ChangeProposed, StepRun
 from ventoux.core.sensitive import Sensitive
 from ventoux.testing import (
     CATALOG,
@@ -28,6 +28,7 @@ from ventoux.testing import (
     propose,
     retry,
     run_case,
+    skip,
 )
 
 ROOT = Path(__file__).parent.parent
@@ -121,7 +122,9 @@ def test_a_rejected_change_changes_nothing() -> None:
 def test_what_a_request_doesnt_know_is_refused() -> None:
     # Fail closed: a kind, an outcome or a role the engine doesn't know is refused, never read as
     # one it does; a refused proposal leaves nothing pending.
-    with pytest.raises(ChangeRefused, match="^rename is not a kind of change: a change is an edit"):
+    with pytest.raises(
+        ChangeRefused, match="^rename is not a kind of change: a change is an edit or a skip$"
+    ):
         run_case(
             REFUND,
             file=LARGE,
@@ -421,3 +424,257 @@ def test_an_edit_excludes_the_values_writer() -> None:
             ],
             people=PEOPLE,
         )
+
+
+# --- Slice 3: skips ---
+
+SMALL = {"order_id": "ord-1", "amount": 40}
+SMALL_REVIEW = ("review", "approve", "ana", {"approved_amount": 40})
+# Who operates, here, besides Omar and Olga: Ana and Sam work the refund too, Lee leads the team,
+# Pia opened the case.
+OPERATING = {
+    "ana": ["support", "operations"],
+    "sam": ["support", "operations"],
+    "lee": ["support-lead", "operations"],
+    "pia": ["support", "operations"],
+    "omar": ["operations"],
+    "olga": ["operations"],
+}
+
+
+def account_closed(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The payment provider: the customer's account is closed, so it never succeeds."""
+    raise ConnectionError("account closed")
+
+
+def test_a_self_approved_skip_is_refused() -> None:
+    # Nothing is skipped automatically, nor by one person alone (brief, D17) (brief, D52).
+    with pytest.raises(AnswerRefused, match="^omar proposed case.change#1, so cannot approve it$"):
+        run_case(
+            REFUND,
+            file=SMALL,
+            answers=[SMALL_REVIEW, skip("pay#1", "omar"), ("case.change#1", "approve", "omar")],
+            people=OPERATING,
+            activities={"payments.refund@2": account_closed},
+        )
+
+
+def refused_skip_approval(
+    definition: dict[str, Any], file: dict[str, Any], before: list[Any], by: str
+) -> str:
+    """What the engine says when `by` approves Omar's skip of `pay#1`, after `before`."""
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            definition,
+            file=file,
+            answers=[*before, skip("pay#1", "omar"), ("case.change#1", "approve", by)],
+            people=OPERATING,
+            activities={"payments.refund@2": account_closed},
+            opened_by="pia",
+        )
+    return str(refused.value)
+
+
+def test_a_skip_excludes_who_the_run_excluded() -> None:
+    # Skipping a run decides its fate, as approving it did: whoever may not approve the run may
+    # not approve its skip, nor whoever proposed or approved it (brief, D52).
+    assert refused_skip_approval(REFUND, SMALL, [SMALL_REVIEW], "ana") == (
+        "ana set approved_amount, which pay uses, so cannot approve it, nor skip pay#1"
+    )
+    assert refused_skip_approval(REFUND, SMALL, [SMALL_REVIEW], "pia") == (
+        "pia opened the case, so cannot approve a change to it"
+    )
+    approved = [TYPED_WRONG, ("pay.approval#1", "approve", "lee")]
+    assert refused_skip_approval(REFUND, LARGE, approved, "lee") == (
+        "lee approved pay.approval#1, so cannot approve skipping pay#1"
+    )
+    proposed = copy.deepcopy(REFUND)
+    proposed["steps"]["pay"] |= {"automatic": False, "proposed_by": ["support"]}
+    # Kept open for Sam's proposal, so it names how a person closes it.
+    proposed["stays_open"] = True
+    proposed["close_reasons"] = {"done": {"display": {"title": "Done"}, "roles": ["support"]}}
+    by_sam = [SMALL_REVIEW, propose("pay", "sam")]
+    assert refused_skip_approval(proposed, SMALL, by_sam, "sam") == (
+        "sam proposed pay, so cannot approve it, nor skip pay#1"
+    )
+    # A run that failed before it started (its amount untrusted, which pay refuses) keeps its
+    # proposer too.
+    untrusted = kept_open()
+    untrusted["fields"]["approved_amount"]["source"] = "untrusted:customer"
+    approved_by_lee = [*by_sam, ("pay.approval#1", "approve", "lee")]
+    refused_start = run_case(
+        untrusted, file=SMALL, answers=approved_by_lee, people=OPERATING, opened_by="pia"
+    )
+    assert refused_start.state.runs[-1].started is False
+    assert refused_skip_approval(untrusted, SMALL, approved_by_lee, "sam") == (
+        "sam proposed pay, so cannot approve it, nor skip pay#1"
+    )
+    # Olga is none of them: she approves it.
+    skipped = run_case(
+        proposed,
+        file=SMALL,
+        answers=[*by_sam, skip("pay#1", "omar"), ("case.change#1", "approve", "olga")],
+        people=OPERATING,
+        activities={"payments.refund@2": account_closed},
+        opened_by="pia",
+    )
+    assert "applied case.change#1: pay#1 skipped by omar, approved by olga" in skipped.history
+
+
+def test_a_skipped_run_is_neither_done_nor_failed() -> None:
+    # `call_customer` requires pay: a skipped run isn't done, so it never starts; nothing pay
+    # would have given is in the case file; nothing needs attention, so the case closes.
+    skipped = run_case(
+        REFUND,
+        file=SMALL,
+        answers=[SMALL_REVIEW, skip("pay#1", "omar"), ("case.change#1", "approve", "olga")],
+        people=OPERATING,
+        activities={"payments.refund@2": account_closed},
+    )
+    assert skipped.history[-4:] == [
+        "omar proposed case.change#1: skip pay#1, to be approved by operations",
+        "olga answered case.change#1 approve as operations",
+        "applied case.change#1: pay#1 skipped by omar, approved by olga",
+        "closed: nothing left to do",
+    ]
+    assert [run.status for run in skipped.state.runs] == ["done", "skipped"]
+    assert "pay.outcome" not in skipped.state.values
+    assert not skipped.reached("pay") and not skipped.reached("call_customer")
+    assert skipped.needs_attention == []
+
+
+def refused_skip(answers: list[Any]) -> str:
+    """What the engine says when Omar proposes skipping `pay#1`, after `answers`."""
+    with pytest.raises(ChangeRefused) as refused:
+        run_case(
+            REFUND,
+            file=SMALL,
+            answers=[*answers, skip("pay#1", "omar")],
+            people=OPERATING,
+            activities={"payments.refund@2": account_closed},
+        )
+    return str(refused.value)
+
+
+def test_only_a_failed_latest_run_is_skipped() -> None:
+    assert refused_skip([]) == "pay#1 is not a run of refund"
+    # Still running: it hasn't failed.
+    with pytest.raises(ChangeRefused, match="^pay#1 can't be skipped: it hasn't failed$"):
+        run_case(
+            REFUND,
+            file=SMALL,
+            answers=[SMALL_REVIEW, skip("pay#1", "omar")],
+            people=OPERATING,
+            held=["pay"],
+        )
+    # A later run of its step (a refresh, beside it): only a step's latest run is skipped, as
+    # only it is retried (brief, D26).
+    failed = run_case(
+        REFUND,
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=OPERATING,
+        activities={"payments.refund@2": account_closed},
+    ).state
+    failed.runs.append(StepRun("pay#2", "pay", "running"))
+    later = ChangeProposed("skip", "pay#1", None, "omar", frozenset(["operations"]), at=START)
+    with pytest.raises(
+        ChangeRefused,
+        match="^pay#1 can't be skipped: pay#2 has run since, and only a step's latest run is "
+        "skipped$",
+    ):
+        decide(parse_case(REFUND), CATALOG, failed, later)
+
+
+def kept_open() -> dict[str, Any]:
+    """The refund, its payment proposed by support, kept open until a person closes it."""
+    definition = copy.deepcopy(REFUND)
+    definition["steps"]["pay"] |= {"automatic": False, "proposed_by": ["support"]}
+    definition["stays_open"] = True
+    definition["close_reasons"] = {"done": {"display": {"title": "Done"}, "roles": ["support"]}}
+    return definition
+
+
+def test_a_skip_of_a_run_retried_meanwhile_is_not_applied() -> None:
+    # Olga's retry ran the payment while Omar's skip waited: Lee's approval applies nothing.
+    retried = run_case(
+        kept_open(),
+        file=SMALL,
+        answers=[
+            SMALL_REVIEW,
+            propose("pay", "sam"),
+            skip("pay#1", "omar"),
+            retry("pay#1", "olga"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=OPERATING,
+        activities={"payments.refund@2": failing_once()},
+    )
+    assert retried.history[-1] == (
+        "case.change#1 not applied: pay#1 can't be skipped: it hasn't failed"
+    )
+    assert retried.reached("pay")
+
+
+def notifying() -> dict[str, Any]:
+    """The refund that closes once paid, with a letter drafted beside the payment."""
+    definition = copy.deepcopy(REFUND)
+    definition["closes_when"] = ["paid"]
+    definition["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["steps"]["notify"] = {
+        "kind": "activity",
+        "display": {"title": "Draft a letter about the refund"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "order_id"}, "template": "refund"},
+    }
+    return definition
+
+
+def letter_down(inputs: dict[str, Any]) -> dict[str, Any]:
+    raise ConnectionError("provider unreachable")
+
+
+def test_a_skip_lets_a_held_close_complete() -> None:
+    # `paid` is reached, and the failed letter holds the close: nothing new starts, but a skip of
+    # the run that holds it is taken, and the case closes (brief, D34) (brief, D52).
+    skipped = run_case(
+        notifying(),
+        file=SMALL,
+        answers=[SMALL_REVIEW, skip("notify#1", "omar"), ("case.change#1", "approve", "olga")],
+        people=OPERATING,
+        activities={"letters.draft@2": letter_down},
+    )
+    assert skipped.history[-2:] == [
+        "applied case.change#1: notify#1 skipped by omar, approved by olga",
+        "closed: paid reached",
+    ]
+    assert skipped.flags == []
+
+
+def test_a_skipped_runs_timers_end_with_it() -> None:
+    # A timer set on a run's start lives while the run does: skipped, the run has ended, and so
+    # has the timer, saying so (brief, D44) (brief, D52).
+    definition = kept_open()
+    definition["milestones"] = {"chased": {"display": {"title": "Payment chased"}}}
+    definition["rules"] = {
+        "chase_pay": {
+            "display": {"title": "Chase a payment left failing for two days"},
+            "on": {"after": "2d", "since": {"started": "pay"}},
+            "then": {"reach": ["chased"]},
+        }
+    }
+    skipped = run_case(
+        definition,
+        file=SMALL,
+        answers=[
+            SMALL_REVIEW,
+            propose("pay", "sam"),
+            skip("pay#1", "omar"),
+            ("case.change#1", "approve", "olga"),
+        ],
+        people=OPERATING,
+        activities={"payments.refund@2": account_closed},
+    )
+    assert skipped.history[-1] == "cancelled chase_pay, 2d after started pay#1: pay#1 is skipped"
+    assert skipped.timers == []

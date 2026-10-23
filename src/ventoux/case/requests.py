@@ -7,11 +7,19 @@ from approving, and what applying it does: an edit of a field's value, or a skip
 See docs/layers/12-releases.md (12c).
 """
 
+from ventoux.case.admission import latest_run
 from ventoux.case.answers import AnswerRefused, offers
-from ventoux.case.definition import CallStep, CaseDefinition
-from ventoux.case.state import Answered, CaseState, ChangeProposed, ChangeRequest, Obtained
+from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, rule_fields
+from ventoux.case.state import (
+    Answered,
+    CaseState,
+    ChangeProposed,
+    ChangeRequest,
+    Obtained,
+    StepRun,
+)
 from ventoux.case.visibility import may_see, seen_by
-from ventoux.core.approval import inputs_digest
+from ventoux.core.approval import inputs_digest, not_someone_else
 from ventoux.core.catalog import Catalog
 from ventoux.core.expressions import ExpressionError, Var, a_kind
 from ventoux.core.expressions.check import a_type
@@ -21,23 +29,25 @@ from ventoux.core.plan import APPROVE, REJECT
 from ventoux.core.roles import role_that_counts
 from ventoux.core.sensitive import Sensitive, plain
 
-EDIT = "edit"
-KINDS = (EDIT,)
+EDIT = "edit"  # a declared field's value
+SKIP = "skip"  # a failed step run
+KINDS = (EDIT, SKIP)
 
 
 class ChangeRefused(Exception):
     """A proposed change the engine won't take, with the reason. Nothing is pending."""
 
 
-def who_may(catalog: Catalog) -> list[str]:
-    """The roles that may propose or approve an edit: the ones registered to edit (brief, D52)."""
-    return catalog.editors
+def who_may(catalog: Catalog, kind: str) -> list[str]:
+    """The roles that may propose or approve a change of `kind`: an edit, the roles registered to
+    edit; a skip, the operating roles, who act on failed steps (brief, D26) (brief, D52)."""
+    return catalog.editors if kind == EDIT else catalog.operators
 
 
-def kind_role(catalog: Catalog, roles: frozenset[str]) -> str | None:
-    """The role among `roles` that lets a person propose or approve the change; None if none
-    does. Fail closed: a role the catalog didn't register for it counts for nothing."""
-    return role_that_counts(tuple(who_may(catalog)), roles, catalog.roles)
+def kind_role(catalog: Catalog, kind: str, roles: frozenset[str]) -> str | None:
+    """The role among `roles` that lets a person propose or approve a change of `kind`; None if
+    none does. Fail closed: a role the catalog didn't register for it counts for nothing."""
+    return role_that_counts(tuple(who_may(catalog, kind)), roles, catalog.roles)
 
 
 def propose_change(
@@ -52,23 +62,27 @@ def propose_change(
         raise ChangeRefused(f"the case is {state.phase}: nothing changes it")
     # Fail closed: a kind the engine doesn't know is refused, never read as one it does.
     if event.kind not in KINDS:
-        raise ChangeRefused(f"{event.kind} is not a kind of change: a change is an edit")
-    role = kind_role(catalog, event.roles)
+        raise ChangeRefused(f"{event.kind} is not a kind of change: a change is an edit or a skip")
+    role = kind_role(catalog, event.kind, event.roles)
     if role is None:
         raise ChangeRefused(no_role(catalog, event.kind, event.by, event.roles, "proposed"))
-    if (hidden := unseen(case, catalog, event.target, event.by, event.roles)) is not None:
-        raise ChangeRefused(hidden)
-    value = kept(case, event.target, event.value)
-    if (problem := edit_problem(case, state, event.target, value)) is not None:
-        raise ChangeRefused(problem)
-    state.requested += 1
+    state.requested += 1  # numbered once it is taken: a refusal below raises, changing nothing
     # A dot no name holds: a step may be named `change`, and its runs are `change#1`.
     entry = f"case.change#{state.requested}"
-    against = inputs_digest({event.target: Var(var=event.target)}, state.values)
-    state.changes[entry] = ChangeRequest(
-        entry, "edit", event.target, event.by, role, value, against
-    )
-    approvers = " or ".join(who_may(catalog))
+    if event.kind == EDIT:
+        if (hidden := unseen(case, catalog, event.target, event.by, event.roles)) is not None:
+            raise ChangeRefused(hidden)
+        value = kept(case, event.target, event.value)
+        if (problem := edit_problem(case, state, event.target, value)) is not None:
+            raise ChangeRefused(problem)
+        against = inputs_digest({event.target: Var(var=event.target)}, state.values)
+        request = ChangeRequest(entry, "edit", event.target, event.by, role, value, against)
+    else:
+        if (problem := skip_problem(case, state, event.target)) is not None:
+            raise ChangeRefused(problem)
+        request = ChangeRequest(entry, "skip", event.target, event.by, role)
+    state.changes[entry] = request
+    approvers = " or ".join(who_may(catalog, event.kind))
     state.waiting[entry] = f"approval of {entry} ({event.kind} {event.target}) by {approvers}"
     state.history.append(
         f"{event.by} proposed {entry}: {event.kind} {event.target}, to be approved by {approvers}"
@@ -77,9 +91,9 @@ def propose_change(
 
 def no_role(catalog: Catalog, kind: str, by: str, roles: frozenset[str], act: str) -> str:
     """`an edit is proposed by support or support-lead, and omar has operations`."""
-    allowed = " or ".join(who_may(catalog)) or "a role registered for it"
+    allowed = " or ".join(who_may(catalog, kind)) or "a role registered for it"
     known = ", ".join(sorted(role for role in roles if role in catalog.roles)) or "no role"
-    return f"an {kind} is {act} by {allowed}, and {by} has {known}"
+    return f"{'an' if kind == EDIT else 'a'} {kind} is {act} by {allowed}, and {by} has {known}"
 
 
 def unseen(
@@ -123,6 +137,23 @@ def edit_problem(case: CaseDefinition, state: CaseState, name: str, value: objec
     return None
 
 
+def skip_problem(case: CaseDefinition, state: CaseState, entry: str) -> str | None:
+    """Why the run `entry` can't be skipped now; None if it can: it is its step's latest run, and
+    failed. Asked when the skip is proposed, and again when it is applied (brief, D52)."""
+    run = next((run for run in state.runs if run.entry == entry), None)
+    if run is None:
+        return f"{entry} is not a run of {case.case}"
+    latest = latest_run(state, run.step)
+    if latest is not None and latest is not run:
+        return (
+            f"{entry} can't be skipped: {latest.entry} has run since, and only a step's latest "
+            "run is skipped"
+        )
+    if run.status != "failed":
+        return f"{entry} can't be skipped: it hasn't failed"
+    return None
+
+
 def answer_change(
     case: CaseDefinition,
     catalog: Catalog,
@@ -136,37 +167,72 @@ def answer_change(
     # A request's outcomes are a closed list: a misspelling is refused, never "not approved".
     if event.outcome not in (APPROVE, REJECT):
         raise AnswerRefused(offers(request.entry, (APPROVE, REJECT), event.outcome))
-    role = kind_role(catalog, event.roles)
+    role = kind_role(catalog, request.kind, event.roles)
     if role is None:
         act = "approved" if event.outcome == APPROVE else "rejected"
         raise AnswerRefused(no_role(catalog, request.kind, event.by, event.roles, act))
     if (problem := form_problem(event.outcome, (), event.form, {})) is not None:
         raise AnswerRefused(problem)
-    if event.outcome == APPROVE:
-        # An approver judges what they see: never a value hidden from them (brief, D30).
-        hidden = unseen(case, catalog, request.target, event.by, event.roles)
-        if (why := hidden or not_someone_else(state, request, event.by)) is not None:
-            raise AnswerRefused(why)
+    if event.outcome == APPROVE and (why := excluded(case, catalog, state, request, event)):
+        raise AnswerRefused(why)
     del state.changes[request.entry]
     del state.waiting[request.entry]
     state.history.append(f"{event.by} answered {request.entry} {event.outcome} as {role}{worded}")
     if event.outcome == REJECT:
         state.history.append(f"{request.entry} not applied: {event.by} rejected it")
         return
-    apply_edit(case, state, request, event.by, event.at)
+    if request.kind == EDIT:
+        apply_edit(case, state, request, event.by, event.at)
+    else:
+        apply_skip(case, state, request, event.by)
 
 
-def not_someone_else(state: CaseState, request: ChangeRequest, by: str) -> str | None:
-    """Why `by` may not approve the request; None if they may. A change is decided by two people:
-    nobody approves their own; and the person who opened the case approves no change to it, as
-    none of its steps (brief, D25) (brief, D52)."""
+def excluded(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    request: ChangeRequest,
+    event: Answered,
+) -> str | None:
+    """Why `event`'s person may not approve the request; None if they may. A change is decided by
+    two people: nobody approves their own; and the person who opened the case approves no change
+    to it, as none of its steps (brief, D25) (brief, D52)."""
+    by = event.by
     if by == request.by:
         return f"{by} proposed {request.entry}, so cannot approve it"
     if by == state.opened_by:
         return f"{by} opened the case, so cannot approve a change to it"
+    if request.kind == SKIP:
+        run = next(run for run in state.runs if run.entry == request.target)
+        return skip_excluded(case, state, run, by)
+    # An approver judges what they see: never a value hidden from them (brief, D30).
+    if (hidden := unseen(case, catalog, request.target, by, event.roles)) is not None:
+        return hidden
     # An edit overrules whoever gave the field its value: they don't judge it (brief, D11).
     if f"person:{by}" in state.sources.get(request.target, ()):
         return f"{by} set {request.target}, so cannot approve a change to it"
+    return None
+
+
+def skip_excluded(case: CaseDefinition, state: CaseState, run: StepRun, by: str) -> str | None:
+    """Why `by` may not approve skipping `run`: skipping decides its fate, as approving it did, so
+    whoever may not approve the run may not approve its skip, nor whoever proposed or approved
+    it (brief, D11) (brief, D25) (brief, D39) (brief, D52)."""
+    nor = f", nor skip {run.entry}"
+    if by in run.excluded:  # kept with the run when it started (brief, D26)
+        return run.excluded[by] + nor
+    if state.proposers.get(run.step) == by:  # a run that failed before it started
+        return f"{by} proposed {run.step}, so cannot approve it{nor}"
+    if run.approved is not None and by in run.approved.approvers:
+        return f"{by} approved {run.approved.entry}, so cannot approve skipping {run.entry}"
+    step = case.steps[run.step]
+    if isinstance(step, CallStep | PlanStep):
+        conditions = [step.when] if step.when is not None else []
+        inputs = list(step.inputs.values())
+        computed = rule_fields(case)
+        why = not_someone_else(by, run.step, inputs, conditions, state.sources, computed)
+        if why is not None:
+            return why + nor
     return None
 
 
@@ -193,6 +259,24 @@ def apply_edit(
         f"applied {request.entry}: {name} edited by {request.by}, approved by {approved_by}"
     )
     lapse_spent(case, state, name)
+
+
+def apply_skip(
+    case: CaseDefinition, state: CaseState, request: ChangeRequest, approved_by: str
+) -> None:
+    """The failed run ends skipped: neither done nor failed, so nothing requiring it starts, it
+    reaches nothing, and a close it held completes; unless it no longer can be (brief, D52)."""
+    if (problem := skip_problem(case, state, request.target)) is not None:
+        state.history.append(f"{request.entry} not applied: {problem}")
+        return
+    run = next(run for run in state.runs if run.entry == request.target)
+    run.status, run.reason = "skipped", ""
+    # The run anyone proposed is over: its proposer, a person or a rule, is forgotten.
+    state.proposers.pop(run.step, None)
+    state.proposed_by_rules.pop(run.step, None)
+    state.history.append(
+        f"applied {request.entry}: {run.entry} skipped by {request.by}, approved by {approved_by}"
+    )
 
 
 def lapse_spent(case: CaseDefinition, state: CaseState, name: str) -> None:

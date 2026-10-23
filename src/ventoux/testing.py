@@ -96,6 +96,7 @@ __all__ = [
     "run_plan",
     "send",
     "shown",
+    "skip",
     "wrapped",
 ]
 
@@ -644,6 +645,12 @@ def edit(field: str, value: Any, who: str) -> Change:
     """A script's proposed edit: `edit("approved_amount", 250, "ana")`. Someone else approves it
     by answering its entry: `("case.change#1", "approve", "lee")` (brief, D52)."""
     return Change("edit", field, value, who)
+
+
+def skip(entry: str, who: str) -> Change:
+    """A script's proposed skip of a failed run: `skip("pay#1", "omar")`; another operator
+    approves it (brief, D17) (brief, D52)."""
+    return Change("skip", entry, None, who)
 
 
 class ShownTo(NamedTuple):
