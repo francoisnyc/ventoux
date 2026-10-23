@@ -813,9 +813,10 @@ Numbered on from 12b's. Answer by number.
     `change#1`, `change#2`, numbered by the case, proposed by a signal and answered like any entry
     (`answer(case, "change#1", "approve", …)`); its state, pending until answered, is the case's,
     so it crosses continue-as-new with the rest (D27), and the case's history tells the whole
-    story. **Forget keeps its own workflow** for its last part only (the key is destroyed once the
-    case's workflow has ended, outside it, D32), and shares the rules (choices 31–33) through the
-    same module. *Recommended.* Set aside: a workflow per request, as forget has (the case's
+    story. **Forget keeps its own workflow,** since a closed case can be forgotten (its workflow
+    has ended, nothing to signal) and the key is destroyed only after the case's workflow ends,
+    outside it (brief, D32); it shares the rules (choices 31–33) through the same module.
+    *Recommended.* Set aside: a workflow per request, as forget has (the case's
     history would show only the apply, and a pending request would be another workflow to find);
     moving forget into the case (its request's history must outlive the key, 9c).
 
