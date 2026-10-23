@@ -1385,7 +1385,8 @@ Status: drafted 2026-10-23, from `main` at `2fde255` (12d merged, #45); the hist
 12e recorded and replayed first (slice 0). Answered the same day: choices 60 to 80, all as
 recommended, with four changes, written into choices 67, 68, 76 and 77 below, each marked
 *Changed in the answers*, and one line for the cases guide (choice 67). The warm-up (learning
-question 28) put and answered, left open (recorded in the log).
+question 28) put and answered, left open (recorded in the log). Built the same day, slices 0 to 8;
+see "Decided while building" and the Promises table.
 
 User-facing description, written first once you agree: `docs/guides/releases.md`, "Activating a
 release in an environment" and "Rolling back and retiring"; `docs/guides/cases.md`, "Running a
@@ -1769,64 +1770,109 @@ Numbered on from 12d's. Answer by number.
 
 ### Seams the tests use
 
-- `case/activation.py`, pure: the registry's state and `request(state, request) -> (state,
-  answer)`; `activation_problems(record, queue, manifests, pollers, registry)`.
-- `worker_manifest(cases, implementations, task_queue, build, identity)`; `environment_worker(…)`;
-  `registry_worker(client)`; `create_environment(client, name, development)`.
-- `activate(client, environment, record, queue, by)`, `retire(…)`, `active_release(…)`,
-  `open_cases(…)`, `environment_check(…)`; `main(["activate", …])`, `main(["retire", …])`,
-  `main(["environment", …])`, `main(["manifest", …])`.
-- `start_case`, `report`, `answer`, `propose_migration`, `preview_migrations`, unchanged.
-- The time-skipping server, the dev server (choice 77), and the `Replayer` on slice 0's fixtures.
+- `case/activation.py`, pure: `activation_problems(label, contracts, queue, environment,
+  manifests, pollers)`; `case/registry.py`, pure: `Registry` and each request, `publish`,
+  `activate`, `opened`, `moved`, `closed`, `retire`, `harden`, each giving the registry after it
+  and an `Answer`; `open_on`.
+- On Temporal: `environment_worker(…)`, `registry_worker(client)`, `create_environment`,
+  `publish_manifest`, `registry_of`, `ask` (an Update, as the commands send them), `retire`,
+  `open_cases`; `start_case`, `report`, `answer`, `propose_migration`, `preview_migrations`,
+  unchanged.
+- `main(["activate", …])`, `main(["retire", …])`, `main(["environment", …])`, `main(["manifest",
+  …])` against the dev server, which `pollers` reads.
+- The `Replayer` on slice 0's fixtures, under the development classes and under classes in an
+  environment.
+- The releases guide's commands, run as written.
 
 ### Slices, in order
 
-Each starts with its negative test, seen failing for the right reason.
+Each started with its negative test, seen failing for the right reason, or, where the code was
+written with its seam, the rule taken out and its test seen failing.
 
 0. **Histories recorded before 12e,** replayed (choice 78).
 1. **The check, pure:** the curriculum's two negative tests first, then a poller without a
    manifest, no poller, workflow contracts where they are bound, every problem at once.
-2. **The registry, pure:** environments, activation, rollback, retirement, open cases, bindings
-   under open cases.
-3. **Manifests and the registry on Temporal:** created on purpose, published at startup, refused
-   at startup, continue-as-new.
-4. **A case in an environment:** opening checked by the registry, drafts in production, closing,
-   the patch.
-5. **Migrations and the cohort:** the target checked on apply, `open_cases`.
-6. **`ventoux activate`, `retire`, `environment`, `manifest`,** on the dev server's pollers.
-7. **D5's second line:** schedule-to-start's proof, `ventoux environment check`.
-8. **The guides, D54, the Promises table checked.**
+2. **The registry, pure:** activation, rollback, opening, environments, retirement, bindings under
+   open cases.
+3. **Manifests and the registry on Temporal:** created once, published at startup, refused at
+   startup, continue-as-new.
+4. **A case in an environment:** opening, drafts, closing, migrating, the patch, the fixtures under
+   an environment; a case ended from outside at a retirement.
+5. **The cohort:** `open_cases`, previewed.
+6. **The commands,** on the dev server's pollers; the guides' parts.
+7. **D5's second line:** schedule-to-start's proof; `ventoux environment check` (slice 6).
+8. **D54, the CI cache, the Promises table checked.**
+
+### Decided while building
+
+- **The check runs once, in the registry** (choice 71 had the command check, then the registry
+  again). The command reads the pollers, which a workflow can't, and sends them with the record's
+  contracts; the registry runs `activation_problems` against the manifests it holds. The same
+  check, one place, depending on nothing else the client did.
+- **What a case asked of its registry crosses in its start, not its state** (choice 78 said
+  `registered`, in the state): `CaseStart.environment`, beside `release`, since it is the
+  driver's, as the release is, and `case` stays free of environments. A start carried before 12e
+  has none, so that case never asks.
+- **One activity for the three questions,** `ventoux.registry.asked`, carrying an opening, a move
+  or a close; and one for the registry, `ventoux.registry.ended`.
+- **The registry reads its start in `__init__`** (Temporal's `workflow.init`): on the dev server
+  a worker's first manifest arrived in the same workflow task as the registry's start, before
+  `run` had read it, and was refused as of an environment named `""`. The time-skipping server
+  had never shown it.
+- **A refused retirement still drops the cases that ended:** what Temporal said is a fact either
+  way; `Answer.done` says only whether the release was retired.
+- **The registry's lines carry no time:** the Temporal history of each Update has it.
+- **Openings name "never activated" before "is active"**: a release this environment never
+  activated says so, `refund-2 can't open on refund 2: production never activated refund 2:
+  activate it first`, rather than naming the release that is active.
+- **"A worker of another environment" has no test of its own:** a manifest's environment is its
+  class's, and is sent to that environment's registry, so the two can't differ; the refusal of a
+  class naming no environment, and of an environment with no registry, are the startup refusals.
+  The registry still refuses a manifest naming another environment (`publish`).
+- **The time-skipping server waits out an activity's timeouts in real time**, never skipping them,
+  so the schedule-to-start test gives `payments.refund@2` a 2 s timeout (`refund_timed`), as the
+  dev server's other build gives it another start-to-close.
+- **Two workers on one queue in one process need two Temporal runtimes:** the SDK refuses a second
+  worker on the same queue in a runtime, so the dev server tests start the second, as from another
+  machine, on a client with its own runtime.
+- **The dev server is downloaded into `TEMPORAL_CLI_DIR`** when set, made first (the SDK doesn't
+  make it); CI caches it per `uv.lock`. A test that can't start it fails.
+- **`ventoux environment create` says which kind it made:** `production created: a production
+  environment, where drafts never open`.
 
 ### Promises
 
-Drafted before building, with the tests they will name; checked against the tests before the pull
-request. `A` is `tests/test_activation.py` (pure), `G` is `tests/test_temporal_registry.py`
-(time-skipping server), `L` is `tests/test_temporal_activate.py` (dev server, choice 77), all new.
+Checked against the tests before the pull request. `A` is `tests/test_activation.py` (pure), `G`
+is `tests/test_temporal_registry.py` (time-skipping server), `L` is
+`tests/test_temporal_activate.py` (dev server, choice 77), all new. Every test they hold is named
+here.
 
 | Promise | Test |
 |---|---|
 | Activating a release whose activities no worker serves is refused, naming each contract and queue (the curriculum's) | A `test_a_release_no_worker_serves_is_refused`, L `test_activate_refuses_a_release_no_worker_serves` |
 | Activation is refused when a served contract's hash differs, naming the worker, its build and both hashes (the curriculum's) | A `test_a_served_hash_that_differs_is_refused`, L `test_activate_refuses_a_worker_serving_another_hash` |
-| Every poller on a checked queue needs a manifest serving the contract; a queue nobody polls refuses | A `test_a_worker_without_a_manifest_refuses`, `test_a_manifest_without_a_live_worker_refuses` |
-| A workflow contract is checked where every case worker binds it, the same way, with its hash | A `test_a_workflow_contract_is_checked_where_it_is_bound` |
-| Every problem is said at once, naming no value | A `test_activation_says_every_problem_at_once` |
-| The registry checks again what it holds, depending on nothing the client checked | A `test_the_registry_checks_again_what_it_holds` |
-| Rolling back is activating the previous release, with the same checks and its own line | A `test_rolling_back_is_activating_the_previous_release` |
-| A release that is active or has open cases is not retired; a retired one opens no case, is no migration's target, and is never activated again | A `test_a_release_with_open_cases_is_not_retired`, `test_a_retired_release_starts_nothing` |
+| Every poller on a checked queue needs a manifest here, as a case worker on a case queue; a queue nobody polls refuses | A `test_a_worker_without_a_manifest_refuses`, `test_a_manifest_without_a_live_worker_refuses` |
+| A workflow contract is checked where every case worker binds it, the same way, served with its hash and its type registered | A `test_a_workflow_contract_is_checked_where_it_is_bound` |
+| Every problem is said at once, each once, naming no value | A `test_activation_says_every_problem_at_once` |
+| The registry runs the check against the manifests it holds | A `test_the_registry_checks_again_what_it_holds` |
+| Rolling back is activating the previous release, with the same checks and its own line; activating the active release again changes nothing | A `test_rolling_back_is_activating_the_previous_release` |
+| A case opens only on its package's active release, with its digest, on the queue it was activated on; a draft only in development; an opening asked again changes nothing | A `test_a_case_opens_only_on_the_active_release`, G `test_a_case_opens_only_on_its_environments_active_release` |
 | An environment is production unless created for development; it can be hardened, never loosened | A `test_an_environment_is_production_unless_made_for_development` |
+| A release that is active or has open cases is not retired; a case Temporal says has ended is dropped, saying so | A `test_a_release_with_open_cases_is_not_retired`, G `test_a_case_ended_from_outside_never_blocks_retirement` |
+| A retired release opens no case, is no migration's target, and is never activated again; a release never activated here is no target | A `test_a_retired_release_starts_nothing` |
 | A workflow type never moves under open cases; its task queue may | A `test_a_workflow_type_never_moves_under_open_cases`, G `test_a_worker_moving_a_workflow_type_under_open_cases_refuses_to_start` |
-| A registry exists only once created; a worker of a missing one, or of another environment, refuses to start | G `test_a_worker_refuses_to_start_without_its_registry`, `test_a_worker_of_another_environment_refuses_to_start` |
-| A worker publishes its manifest, built from its code: contracts with hashes, workflow types, bindings, build and identity | G `test_a_worker_publishes_its_manifest` |
+| Histories recorded before 12e replay, under the development classes and under classes in an environment | G `test_histories_from_before_12e_replay`, `test_a_case_without_an_environment_is_as_before` |
+| A worker publishes its manifest, built from its code, before it polls | G `test_a_worker_publishes_its_manifest` |
+| A worker of an environment with no registry, or of a class naming none, refuses to start; an environment is created once | G `test_a_worker_refuses_to_start_without_its_registry`, `test_an_environment_is_created_once` |
 | The registry's state crosses continue-as-new | G `test_the_registry_crosses_continue_as_new` |
-| A case in an environment opens only on the active release with the registry's digest; replay reads the answer from its history | G `test_a_case_opens_only_on_its_environments_active_release` |
-| A draft is refused in production, and runs in development and with no environment | G `test_a_draft_is_refused_in_production` |
-| The registry knows each release's open cases: opened, moved, closed | G `test_the_registry_knows_each_releases_open_cases` |
+| The registry's answer is in the case's history, replayed with no registry; a case in an environment records the patch marker, one with none records nothing new | G `test_a_case_opens_only_on_its_environments_active_release`, `test_a_case_without_an_environment_is_as_before` |
+| A draft is refused in production, and opens in development and with no environment | G `test_a_draft_is_refused_in_production` |
+| The registry knows each release's open cases: opened, moved, closed, across continue-as-new | G `test_the_registry_knows_each_releases_open_cases` |
 | A migration's target is checked against the registry when its approval would apply it; a refusal is recorded and the request waits on | G `test_a_migration_target_is_the_registrys` |
 | A cohort is the release's open cases, as the registry lists them | G `test_a_cohort_is_the_releases_open_cases` |
 | An activity no worker picks up fails at its schedule-to-start timeout, and the case needs attention | G `test_an_activity_nobody_picks_up_needs_attention` |
-| A case without an environment asks nothing and records no marker; one opened before 12e never calls the registry on a later run | G `test_a_case_without_an_environment_is_as_before`, `test_histories_from_before_12e_replay` |
-| Histories recorded before 12e replay | G `test_histories_from_before_12e_replay` |
-| `ventoux environment check` exits 1, saying which, when an active release's contract has no live worker | L `test_the_environment_check_fails_when_a_contract_has_no_live_worker` |
-| The commands exit 0, 1 or 2 as the guide says; the guide's example runs as written | L `test_the_commands_say_what_they_did`, `test_the_guides_activation_example_runs_as_written` |
+| `ventoux environment check` covers every release active or with open cases, each on its queue, and exits 1 saying which | L `test_the_environment_check_fails_when_a_contract_has_no_live_worker` |
+| The commands exit 0, 1 or 2, saying what the registry or the store said | L `test_the_commands_say_what_they_did` |
+| The releases guide's activation example runs as written | L `test_the_guides_activation_example_runs_as_written` |
 | The engine version is unchanged: 3 is still unknown | `tests/test_engine.py` `test_an_unknown_engine_version_is_refused`, unchanged |
-| `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |
+| `case` reads no clock or I/O and imports no Temporal, in the new modules too | `tests/test_layers.py`, unchanged |

@@ -246,7 +246,7 @@ OPEN_ON = {"refunds": ["refunds-a"]}
 
 async def activated(client: Client, record: Record, queue: str = QUEUE) -> Answer:
     """Pia activates `record` in production, the registry given the pollers a command would see:
-    the time-skipping server can't list them (choice 77); the dev server's tests read them."""
+    the time-skipping server can't list them (layer 12e, choice 77); the dev server's tests read them."""
     asked = Activating(released(record), dict(record.contracts), queue, OPEN_ON, "pia")
     answer = await ask(client, "production", "activate", asked)
     assert answer.done, answer.said
@@ -491,7 +491,7 @@ class Retyped(ProductionCases):
 def test_a_case_ended_from_outside_never_blocks_retirement() -> None:
     # Terminated in Temporal's UI, a case never says it closed. Retiring its release, the registry
     # asks Temporal through an activity, drops it saying so, and refuses only for the rest
-    # (choice 67, as answered).
+    # (layer 12e, choice 67, as answered).
     async def scenario(client: Client) -> tuple[list[str], list[str]]:
         async with await production_worker(client):
             await activated(client, REFUND_1)

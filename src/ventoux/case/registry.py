@@ -64,7 +64,7 @@ class Registry:
 
 def publish(registry: Registry, manifest: Manifest) -> tuple[Registry, Answer]:
     """Keep `manifest`, a worker's as it starts, in place of any earlier one of its identity;
-    refused if it moves a workflow type that open cases call (brief, D29)."""
+    refused if it moves a workflow type that open cases call (brief, D29) (brief, D54)."""
     here = registry.environment
     if manifest.environment != here:
         return registry, Answer(
@@ -163,8 +163,8 @@ class Opening:
 def opened(registry: Registry, asked: Opening) -> tuple[Registry, Answer]:
     """Let the case open, and list it as open on its release, if that release is its package's
     active one here, with the same digest, on the queue it was activated on; a draft only in a
-    development environment (brief, D51). One request, so nothing comes between the check and
-    the listing."""
+    development environment (brief, D51) (brief, D54). One request, so nothing comes between the
+    check and the listing."""
     here, case, released = registry.environment, asked.case, asked.released
     if released is None:
         if registry.development:
@@ -184,7 +184,7 @@ def opened(registry: Registry, asked: Opening) -> tuple[Registry, Answer]:
         return registry, Answer(False, [f"{refused}: {why}"])
     queue = registry.activated[label].task_queue
     if asked.task_queue != queue:
-        # Activation checked the workers on that queue only (choice 68, as answered).
+        # Activation checked the workers on that queue only (layer 12e, choice 68, as answered).
         return registry, Answer(
             False, [f"{refused} on {asked.task_queue}: {here} activated it on {queue}"]
         )
@@ -257,9 +257,9 @@ def retire(
     registry: Registry, asked: Retiring, ended: Mapping[str, str]
 ) -> tuple[Registry, Answer]:
     """Retire the release for good: it then opens no case, is no migration's target and is never
-    activated again; refused while it is active or a case is open on it (brief, D5). `ended`
+    activated again; refused while it is active or a case is open on it (brief, D54). `ended`
     says, for cases listed on it, which Temporal says have ended (`terminated`) without saying
-    they closed: those are dropped, saying so, and never block it (choice 67, as answered)."""
+    they closed: those are dropped, saying so, and never block it (layer 12e, choice 67, as answered)."""
     label, here = str(asked.released), registry.environment
     refused = f"{label} not retired"
     if label in registry.retired:

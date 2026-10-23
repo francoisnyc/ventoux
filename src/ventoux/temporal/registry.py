@@ -155,7 +155,7 @@ class RegistryWorkflow:
     async def retire(self, sent: Retire) -> Answer:
         """Retire a release, once Temporal has said which of the cases listed on it have ended
         without saying so: its answer comes from an activity, recorded in this history, so a
-        replay reads it there and never asks again (choice 67, as answered)."""
+        replay reads it there and never asks again (layer 12e, choice 67, as answered)."""
         async with self.lock:
             listed = open_on(self.registry, sent.asked.released)
             ended: dict[str, str] = {}
@@ -307,7 +307,7 @@ def released(record: Record) -> Released:
 
 async def pollers(client: Client, queues: list[str]) -> dict[str, list[str]]:
     """Each queue's pollers, workflow and activity alike, by identity, as Temporal's server lists
-    them now: it drops a poller a few minutes after its last poll (choice 72)."""
+    them now: it drops a poller a few minutes after its last poll (layer 12e, choice 72)."""
     found: dict[str, list[str]] = {}
     for queue in queues:
         identities: set[str] = set()
@@ -316,7 +316,7 @@ async def pollers(client: Client, queues: list[str]) -> dict[str, list[str]]:
             TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY,
         ):
             # Temporal: `DescribeTaskQueue` lists who polls a queue; the time-skipping test server
-            # doesn't implement it, the dev server does (choice 77).
+            # doesn't implement it, the dev server does (layer 12e, choice 77).
             described = await client.workflow_service.describe_task_queue(
                 DescribeTaskQueueRequest(
                     namespace=client.namespace,

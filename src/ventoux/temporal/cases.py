@@ -588,7 +588,7 @@ class CaseWorkflow:
     async def ask_to_open(self) -> None:
         """In an environment, ask its registry whether the case may open: on its package's
         active release, with that digest, on the queue it was activated on; a draft only where
-        drafts run. Refused, `CaseRefused`, and nothing is decided (brief, D51). The answer comes
+        drafts run. Refused, `CaseRefused`, and nothing is decided (brief, D54). The answer comes
         from an activity, recorded in this history: a replay reads it there, and never asks
         again. Behind a patch, so a case opened before 12e replays as it was recorded."""
         if self.environment is None or not workflow.patched(REGISTRY_PATCH):
@@ -609,7 +609,7 @@ class CaseWorkflow:
         target may run here: activated, not retired, with its digest. Found by deciding the
         answer on a copy first: `decide` is pure, so the copy decides exactly what the case
         would. Refused, `ChangeRefused`, recorded as a refused answer, and the request waits on
-        (brief, D53)."""
+        (brief, D53) (brief, D54)."""
         if self.registered is None or not isinstance(event, Answered):
             return
         try:

@@ -61,7 +61,7 @@ def activation_problems(
     """Why the release `label` (`refund 2`), whose record needs `contracts`, can't run on `queue`
     in `environment`, given each worker's manifest by identity and each queue's pollers by
     identity; every problem at once, empty if none. Contracts, queues, workers and builds are
-    named, never a value."""
+    named, never a value (brief, D54)."""
     seen = Seen(environment, manifests, pollers)
     if not pollers.get(queue):
         # A manifest says what a worker served when it started; only Temporal says who polls now.

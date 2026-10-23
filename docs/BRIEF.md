@@ -230,6 +230,13 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   is built as one more change request: its request carries the release record's package, the
   case checks the package gives its digest, and the API, reading the record from the store,
   vouches that it is the store's release until 12e's registry.
+- **Amended 2026-10-23, by D54** (the text above stands; this adds to it): the activation check
+  is built as described, the check running in each environment's registry against the manifests
+  it holds, the pollers from Temporal's server; a draft is refused in a production environment,
+  which every environment is unless created for development; a release is retired per
+  environment, a case ended from outside never blocking it; the second line is
+  `ventoux environment check`, for every release active or with open cases, and the
+  schedule-to-start timeout every activity contract already declares.
 
 ### D6. Existing Temporal workflows as steps
 
@@ -843,6 +850,9 @@ be erased on request), has size limits, and a second copy of business records go
   system the platform team registered (D30), and a contract declaring one nobody registered is
   refused when it is registered, as a reference to one is: a typo is caught, never a system
   nobody runs.
+- **Amended 2026-10-23, by D54** (the text above stands; this adds to it): an environment's
+  registry refuses a worker's manifest that binds a workflow contract an open case's release calls
+  to another workflow type, so that worker never starts; a new task queue is taken.
 
 ### D30. References go where their system is expected; the case file is filtered by role
 
@@ -1950,6 +1960,10 @@ D27, D28 and D50, whose text is kept.*
 - **Amended 2026-10-23, by D53** (the text above stands; this adds to it): a migration moves the
   engine version, forward only, as data in its request: the version the proposer's code was
   built with, refused if the case's code doesn't know it.
+- **Amended 2026-10-23, by D54** (the text above stands; this adds to it): in a production
+  environment a draft is refused at its opening; a case in an environment opens only on its
+  package's active release there, with its digest, on the queue it was activated on, the
+  registry's answer read from its history.
 
 ### D52. Change requests: proposed, approved by someone else, checked again, applied
 
@@ -2057,6 +2071,55 @@ D5, D44, D51 and D52, whose text is kept.*
 - **The history says each step,** naming people, roles, releases, engine versions, names and
   entries, never a value.
 - **A case that closes without reaching its `closes_when`** says which milestones it didn't reach.
+- **Amended 2026-10-23, by D54** (the text above stands; this adds to it): in an environment, the
+  case also asks its registry, as the approval would apply the migration, that the target was
+  activated there and isn't retired; the cohort of a release is its open cases, as the registry
+  lists them.
+
+### D54. Activation: worker manifests, the environment registry, and the release a case checks
+
+*Drafted 2026-10-23, in layer 12e (`docs/layers/12-releases.md`, choices 60 to 80). Adds to D5,
+D29, D51 and D53, whose text is kept.*
+
+- **A worker says what it serves before it polls.** A case workflow names its environment; its
+  worker publishes a manifest (environment, task queue, build, identity, each contract it has code
+  for with its method 1 hash from its own catalog, its workflow types and its bindings), built from
+  its code, never by hand. A refusal, or an environment with no registry, stops it before it polls.
+  A worker in another SDK language publishes the same manifest as JSON.
+- **One registry per environment,** a long-running workflow, created on purpose, never by a first
+  manifest. It keeps the latest manifest per worker identity, each package's active release, every
+  release activated there with its record's contracts and the queue its cases run on, the retired
+  releases, and each release's open cases. Every request is an Update, answered, decided one at a
+  time by pure functions; its whole state crosses continue-as-new after a count of requests, at a
+  quiet point.
+- **An environment is production unless created for development,** where drafts open; a
+  development one can be made production, never the reverse.
+- **Activating checks every worker polling where each contract runs.** For each contract the
+  record needs: on the case's queue, every poller has a manifest here, is a case worker, and serves
+  it with the record's hash; a workflow contract, where every case worker binds it the same way,
+  every poller there serves it with the record's hash and registers its type. Temporal gives a
+  task to any poller on its queue, so one is enough to run other code. "Polling now" is what
+  Temporal's server lists. Every problem is said at once, naming contracts, queues, workers, builds
+  and short hashes, never a value. The check runs in the registry, against the manifests it holds;
+  only the pollers come from the command. One person activates, named; rolling back is activating
+  an earlier release, with the same checks.
+- **A case in an environment asks its registry, from its history alone:** as it opens (the active
+  release, its digest, the queue it was activated on; a draft only where drafts open); as an
+  approval would apply a migration (a target activated there and not retired); and as it closes.
+  Through an activity, so a replay reads the answer from the history. Behind a patch, its answer
+  carried across continue-as-new: a case opened before never asks. Its workflow can't end while its
+  registry is unreachable, the safe side.
+- **Retiring:** refused while active or with open cases; a case Temporal says has ended without
+  saying it closed is dropped, saying so. Retired, a release opens no case, is no migration's
+  target and is never activated again; its record and histories stay.
+- **A workflow type never moves under open cases:** a manifest binding a workflow contract an open
+  case's release calls to another type is refused; its task queue may move.
+- **Watching:** `ventoux environment check` runs the same check for every release active or with
+  open cases, each on its queue, exiting 1 on a problem, for the deployment's monitoring. An
+  activity nobody picks up fails at its contract's schedule-to-start timeout, and the case needs
+  attention.
+- **No new engine version:** `decide` decides nothing differently; the registry's calls are in the
+  driver, on new paths, behind the patch `ventoux-registry`.
 
 ### Simplifications adopted
 
@@ -2109,6 +2172,8 @@ D5, D44, D51 and D52, whose text is kept.*
 | Package | A case definition and the plans it uses, released together |
 | Release | An immutable, numbered version of a package, identified by its behaviour digest |
 | Activation | Making new cases in an environment start on a given release |
+| Worker manifest | What one worker says it serves, as it starts: each contract with its hash, its workflow types and bindings |
+| Environment registry | One workflow per environment keeping its workers' manifests, active and retired releases, and each release's open cases |
 | Migration | Moving an open case to a newer release, checked and approved |
 
 (In the `chartering` prototype, steps are called fragments, and rules are split into sentries,

@@ -79,7 +79,7 @@ async def environment_worker(
     forget: type[ForgetWorkflow] | None = None,
 ) -> Worker:
     """A case worker for `cases`'s environment, as `case_worker` builds one, once its manifest is
-    published: refused (`ManifestRefused`, `RegistryMissing`), it never polls (brief, D5).
+    published: refused (`ManifestRefused`, `RegistryMissing`), it never polls (brief, D54).
     `build` is the deployment's name for this build, given, never read from git; `identity` is
     the worker's name among a queue's pollers (the client's own by default)."""
     identity = identity or client.identity

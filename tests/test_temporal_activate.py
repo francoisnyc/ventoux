@@ -2,7 +2,7 @@
 (layer 12e).
 
 Only the dev server lists a queue's pollers (`DescribeTaskQueue`): the time-skipping test server
-doesn't implement it (choice 77). The SDK downloads the dev server the first time, into
+doesn't implement it (layer 12e, choice 77). The SDK downloads the dev server the first time, into
 `TEMPORAL_CLI_DIR` if set (CI caches it there); a test that can't start it fails, never skips.
 See docs/layers/12-releases.md (12e).
 """
@@ -252,7 +252,7 @@ def test_the_environment_check_fails_when_a_contract_has_no_live_worker(
 ) -> None:
     # Refund 2 is active and a case is still open on refund 1. A worker joins without code for
     # payments.refund@2: the check says so for both, each on its queue, and exits 1 (brief, D5,
-    # as answered for choice 76: an open case's release is checked as an active one).
+    # layer 12e, choice 76 as answered: an open case's release is checked as an active one).
     store = released(tmp_path / "releases")
     reworded_and_released(store)
 
