@@ -46,11 +46,13 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.freshness import TimeRefused
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
     from ventoux.case.releases import Hash, Record, is_release
+    from ventoux.case.requests import ChangeRefused
     from ventoux.case.runtime import CaseRefused, EventRefused, ShownRefused, decide
     from ventoux.case.state import (
         Answered,
         CancelWorkflow,
         CaseState,
+        ChangeProposed,
         CloseAsked,
         Command,
         Completed,
@@ -169,6 +171,20 @@ class CaseForget:
     proposer_roles: list[str]  # their roles, stated with the proposal (brief, D22)
     approved_by: str  # who approved it
     approver_roles: list[str]  # their roles, stated with the approval
+
+
+@dataclass
+class CaseChange:
+    """A change request, as a person proposes it to a case: an edit of a field's value, or a
+    skip of a failed run; someone else approves it (brief, D52)."""
+
+    kind: str  # `edit` or `skip`
+    target: str  # the field to edit, or the run to skip (`pay#1`)
+    # An edit's new value, sealed: the client can't tell which fields are sensitive (brief, D31);
+    # None for a skip.
+    value: Any
+    by: str  # who proposes it, as the trusted caller states (brief, D19)
+    roles: list[str]  # their roles, stated with the proposal (brief, D22)
 
 
 @dataclass
@@ -301,6 +317,13 @@ class CaseWorkflow:
                 frozenset(sent.approver_roles),
                 at=now(),
             )
+        )
+
+    @workflow.signal(name="change")
+    def change(self, sent: CaseChange) -> None:
+        roles = frozenset(sent.roles)
+        self.inbox.append(
+            ChangeProposed(sent.kind, sent.target, sent.value, sent.by, roles, at=now())
         )
 
     @workflow.signal(name="shown")
@@ -446,6 +469,7 @@ class CaseWorkflow:
                 ShownRefused,
                 ForgetRefused,
                 EventRefused,
+                ChangeRefused,
             ) as refused:
                 # In memory a refusal raises to the test; here nobody is there to catch it. It is
                 # recorded, and the case waits on as if it hadn't come: `decide` changed nothing
@@ -796,6 +820,8 @@ def asked(event: Event) -> str:
         return f"the record of {event.field} shown to {event.by}"
     if isinstance(event, ForgetApproved):
         return f"forgetting the case, approved by {event.approved_by}"
+    if isinstance(event, ChangeProposed):
+        return f"{event.by}'s proposal to {event.kind} {event.target}"  # never the value
     if isinstance(event, Sent):
         return f"{event.event} from {event.by}"  # who sent it, never what it carries
     return type(event).__name__  # only people's requests are refused; anything else is a bug
@@ -908,6 +934,23 @@ async def close(
 ) -> None:
     """Close the case with the declared `reason`, as the person `by` (brief, D10)."""
     await case.signal(CaseWorkflow.close, CaseRequest(reason, by, sorted(roles)))
+
+
+async def propose_change(
+    case: WorkflowHandle[CaseWorkflow, CaseReport],
+    kind: str,
+    target: str,
+    value: Any,
+    by: str,
+    roles: list[str],
+) -> None:
+    """Propose a change to the case, as the person `by`, who has `roles`: `edit` the field
+    `target` to `value`, or `skip` the failed run `target` (`pay#1`) with `value` None. Someone
+    else approves it by answering its entry (`case.change#1`, as `report` shows it in
+    `waiting_at`). An edit's value crosses sealed, as an answer's form does (brief, D31)
+    (brief, D52)."""
+    sealed = None if value is None else Sensitive(value)
+    await case.signal(CaseWorkflow.change, CaseChange(kind, target, sealed, by, sorted(roles)))
 
 
 async def shown(
