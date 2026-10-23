@@ -97,8 +97,11 @@ class RegistryWorkflow:
     # (brief, D27).
     requests_per_run: ClassVar[int] = 500
 
-    def __init__(self) -> None:
-        self.registry = Registry("")  # read from the start
+    # Temporal: `workflow.init` gives `__init__` the run's start, so an Update that arrives with the
+    # start, in the same workflow task, already reads the registry, never an empty one.
+    @workflow.init
+    def __init__(self, start: RegistryStart) -> None:
+        self.registry = start.registry
         self.decided = 0  # requests this run has decided
         # Temporal: an async handler may wait (a retirement asks Temporal about cases); the lock
         # keeps requests one at a time, in the order they came.
@@ -106,7 +109,6 @@ class RegistryWorkflow:
 
     @workflow.run
     async def run(self, start: RegistryStart) -> None:
-        self.registry = start.registry
         # Temporal: switch only once no Update is part-way, so none is carried as a queue.
         await workflow.wait_condition(
             lambda: (
@@ -229,9 +231,7 @@ def missing(environment: str) -> str:
     )
 
 
-def registry_worker(
-    client: Client, registry: type[RegistryWorkflow] = RegistryWorkflow
-) -> Worker:
+def registry_worker(client: Client, registry: type[RegistryWorkflow] = RegistryWorkflow) -> Worker:
     """A worker for every environment's registry, on its own queue, and the activity it runs.
     A deployment can run it in the same process as a case worker."""
     activities = RegistryActivities(client)

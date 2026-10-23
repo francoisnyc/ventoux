@@ -46,6 +46,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.freshness import TimeRefused
     from ventoux.case.migrations import migration_of
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
+    from ventoux.case.registry import Answer, Moving, Opening, Released
     from ventoux.case.releases import Hash, Record, is_release
     from ventoux.case.requests import ChangeRefused
     from ventoux.case.runtime import (
@@ -90,8 +91,26 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.temporal.carried import state_as_data, state_from_data
     from ventoux.temporal.converter import keys_of
     from ventoux.temporal.options import activity_options
+    from ventoux.temporal.registry import CALL, Asked
     from ventoux.temporal.workflow import Given, PlanStart, RunReport, raised
     from ventoux.tooling.keys import FORGOTTEN
+
+
+# The patch marker a case in an environment records at its opening, once 12e asks its registry: a
+# history without it, recorded before, replays without asking (brief, D51).
+REGISTRY_PATCH = "ventoux-registry"
+
+# What a person's request may be refused with: recorded, and the case waits on.
+REFUSALS = (
+    AnswerRefused,
+    ProposalRefused,
+    RetryRefused,
+    CloseRefused,
+    ShownRefused,
+    ForgetRefused,
+    EventRefused,
+    ChangeRefused,
+)
 
 
 class StartUnread(Exception):
@@ -127,6 +146,9 @@ class CaseStart:
     # The release it opens on, crossing every continue-as-new with the definition; None: a draft,
     # as every case before 12b (brief, D51).
     release: ReleaseStart | None = None
+    # The environment whose registry it asked as it opened, and asks as it moves and closes,
+    # crossing every continue-as-new; None: none, as every case opened before 12e (brief, D5).
+    environment: str | None = None
 
 
 @dataclass
@@ -335,6 +357,8 @@ class CaseWorkflow:
         # for a draft (brief, D51).
         self.its_plans: Mapping[str, Any] = self.plans
         self.release: ReleaseStart | None = None  # the release it runs; None: a draft
+        # The environment whose registry it asks; None: none (brief, D5).
+        self.registered: str | None = None
         self.inbox: list[Event] = []  # events not yet decided, in the order they came
         self.decided = 0  # events this run has decided
         self.running = 0  # activities and child plans started and not yet back
@@ -501,12 +525,14 @@ class CaseWorkflow:
             self.definition = start.definition  # as stored data, for the next run's start
             named = None if start.release is None else self.released_on(case, start.release)
             if start.carried is None:
+                await self.ask_to_open()
                 opened = Opened(
                     start.file, start.opened_by, at=now(), engine=engine(), release=named
                 )
                 self.decide(case, opened)
             else:
                 self.state = state_from_data(start.carried)  # a case continued as new
+                self.registered = start.environment
         except (CaseInvalid, CaseRefused) as refused:
             if start.carried is not None:
                 # A run continued as new: its start was read and checked when the case opened, so
@@ -539,21 +565,17 @@ class CaseWorkflow:
             event = self.inbox.pop(0)
             try:
                 names_its_entry(event, self.state)
+                await self.ask_to_move(event)
                 self.decide(self.case, event)
-            except (
-                AnswerRefused,
-                ProposalRefused,
-                RetryRefused,
-                CloseRefused,
-                ShownRefused,
-                ForgetRefused,
-                EventRefused,
-                ChangeRefused,
-            ) as refused:
+            except REFUSALS as refused:
                 # In memory a refusal raises to the test; here nobody is there to catch it. It is
                 # recorded, and the case waits on as if it hadn't come: `decide` changed nothing
                 # (8b, slice 0). Never queued for later (layer 6).
                 self.state.history.append(f"refused {asked(event)}: {refused}")
+        if self.registered is not None:
+            # Its registry lists it open until it says it closed: retried until the registry
+            # answers, so the workflow can't end while its registry is unreachable (brief, D5).
+            await self.ask_registry(Asked(self.registered, closing=workflow.info().workflow_id))
         # What came with the close, still in the inbox, is refused and recorded, never dropped
         # while its sender's send succeeded (brief, D41, as added in 11d's tutor review). Only a
         # line of history, no command, so replay decides the same; and Temporal fails a
@@ -562,6 +584,55 @@ class CaseWorkflow:
             self.state.history.append(f"refused {asked(event)}: the case is closed")
         self.inbox.clear()
         return self.report()
+
+    async def ask_to_open(self) -> None:
+        """In an environment, ask its registry whether the case may open: on its package's
+        active release, with that digest, on the queue it was activated on; a draft only where
+        drafts run. Refused, `CaseRefused`, and nothing is decided (brief, D51). The answer comes
+        from an activity, recorded in this history: a replay reads it there, and never asks
+        again. Behind a patch, so a case opened before 12e replays as it was recorded."""
+        if self.environment is None or not workflow.patched(REGISTRY_PATCH):
+            return
+        self.registered = self.environment
+        info = workflow.info()
+        released = None
+        if self.release is not None:
+            released = Released(self.release.name, self.release.release, self.release.digest)
+        answer = await self.ask_registry(
+            Asked(self.environment, opening=Opening(info.workflow_id, info.task_queue, released))
+        )
+        if not answer.done:
+            raise CaseRefused(answer.said[0])
+
+    async def ask_to_move(self, event: Event) -> None:
+        """Before an answer that would apply a migration, ask the case's registry whether the
+        target may run here: activated, not retired, with its digest. Found by deciding the
+        answer on a copy first: `decide` is pure, so the copy decides exactly what the case
+        would. Refused, `ChangeRefused`, recorded as a refused answer, and the request waits on
+        (brief, D53)."""
+        if self.registered is None or not isinstance(event, Answered):
+            return
+        try:
+            _, commands = decide(self.case, self.catalog, self.state, event)
+        except REFUSALS:
+            return  # the case refuses it itself, as always
+        for command in commands:
+            if isinstance(command, UseRelease):
+                target = command.migration
+                digest = Hash(target.method, target.sha256)
+                moving = Moving(
+                    workflow.info().workflow_id, Released(target.name, target.release, digest)
+                )
+                answer = await self.ask_registry(Asked(self.registered, moving=moving))
+                if not answer.done:
+                    raise ChangeRefused(answer.said[0])
+
+    async def ask_registry(self, asked: Asked) -> Answer:
+        """The registry's answer, through the case worker's activity, retried until it comes."""
+        answer: Answer = await workflow.execute_activity(
+            "ventoux.registry.asked", asked, start_to_close_timeout=CALL, result_type=Answer
+        )
+        return answer
 
     def released_on(self, case: Any, release: ReleaseStart) -> str:
         """The release's name, `refund 1`, once the case has checked that what it was given is
@@ -621,7 +692,12 @@ class CaseWorkflow:
         assert not self.inbox and self.running == 0 and workflow.all_handlers_finished()
         # The definition and release it runs now, which a migration may have moved (brief, D53).
         carried = CaseStart(
-            self.definition, {}, start.opened_by, state_as_data(self.state), self.release
+            self.definition,
+            {},
+            start.opened_by,
+            state_as_data(self.state),
+            self.release,
+            self.registered,
         )
         # Temporal: ends this run and starts the next one of the same workflow, with `carried`.
         workflow.continue_as_new(carried)

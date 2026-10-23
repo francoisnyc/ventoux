@@ -15,7 +15,8 @@ from ventoux.case.releases import Hash
 
 @dataclass(frozen=True)
 class Bound:
-    """Where a case worker runs a workflow contract: its workflow type and task queue (D29)."""
+    """Where a case worker runs a workflow contract: its workflow type and task queue
+    (brief, D29)."""
 
     workflow: str  # the workflow type its team's worker registers
     task_queue: str  # the task queue that worker polls
