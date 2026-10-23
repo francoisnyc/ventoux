@@ -1,0 +1,31 @@
+{
+  "plan": "review-and-pay",
+  "version": 1,
+  "display": {"title": "Review a refund, then pay it", "description": "A wait, an approval, and a payment."},
+  "fields": {
+    "order_id": {"type": "reference", "system": "orders"},
+    "approved_amount": {"type": "number"},
+    "note": {"type": "string", "source": "untrusted:customer"}
+  },
+  "initial": "review",
+  "states": {
+    "review": {
+      "wait": {"outcomes": ["accept", "reject"], "roles": ["support"],
+               "sets": {"accept": ["approved_amount"]}, "timeout": "48h"},
+      "on": {"accept": [{"target": "approve_refund", "when": {">": [{"var": "approved_amount"}, 0]}},
+                        {"target": "failed"}],
+             "reject": "failed", "timeout": "failed"}
+    },
+    "approve_refund": {
+      "approval": {"of": "pay", "roles": ["support-lead"], "timeout": "24h"},
+      "on": {"approve": "pay", "reject": "failed", "timeout": "failed"}
+    },
+    "pay": {
+      "activity": "payments.refund@2",
+      "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
+      "on": {"done": "paid", "declined": "failed"}
+    },
+    "paid": {"final": "succeeded"},
+    "failed": {"final": "failed"}
+  }
+}

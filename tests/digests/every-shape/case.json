@@ -1,0 +1,185 @@
+{
+  "case": "every-shape",
+  "display": {
+    "title": "Every shape",
+    "description": "A case that uses every shape of the format, so method 1's digests are pinned for each."
+  },
+  "fields": {
+    "customer_id": {"type": "reference", "system": "crm", "display": {"title": "Customer"}},
+    "order_id": {"type": "reference", "system": "orders", "display": {"title": "Order"}},
+    "national_id": {
+      "type": "string",
+      "sensitive": true,
+      "visible_to": ["claims-sensitive"],
+      "display": {"title": "National ID"}
+    },
+    "note": {"type": "string", "source": "untrusted:customer", "display": {"title": "Note"}},
+    "amount": {"type": "number", "display": {"title": "Amount"}},
+    "urgent": {"type": "boolean", "display": {"title": "Urgent"}},
+    "verdict": {"type": "outcome", "outcomes": ["fair", "unfair"], "display": {"title": "Verdict"}},
+    "items": {
+      "type": "list",
+      "fields": {"price": {"type": "number"}, "kind": {"type": "string"}},
+      "display": {"title": "Items"}
+    }
+  },
+  "milestones": {
+    "checked": {"display": {"title": "Checked"}},
+    "paid": {"display": {"title": "Paid"}},
+    "flagged": {"display": {"title": "Flagged"}}
+  },
+  "steps": {
+    "review": {
+      "kind": "task",
+      "display": {"title": "Review the request"},
+      "roles": ["support"],
+      "reaches": ["checked"],
+      "outcomes": {
+        "approve": {
+          "display": {"title": "Approve"},
+          "sets": ["amount"],
+          "reaches": ["flagged"]
+        },
+        "reject": {"display": {"title": "Reject"}}
+      }
+    },
+    "kyc": {
+      "kind": "workflow",
+      "display": {"title": "Check the customer"},
+      "workflow": "kyc.check@1",
+      "inputs": {"customer_id": {"var": "customer_id"}},
+      "requires": ["review"],
+      "when": {"and": [
+        {"==": [{"var": "review.outcome"}, "approve"]},
+        {"or": [{"var": "urgent"}, {"!": [{"exists": "verdict"}]}]}
+      ]},
+      "automatic": false,
+      "proposed_by": ["support"],
+      "repeatable": true,
+      "max_age": {"review.outcome": "1d"},
+      "reaches": ["checked"],
+      "approval": {
+        "when": {">=": [{"var": "amount"}, 100]},
+        "roles": ["support-lead"],
+        "count": 2,
+        "display": {"reason": "Two team leads check large amounts"}
+      }
+    },
+    "lookup": {
+      "kind": "activity",
+      "display": {"title": "Look the order up"},
+      "activity": "orders.lookup@1",
+      "inputs": {"order_id": {"cat": ["ord-", {"string": [{"var": "amount"}]}]}},
+      "requires": ["review"],
+      "when": {"if": [
+        {"<": [{"count": {"over": {"var": "items"}, "where": {"==": [{"item": "kind"}, "gift"]}}}, 2]},
+        {"<=": [{"sum": {"over": {"var": "items"}, "where": {"!=": [{"item": "kind"}, "fee"]}, "value": {"*": [{"item": "price"}, 2]}}}, 500]},
+        {"!=": [{"var": "verdict"}, "unfair"]}
+      ]},
+      "automatic": false,
+      "proposed_by": ["support"],
+      "repeatable": true,
+      "max_age": {"amount": "12h"},
+      "reaches": ["checked"]
+    },
+    "arrival": {
+      "kind": "wait",
+      "display": {"title": "Wait for the customer's documents"},
+      "event": "documents",
+      "requires": ["review"],
+      "when": {"in": [{"var": "verdict"}, ["fair"]]},
+      "automatic": false,
+      "proposed_by": ["support"],
+      "repeatable": true,
+      "reaches": ["checked"]
+    },
+    "settle": {
+      "kind": "plan",
+      "display": {"title": "Settle the request"},
+      "plan": "review-and-pay@1",
+      "inputs": {"order_id": {"var": "order_id"}, "note": {"var": "note"}},
+      "requires": ["review"],
+      "when": {">": [{"/": [{"+": [{"var": "amount"}, 10]}, {"-": [3, 1]}]}, 0]},
+      "automatic": false,
+      "proposed_by": ["support"],
+      "repeatable": true,
+      "max_age": {"amount": "30m"},
+      "reaches": ["paid"]
+    },
+    "chase": {
+      "kind": "task",
+      "display": {"title": "Chase the review"},
+      "roles": ["support"],
+      "repeatable": true,
+      "automatic": false,
+      "proposed_by": ["support-lead"],
+      "outcomes": {"chased": {"display": {"title": "Chased"}}}
+    }
+  },
+  "events": {
+    "documents": {
+      "display": {"title": "Documents received"},
+      "sent_by": {"system": "portal"},
+      "payload": {
+        "pages": {"type": "number", "display": {"title": "Pages"}},
+        "summary": {"type": "string", "source": "untrusted:llm", "display": {"title": "Summary"}}
+      }
+    },
+    "complaint": {
+      "display": {"title": "A complaint"},
+      "sent_by": {"roles": ["support"]},
+      "payload": {}
+    }
+  },
+  "rules": {
+    "on_opening": {
+      "display": {"title": "Flag an urgent request"},
+      "on": "opened",
+      "when": {"var": "urgent"},
+      "then": {"reach": ["flagged"]}
+    },
+    "on_start": {
+      "display": {"title": "Stop the lookup once kyc starts"},
+      "on": {"started": "kyc"},
+      "then": {"stop": ["lookup"]}
+    },
+    "on_milestone": {
+      "display": {"title": "Start settling once checked"},
+      "on": {"reached": "checked"},
+      "then": {"start": ["settle"]}
+    },
+    "on_answer": {
+      "display": {"title": "Mark a large amount urgent"},
+      "on": {"answered": "review"},
+      "then": {"set": {"urgent": {">": [{"var": "amount"}, 1000]}}}
+    },
+    "on_event": {
+      "display": {"title": "Flag a complaint"},
+      "on": {"event": "complaint"},
+      "then": {"reach": ["flagged"]}
+    },
+    "on_time": {
+      "display": {"title": "Chase a review left two days"},
+      "on": {"after": "2d", "since": {"started": "review"}},
+      "when": {"!=": [{"var": "urgent"}, true]},
+      "then": {"start": ["chase"]}
+    },
+    "review_sla": {
+      "display": {"title": "Chase a review not done within five days"},
+      "sla": {"step": "review", "within": "5d"},
+      "when": {"var": "urgent"},
+      "then": {"start": ["chase"]}
+    },
+    "remind_review": {
+      "display": {"title": "Remind the reviewer"},
+      "reminder": {"task": "review", "after": ["1d", "3d"], "start": "chase"},
+      "when": {"!": [{"var": "urgent"}]}
+    }
+  },
+  "close_reasons": {
+    "duplicate": {"display": {"title": "Duplicate"}, "roles": ["support"]}
+  },
+  "closes_when": ["paid"],
+  "stays_open": true,
+  "forgetting": "while_open"
+}
