@@ -83,6 +83,12 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.tooling.keys import FORGOTTEN
 
 
+class StartUnread(Exception):
+    """A run continued as new whose start, read and checked when the case opened, no longer reads
+    or no longer gives its release's digest: a change of code. Not a refusal of the case: it fails
+    the workflow task, retried until code that reads it is deployed (brief, D17) (brief, D51)."""
+
+
 class CaseForgotten(Exception):
     """A forgotten case read for what it held: its key is gone (brief, D32)."""
 
@@ -397,6 +403,15 @@ class CaseWorkflow:
             else:
                 self.state = state_from_data(start.carried)  # a case continued as new
         except (CaseInvalid, CaseRefused) as refused:
+            if start.carried is not None:
+                # A run continued as new: its start was read and checked when the case opened, so
+                # one that no longer reads, or no longer gives its release's digest, means the code
+                # changed. The workflow task fails, and the case waits for code that reads it,
+                # never failed for good (brief, D17) (brief, D51).
+                raise StartUnread(
+                    f"{info.workflow_id} can't read the start it continued with: {refused}: deploy "
+                    "code that reads it"
+                ) from None
             # A case that can't open fails at once, saying why. Any other exception fails only the
             # workflow task, which Temporal retries until fixed code is deployed (brief, D17).
             kind = type(refused).__name__

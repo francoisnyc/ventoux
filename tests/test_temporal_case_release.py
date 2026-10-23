@@ -10,6 +10,7 @@ import copy
 import json
 import shutil
 from collections.abc import Awaitable, Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
@@ -24,6 +25,8 @@ from temporalio.client import (
     WorkflowHistory,
 )
 from temporalio.exceptions import ApplicationError
+from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import Worker
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_temporal_approvals import EveryEventCases
@@ -43,14 +46,16 @@ from test_temporal_case import (
     unapproved_refund_order,
 )
 
-from ventoux.case.releases import Record
+from ventoux.case.releases import Hash, Record
 from ventoux.case.state import CaseState
 from ventoux.temporal import client as plans
+from ventoux.temporal.activities import plan_activities
 from ventoux.temporal.carried import state_as_data
 from ventoux.temporal.cases import (
     CaseReport,
     CaseStart,
     CaseWorkflow,
+    ReleaseStart,
     WordingRefused,
     answer,
     approval_sheet,
@@ -63,7 +68,16 @@ from ventoux.temporal.cases import (
     wording_of,
 )
 from ventoux.temporal.converter import keys_of
-from ventoux.testing import CATALOG, START, DevelopmentCases, fixture_converter
+from ventoux.temporal.worker import SANDBOX
+from ventoux.testing import (
+    CATALOG,
+    FAKES,
+    START,
+    DevelopmentCases,
+    DevelopmentPlans,
+    development_converter,
+    fixture_converter,
+)
 from ventoux.tooling.releases import FolderStore, release
 
 HERE = Path(__file__).parent / "histories"
@@ -398,3 +412,99 @@ def test_the_guides_release_example_runs_as_written(tmp_path: Path) -> None:
     now = on_temporal(scenario)
     assert now.history[: len(shown)] == shown
     assert (now.release, now.engine) == ("refund 1", 1)
+
+
+# --- From the tutor review: a continued run that can't read its start waits for its code ---
+
+
+# Temporal: a worker whose code no longer gives the release's digest, as a later change to method
+# 1 would: it reads every release's digest as all zeros. Same workflow name, so it picks up the
+# case's next workflow task.
+@workflow.defn(name="ventoux.case")
+class DigestChanged(CaseWorkflow):
+    catalog = DevelopmentCases.catalog
+    events_per_run = 1
+
+    def released_on(self, case: Any, release: ReleaseStart) -> str:
+        return super().released_on(case, replace(release, digest=Hash(1, "0" * 64)))
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+def test_a_continued_run_whose_digest_changed_waits_for_its_code(tmp_path: Path) -> None:
+    # The case opened and continued as new on code that gave its release's digest; the code then
+    # changes and no longer gives it. The next run's workflow task fails, and the case waits,
+    # running, never failed for good; code that gives it again lets the case go on (brief, D17,
+    # D51).
+    refund_1 = released(tmp_path, proposed=True)
+
+    async def scenario() -> tuple[list[str], bool, CaseReport]:
+        environment = await WorkflowEnvironment.start_time_skipping(
+            data_converter=development_converter()
+        )
+        async with environment:
+            client = environment.client
+
+            def serving(cases: type[CaseWorkflow]) -> Worker:
+                # Temporal: with no workflow cached, each task goes to the queue every worker
+                # polls, never to a stopped worker's own, so the next worker takes it at once.
+                return Worker(
+                    client,
+                    task_queue=QUEUE,
+                    workflows=[cases, DevelopmentPlans],
+                    activities=plan_activities(cases.catalog, FAKES),
+                    activity_executor=ThreadPoolExecutor(),
+                    workflow_runner=SANDBOX,
+                    max_cached_workflows=0,
+                )
+
+            async with serving(EveryEventCases):
+                case = await start_case(client, EveryEventCases, refund_1, LARGE, "refund-1", QUEUE)
+                await reported(case, lambda now: now.waiting_at == ["review#1"])
+                first, current = await runs_of(client, "refund-1")
+                assert current != first  # it has continued as new since it opened
+            async with serving(DigestChanged):
+                await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
+                for _ in range(100):
+                    kinds = kinds_of(await case.fetch_history())
+                    if "EVENT_TYPE_WORKFLOW_TASK_FAILED" in kinds:
+                        break
+                    await asyncio.sleep(0.05)
+                running = (await case.describe()).status == WorkflowExecutionStatus.RUNNING
+            async with serving(EveryEventCases):
+                now = await reported(case, lambda now: "review#1 done" in now.history)
+            return kinds, running, now
+
+    kinds, running, now = asyncio.run(asyncio.wait_for(scenario(), timeout=60))
+    assert "EVENT_TYPE_WORKFLOW_TASK_FAILED" in kinds
+    assert running
+    assert (now.status, now.release) == ("open", "refund 1")
+
+
+def test_a_continued_run_whose_definition_no_longer_reads_waits_for_its_code() -> None:
+    # The same for a definition that read when the case opened and no longer does on a later
+    # run: a change of code, never a reason to fail the case for good (brief, D17, D51).
+    async def scenario(client: Client) -> tuple[list[str], bool]:
+        carried = state_as_data(CaseState("refund-1/run-1"))
+        unreadable = REFUND | {"stays_open": "yes"}
+        keys_of(client).create("refund-1")
+        case = await client.start_workflow(
+            DevelopmentCases.run,
+            CaseStart(unreadable, {}, None, carried),
+            id="refund-1",
+            task_queue=QUEUE,
+        )
+        for _ in range(100):
+            kinds = kinds_of(await case.fetch_history())
+            if "EVENT_TYPE_WORKFLOW_TASK_FAILED" in kinds:
+                break
+            await asyncio.sleep(0.05)
+        running = (await case.describe()).status == WorkflowExecutionStatus.RUNNING
+        await case.terminate()
+        return kinds, running
+
+    kinds, running = on_temporal(scenario)
+    assert "EVENT_TYPE_WORKFLOW_TASK_FAILED" in kinds
+    assert running
