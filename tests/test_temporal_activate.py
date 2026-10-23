@@ -21,11 +21,9 @@ from temporalio.runtime import Runtime, TelemetryConfig
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from test_temporal_case import LARGE, reported
-from test_temporal_registry import ProductionCases
+from test_temporal_registry import ProductionCases, refund_timed
 
 from ventoux.case.memory import Activity
-from ventoux.core.catalog import Catalog
-from ventoux.core.contract import ActivityContract
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow, start_case
 from ventoux.temporal.manifests import environment_worker
 from ventoux.temporal.registry import create_environment, pollers, registry_worker
@@ -105,27 +103,10 @@ async def second_client(address: str) -> Client:
     )
 
 
-def catalog_where_refund_differs() -> Catalog:
-    """The development catalog, but with payments.refund@2 given another timeout: what a build
-    from a branch that changed a contract without a new version would serve."""
-    other = Catalog()
-    for label in CATALOG.labels:
-        other.register_label(label)
-    for system in CATALOG.systems:
-        other.register_system(system)
-    for contract in CATALOG.contracts():
-        if isinstance(contract, ActivityContract) and contract.reference == "payments.refund@2":
-            contract = contract.model_copy(
-                update={"timeouts": contract.timeouts.model_copy(update={"start_to_close": 99})}
-            )
-        other.register(contract)
-    return other
-
-
 # Temporal: a case workflow whose catalog serves another payments.refund@2.
 @workflow.defn(name="ventoux.case")
 class OtherBuildCases(ProductionCases):
-    catalog = catalog_where_refund_differs()
+    catalog = refund_timed(start_to_close=99)  # another timeout: another hash
 
     @workflow.run
     async def run(self, start: CaseStart) -> CaseReport:

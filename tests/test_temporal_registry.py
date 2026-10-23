@@ -21,12 +21,23 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from test_migrations import PEOPLE, REFUND_1, REFUND_2
 from test_temporal_approvals import EveryEventCases
-from test_temporal_case import LARGE, REFUND, on_temporal, replay, reported
+from test_temporal_case import (
+    LARGE,
+    REFUND,
+    SMALL,
+    SMALL_FORM,
+    on_temporal,
+    replay,
+    reported,
+    skipping,
+)
 from test_temporal_case_release import markers_of
 
 from ventoux.case.activation import Bound, Manifest
 from ventoux.case.registry import Activating, Answer, Opening, Released
 from ventoux.case.releases import METHOD, Hash, Record
+from ventoux.core.catalog import Catalog
+from ventoux.core.contract import ActivityContract
 from ventoux.core.contract_hash import contract_hash
 from ventoux.temporal.bindings import Binding
 from ventoux.temporal.cases import (
@@ -530,3 +541,52 @@ def test_a_cohort_is_the_releases_open_cases() -> None:
     seen = in_production(scenario)
     assert list(seen) == ["refund-1", "refund-2"]
     assert all(preview.refused == [] for preview in seen.values())
+
+
+# --- Slice 7: D5's second line ---
+
+
+def refund_timed(**timeouts: int) -> Catalog:
+    """The development catalog, but with payments.refund@2's timeouts changed: what a build from
+    a branch that changed a contract without a new version would serve, or a contract a test can
+    wait out."""
+    other = Catalog()
+    for label in CATALOG.labels:
+        other.register_label(label)
+    for system in CATALOG.systems:
+        other.register_system(system)
+    for contract in CATALOG.contracts():
+        if isinstance(contract, ActivityContract) and contract.reference == "payments.refund@2":
+            changed = contract.timeouts.model_copy(update=timeouts)
+            contract = contract.model_copy(update={"timeouts": changed})
+        other.register(contract)
+    for role in ("support", "support-lead"):
+        other.register_role(role, approves=CATALOG.roles[role])
+    return other
+
+
+# Temporal: development cases whose refund waits at most 2 s for a worker to pick it up: the
+# time-skipping server waits out an activity's timeouts in real time, never skipping them.
+@workflow.defn(name="ventoux.case")
+class QuicklyTimedOut(CaseWorkflow):
+    catalog = refund_timed(schedule_to_start=2)
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+def test_an_activity_nobody_picks_up_needs_attention() -> None:
+    # The case worker serves no activity at all, so nobody polls for payments.refund@2: past its
+    # contract's schedule-to-start timeout the step fails loudly, never retried (Temporal doesn't
+    # retry that timeout), and the case needs attention, never waits silently (brief, D5)
+    # (brief, D17).
+    async def scenario(environment: WorkflowEnvironment) -> CaseReport:
+        client = environment.client
+        case = await start_case(client, QuicklyTimedOut, REFUND, SMALL, "refund-1", "cases")
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], SMALL_FORM)
+        return await reported(case, lambda now: bool(now.needs_attention))
+
+    now = skipping(scenario, {}, QuicklyTimedOut)
+    assert now.needs_attention == ["pay#1: payments.refund@2 failed with TimeoutError: ‹sensitive›"]
+    assert now.status == "open"
