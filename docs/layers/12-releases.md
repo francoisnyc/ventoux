@@ -741,6 +741,7 @@ and every test 12b added to `R`, is named here.
 Status: drafted 2026-10-23, from `main` at `5801ca0` (12b merged, #43); the histories from
 before 12c recorded and replayed first (slice 0). Answered "all as recommended" the same day:
 choices 29 to 41. The warm-up (learning question 37's follow-up) put and not answered, left open.
+Built the same day, slices 0 to 7; see "Decided while building" and the Promises table.
 
 User-facing description, written first once you agree: `docs/guides/cases.md`, "Changing an open
 case". Decision: brief D52, drafted with it.
@@ -944,12 +945,14 @@ Numbered on from 12b's. Answer by number.
 
 ### Seams the tests use
 
-- `run_case(...)` with a script's `propose_change(kind, …, by)` and answers to `change#n`;
-  `history`, `waiting_for`, `needs_attention`, `closed`.
-- `parse_case`, the catalog's `register_role(..., edits=True)`.
-- On Temporal: `propose_change(case, …)`, `answer(case, "change#1", …)`, `report`, the `Replayer` on
-  fixtures recorded before 12c, and a forget request (`propose_forget`, `answer_forget`).
-- The guide's example, run as written.
+- `run_case(...)` with a script's `edit(field, value, by)` and `skip(run, by)`, and answers to
+  `case.change#n`; `history`, `waiting_for`, `needs_attention`, `closed`, `state`.
+- `parse_case`, `decide` (for what a script can't send: a value in plain text, a later run beside
+  a failed one), and the catalog's `register_role(..., edits=True)`.
+- On Temporal: `propose_change(case, kind, target, value, by, roles)`, `answer(case,
+  "case.change#1", …)`, `report`, the `Replayer` on fixtures recorded before 12c, and a forget
+  request (`propose_forget`, `answer_forget`).
+- The guide's examples, run as written.
 
 ### Slices, in order
 
@@ -969,24 +972,74 @@ Each starts with its negative test, seen failing for the right reason.
 6. **Forgetting under the same rules:** engine version 2, its marker, the old branch.
 7. **The guide, D52, the Promises table checked.**
 
-### Promises (draft)
+### Decided while building
 
-Named before the tests are written; checked against them before the pull request. `Q` is
-`tests/test_change_requests.py` (new), `T` is `tests/test_temporal_change_requests.py` (new).
+- **Requests are `case.change#1`, not `change#1`:** a name is `[a-z][a-z0-9_]*`, so a step may be
+  named `change`, and its runs would share the entries. A dot no name holds keeps them apart, as
+  `pay.approval#1` does. Reserving `change` instead would refuse a definition that reads today,
+  which on a continued run is a change of behaviour (D51).
+- **The lines, as built:** a proposal says `to be approved by support or support-lead` (choice 38
+  wrote `approved by`, which reads as done); an approval's line is an answer's, `lee answered
+  case.change#1 approve as support-lead`, as for an approval; a rejection adds `case.change#1 not
+  applied: lee rejected it`. Skipping adds no line beyond `applied case.change#1: pay#1 skipped by
+  omar, approved by olga`.
+- **Nobody proposes or approves an edit of a field hidden from them** (D30: an approver judges
+  what they see), which the choices didn't list; and **an edit of a field that holds no value
+  yet is refused:** it would give a first value no step asked for.
+- **An approval spent on a failed run lapses with the edit.** It stays with the run for its retry
+  (D26), so `follow` never sees it, and the retry would stop on it for ever (`the inputs of pay
+  changed since sam approved them`), keeping it each time. The edit lapses it (`lapsed
+  pay.approval#1: approved_amount changed`), and the retry asks again: choice 35's "asked again,
+  never needing attention", for the one approval the existing code didn't follow.
+- **The request to forget asks who opened the case,** when someone approves, from the case's
+  start (a new activity, `ventoux.forget.opener`, behind the patch `ventoux-forget-opener`, so
+  the request recorded in slice 0 replays). Without it, a request whose approval the case
+  refuses would wait for the case to end, then destroy its key when it closed for any other
+  reason. It refuses anyone if who opened the case can't be told. So a request proposed now
+  refuses the opener on an engine 1 case too; the case's engine 1 branch decides only histories
+  approved before.
+- **Every new case writes the marker `ventoux-engine-2`,** a draft included: the engine decides
+  drafts too. 12b's tests that said no marker is written now say this one is; the version they
+  call unknown is 3.
+- **A held close takes edits too:** they start nothing. Choice 39's exception is the held close
+  (open, its milestones reached); a close that has begun cancels the failed run itself, and with
+  it any skip of it. A case closing with nothing left to do cancels its pending requests too:
+  `cancelled case.change#1: nothing left to do`.
+- **Not built:** skipping a failed rule's firing. It holds a close as a failed run does, and is
+  retried, or the case closed (D38); a kind for it is one more function when it is needed.
+- **The guide's Temporal example passes `Decimal("250")`:** written `250`, it was refused (`the
+  edit gives an int`) when the test ran it, as numbers are exact decimals (D20).
+- **The development catalog lets `support` and `support-lead` edit,** so the guide's Ana proposes
+  and Lee approves.
+
+### Promises
+
+Checked against the tests before the pull request. `Q` is `tests/test_change_requests.py`, `T` is
+`tests/test_temporal_change_requests.py`, both new. Each test was seen failing for the right
+reason, or, where the seam already held the rule, the rule was taken out and its test seen
+failing.
 
 | Promise | Test |
 |---|---|
-| A change is never approved by its proposer, nor by the case's opener | Q `test_a_self_approved_change_is_refused`, `test_the_opener_approves_no_change` |
-| An edit excludes whoever's answer gave the field its value; a skip whoever the failed run excluded, proposed or approved | Q `test_an_edit_excludes_the_values_writer`, `test_a_skip_excludes_who_the_run_excluded` |
-| A request is checked when proposed and again when applied, against the case then | Q `test_a_proposal_is_checked_when_made`, `test_an_edit_whose_field_changed_is_not_applied`, `test_a_skip_of_a_run_retried_meanwhile_is_not_applied` |
-| An edited value's sources are its proposer and approver; a declared untrusted mark stays | Q `test_an_edited_value_is_its_deciders` |
-| An edit to the value already held is refused, so an untrusted value is never made a person's | Q `test_an_edit_never_launders_a_value` |
+| A change is never approved by its proposer, nor by the case's opener | Q `test_a_self_approved_change_is_refused`, `test_a_self_approved_skip_is_refused`, `test_the_opener_approves_no_change`, `test_a_skip_excludes_who_the_run_excluded` |
+| A kind, an outcome or a role the engine doesn't know is refused | Q `test_what_a_request_doesnt_know_is_refused` |
+| A rejected request changes nothing, and is closed | Q `test_a_rejected_change_changes_nothing` |
+| An edit excludes whoever's answer gave the field its value, and anyone it is hidden from | Q `test_an_edit_excludes_the_values_writer`, `test_an_edit_is_judged_by_people_who_see_it` |
+| A skip excludes whoever the failed run excluded, proposed or approved, and whoever's answer flows into it | Q `test_a_skip_excludes_who_the_run_excluded` |
+| A request is checked when proposed and again when applied, against the case then | Q `test_a_proposal_is_checked_when_made`, `test_an_edit_whose_field_changed_is_not_applied`, `test_only_a_failed_latest_run_is_skipped`, `test_a_skip_of_a_run_retried_meanwhile_is_not_applied` |
+| An edited value's sources are its proposer and approver, so neither approves a step reading it; a declared untrusted mark stays | Q `test_an_edited_value_is_its_deciders` |
+| An edit to the value already held is refused, proposed and applied, so an untrusted value is never made a person's | Q `test_an_edit_never_launders_a_value` |
 | An outcome or an output is never edited | Q `test_a_record_of_what_happened_is_never_edited` |
-| An edit withdraws open approvals of the steps reading it, every approval on the entry, and lapses given ones; the step is asked again | Q `test_an_edit_withdraws_and_lapses_what_saw_the_old_value` |
-| A skipped run is neither done nor failed: `requires` doesn't count it, a held close completes | Q `test_a_skipped_run_is_neither_done_nor_failed`, `test_a_skip_lets_a_held_close_complete` |
-| A pending request doesn't hold the case open, and is cancelled when it closes, except a skip of the run that holds the close | Q `test_a_pending_request_is_cancelled_by_the_close`, `test_a_held_close_takes_a_skip` |
+| A sensitive field's new value is sealed, refused in plain text, and in no history | Q `test_a_sensitive_value_is_edited_sealed`, T `test_a_sensitive_edit_crosses_sealed` |
+| An edit withdraws open approvals that saw the old value, every approval on the entry, and lapses an approval spent on a failed run; the step is asked again | Q `test_an_edit_withdraws_and_lapses_what_saw_the_old_value` |
+| A skipped run is neither done nor failed: `requires` doesn't count it, it gives nothing, its timers end | Q `test_a_skipped_run_is_neither_done_nor_failed`, `test_a_skipped_runs_timers_end_with_it` |
+| A held close takes a skip of the run holding it, and completes | Q `test_a_skip_lets_a_held_close_complete` |
+| A pending request doesn't hold the case open, and is cancelled when it closes | Q `test_a_pending_request_is_cancelled_by_the_close` |
 | The history says each step, naming no value | Q `test_the_history_names_no_value` |
-| On Temporal, a pending request crosses continue-as-new; histories recorded before 12c replay | T `test_a_pending_request_crosses_continue_as_new`, `test_histories_from_before_12c_replay` |
-| Forget excludes the opener on a case opened under engine 2, and not on one opened before | T `test_forget_excludes_the_opener_from_engine_2`, `test_a_forget_recorded_under_engine_1_replays` |
-| The guide's example runs as written | Q `test_the_guides_change_example_runs_as_written` |
+| On Temporal, a refused proposal or approval is recorded and the request waits on | T `test_refused_changes_are_recorded_and_the_case_waits_on` |
+| On Temporal, a pending request crosses continue-as-new and replays; histories recorded before 12c replay | T `test_a_pending_request_crosses_continue_as_new`, `test_histories_from_before_12c_replay` |
+| From engine 2 the case refuses its opener's forget; a case opened at engine 1 keeps 9c's rule, and its history replays | Q `test_forget_excludes_the_opener_from_engine_2`, T `test_the_case_refuses_its_openers_forget_from_engine_2`, `test_histories_from_before_12c_replay` |
+| The request to forget refuses the opener's approval, or anyone's if who opened the case can't be told | T `test_a_request_to_forget_refuses_the_opener`; `tests/test_temporal_forget.py` `test_the_guides_refusals_are_what_the_engine_says` |
+| New cases open at engine 2, with its marker; version 3 is unknown | `tests/test_temporal_case_release.py` `test_a_case_opens_on_its_release`, `test_a_draft_is_as_before`; `tests/test_engine.py` `test_an_unknown_engine_version_is_refused` |
+| The guide's examples run as written | Q `test_the_guides_change_example_runs_as_written`, T `test_the_guides_temporal_example_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |

@@ -9,6 +9,7 @@ See docs/layers/12-releases.md (12c).
 import asyncio
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from temporalio.client import Client, WorkflowHistory
 from temporalio.worker import Replayer
@@ -201,3 +202,34 @@ def test_the_case_refuses_its_openers_forget_from_engine_2() -> None:
         "forgetting it"
     )
     assert now.status == "open"
+
+
+# --- Slice 7: the guide ---
+
+GUIDE = (Path(__file__).parent.parent / "docs" / "guides" / "cases.md").read_text()
+SNIPPET = GUIDE.split("## Changing an open case\n")[1].split("\n## ")[0].split("```python\n")[4]
+
+
+def test_the_guides_temporal_example_runs_as_written() -> None:
+    # The cases guide's request on Temporal, run as written inside a coroutine, as a client
+    # would (our own documentation, never a definition).
+    code = "async def snippet():\n" + "".join(
+        f"    {line}\n" for line in SNIPPET.split("```")[0].splitlines()
+    )
+
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, DevelopmentCases, REFUND, LARGE, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], TYPED_WRONG)
+        await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        namespace: dict[str, Any] = {
+            "case": case,
+            "propose_change": propose_change,
+            "answer": answer,
+            "Decimal": Decimal,
+        }
+        exec(code, namespace)  # noqa: S102
+        await namespace["snippet"]()
+        return await reported(case, lambda now: now.waiting_at == ["pay.approval#2"])
+
+    now = on_temporal(scenario)
+    assert "applied case.change#1: approved_amount edited by ana, approved by lee" in now.history

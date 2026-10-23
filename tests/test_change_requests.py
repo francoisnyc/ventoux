@@ -18,6 +18,7 @@ from ventoux.case.definition import parse_case
 from ventoux.case.forgetting import ForgetRefused
 from ventoux.case.runtime import decide
 from ventoux.case.state import CaseState, ChangeProposed, ForgetApproved, Opened, StepRun
+from ventoux.core.catalog import Catalog
 from ventoux.core.sensitive import Sensitive
 from ventoux.testing import (
     CATALOG,
@@ -743,3 +744,101 @@ def test_forget_excludes_the_opener_from_engine_2() -> None:
     )
     forgotten, _ = decide(case, CATALOG, opened, approved)
     assert forgotten.history[-1] == "closed: forgotten"
+
+
+# --- Slice 7: the guide, and what the history says ---
+
+GUIDE = (ROOT / "docs" / "guides" / "cases.md").read_text()
+SECTION = GUIDE.split("## Changing an open case\n")[1].split("\n## ")[0]
+
+
+def guide_blocks(language: str) -> list[str]:
+    """The section's code blocks in `language` (`""` for plain ones), in order."""
+    parts = SECTION.split("```")
+    return [
+        part.removeprefix(language + "\n")
+        for part in parts[1::2]
+        if part.split("\n")[0] == language
+    ]
+
+
+def test_the_guides_change_example_runs_as_written() -> None:
+    # Our own documentation, run so it can't drift from the code; never a definition (data).
+    registering, typo, skipping, on_temporal = guide_blocks("python")
+    catalog = Catalog()
+    exec(registering, {"catalog": catalog})  # noqa: S102
+    assert (catalog.editors, catalog.operators) == (["support", "support-lead"], ["operations"])
+    namespace: dict[str, Any] = {
+        "run_case": run_case,
+        "refund": REFUND,
+        "edit": edit,
+        "skip": skip,
+        "account_closed": account_closed,
+        "PEOPLE": {**PEOPLE, "olga": ["operations"]},
+    }
+    for code in (typo, skipping):
+        exec(code, namespace)  # noqa: S102
+    for name, shown in zip(("typo", "skipped"), guide_blocks(""), strict=True):
+        lines = shown.splitlines()
+        history = namespace[name].history
+        first = history.index(lines[0])
+        assert history[first : first + len(lines)] == lines, name
+    assert "propose_change(case," in on_temporal  # run on Temporal's test server (12c, slice 7)
+    # The refusals the prose quotes are the engine's: each is said by a test above.
+    said = " ".join(SECTION.split())
+    for quoted in (
+        "pay.outcome is not a field of refund: only a declared field is edited",
+        "approved_amount holds no value yet: an edit changes a value, never gives the first",
+        "approved_amount is a number, and the edit gives a string",
+        "approved_amount already holds that value: an edit changes it",
+        (
+            "case.change#1 not applied: approved_amount changed since it was proposed: propose "
+            "it again"
+        ),
+        "pay#1 can't be skipped: it hasn't failed",
+        "lee answered case.change#1 reject as support-lead",
+        "case.change#1 not applied: lee rejected it",
+    ):
+        assert f"`{quoted}`" in said, quoted
+    assert refused_edit("pay.outcome", "done") == (
+        "pay.outcome is not a field of refund: only a declared field is edited"
+    )
+
+
+SECRET_ORDER = "ORD-7-SECRET"  # an order, and amounts, to look for where they mustn't be
+SECRET_AMOUNTS = (12345, 54321, 67890, 77777)
+
+
+def test_the_history_names_no_value() -> None:
+    # Every line a request adds names people, roles, fields, runs and requests, never a value:
+    # a history reaches people who may not see one (brief, D30) (brief, D52).
+    file = {"order_id": SECRET_ORDER, "amount": SECRET_AMOUNTS[0]}
+    review = ("review", "approve", "ana", {"approved_amount": SECRET_AMOUNTS[0]})
+    edited = run_case(
+        reworkable(),
+        file=file,
+        answers=[
+            review,
+            edit("approved_amount", SECRET_AMOUNTS[1], "ana"),
+            ("case.change#1", "reject", "lee"),
+            edit("approved_amount", SECRET_AMOUNTS[1], "ana"),
+            ("case.change#2", "approve", "lee"),
+            edit("approved_amount", SECRET_AMOUNTS[2], "sam"),
+            propose("review", "sam"),
+            ("review#2", "approve", "sam", {"approved_amount": SECRET_AMOUNTS[3]}),
+            ("case.change#3", "approve", "lee"),
+        ],
+        people=PEOPLE,
+    )
+    skipped = run_case(
+        REFUND,
+        file=file,
+        answers=[review, ("pay.approval#1", "approve", "lee"), skip("pay#1", "omar")],
+        people=OPERATING,
+        activities={"payments.refund@2": account_closed},
+    )
+    lines = [line for line in edited.history + skipped.history if "change#" in line]
+    assert len(lines) >= 10
+    for line in lines:
+        assert SECRET_ORDER not in line
+        assert not any(str(amount) in line for amount in SECRET_AMOUNTS), line

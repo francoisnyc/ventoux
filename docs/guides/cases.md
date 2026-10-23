@@ -525,7 +525,7 @@ support-lead`, then `case.change#1 not applied: lee rejected it`.
 On Temporal, a request is proposed with `propose_change` and answered as any entry:
 
 ```python
-await propose_change(case, "edit", "approved_amount", 250, "ana", ["support"])
+await propose_change(case, "edit", "approved_amount", Decimal("250"), "ana", ["support"])
 await answer(case, "case.change#1", "approve", "lee", ["support-lead"])
 ```
 
