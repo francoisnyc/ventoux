@@ -9,6 +9,8 @@ release".
 import copy
 import dataclasses
 import json
+from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,6 +20,7 @@ from ventoux.case.releases import Written
 from ventoux.testing import (
     AnswerRefused,
     ChangeRefused,
+    finish,
     migrate,
     propose,
     release_of,
@@ -25,6 +28,7 @@ from ventoux.testing import (
     send,
 )
 
+ROOT = Path(__file__).parent.parent
 LARGE = {"order_id": "ord-1", "amount": 250}
 REVIEWED = ("review", "approve", "ana", {"approved_amount": 250})
 
@@ -455,4 +459,199 @@ def test_what_waits_on_a_step_refuses_its_removal() -> None:
         "pay.approval#1 is open, and refund 2 has no step pay: map it\n"
         "pay waits on start_pay#1, and refund 2 has no step pay: map it\n"
         "pay waits on start_pay#1, and refund 2 has no rule start_pay: map it"
+    )
+
+
+# --- Slice 3: running work, open tasks, waits and failed runs ---
+
+
+def looking_up() -> dict[str, Any]:
+    """The refund kept open, its payment step calling another contract than the payment."""
+    return without(
+        kept_open(REFUND),
+        lambda d: d["steps"]["pay"].update(
+            activity="orders.lookup@1", inputs={"order_id": {"var": "order_id"}}
+        ),
+    )
+
+
+def account_closed(inputs: dict[str, Any]) -> dict[str, Any]:
+    raise ConnectionError("account closed")
+
+
+def test_running_work_finishes_on_its_contract() -> None:
+    # A running run's result is checked against the contract that ran it: a target whose step
+    # calls another is refused until it finishes (brief, D10) (brief, D53).
+    with pytest.raises(ChangeRefused) as refused:
+        run_case(
+            kept_open(REFUND),
+            file=SMALL,
+            answers=[SMALL_REVIEW, migrate(release_of(looking_up(), 2), {}, "pia")],
+            people=PEOPLE,
+            release=release_of(kept_open(REFUND), 1),
+            held=["pay"],
+        )
+    assert str(refused.value) == (
+        "pay#1 is running on payments.refund@2, and refund 2's pay calls orders.lookup@1: "
+        "migrate after it finishes"
+    )
+    # The same contract: the run finishes under the target, keeping its entry and its key.
+    with_check = without(kept_open(refund_2()), lambda d: d["steps"]["pay"].pop("requires"))
+    finished = run_case(
+        kept_open(REFUND),
+        file=SMALL,
+        answers=[
+            SMALL_REVIEW,
+            migrate(release_of(with_check, 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+            finish("pay#1"),
+        ],
+        people=PEOPLE,
+        release=release_of(kept_open(REFUND), 1),
+        held=["pay"],
+    )
+    assert "pay#1 done, giving refund_id from untrusted:undeclared" in finished.history
+    assert finished.state.release == "refund 2"
+    # A failed run is retried as the same run, with the same key (brief, D26): its contract too.
+    with pytest.raises(ChangeRefused) as failed:
+        run_case(
+            kept_open(REFUND),
+            file=SMALL,
+            answers=[SMALL_REVIEW, migrate(release_of(looking_up(), 2), {}, "pia")],
+            people=PEOPLE,
+            release=release_of(kept_open(REFUND), 1),
+            activities={"payments.refund@2": account_closed},
+        )
+    assert str(failed.value) == (
+        "pay#1 is failed on payments.refund@2, and refund 2's pay calls orders.lookup@1: "
+        "migrate after it is retried or skipped"
+    )
+
+
+def plan_package() -> tuple[dict[str, Any], dict[str, Any]]:
+    """The example package: the refund, its payment made by the `refund-order@1` plan."""
+    folder = ROOT / "examples" / "packages" / "refund"
+    case = json.loads((folder / "case.json").read_text(), parse_float=Decimal)
+    plan = json.loads((folder / "plans" / "refund-order.json").read_text(), parse_float=Decimal)
+    return case, plan
+
+
+def test_a_running_plan_finishes_on_its_plan() -> None:
+    # Plans don't migrate (brief, D28): a target running another plan waits for this one.
+    case, plan = plan_package()
+    target = without(case, lambda d: d["steps"]["settle"].update(plan="refund-order@2"))
+    later_plan = {**plan, "version": 2}
+    with pytest.raises(ChangeRefused) as refused:
+        run_case(
+            case,
+            file=LARGE,
+            answers=[REVIEWED, migrate(release_of(target, 2, [later_plan]), {}, "pia")],
+            people=PEOPLE,
+            release=release_of(case, 1, [plan]),
+            plans={"refund-order@1": plan},
+        )
+    assert str(refused.value) == (
+        "settle#1 is running on refund-order@1, and refund 2's settle runs refund-order@2: "
+        "migrate after it finishes"
+    )
+
+
+def test_open_and_failed_runs_stay() -> None:
+    # An open task stays open, answered as the target says: its roles, its outcomes.
+    escalating = without(
+        kept_open(REFUND),
+        lambda d: (
+            d["steps"]["review"].update(roles=["support", "support-lead"]),
+            d["steps"]["review"]["outcomes"].update(
+                escalate={"display": {"title": "Escalate to a team lead"}}
+            ),
+        ),
+    )
+    moved = run_case(
+        kept_open(REFUND),
+        file=SMALL,
+        answers=[
+            migrate(release_of(escalating, 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=release_of(kept_open(REFUND), 1),
+    )
+    assert moved.waiting_for == ["review by support or support-lead"]
+    answered = run_case(
+        kept_open(REFUND),
+        file=SMALL,
+        answers=[
+            migrate(release_of(escalating, 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+            ("review#1", "escalate", "lee"),
+        ],
+        people=PEOPLE,
+        release=release_of(kept_open(REFUND), 1),
+    )
+    # Lee leads the team: only the target lets a support-lead answer the review.
+    assert "lee answered review#1 escalate as support-lead" in answered.history
+    # A step that changed kind under an open run is refused: answer it first.
+    automated = without(
+        kept_open(REFUND),
+        lambda d: d["steps"].update(
+            review={
+                "kind": "activity",
+                "display": {"title": "Review the refund request"},
+                "activity": "orders.lookup@1",
+                "inputs": {"order_id": {"var": "order_id"}},
+            }
+        ),
+    )
+    assert refused_on(kept_open(REFUND), automated, []) == (
+        "review#1 is open, and refund 2's review is another kind of step: migrate after it is "
+        "answered"
+    )
+
+
+def waiting_for_cancellation() -> dict[str, Any]:
+    """The refund kept open, waiting for the customer to cancel from the portal."""
+    definition = kept_open(REFUND)
+    definition["events"] = {
+        "cancelled": {
+            "display": {"title": "The customer cancels"},
+            "sent_by": {"system": "portal"},
+            "payload": {},
+        }
+    }
+    definition["steps"]["await_cancel"] = {
+        "kind": "wait",
+        "display": {"title": "Wait for a cancellation"},
+        "event": "cancelled",
+    }
+    return definition
+
+
+def test_an_open_wait_stays_on_its_event() -> None:
+    # A wait renamed with its event waits on, its line as the target says it; one waiting for
+    # another event is refused until it ends (brief, D53).
+    renamed_event = json.loads(
+        json.dumps(waiting_for_cancellation()).replace("cancelled", "withdrawn")
+    )
+    moved = run_case(
+        waiting_for_cancellation(),
+        file=SMALL,
+        answers=[
+            migrate(release_of(renamed_event, 2), {"events": {"cancelled": "withdrawn"}}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE,
+        release=release_of(waiting_for_cancellation(), 1),
+    )
+    assert "withdrawn from portal" in moved.waiting_for
+    other = without(
+        waiting_for_cancellation(),
+        lambda d: (
+            d["events"].update(withdrawn=d["events"]["cancelled"]),
+            d["steps"]["await_cancel"].update(event="withdrawn"),
+        ),
+    )
+    assert refused_on(waiting_for_cancellation(), other, []) == (
+        "await_cancel#1 waits for cancelled, and refund 2's await_cancel waits for withdrawn: "
+        "migrate after it arrives"
     )

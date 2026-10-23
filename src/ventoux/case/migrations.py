@@ -22,12 +22,14 @@ from ventoux.case.definition import (
     CaseInvalid,
     PlanStep,
     TaskStep,
+    WaitStep,
     parse_case,
+    sent_by,
 )
 from ventoux.case.engine import KNOWN
 from ventoux.case.releases import Hash, Record, canonical, is_release
 from ventoux.case.sequence import requirements
-from ventoux.case.state import CaseState, Migration
+from ventoux.case.state import CaseState, Migration, StepRun
 from ventoux.case.visibility import seen_by
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
@@ -214,6 +216,8 @@ def depending(
             problems.append(
                 f"{run.entry} is {run.status}, and {label} has no step {new}: map it{wait}"
             )
+        elif run.status in UNTIL:
+            problems += unfinished(case, target, migration, run, new)
     for milestone in state.milestones:
         if (new := renamed(migration, "milestones", milestone)) not in target.milestones:
             problems.append(
@@ -247,6 +251,57 @@ def depending(
                 f"{asked.step} waits on {asked.entry}, and {label} has no rule {new}: map it"
             )
     return list(dict.fromkeys(problems))  # each said once
+
+
+# What a run that hasn't ended waits for, as a refusal tells when to migrate.
+UNTIL = {
+    "open": "it is answered",
+    "running": "it finishes",
+    "failed": "it is retried or skipped",
+    "retrying": "it is retried or skipped",
+}
+
+
+def unfinished(
+    case: CaseDefinition, target: CaseDefinition, migration: Migration, run: StepRun, new: str
+) -> list[str]:
+    """Why a run that hasn't ended can't go on under the target: its step is another kind there,
+    calls another contract, runs another plan, or waits for another event. A result is checked
+    against what ran it, and a retry is the same run with the same key (brief, D26) (brief, D53)."""
+    before, after, label = case.steps[run.step], target.steps[new], migration.label
+    when = f"migrate after {UNTIL[run.status]}"
+    if type(before) is not type(after):
+        return [f"{run.entry} is {run.status}, and {label}'s {new} is another kind of step: {when}"]
+    if (
+        isinstance(before, CallStep)
+        and isinstance(after, CallStep)
+        and before.called != after.called
+    ):
+        return [
+            (
+                f"{run.entry} is {run.status} on {before.called}, and {label}'s {new} calls "
+                f"{after.called}: {when}"
+            )
+        ]
+    if isinstance(before, PlanStep) and isinstance(after, PlanStep) and before.plan != after.plan:
+        return [
+            (
+                f"{run.entry} is {run.status} on {before.plan}, and {label}'s {new} runs "
+                f"{after.plan}: {when}"
+            )
+        ]
+    if (
+        isinstance(before, WaitStep)
+        and isinstance(after, WaitStep)
+        and renamed(migration, "events", before.event) != after.event
+    ):
+        return [
+            (
+                f"{run.entry} waits for {before.event}, and {label}'s {new} waits for "
+                f"{after.event}: migrate after it arrives"
+            )
+        ]
+    return []
 
 
 def value_problems(
@@ -443,6 +498,16 @@ def rename(
     state.arrived = {
         renamed(migration, "events", event): count for event, count in state.arrived.items()
     }
+    # What an open run waits for, as the target says it: its roles, its event's sender
+    # (brief, D24).
+    for run in state.runs:
+        if run.status != "open":
+            continue
+        waits = target.steps[run.step]
+        if isinstance(waits, TaskStep):
+            state.waiting[run.entry] = f"{run.step} by {' or '.join(waits.roles)}"
+        elif isinstance(waits, WaitStep):
+            state.waiting[run.entry] = f"{waits.event} {sent_by(target.events[waits.event])}"
 
 
 def same_behaviour(case: CaseDefinition, target: CaseDefinition, name: str) -> bool:

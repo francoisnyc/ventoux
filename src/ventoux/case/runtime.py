@@ -53,6 +53,7 @@ from ventoux.case.definition import (
     WorkflowStep,
     form_fields,
     rule_fields,
+    sent_by,
 )
 from ventoux.case.engine import known
 from ventoux.case.forgetting import forget
@@ -287,13 +288,6 @@ def arrive(case: CaseDefinition, state: CaseState, event: Sent, role: str | None
             del state.waiting[run.entry]
             state.history.append(f"{run.entry} done: {entry} arrived")
             reach_unless_steered(state, run, waits.reaches)
-
-
-def sent_by(declared: DeclaredEvent) -> str:
-    """Who sends an event, as the inbox says it: `from portal`, `by support or fraud`."""
-    if declared.sent_by.system is not None:
-        return f"from {declared.sent_by.system}"
-    return f"by {' or '.join(declared.sent_by.roles or ())}"
 
 
 def sender_role(catalog: Catalog, name: str, declared: DeclaredEvent, event: Sent) -> str | None:
