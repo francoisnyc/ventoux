@@ -319,6 +319,9 @@ class CaseWorkflow:
     # Where each workflow contract runs, in this deployment (brief, D5): its workflow type and
     # task queue. A workflow step whose contract isn't bound here fails (brief, D29).
     workflows: ClassVar[Mapping[str, Binding]] = {}
+    # The environment its cases run in, whose registry each case asks as it opens, moves and
+    # closes (brief, D5); None: none, where drafts run and no registry is asked, as before 12e.
+    environment: ClassVar[str | None] = None
     # How many events one run decides before the case continues as new: a count, never a clock,
     # so replay switches at the same place (brief, D27). Temporal warns at about 10,000 history
     # events; a case's event makes a few.
