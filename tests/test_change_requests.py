@@ -15,8 +15,9 @@ from test_case import REFUND, reworkable
 from test_sensitive import FILE, NATIONAL_ID, claim
 
 from ventoux.case.definition import parse_case
+from ventoux.case.forgetting import ForgetRefused
 from ventoux.case.runtime import decide
-from ventoux.case.state import ChangeProposed, StepRun
+from ventoux.case.state import CaseState, ChangeProposed, ForgetApproved, Opened, StepRun
 from ventoux.core.sensitive import Sensitive
 from ventoux.testing import (
     CATALOG,
@@ -24,13 +25,16 @@ from ventoux.testing import (
     AnswerRefused,
     Change,
     ChangeRefused,
+    as_json,
     close,
     edit,
     finish,
+    forget,
     propose,
     retry,
     run_case,
     skip,
+    wrapped,
 )
 
 ROOT = Path(__file__).parent.parent
@@ -713,3 +717,29 @@ def test_a_pending_request_is_cancelled_by_the_close() -> None:
         "closed: nothing left to do",
     ]
     assert paid.waiting_for == []
+
+
+# --- Slice 6: forgetting under the same rules ---
+
+FORGETTERS = {"pia": ["privacy"], "olu": ["privacy"]}
+
+
+def test_forget_excludes_the_opener_from_engine_2() -> None:
+    # Olu opened the claim: from engine 2 the case refuses his approval of forgetting it, as of
+    # any change to it, depending on nothing the request did (brief, D52).
+    with pytest.raises(
+        ForgetRefused, match="^olu opened the case, so cannot approve forgetting it$"
+    ):
+        run_case(
+            claim(), file=FILE, answers=[forget("pia", "olu")], people=FORGETTERS, opened_by="olu"
+        )
+    # A case opened at engine 1 keeps 9c's rule, so a history recorded then replays as it was
+    # (brief, D51).
+    case = parse_case(claim())
+    opening = Opened(wrapped(case, as_json(FILE)), "olu", at=START, engine=1)
+    opened, _ = decide(case, CATALOG, CaseState("claim-7/run"), opening)
+    approved = ForgetApproved(
+        "pia", frozenset({"privacy"}), "olu", frozenset({"privacy"}), at=START
+    )
+    forgotten, _ = decide(case, CATALOG, opened, approved)
+    assert forgotten.history[-1] == "closed: forgotten"

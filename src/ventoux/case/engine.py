@@ -9,12 +9,13 @@ recorded (brief, D51). See docs/layers/12-releases.md (12b).
 from collections.abc import Callable, Sequence
 
 # The version this code opens new cases at. Version 1 is the engine as merged at `b734098`: every
-# path decided before then is version 1's, with no older branch kept (brief, D51).
-ENGINE = 1
+# path decided before then is version 1's, with no older branch kept (brief, D51). Version 2, from
+# layer 12c: the case refuses its opener's approval of forgetting it (brief, D52).
+ENGINE = 2
 
 # Every version this code can still decide as, newest first. A version leaves this list only once
 # no open case decides as it, as Temporal's patches are deprecated, then removed.
-KNOWN = (1,)
+KNOWN = (2, 1)
 
 
 class EngineUnknown(Exception):

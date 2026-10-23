@@ -93,6 +93,25 @@ def lookup_refusal(case: str, found: CaseLookup) -> str | None:
 
 
 @dataclass
+class CaseOpener:
+    """Who opened a case, as its start says, asked when someone approves forgetting it."""
+
+    by: str | None  # the person who opened it; None: a system did
+    known: bool = True  # False: Temporal holds no history of it, so who opened it is unknown
+
+
+def opener_refusal(case: str, by: str, found: CaseOpener) -> str | None:
+    """Why `by` may not approve forgetting `case`: they opened it, and approve no change to it
+    (brief, D25) (brief, D52); or whoever opened it can't be told. None if they may."""
+    if not found.known:
+        # Fail closed: an approval is never taken from someone who might have opened the case.
+        return f"who opened {case} can't be told: Temporal holds no history of it"
+    if by == found.by:
+        return f"{by} opened {case}, so cannot approve forgetting it"
+    return None
+
+
+@dataclass
 class CaseEnded:
     """How a case ended, as the request records it."""
 
@@ -177,6 +196,15 @@ class ForgetWorkflow:
                 # Recorded, and the request waits on, as every refusal on Temporal (layer 8c).
                 self.report.history.append(f"refused {sent.by}'s answer {sent.outcome}: {refused}")
                 continue
+            # Its opener approves no change to the case. Asked of the case's start, behind a patch:
+            # a request recorded before 12c replays as it was (brief, D51) (brief, D52).
+            if sent.outcome == "approve" and workflow.patched("ventoux-forget-opener"):
+                found = await workflow.execute_activity_method(
+                    ForgetActivities.opener, start.case, start_to_close_timeout=KEY_CALL
+                )
+                if (refused := opener_refusal(start.case, sent.by, found)) is not None:
+                    self.report.history.append(f"refused {sent.by}'s answer approve: {refused}")
+                    continue
             if sent.outcome == "reject":
                 self.report.status = "rejected"
                 self.report.history.append(f"rejected by {sent.by}")
@@ -249,11 +277,22 @@ class ForgetActivities:
     async def forgetting(self, case: str) -> str:
         """What the case's definition says about forgetting, read from the start of its latest
         run (each run carries the definition); empty if Temporal holds no history of it."""
+        opening = await self.start_of(case)
+        return "" if opening is None else parse_case(opening.definition).forgetting
+
+    @activity.defn(name="ventoux.forget.opener")
+    async def opener(self, case: str) -> CaseOpener:
+        """Who opened the case, read from the start of its latest run, which carries it."""
+        opening = await self.start_of(case)
+        return CaseOpener(None, known=False) if opening is None else CaseOpener(opening.opened_by)
+
+    async def start_of(self, case: str) -> CaseStart | None:
+        """The start of the case's latest run; None if Temporal holds no history of it."""
         try:
             history = await self.client.get_workflow_handle(case).fetch_history()
         except RPCError as error:
             if error.status == RPCStatusCode.NOT_FOUND:
-                return ""
+                return None
             raise
         started = history.events[0].workflow_execution_started_event_attributes
         # Temporal: the start's payloads are decoded as the case's, with its key.
@@ -261,7 +300,8 @@ class ForgetActivities:
             WorkflowSerializationContext(self.client.namespace, case)
         )
         [opening] = await converter.decode(started.input.payloads, [CaseStart])
-        return parse_case(opening.definition).forgetting
+        assert isinstance(opening, CaseStart)
+        return opening
 
     @activity.defn(name="ventoux.forget.case_ended")
     async def case_ended(self, case: str) -> CaseEnded:
@@ -308,7 +348,7 @@ class ForgetActivities:
 
     def all(self) -> list[Any]:
         """Each activity, to register with a worker."""
-        return [self.look_up, self.case_ended, self.destroy_key]
+        return [self.look_up, self.case_ended, self.destroy_key, self.opener]
 
 
 async def propose_forget(

@@ -105,7 +105,7 @@ def test_an_unknown_engine_version_waits_for_its_code() -> None:
     # retries until code that knows it is deployed: the case waits, never decided as an older
     # version, never failed for good (brief, D17, D51).
     async def scenario(client: Client) -> tuple[list[str], bool]:
-        carried = state_as_data(CaseState("refund-1/run-1")) | {"engine": 2}
+        carried = state_as_data(CaseState("refund-1/run-1")) | {"engine": 3}
         case = await client.start_workflow(
             DevelopmentCases.run,
             CaseStart(REFUND, {}, None, carried),
@@ -153,6 +153,17 @@ def kinds_of(history: WorkflowHistory) -> list[str]:
     return [EventType.Name(event.event_type) for event in history.events]
 
 
+def markers_of(history: WorkflowHistory) -> list[str]:
+    """The patch markers `history` records, by their IDs: each engine version above 1 asked for
+    and in force (brief, D51)."""
+    found: list[str] = []
+    for event in history.events:
+        if event.event_type == EventType.EVENT_TYPE_MARKER_RECORDED:
+            details = event.marker_recorded_event_attributes.details
+            found.append(json.loads(details["patch-data"].payloads[0].data)["id"])
+    return found
+
+
 def test_a_case_opens_on_its_release(tmp_path: Path) -> None:
     refund_1 = released(tmp_path)
 
@@ -162,13 +173,13 @@ def test_a_case_opens_on_its_release(tmp_path: Path) -> None:
         return now, await case.fetch_history()
 
     now, history = on_temporal(scenario)
-    assert (now.release, now.engine) == ("refund 1", 1)
+    assert (now.release, now.engine) == ("refund 1", 2)
     assert now.history[:2] == [
-        "opened on refund 1, engine 1",
+        "opened on refund 1, engine 2",
         "opened by system:opener, with amount and order_id",
     ]
-    # With version 1 alone, nothing is asked and no marker written (brief, D51).
-    assert "EVENT_TYPE_MARKER_RECORDED" not in kinds_of(history)
+    # Version 2 is a patch marker, written once at the opening (brief, D51) (brief, D52).
+    assert markers_of(history) == ["ventoux-engine-2"]
 
 
 def test_a_draft_is_as_before() -> None:
@@ -178,9 +189,10 @@ def test_a_draft_is_as_before() -> None:
         return now, await case.fetch_history()
 
     now, history = on_temporal(scenario)
-    assert (now.release, now.engine) == ("draft", 1)
+    assert (now.release, now.engine) == ("draft", 2)
     assert now.history[0] == "opened by system:opener, with amount and order_id"
-    assert "EVENT_TYPE_MARKER_RECORDED" not in kinds_of(history)
+    # The engine decides a draft too: its version's marker is its one difference (brief, D52).
+    assert markers_of(history) == ["ventoux-engine-2"]
 
 
 def test_a_start_that_isnt_its_release_is_refused(tmp_path: Path) -> None:
@@ -249,7 +261,7 @@ def test_the_release_and_engine_cross_continue_as_new(tmp_path: Path) -> None:
         cases=EveryEventCases,
     )
     assert waited == "approve_refund#1"
-    assert (ended.status, ended.release, ended.engine) == ("closed", "refund 1", 1)
+    assert (ended.status, ended.release, ended.engine) == ("closed", "refund 1", 2)
     assert "settle#1 done" in ended.history
 
 
@@ -411,7 +423,7 @@ def test_the_guides_release_example_runs_as_written(tmp_path: Path) -> None:
 
     now = on_temporal(scenario)
     assert now.history[: len(shown)] == shown
-    assert (now.release, now.engine) == ("refund 1", 1)
+    assert (now.release, now.engine) == ("refund 1", 2)
 
 
 # --- From the tutor review: a continued run that can't read its start waits for its code ---

@@ -24,15 +24,18 @@ from test_temporal_case import (
     reported,
     runs_of,
 )
+from test_temporal_forget import on_temporal as forgetting_on_temporal
 from test_temporal_sensitive import as_stored
 
 from ventoux.temporal.cases import (
+    CaseForget,
     CaseReport,
     CaseWorkflow,
     answer,
     propose_change,
     start_case,
 )
+from ventoux.temporal.forget import ForgetReport, answer_forget, propose_forget
 from ventoux.temporal.worker import SANDBOX
 from ventoux.testing import (
     DevelopmentCases,
@@ -153,3 +156,48 @@ def test_a_sensitive_edit_crosses_sealed() -> None:
     stored, exported = as_stored(history)
     for planted in (CORRECTED_ID, NATIONAL_ID):
         assert planted.encode() not in stored and planted not in exported
+
+
+# --- Slice 6: forgetting under the same rules ---
+
+
+def test_a_request_to_forget_refuses_the_opener() -> None:
+    # Olu opened the claim: the request refuses his approval, recorded, and waits on; Eli approves
+    # it. The case checks again, depending on nothing the request did (brief, D52).
+    async def scenario(client: Client) -> tuple[ForgetReport, CaseReport]:
+        case = await start_case(
+            client, DevelopmentCases, claim(), as_json(FILE), "claim-7", QUEUE, opened_by="olu"
+        )
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-7", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        await answer_forget(request, "approve", "eli", ["privacy"])
+        return await request.result(), await case.result()
+
+    ended, case = forgetting_on_temporal(scenario)
+    assert ended.history[:3] == [
+        "pia proposed forgetting claim-7, as privacy",
+        "refused olu's answer approve: olu opened claim-7, so cannot approve forgetting it",
+        "approved by eli, as privacy",
+    ]
+    assert ended.status == "forgotten"
+    assert "forgetting approved by eli as privacy, proposed by pia as privacy" in case.history
+
+
+def test_the_case_refuses_its_openers_forget_from_engine_2() -> None:
+    # Sent as a request would, but a request under this code refuses it first: the case's own
+    # check holds on nothing the request did, and is recorded (brief, D34) (brief, D52).
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(
+            client, DevelopmentCases, claim(), as_json(FILE), "claim-7", QUEUE, opened_by="olu"
+        )
+        await case.signal("forget", CaseForget("pia", ["privacy"], "olu", ["privacy"]))
+        return await reported(case, lambda now: any("refused" in line for line in now.history))
+
+    now = forgetting_on_temporal(scenario)
+    assert now.history[-1] == (
+        "refused forgetting the case, approved by olu: olu opened the case, so cannot approve "
+        "forgetting it"
+    )
+    assert now.status == "open"
