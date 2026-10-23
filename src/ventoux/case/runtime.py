@@ -259,6 +259,8 @@ def preview_migration(
     on a copy of its state: the approver reads it before approving, and the case is unchanged.
     The apply checks again, depending on nothing this said (brief, D34) (brief, D53)."""
     state = copy.deepcopy(state)  # the state passed in is never changed
+    if state.phase != "open":
+        return MigrationPreview(refused=(f"the case is {state.phase}: nothing changes it",))
     if problems := problems_of(case, catalog, state, migration):
         return MigrationPreview(refused=tuple(problems))
     seen = len(state.history)
