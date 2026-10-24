@@ -801,6 +801,8 @@ Open since layer 8; last asked at 11e's warm-up. Answer from memory first. It is
 another form: the sheet and the readings say only what the definition proves, and quote nothing a
 case holds.
 
+Asked to be told, 2026-10-24; answered briefly and recorded. The question stays open.
+
 ### What this part is for
 
 13a and 13b made one change list, each change with a verdict that is a proof. 13c says it in
