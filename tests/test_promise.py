@@ -170,3 +170,35 @@ def test_the_base_commits_promises_say_what_changed(
     command, printed = block.split("\n", 1)
     assert command == "$ ventoux hashes --lock contracts.lock.json --before base-promises.json"
     assert printed == said
+
+
+# --- 13e: a number written otherwise (from the review of #50) ------------------------------------
+
+
+def test_a_number_written_otherwise_is_said_as_the_hash_reads_it() -> None:
+    # Python counts 2 and 2.0 as equal; the hash doesn't. A base promise differing only so says
+    # where, as written, never a changed contract with nothing under it (13e, choice 73).
+    now = promise_of(lookup_contract())
+    before = json.loads(json.dumps(now))
+    before["retry"]["backoff_coefficient"] = 2  # the contract says 2.0
+    recorded = {LOOKUP: promise_hash(before)}
+    assert check_hashes(catalog_of(lookup_contract()), recorded, {LOOKUP: before}) == [
+        (
+            "orders.lookup@1 changed without a new version: register it as orders.lookup@2.\n"
+            "  retry.backoff_coefficient: 2 -> 2.0"
+        )
+    ]
+
+
+def test_a_hash_that_differs_where_no_path_does_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Fail closed: a changed contract is never left with nothing under it. No promise reaches
+    # this now; the comparison is made to find nothing here.
+    monkeypatch.setattr("ventoux.core.hash_check.promise_changes", lambda before, after: [])
+    recorded = {LOOKUP: contract_hash(lookup_contract())}
+    before = {LOOKUP: promise_of(lookup_contract())}
+    assert check_hashes(catalog_of(lookup_contract(timeouts=LONGER)), recorded, before) == [
+        (
+            "orders.lookup@1 changed without a new version: register it as orders.lookup@2.\n"
+            "  what changed can't be said: no path differs as written"
+        )
+    ]
