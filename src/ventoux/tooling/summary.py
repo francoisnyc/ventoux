@@ -54,6 +54,7 @@ class Summary:
     text: str  # the whole summary, in Markdown
     contracts: str = MATCHED  # the contracts' status, in one line
     failures: tuple[str, ...] = ()  # why the step fails, if it does
+    commits: tuple[str, str] | None = None  # the base's and the merge commit's, as CI names them
 
 
 def summarize(
@@ -63,6 +64,7 @@ def summarize(
     catalog: Catalog,
     recorded: Mapping[str, str],
     before: Mapping[str, object],
+    commits: tuple[str, str] | None = None,
 ) -> Summary:
     """What merging `head` onto `base` does to each package under `packages`, in either tree,
     each changed one's diff in the plain form (brief, D56), then the contracts: the hash check
@@ -70,8 +72,7 @@ def summarize(
     read or compare fails the step, said last; never read as nothing changed (fail closed)."""
     for tree, which in ((base, "base"), (head, "head")):
         if not tree.is_dir():
-            failure = f"the {which} can't be read: {tree} isn't a folder"
-            return Summary((), CANT_READ, said_as([], [], [], [failure]), failures=(failure,))
+            return cant_be_read(f"the {which} can't be read: {tree} isn't a folder")
     old, unread_old = found_in(base, packages, "base")
     new, unread_new = found_in(head, packages, "head")
     failures = [*unread_old, *unread_new]
@@ -96,16 +97,26 @@ def summarize(
                 failures.append(f"{name}: the diff can't be made: {refused}")
     problems = check_hashes(catalog, recorded, before)
     code = REFUSED if failures or problems else COMPARED
-    text = said_as(outcomes, diffs, problems, failures)
-    return Summary(tuple(outcomes), code, text, contracts_line(problems), tuple(failures))
+    text = said_as(outcomes, diffs, problems, failures, commits)
+    return Summary(tuple(outcomes), code, text, contracts_line(problems), tuple(failures), commits)
+
+
+def cant_be_read(why: str) -> Summary:
+    """A summary that can't be made: why, and nothing else (exit 2)."""
+    text = "\n".join(["# What merging changes", "", "## Why the step fails", "", f"- {why}"])
+    return Summary((), CANT_READ, text + "\n", "", (why,))
 
 
 def said_as(
-    outcomes: Sequence[str], diffs: Sequence[str], problems: Sequence[str], failures: Sequence[str]
+    outcomes: Sequence[str],
+    diffs: Sequence[str],
+    problems: Sequence[str],
+    failures: Sequence[str],
+    commits: tuple[str, str] | None = None,
 ) -> str:
-    """The whole summary, in Markdown: the packages, their diffs, the contracts, then why the
-    step fails, if it does."""
-    lines = ["# What merging changes", "", "## Packages", "", *outcomes]
+    """The whole summary, in Markdown: the commits compared, the packages, their diffs, the
+    contracts, then why the step fails, if it does."""
+    lines = [*heading(commits), "## Packages", "", *outcomes]
     for said in diffs:
         lines += ["", said.rstrip("\n")]
     lines += ["", "## Contracts", ""]
@@ -117,6 +128,20 @@ def said_as(
     if failures:
         lines += ["", "## Why the step fails", "", *(f"- {failure}" for failure in failures)]
     return "\n".join(lines) + "\n"
+
+
+def heading(commits: tuple[str, str] | None) -> list[str]:
+    """The summary's title, and the commits compared when CI names them: the tool never reads
+    git (brief, D50)."""
+    if commits is None:
+        return ["# What merging changes", ""]
+    base, merged = commits
+    return [
+        "# What merging changes",
+        "",
+        f"The merge commit `{merged}`, against its base `{base}`.",
+        "",
+    ]
 
 
 def contracts_line(problems: Sequence[str]) -> str:
@@ -176,7 +201,7 @@ def for_summary_file(found: Summary, limit: int = LIMIT) -> str:
     size = len(found.text.encode())
     if size <= limit:
         return found.text
-    lines = ["# What merging changes", "", "## Packages", "", *found.outcomes]
+    lines = [*heading(found.commits), "## Packages", "", *found.outcomes]
     lines += ["", "## Contracts", "", found.contracts]
     if found.failures:
         lines += ["", "## Why the step fails", "", *(f"- {failure}" for failure in found.failures)]

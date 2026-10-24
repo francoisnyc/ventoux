@@ -11,12 +11,14 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import pytest
 from test_diff import LOOSE, ROOT, calling, refund
 
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract_hash import contract_hash, promise_hash
 from ventoux.core.promise import promise_of
 from ventoux.testing import CATALOG
+from ventoux.tooling.cli import main
 from ventoux.tooling.summary import Summary, for_summary_file, summarize
 
 PACKAGES = "examples/packages"
@@ -214,4 +216,80 @@ def test_a_summary_past_the_limit_says_where_the_whole_text_is(tmp_path: Path) -
         "Every contract matches `contracts.lock.json`.\n\n"
         f"The whole summary is {len(found.text.encode())} bytes, past the job summary's limit of "
         "200 bytes: it is in this step's log, under `ventoux summary`.\n"
+    )
+
+
+# --- Slice 4: the command the workflow calls -----------------------------------------------------
+
+LOCK = ROOT / "contracts.lock.json"
+
+
+def run_summary(
+    tmp_path: Path, base: Path, head: Path, before: Path, *more: str
+) -> tuple[int, list[str]]:
+    """`ventoux summary` as the workflow calls it, the job summary file already holding an
+    earlier step's line: its exit code, and the arguments it was given."""
+    arguments = ["summary", "--base", str(base), "--head", str(head), "--packages", PACKAGES]
+    arguments += ["--lock", str(LOCK), "--before", str(before)]
+    arguments += ["--summary-file", str(tmp_path / "summary.md"), *more]
+    (tmp_path / "summary.md").write_text("an earlier step's summary\n")
+    return main(arguments), arguments
+
+
+def test_base_promises_that_cant_be_read_fail_and_say_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Fail closed: the base's `ventoux promises` gave nothing readable (exit 2), said in the log
+    # and in the summary, never read as nothing changed.
+    before = tmp_path / "base-promises.json"
+    before.write_text("")
+    base, head = with_example(tmp_path / "base"), with_example(tmp_path / "head")
+    code, _ = run_summary(tmp_path, base, head, before)
+    assert code == 2
+    said = f"{before}: isn't JSON: Expecting value, at line 1"
+    assert capsys.readouterr().err == f"{said}\n"
+    assert (tmp_path / "summary.md").read_text() == (
+        f"an earlier step's summary\n# What merging changes\n\n## Why the step fails\n\n- {said}\n"
+    )
+
+
+def test_the_command_logs_the_whole_summary_and_appends_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # As the workflow runs it: the base's own promises, the development catalog, the commits
+    # named by CI. The whole text to the log; appended to the job summary, never written over.
+    assert main(["promises"]) == 0
+    before = tmp_path / "base-promises.json"
+    before.write_text(capsys.readouterr().out)
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), unrequired)
+    code, _ = run_summary(
+        tmp_path, base, head, before, "--base-commit", "231a0e7", "--head-commit", "9004cbd"
+    )
+    logged = capsys.readouterr().out
+    assert code == 0
+    assert logged.startswith(
+        "# What merging changes\n\nThe merge commit `9004cbd`, against its base `231a0e7`.\n\n"
+        "## Packages\n\n- **refund**: a new release"
+    )
+    assert "- **Looser** (`steps.settle.requires`): review -> nothing." in logged
+    assert logged.endswith("## Contracts\n\nEvery contract matches `contracts.lock.json`.\n")
+    assert (tmp_path / "summary.md").read_text() == f"an earlier step's summary\n{logged}"
+
+
+def test_the_command_says_where_a_summary_too_long_is(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["promises"]) == 0
+    before = tmp_path / "base-promises.json"
+    before.write_text(capsys.readouterr().out)
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), unrequired)
+    code, _ = run_summary(tmp_path, base, head, before, "--limit", "300")
+    logged = capsys.readouterr().out
+    kept = (tmp_path / "summary.md").read_text()
+    assert code == 0 and "**Looser**" in logged and "**Looser**" not in kept
+    assert kept.endswith(
+        f"The whole summary is {len(logged.encode())} bytes, past the job summary's limit of 300 "
+        "bytes: it is in this step's log, under `ventoux summary`.\n"
     )
