@@ -100,8 +100,15 @@ def test_what_merging_does_to_each_package(tmp_path: Path) -> None:
         "first": summarized(tree(tmp_path / "empty"), same).outcomes,
     }
     assert said == {
-        "same": ("- **refund**: nothing to release.",),
-        "reworded": ("- **refund**: a wording revision of its latest release.",),
+        # Only what the two trees show: the summary reads no records (13e, choice 78).
+        "same": ("- **refund**: the same behaviour and wording as the base.",),
+        "reworded": (
+            (
+                "- **refund**: the same behaviour as the base, other wording: a wording revision, "
+                "if the base's behaviour is the latest release's (`ventoux release` decides on "
+                "merge, from the records)."
+            ),
+        ),
         "released": (
             (
                 "- **refund**: a new release, unless an earlier release has this behaviour "
@@ -117,7 +124,9 @@ def test_packages_are_matched_by_name_not_by_folder(tmp_path: Path) -> None:
     base = with_example(tmp_path / "base")
     head = tmp_path / "head"
     shutil.copytree(EXAMPLE, head / PACKAGES / "refunds")
-    assert summarized(base, head).outcomes == ("- **refund**: nothing to release.",)
+    assert summarized(base, head).outcomes == (
+        "- **refund**: the same behaviour and wording as the base.",
+    )
 
 
 # --- Slice 2: the diff and the contracts ---------------------------------------------------------
@@ -157,7 +166,8 @@ def test_a_contract_changed_in_place_says_what_changed_and_fails(tmp_path: Path)
 def test_contracts_that_match_are_said_to(tmp_path: Path) -> None:
     found = summarized(with_example(tmp_path / "base"), with_example(tmp_path / "head"))
     assert found.text == (
-        "# What merging changes\n\n## Packages\n\n- **refund**: nothing to release.\n\n"
+        "# What merging changes\n\n## Packages\n\n- **refund**: the same behaviour and wording as "
+        "the base.\n\n"
         "## Contracts\n\nEvery contract matches `contracts.lock.json`.\n"
     )
 

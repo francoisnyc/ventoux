@@ -27,8 +27,13 @@ REFUSED = 1  # a package, the diff or a contract refused: said why
 CANT_READ = 2  # a checkout can't be read
 
 # What merging does to a package, as the summary says it.
-NOTHING = "nothing to release."
-REWORDED = "a wording revision of its latest release."
+# Each line says only what the two trees show: the summary reads no records, so which release
+# the base is, and what merging releases, are `ventoux release`'s to say (13e, choice 78).
+NOTHING = "the same behaviour and wording as the base."
+REWORDED = (
+    "the same behaviour as the base, other wording: a wording revision, if the base's behaviour "
+    "is the latest release's (`ventoux release` decides on merge, from the records)."
+)
 # The summary reads no records: whether an earlier release has this behaviour is `ventoux
 # release`'s to say, on merge (brief, D50).
 RELEASED = (

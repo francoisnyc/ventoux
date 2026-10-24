@@ -1757,17 +1757,33 @@ Each starts with its negative test, seen failing for the right reason.
   summary's `## Packages` and `## Contracts`: the summary shows it as `ventoux diff --plain` prints
   it.
 
+#### Decided while building, after the review of #52
+
+- **Escaped where Markdown is written, so what is data stays plain.** A sheet's lines (`nevers`,
+  which its tests read), a summary's failures and a change's `said` stay as written; only
+  `plain`, `case_map`, `never_sheet` and the summary escape them as they place them. The
+  developer forms print what they printed before.
+- **Fifteen expectations changed, each an escape only:** `order_id` reads `order\_id`, `>`
+  reads `&gt;` and `->` in what a change says reads `-&gt;`, outside code spans; paths in code
+  spans are unchanged. Each diff was read before the expectation was updated, and the guides'
+  examples were made again from the commands, never edited by hand.
+- **No Markdown renderer is a dependency,** none is installed, so the tests check the escaped text
+  itself (every `<` gone, each character escaped), not a rendering.
+- **The review's run, as a test:** a task `vet` before `pay`, its condition comparing review's
+  outcome with the review's literal, and `pay` moved to an `@3` that takes any amount.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
-`Y` is `tests/test_summary.py` (new), `R` is 13d's `tests/test_promise.py`. Checked against the
-tests, 2026-10-24: every test named here exists, every test in `Y` is named here, and every test
-13e added to `R` is named here.
+`Y` is `tests/test_summary.py` (new), `R` is 13d's `tests/test_promise.py`, `D` is 13a's
+`tests/test_diff.py`. Checked against the tests, 2026-10-24, again after the review of #52: every
+test named here exists, every test in `Y` is named here, and every test 13e added to `R` is named
+here.
 
 | Promise | Test |
 |---|---|
 | A number written otherwise in a promise is said as the hash writes it (`2 -> 2.0`); a hash that differs where no path does says what changed can't be said, never a contract with nothing under it | R `test_a_number_written_otherwise_is_said_as_the_hash_reads_it`, `test_a_hash_that_differs_where_no_path_does_says_so` |
-| What merging does to each package, from 12a's digest and wording: nothing, a wording revision, a new release, a first release, removed, never left out; matched by name | Y `test_what_merging_does_to_each_package`, `test_a_package_only_in_the_base_is_said_removed`, `test_packages_are_matched_by_name_not_by_folder` |
+| What merging does to each package, from 12a's digest and wording, said as only the two trees show (the same behaviour and wording as the base; the same behaviour, other wording; a new release; a first release; removed), never left out; matched by name | Y `test_what_merging_does_to_each_package`, `test_a_package_only_in_the_base_is_said_removed`, `test_packages_are_matched_by_name_not_by_folder` |
 | The curriculum's negative test, end to end: an input policy loosened reads Looser in the summary, and fails nothing | Y `test_an_input_policy_loosened_reads_as_looser_in_the_summary` |
 | The contracts: the hash check with the base commit's own promises; a contract changed in place says what changed and fails the step; matching contracts are said to | Y `test_a_contract_changed_in_place_says_what_changed_and_fails`, `test_contracts_that_match_are_said_to` |
 | Fail closed: a package that can't be read, a diff the catalog can't make, a checkout that isn't a folder, base promises that can't be read: each fails the step, said in the summary, and nothing is read as removed or unchanged on a guess | Y `test_a_package_that_cant_be_read_fails_the_step_and_is_never_read_as_removed`, `test_a_diff_the_catalog_cant_make_fails_the_step`, `test_a_base_that_isnt_a_folder_cant_be_read`, `test_base_promises_that_cant_be_read_fail_and_say_so` |
@@ -1776,6 +1792,9 @@ tests, 2026-10-24: every test named here exists, every test in `Y` is named here
 | Two packages of one name in a tree are refused, naming the second folder | Y `test_two_packages_of_one_name_in_a_tree_are_refused` |
 | The existing checks are as they were, the cached CLI included; a push to `main` runs them only | Y `test_the_existing_checks_are_as_they_were` |
 | The releases guide's summary runs as written | Y `test_the_guides_summary_runs_as_written` |
+| Text a definition writes is shown, never rendered: the review's run has no `<` from a definition in the summary, its literal shown escaped and the Looser line visible; a backtick, `*`, `[`, `#` and a line break shown as written (from the review of #52, choice 77) | Y `test_html_a_pull_request_writes_never_reaches_the_summary`, `test_markdown_a_definition_writes_is_shown_as_written` |
+| A path's code span and the hash check's block are fenced past any backtick run in them | Y `test_a_path_in_a_code_span_is_fenced_past_its_backticks`, `test_a_backtick_in_a_contract_never_closes_the_hash_checks_block` |
+| The plain form, the map and the sheet escape what they place, and their tests and the guides' examples pin it | 13c's `tests/test_plain.py` and `tests/test_sheet.py`, `test_the_guides_map_runs_as_written`; D `test_the_guides_example_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal: the summary is `tooling`'s | `tests/test_layers.py`, unchanged |
 
 ### From the tutor review of #52: text a pull request writes reaches rendered Markdown

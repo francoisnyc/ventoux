@@ -532,9 +532,13 @@ summary of each job): what merging it changes, before anyone merges. GitHub chec
 commit it makes, which is what merging creates, and the job checks out its first parent, the base,
 beside it. Then one command says it all:
 
-- **for each package,** matched by name in both: nothing to release, a wording revision of its
-  latest release, a new release, a new package (its first release), or removed; then, for one that
-  changed, the diff in the plain form, the verdicts in their words;
+- **for each package,** matched by name in both, only what the two trees show: the same
+  behaviour and wording as the base, the same behaviour with other wording (a wording revision, if
+  the base's behaviour is the latest release's), a new release, a new package (its first release),
+  or removed; which release each makes is `ventoux release`'s to say on merge, from the records.
+  Then, for one that changed, the diff in the plain form, the verdicts in their words. What the
+  diff quotes from a definition (a literal, a title, a name) is shown, never rendered: no HTML,
+  link or emphasis a pull request writes reaches the page;
 - **the contracts:** the hash check, given the promises the base commit's own code prints
   (`ventoux promises`), so a contract changed in place says what changed, path by path.
 
