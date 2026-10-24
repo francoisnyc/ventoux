@@ -4,20 +4,22 @@ D56, D45 as amended).
 See docs/layers/13-diff.md (13c) and docs/guides/releases.md, "What changed: the diff".
 """
 
+import copy
 import inspect
 import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
 import pytest
-from test_diff import FOUR_EYES, packed, refund, settling
+from test_diff import FOUR_EYES, LOOSE, calling, packed, refund, settling
 from test_diff_people import fresh
 
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import CaseDefinition
-from ventoux.case.diff import diff
+from ventoux.case.diff import Diff, diff
+from ventoux.case.plain import plain
 from ventoux.case.reading import ENTRY_CLAUSES, EntryReading, ReadingRefused, read_entry
-from ventoux.case.releases import changed
+from ventoux.case.releases import Package, changed
 from ventoux.core.catalog import Catalog
 from ventoux.core.plan import Plan
 from ventoux.testing import CATALOG, propose, run_case
@@ -239,3 +241,115 @@ def test_whoever_proposes_a_run_never_approves_it() -> None:
 
 def test_every_entry_clause_has_a_witness() -> None:
     assert ENTRY_WITNESSED == set(ENTRY_CLAUSES)
+
+
+# --- Slice 2: the plain form renders the one change list ----------------------------------------
+
+
+def plain_of(before: Package, after: Package, catalog: Catalog = CATALOG) -> str:
+    """The plain form of the diff from `before` to `after`."""
+    return plain(diff(before, after, catalog), before, after, catalog)
+
+
+def one_lead() -> dict[str, Any]:
+    """The four-eyes refund, back to one team lead."""
+    case: dict[str, Any] = json.loads(FOUR_EYES.read_text())
+    case["steps"]["pay"]["approval"]["count"] = 1
+    return case
+
+
+def test_the_plain_form_reads_each_entry_before_and_after() -> None:
+    four_eyes = json.loads(FOUR_EYES.read_text())
+    assert plain_of(packed(four_eyes), packed(one_lead())) == (
+        "## refund: what changes\n"
+        "\n"
+        "1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; no wording "
+        "change.\n"
+        "\n"
+        "### steps.pay\n"
+        "\n"
+        "- Before: pay calls payments.refund@2 (high risk, it writes), giving order_id from "
+        "order_id and amount from approved_amount. It starts by itself once review is done, if "
+        'review.outcome = "approve". Two people approve it, each a support-lead, when '
+        "approved_amount > 10000.\n"
+        "  - Where approved_amount > 10000 is false, it runs with no approval.\n"
+        "  - The 2 approvers are different people, each someone else; one rejection rejects the "
+        "approval.\n"
+        "- After: pay calls payments.refund@2 (high risk, it writes), giving order_id from "
+        "order_id and amount from approved_amount. It starts by itself once review is done, if "
+        'review.outcome = "approve". One support-lead approves it, when approved_amount > '
+        "10000.\n"
+        "  - Where approved_amount > 10000 is false, it runs with no approval.\n"
+        "- **Looser** (`steps.pay.approval.count`): 2 -> 1 (one person approves pay, where two "
+        "had to).\n"
+    )
+
+
+def test_every_verdict_word_is_its_changes() -> None:
+    # The plain form judges nothing again: each change is said once, in its verdict's words, in
+    # the change list's order (13c, choices 33 and 34).
+    after = calling("payments.refund@3")
+    after["steps"]["pay"]["approval"]["when"] = {">": [{"var": "approved_amount"}, 150]}
+    after["fields"]["approved_amount"]["source"] = "untrusted:customer"
+    found = diff(packed(refund()), packed(after), LOOSE)
+    said = [
+        line
+        for line in plain(found, packed(refund()), packed(after), LOOSE).splitlines()
+        if line.startswith("- **")
+    ]
+    words = {
+        "looser": "Looser",
+        "stricter": "Stricter",
+        "not proven": "Changed, not proven either way (read it as possibly looser)",
+    }
+    assert said == [
+        f"- **{words[change.verdict]}** (`{change.path}`): {change.said}."
+        for change in found.changes
+    ]
+
+
+def test_an_entry_added_reads_after_only() -> None:
+    after = refund()
+    after["close_reasons"] = {"duplicate": {"display": {"title": "Dup"}, "roles": ["support"]}}
+    text = plain_of(packed(refund()), packed(after))
+    assert (
+        "### close_reasons.duplicate\n"
+        "\n"
+        "- After: duplicate: support may close the case with it.\n"
+        "- **Looser** (`close_reasons.duplicate`): added: closed by support.\n"
+    ) in text
+    assert "- Before:" not in text
+
+
+def test_written_otherwise_and_wording_are_listed_apart() -> None:
+    before, after = fresh("1d"), fresh("24h")
+    after["steps"]["lookup"]["display"]["title"] = "Find the order"
+    text = plain_of(packed(before), packed(after))
+    assert text.endswith(
+        "### Written otherwise, the same decisions\n"
+        "\n"
+        "- `steps.lookup.max_age.order_id`: 1d -> 24h: the same decisions; the history says 24 "
+        "hours where it said 1 day.\n"
+        "\n"
+        "### Wording\n"
+        "\n"
+        '- `steps.lookup.display.title`: "Look the order up" -> "Find the order".\n'
+    )
+
+
+def test_a_plans_approved_activity_moved_says_the_known_limit() -> None:
+    # 13b compares a plan's approval roles on their own leaf, never again for a new contract's
+    # risk: the plain form says so where it applies (13c, choice 37).
+    case, plans = settling()
+    after = copy.deepcopy(plans)
+    after[0]["states"]["pay"]["activity"] = "payments.refund@3"
+    text = plain_of(packed(case, plans), packed(case, after), LOOSE)
+    assert (
+        "- Note: who may approve pay in the plan was compared by approve_refund's roles, not "
+        "again for payments.refund@3's risk: read approve_refund's roles.\n"
+    ) in text
+
+
+def test_a_plain_form_is_given_no_case_file() -> None:
+    given = [p.annotation for p in inspect.signature(plain).parameters.values()]
+    assert given == [Diff, Package, Package, Catalog]
