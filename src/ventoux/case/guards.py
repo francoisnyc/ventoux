@@ -11,8 +11,9 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from ventoux.case.changes import Change, DiffRefused, Leaf, Verdict, shown
-from ventoux.case.definition import Approval, CallStep, CaseDefinition
+from ventoux.case.changes import MISSING, Change, DiffRefused, Leaf, Verdict, merged, shown
+from ventoux.case.definition import Approval, CallStep, CaseDefinition, CloseReason
+from ventoux.case.freshness import seconds_in
 from ventoux.case.sequence import requirements
 from ventoux.case.writers import could_come_from
 from ventoux.core.catalog import Catalog, NotInCatalog
@@ -153,8 +154,33 @@ def step_guards(step: str, versions: Versions) -> Iterator[Change]:
     """What follows from a step's changes, said under it: who may approve it, and who is
     excluded from approving it."""
     yield from requirements_change(step, versions)
+    yield from freshness(step, versions)
     yield from approvers(step, versions)
     yield from exclusions(step, versions)
+
+
+def freshness(step: str, versions: Versions) -> Iterator[Change]:
+    """How old each fact `step` reads may be (`max_age`, brief, D18), compared as a duration, never
+    as text (13b, choice 28): longer looser, shorter stricter; a fact no longer required fresh
+    looser, newly required stricter."""
+    old = getattr(versions.before.steps[step], "max_age", {})
+    new = getattr(versions.after.steps[step], "max_age", {})
+    path = f"steps.{step}.max_age"
+    for fact in merged(list(old), list(new)):
+        where, said = f"{path}.{fact}", f"{old.get(fact, 'any age')} -> {new.get(fact, 'any age')}"
+        if fact not in new:
+            yield Change(where, "looser", said, "freshness")
+        elif fact not in old:
+            yield Change(where, "stricter", said, "freshness")
+        elif old[fact] != new[fact]:
+            longer, shorter = seconds_in(new[fact]), seconds_in(old[fact])
+            if longer == shorter:
+                yield Change(where, "not proven", f"{said} (the same age)")
+            else:
+                verdict: Verdict = "looser" if longer > shorter else "stricter"
+                yield Change(where, verdict, said, "freshness")
+    if set(old) == set(new) and list(old) != list(new):
+        yield Change(path, "not proven", f"{shown(old)} -> {shown(new)}")  # reordered
 
 
 def requirements_change(step: str, versions: Versions) -> Iterator[Change]:
@@ -308,3 +334,37 @@ def switch_change(leaf: Leaf, name: str) -> Change:
     if leaf.after is True:
         return Change(leaf.path, "looser", f"{said} ({SWITCHES[name]})", name)
     return Change(leaf.path, "stricter", said, name)
+
+
+# --- Closing and forgetting ----------------------------------------------------------------------
+
+
+def close_reason_change(leaf: Leaf) -> Change:
+    """A close reason added: a new way for people to close the case, looser; removed, stricter
+    (13b, choice 27). Its roles, when both versions have it, are compared as roles."""
+    if leaf.before is MISSING:
+        assert isinstance(leaf.after, CloseReason)
+        said = f"added: closed by {' or '.join(leaf.after.roles)}"
+        return Change(leaf.path, "looser", said, "close reasons", entry="added")
+    assert isinstance(leaf.before, CloseReason)
+    said = f"removed: closed by {' or '.join(leaf.before.roles)}"
+    return Change(leaf.path, "stricter", said, "close reasons", entry="removed")
+
+
+# Forgetting, from keeping everything to erasing the most (brief, D32), and what each step lets a
+# person erase that the one before didn't.
+FORGETTING = ("never", "while_open", "allowed")
+ERASES = {
+    "while_open": "an open case may be forgotten",
+    "allowed": "a closed case may be forgotten too",
+}
+
+
+def forgetting_change(leaf: Leaf) -> Change:
+    """`forgetting`, ordered never < while_open < allowed (13b, choice 29): toward allowed looser,
+    a person may erase more; toward never stricter."""
+    old, new = str(leaf.before), str(leaf.after)
+    said = f"{old} -> {new}"
+    if FORGETTING.index(new) > FORGETTING.index(old):
+        return Change(leaf.path, "looser", f"{said} ({ERASES[new]})", "forgetting")
+    return Change(leaf.path, "stricter", said, "forgetting")

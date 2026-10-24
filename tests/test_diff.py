@@ -572,7 +572,7 @@ def test_changes_come_in_the_packages_order() -> None:
         "not proven steps.audit: added",
         "not proven steps.note: removed",
         'not proven steps.settle.when: review.outcome = "approve" -> review.outcome = "reject"',
-        "not proven forgetting: allowed -> never",
+        "stricter   forgetting: allowed -> never",  # judged since 13b
         "not proven plans.refund-order@1.states.approve_refund.approval.timeout: 48h -> 72h",
     ]
     assert lines(diff(packed(case, plans), packed(after, after_plans), CATALOG)) == expected

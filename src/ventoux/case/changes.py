@@ -44,6 +44,9 @@ COMPARISONS = (
     "step condition",  # whether a step has a `when`, never what it says (13b, choice 19)
     "automatic",  # whether a step starts by itself once admitted (13b, choice 26)
     "repeatable",  # whether a step may run again, when proposed (13b, choice 26)
+    "close reasons",  # the ways people may close a case (brief, D10)
+    "freshness",  # how old a fact a step reads may be (brief, D18)
+    "forgetting",  # when a case may be forgotten (brief, D32)
 )
 
 

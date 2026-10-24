@@ -30,7 +30,8 @@ from ventoux.case.memory import CaseRun
 from ventoux.case.runtime import EventRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.policy import trusted_only
-from ventoux.testing import CATALOG, close, propose, run_case, send
+from ventoux.temporal.forget import CaseLookup, lookup_refusal
+from ventoux.testing import CATALOG, close, later, propose, run_case, send
 
 FOUR_EYES = ROOT / "examples" / "refund" / "refund-four-eyes.json"
 
@@ -439,6 +440,123 @@ def test_repeatable_added_is_looser_and_removed_stricter() -> None:
     assert judged_lines(again, once) == ["stricter   steps.follow_up.repeatable: true -> false"]
 
 
+# --- Slice 4: close reasons, senders, forgetting and freshness -----------------------------------
+
+
+def closing(**reasons: list[str]) -> dict[str, Any]:
+    """The refund with `roled`'s lists, and each of `reasons` a close reason for its roles."""
+    case = roled()
+    for name, roles in reasons.items():
+        case["close_reasons"][name] = {"display": {"title": name}, "roles": roles}
+    return case
+
+
+def test_a_close_reason_added_is_looser() -> None:
+    # A new way for people to close the case.
+    assert judged_lines(closing(), closing(withdrawn=["support"])) == [
+        "looser     close_reasons.withdrawn: added: closed by support"
+    ]
+    assert judged_lines(closing(withdrawn=["support"]), closing()) == [
+        "stricter   close_reasons.withdrawn: removed: closed by support"
+    ]
+
+
+def test_a_close_reason_renamed_is_not_judged() -> None:
+    # The same way to close under another name: neither more nor less (13a, choice 6).
+    before = closing()
+    after = roled()
+    after["close_reasons"] = {"duplicated": before["close_reasons"]["duplicate"]}
+    assert judged_lines(before, after) == [
+        "not proven close_reasons.duplicate: removed",
+        (
+            "not proven close_reasons.duplicated: added: behaves as the removed duplicate did: "
+            "open cases need a migration mapping duplicate to duplicated (brief, D53)"
+        ),
+    ]
+
+
+def test_an_events_sender_replaced_is_not_proven() -> None:
+    before = roled()
+    after = roled()
+    after["events"]["noted"]["sent_by"] = {"system": "portal"}
+    assert judged_lines(before, after) == [
+        "not proven events.noted.sent_by.system: none -> portal",
+        "not proven events.noted.sent_by.roles: support -> none",
+    ]
+
+
+def forgetting(rule: str) -> dict[str, Any]:
+    """The refund, its records kept as `rule` says (brief, D32)."""
+    case = refund()
+    case["forgetting"] = rule
+    return case
+
+
+def test_forgetting_is_ordered() -> None:
+    # never < while_open < allowed: toward allowed, a person may erase more.
+    assert judged_lines(forgetting("while_open"), forgetting("allowed")) == [
+        "looser     forgetting: while_open -> allowed (a closed case may be forgotten too)"
+    ]
+    assert judged_lines(forgetting("never"), forgetting("while_open")) == [
+        "looser     forgetting: never -> while_open (an open case may be forgotten)"
+    ]
+    assert judged_lines(forgetting("allowed"), forgetting("never")) == [
+        "stricter   forgetting: allowed -> never"
+    ]
+
+
+def fresh(age: str | None) -> dict[str, Any]:
+    """A case looking an order up once someone confirms it, the order ID read at most `age` old,
+    or of any age."""
+    lookup: dict[str, Any] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "requires": ["confirm"],
+    }
+    if age is not None:
+        lookup["max_age"] = {"order_id": age}
+    return {
+        "case": "fresh",
+        "display": {"title": "A fresh order"},
+        "fields": {
+            "order_id": {"type": "reference", "system": "orders", "display": {"title": "Order"}}
+        },
+        "steps": {
+            "confirm": {
+                "kind": "task",
+                "display": {"title": "Confirm it"},
+                "roles": ["support"],
+                "outcomes": {"ok": {"display": {"title": "Confirmed"}}},
+            },
+            "lookup": lookup,
+        },
+    }
+
+
+def test_a_fact_allowed_older_is_looser() -> None:
+    # Ages compared as durations, never as text: 2d is longer than 12h.
+    assert judged_lines(fresh("12h"), fresh("2d")) == [
+        "looser     steps.lookup.max_age.order_id: 12h -> 2d"
+    ]
+    assert judged_lines(fresh("2d"), fresh("12h")) == [
+        "stricter   steps.lookup.max_age.order_id: 2d -> 12h"
+    ]
+    assert judged_lines(fresh("1d"), fresh("24h")) == [
+        "not proven steps.lookup.max_age.order_id: 1d -> 24h (the same age)"
+    ]
+
+
+def test_a_fact_no_longer_required_fresh_is_looser() -> None:
+    assert judged_lines(fresh("1d"), fresh(None)) == [
+        "looser     steps.lookup.max_age.order_id: 1d -> any age"
+    ]
+    assert judged_lines(fresh(None), fresh("1d")) == [
+        "stricter   steps.lookup.max_age.order_id: any age -> 1d"
+    ]
+
+
 # --- Witnesses -----------------------------------------------------------------------------------
 
 
@@ -648,6 +766,45 @@ def repeatable_witness() -> Witness:
     return before, after, CATALOG, refused, started(new, "follow_up#2")
 
 
+def close_reasons_witness() -> Witness:
+    """Support may not close the case as withdrawn before the reason exists; then may."""
+    before, after = closing(), closing(withdrawn=["support"])
+    old = attempted(before, CATALOG, close("withdrawn", "ana"))
+    new = attempted(after, CATALOG, close("withdrawn", "ana"))
+    refused = old == "refund has no close reason 'withdrawn': its reasons are duplicate"
+    return before, after, CATALOG, refused, isinstance(new, CaseRun) and new.closed
+
+
+def freshness_witness() -> Witness:
+    """The order ID, three days old, is refused at most a day old (it can't be fetched again, so
+    the lookup needs attention); allowed a week, the lookup runs."""
+    before, after = fresh("1d"), fresh("7d")
+
+    def looked_up(case: dict[str, Any]) -> CaseRun:
+        return run_case(
+            case,
+            file={"order_id": "ord-1"},
+            answers=[later("3d"), ("confirm", "ok", "ana")],
+            people=PEOPLE,
+        )
+
+    old, new = looked_up(before), looked_up(after)
+    refused = not old.reached("lookup") and any(
+        "order_id was obtained 3 days ago, and lookup needs it at most 1 day old" in line
+        for line in old.needs_attention
+    )
+    return before, after, CATALOG, refused, new.reached("lookup")
+
+
+def forgetting_witness() -> Witness:
+    """A closed case is refused forgetting while its definition keeps closed cases; allowed, it
+    may be forgotten (brief, D32)."""
+    refused = lookup_refusal("refund-1", CaseLookup("kept", False, "while_open"))
+    taken = lookup_refusal("refund-1", CaseLookup("kept", False, "allowed")) is None
+    expected = "refund-1 is closed, and its definition keeps closed cases (forgetting: while_open)"
+    return forgetting("while_open"), forgetting("allowed"), CATALOG, refused == expected, taken
+
+
 # Each of 13b's comparisons, and its witness, in the order of COMPARISONS.
 WITNESSES: dict[str, Callable[[], Witness]] = {
     "approval": approval_witness,
@@ -663,6 +820,9 @@ WITNESSES: dict[str, Callable[[], Witness]] = {
     "step condition": step_condition_witness,
     "automatic": automatic_witness,
     "repeatable": repeatable_witness,
+    "close reasons": close_reasons_witness,
+    "freshness": freshness_witness,
+    "forgetting": forgetting_witness,
 }
 
 

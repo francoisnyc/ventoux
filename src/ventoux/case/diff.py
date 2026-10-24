@@ -29,7 +29,9 @@ from ventoux.case.guards import (
     Versions,
     approval_change,
     approval_condition_change,
+    close_reason_change,
     count_change,
+    forgetting_change,
     roles_change,
     step_condition_change,
     step_guards,
@@ -236,6 +238,16 @@ APPROVAL_COUNT = ("steps", "*", "approval", "count")
 APPROVAL_WHEN = ("steps", "*", "approval", "when")
 APPROVERS = ("steps", "*", "approval", "roles")
 REQUIRES = ("steps", "*", "requires")
+CLOSE_REASON = ("close_reasons", "*")
+FORGETTING = ("forgetting",)
+
+
+def under_max_age(path: str) -> bool:
+    """Whether `path` is in a step's `max_age`, whose keys name facts with dots in them."""
+    parts = path.split(".")
+    return len(parts) >= 3 and parts[0] == "steps" and parts[2] == "max_age"
+
+
 STEP_WHEN = ("steps", "*", "when")
 SWITCHES = ("automatic", "repeatable")
 
@@ -271,8 +283,15 @@ def judged(
     """Each leaf as changes: judged by its comparison where one applies, else said, not proven.
     An entry added is matched against the entries removed among `peers` (`found` by default)."""
     for leaf in found:
-        if leaf.before is MISSING or leaf.after is MISSING:
-            yield entry_change(leaf, found if peers is None else peers)
+        others = found if peers is None else peers
+        if under_max_age(leaf.path):
+            continue  # said by `step_guards`, which compares each fact's age as a duration
+        elif at(leaf.path, CLOSE_REASON) and not renamed(leaf, others):
+            yield close_reason_change(leaf)  # a way to close added or removed
+        elif leaf.before is MISSING or leaf.after is MISSING:
+            yield entry_change(leaf, others)
+        elif at(leaf.path, FORGETTING):
+            yield forgetting_change(leaf)
         elif any(at(leaf.path, pattern) for pattern in CONTRACTS):
             yield from contract_changes(leaf, versions.catalog)
         elif at(leaf.path, APPROVAL):
@@ -297,6 +316,21 @@ def judged(
             continue  # said by `readers`, which compares who sees it, under its field
         else:
             yield Change(leaf.path, "not proven", f"{shown(leaf.before)} -> {shown(leaf.after)}")
+
+
+def renamed(leaf: Leaf, found: list[Leaf]) -> bool:
+    """Whether `leaf` is an entry added or removed whose counterpart, removed or added in the same
+    map, behaves exactly as it does: a rename, never judged (brief, D53)."""
+    if leaf.before is not MISSING and leaf.after is not MISSING:
+        return False
+    parent = leaf.path.rpartition(".")[0]
+    mine = leaf.after if leaf.before is MISSING else leaf.before
+    return any(
+        other.path.rpartition(".")[0] == parent
+        and (other.before is MISSING) != (leaf.before is MISSING)
+        and canonical(other.after if other.before is MISSING else other.before) == canonical(mine)
+        for other in found
+    )
 
 
 def entry_change(leaf: Leaf, found: list[Leaf]) -> Change:
