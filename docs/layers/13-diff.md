@@ -1,9 +1,10 @@
 # Layer 13: the semantic diff
 
-Status: draft, 2026-10-24. Prior art read (the `chartering` prototype at `81389b3`, its `main`);
+Status: 2026-10-24. Prior art read (the `chartering` prototype at `81389b3`, its `main`);
 layer 13 explained, split into five parts, and 13a's choices put with a recommendation each.
-Waiting for answers by number. Nothing built yet. Layer 12's walk-through and check-yourself are
-deferred, by the user's choice, and aren't part of this layer.
+Answered "all as recommended", the same day: choices 1 to 18. D55 and the releases guide's
+section "What changed: the diff" written before building 13a. Layer 12's walk-through and
+check-yourself are deferred, by the user's choice, and aren't part of this layer.
 
 ## Warm-up: learning question 40, arrival is a fact, content is not
 

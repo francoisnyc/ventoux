@@ -590,6 +590,9 @@ be erased on request), has size limits, and a second copy of business records go
 - **Read as one sentence,** the same in validator errors, approval sheets and diffs: "takes
   `to_customer` only from a system or a person, never from untrusted data"; "takes `account` only
   from payments". Developers never write a policy; they meet that sentence.
+- **Amended 2026-10-24, by D55** (the text above stands; this adds to it): the semantic diff's
+  "stricter or looser?" is built for both kinds: what an input's policies accept is compared
+  exactly, `compared(old, new)` beside the kinds, and a kind it doesn't know refuses the diff.
 
 ### D22. Roles come with each answer, from the trusted caller
 
@@ -2120,6 +2123,59 @@ D29, D51 and D53, whose text is kept.*
   attention.
 - **No new engine version:** `decide` decides nothing differently; the registry's calls are in the
   driver, on new paths, behind the patch `ventoux-registry`.
+
+### D55. The semantic diff: changes by effect, a verdict only where proven, every doubt read as looser
+
+*Drafted 2026-10-24, in layer 13a (`docs/layers/13-diff.md`, choices 1 to 18). Adds to D5, D21
+and D50, whose text is kept.*
+
+- **One diff, several renderings.** `diff(before, after, catalog)` compares two packages, a case
+  and its plans (D50), against the catalog, and gives a list of changes: each with its path, as
+  the JSON writes it, its verdict, and what it was and is, in the definition's own terms. The
+  developer form, the plain-language form (13c), the release notes (13d) and the CI summary (13e)
+  all render that one list, so no two of them can judge a change differently.
+- **Three verdicts, each a proof.** *Looser*: the new version's guard lets through strictly more
+  than the old, whatever a case holds; *stricter*: strictly less; *not proven*: anything else,
+  two guards neither wider nor narrower, a change to what isn't a guard, or a comparison the diff
+  doesn't know. A verdict comes only from a closed list of comparisons, each with a witness, a
+  run where one version refuses what the other lets through; a test checks the witnesses cover
+  the list. Expressions are never compared: `amount > 100` against `amount > 150` is not proven,
+  both shown.
+- **Every doubt reads as looser.** "Not proven" is never "unchanged" or "stricter": in a summary
+  it is counted with looser, as what may loosen, and said before stricter. Its own line says only
+  what changed. A comparison the diff can't make (a contract the catalog doesn't hold, a policy
+  kind it doesn't know) refuses the whole diff, never leaves a change out.
+- **Built in 13a, the guards on data:** an input's policies, when a step or a plan's activity
+  state calls another contract, compared per input, the rest of the contract said and not proven
+  (its readable diff is 13d's); an `untrusted:` mark on a case field, a payload field or a plan's
+  field, removed looser, added stricter, relabelled not proven; `sensitive`, removed looser,
+  added stricter; who sees a field, compared as the case computes it (its `visible_to`, or every
+  role the case names), so a role named anywhere new is said on every field it now sees, and once
+  for every outcome and output. 13b adds approvals, requirements, conditions, who proposes,
+  answers, sends and closes, `automatic`, `repeatable`, `max_age`, close reasons, forgetting and a
+  plan's approval states; until then each reads not proven.
+- **Never less than the digest.** Every path where the behaviour digest's comparison (D50) sees a
+  change is covered by a change in the diff, and the diff is empty exactly when the digests are
+  equal: a contract reference names one immutable contract (D5). Wording is listed apart, before
+  and after, never as behaviour.
+- **Renames are left as they are:** one entry removed, one added. A migration's mapping (D53)
+  isn't in either package. Where an added entry behaves exactly as a removed one of its kind, the
+  added line says so, and that open cases need a migration mapping one to the other.
+- **What it may show:** what the definitions and the catalog write (names, roles, contract
+  references, durations, counts, a literal input, an expression's constants through the
+  expression renderer, wording). It is given no case file, so it never quotes a case's value.
+- **Pure:** no clock, randomness or I/O, no Temporal; the same list in the same order every time:
+  the case before its plans, the case's sections in the order the format writes them, each map in
+  the new version's order with a removed entry at its old place, a change derived from another
+  under the entry it is about, naming what caused it.
+- **`ventoux diff OLD NEW`** prints the developer form of two package folders, against the
+  development catalog until `ventoux check` brings the deployment's (layer 14). Exit 0 when it
+  compared, whatever it found: a looser change is a reviewer's to judge; 1 when a package or the
+  diff is refused; 2 when something can't be read.
+- **Decided for the layer, built later:** the CI step shows the diff and whether merging creates a
+  release, in the job summary, comparing the base's digest with the head's (13e); a contract's
+  readable diff, its old promise computed from the base commit when the hash check fails, the
+  lockfile keeping its shape (13d).
 
 ### Simplifications adopted
 

@@ -360,7 +360,75 @@ operator terminating it in Temporal's UI, never said it closed: retiring asks Te
 listed case stands, and drops those that have ended, saying so: `refund-8 ended (terminated)
 without saying it closed: no longer open on refund 1`.
 
+## What changed: the diff
+
+A pull request shows the JSON that changed. That is rarely what a reviewer needs to know. Moving a
+step from `"payments.refund@2"` to `"payments.refund@3"` changes one character. If `@3` takes
+`amount` with no input policy, a customer's amount could now reach the payment. `ventoux diff`
+compares two versions of a package by what they do, against the catalog:
+
+```
+$ ventoux diff refund-before refund-after
+refund: 1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; no wording change
+looser     steps.pay.activity: payments.refund@2 -> payments.refund@3: input amount: was only from a system or a person, never from untrusted data; now any value (no input policy)
+```
+
+Each change has a **verdict**:
+
+- **looser:** the new version lets through strictly more than the old, whatever a case holds:
+  an input policy that accepts more, an `untrusted:` mark removed from a field, `sensitive`
+  removed, a field seen by more roles;
+- **stricter:** the reverse, strictly less;
+- **not proven:** anything else. Two policies that are neither wider nor narrower
+  (`only_from("payments")` against `only_from("billing")`), a change to something that isn't a
+  guard (a timer's age, a step added), or one the diff can't judge yet. Approvals, requirements and
+  conditions are judged in a later part of layer 13; until then they read "not proven".
+
+**Every doubt reads as looser.** "Not proven" is counted with looser, as what *may loosen*. Its
+line says only what changed and leaves the judgement to you. A change is never left out: whatever
+changes the behaviour digest is in the diff, and the diff is empty exactly when the digests are
+equal. If the diff can't make a comparison (a contract the catalog doesn't hold), it refuses to
+answer at all.
+
+**What the JSON hides.** Here the refund package (`examples/packages/refund`) gains a fraud check,
+answered by the `fraud` role. Its `amount` is marked as typed by the customer. The plan's approval
+gets 72 hours instead of 48. And the settlement is reworded:
+
+```
+$ ventoux diff examples/packages/refund refund-next
+refund: 7 behaviour changes: 6 may loosen (4 looser, 2 not proven), 1 stricter; 1 wording change
+looser     fields.order_id.visible_to: seen by support -> fraud, support (because steps.fraud_check.roles names fraud)
+stricter   fields.amount.source: none -> untrusted:customer
+looser     fields.amount.visible_to: seen by support -> fraud, support (because steps.fraud_check.roles names fraud)
+looser     fields.approved_amount.visible_to: seen by support -> fraud, support (because steps.fraud_check.roles names fraud)
+looser     steps: every outcome and output: seen by support -> fraud, support (because steps.fraud_check.roles names fraud)
+not proven steps.fraud_check: added
+not proven plans.refund-order@1.states.approve_refund.approval.timeout: 48h -> 72h
+wording    steps.settle.display.title: "Settle the refund" -> "Pay the refund"
+```
+
+The JSON diff shows a new step and nothing about the fields. But a field without `visible_to` is
+seen by every role the case names, so naming `fraud` anywhere lets it see the order, the amounts,
+and every step's outcome and outputs. The diff says so on each, and says why.
+
+**Renames** are one entry removed and one added: the diff can't know you meant a rename. When the
+added one behaves exactly as the removed one did, its line says so, and that open cases need a
+migration mapping one to the other (above).
+
+**Never a value from a case.** The diff reads two packages and the catalog, never a case file, so
+it can't quote one. What it shows is what you wrote: names, roles, contract references,
+durations, conditions as the expression renderer writes them, a literal input, your wording.
+
+**The order is the package's:** the case before its plans; fields, milestones, steps, rules,
+events and close reasons in the order the format writes them; each in the new version's order,
+with a removed entry where it was.
+
+`ventoux diff` exits 0 when it compared, whatever it found: a looser change can be the right one,
+and it is yours to judge. It exits 1 when a package or the diff is refused, and 2 when something
+can't be read.
+
 ## What the tool says
 
-Paths and names, never values: `behaviour changed at steps.settle.when`. The semantic diff (layer
-13) will say what a change means; until then, the paths are the release notes.
+Paths and names, never values: `behaviour changed at steps.settle.when`. The diff (above) says
+what a change means; until the release notes are generated from it (layer 13d), the record's
+paths are the release notes.
