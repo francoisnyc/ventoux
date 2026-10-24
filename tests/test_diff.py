@@ -13,7 +13,8 @@ from typing import Annotated, Any
 import pytest
 from pydantic import BaseModel, create_model
 
-from ventoux.case.diff import Diff, DiffRefused, diff
+from ventoux.case.diff import COMPARISONS, Diff, DiffRefused, diff
+from ventoux.case.memory import CaseRun
 from ventoux.case.releases import Package, changed, digest, package
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract
@@ -24,7 +25,7 @@ from ventoux.core.policy import (
     only_from,
     trusted_only,
 )
-from ventoux.testing import CATALOG, payments_refund
+from ventoux.testing import CATALOG, fake_refund, payments_refund, run_case
 
 ROOT = Path(__file__).parent.parent
 REFUND = ROOT / "examples" / "refund" / "refund.json"
@@ -70,9 +71,9 @@ def refund_contract(version: int, input: type[BaseModel], **more: Any) -> Activi
 
 
 def catalog_with(*contracts: ActivityContract) -> Catalog:
-    """The development catalog's refund, and `contracts`."""
-    catalog = Catalog()
-    for contract in (payments_refund, *contracts):
+    """The development catalog, and `contracts`."""
+    catalog = copy.deepcopy(CATALOG)
+    for contract in contracts:
         catalog.register(contract)
     return catalog
 
@@ -554,3 +555,144 @@ def test_the_diff_reads_only_packages_and_the_catalog() -> None:
     # definitions and the catalog write (brief, D55).
     given = [parameter.annotation for parameter in inspect.signature(diff).parameters.values()]
     assert given == [Package, Package, Catalog]
+
+
+# --- Slice 5: a witness for each comparison ------------------------------------------------------
+#
+# A witness is a pair of definitions the diff reads as looser by one comparison, and two runs:
+# the old version refuses what the new one lets through. Read the other way, the same pair is
+# stricter, so one witness proves both verdicts (brief, D55).
+
+SUPPORT = {"ana": ["support"], "lee": ["support-lead"]}
+REVIEWED = ("review", "approve", "ana", {"approved_amount": 50})  # under 100: no approval...
+# ...unless the amount is untrusted, which can't remove an approval (brief, D38): a team lead's.
+APPROVED = ("pay.approval#1", "approve", "lee")
+
+
+def refund_runs(case: dict[str, Any], catalog: Catalog = CATALOG) -> CaseRun:
+    """The refund run to its payment: reviewed, 50 approved, and approved by a team lead if
+    the amount is marked untrusted."""
+    untrusted = "source" in case["fields"]["approved_amount"]
+    return run_case(
+        case,
+        file={"order_id": "ord-1", "amount": 50},
+        answers=[REVIEWED, APPROVED] if untrusted else [REVIEWED],
+        people=SUPPORT,
+        activities={"payments.refund@3": fake_refund},
+        catalog=catalog,
+    )
+
+
+def policy_witness() -> tuple[dict[str, Any], dict[str, Any], Catalog, bool, bool]:
+    """@2 refuses an amount marked untrusted; @3, with no policy on it, takes it."""
+    before = marked("untrusted:customer")
+    after = copy.deepcopy(before)
+    after["steps"]["pay"]["activity"] = "payments.refund@3"
+    refused = policy_refused(refund_runs(before, LOOSE))
+    taken = refund_runs(after, LOOSE).reached("pay")
+    return before, after, LOOSE, refused, taken
+
+
+def policy_refused(run: CaseRun) -> bool:
+    """Whether the payment was refused by its input policy on `amount`, and only that."""
+    return not run.reached("pay") and run.needs_attention == [
+        (
+            "pay#1: payments.refund@2 takes amount only from a system or a person, never from "
+            "untrusted data, and this value comes from approved_amount (person:ana, "
+            "untrusted:customer)"
+        )
+    ]
+
+
+def mark_witness() -> tuple[dict[str, Any], dict[str, Any], Catalog, bool, bool]:
+    """The same amount, refused while its field carries the mark, taken once it doesn't."""
+    before, after = marked("untrusted:customer"), marked(None)
+    return (
+        before,
+        after,
+        CATALOG,
+        policy_refused(refund_runs(before)),
+        refund_runs(after).reached("pay"),
+    )
+
+
+def identified(sensitive: bool) -> dict[str, Any]:
+    """A case checking a customer's ID through the KYC team's workflow, the ID sensitive or not."""
+    field: dict[str, Any] = {
+        "type": "string",
+        "display": {"title": "ID"},
+        "visible_to": ["support"],
+    }
+    if sensitive:
+        field["sensitive"] = True
+    return {
+        "case": "identified",
+        "display": {"title": "A customer identified"},
+        "fields": {"national_id": field},
+        "steps": {
+            "kyc": {
+                "kind": "workflow",
+                "display": {"title": "Check the customer"},
+                "workflow": "kyc.check@1",
+                "inputs": {"customer_id": {"var": "national_id"}},
+            }
+        },
+    }
+
+
+def checks(case: dict[str, Any]) -> CaseRun:
+    """The KYC workflow given the ID."""
+    run = run_case(
+        case,
+        file={"national_id": "1 85 05 78 006 084 36"},
+        answers=[],
+        people=SUPPORT,
+    )
+    return run
+
+
+def sensitive_witness() -> tuple[dict[str, Any], dict[str, Any], Catalog, bool, bool]:
+    """A sensitive ID is never given to a workflow step; once not sensitive, it is."""
+    before, after = identified(True), identified(False)
+    refused = checks(before).needs_attention == [
+        (
+            "kyc#1: kyc.check@1 is a workflow step and can't be given national_id, a sensitive "
+            "field: its worker doesn't hold the case's key"
+        )
+    ]
+    return before, after, CATALOG, refused, checks(after).reached("kyc")
+
+
+def readers_witness() -> tuple[dict[str, Any], dict[str, Any], Catalog, bool, bool]:
+    """`amount` absent from a team lead's view, then present."""
+    before, after = seen_by("support"), seen_by("support", "support-lead")
+
+    def sees(case: dict[str, Any]) -> bool:
+        run = run_case(case, file={"order_id": "ord-1", "amount": 50}, answers=[], people=SUPPORT)
+        return "amount" in run.view(["support-lead"]).values
+
+    return before, after, CATALOG, not sees(before), sees(after)
+
+
+WITNESSES = {
+    "input policy": policy_witness,
+    "untrusted mark": mark_witness,
+    "sensitive": sensitive_witness,
+    "readers": readers_witness,
+}
+
+
+@pytest.mark.parametrize("comparison", list(WITNESSES))
+def test_each_comparison_has_a_witness(comparison: str) -> None:
+    before, after, catalog, refused, taken = WITNESSES[comparison]()
+    assert refused, f"{comparison}: the old version lets it through"
+    assert taken, f"{comparison}: the new version refuses it"
+    looser = diff(packed(before), packed(after), catalog).changes
+    stricter = diff(packed(after), packed(before), catalog).changes
+    assert [(c.verdict, c.comparison) for c in looser] == [("looser", comparison)]
+    assert [(c.verdict, c.comparison) for c in stricter] == [("stricter", comparison)]
+
+
+def test_the_witnesses_cover_every_comparison() -> None:
+    # A comparison can't give a verdict without a run that shows it (brief, D55).
+    assert list(WITNESSES) == list(COMPARISONS)
