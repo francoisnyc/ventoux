@@ -1876,3 +1876,109 @@ here.
 | The releases guide's activation example runs as written | L `test_the_guides_activation_example_runs_as_written` |
 | The engine version is unchanged: 3 is still unknown | `tests/test_engine.py` `test_an_unknown_engine_version_is_refused`, unchanged |
 | `case` reads no clock or I/O and imports no Temporal, in the new modules too | `tests/test_layers.py`, unchanged |
+
+## 12e, fixed later: the dev server's cold start
+
+Status: choices drafted 2026-10-24, from `main` at `231a0e7` (13d merged as #50), before 13e.
+Waiting for answers, by number.
+
+### The cause, from the tutor review of #50
+
+`test_activate_refuses_a_release_no_worker_serves`, the file's first test, failed in four full
+runs since 12e, always on the file's first dev-server start, with no output from the server:
+`ephemeral server at 127.0.0.1:39227 did not start within 5s`. The review measured why:
+
+- the first start after a cloud container is restored took 5.08 s and failed (the container up
+  1.4 min); another, in a freshly restored container, 0.83 s; starts in containers up 10 to 17
+  minutes, 0.13 to 0.21 s;
+- reading a 156 MB binary nothing had read since the restore (the dev server's size) took 6.04 s
+  cold and 0.03 s warm.
+
+So the first start pages the server's 156 MB binary in from a cold disk, which can take longer
+than the 5 s sdk-core waits for the server to answer. That wait is fixed: `start_local` takes no
+startup timeout in temporalio 1.34.0. It explains why the failure is always a run's first start,
+and why the server prints nothing: it hasn't got far enough to log.
+
+Checked before drafting: a stand-in executable that sleeps 6 s and then runs the real binary,
+given to `start_local(dev_server_existing_path=…)`, fails the same way, after 5.08 s, and leaves no
+process behind.
+
+### What the SDK does today, and what each fix would depend on
+
+- `start_local` downloads the Temporal CLI the first time, into `download_dest_dir` (CI gives
+  `TEMPORAL_CLI_DIR`) or the system's temporary folder, as `temporal-sdk-python-1.34.0`: a name
+  sdk-core makes from the SDK's name and version, documented nowhere. Then it runs `<binary> server
+  start-dev --port P --namespace default --ip 127.0.0.1 --log-format pretty --log-level warn
+  --dynamic-config-value frontend.enableServerVersionCheck=false --dynamic-config-value
+  frontend.enableUpdateWorkflowExecution=true --dynamic-config-value
+  frontend.enableUpdateWorkflowExecutionAsyncAccepted=true --headless` (read from the running
+  process), and waits 5 s for it.
+- Public: `dev_server_existing_path` (run this binary, download nothing),
+  `WorkflowEnvironment.from_client(client)`, `Client.connect(target)`, and the CLI's own `server
+  start-dev` flags. Internal: the binary's name and folder, and the 5 s.
+- There is no call that only downloads: the SDK downloads as it starts.
+
+### Choices
+
+81. **The harness owns the start, with its own deadline.** Offered:
+    - (a) **start the CLI itself:** `tests/dev_server.py` runs `<binary> server start-dev` with
+      the flags above on a free port, its output going to a file; connects with `Client.connect`
+      until the server answers or a deadline passes; gives `WorkflowEnvironment.from_client`; and
+      stops the process on the way out (terminate, then kill). Depends on the CLI's public flags
+      and on finding the binary (choice 82); the 5 s is no longer in the path;
+    - (b) **read the binary once before the first start**, then `start_local` as today. Depends
+      on the binary's internal name too, keeps the 5 s for anything else slow (a busy CI runner,
+      a slower disk), and a stand-in that is really slow still fails with it: it can't pass the
+      negative test (choice 84).
+
+    *Recommended:* (a). It removes the cause rather than racing it: the start no longer has a
+    deadline someone else chose. Never a retry.
+
+82. **Where the binary comes from.** The folder stays the SDK's: `TEMPORAL_CLI_DIR` when set, the
+    system's temporary folder otherwise, so CI's cache and a developer's existing download are
+    reused. The harness looks for `temporal-sdk-python-<SDK version>` there. When it isn't there,
+    the SDK downloads it the only way it can, by starting it once (`start_local` with that
+    folder), stopped at once: a file just written is warm, so that start doesn't read a cold disk.
+    If the binary still isn't at that name afterwards, the harness fails, saying the SDK put its
+    dev server somewhere it doesn't know, naming the folder's files: an SDK upgrade that renames
+    it is caught, never silently started some other way. *Recommended.* Set aside: downloading the
+    CLI ourselves (a second pin of its version, and a network path of our own).
+
+83. **The deadline: 30 s**, five times the measured cold read; a test start slower than that is
+    a fault worth failing on. A start that misses it fails (never skips, never retries), killing
+    the process and saying how long it waited, the command, and the server's own output, read
+    from its file. A server that exits before it answers fails at once, with its exit code and
+    output. *Recommended.*
+
+84. **The negative tests, in `tests/test_dev_server.py`:**
+    - the cause, reproduced: a stand-in that sleeps 6 s then runs the real binary;
+      `start_local(dev_server_existing_path=stand-in)` fails with `did not start within 5s`
+      (without the fix), and the harness starts it and a client reaches its namespace (with it);
+    - a stand-in that prints a line and never answers, with a 2 s deadline: fails, its line shown,
+      no process left;
+    - a stand-in that prints a line and exits 3: fails at once, saying so, its line shown;
+    - the binary missing under its name after the download start: fails, naming the folder's
+      files.
+
+    About 15 s of test time, most of it the 6 s stand-in, run twice. *Recommended.*
+
+85. **CI: no workflow change.** `TEMPORAL_CLI_DIR` and its cache stay as they are: the binary's
+    name carries the SDK's version, as the cache key carries `uv.lock`. *Recommended.*
+
+86. **The time-skipping test server** (`start_time_skipping`, an 84 MB binary, started by most
+    Temporal tests) waits on sdk-core the same way. It has never failed in a run whose output was
+    kept. *Recommended:* leave it, and say so as a known risk in the note: if it ever fails, the
+    same fix applies (its binary started by the harness).
+
+87. **The idle thread-pool workers (optional).** `case_worker` and `plan_worker`
+    (`src/ventoux/temporal/worker.py`) give each Worker a `ThreadPoolExecutor()` that Temporal's
+    Worker never shuts down, so each test's threads stay alive, idle. *Recommended:* not in this
+    pull request. The fix is in the shipped worker's lifecycle (who owns and shuts down the
+    executor), which every Temporal test file uses, and nothing it touches is the cold start. A
+    carried note for its own small pull request.
+
+88. **Where it is recorded:** dated lines on 12e's choice 77 (the dev server is started by the
+    harness) and on its "dev server is downloaded into `TEMPORAL_CLI_DIR`" line; 13c's carried
+    note in `docs/layers/13-diff.md` ("The flaky activation test") gets a dated line saying the
+    cause is found and fixed here. No decision in the brief names how the tests start the dev
+    server, so none changes. *Recommended.*
