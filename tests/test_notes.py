@@ -213,7 +213,7 @@ def test_the_notes_command_reads_a_records_notes(
     assert main(["notes", "refund", "2", "--releases", releases, "--plain"]) == 0
     said = capsys.readouterr().out
     assert said.startswith("## refund: what changes\n")
-    assert "- **Looser** (`steps.settle.requires`): review -> nothing." in said
+    assert "- **Looser** (`steps.settle.requires`): review -&gt; nothing." in said
 
 
 def test_the_notes_command_says_a_record_has_none_and_refuses_one_it_lacks(

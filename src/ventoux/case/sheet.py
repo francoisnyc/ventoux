@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from ventoux.case.definition import CallStep, Rule, WorkflowStep
 from ventoux.case.guards import excluded_every_time, whoever
+from ventoux.case.markdown import text
 from ventoux.case.reading import (
     EVERY_RULE,
     EntryReading,
@@ -86,7 +87,9 @@ class Never:
 def case_map(package: Package, catalog: Catalog) -> str:
     """What a case of `package` can do: every entry read, in the format's order (brief, D56)."""
     case = package.case
-    lines = [f"# {package.name}: what a case can do"]
+    # Every piece a definition or the catalog writes is shown, never rendered: `text` escapes it
+    # where Markdown is written (brief, D56, as amended in 13e).
+    lines = [f"# {text(package.name)}: what a case can do"]
 
     def section(title: str, entries: list[str], above: str = "") -> None:
         nonlocal lines
@@ -107,14 +110,14 @@ def case_map(package: Package, catalog: Catalog) -> str:
     )
     section("Closing", [bullet(read_closing(case))])
     for reference, plan in package.plans.items():
-        entries = [f"- It starts at {plan.initial}."]
+        entries = [f"- It starts at {text(plan.initial)}."]
         entries += [
             read(f"plans.{reference}.fields.{name}", package, catalog) for name in plan.fields
         ]
         entries += [
             read(f"plans.{reference}.states.{name}", package, catalog) for name in plan.states
         ]
-        section(f"Plan {reference}", entries)
+        section(f"Plan {text(reference)}", entries)
     return "\n".join(lines) + "\n"
 
 
@@ -127,7 +130,8 @@ def read(path: str, package: Package, catalog: Catalog) -> str:
 
 def bullet(reading: EntryReading) -> str:
     """`- sentence`, and each line of fine print under it."""
-    return "\n".join([f"- {reading.sentence}", *(f"  - {line}" for line in reading.fine_print)])
+    lines = [f"- {text(reading.sentence)}", *(f"  - {text(line)}" for line in reading.fine_print)]
+    return "\n".join(lines)
 
 
 def rules_read(package: Package) -> list[str]:
@@ -139,13 +143,14 @@ def rules_read(package: Package) -> list[str]:
     for name, entry in case.written.items():
         if isinstance(entry, Rule):
             reading = read_rule(name, case.rules[name], case)
-            found.append(f"- **{name}**: {reading.sentence}")
-            found += [f"  - {line}" for line in reading.fine_print]
+            found.append(f"- **{text(name)}**: {text(reading.sentence)}")
+            found += [f"  - {text(line)}" for line in reading.fine_print]
         else:
             pattern = patterns[name]
-            found.append(f"- **{name}**: {pattern.sentence} It expands to:")
+            found.append(f"- **{text(name)}**: {text(pattern.sentence)} It expands to:")
             for rule in pattern.rules:
-                found.append(f"  - **{rule}**: {read_rule(rule, case.rules[rule], case).sentence}")
+                sentence = read_rule(rule, case.rules[rule], case).sentence
+                found.append(f"  - **{text(rule)}**: {text(sentence)}")
     return found
 
 
@@ -155,12 +160,12 @@ def rules_read(package: Package) -> list[str]:
 def never_sheet(package: Package, catalog: Catalog) -> str:
     """What no case of `package` will ever do: the engine's guarantees once, then the package's
     own lines, each a proof for every case (brief, D56)."""
-    lines = [f"# {package.name} will never", "", "## For every case, by Ventoux's engine", ""]
+    lines = [f"# {text(package.name)} will never", "", "## For every case, by Ventoux's engine", ""]
     lines += [f"- {line} {decisions}." for line, decisions in ENGINE_WIDE]
     # The package's own lines hold while a case runs this release: a migration moves a case to
     # the target release's definition (brief, D53) (13c, choice 48).
-    lines += ["", f"## For every case of {package.name}, while it runs this release", ""]
-    lines += [f"- {never.line}." for never in nevers(package, catalog)]
+    lines += ["", f"## For every case of {text(package.name)}, while it runs this release", ""]
+    lines += [f"- {text(never.line)}." for never in nevers(package, catalog)]
     return "\n".join(lines) + "\n"
 
 

@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from test_diff import LOOSE, ROOT, calling, refund
 
+from ventoux.case.markdown import text
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract_hash import contract_hash, promise_hash
 from ventoux.core.promise import promise_of
@@ -130,7 +131,7 @@ def test_an_input_policy_loosened_reads_as_looser_in_the_summary(tmp_path: Path)
     assert found.code == 0  # a looser change is the reviewer's to judge, never a failure
     assert "- **refund**: a new release, unless an earlier release has this behaviour" in found.text
     assert (
-        "- **Looser** (`steps.pay.activity`): payments.refund@2 -> payments.refund@3: input "
+        "- **Looser** (`steps.pay.activity`): payments.refund@2 -&gt; payments.refund@3: input "
         "amount: was only from a system or a person, never from untrusted data; now any value "
         "(no input policy)."
     ) in found.text
@@ -198,8 +199,9 @@ def test_a_diff_the_catalog_cant_make_fails_the_step(tmp_path: Path) -> None:
 def test_a_base_that_isnt_a_folder_cant_be_read(tmp_path: Path) -> None:
     found = summarized(tmp_path / "nowhere", with_example(tmp_path / "head"))
     assert (found.code, found.outcomes) == (2, ())
+    nowhere = text(str(tmp_path / "nowhere"))  # a folder's name, shown as written
     assert found.text.endswith(
-        f"## Why the step fails\n\n- the base can't be read: {tmp_path / 'nowhere'} isn't a folder\n"
+        f"## Why the step fails\n\n- the base can't be read: {nowhere} isn't a folder\n"
     )
 
 
@@ -249,7 +251,8 @@ def test_base_promises_that_cant_be_read_fail_and_say_so(
     said = f"{before}: isn't JSON: Expecting value, at line 1"
     assert capsys.readouterr().err == f"{said}\n"
     assert (tmp_path / "summary.md").read_text() == (
-        f"an earlier step's summary\n# What merging changes\n\n## Why the step fails\n\n- {said}\n"
+        "an earlier step's summary\n# What merging changes\n\n## Why the step fails\n\n"
+        f"- {text(said)}\n"
     )
 
 
@@ -272,7 +275,7 @@ def test_the_command_logs_the_whole_summary_and_appends_it(
         "# What merging changes\n\nThe merge commit `9004cbd`, against its base `231a0e7`.\n\n"
         "## Packages\n\n- **refund**: a new release"
     )
-    assert "- **Looser** (`steps.settle.requires`): review -> nothing." in logged
+    assert "- **Looser** (`steps.settle.requires`): review -&gt; nothing." in logged
     assert logged.endswith("## Contracts\n\nEvery contract matches `contracts.lock.json`.\n")
     assert (tmp_path / "summary.md").read_text() == f"an earlier step's summary\n{logged}"
 
@@ -384,4 +387,40 @@ def test_two_packages_of_one_name_in_a_tree_are_refused(tmp_path: Path) -> None:
     assert found.code == 1
     assert found.failures == (
         "examples/packages/refund-copy, in the head: another folder holds refund too",
+    )
+
+
+# --- From the tutor review of #52: what a pull request writes is shown, never rendered -----------
+
+HIDING = "approve</li></ul><details><summary>checked: nothing loosens</summary>"
+
+
+def hiding() -> dict[str, Any]:
+    """The review's head: a task before pay whose condition hides what follows in a collapsed
+    <details>, and pay moved to an @3 that takes any amount."""
+    case = calling("payments.refund@3")
+    case["steps"]["vet"] = {
+        "kind": "task",
+        "display": {"title": "Vet the refund"},
+        "roles": ["support"],
+        "when": {"==": [{"var": "review.outcome"}, HIDING]},
+        "outcomes": {"done": {"display": {"title": "Done"}}},
+    }
+    case["steps"]["pay"]["requires"] = ["vet"]
+    return case
+
+
+def test_html_a_pull_request_writes_never_reaches_the_summary(tmp_path: Path) -> None:
+    # The review's run: the literal is shown escaped, the Looser line stays visible, and nothing a
+    # definition writes opens an HTML tag (brief, D56, as amended in 13e).
+    base = tree(tmp_path / "base", refund())
+    head = tree(tmp_path / "head", hiding())
+    found = summarized(base, head, LOOSE)
+    assert "<" not in found.text
+    assert (
+        "approve&lt;/li&gt;&lt;/ul&gt;&lt;details&gt;&lt;summary&gt;checked: nothing loosens"
+        "&lt;/summary&gt;"
+    ) in found.text
+    assert "- **Looser** (`steps.pay.activity`): payments.refund@2 -&gt; payments.refund@3" in (
+        found.text
     )

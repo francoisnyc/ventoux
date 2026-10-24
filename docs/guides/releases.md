@@ -460,12 +460,12 @@ $ ventoux diff refund-four-eyes refund-one-lead --plain
 
 ### steps.pay
 
-- Before: pay calls payments.refund@2 (high risk, it writes), giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve". Two people approve it, each a support-lead, when approved_amount > 10000.
-  - Where approved_amount > 10000 is false, it runs with no approval.
+- Before: pay calls payments.refund@2 (high risk, it writes), giving order\_id from order\_id and amount from approved\_amount. It starts by itself once review is done, if review.outcome = "approve". Two people approve it, each a support-lead, when approved\_amount &gt; 10000.
+  - Where approved\_amount &gt; 10000 is false, it runs with no approval.
   - The 2 approvers are different people, each someone else; one rejection rejects the approval.
-- After: pay calls payments.refund@2 (high risk, it writes), giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve". One support-lead approves it, when approved_amount > 10000.
-  - Where approved_amount > 10000 is false, it runs with no approval.
-- **Looser** (`steps.pay.approval.count`): 2 -> 1 (one person approves pay, where two had to).
+- After: pay calls payments.refund@2 (high risk, it writes), giving order\_id from order\_id and amount from approved\_amount. It starts by itself once review is done, if review.outcome = "approve". One support-lead approves it, when approved\_amount &gt; 10000.
+  - Where approved\_amount &gt; 10000 is false, it runs with no approval.
+- **Looser** (`steps.pay.approval.count`): 2 -&gt; 1 (one person approves pay, where two had to).
 ```
 
 **Written otherwise, the same decisions.** Where two versions are written differently but decide
@@ -555,9 +555,9 @@ $ ventoux summary --base base --head . --packages examples/packages --lock contr
 
 ### steps.settle
 
-- Before: settle runs the plan refund-order@1, giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve".
-- After: settle runs the plan refund-order@1, giving order_id from order_id and amount from approved_amount. It starts by itself when the case opens, if review.outcome = "approve".
-- **Looser** (`steps.settle.requires`): review -> nothing.
+- Before: settle runs the plan refund-order@1, giving order\_id from order\_id and amount from approved\_amount. It starts by itself once review is done, if review.outcome = "approve".
+- After: settle runs the plan refund-order@1, giving order\_id from order\_id and amount from approved\_amount. It starts by itself when the case opens, if review.outcome = "approve".
+- **Looser** (`steps.settle.requires`): review -&gt; nothing.
 
 ## Contracts
 

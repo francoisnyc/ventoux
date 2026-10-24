@@ -17,6 +17,7 @@ from test_diff_people import fresh
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.diff import Diff, diff
+from ventoux.case.markdown import text as text_of
 from ventoux.case.plain import plain
 from ventoux.case.reading import ENTRY_CLAUSES, EntryReading, ReadingRefused, read_entry
 from ventoux.case.releases import Package, changed
@@ -371,19 +372,19 @@ def test_the_plain_form_reads_each_entry_before_and_after() -> None:
         "\n"
         "### steps.pay\n"
         "\n"
-        "- Before: pay calls payments.refund@2 (high risk, it writes), giving order_id from "
-        "order_id and amount from approved_amount. It starts by itself once review is done, if "
+        "- Before: pay calls payments.refund@2 (high risk, it writes), giving order\\_id from "
+        "order\\_id and amount from approved\\_amount. It starts by itself once review is done, if "
         'review.outcome = "approve". Two people approve it, each a support-lead, when '
-        "approved_amount > 10000.\n"
-        "  - Where approved_amount > 10000 is false, it runs with no approval.\n"
+        "approved\\_amount &gt; 10000.\n"
+        "  - Where approved\\_amount &gt; 10000 is false, it runs with no approval.\n"
         "  - The 2 approvers are different people, each someone else; one rejection rejects the "
         "approval.\n"
-        "- After: pay calls payments.refund@2 (high risk, it writes), giving order_id from "
-        "order_id and amount from approved_amount. It starts by itself once review is done, if "
-        'review.outcome = "approve". One support-lead approves it, when approved_amount > '
+        "- After: pay calls payments.refund@2 (high risk, it writes), giving order\\_id from "
+        "order\\_id and amount from approved\\_amount. It starts by itself once review is done, if "
+        'review.outcome = "approve". One support-lead approves it, when approved\\_amount &gt; '
         "10000.\n"
-        "  - Where approved_amount > 10000 is false, it runs with no approval.\n"
-        "- **Looser** (`steps.pay.approval.count`): 2 -> 1 (one person approves pay, where two "
+        "  - Where approved\\_amount &gt; 10000 is false, it runs with no approval.\n"
+        "- **Looser** (`steps.pay.approval.count`): 2 -&gt; 1 (one person approves pay, where two "
         "had to).\n"
     )
 
@@ -405,8 +406,9 @@ def test_every_verdict_word_is_its_changes() -> None:
         "stricter": "Stricter",
         "not proven": "Changed, not proven either way (read it as possibly looser)",
     }
+    # Each said as the change says it, shown, never rendered (brief, D56, as amended in 13e).
     assert said == [
-        f"- **{words[change.verdict]}** (`{change.path}`): {change.said}."
+        f"- **{words[change.verdict]}** (`{change.path}`): {text_of(change.said)}."
         for change in found.changes
     ]
 
@@ -416,7 +418,7 @@ def test_an_entry_added_reads_after_only() -> None:
     after["close_reasons"] = {"duplicate": {"display": {"title": "Dup"}, "roles": ["support"]}}
     text = plain_of(packed(refund()), packed(after))
     assert (
-        "### close_reasons.duplicate\n"
+        "### close\\_reasons.duplicate\n"
         "\n"
         "- After: duplicate: support may close the case with it.\n"
         "- **Looser** (`close_reasons.duplicate`): added: closed by support.\n"
@@ -431,7 +433,7 @@ def test_written_otherwise_and_wording_are_listed_apart() -> None:
     assert text.endswith(
         "### Written otherwise, the same decisions\n"
         "\n"
-        "- `steps.lookup.max_age.order_id`: 1d -> 24h: the same decisions; the history says 24 "
+        "- `steps.lookup.max_age.order_id`: 1d -&gt; 24h: the same decisions; the history says 24 "
         "hours where it said 1 day.\n"
         "\n"
         "### Wording\n"
@@ -448,8 +450,8 @@ def test_a_plans_approved_activity_moved_says_the_known_limit() -> None:
     after[0]["states"]["pay"]["activity"] = "payments.refund@3"
     text = plain_of(packed(case, plans), packed(case, after), LOOSE)
     assert (
-        "- Note: who may approve pay in the plan was compared by approve_refund's roles, not "
-        "again for payments.refund@3's risk: read approve_refund's roles.\n"
+        "- Note: who may approve pay in the plan was compared by approve\\_refund's roles, not "
+        "again for payments.refund@3's risk: read approve\\_refund's roles.\n"
     ) in text
 
 

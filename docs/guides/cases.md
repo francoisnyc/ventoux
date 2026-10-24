@@ -1985,15 +1985,15 @@ $ ventoux map examples/packages/refund
 
 ## Fields
 
-- order_id is a reference to orders, seen by support.
+- order\_id is a reference to orders, seen by support.
 - amount is a number, seen by support.
-- approved_amount is a number, seen by support.
+- approved\_amount is a number, seen by support.
 
 ## Steps
 
-- review is a task for support, answered approve or reject. It starts by itself when the case opens. Answered approve, it sets approved_amount.
-- settle runs the plan refund-order@1, giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve".
-- call_customer is a task for support, answered called. It starts by itself once settle is done, if settle.outcome = "failed".
+- review is a task for support, answered approve or reject. It starts by itself when the case opens. Answered approve, it sets approved\_amount.
+- settle runs the plan refund-order@1, giving order\_id from order\_id and amount from approved\_amount. It starts by itself once review is done, if review.outcome = "approve".
+- call\_customer is a task for support, answered called. It starts by itself once settle is done, if settle.outcome = "failed".
 
 ## Closing
 
@@ -2001,12 +2001,12 @@ $ ventoux map examples/packages/refund
 
 ## Plan refund-order@1
 
-- It starts at check_order.
-- order_id is a reference to orders.
+- It starts at check\_order.
+- order\_id is a reference to orders.
 - amount is a number.
-- check_order calls orders.lookup@1 (low risk, it reads), giving order_id from order_id. On done, approve_refund; on not_found, failed.
-- approve_refund: one support-lead approves pay, within 48h. On approve, pay; on reject, failed; on timeout, failed.
-- pay calls payments.refund@2 (high risk, it writes), giving order_id from order_id and amount from amount. On done, paid; on declined, failed.
+- check\_order calls orders.lookup@1 (low risk, it reads), giving order\_id from order\_id. On done, approve\_refund; on not\_found, failed.
+- approve\_refund: one support-lead approves pay, within 48h. On approve, pay; on reject, failed; on timeout, failed.
+- pay calls payments.refund@2 (high risk, it writes), giving order\_id from order\_id and amount from amount. On done, paid; on declined, failed.
 - paid ends the plan: succeeded.
 - failed ends the plan: failed.
 
@@ -2026,8 +2026,8 @@ $ ventoux map examples/packages/refund
 
 - call anything but orders.lookup@1 (low risk, it reads) and payments.refund@2 (high risk, it writes).
 - change the world, by what its contracts declare, but through payments.refund@2.
-- give payments.refund@2 its order_id or its amount from untrusted data.
-- show order_id, amount or approved_amount to anyone but support.
+- give payments.refund@2 its order\_id or its amount from untrusted data.
+- show order\_id, amount or approved\_amount to anyone but support.
 - show any step's outcome or outputs to anyone but support.
 ```
 

@@ -9,6 +9,7 @@ holds. See docs/layers/13-diff.md (13c) and docs/guides/releases.md, "What chang
 
 from ventoux.case.changes import Change, quoted
 from ventoux.case.diff import Diff
+from ventoux.case.markdown import code, text
 from ventoux.case.reading import EntryReading, PatternReading, Reading, read_entry
 from ventoux.case.releases import Package
 from ventoux.core.catalog import Catalog
@@ -31,23 +32,25 @@ def plain(found: Diff, before: Package, after: Package, catalog: Catalog) -> str
     """The plain form of `found`, the diff from `before` to `after`: each entry, in the change
     list's order, read before and after, then its changes in their verdicts' words; what is
     written otherwise, then the wording, apart."""
-    lines = [f"## {found.name}: what changes", "", f"{counts(found)}."]
+    # Every piece a definition or the catalog writes is shown, never rendered: `text` and `code`
+    # escape it where Markdown is written (brief, D56, as amended in 13e).
+    lines = [f"## {text(found.name)}: what changes", "", f"{counts(found)}."]
     for entry, changes in grouped(found.changes):
-        lines += ["", f"### {entry}", ""]
+        lines += ["", f"### {text(entry)}", ""]
         lines += read_as("Before", entry, before, catalog)
         lines += read_as("After", entry, after, catalog)
         lines += [
-            f"- **{WORDS[change.verdict]}** (`{change.path}`): {said(change)}."
+            f"- **{WORDS[change.verdict]}** ({code(change.path)}): {text(said(change))}."
             for change in changes
         ]
         lines += known_limit(changes, after)
     if found.rewritten:
         lines += ["", "### Written otherwise, the same decisions", ""]
-        lines += [f"- `{line.path}`: {line.said}." for line in found.rewritten]
+        lines += [f"- {code(line.path)}: {text(line.said)}." for line in found.rewritten]
     if found.wording:
         lines += ["", "### Wording", ""]
         lines += [
-            f"- `{line.path}`: {quoted(line.before)} -> {quoted(line.after)}."
+            f"- {code(line.path)}: {text(quoted(line.before))} -> {text(quoted(line.after))}."
             for line in found.wording
         ]
     return "\n".join(lines) + "\n"
@@ -89,7 +92,7 @@ def read_as(when: str, entry: str, version: Package, catalog: Catalog) -> list[s
     if reading is None:
         return []
     sentence, fine = parts_of(reading)
-    return [f"- {when}: {sentence}", *(f"  - {line}" for line in fine)]
+    return [f"- {when}: {text(sentence)}", *(f"  - {text(line)}" for line in fine)]
 
 
 def parts_of(reading: object) -> tuple[str, tuple[str, ...]]:
@@ -123,8 +126,8 @@ def known_limit(changes: list[Change], after: Package) -> list[str]:
             continue
         by = " and ".join(approving)
         note = (
-            f"- Note: who may approve {state} in the plan was compared by {by}'s roles, not "
-            f"again for {target.activity}'s risk: read {by}'s roles."
+            f"- Note: who may approve {text(state)} in the plan was compared by {text(by)}'s "
+            f"roles, not again for {text(target.activity)}'s risk: read {text(by)}'s roles."
         )
         if note not in notes:
             notes.append(note)

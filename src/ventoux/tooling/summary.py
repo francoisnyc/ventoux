@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ventoux.case.changes import DiffRefused
 from ventoux.case.diff import diff
+from ventoux.case.markdown import block, code, text
 from ventoux.case.plain import plain
 from ventoux.case.reading import ReadingRefused
 from ventoux.case.releases import Package, PackageRefused, PackageUnreadable, digest, wording
@@ -86,25 +87,27 @@ def summarize(
             # said removed, or new, on a guess.
             other = "head" if later is None else "base"
             outcomes.append(
-                f"- **{name}**: not compared: a package in the {other} can't be read (below)."
+                f"- **{text(name)}**: not compared: a package in the {other} can't be read (below)."
             )
             continue
-        outcomes.append(f"- **{name}**: {what_merging_does(earlier, later)}")
+        outcomes.append(f"- **{text(name)}**: {what_merging_does(earlier, later)}")
         if earlier is not None and later is not None and changed_at_all(earlier, later):
             try:
                 diffs.append(plain(diff(earlier, later, catalog), earlier, later, catalog))
             except (DiffRefused, ReadingRefused) as refused:
                 failures.append(f"{name}: the diff can't be made: {refused}")
     problems = check_hashes(catalog, recorded, before)
-    code = REFUSED if failures or problems else COMPARED
-    text = said_as(outcomes, diffs, problems, failures, commits)
-    return Summary(tuple(outcomes), code, text, contracts_line(problems), tuple(failures), commits)
+    ending = REFUSED if failures or problems else COMPARED
+    said = said_as(outcomes, diffs, problems, failures, commits)
+    return Summary(
+        tuple(outcomes), ending, said, contracts_line(problems), tuple(failures), commits
+    )
 
 
 def cant_be_read(why: str) -> Summary:
     """A summary that can't be made: why, and nothing else (exit 2)."""
-    text = "\n".join(["# What merging changes", "", "## Why the step fails", "", f"- {why}"])
-    return Summary((), CANT_READ, text + "\n", "", (why,))
+    said = "\n".join(["# What merging changes", "", "## Why the step fails", "", f"- {text(why)}"])
+    return Summary((), CANT_READ, said + "\n", "", (why,))
 
 
 def said_as(
@@ -121,12 +124,14 @@ def said_as(
         lines += ["", said.rstrip("\n")]
     lines += ["", "## Contracts", ""]
     if problems:
-        # Kept as the hash check prints them: each changed path indented under its contract.
-        lines += ["```", *problems, "```"]
+        # Kept as the hash check prints them, each changed path indented under its contract, in
+        # a block no backtick in them can close: the head's own code writes the catalog.
+        lines += block([line for problem in problems for line in problem.splitlines()])
     else:
         lines.append(MATCHED)
     if failures:
-        lines += ["", "## Why the step fails", "", *(f"- {failure}" for failure in failures)]
+        lines += ["", "## Why the step fails", ""]
+        lines += [f"- {text(failure)}" for failure in failures]
     return "\n".join(lines) + "\n"
 
 
@@ -139,7 +144,7 @@ def heading(commits: tuple[str, str] | None) -> list[str]:
     return [
         "# What merging changes",
         "",
-        f"The merge commit `{merged}`, against its base `{base}`.",
+        f"The merge commit {code(merged)}, against its base {code(base)}.",
         "",
     ]
 
@@ -204,7 +209,8 @@ def for_summary_file(found: Summary, limit: int = LIMIT) -> str:
     lines = [*heading(found.commits), "## Packages", "", *found.outcomes]
     lines += ["", "## Contracts", "", found.contracts]
     if found.failures:
-        lines += ["", "## Why the step fails", "", *(f"- {failure}" for failure in found.failures)]
+        lines += ["", "## Why the step fails", ""]
+        lines += [f"- {text(failure)}" for failure in found.failures]
     lines += [
         "",
         (
