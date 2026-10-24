@@ -8,7 +8,6 @@ from one. Pure: no clock, no I/O, the same list in the same order every time.
 See docs/layers/13-diff.md (13a) and docs/guides/releases.md, "What changed: the diff".
 """
 
-import json
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
@@ -20,6 +19,7 @@ from ventoux.case.changes import (
     Change,
     DiffRefused,
     Leaf,
+    Reworded,
     Rewritten,
     Verdict,
     merged,
@@ -63,18 +63,6 @@ from ventoux.core.provenance import is_trusted
 
 
 @dataclass(frozen=True)
-class Reworded:
-    """A piece of wording changed: never behaviour (brief, D5)."""
-
-    path: str  # where: `steps.settle.display.title`
-    before: str | None  # the old text; None: it wasn't written
-    after: str | None  # the new text; None: it isn't written any more
-
-    def __str__(self) -> str:
-        return f"{'wording':<10} {self.path}: {quoted(self.before)} -> {quoted(self.after)}"
-
-
-@dataclass(frozen=True)
 class Diff:
     """Every behaviour change between two versions of a package, and its wording apart."""
 
@@ -112,11 +100,6 @@ class Diff:
 def counted(number: int, noun: str) -> str:
     """`1 behaviour change`, `2 behaviour changes`."""
     return f"{number} {noun}{'' if number == 1 else 's'}"
-
-
-def quoted(text: str | None) -> str:
-    """A piece of wording as the diff shows it: in quotes, or `none`."""
-    return "none" if text is None else json.dumps(text, ensure_ascii=False)
 
 
 def diff(before: Package, after: Package, catalog: Catalog) -> Diff:

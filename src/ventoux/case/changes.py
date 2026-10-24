@@ -135,3 +135,39 @@ def shown(value: object) -> str:
         return json.dumps(written, ensure_ascii=False)
     # Fail closed: a kind of value this code doesn't know is never left unsaid.
     raise DiffRefused(f"the diff can't show a {type(value).__name__}")
+
+
+@dataclass(frozen=True)
+class Reworded:
+    """A piece of wording changed: never behaviour (brief, D5)."""
+
+    path: str  # where: `steps.settle.display.title`
+    before: str | None  # the old text; None: it wasn't written
+    after: str | None  # the new text; None: it isn't written any more
+
+    def __str__(self) -> str:
+        return f"{'wording':<10} {self.path}: {quoted(self.before)} -> {quoted(self.after)}"
+
+
+def quoted(text: str | None) -> str:
+    """A piece of wording as the diff shows it: in quotes, or `none`."""
+    return "none" if text is None else json.dumps(text, ensure_ascii=False)
+
+
+@dataclass(frozen=True)
+class Against:
+    """The record a release's notes compare with: a release and one of its wordings."""
+
+    release: int
+    wording: int  # 1 for the release itself
+
+
+@dataclass(frozen=True)
+class Notes:
+    """A release's notes: the semantic diff against the record before it, kept as data, so a
+    reader renders it in the same verdict words as the diff, never judged again (brief, D57)."""
+
+    against: Against | None  # None: the first release, compared with nothing
+    changes: tuple[Change, ...] = ()
+    rewritten: tuple[Rewritten, ...] = ()  # written otherwise, the same decisions
+    wording: tuple[Reworded, ...] = ()

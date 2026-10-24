@@ -18,6 +18,7 @@ from typing import Any, Literal, get_origin
 
 from pydantic import BaseModel
 
+from ventoux.case.changes import Notes
 from ventoux.case.definition import (
     ApprovalDisplay,
     CallStep,
@@ -133,6 +134,8 @@ class Record:
     contracts: Mapping[str, Hash]  # every contract the package needs, its plans' included
     written: Written
     changed: Changed = field(default_factory=Changed)
+    # Its notes, made with it (brief, D57); None in a record written before layer 13d.
+    notes: Notes | None = None
 
 
 def package(case: str, plans: Sequence[str]) -> Package:

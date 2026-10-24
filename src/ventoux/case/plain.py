@@ -7,8 +7,8 @@ Markdown, so the CI step can show it as it is (13e). Given no case file: it quot
 holds. See docs/layers/13-diff.md (13c) and docs/guides/releases.md, "What changed: the diff".
 """
 
-from ventoux.case.changes import Change
-from ventoux.case.diff import Diff, quoted
+from ventoux.case.changes import Change, quoted
+from ventoux.case.diff import Diff
 from ventoux.case.reading import EntryReading, PatternReading, Reading, read_entry
 from ventoux.case.releases import Package
 from ventoux.core.catalog import Catalog

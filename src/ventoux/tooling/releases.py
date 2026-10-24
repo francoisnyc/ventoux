@@ -6,13 +6,14 @@ package is checked, and the record is written once (brief, D50). See docs/guides
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
+from ventoux.case.notes import notes_for
 from ventoux.case.releases import (
     Hash,
     Outcome,
@@ -95,6 +96,14 @@ class FolderStore:
     def write(self, kept: Record) -> bool:
         """Write `kept` as its file; False if that file already holds the same bytes. A file is
         never written over: other bytes are refused (brief, D50)."""
+        if kept.notes is None:
+            # Only a record written before layer 13d has none; a new one never goes without
+            # (brief, D57).
+            wording = f", wording {kept.wording}" if kept.wording > 1 else ""
+            raise RecordRefused(
+                f"{kept.name} {kept.release}{wording} has no notes: nothing is recorded without "
+                "its notes"
+            )
         path = self.root / kept.name / file_name(kept)
         text = record_text(kept)
         if path.exists():
@@ -145,10 +154,13 @@ def release(folder: Path, store: FolderStore, commit: str, catalog: Catalog) -> 
     compared with its records, then recorded once (brief, D50)."""
     released = read_package(folder)
     warnings = checked(released, catalog)
-    outcome = next_release(released, store.records(released.name))
+    records = store.records(released.name)
+    outcome = next_release(released, records)
     wrote = False
     if isinstance(outcome, Released | Reworded):
-        wrote = store.write(record(released, outcome, commit, catalog))
+        made = record(released, outcome, commit, catalog)
+        # Nothing is recorded without its notes, made from the stored packages (brief, D57).
+        wrote = store.write(replace(made, notes=notes_for(made, records, catalog)))
     return Run(released.name, digest(released), outcome, warnings, wrote)
 
 
