@@ -1,4 +1,4 @@
-"""The case map and the "will never do" sheet of a package (layer 13c; brief, D56).
+"""The case map and the "will never do" sheet of a package (layer 13c) (brief, D56).
 
 The map reads every entry of the package in the format's order, judging nothing. The sheet says
 what no case of the package will ever do: the engine's own guarantees once, above it, then each
@@ -36,23 +36,23 @@ ENGINE_WIDE = (
             "run anything written in its definition as code, or read a clock, randomness or "
             "outside data in a condition"
         ),
-        "D20",
+        "(brief, D20)",
     ),
     (
         "call anything the catalog doesn't hold: a definition names a contract, never defines one",
-        "D5",
+        "(brief, D5)",
     ),
-    ("let untrusted data reach a milestone or stop a step", "D38"),
+    ("let untrusted data reach a milestone or stop a step", "(brief, D38)"),
     (
         (
             "let anyone approve a step their own answer feeds, or one they proposed, or one in a "
             "case they opened"
         ),
-        "D11, D25",
+        "(brief, D11) (brief, D25)",
     ),
-    ("let one approval unlock more than one run of one step", "D11"),
-    ("skip a failed step by itself: it waits for a person", "D17"),
-    ("give a sensitive value to a workflow step, or write one out", "D31"),
+    ("let one approval unlock more than one run of one step", "(brief, D11)"),
+    ("skip a failed step by itself: it waits for a person", "(brief, D17)"),
+    ("give a sensitive value to a workflow step, or write one out", "(brief, D31)"),
 )
 
 # The kinds of line a sheet may say of a package, a closed list: each is proven for every case by
@@ -156,7 +156,7 @@ def never_sheet(package: Package, catalog: Catalog) -> str:
     """What no case of `package` will ever do: the engine's guarantees once, then the package's
     own lines, each a proof for every case (brief, D56)."""
     lines = [f"# {package.name} will never", "", "## For every case, by Ventoux's engine", ""]
-    lines += [f"- {line} ({decisions})." for line, decisions in ENGINE_WIDE]
+    lines += [f"- {line} {decisions}." for line, decisions in ENGINE_WIDE]
     lines += ["", f"## For every case of {package.name}", ""]
     lines += [f"- {never.line}." for never in nevers(package, catalog)]
     return "\n".join(lines) + "\n"

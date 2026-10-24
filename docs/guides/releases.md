@@ -407,6 +407,32 @@ refund: 1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; n
 looser     steps.pay.approval.count: 2 -> 1 (one person approves pay, where two had to)
 ```
 
+**In plain words, for whoever reviews the business side,** `--plain` reads each entry a change
+is about, before and after, as the cases guide reads rules, then says each change in its verdict's
+words: **Looser**, **Stricter**, or **Changed, not proven either way (read it as possibly
+looser)**. Nothing is judged again: the words are the change's. It prints Markdown, so a pull
+request can show it as it is:
+
+```
+$ ventoux diff refund-four-eyes refund-one-lead --plain
+## refund: what changes
+
+1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; no wording change.
+
+### steps.pay
+
+- Before: pay calls payments.refund@2 (high risk, it writes), giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve". Two people approve it, each a support-lead, when approved_amount > 10000.
+  - Where approved_amount > 10000 is false, it runs with no approval.
+  - The 2 approvers are different people, each someone else; one rejection rejects the approval.
+- After: pay calls payments.refund@2 (high risk, it writes), giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve". One support-lead approves it, when approved_amount > 10000.
+  - Where approved_amount > 10000 is false, it runs with no approval.
+- **Looser** (`steps.pay.approval.count`): 2 -> 1 (one person approves pay, where two had to).
+```
+
+**Written otherwise, the same decisions.** Where two versions are written differently but decide
+the same for every case, as a `max_age` of `2d` and one of `48h`, the diff says so on a line of its
+own, with what the history words differently, and counts it apart: it never reads as a loosening.
+
 **Every doubt reads as looser.** "Not proven" is counted with looser, as what *may loosen*. Its
 line says only what changed and leaves the judgement to you. A change is never left out: whatever
 changes the behaviour digest is in the diff, and the diff is empty exactly when the digests are

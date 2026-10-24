@@ -1,7 +1,7 @@
 """The `ventoux` command: `ventoux simulate STORY.json` (layer 11g2), `ventoux release FOLDER
 --releases DIR --commit SHA` (layer 12a), an environment's commands (layer 12e): `ventoux
 environment create|harden|check`, `ventoux activate`, `ventoux retire`, `ventoux manifest publish`,
-and `ventoux diff OLD NEW` (layer 13a).
+`ventoux diff OLD NEW [--plain]` (layers 13a, 13c) and `ventoux map FOLDER` (layer 13c).
 
 Reading files and printing happen here, never in `core` or `case`, which read no clock and do no
 I/O (brief, D45). `ventoux check` comes with the Python builder (brief, D34).
@@ -19,6 +19,8 @@ from typing import Any
 from ventoux.case.changes import DiffRefused
 from ventoux.case.definition import CaseDefinition, CaseInvalid, parse_case
 from ventoux.case.diff import diff
+from ventoux.case.plain import plain
+from ventoux.case.reading import ReadingRefused
 from ventoux.case.releases import (
     PackageRefused,
     PackageUnreadable,
@@ -27,6 +29,7 @@ from ventoux.case.releases import (
     SameAs,
     Unchanged,
 )
+from ventoux.case.sheet import SheetRefused, case_map, never_sheet
 from ventoux.case.simulate import StoryRefused, simulate
 from ventoux.case.story import Story, StoryInvalid, parse_story
 from ventoux.testing import CATALOG
@@ -65,6 +68,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     diffing = commands.add_parser("diff", help="what changed between two versions of a package")
     diffing.add_argument("old", type=Path, help="the package's folder before")
     diffing.add_argument("new", type=Path, help="the package's folder after")
+    diffing.add_argument("--plain", action="store_true", help="in plain language, as Markdown")
+    mapping = commands.add_parser(
+        "map", help="what a case of a package can do, and what it will never do"
+    )
+    mapping.add_argument("package", type=Path, help="the package's folder")
     environments(commands)
     arguments = parser.parse_args(argv)
     if arguments.command in ("environment", "activate", "retire", "manifest"):
@@ -72,7 +80,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.command == "release":
         return release_package(arguments.package, arguments.releases, arguments.commit)
     if arguments.command == "diff":
-        return diff_packages(arguments.old, arguments.new)
+        return diff_packages(arguments.old, arguments.new, arguments.plain)
+    if arguments.command == "map":
+        return map_package(arguments.package)
     return simulate_story(arguments.story)
 
 
@@ -141,25 +151,43 @@ def release_package(folder: Path, releases: Path, commit: str) -> int:
     return HOLDS
 
 
-def diff_packages(old: Path, new: Path) -> int:
-    """Print what changed from the package in `old` to the one in `new`, by effect (brief, D55).
-    Exit 0 when compared, whatever was found: a looser change is the reviewer's to judge."""
+def diff_packages(old: Path, new: Path, in_plain: bool = False) -> int:
+    """Print what changed from the package in `old` to the one in `new`, by effect (brief, D55),
+    in plain language if asked (brief, D56). Exit 0 when compared, whatever was found: a looser
+    change is the reviewer's to judge."""
     folder = old
     try:
         before = read_package(old)
         folder = new
         after = read_package(new)
         found = diff(before, after, CATALOG)
+        said = plain(found, before, after, CATALOG) if in_plain else str(found)
     except PackageRefused as refused:
         print(Unreadable(folder, str(refused)), file=sys.stderr)
         return FAILS
-    except DiffRefused as refused:
+    except (DiffRefused, ReadingRefused) as refused:
         print(f"{old} -> {new}: {refused}", file=sys.stderr)
         return FAILS
     except (PackageUnreadable, OSError) as unreadable:
         print(Unreadable(folder, str(unreadable)), file=sys.stderr)
         return CANT_READ
-    print(found, end="")
+    print(said, end="")
+    return HOLDS
+
+
+def map_package(folder: Path) -> int:
+    """Print what a case of the package in `folder` can do, then what it will never do
+    (brief, D56). Exit 1 when the package or a reading is refused, 2 when it can't be read."""
+    try:
+        package = read_package(folder)
+        said = f"{case_map(package, CATALOG)}\n{never_sheet(package, CATALOG)}"
+    except (PackageRefused, ReadingRefused, SheetRefused) as refused:
+        print(Unreadable(folder, str(refused)), file=sys.stderr)
+        return FAILS
+    except (PackageUnreadable, OSError) as unreadable:
+        print(Unreadable(folder, str(unreadable)), file=sys.stderr)
+        return CANT_READ
+    print(said, end="")
     return HOLDS
 
 

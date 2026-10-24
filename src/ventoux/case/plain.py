@@ -1,7 +1,7 @@
 """The semantic diff in plain language: the one change list, read (layer 13c).
 
 Each entry a change is about (a step, a field, a rule, an event, a close reason, a plan's state)
-is read before and after, as D45 reads rules (D56), then each of its changes is said in its
+is read before and after, as rules are read (brief, D45) (brief, D56), then each of its changes is said in its
 verdict's words. The verdict is the change's: nothing here compares or judges again (brief, D55).
 Markdown, so the CI step can show it as it is (13e). Given no case file: it quotes nothing a case
 holds. See docs/layers/13-diff.md (13c) and docs/guides/releases.md, "What changed: the diff".

@@ -4,8 +4,11 @@ See docs/layers/13-diff.md (13c) and docs/guides/cases.md, "What a case can do, 
 """
 
 import inspect
+import json
 import re
 from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 from test_diff import (
     ROOT,
@@ -29,6 +32,7 @@ from ventoux.case.sheet import ENGINE_WIDE, NEVERS, case_map, never_sheet, never
 from ventoux.core.catalog import Catalog
 from ventoux.core.policy import only_from
 from ventoux.testing import CATALOG, run_case
+from ventoux.tooling.cli import main
 
 TESTS = ROOT / "tests"
 
@@ -68,7 +72,7 @@ def test_the_case_map_reads_every_entry_in_the_formats_order() -> None:
 
 def test_the_sheet_says_the_engines_guarantees_once_then_the_packages() -> None:
     sheet = never_sheet(packed(refund()), CATALOG)
-    engine = "".join(f"- {line} ({decisions}).\n" for line, decisions in ENGINE_WIDE)
+    engine = "".join(f"- {line} {decisions}.\n" for line, decisions in ENGINE_WIDE)
     assert sheet == (
         "# refund will never\n"
         "\n"
@@ -89,25 +93,25 @@ def test_the_sheet_says_the_engines_guarantees_once_then_the_packages() -> None:
 
 # Each engine-wide guarantee, and the tests that already prove it (13c, choice 40).
 PROVEN = {
-    "D20": [
+    "(brief, D20)": [
         "test_layers.py::test_pure_layers_may_not_run_text_as_code",
         "test_layers.py::test_pure_layers_may_not_read_the_clock_randomness_or_io",
     ],
-    "D5": [
+    "(brief, D5)": [
         "test_catalog.py::test_a_definition_naming_an_activity_not_in_the_catalog_stops_the_case"
     ],
-    "D38": ["test_rules.py::test_untrusted_data_cant_decide"],
-    "D11, D25": [
+    "(brief, D38)": ["test_rules.py::test_untrusted_data_cant_decide"],
+    "(brief, D11) (brief, D25)": [
         "test_approvals.py::test_every_approver_is_someone_else",
         "test_case.py::test_the_person_who_proposed_a_step_cannot_approve_it",
         "test_case.py::test_the_opener_cannot_approve",
     ],
-    "D11": [
+    "(brief, D11)": [
         "test_validate.py::test_one_approval_unlocks_one_high_risk_run",
         "test_case.py::test_an_approval_unlocks_one_run_with_its_own_key",
     ],
-    "D17": ["test_case.py::test_a_failed_step_needs_attention_and_keeps_the_case_open"],
-    "D31": [
+    "(brief, D17)": ["test_case.py::test_a_failed_step_needs_attention_and_keeps_the_case_open"],
+    "(brief, D31)": [
         "test_sensitive.py::test_a_workflow_step_is_never_given_a_sensitive_value",
         "test_sensitive.py::test_a_sensitive_value_never_prints",
     ],
@@ -232,3 +236,28 @@ def test_a_forgetting_line_is_the_requests_refusal() -> None:
 
 def test_every_kind_of_line_has_a_witness() -> None:
     assert NEVER_WITNESSED == set(NEVERS)
+
+
+CASES_GUIDE = ROOT / "docs" / "guides" / "cases.md"
+
+
+def test_the_guides_map_runs_as_written(capsys: Any, monkeypatch: Any) -> None:
+    section = CASES_GUIDE.read_text().split("## What a case can do, and will never do")[1]
+    # The block between the section's first fences: the map's own `## ` headings are in it.
+    block = section.split("```\n", 2)[1]
+    command_line, printed = block.split("\n", 1)
+    assert command_line == "$ ventoux map examples/packages/refund"
+    monkeypatch.chdir(ROOT)  # the guide's path is relative, from the repository's root
+    assert main(command_line.removeprefix("$ ventoux ").split()) == 0
+    assert capsys.readouterr().out == printed
+
+
+def test_the_map_command_refuses_and_fails_to_read(tmp_path: Path, capsys: Any) -> None:
+    folder = tmp_path / "refund"
+    folder.mkdir()
+    (folder / "case.json").write_text(json.dumps(calling("payments.refund@9")))
+    assert main(["map", str(folder)]) == 1
+    assert "payments.refund@9 is not in the catalog" in capsys.readouterr().err
+    (folder / "case.json").write_text("{")
+    assert main(["map", str(folder)]) == 2
+    assert capsys.readouterr().err.startswith(f"{folder}: case.json isn't JSON: ")

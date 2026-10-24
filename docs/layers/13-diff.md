@@ -1003,3 +1003,81 @@ if it fails, the whole output is kept and said in the pull request.
 - Release notes in the record and a contract's readable diff (13d); the CI step (13e).
 - Re-judging a plan's approvers for a changed risk (choice 37 says it, nothing judges it).
 - Nothing at runtime: no workflow changes, no new engine version.
+
+### Seams the tests use
+
+- `diff(before, after, catalog)` and its `rewritten` lines; `plain(found, before, after,
+  catalog)`; `read_entry(path, case, plans, catalog)` and `EntryReading`; `case_map(package,
+  catalog)`, `never_sheet(package, catalog)` and `nevers(package, catalog)`.
+- `run_case` and 13a's and 13b's witnesses, reused for the sheet's lines.
+- `main(["diff", …, "--plain"])` and `main(["map", …])`, through the guides' examples.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **Written otherwise** (choice 38): an age of the same duration is no verdict.
+1. **Every entry read** (choices 35 and 36): steps, fields, events, close reasons, closing, a
+   plan's states and fields; the three new clauses and their witnesses.
+2. **The plain form** (choices 33, 34 and 37).
+3. **The case map and the sheet** (choices 39 to 41): the engine's lines with the tests that prove
+   them, the package's lines with their witnesses.
+4. **The commands, the guides, the Promises** (choices 42 to 44).
+
+### Decided while building
+
+- **Requirements written in another order stay not proven** (while drafting choice 38, checked
+  against the code): the runtime names the first unmet requirement in a refusal and records what
+  steered a run in that order, so the order is read. Only a `max_age` of the same duration is said
+  as written otherwise, with how the history words it (`freshness.as_said`).
+- **A sheet is offered only for what a case's steps name:** who may not approve, and runs only
+  approved, read a case's own approvals; a plan's approval states are read in the map, not said in
+  the sheet (whether every path to an activity passes its approval is layer 3's to prove, and the
+  sheet doesn't repeat a proof it doesn't make). The releases guide's package, whose `settle` runs
+  a plan, shows it: no "who may not approve" line.
+- **Who sees, on the sheet, groups fields seen by the same roles** into one line, in the fields'
+  order; a field no registered role sees reads "show … to anyone".
+- **The proposer's witness keeps its case open** (`stays_open` and a close reason): with `pay`
+  proposed, nothing is left to do once the review is answered, and a proposal to a closed case is
+  refused before anything about approving is checked.
+- **The guides' examples are pasted from the commands' own output,** then run by the tests, as
+  12a's were: the plain form's and the map's `## ` headings sit inside the guides' code blocks, so
+  the tests read a block by its fences, never by the next heading.
+- **The engine-wide lines cite their decisions as the source does,** `(brief, D11) (brief, D25)`,
+  so the sheet prints them so: the decision-citation check (layer 3) found them bare.
+- **The 12e activation test failed a third time, and this time its output was kept** (the full run
+  of slice 4, `uv run pytest > run.txt 2>&1`). It never reached its assertion: Temporal's dev server
+  didn't start in time, in `WorkflowEnvironment.start_local`:
+  `RuntimeError: Failed starting Temporal dev server: ephemeral server at 127.0.0.1:39227 did not
+  start within 5s. Make sure another download isn't stuck and delete the temp file.`
+  `tests/test_temporal_activate.py`'s `on_dev_server` starts a fresh dev server for each test, and
+  under the full suite's load one start can take longer than the SDK's 5 seconds; alone, or in its
+  file, it never does. A cause in 12e's test harness, not in this layer's code: not fixed here, and
+  said in the pull request with a proposed fix (one dev server per module, started once).
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`L` is `tests/test_plain.py` (new), `S` is `tests/test_sheet.py` (new), `D` is 13a's
+`tests/test_diff.py`. Checked against the tests, 2026-10-24: every test named here exists, and
+every test in `L` and `S` is named here.
+
+| Promise | Test |
+|---|---|
+| An age written otherwise with the same duration is no verdict and never counted as may loosen; it says how the history words it, and covers the path the digest sees (from the review of #48) | L `test_an_age_written_otherwise_is_no_verdict` |
+| A step reads as what it is (a task for whom, a contract with its risk and declared effect), when it starts (requirements with `sequence`, `when`, by itself or proposed by whom, repeatable), who approves it and how many, what it sets | L `test_a_call_step_reads_as_what_it_calls_and_when_it_starts`, `test_a_task_reads_as_who_answers_and_what_each_answer_does`, `test_a_proposed_step_reads_as_who_proposes_it` |
+| A field reads as its type, who sees it (registered roles only), `sensitive` and its mark | L `test_a_field_reads_as_its_type_and_who_sees_it` |
+| An event, a close reason, the closing and forgetting, and a plan's states read | L `test_an_event_a_close_reason_and_the_closing_read`, `test_a_plans_states_read` |
+| A shape the reader doesn't know is refused, never left out | L `test_a_shape_the_reader_doesnt_know_is_refused` |
+| The new fine print, each clause with its witness: unapproved where the approval's condition is false; distinct approvers, one rejection rejecting; the proposer never approves; and the witnesses cover the list | L `test_a_step_runs_unapproved_where_its_approvals_condition_is_false`, `test_several_approvers_are_distinct_and_one_rejection_rejects`, `test_whoever_proposes_a_run_never_approves_it`, `test_every_entry_clause_has_a_witness` |
+| The plain form reads each entry before and after, then each change in its verdict's words, from the change alone, in the change list's order | L `test_the_plain_form_reads_each_entry_before_and_after`, `test_every_verdict_word_is_its_changes` |
+| An entry added reads after only | L `test_an_entry_added_reads_after_only` |
+| Written otherwise and wording are listed apart, last | L `test_written_otherwise_and_wording_are_listed_apart` |
+| 13b's known limit is said where a plan's approved activity moves to another contract | L `test_a_plans_approved_activity_moved_says_the_known_limit` |
+| Readings, the plain form, the map and the sheet are given no case file | L `test_readings_are_given_no_case_file`, `test_a_plain_form_is_given_no_case_file`; S `test_the_map_and_the_sheet_are_given_no_case_file` |
+| The case map reads every entry in the format's order | S `test_the_case_map_reads_every_entry_in_the_formats_order` |
+| The sheet says the engine's guarantees once, each naming tests that exist and prove it, then the package's own lines | S `test_the_sheet_says_the_engines_guarantees_once_then_the_packages`, `test_each_engine_wide_guarantee_names_tests_that_prove_it` |
+| Each kind of line the sheet offers has a witness, and the witnesses cover the closed list: calls only; changes the world only through, from declared effects; input policies (trusted only, only from); who sees; sensitive; who may not approve; runs only approved (never with a `when`); forgetting | S `test_a_run_calls_only_what_the_sheet_says`, `test_what_changes_the_world_is_read_from_declared_effects`, `test_an_input_policy_line_is_the_runtimes_refusal`, `test_a_who_sees_line_is_the_view`, `test_a_sensitive_line_is_the_workflow_steps_refusal`, `test_a_who_may_not_approve_line_is_the_exclusion`, `test_a_runs_only_approved_line_is_the_wait_for_approval`, `test_a_forgetting_line_is_the_requests_refusal`, `test_every_kind_of_line_has_a_witness` |
+| `ventoux map` prints the map and the sheet, exits 1 when refused and 2 when unreadable; the cases guide's example runs as written | S `test_the_guides_map_runs_as_written`, `test_the_map_command_refuses_and_fails_to_read` |
+| `ventoux diff --plain`: the releases guide's plain example runs as written | D `test_the_guides_example_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal, in the new modules too | `tests/test_layers.py`, unchanged |

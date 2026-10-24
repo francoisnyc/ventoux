@@ -1955,6 +1955,76 @@ stays running until it is back, and a request to forget it, which waits for its 
 (brief, D32), waits too. That is the safe side: a release is never retired while a case on it
 might still run.
 
+## What a case can do, and will never do
+
+`ventoux map FOLDER` reads a package whole, from its definition and the catalog, never from a
+case: first the **case map**, every entry read in the order the format writes them, then the
+**"will never do" sheet**.
+
+The sheet says the engine's own guarantees once, for every definition, each naming its decision.
+Below them come the package's own lines, and a line is said only where it holds for every case of
+the package, from a check the engine already makes: the contracts it calls, and only those; the
+contracts through which, by what they declare, it changes the world; what each input of what it
+calls refuses; who sees each field, and every outcome and output; a sensitive value never given
+to a workflow step; who may never approve a step; a step that never runs unapproved (an approval
+with no `when`; with one, the step runs unapproved where it is false); and what forgetting keeps.
+Nothing decided by a condition or by data is said ("never pays more than 100" is not a line), and
+nothing is read from a contract's name.
+
+The releases guide's refund package:
+
+```
+$ ventoux map examples/packages/refund
+# refund: what a case can do
+
+## Fields
+
+- order_id is a reference to orders, seen by support.
+- amount is a number, seen by support.
+- approved_amount is a number, seen by support.
+
+## Steps
+
+- review is a task for support, answered approve or reject. It starts by itself when the case opens. Answered approve, it sets approved_amount.
+- settle runs the plan refund-order@1, giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve".
+- call_customer is a task for support, answered called. It starts by itself once settle is done, if settle.outcome = "failed".
+
+## Closing
+
+- It closes when nothing is left to do. Its records may be forgotten, open or closed.
+
+## Plan refund-order@1
+
+- It starts at check_order.
+- order_id is a reference to orders.
+- amount is a number.
+- check_order calls orders.lookup@1 (low risk, it reads), giving order_id from order_id. On done, approve_refund; on not_found, failed.
+- approve_refund: one support-lead approves pay, within 48h. On approve, pay; on reject, failed; on timeout, failed.
+- pay calls payments.refund@2 (high risk, it writes), giving order_id from order_id and amount from amount. On done, paid; on declined, failed.
+- paid ends the plan: succeeded.
+- failed ends the plan: failed.
+
+# refund will never
+
+## For every case, by Ventoux's engine
+
+- run anything written in its definition as code, or read a clock, randomness or outside data in a condition (brief, D20).
+- call anything the catalog doesn't hold: a definition names a contract, never defines one (brief, D5).
+- let untrusted data reach a milestone or stop a step (brief, D38).
+- let anyone approve a step their own answer feeds, or one they proposed, or one in a case they opened (brief, D11) (brief, D25).
+- let one approval unlock more than one run of one step (brief, D11).
+- skip a failed step by itself: it waits for a person (brief, D17).
+- give a sensitive value to a workflow step, or write one out (brief, D31).
+
+## For every case of refund
+
+- call anything but orders.lookup@1 (low risk, it reads) and payments.refund@2 (high risk, it writes).
+- change the world, by what its contracts declare, but through payments.refund@2.
+- give payments.refund@2 its order_id or its amount from untrusted data.
+- show order_id, amount or approved_amount to anyone but support.
+- show any step's outcome or outputs to anyone but support.
+```
+
 ## What `ventoux check` proves about a case
 
 `ventoux check` reads the whole definition before any case opens and lists every problem at once,
