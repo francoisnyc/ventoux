@@ -1777,3 +1777,73 @@ tests, 2026-10-24: every test named here exists, every test in `Y` is named here
 | The existing checks are as they were, the cached CLI included; a push to `main` runs them only | Y `test_the_existing_checks_are_as_they_were` |
 | The releases guide's summary runs as written | Y `test_the_guides_summary_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal: the summary is `tooling`'s | `tests/test_layers.py`, unchanged |
+
+### From the tutor review of #52: text a pull request writes reaches rendered Markdown
+
+The review's run: a head adds a task before `pay` whose condition is `review.outcome =
+"approve</li></ul><details><summary>checked: nothing loosens</summary>"`, and moves `pay` to an
+`@3` that takes any amount. `summarize` exits 0, and rendered (CommonMark, then the HTML tree
+browsers and GitHub's sanitizer build), the Looser line and everything after it sit inside a
+collapsed `<details>` reading "checked: nothing loosens". A pull request can hide the curriculum's
+negative test from its reviewer.
+
+Every route found, checked against the code:
+
+- **the plain form** (`case/plain.py`): each change's `said` (literals as the expression renderer
+  writes them, through `json.dumps`, which leaves `<` and `>` as they are), the readings and their
+  fine print, the wording lines' titles, the entries' and changes' paths;
+- **the map and the sheet** (`case/sheet.py`): the readings, the rules' sentences, the package's
+  name in its headings, the sheet's lines (roles, contract references, field names);
+- **the summary** (`tooling/summary.py`): the folder names and refusal messages in "Why the step
+  fails", which quote what the tree holds; and the hash check's block, fenced with three
+  backticks, which a docstring or a field's title holding three backticks ends early (the head's
+  own code writes the catalog);
+- names a definition gives are checked against patterns (a case's `case`, `[a-z][a-z0-9-]*`), but
+  not every key that becomes a path is, so a path is treated as text too.
+
+The developer forms (`ventoux diff`, `ventoux release`, `ventoux notes` without `--plain`,
+`ventoux hashes`) print plain text to a terminal, and a record keeps data: neither is Markdown.
+
+77. **Where the escaping goes: where Markdown is written, never at the source.** One small module,
+    `case/markdown.py`, and every renderer of Markdown uses it for every piece of text it didn't
+    write itself: the plain form, the map and the sheet, so `ventoux diff --plain`, `ventoux notes
+    --plain`, `ventoux map` and the summary all inherit it; and the summary's own pieces (package
+    and folder names, refusal messages, commits):
+    - `text(s)` for text in a paragraph or list item: `&`, `<` and `>` as the entities `&amp;`,
+      `&lt;` and `&gt;`; a backslash before each of `\`, `` ` ``, `*`, `_`, `[`, `]`, `~`, `#`,
+      `|` and `!`; and a line break, a carriage return or a tab shown as `\n`, `\r` or `\t`, so a
+      value never starts a line of its own;
+    - `code(s)` for a path in a code span: fenced with one backtick more than the longest run in
+      it, as CommonMark allows, so nothing in it closes it;
+    - `block(lines)` for the hash check's lines: fenced with one backtick more than the longest
+      run in them, never less than three.
+
+    Set aside: escaping at the source (the diff's `said`, the readings), which would put entities
+    in the developer forms and in every record's notes; and backslashes before every ASCII
+    punctuation mark, which CommonMark allows and which would be safe without an argument, but
+    turns every `refund-order@1, giving order_id` into `refund\-order\@1\, giving order\_id` in
+    the raw text the guides show. The set above is enough because a value never starts a line (its
+    line breaks are shown, not kept), so only what can open a construct inside a line matters:
+    raw HTML and autolinks (`<`), entities (`&`), emphasis (`*`, `_`, `~`), code (`` ` ``), links
+    and images (`[`, `]`, `!`), and the escape itself (`\`); `#` and `|` are escaped too, should a
+    value ever be placed at a line's start. *Recommended.*
+
+78. **"Nothing to release" claims what the summary doesn't know (optional, from the review).** It
+    assumes the base was released when it merged; the summary reads no records. Offered: each line
+    says only what the two trees show, and leaves releasing to `ventoux release`:
+    - the same digest and wording: "the same behaviour and wording as the base";
+    - the same digest, other wording: "the same behaviour as the base, other wording: a wording
+      revision, if the base's behaviour is the latest release's (`ventoux release` decides on
+      merge, from the records)";
+    - the others as they are (a new release already says `ventoux release` decides).
+
+    *Recommended:* yes, in this pull request, beside the escaping.
+
+79. **Where it is recorded:** a dated line on D56 (the Markdown the plain form, the map and the
+    sheet print escapes what a definition writes) and one on 13e's line in D55 (the summary
+    inherits it, and fences the hash check by its content). *Recommended.*
+
+The negative test, test-first: the review's run, the literal shown escaped and no `<` in the
+summary coming from a definition; then literals holding a backtick, a `*`, a `[` and a `#`, each
+shown as written once rendered, and a docstring holding three backticks kept inside the hash
+check's block.
