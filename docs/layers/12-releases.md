@@ -1730,6 +1730,9 @@ Numbered on from 12d's. Answer by number.
     proven only by reading it.
     *Changed in the answers:* **yes to the dev server,** with a CI cache step for the CLI; a test
     that can't start it fails, never skips.
+    *Changed 2026-10-24, by choice 81 (the dev server's cold start, below):* the tests start the
+    dev server's binary themselves (`tests/dev_server.py`), with a 30 s deadline of their own,
+    rather than through `start_local`, whose 5 s a cold disk can outlast.
 
 78. **Histories recorded before 12e replay, recorded first** (slice 0): a draft waiting, a released
     case waiting for an approval, one continued as new, a migrated case. 12e's changes to the case
@@ -1837,6 +1840,9 @@ written with its seam, the rule taken out and its test seen failing.
   machine, on a client with its own runtime.
 - **The dev server is downloaded into `TEMPORAL_CLI_DIR`** when set, made first (the SDK doesn't
   make it); CI caches it per `uv.lock`. A test that can't start it fails.
+  *Changed 2026-10-24, by choice 82:* the harness looks for the binary there (the system's
+  temporary folder when unset), and lets the SDK download it, by one start, only when it is
+  missing.
 - **`ventoux environment create` says which kind it made:** `production created: a production
   environment, where drafts never open`.
 
@@ -1880,7 +1886,7 @@ here.
 ## 12e, fixed later: the dev server's cold start
 
 Status: choices drafted 2026-10-24, from `main` at `231a0e7` (13d merged as #50), before 13e.
-Waiting for answers, by number.
+Answered "all as recommended", the same day: choices 81 to 88.
 
 ### The cause, from the tutor review of #50
 
