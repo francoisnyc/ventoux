@@ -11,10 +11,10 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from test_diff import ROOT
+from test_diff import LOOSE, ROOT, calling, refund
 
 from ventoux.core.catalog import Catalog
-from ventoux.core.contract_hash import contract_hash
+from ventoux.core.contract_hash import contract_hash, promise_hash
 from ventoux.core.promise import promise_of
 from ventoux.testing import CATALOG
 from ventoux.tooling.summary import Summary, summarize
@@ -113,3 +113,45 @@ def test_packages_are_matched_by_name_not_by_folder(tmp_path: Path) -> None:
     head = tmp_path / "head"
     shutil.copytree(EXAMPLE, head / PACKAGES / "refunds")
     assert summarized(base, head).outcomes == ("- **refund**: nothing to release.",)
+
+
+# --- Slice 2: the diff and the contracts ---------------------------------------------------------
+
+
+def test_an_input_policy_loosened_reads_as_looser_in_the_summary(tmp_path: Path) -> None:
+    # The curriculum's negative test, end to end: one character in the JSON, and a customer's
+    # amount could reach the payment. The summary says so, in the diff's own words (13e, choice
+    # 68).
+    base = tree(tmp_path / "base", refund())
+    head = tree(tmp_path / "head", calling("payments.refund@3"))
+    found = summarized(base, head, LOOSE)
+    assert found.code == 0  # a looser change is the reviewer's to judge, never a failure
+    assert "- **refund**: a new release, unless an earlier release has this behaviour" in found.text
+    assert (
+        "- **Looser** (`steps.pay.activity`): payments.refund@2 -> payments.refund@3: input "
+        "amount: was only from a system or a person, never from untrusted data; now any value "
+        "(no input policy)."
+    ) in found.text
+
+
+def test_a_contract_changed_in_place_says_what_changed_and_fails(tmp_path: Path) -> None:
+    # The base commit's own promise, checked against the lockfile, says each path (brief, D57).
+    base, head = with_example(tmp_path / "base"), with_example(tmp_path / "head")
+    before: dict[str, Any] = {c.reference: promise_of(c) for c in CATALOG.contracts()}
+    before["orders.lookup@1"]["timeouts"]["start_to_close"] = 5
+    recorded = {c.reference: contract_hash(c) for c in CATALOG.contracts()}
+    recorded["orders.lookup@1"] = promise_hash(before["orders.lookup@1"])
+    found = summarize(base, head, [PACKAGES], CATALOG, recorded, before)
+    assert found.code == 1
+    assert found.text.endswith(
+        "## Contracts\n\n```\norders.lookup@1 changed without a new version: register it as "
+        "orders.lookup@3.\n  timeouts.start_to_close: 5 -> 10\n```\n"
+    )
+
+
+def test_contracts_that_match_are_said_to(tmp_path: Path) -> None:
+    found = summarized(with_example(tmp_path / "base"), with_example(tmp_path / "head"))
+    assert found.text == (
+        "# What merging changes\n\n## Packages\n\n- **refund**: nothing to release.\n\n"
+        "## Contracts\n\nEvery contract matches `contracts.lock.json`.\n"
+    )
