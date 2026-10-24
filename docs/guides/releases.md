@@ -376,8 +376,9 @@ looser     steps.pay.activity: payments.refund@2 -> payments.refund@3: input amo
 Each change has a **verdict**:
 
 - **looser:** the new version lets through strictly more than the old, whatever a case holds:
-  an input policy that accepts more, an `untrusted:` mark removed from a field, `sensitive`
-  removed, a field seen by more roles;
+  an input policy that accepts more, an `untrusted:` mark removed from a field, a contract's
+  output that now comes from a system where it was untrusted or undeclared (a case may now decide
+  on it), `sensitive` removed, a field seen by more roles;
 - **stricter:** the reverse, strictly less;
 - **not proven:** anything else. Two policies that are neither wider nor narrower
   (`only_from("payments")` against `only_from("billing")`), a change to something that isn't a

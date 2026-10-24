@@ -18,6 +18,7 @@ from ventoux.case.memory import CaseRun
 from ventoux.case.releases import Package, changed, digest, package
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import ActivityContract
+from ventoux.core.output_sources import source
 from ventoux.core.policy import (
     Policy,
     UnknownPolicy,
@@ -25,7 +26,15 @@ from ventoux.core.policy import (
     only_from,
     trusted_only,
 )
-from ventoux.testing import CATALOG, fake_refund, payments_refund, run_case
+from ventoux.testing import (
+    CATALOG,
+    fake_refund,
+    payments_refund,
+    run_case,
+)
+from ventoux.testing import (
+    orders_lookup_2 as lookup_2,
+)
 from ventoux.tooling.cli import main
 
 ROOT = Path(__file__).parent.parent
@@ -189,7 +198,8 @@ def test_a_contract_missing_from_the_catalog_refuses_the_diff() -> None:
 
 def test_other_contract_differences_are_said_not_proven() -> None:
     with_a_note = refund_input(trusted_only(), note=(str, ...))
-    noted = refund_contract(6, with_a_note, risk="medium")
+    with_a_fee = create_model("RefundOutput", refund_id=(str, ...), fee=(Decimal, ...))
+    noted = refund_contract(6, with_a_note, risk="medium", output=with_a_fee)
     found = diff(packed(refund()), packed(calling("payments.refund@6")), catalog_with(noted))
     assert lines(found) == [
         (
@@ -197,8 +207,12 @@ def test_other_contract_differences_are_said_not_proven() -> None:
             "only in payments.refund@6"
         ),
         (
+            "not proven steps.pay.activity: payments.refund@2 -> payments.refund@6: output fee "
+            "only in payments.refund@6"
+        ),
+        (
             "not proven steps.pay.activity: payments.refund@2 -> payments.refund@6: its contract "
-            "also differs: input, risk"
+            "also differs: input, output, risk"
         ),
     ]
 
@@ -568,6 +582,92 @@ def test_the_diff_reads_only_packages_and_the_catalog() -> None:
     assert given == [Package, Package, Catalog]
 
 
+# --- Slice 7: output sources (added to 13a in its review) ----------------------------------------
+
+
+def looking_up(reference: str) -> dict[str, Any]:
+    """A case looking an order up with `reference`, then deciding on its status: a rule reaches
+    `delivered` once the lookup says so."""
+    return {
+        "case": "delivery",
+        "display": {"title": "A delivery"},
+        "fields": {
+            "order_id": {"type": "reference", "system": "orders", "display": {"title": "Order"}}
+        },
+        "milestones": {
+            "looked_up": {"display": {"title": "Looked up"}},
+            "delivered": {"display": {"title": "Delivered"}},
+        },
+        "steps": {
+            "lookup": {
+                "kind": "activity",
+                "display": {"title": "Look the order up"},
+                "activity": reference,
+                "inputs": {"order_id": {"var": "order_id"}},
+                "reaches": ["looked_up"],
+            }
+        },
+        "rules": {
+            "delivery": {
+                "display": {"title": "Delivered, as the orders system says"},
+                "on": {"reached": "looked_up"},
+                "when": {"==": [{"var": "lookup.status"}, "delivered"]},
+                "then": {"reach": ["delivered"]},
+            }
+        },
+    }
+
+
+def test_an_output_source_made_a_system_is_looser() -> None:
+    # @1 declares no source for `status`, so it is untrusted:undeclared and decides nothing; @2
+    # says the orders system gives it (brief, D29). A case may now decide on it.
+    found = diff(
+        packed(looking_up("orders.lookup@1")), packed(looking_up("orders.lookup@2")), CATALOG
+    )
+    assert lines(found)[0] == (
+        "looser     steps.lookup.activity: orders.lookup@1 -> orders.lookup@2: output status: "
+        "was untrusted:undeclared; now system:orders"
+    )
+    assert found.changes[0].comparison == "output source"
+
+
+def test_an_output_source_made_untrusted_is_stricter() -> None:
+    found = diff(
+        packed(looking_up("orders.lookup@2")), packed(looking_up("orders.lookup@1")), CATALOG
+    )
+    assert lines(found)[0] == (
+        "stricter   steps.lookup.activity: orders.lookup@2 -> orders.lookup@1: output status: "
+        "was system:orders; now untrusted:undeclared"
+    )
+
+
+def test_one_system_for_another_is_not_proven() -> None:
+    # Neither is a proof: what each system says is trusted, and a policy may name one and not
+    # the other (brief, D21).
+    from_crm = lookup_2.model_validate(
+        dict(lookup_2)
+        | {
+            "version": 3,
+            # Named as @2's output is, so only the source differs.
+            "output": create_model(
+                "LookupOutputFromOrders", status=(Annotated[str, source("system:crm")], ...)
+            ),
+        }
+    )
+    found = diff(
+        packed(looking_up("orders.lookup@2")),
+        packed(looking_up("orders.lookup@3")),
+        catalog_with(from_crm),
+    )
+    assert lines(found) == [
+        (
+            "not proven steps.lookup.activity: orders.lookup@2 -> orders.lookup@3: output status: "
+            "was system:orders; now system:crm"
+        )
+    ]
+    assert found.changes[0].comparison is None
+
+
 # --- Slice 5: a witness for each comparison ------------------------------------------------------
 #
 # A witness is a pair of definitions the diff reads as looser by one comparison, and two runs:
@@ -685,11 +785,36 @@ def readers_witness() -> tuple[dict[str, Any], dict[str, Any], Catalog, bool, bo
     return before, after, CATALOG, not sees(before), sees(after)
 
 
+def output_witness() -> tuple[dict[str, Any], dict[str, Any], Catalog, bool, bool]:
+    """A rule reaching `delivered` on the lookup's status acts on nothing while the contract
+    leaves it undeclared, and reaches it once the orders system gives it (brief, D29, D38)."""
+    before, after = looking_up("orders.lookup@1"), looking_up("orders.lookup@2")
+
+    def delivered(case: dict[str, Any]) -> CaseRun:
+        delivers = {"orders.lookup@1": lambda _: {"status": "delivered"}}
+        delivers["orders.lookup@2"] = delivers["orders.lookup@1"]
+        return run_case(
+            case, file={"order_id": "ord-1"}, answers=[], people=SUPPORT, activities=delivers
+        )
+
+    old, new = delivered(before), delivered(after)
+    refused = (
+        "delivered" not in old.state.milestones
+        and (
+            "delivery#1 on reached looked_up: reaches nothing: its condition reads lookup.status, "
+            "from untrusted:undeclared, and untrusted data can't decide"
+        )
+        in old.history
+    )
+    return before, after, CATALOG, refused, "delivered" in new.state.milestones
+
+
 WITNESSES = {
     "input policy": policy_witness,
     "untrusted mark": mark_witness,
     "sensitive": sensitive_witness,
     "readers": readers_witness,
+    "output source": output_witness,
 }
 
 
@@ -698,10 +823,14 @@ def test_each_comparison_has_a_witness(comparison: str) -> None:
     before, after, catalog, refused, taken = WITNESSES[comparison]()
     assert refused, f"{comparison}: the old version lets it through"
     assert taken, f"{comparison}: the new version refuses it"
+    # What is judged, by which comparison; a change said and not proven beside it may stay (the
+    # output's class renamed between orders.lookup@1 and @2 is one: its contract also differs).
     looser = diff(packed(before), packed(after), catalog).changes
     stricter = diff(packed(after), packed(before), catalog).changes
-    assert [(c.verdict, c.comparison) for c in looser] == [("looser", comparison)]
-    assert [(c.verdict, c.comparison) for c in stricter] == [("stricter", comparison)]
+    assert [(c.verdict, c.comparison) for c in looser if c.comparison] == [("looser", comparison)]
+    assert [(c.verdict, c.comparison) for c in stricter if c.comparison] == [
+        ("stricter", comparison)
+    ]
 
 
 def test_the_witnesses_cover_every_comparison() -> None:

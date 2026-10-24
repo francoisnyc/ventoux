@@ -4,7 +4,10 @@ Status: 2026-10-24. Prior art read (the `chartering` prototype at `81389b3`, its
 layer 13 explained, split into five parts, and 13a's choices put with a recommendation each.
 Answered "all as recommended", the same day: choices 1 to 18. D55 and the releases guide's
 section "What changed: the diff" written before building 13a; 13a built, slices 0–6, and its
-Promises table checked against the tests, the same day (see 13a, "Decided while building").
+Promises table checked against the tests, the same day (see 13a, "Decided while building"). In a
+second answer, the same day: 1 to 18 as recommended, with one addition to 13 and 14, a contract's
+output sources judged in 13a too (choice 14a), built as slice 7; and no research note on `cdk
+diff` and the others, since the analogy only supports choice 3 and nothing depends on it.
 Layer 12's walk-through and check-yourself are deferred, by the user's choice, and aren't part of
 this layer.
 
@@ -122,7 +125,7 @@ its own tutor review, as layers 11 and 12 did:
 
 | PR | What it builds | Curriculum negative test |
 |---|---|---|
-| **13a: the change list, by effect** | `diff(before, after, catalog)`: every behaviour change between two packages, said in the developer form by path, each with a verdict (stricter, looser, or not proven). Judged in 13a: the guards on data (input policies, `untrusted:` marks, `sensitive`, who sees a field). Every other change is said and left unproven. `ventoux diff OLD NEW` | a change that loosens an input policy is reported as looser, never hidden |
+| **13a: the change list, by effect** | `diff(before, after, catalog)`: every behaviour change between two packages, said in the developer form by path, each with a verdict (stricter, looser, or not proven). Judged in 13a: the guards on data (input policies, `untrusted:` marks, a contract's output sources, `sensitive`, who sees a field). Every other change is said and left unproven. `ventoux diff OLD NEW` | a change that loosens an input policy is reported as looser, never hidden; and (added in the answers) an output made a system's is reported as looser |
 | **13b: guards on people and runs** | verdicts for approvals (whether there is one, who, how many, when), requirements and conditions, who proposes, answers, sends or closes, `automatic`, `repeatable`, `max_age`, close reasons, forgetting, and a plan's approval states | — (its own: an approval's count lowered is looser) |
 | **13c: the plain-language form, the case map and the rules sheet** | the diff said in readings (D45): each changed rule, step, approval and field as its sentence before and after; the generated case map (what a case can do) and the "will never do" sheet, per package | — (its own: a "never" line said only where it is proven) |
 | **13d: release notes and a contract's diff** | release notes generated from the diff, behaviour and wording apart, replacing 12a's paths (D50); a contract's readable diff (design question 16): `retry.maximum_attempts: 5 -> 9` | — |
@@ -200,7 +203,8 @@ Answer by number. "Recommended" is what I'd do; options set aside are said.
    **What counts as loosening**, across the layer:
    - **13a:** an input policy that accepts more (a policy removed, `only_from` widened, `only_from`
      replaced by `trusted_only`); an `untrusted:` mark removed from a field, a payload field or a
-     plan's field; `sensitive` removed; a field seen by more roles (its `visible_to` widened or
+     plan's field; a contract's output made a system's where it was untrusted or undeclared
+     (choice 14a, added in the answers); `sensitive` removed; a field seen by more roles (its `visible_to` widened or
      removed, or a new role named anywhere in the case, which then sees every field without a
      `visible_to`, every outcome and every output).
    - **13b:** an approval removed, its `count` lowered, its roles widened, or a `when` added to it
@@ -300,6 +304,8 @@ Wording changes are listed apart, by path, before and after, never as behaviour.
   contract.
 - **An `untrusted:` mark** on a case field, an event's payload field, or a plan's field (its
   `sources`).
+- **An output's source,** as the contract a step (or a plan's activity state) calls declares it,
+  compared when the step moves to another contract (choice 14a, added in the answers).
 - **`sensitive`** on a case field.
 - **Who sees** each field, and the outcomes and outputs, as `seen_by` computes it: the declared
   `visible_to`, or every role the case names.
@@ -357,6 +363,17 @@ pin.)
     changed (`customer` to `llm`) is not proven. No policy reads labels today, but "today" isn't a
     proof for every later kind. *Recommended.*
 
+14a. **A contract's output sources, judged beside the marks** (D29). *Added in the answers,
+    2026-10-24, to choices 13 and 14.* When a step moves to another contract, each output both
+    contracts give is compared by the source each declares, an undeclared one being
+    `untrusted:undeclared`: from untrusted to a system is looser (a case may now decide on it:
+    a rule reaching a milestone on it acts); the reverse is stricter; one system for another,
+    or one label for another, is not proven. An output only one of them gives is said, not
+    proven. Its witness: a rule reaching `delivered` on `lookup.status` acts on nothing while
+    `orders.lookup@1` leaves `status` undeclared, and reaches it on `orders.lookup@2`, whose
+    `status` comes from `system:orders`. An output's source is taken out of "its contract also
+    differs", as an input's policies are.
+
 15. **`sensitive`:** removed is looser (the value is no longer wrapped and may be given to a
     workflow step, D31, D36); added is stricter. *Recommended.*
 
@@ -375,13 +392,14 @@ pin.)
     `ventoux release`. *Recommended.* Set aside: failing on "looser" (reviewers approve legitimate
     loosenings every day; a red check they learn to ignore protects nothing).
 
-18. **Witnesses for 13a's four comparisons:** a run with `run_case` where the old version refuses
+18. **Witnesses for 13a's four comparisons** (five with 14a's)**:** a run with `run_case` where the old version refuses
     and the new one lets through:
     - input policy: a value from `untrusted:customer` refused by `@2`'s `amount`, taken by `@3`'s;
     - `untrusted:` mark: the same value, refused while the field carried the mark, taken once it
       doesn't;
     - `sensitive`: refused to a workflow step while sensitive, given once not;
-    - who sees: the field absent from `auditor`'s view, then present.
+    - who sees: the field absent from `auditor`'s view, then present;
+    - an output's source (14a): a rule reaching a milestone on it acts on nothing, then acts.
 
     A coverage test checks that the four cover 13a's list of comparisons. *Recommended.*
 
@@ -428,6 +446,9 @@ Each starts with its negative test, seen failing for the right reason.
 5. **Witnesses and coverage:** the four runs, and the coverage test.
 6. **The command, the guide and D55:** exit codes; the guide's example as written; the amendment
    lines.
+7. **Output sources** (choice 14a, added in the answers), its negative test first: `lookup` moved
+   from `orders.lookup@1` to `@2`, whose `status` comes from the orders system, is reported looser;
+   then the reverse, one system for another, an output only one contract gives, and the witness.
 
 ### Decided while building
 
@@ -464,6 +485,12 @@ Each starts with its negative test, seen failing for the right reason.
 - **`ventoux diff`'s refusals:** a package that isn't one names its folder, as `ventoux release`
   does; a diff refused names both folders and why.
 
+- **`orders.lookup@1` and `@2` name their output classes differently** (slice 7): so besides
+  the looser output, the diff says, truthfully, "its contract also differs: output". The
+  witnesses check the changes a comparison judged, and let a not-proven change stand beside them.
+- **The readers' witness asks `support-lead`, not `auditor`** (slice 5, said above): choice 18's
+  `auditor` would have been named by the field itself.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
@@ -476,9 +503,10 @@ Each claim this section makes about behaviour, and the test that would fail if i
 | A policy that accepts less is stricter; two policies neither wider nor narrower are not proven | D `test_an_input_policy_tightened_is_stricter`, `test_policies_neither_wider_nor_narrower_are_not_proven` |
 | `compared` orders every pair of the two kinds exactly, and refuses a kind it doesn't know; so does the diff | D `test_policies_are_compared_exactly`, `test_a_policy_kind_the_diff_doesnt_know_is_refused` |
 | A contract the catalog doesn't hold refuses the diff, naming it | D `test_a_contract_missing_from_the_catalog_refuses_the_diff` |
-| An input in only one of the two contracts, or another difference between them, is said and not proven | D `test_other_contract_differences_are_said_not_proven` |
+| An input or an output in only one of the two contracts, or another difference between them, is said and not proven | D `test_other_contract_differences_are_said_not_proven` |
 | A looser or stricter verdict names a comparison on the closed list; not proven names none | D `test_a_verdict_names_its_comparison` |
 | An `untrusted:` mark removed is looser, added is stricter, relabelled is not proven, on case fields, payload fields and a plan's fields | D `test_an_untrusted_mark_removed_is_looser`, `test_an_untrusted_mark_added_is_stricter`, `test_a_relabelled_mark_is_not_proven`, `test_marks_on_payloads_and_plans_are_judged` |
+| A step moved to a contract whose output comes from a system where it was untrusted (or undeclared) is reported looser, naming the output and both sources; the reverse is stricter; one system for another is not proven (choice 14a, added in the answers: a negative test of its own) | D `test_an_output_source_made_a_system_is_looser`, `test_an_output_source_made_untrusted_is_stricter`, `test_one_system_for_another_is_not_proven` |
 | `sensitive` removed is looser; added is stricter | D `test_sensitive_removed_is_looser`, `test_sensitive_added_is_stricter` |
 | Who sees a field is compared as `seen_by` computes it: widened looser, narrowed stricter, both not proven | D `test_visible_to_widened_is_looser`, `test_visible_to_narrowed_is_stricter`, `test_readers_both_added_and_removed_are_not_proven` |
 | A new role named anywhere is said on every field without `visible_to`, and on outcomes and outputs, naming the change that caused it (a change the JSON diff hides) | D `test_a_new_role_sees_every_unnarrowed_field` |

@@ -2148,7 +2148,9 @@ and D50, whose text is kept.*
 - **Built in 13a, the guards on data:** an input's policies, when a step or a plan's activity
   state calls another contract, compared per input, the rest of the contract said and not proven
   (its readable diff is 13d's); an `untrusted:` mark on a case field, a payload field or a plan's
-  field, removed looser, added stricter, relabelled not proven; `sensitive`, removed looser,
+  field, removed looser, added stricter, relabelled not proven; a contract's output source, when
+  a step calls another contract, from untrusted (or undeclared, D29) to a system looser, the
+  reverse stricter, one system or label for another not proven; `sensitive`, removed looser,
   added stricter; who sees a field, compared as the case computes it (its `visible_to`, or every
   role the case names), so a role named anywhere new is said on every field it now sees, and once
   for every outcome and output. 13b adds approvals, requirements, conditions, who proposes,

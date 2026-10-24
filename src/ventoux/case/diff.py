@@ -32,8 +32,10 @@ from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
 from ventoux.core.expressions import Expression, render
 from ventoux.core.expressions.model import Node
+from ventoux.core.output_sources import output_sources
 from ventoux.core.plan import Plan
 from ventoux.core.policy import Policy, UnknownPolicy, compared
+from ventoux.core.provenance import is_trusted
 
 type Verdict = Literal["looser", "stricter", "not proven"]
 
@@ -46,6 +48,7 @@ COMPARISONS = (
     "untrusted mark",  # an `untrusted:` mark on a field (brief, D12)
     "sensitive",  # a field's value wrapped, and never given to a workflow step (brief, D31)
     "readers",  # the roles that see a field, or every outcome and output (brief, D30)
+    "output source",  # where a step's contract says an output comes from (brief, D29)
 )
 
 
@@ -362,6 +365,9 @@ def contract_changes(leaf: Leaf, catalog: Catalog) -> Iterator[Change]:
                 None if how == "neither" else "input policy",
             )
             said = True
+    for change in output_changes(leaf.path, called, old, new):
+        yield change
+        said = True
     other = differing(old, new)
     if other or not said:
         also = f": its contract also differs: {', '.join(other)}" if other else ""
@@ -385,32 +391,58 @@ def described(policies: Sequence[Policy]) -> str:
 
 def differing(old: Contract, new: Contract) -> list[str]:
     """What else two contracts promise differently, by name: everything their hash covers but
-    their name, their version and their inputs' policies, compared above."""
+    their name, their version, their inputs' policies and their outputs' sources, compared
+    above."""
     first, second = promised(old), promised(new)
     return sorted(key for key in first.keys() | second.keys() if first.get(key) != second.get(key))
 
 
 def promised(contract: Contract) -> dict[str, object]:
-    """A contract's promise, as its hash reads it, without its name, version and policies."""
+    """A contract's promise, as its hash reads it, without its name, version, policies and
+    output sources."""
     promise = contract.model_dump(
         mode="json", exclude={"display", "input", "output", "name", "version"}
     )
     promise["input"] = without_policies(contract.input.model_json_schema())
-    promise["output"] = contract.output.model_json_schema()
+    promise["output"] = without(contract.output.model_json_schema(), "x-source")
     return promise
 
 
 def without_policies(schema: object) -> object:
     """A JSON Schema with every input policy taken out (`x-input-policies`) (brief, D21)."""
+    return without(schema, "x-input-policies")
+
+
+def without(schema: object, taken: str) -> object:
+    """A JSON Schema with every key `taken` taken out, at any depth."""
     if isinstance(schema, dict):
-        return {
-            key: without_policies(value)
-            for key, value in schema.items()
-            if key != "x-input-policies"
-        }
+        return {key: without(value, taken) for key, value in schema.items() if key != taken}
     if isinstance(schema, list):
-        return [without_policies(item) for item in schema]
+        return [without(item, taken) for item in schema]
     return schema
+
+
+def output_changes(path: str, called: str, old: Contract, new: Contract) -> Iterator[Change]:
+    """Each output whose source changed, from what the old contract declares to the new one's
+    (an undeclared one is untrusted:undeclared) (brief, D29): from untrusted to a system, a case
+    may now decide on it, looser; the reverse, stricter; one system or label for another, not
+    proven. An output only one of them gives is said, not proven."""
+    before, after = output_sources(old.output), output_sources(new.output)
+    for name in merged(list(before), list(after)):
+        if name not in before or name not in after:
+            which = old.reference if name in before else new.reference
+            yield Change(path, "not proven", f"{called}: output {name} only in {which}")
+            continue
+        if before[name] == after[name]:
+            continue
+        said = f"{called}: output {name}: was {before[name]}; now {after[name]}"
+        trusted_before, trusted_after = is_trusted(before[name]), is_trusted(after[name])
+        if trusted_after and not trusted_before:
+            yield Change(path, "looser", said, "output source")
+        elif trusted_before and not trusted_after:
+            yield Change(path, "stricter", said, "output source")
+        else:
+            yield Change(path, "not proven", said)
 
 
 # --- Marks and sensitive values ------------------------------------------------------------------
