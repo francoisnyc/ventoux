@@ -3,22 +3,22 @@
 
 Only the dev server lists a queue's pollers (`DescribeTaskQueue`): the time-skipping test server
 doesn't implement it (layer 12e, choice 77). The SDK downloads the dev server the first time, into
-`TEMPORAL_CLI_DIR` if set (CI caches it there); a test that can't start it fails, never skips.
+`TEMPORAL_CLI_DIR` if set (CI caches it there), and `tests/dev_server.py` starts it with a deadline
+of its own (12e, choice 81); a test that can't start it fails, never skips.
 See docs/layers/12-releases.md (12e).
 """
 
 import asyncio
 import json
-import os
 import shutil
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 
 import pytest
+from dev_server import cli_binary, cli_folder, dev_server
 from temporalio import workflow
 from temporalio.client import Client
 from temporalio.runtime import Runtime, TelemetryConfig
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from test_temporal_case import LARGE, reported
 from test_temporal_registry import ProductionCases, refund_timed
@@ -41,13 +41,11 @@ def on_dev_server[T](scenario: Callable[[Client, str], Awaitable[T]], create: bo
     address."""
 
     async def go() -> T:
-        folder = os.environ.get("TEMPORAL_CLI_DIR")  # where CI keeps the dev server it caches
-        if folder is not None:
-            Path(folder).mkdir(parents=True, exist_ok=True)  # the SDK downloads into it, as is
-        environment = await WorkflowEnvironment.start_local(
-            data_converter=development_converter(), download_dest_dir=folder
-        )
-        async with environment, registry_worker(environment.client):
+        # Started by the harness, with its own deadline: a cold disk can outlast the SDK's 5 s
+        # (12e, choice 81).
+        binary = await cli_binary(cli_folder())
+        server = dev_server(binary, data_converter=development_converter())
+        async with server as environment, registry_worker(environment.client):
             if create:
                 await create_environment(environment.client, "production")
             address = environment.client.service_client.config.target_host
