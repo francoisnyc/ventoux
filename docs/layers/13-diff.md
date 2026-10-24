@@ -538,6 +538,10 @@ Open since the tracer bullet. The exclusion and the test's three assertions are 
 back last time. Answer from memory first. It is 13b's question: "who may approve" is more than the
 roles an approval names (choice 23).
 
+Answered 2026-10-24, after a reminder of what the exclusion is: "Sam can approve; Ana can't, she
+set approved_amount." The exclusion and its reason came back; the opener, what the case waits for,
+and the test's three assertions didn't. Discussed and recorded; the question stays open.
+
 ### What this part is for
 
 13a judges what may flow where, and who may see it. 13b judges **who may act, and when a step
