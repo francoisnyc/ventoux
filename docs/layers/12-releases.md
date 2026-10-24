@@ -1988,3 +1988,43 @@ process behind.
     note in `docs/layers/13-diff.md` ("The flaky activation test") gets a dated line saying the
     cause is found and fixed here. No decision in the brief names how the tests start the dev
     server, so none changes. *Recommended.*
+
+### Seams the tests use
+
+- `cli_folder()`, `cli_binary(folder, download=…)` and `dev_server(binary, deadline, data_converter)`
+  in `tests/dev_server.py`; `DevServerFailed`.
+- `WorkflowEnvironment.start_local(dev_server_existing_path=…)`, for the start without the fix.
+- Stand-ins: small shell scripts playing a slow, a silent and a failing server.
+
+### Decided while building
+
+- **The harness lives in `tests/dev_server.py`,** beside the tests that use it: it is test
+  infrastructure, not part of what `ventoux.testing` ships.
+- **The server is started with `asyncio.create_subprocess_exec`,** never a blocking `Popen` inside
+  the event loop (ruff's ASYNC220 found it), and stopped the same way: asked, then killed after
+  10 s.
+- **A server still running is found by the PID the stand-in records,** which `exec` keeps. The
+  first version looked for the stand-in's path among the processes' arguments, which `exec sleep`
+  replaces: a break that left the server running passed it, and showed it.
+- **The server's own warnings go to its log file,** shown only when a start fails, where
+  `start_local` printed them to the terminal (`Cluster Id … is not a valid uuid`).
+- **The time-skipping test server keeps `start_time_skipping`** (choice 86): it waits on
+  sdk-core's 5 s too, with an 84 MB binary, and has never failed in a run whose output was kept. A
+  known risk: if it fails, its binary is started by the harness the same way.
+- **The idle thread-pool workers are a carried note** (choice 87): `case_worker` and
+  `plan_worker` give each Worker a `ThreadPoolExecutor()` Temporal never shuts down; fixed in its
+  own pull request, by deciding who owns the executor.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`T` is `tests/test_dev_server.py` (new). Checked against the tests, 2026-10-24: every test named
+here exists, and every test in `T` is named here.
+
+| Promise | Test |
+|---|---|
+| A server slower than the SDK's 5 s fails through `start_local` and starts through the harness: the cause, reproduced, and removed | T `test_a_server_slower_than_5_s_starts_with_the_harness_and_not_without` |
+| A server that never answers fails at the deadline, never skipped or retried, saying the command and the server's own output, and is stopped | T `test_a_server_that_never_answers_fails_showing_its_output` |
+| A server that exits before it answers fails at once, with its exit code and output | T `test_a_server_that_exits_first_fails_at_once_showing_its_output` |
+| The SDK's binary missing under its name after the download fails, naming what the folder holds | T `test_a_binary_the_sdk_names_otherwise_fails_naming_what_is_there` |
+| The activation tests start the dev server through the harness, from `TEMPORAL_CLI_DIR` when set | `tests/test_temporal_activate.py`, every test |
