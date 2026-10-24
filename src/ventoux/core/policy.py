@@ -4,9 +4,9 @@ A policy is written on the input field it guards, in the activity's input model.
 docs/guides/activities.md.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import GetJsonSchemaHandler
 from pydantic_core import CoreSchema
@@ -109,6 +109,68 @@ def only_from(*systems: str) -> OnlyFrom:
 # in the brief, like an expression operator (brief, D21).
 KINDS: tuple[type[Policy], ...] = (TrustedOnly, OnlyFrom)
 KIND_NAMES = "trusted_only and only_from"
+
+
+class UnknownPolicy(ValueError):
+    """A policy whose kind the engine doesn't know: it can't be compared, so nothing is said."""
+
+
+# What a list of policies accepts, among sets of sources: one of three shapes, from the widest.
+ANY = "any"  # no policy: every set of sources
+TRUSTED = "trusted"  # trusted_only: sets whose every source is trusted, none included
+SYSTEMS = "systems"  # only_from: non-empty sets of the systems every only_from on it names
+
+
+def accepted(policies: Sequence[Policy]) -> tuple[str, frozenset[str]]:
+    """What an input with `policies` accepts: its shape, and for only_from the systems a value may
+    come from. Every policy applies (brief, D21), so only_from's systems are those all of them
+    name, and trusted_only adds nothing to an only_from: a system is trusted."""
+    systems: frozenset[str] | None = None
+    for policy in policies:
+        # Fail closed: a kind not in the closed list can't be compared, never read as "the same".
+        if type(policy) not in KINDS:
+            raise UnknownPolicy(
+                f"an input policy of a kind Ventoux doesn't know ({type(policy).__name__}): "
+                f"the kinds are {KIND_NAMES}"
+            )
+        if isinstance(policy, OnlyFrom):
+            named = frozenset(policy.systems)
+            systems = named if systems is None else systems & named
+    if systems is not None:
+        return (SYSTEMS, systems)
+    if any(isinstance(policy, TrustedOnly) for policy in policies):
+        return (TRUSTED, frozenset())
+    return (ANY, frozenset())
+
+
+def within(inner: tuple[str, frozenset[str]], outer: tuple[str, frozenset[str]]) -> bool:
+    """Whether every set of sources `inner` accepts, `outer` accepts too."""
+    shape, systems = inner
+    outer_shape, outer_systems = outer
+    if outer_shape == ANY:
+        return True
+    if shape == ANY:
+        return False  # an untrusted source is accepted by `inner` only
+    if outer_shape == TRUSTED:
+        return True  # a trusted set, or one of systems, which are trusted
+    if shape == TRUSTED:
+        return False  # a person's answer is trusted, and from no system
+    return systems <= outer_systems
+
+
+def compared(
+    old: Sequence[Policy], new: Sequence[Policy]
+) -> Literal["same", "wider", "narrower", "neither"]:
+    """How what an input accepts changed from `old` policies to `new`: the same sets of sources,
+    strictly more (wider), strictly fewer (narrower), or neither, each a proof for every value.
+    A kind the engine doesn't know is refused (`UnknownPolicy`)."""
+    before, after = accepted(old), accepted(new)
+    grows, shrinks = within(before, after), within(after, before)
+    if grows and shrinks:
+        return "same"
+    if grows:
+        return "wider"
+    return "narrower" if shrinks else "neither"
 
 
 def origins(
