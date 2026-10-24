@@ -88,7 +88,7 @@ def test_the_sheet_says_the_engines_guarantees_once_then_the_packages() -> None:
         "\n"
         f"{engine}"
         "\n"
-        "## For every case of refund\n"
+        "## For every case of refund, while it runs this release\n"
         "\n"
         "- call anything but payments.refund@2 (high risk, it writes).\n"
         "- change the world, by what its contracts declare, but through payments.refund@2.\n"

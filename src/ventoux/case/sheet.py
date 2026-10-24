@@ -157,7 +157,9 @@ def never_sheet(package: Package, catalog: Catalog) -> str:
     own lines, each a proof for every case (brief, D56)."""
     lines = [f"# {package.name} will never", "", "## For every case, by Ventoux's engine", ""]
     lines += [f"- {line} {decisions}." for line, decisions in ENGINE_WIDE]
-    lines += ["", f"## For every case of {package.name}", ""]
+    # The package's own lines hold while a case runs this release: a migration moves a case to
+    # the target release's definition (brief, D53) (13c, choice 48).
+    lines += ["", f"## For every case of {package.name}, while it runs this release", ""]
     lines += [f"- {never.line}." for never in nevers(package, catalog)]
     return "\n".join(lines) + "\n"
 

@@ -1969,7 +1969,13 @@ calls refuses; who sees each field, and every outcome and output; a sensitive va
 to a workflow step; who may never approve a step; a step that never runs unapproved (an approval
 with no `when`; with one, the step runs unapproved where it is false); and what forgetting keeps.
 Nothing decided by a condition or by data is said ("never pays more than 100" is not a line), and
-nothing is read from a contract's name.
+nothing is read from a contract's name. Who may never approve a step is said only where it holds
+in every run: for a task's outcome the step reads, the task not repeatable. A field a form sets is
+never said, since an edit, a second answer or another writer replaces whose answer it holds.
+
+The package's own lines hold while a case runs this release, and their heading says so. A
+migration moves a case to the target release, and so to that release's sheet: the diff between
+the two releases (`ventoux diff`, in the releases guide) says what the move loosens.
 
 The releases guide's refund package:
 
@@ -2016,7 +2022,7 @@ $ ventoux map examples/packages/refund
 - skip a failed step by itself: it waits for a person (brief, D17).
 - give a sensitive value to a workflow step, or write one out (brief, D31).
 
-## For every case of refund
+## For every case of refund, while it runs this release
 
 - call anything but orders.lookup@1 (low risk, it reads) and payments.refund@2 (high risk, it writes).
 - change the world, by what its contracts declare, but through payments.refund@2.
