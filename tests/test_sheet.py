@@ -179,6 +179,12 @@ def test_what_changes_the_world_is_read_from_declared_effects() -> None:
         changes = CATALOG.lookup(reference).effect in ("write", "notify")
         assert (reference in line) == changes, reference
     assert line == "change the world, by what its contracts declare, but through payments.refund@2"
+    # A contract declared `notify` changes the world too, whatever its name says.
+    notifying = catalog_with(refund_contract(5, refund_input(), effect="notify"))
+    told = dict(lines_of(calling("payments.refund@5"), notifying))
+    assert told["changes the world only through"] == (
+        "change the world, by what its contracts declare, but through payments.refund@5"
+    )
 
 
 @witness("input policy")
