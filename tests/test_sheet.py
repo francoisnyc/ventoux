@@ -25,8 +25,16 @@ from test_diff import (
     sensitive_witness,
     settling,
 )
-from test_diff_people import approval_witness, exclusions_witness, forgetting_witness
+from test_diff_people import (
+    REVIEWED,
+    answered_again,
+    approval_witness,
+    approved_by,
+    forgetting_witness,
+    with_check,
+)
 
+from ventoux.case.memory import CaseRun
 from ventoux.case.releases import Package
 from ventoux.case.sheet import ENGINE_WIDE, NEVERS, case_map, never_sheet, nevers
 from ventoux.core.catalog import Catalog
@@ -215,11 +223,35 @@ def test_a_sensitive_line_is_the_workflow_steps_refusal() -> None:
     assert refused
 
 
+def approver_lines(case: dict[str, Any]) -> list[str]:
+    """The sheet's "who may not approve" lines for `case`."""
+    return [line for kind, line in lines_of(case) if kind == "who may not approve"]
+
+
+def test_who_may_not_approve_is_never_said_of_a_field_a_form_sets() -> None:
+    # The review of #49: Bob and Lee edit approved_amount, which Ana's answer set, and it comes
+    # from them now (brief, D52), so Ana may approve the payment that reads it.
+    case = with_check("approved_amount", None)
+    assert approver_lines(case) == []
+    assert isinstance(approved_by(case, "ana"), CaseRun)
+
+
+def test_who_may_not_approve_is_never_said_of_a_repeatable_tasks_outcome() -> None:
+    # The review of #49: review answered again, its outcome is Tom's, so Ana may approve.
+    case, history = answered_again()
+    assert approver_lines(case) == []
+    assert isinstance(approved_by(case, "ana", history), CaseRun)
+
+
 @witness("who may not approve")
 def test_a_who_may_not_approve_line_is_the_exclusion() -> None:
-    before, _, _, refused, _ = exclusions_witness()
-    assert ("who may not approve", "let whoever answers review approve pay") in lines_of(before)
-    assert refused
+    # An outcome can't be edited and review is answered once, so Ana is refused in every run,
+    # the edit of approved_amount included (brief, D11) (brief, D52).
+    case = with_check("amount", REVIEWED)
+    assert approver_lines(case) == ["let whoever answers review approve pay"]
+    assert approved_by(case, "ana") == (
+        "ana set review.outcome, which decides whether pay runs, so cannot approve it"
+    )
 
 
 @witness("runs only approved")

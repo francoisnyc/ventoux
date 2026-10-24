@@ -21,14 +21,14 @@ from ventoux.case.changes import (
     merged,
     shown,
 )
-from ventoux.case.definition import Approval, CallStep, CaseDefinition, CloseReason
+from ventoux.case.definition import Approval, CallStep, CaseDefinition, CloseReason, TaskStep
 from ventoux.case.freshness import as_said, seconds_in
 from ventoux.case.sequence import requirements
 from ventoux.case.writers import could_come_from
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
 from ventoux.core.plan import ActivityState, ApprovalState, Plan
-from ventoux.core.provenance import fields_read
+from ventoux.core.provenance import answering, fields_read
 from ventoux.core.roles import may_approve
 
 
@@ -245,14 +245,34 @@ def excluded(case: CaseDefinition, step: CallStep, catalog: Catalog) -> frozense
     (`person:answering review`), from the definition alone: through a field a task's form sets,
     a task's outcome, an event a person sends, or a rule that computes from them (brief, D42)."""
     sources = could_come_from(case, catalog, None)
-    read = [*step.inputs.values(), *([step.when] if step.when is not None else [])]
-    fields = {field for expression in read for field in fields_read(expression)}
     return frozenset(
         source
-        for field in fields
+        for field in read_by(step)
         for source in sources.get(field, frozenset())
         if source.startswith("person:")
     )
+
+
+def excluded_every_time(case: CaseDefinition, step: CallStep) -> frozenset[str]:
+    """The people excluded from approving `step` in every run: whoever answers a task that isn't
+    repeatable, whose outcome `step`'s inputs or its `when` read directly. An outcome can't be
+    edited (brief, D52) and such a task is answered once, so its answerer stays the outcome's
+    source; a field a form sets may be edited, answered again or set by another (13c, choice
+    45)."""
+    found: set[str] = set()
+    for value in read_by(step):
+        name, _, part = value.partition(".")
+        task = case.steps.get(name)
+        if part == "outcome" and isinstance(task, TaskStep) and not task.repeatable:
+            found.add(answering(name))
+    return frozenset(found)
+
+
+def read_by(step: CallStep) -> set[str]:
+    """The values `step`'s inputs and its `when` read: whose answers in them may not approve it
+    (brief, D11)."""
+    read = [*step.inputs.values(), *([step.when] if step.when is not None else [])]
+    return {field for expression in read for field in fields_read(expression)}
 
 
 # How the static check's sources name a person, and how a sentence says it.

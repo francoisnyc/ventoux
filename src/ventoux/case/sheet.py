@@ -11,7 +11,7 @@ See docs/layers/13-diff.md (13c) and docs/guides/cases.md, "What a case can do, 
 from dataclasses import dataclass
 
 from ventoux.case.definition import CallStep, Rule, WorkflowStep
-from ventoux.case.guards import excluded, whoever
+from ventoux.case.guards import excluded_every_time, whoever
 from ventoux.case.reading import (
     EVERY_RULE,
     EntryReading,
@@ -171,7 +171,7 @@ def nevers(package: Package, catalog: Catalog) -> list[Never]:
         *input_policies(called),
         *who_sees(package, catalog),
         *sensitive(package),
-        *who_may_not_approve(package, catalog),
+        *who_may_not_approve(package),
         *runs_only_approved(package),
         *forgetting(package),
     ]
@@ -283,13 +283,15 @@ def sensitive(package: Package) -> list[Never]:
     ]
 
 
-def who_may_not_approve(package: Package, catalog: Catalog) -> list[Never]:
-    """For each step with an approval, whoever's answer can reach what it reads (brief, D11)."""
+def who_may_not_approve(package: Package) -> list[Never]:
+    """For each step with an approval, whoever is excluded from approving it in every run: a
+    person whose answer it reads now may not approve it (brief, D11), and only a task's outcome,
+    read directly, stays theirs whatever happens after (13c, choice 45)."""
     found: list[Never] = []
     for name, step in package.case.steps.items():
         if not isinstance(step, CallStep) or step.approval is None:
             continue
-        people = excluded(package.case, step, catalog)
+        people = excluded_every_time(package.case, step)
         if people:
             found.append(Never("who may not approve", f"let {whoever(people)} approve {name}"))
     return found

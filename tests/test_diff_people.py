@@ -34,7 +34,7 @@ from ventoux.case.runtime import EventRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.policy import trusted_only
 from ventoux.temporal.forget import CaseLookup, lookup_refusal
-from ventoux.testing import CATALOG, close, later, propose, run_case, send
+from ventoux.testing import CATALOG, close, edit, later, propose, run_case, send
 
 FOUR_EYES = ROOT / "examples" / "refund" / "refund-four-eyes.json"
 
@@ -351,6 +351,79 @@ def test_exclusions_both_added_and_removed_are_not_proven() -> None:
         "not proven steps.pay.approval: excluded from approving pay: whoever answers review -> "
         "whoever answers check"
     ) in judged_lines(before, after)
+
+
+# --- From the review of #49: excluded in every run, or only maybe ---------------------------------
+
+# Pay's condition in the review's runs: whoever answers review decides whether it runs.
+REVIEWED = {"==": [{"var": "review.outcome"}, "approve"]}
+# The people of the review's runs: Ana and Lee may approve a payment, Tom and Bob may not.
+REVIEW_PEOPLE = {
+    "ana": ["support", "support-lead"],
+    "tom": ["support"],
+    "bob": ["support"],
+    "lee": ["support-lead"],
+}
+# The review's history, the same for every run: Ana answers review, Tom answers check, Bob
+# proposes an edit of approved_amount and Lee approves it (brief, D52).
+EDITED: list[Any] = [
+    ("review", "approve", "ana", {"approved_amount": 250}),
+    ("check", "ok", "tom", {"checked_amount": 250}),
+    edit("approved_amount", 200, "bob"),
+    ("case.change#1", "approve", "lee"),
+]
+
+
+def with_check(amount: str, when: dict[str, Any] | None) -> dict[str, Any]:
+    """The quickstart's refund, plus `check`, a task for support whose `ok` sets checked_amount:
+    `pay` requires review and check, sends `amount`, runs if `when` holds (whenever admitted if
+    None) and asks a lead's approval on every run."""
+    case = refund()
+    case["fields"]["checked_amount"] = {"type": "number", "display": {"title": "Amount checked"}}
+    case["steps"]["check"] = {
+        "kind": "task",
+        "display": {"title": "Check the amount"},
+        "roles": ["support"],
+        "outcomes": {"ok": {"display": {"title": "Checked"}, "sets": ["checked_amount"]}},
+    }
+    pay = case["steps"]["pay"]
+    pay["requires"] = ["review", "check"]
+    pay["inputs"]["amount"] = {"var": amount}
+    pay["approval"] = {"roles": ["support-lead"], "display": {"reason": "A lead pays"}}
+    if when is None:
+        del pay["when"]
+    else:
+        pay["when"] = when
+    return case
+
+
+def approved_by(case: dict[str, Any], who: str, history: list[Any] = EDITED) -> str | CaseRun:
+    """`history`, then `who` approves the payment: the run, or why it was refused. An edit
+    withdraws an approval that read the old value and asks again (brief, D52), so `who` answers
+    the approval open then."""
+    file = {"order_id": "ord-1", "amount": 250}
+    before = run_case(case, file=file, answers=history, people=REVIEW_PEOPLE)
+    (entry,) = [name for name in before.state.waiting if name.startswith("pay.approval#")]
+    try:
+        return run_case(
+            case, file=file, answers=[*history, (entry, "approve", who)], people=REVIEW_PEOPLE
+        )
+    except AnswerRefused as refused:
+        return str(refused)
+
+
+def answered_again() -> tuple[dict[str, Any], list[Any]]:
+    """The review's case with review repeatable, its condition reading review's outcome, and a
+    history where Tom answers review again before check is answered."""
+    case = with_check("amount", REVIEWED)
+    case["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    history: list[Any] = [
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        propose("review", "bob"),
+        ("review#2", "approve", "tom", {"approved_amount": 250}),
+        ("check", "ok", "bob", {"checked_amount": 250}),
+    ]
+    return case, history
 
 
 # --- Slice 3: when a step may run ----------------------------------------------------------------
