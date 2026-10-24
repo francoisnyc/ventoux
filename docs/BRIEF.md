@@ -2226,6 +2226,16 @@ and D50, whose text is kept.*
   nobody joins either set; otherwise not proven. Every age the format holds is compared as a
   duration, the same duration written otherwise: a fact's `max_age`, a plan state's `timeout`, a
   rule's `after`, an sla's `within` and a reminder's `after`.
+- **Amended 2026-10-24, in layer 13e** (`docs/layers/13-diff.md`, choices 63 to 76; the text
+  above stands, this adds to it): on each pull request, a second CI job writes the job summary
+  with `ventoux summary`: for each package, matched by name, whether merging creates a release, a
+  wording revision or nothing (the digest of the merge commit against its first parent), a new
+  package or a removed one, then the diff in the plain form; and the hash check with the base
+  commit's own promises. Anything it can't read or the diff refuses fails the step, saying why,
+  never read as nothing changed; a looser change fails nothing. The whole text goes to the log;
+  past the summary's 1 MiB, the summary says where it is. It sends nothing: the summary only,
+  `permissions: contents: read`, `pull_request` and never `pull_request_target`. A push to `main`
+  runs the checks only.
 
 ### D56. The case map and the "will never do" sheet: readings of a package, and only proven nevers
 
@@ -2289,6 +2299,11 @@ D55, and answers design question 16's other half, whose text is kept.*
   can't be said. `ventoux hashes --lock FILE [--before PROMISES]` prints the hash check, each
   contract changed in place followed by its paths. The lockfile keeps its shape. Running the
   base's promises in CI comes with the CI step (13e).
+- **Amended 2026-10-24, in layer 13e** (the text above stands; this adds to it): CI runs the
+  base commit's `ventoux promises` in a second checkout, with the base's own code, and the job
+  summary says each contract changed in place, path by path. Leaves are compared as the hash
+  writes them, so `2` and `2.0` differ; a promise whose hash differs where no path does says what
+  changed can't be said.
 
 ### Simplifications adopted
 

@@ -1568,7 +1568,8 @@ named here.
 ## 13e. The CI step: what merging a pull request changes, in its job summary
 
 Status: choices drafted 2026-10-24, from `main` at `9004cbd` (the 12e cold-start fix merged as
-#51). Waiting for answers, by number.
+#51). Answered "all as recommended", the same day: choices 63 to 76. The dated lines on D55 and
+D57 written before building 13e.
 
 ### Warm-up: learning question 34, why check input policies twice
 
