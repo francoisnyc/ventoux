@@ -20,6 +20,7 @@ from ventoux.case.changes import (
     Change,
     DiffRefused,
     Leaf,
+    Rewritten,
     Verdict,
     merged,
     shown,
@@ -78,14 +79,17 @@ class Diff:
     name: str  # the package: `refund`
     changes: tuple[Change, ...]
     wording: tuple[Reworded, ...]
+    rewritten: tuple[Rewritten, ...] = ()  # written otherwise, the same decisions (13c)
 
     def __str__(self) -> str:
-        lines = [self.summary(), *map(str, self.changes), *map(str, self.wording)]
+        lines = [self.summary(), *map(str, self.changes), *map(str, self.rewritten)]
+        lines += map(str, self.wording)
         return "\n".join(lines) + "\n"
 
     def summary(self) -> str:
-        """One line: how many changes, what may loosen first, then what is stricter."""
-        if not self.changes and not self.wording:
+        """One line: how many changes, what may loosen first, then what is stricter, then what is
+        written otherwise and the wording."""
+        if not self.changes and not self.wording and not self.rewritten:
             return f"{self.name}: nothing changed"
         verdicts = [change.verdict for change in self.changes]
         looser, unproven = verdicts.count("looser"), verdicts.count("not proven")
@@ -99,7 +103,8 @@ class Diff:
         reworded = (
             counted(len(self.wording), "wording change") if self.wording else "no wording change"
         )
-        return f"{self.name}: {behaviour}; {reworded}"
+        rewritten = f"{len(self.rewritten)} written otherwise; " if self.rewritten else ""
+        return f"{self.name}: {behaviour}; {rewritten}{reworded}"
 
 
 def counted(number: int, noun: str) -> str:
@@ -117,7 +122,7 @@ def diff(before: Package, after: Package, catalog: Catalog) -> Diff:
     apart. Refused (`DiffRefused`) if a comparison can't be made: a contract the catalog doesn't
     hold, a policy of a kind it doesn't know (brief, D55)."""
     versions = Versions(before.case, after.case, catalog, before.plans, after.plans)
-    changes = list(case_changes(versions))
+    changes: list[Change | Rewritten] = list(case_changes(versions))
     for reference in merged(list(before.plans), list(after.plans)):
         path = f"plans.{reference}"
         changes += judged(
@@ -126,7 +131,9 @@ def diff(before: Package, after: Package, catalog: Catalog) -> Diff:
         )
         if reference in before.plans and reference in after.plans:
             changes += plan_approvals(reference, versions)
-    return Diff(after.name, tuple(changes), reworded(before, after, changes))
+    found = [change for change in changes if isinstance(change, Change)]
+    rewritten = tuple(line for line in changes if isinstance(line, Rewritten))
+    return Diff(after.name, tuple(found), reworded(before, after, found), rewritten)
 
 
 # --- Walking the two versions --------------------------------------------------------------------
@@ -186,7 +193,7 @@ def sources_leaves(before: Mapping[str, str], after: Mapping[str, str], path: st
 # --- The case ------------------------------------------------------------------------------------
 
 
-def case_changes(versions: Versions) -> Iterator[Change]:
+def case_changes(versions: Versions) -> Iterator[Change | Rewritten]:
     """The case's changes, its sections in the order the format writes them."""
     before, after = versions.before, versions.after
     for name in type(before).model_fields:
@@ -207,7 +214,7 @@ def case_changes(versions: Versions) -> Iterator[Change]:
             yield from judged(leaves(old, new, where) or [Leaf(where, old, new)], versions)
 
 
-def step_changes(versions: Versions) -> Iterator[Change]:
+def step_changes(versions: Versions) -> Iterator[Change | Rewritten]:
     """Each step's changes, then what follows from them under it: who may approve it (and, from
     later slices, what it requires and reads)."""
     old, new = versions.before.steps, versions.after.steps

@@ -11,9 +11,18 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from ventoux.case.changes import MISSING, Change, DiffRefused, Leaf, Verdict, merged, shown
+from ventoux.case.changes import (
+    MISSING,
+    Change,
+    DiffRefused,
+    Leaf,
+    Rewritten,
+    Verdict,
+    merged,
+    shown,
+)
 from ventoux.case.definition import Approval, CallStep, CaseDefinition, CloseReason
-from ventoux.case.freshness import seconds_in
+from ventoux.case.freshness import as_said, seconds_in
 from ventoux.case.sequence import requirements
 from ventoux.case.writers import could_come_from
 from ventoux.core.catalog import Catalog, NotInCatalog
@@ -155,7 +164,7 @@ def widened(path: str, said: str, old: set[str], new: set[str], comparison: str)
 # --- What follows under a step -------------------------------------------------------------------
 
 
-def step_guards(step: str, versions: Versions) -> Iterator[Change]:
+def step_guards(step: str, versions: Versions) -> Iterator[Change | Rewritten]:
     """What follows from a step's changes, said under it, as the case reads them: what it
     requires, how old each fact it reads may be, who may approve it, and who is excluded from
     approving it."""
@@ -165,7 +174,7 @@ def step_guards(step: str, versions: Versions) -> Iterator[Change]:
     yield from exclusions(step, versions)
 
 
-def freshness(step: str, versions: Versions) -> Iterator[Change]:
+def freshness(step: str, versions: Versions) -> Iterator[Change | Rewritten]:
     """How old each fact `step` reads may be (`max_age`) (brief, D18), compared as a duration, never
     as text (13b, choice 28): longer looser, shorter stricter; a fact no longer required fresh
     looser, newly required stricter."""
@@ -181,7 +190,10 @@ def freshness(step: str, versions: Versions) -> Iterator[Change]:
         elif old[fact] != new[fact]:
             longer, shorter = seconds_in(new[fact]), seconds_in(old[fact])
             if longer == shorter:
-                yield Change(where, "not proven", f"{said} (the same age)")
+                # Every decision compares seconds; the history says the age as written
+                # (`freshness.as_said`), so the line says that too (13c, choice 38).
+                history = f"says {as_said(new[fact])} where it said {as_said(old[fact])}"
+                yield Rewritten(where, f"{said}: the same decisions; the history {history}")
             else:
                 verdict: Verdict = "looser" if longer > shorter else "stricter"
                 yield Change(where, verdict, said, "freshness")

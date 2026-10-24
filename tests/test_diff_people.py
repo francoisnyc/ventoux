@@ -546,9 +546,7 @@ def test_a_fact_allowed_older_is_looser() -> None:
     assert judged_lines(fresh("2d"), fresh("12h")) == [
         "stricter   steps.lookup.max_age.order_id: 2d -> 12h"
     ]
-    assert judged_lines(fresh("1d"), fresh("24h")) == [
-        "not proven steps.lookup.max_age.order_id: 1d -> 24h (the same age)"
-    ]
+    assert judged_lines(fresh("1d"), fresh("24h")) == []  # written otherwise (13c, choice 38)
 
 
 def test_a_fact_no_longer_required_fresh_is_looser() -> None:

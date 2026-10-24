@@ -82,6 +82,18 @@ class Change:
 
 
 @dataclass(frozen=True)
+class Rewritten:
+    """Written otherwise, deciding the same for every case: no verdict, never counted as what may
+    loosen, and only where the diff proves it (13c, choice 38)."""
+
+    path: str  # where, as the JSON writes it
+    said: str  # what it was and is, and what differs, if anything, in what the history says
+
+    def __str__(self) -> str:
+        return f"{'rewritten':<10} {self.path}: {self.said}"
+
+
+@dataclass(frozen=True)
 class Leaf:
     """Where the two versions behave differently, as deep as a reader needs: an expression whole,
     an entry added or removed whole."""
