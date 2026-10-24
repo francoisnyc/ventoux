@@ -1581,6 +1581,9 @@ Answer the follow-up from memory first. It is 13e's question: the summary is the
 voice in the pull request, so whoever can change the definition hears of a loosening before any
 case runs it.
 
+Answered from memory, 2026-10-24: "every path" came back; "when it costs" and "who hears of it"
+didn't, and were discussed. Recorded in the log; the question stays open.
+
 ### What this part is for
 
 13a to 13d made the diff, its verdicts, its plain form and the release notes, all run by hand.
