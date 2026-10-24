@@ -1884,7 +1884,7 @@ Waiting for answers, by number.
 
 ### The cause, from the tutor review of #50
 
-`test_activate_refuses_a_release_no_worker_serves`, the file's first test, failed in four full
+`test_activate_refuses_a_release_no_worker_serves`, the file's first test, failed in several full
 runs since 12e, always on the file's first dev-server start, with no output from the server:
 `ephemeral server at 127.0.0.1:39227 did not start within 5s`. The review measured why:
 
