@@ -1364,5 +1364,21 @@ and record the key points. A question is closed once you can explain the answer 
   - **11h1's unclaimed `NEVER_STARTS`** (`docs/layers/11-rules.md`, "Decided while building
     11h1"): a start written before a rule that always closes is refused every time, and the
     check doesn't claim it. No later commit fixes it.
+- Retrieval (layer 13 warm-up, 2026-10-24): asked first "what is a fact?" (reminded: a value
+  the case may decide on, because a person or a registered system vouches for it, D12; a
+  milestone; time passing; not a value marked `untrusted:`). Then: "the arrival is a fact, the
+  content of the email is not." The principle came back, as last time; no example, and none of
+  the three parts. Discussed, with the example:
+  - **Why the arrival is a fact: the sender check.** The portal sends `cancelled`; the API
+    vouches that it was the portal, and the engine refuses an event from any other sender
+    (`sent_by`, brief, D41). So "the customer cancelled through the portal" is the portal's
+    fact, and a rule may decide on it: `withdraw` reaches `withdrawn`.
+  - **Why the content isn't:** the `note` the customer typed is declared `untrusted:customer`,
+    and keeps that mark whoever carries it (D12).
+  - **Content informs, never decides:** a rule may read `cancelled.note` to start a step or set
+    a field (the value keeps its mark, D39, D42), and a person may read it. A rule that would
+    *reach* or *stop* on it acts on nothing, and validation says `UNTRUSTED_TRIGGER` (D38).
+  - **Why it matters in layer 13:** a field's `untrusted:` mark removed, or an event's senders
+    widened, is the diff's "looser": either turns content into something that may decide.
 - Status: open, until an example comes back with the sender check and "informs, never decides".
 

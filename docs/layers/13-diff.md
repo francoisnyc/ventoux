@@ -17,6 +17,10 @@ that content may still start steps and set fields (it informs), and the line val
 It is relevant here: a diff that says "looser" about who may send an event, or about a field's
 `untrusted:` mark, relies on exactly that line.
 
+Answered 2026-10-24: "the arrival is a fact, the content of the email is not." The principle
+came back; the example, the sender check and "informs, never decides" didn't. They were
+discussed and recorded, and the question stays open.
+
 ## Prior art: what the prototype has, and what it means for Ventoux
 
 The curriculum names two references in `francoisnyc/chartering`. The default branch this
