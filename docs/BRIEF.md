@@ -1655,6 +1655,13 @@ whose text is kept.*
 - **One command, `ventoux simulate STORY.json`,** the first entry point: reading files and
   printing stay out of `core` and `case`. `ventoux check` stays with the builder (D34).
 - **Built in two parts:** the reading in 11g1, the story and the command in 11g2.
+- **Amended 2026-10-24, by D56** (the text above stands; this adds to it): every kind of entry
+  has a reading, under the same rules (names, conditions as written, never given a case file, a
+  shape it doesn't know refused): a step, a field, an event, a close reason, how a case closes and
+  is forgotten, and a plan's states. Their fine print is a closed list too, each clause with its
+  witness: an approval with a `when` lets the step run unapproved where it is false; several
+  approvers are distinct people, one rejection rejecting the approval; whoever proposes a run never
+  approves it.
 
 ### D46. Patterns: data that expands into raw rules when the definition is read
 
@@ -2197,6 +2204,36 @@ and D50, whose text is kept.*
   ordered `never`, `while_open`, `allowed`. A plan's approval targets and its approval and wait
   roles likewise; a plan's timeouts not proven. An output's source on a plan's activity state is
   said, never judged: a plan keeps no activity's outputs (D28).
+- **Amended 2026-10-24, in layer 13c** (`docs/layers/13-diff.md`, choices 33 to 44; the text
+  above stands, this adds to it): the plain-language form renders the one change list, each entry
+  read before and after (D56), each change's verdict in fixed words ("Looser:", "Stricter:",
+  "Changed, not proven either way (read it as possibly looser):"), never judged again. A fourth
+  kind of line, *written otherwise, the same decisions*, is listed apart and never counted as what
+  may loosen, only where the diff proves both versions decide the same for every case: a
+  `max_age` of the same duration, said with how the history words it.
+
+### D56. The case map and the "will never do" sheet: readings of a package, and only proven nevers
+
+*Drafted 2026-10-24, in layer 13c (`docs/layers/13-diff.md`, choices 33 to 44). Adds to D45 and
+D55, whose text is kept.*
+
+- **The case map** reads every entry of a package in the format's order (its fields, steps,
+  rules and patterns, events, close reasons, how it closes and is forgotten, its plans), from the
+  definition and the catalog alone: it judges nothing and quotes no case's value.
+- **The "will never do" sheet** says what no case of the package will ever do. The engine's own
+  guarantees, true of every definition, are said once above it, each naming its decision. Below,
+  a line is said only where it is proven for every case, by a check that already proves it, from
+  a closed list (`NEVERS`), each kind with a witness: the contracts it calls, and only those; the
+  contracts through which, by their declared effect, it changes the world; each input policy of
+  what it calls; who sees each field, and every outcome and output; a sensitive value never given
+  to a workflow step; who may never approve a step; a step that never runs unapproved (an approval
+  with no `when`); and forgetting.
+- **Never said:** what a condition or a value decides ("never pays more than 100"), anything read
+  from a contract's name (a capability called `mail.deliver` may send), reachability (validation's
+  to prove, D34), and "drafts, never sends", until the engine checks it.
+- **`ventoux map FOLDER`** prints both, and `ventoux diff OLD NEW --plain` the plain form, in
+  Markdown, against the development catalog until `ventoux check` brings the deployment's
+  (layer 14).
 
 ### Simplifications adopted
 

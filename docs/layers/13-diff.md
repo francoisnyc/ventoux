@@ -788,8 +788,9 @@ tests, 2026-10-24: every test named here exists, and every test in `P` is named 
 
 ## 13c. The plain-language form, the case map and the "will never do" sheet
 
-Status: choices drafted 2026-10-24, from `main` at `43dea32` (13b merged as #48). Waiting for
-answers by number. Nothing built yet.
+Status: choices drafted 2026-10-24, from `main` at `43dea32` (13b merged as #48). Answered "all
+as recommended", the same day: choices 33 to 44. D56, and D45's and D55's amendment lines, written
+before building 13c.
 
 ### Warm-up: learning question 36, the model picks the step, never the values
 
