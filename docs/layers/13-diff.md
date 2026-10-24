@@ -1209,6 +1209,12 @@ the one that fails elsewhere, included; and the failing run captured no output f
 The test's harness is unchanged in this pull request. The next step is to keep the server's own
 output when a start fails, then find the cause from it.
 
+*Found 2026-10-24, in the tutor review of #50, and fixed in 12e's follow-up
+(`docs/layers/12-releases.md`, "12e, fixed later: the dev server's cold start", choices 81 to
+88):* the first start after a container is restored reads the server's 156 MB binary from a cold
+disk, longer than the 5 s the SDK waits. The harness now starts the binary with a deadline of its
+own.
+
 ### Not in 13c
 
 - Release notes in the record and a contract's readable diff (13d); the CI step (13e).
