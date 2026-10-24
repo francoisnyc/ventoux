@@ -1319,6 +1319,8 @@ Open since layer 1; put at layer 12's warm-up and left unanswered. Answer from m
 13d's question from the other side: a wording revision's notes say only wording, so what counts as
 wording decides what reaches open cases without review.
 
+Asked to be told, 2026-10-24; answered briefly and recorded in the log. The question stays open.
+
 ### What this part is for
 
 Two things say "what changed" today by path or by name only, and 13d makes each say it as the
