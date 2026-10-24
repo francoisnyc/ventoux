@@ -44,6 +44,109 @@ def test_an_age_written_otherwise_is_no_verdict() -> None:
     assert list(seen) == [line.path for line in found.rewritten]
 
 
+def chasing(rule: dict[str, Any]) -> Package:
+    """The quickstart's refund, with `nudge`, a repeatable task, and `rule`, written as `chase`."""
+    case = refund()
+    case["steps"]["nudge"] = {
+        "kind": "task",
+        "display": {"title": "Nudge"},
+        "roles": ["support"],
+        "repeatable": True,
+        "outcomes": {"done": {"display": {"title": "Done"}}},
+    }
+    case["rules"] = {"chase": {"display": {"title": "Chase"}} | rule}
+    return packed(case)
+
+
+def timer(age: str) -> Package:
+    """`chase` starts nudge `age` after review starts: a rule's timer (brief, D44)."""
+    return chasing(
+        {"on": {"after": age, "since": {"started": "review"}}, "then": {"start": ["nudge"]}}
+    )
+
+
+def sla(age: str) -> Package:
+    """`chase` starts nudge if a run of review isn't done within `age` (brief, D46)."""
+    return chasing({"sla": {"step": "review", "within": age}, "then": {"start": ["nudge"]}})
+
+
+def reminder(*ages: str) -> Package:
+    """`chase` starts nudge after each of `ages` while review is open (brief, D46)."""
+    return chasing({"reminder": {"task": "review", "after": list(ages), "start": "nudge"}})
+
+
+def approval_within(age: str) -> Package:
+    """The releases guide's package, its plan's approval waiting at most `age`."""
+    case, (plan,) = settling()
+    plan["states"]["approve_refund"]["approval"]["timeout"] = age
+    return packed(case, [plan])
+
+
+def wait_within(age: str) -> Package:
+    """The releases guide's package, its plan waiting at most `age` for a lead to confirm."""
+    case, (plan,) = settling()
+    plan["states"]["check_order"]["on"]["done"] = "confirm"
+    plan["states"]["confirm"] = {
+        "wait": {"outcomes": ["go"], "roles": ["support-lead"], "timeout": age},
+        "on": {"go": "approve_refund", "timeout": "failed"},
+    }
+    return packed(case, [plan])
+
+
+SAME = ": the same decisions; the history says"
+PLAN_STATES = "plans.refund-order@1.states"
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "line"),
+    [
+        (timer("2d"), timer("48h"), f"rules.chase.on.after: 2d -> 48h{SAME} 48h where it said 2d"),
+        (sla("2d"), sla("48h"), f"rules.chase.sla.within: 2d -> 48h{SAME} 48h where it said 2d"),
+        (
+            reminder("1d", "2d"),
+            reminder("24h", "48h"),
+            (
+                f"rules.chase.reminder.after: 1d, 2d -> 24h, 48h{SAME} 24h, 48h where it said "
+                "1d, 2d, and names its rules chase_24h and chase_48h where it named chase_1d and "
+                "chase_2d"
+            ),
+        ),
+        (
+            approval_within("2d"),
+            approval_within("48h"),
+            f"{PLAN_STATES}.approve_refund.approval.timeout: 2d -> 48h{SAME} 48h where it said 2d",
+        ),
+        (
+            wait_within("60m"),
+            wait_within("3600s"),
+            f"{PLAN_STATES}.confirm.wait.timeout: 60m -> 3600s{SAME} 3600s where it said 60m",
+        ),
+    ],
+)
+def test_every_age_written_otherwise_is_no_verdict(
+    before: Package, after: Package, line: str
+) -> None:
+    # The review of #49: every age the format holds is compared as a duration, as max_age is
+    # (13c, choice 50): the same duration decides the same for every case.
+    found = diff(before, after, CATALOG)
+    assert found.changes == ()
+    assert [str(rewritten) for rewritten in found.rewritten] == [f"rewritten  {line}"]
+    assert found.summary() == "refund: no behaviour change; 1 written otherwise; no wording change"
+    assert list(changed(before, after).behaviour) == [
+        rewritten.path for rewritten in found.rewritten
+    ]
+
+
+def test_an_age_of_another_duration_is_still_not_proven() -> None:
+    # What a timer or a timeout leads to decides whether sooner is looser: never judged.
+    found = diff(timer("2d"), timer("3d"), CATALOG)
+    assert [str(change) for change in found.changes] == [
+        "not proven rules.chase.on.after: 2d -> 3d"
+    ]
+    found = diff(reminder("1d", "2d"), reminder("2d", "1d"), CATALOG)
+    assert found.rewritten == ()
+
+
 # --- Slice 1: every entry read (D45, as amended by D56) ------------------------------------------
 
 

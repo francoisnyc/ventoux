@@ -1133,7 +1133,9 @@ The notify witness needs no choice (from the review): a contract declared `notif
   excluded.
 - **50, widened to every age the format holds:** a plan state's `timeout`, a rule's `after`
   (`2d` -> `48h` reads "not proven" today) and a reminder's `after`, each compared as a duration.
-  The negative test is as in choice 38.
+  The negative test is as in choice 38. An sla's `within` is an age the format holds too, so it
+  is compared the same way. A reminder's rules are named by their ages (`chase_2d`), so its line
+  also says the history names them otherwise.
 
 #### Every way a value the step reads is given
 
@@ -1171,8 +1173,8 @@ Each starts with its negative test, seen failing for the right reason.
    be excluded; R1, R2, R3 and the review's `recheck` read not proven, each with its run; a proven
    witness.
 7. **The heading and the guide** (choices 48 and 49).
-8. **Every age written otherwise** (choice 50): a plan state's `timeout`, a rule's `after`, a
-   reminder's `after`.
+8. **Every age written otherwise** (choice 50): a plan state's `timeout`, a rule's `after`, an
+   sla's `within`, a reminder's `after`.
 9. **Who sees counts registered roles** (choice 51).
 
 ### The flaky activation test

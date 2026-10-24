@@ -28,6 +28,7 @@ from ventoux.case.changes import (
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
 from ventoux.case.guards import (
     Versions,
+    age_change,
     approval_change,
     approval_condition_change,
     close_reason_change,
@@ -277,6 +278,15 @@ ROLES = {
     ("plans", "*", "states", "*", "wait", "roles"): "plan answerers",
 }
 PLAN_APPROVERS = ("plans", "*", "states", "*", "approval", "roles")
+# Every other age the format holds, each compared as a duration as `max_age` is (13c, choice 50):
+# a rule's timer, an sla's `within`, a reminder's ages, and a plan state's timeout.
+AGES = (
+    ("rules", "*", "on", "after"),
+    ("rules", "*", "sla", "within"),
+    ("rules", "*", "reminder", "after"),
+    ("plans", "*", "states", "*", "approval", "timeout"),
+    ("plans", "*", "states", "*", "wait", "timeout"),
+)
 
 
 def roles_compared(path: str) -> str | None:
@@ -292,7 +302,7 @@ def at(path: str, pattern: Sequence[str]) -> bool:
 
 def judged(
     found: list[Leaf], versions: Versions, peers: list[Leaf] | None = None
-) -> Iterator[Change]:
+) -> Iterator[Change | Rewritten]:
     """Each leaf as changes: judged by its comparison where one applies, else said, not proven.
     An entry added is matched against the entries removed among `peers` (`found` by default)."""
     for leaf in found:
@@ -329,6 +339,8 @@ def judged(
             yield sensitive_change(leaf)
         elif at(leaf.path, READERS):
             continue  # said by `readers`, which compares who sees it, under its field
+        elif any(at(leaf.path, pattern) for pattern in AGES):
+            yield age_change(leaf)
         else:
             yield Change(leaf.path, "not proven", f"{shown(leaf.before)} -> {shown(leaf.after)}")
 

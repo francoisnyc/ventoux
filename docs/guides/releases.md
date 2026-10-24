@@ -442,6 +442,10 @@ $ ventoux diff refund-four-eyes refund-one-lead --plain
 **Written otherwise, the same decisions.** Where two versions are written differently but decide
 the same for every case, as a `max_age` of `2d` and one of `48h`, the diff says so on a line of its
 own, with what the history words differently, and counts it apart: it never reads as a loosening.
+Every age is compared so: a fact's `max_age`, a rule's timer, an sla's `within`, a reminder's ages
+(whose rules are named by them, `chase_2d`, so the line says the history names them otherwise) and
+a plan state's `timeout`. An age of another duration is not proven: what the timer leads to
+decides whether sooner is looser.
 
 **Every doubt reads as looser.** "Not proven" is counted with looser, as what *may loosen*. Its
 line says only what changed and leaves the judgement to you. A change is never left out: whatever

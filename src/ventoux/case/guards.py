@@ -201,6 +201,41 @@ def freshness(step: str, versions: Versions) -> Iterator[Change | Rewritten]:
         yield Change(path, "not proven", f"{shown(old)} -> {shown(new)}")  # reordered
 
 
+def age_change(leaf: Leaf) -> Change | Rewritten:
+    """An age besides `max_age` (13c, choice 50): a rule's timer, an sla's `within`, a reminder's
+    ages, a plan state's timeout. The same duration written otherwise decides the same for every
+    case, and the line says how the history words it; any other change is not proven, since what
+    the timer leads to decides whether sooner is looser, and the diff doesn't judge that."""
+    said = f"{shown(leaf.before)} -> {shown(leaf.after)}"
+    old, new = ages_of(leaf.before), ages_of(leaf.after)
+    if old is None or new is None or [seconds_of(a) for a in old] != [seconds_of(a) for a in new]:
+        return Change(leaf.path, "not proven", said)
+    history = f"says {shown(leaf.after)} where it said {shown(leaf.before)}"
+    rules, name, *rest = leaf.path.split(".")
+    if rules == "rules" and rest[0] == "reminder":
+        # A reminder's rules are named by their ages, `chase_2d` (brief, D46), so the history
+        # names them otherwise too.
+        before = " and ".join(f"{name}_{age}" for age in old)
+        after = " and ".join(f"{name}_{age}" for age in new)
+        history += f", and names its rules {after} where it named {before}"
+    return Rewritten(leaf.path, f"{said}: the same decisions; the history {history}")
+
+
+def ages_of(value: object) -> tuple[str, ...] | None:
+    """An age, or a reminder's ages, as a tuple; None for anything else (no timeout at all)."""
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, tuple) and all(isinstance(age, str) for age in value):
+        return value
+    return None
+
+
+def seconds_of(age: str) -> int:
+    """How many seconds an age holds: a case's units (`seconds_in`), and a plan's seconds, `30s`,
+    which a plan's timeout may be written in."""
+    return int(age[:-1]) if age.endswith("s") else seconds_in(age)
+
+
 def requirements_change(step: str, versions: Versions) -> Iterator[Change]:
     """What `step` requires, its `requires` with `sequence` folded in (13b, choice 24): fewer
     looser, it may start with less done; more stricter; replaced not proven."""

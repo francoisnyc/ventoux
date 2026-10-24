@@ -2220,7 +2220,7 @@ and D50, whose text is kept.*
   leaves either set and everyone who may be excluded is excluded in every run; looser only if
   nobody joins either set; otherwise not proven. Every age the format holds is compared as a
   duration, the same duration written otherwise: a fact's `max_age`, a plan state's `timeout`, a
-  rule's `after` and a reminder's `after`.
+  rule's `after`, an sla's `within` and a reminder's `after`.
 
 ### D56. The case map and the "will never do" sheet: readings of a package, and only proven nevers
 
