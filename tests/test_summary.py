@@ -293,3 +293,80 @@ def test_the_command_says_where_a_summary_too_long_is(
         f"The whole summary is {len(logged.encode())} bytes, past the job summary's limit of 300 "
         "bytes: it is in this step's log, under `ventoux summary`.\n"
     )
+
+
+# --- Slice 4: the workflow -----------------------------------------------------------------------
+
+WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def job(name: str) -> str:
+    """The text of the workflow's job `name`, up to the next job."""
+    text = WORKFLOW.read_text()
+    start = text.index(f"\n  {name}:\n")
+    following = [text.find(f"\n  {other}:\n", start + 1) for other in ("check", "changes")]
+    end = min([index for index in following if index > start], default=len(text))
+    return text[start:end]
+
+
+def test_the_workflow_sends_nothing_and_reads_only(tmp_path: Path) -> None:
+    # The job summary only, a token that reads and nothing more, and never pull_request_target,
+    # which would run the head's code with the base's rights (13e, choice 70). Read as text: no
+    # YAML parser is a dependency.
+    text = WORKFLOW.read_text()
+    assert "\npermissions:\n  contents: read\n" in text
+    # What the workflow does, its comments left out: a comment may name what it never does.
+    doing = [line for line in text.splitlines() if not line.strip().startswith("#")]
+    assert not [line for line in doing if "pull_request_target" in line]
+    assert not [line for line in doing if line.strip().endswith(": write")]
+    for forbidden in ("gh ", "github-script", "pull-requests"):
+        assert not [line for line in doing if forbidden in line], forbidden
+
+
+def test_the_summary_runs_on_pull_requests_from_the_base_s_own_promises() -> None:
+    changes = job("changes")
+    assert "    if: github.event_name == 'pull_request'\n" in changes
+    assert "fetch-depth: 2" in changes  # the merge commit and its first parent
+    assert "git rev-parse HEAD^1" in changes
+    assert "path: base" in changes
+    assert changes.count("persist-credentials: false") == 2
+    assert "uv run --directory base --locked ventoux promises > base-promises.json" in changes
+    assert "uv run ventoux summary" in changes
+    assert '--summary-file "$GITHUB_STEP_SUMMARY"' in changes
+
+
+def test_the_existing_checks_are_as_they_were() -> None:
+    # A push to main runs these only, the cached CLI included (13e, choices 71 and 72).
+    check = job("check")
+    for line in (
+        "TEMPORAL_CLI_DIR: /home/runner/.cache/temporal-cli",
+        "key: temporal-cli-${{ hashFiles('uv.lock') }}",
+        "- run: uv sync --locked",
+        "- run: uv run ruff format --check",
+        "- run: uv run ruff check",
+        "- run: uv run mypy",
+        "- run: uv run pytest",
+    ):
+        assert line in check, line
+    assert "if:" not in check
+
+
+GUIDE = ROOT / "docs" / "guides" / "releases.md"
+
+
+def test_the_guides_summary_runs_as_written(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As the job runs it, from the repository's root: the head checked out at `.`, its base at
+    # `base`, the base's promises beside them.
+    monkeypatch.chdir(tmp_path)
+    with_example(tmp_path / "base")
+    edited(with_example(tmp_path), unrequired)
+    shutil.copy(LOCK, tmp_path / "contracts.lock.json")
+    assert main(["promises"]) == 0
+    (tmp_path / "base-promises.json").write_text(capsys.readouterr().out)
+    section = GUIDE.read_text().split("\n## On each pull request\n")[1]
+    command, printed = section.split("```\n")[1].split("\n", 1)
+    assert command.startswith("$ ventoux ")
+    assert main(command.removeprefix("$ ventoux ").split()) == 0
+    assert capsys.readouterr().out == printed
