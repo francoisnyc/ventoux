@@ -1,5 +1,6 @@
-"""The `ventoux` command: `ventoux simulate STORY.json` (layer 11g2), and `ventoux release
-FOLDER --releases DIR --commit SHA` (layer 12a).
+"""The `ventoux` command: `ventoux simulate STORY.json` (layer 11g2), `ventoux release FOLDER
+--releases DIR --commit SHA` (layer 12a), and an environment's commands (layer 12e): `ventoux
+environment create|harden|check`, `ventoux activate`, `ventoux retire`, `ventoux manifest publish`.
 
 Reading files and printing happen here, never in `core` or `case`, which read no clock and do no
 I/O (brief, D45). `ventoux check` comes with the Python builder (brief, D34).
@@ -26,6 +27,7 @@ from ventoux.case.releases import (
 from ventoux.case.simulate import StoryRefused, simulate
 from ventoux.case.story import Story, StoryInvalid, parse_story
 from ventoux.testing import CATALOG
+from ventoux.tooling.environments import environment_command
 from ventoux.tooling.releases import FolderStore, Run, release, said
 
 # What `ventoux simulate` exits with.
@@ -57,10 +59,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     releasing.add_argument("package", type=Path, help="the package's folder")
     releasing.add_argument("--releases", type=Path, required=True, help="where records are kept")
     releasing.add_argument("--commit", required=True, help="the commit CI releases from")
+    environments(commands)
     arguments = parser.parse_args(argv)
+    if arguments.command in ("environment", "activate", "retire", "manifest"):
+        return environment_command(arguments)
     if arguments.command == "release":
         return release_package(arguments.package, arguments.releases, arguments.commit)
     return simulate_story(arguments.story)
+
+
+def environments(commands: Any) -> None:
+    """The commands that talk to an environment's registry on Temporal (layer 12e)."""
+    environment = commands.add_parser("environment", help="create, harden or check an environment")
+    actions = environment.add_subparsers(dest="action", required=True)
+    create = actions.add_parser("create", help="create an environment's registry, once")
+    create.add_argument("name", help="the environment: production")
+    create.add_argument("--development", action="store_true", help="drafts open there")
+    harden = actions.add_parser("harden", help="make a development environment production")
+    harden.add_argument("name")
+    harden.add_argument("--by", required=True, help="who does it")
+    check = actions.add_parser("check", help="check every release that is active or has open cases")
+    check.add_argument("name")
+    activate = commands.add_parser("activate", help="make a release the one new cases open on")
+    retire = commands.add_parser("retire", help="retire a release with no open cases, for good")
+    for each in (activate, retire):
+        each.add_argument("package", help="the package: refund")
+        each.add_argument("release", type=int, help="its release number")
+        each.add_argument("--environment", required=True)
+        each.add_argument("--releases", type=Path, required=True, help="where records are kept")
+        each.add_argument("--by", required=True, help="who does it")
+    activate.add_argument("--task-queue", required=True, help="where its new cases run")
+    manifest = commands.add_parser("manifest", help="publish a worker's manifest")
+    manifest.add_argument("action", choices=["publish"])
+    manifest.add_argument("file", type=Path, help="the manifest, as JSON")
+    for each in (create, harden, check, activate, retire, manifest):
+        each.add_argument("--address", default="localhost:7233", help="Temporal's frontend")
+        each.add_argument("--namespace", default="default")
 
 
 def simulate_story(path: Path) -> int:

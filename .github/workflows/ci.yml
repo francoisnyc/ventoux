@@ -7,9 +7,18 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      # Where the activation tests' Temporal dev server is downloaded, and kept between runs
+      # (layer 12e): the time-skipping test server doesn't list a queue's pollers.
+      TEMPORAL_CLI_DIR: /home/runner/.cache/temporal-cli
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      # The dev server the SDK pinned in uv.lock downloads: cached per lockfile.
+      - uses: actions/cache@v4
+        with:
+          path: /home/runner/.cache/temporal-cli
+          key: temporal-cli-${{ hashFiles('uv.lock') }}
       # Python 3.12 comes from .python-version; --locked fails if uv.lock is out of date.
       - run: uv sync --locked
       - run: uv run ruff format --check

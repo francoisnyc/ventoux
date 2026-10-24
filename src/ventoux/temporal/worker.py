@@ -13,6 +13,7 @@ from ventoux.temporal.cases import CaseWorkflow
 from ventoux.temporal.converter import require_ventoux_converter
 from ventoux.temporal.forget import ForgetActivities, ForgetWorkflow
 from ventoux.temporal.logs import keep_only_exception_types
+from ventoux.temporal.registry import RegistryActivities
 from ventoux.temporal.workflow import PlanWorkflow
 
 # Temporal: the workflow sandbox imports a workflow's modules afresh for every run; a module passed
@@ -54,18 +55,22 @@ def case_worker(
     plans: type[PlanWorkflow],
     implementations: Mapping[str, Activity],
     forget: type[ForgetWorkflow] | None = None,
+    identity: str | None = None,
 ) -> Worker:
     """A worker on `task_queue` for `cases`, the plan workflow its plan steps run as, and the code
     behind its catalog's contracts; and, given `forget`, the requests to forget a case
-    (brief, D32)."""
+    (brief, D32). A case workflow in an environment also asks its registry, through this worker
+    (brief, D5); `identity` names the worker among a queue's pollers."""
     require_ventoux_converter(client)
     keep_only_exception_types()  # a failure's text never reaches the log (brief, D31)
     forgetting = [] if forget is None else ForgetActivities(client).all()
+    registry = [] if cases.environment is None else RegistryActivities(client).for_cases()
     return Worker(
         client,
         task_queue=task_queue,
+        identity=identity,
         workflows=[cases, plans] if forget is None else [cases, plans, forget],
-        activities=[*plan_activities(cases.catalog, implementations), *forgetting],
+        activities=[*plan_activities(cases.catalog, implementations), *forgetting, *registry],
         # Temporal: activities that are plain functions (not `async`) run on these threads.
         activity_executor=ThreadPoolExecutor(),
         workflow_runner=SANDBOX,

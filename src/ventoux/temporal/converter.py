@@ -155,6 +155,12 @@ def data_converter(keys: KeyProvider) -> DataConverter:
     )
 
 
+def registry_converter() -> DataConverter:
+    """Exact numbers, and no key: for a client that reads and writes no case's values, such as
+    the `ventoux` command talking to a registry, none of whose payloads is sensitive."""
+    return dataclasses.replace(DataConverter.default, payload_converter_class=ExactPayloadConverter)
+
+
 def require_ventoux_converter(client: Client) -> None:
     """Refuse a client that would write numbers some other way (brief, D20), or sensitive values
     in plain text (brief, D31)."""

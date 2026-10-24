@@ -1,8 +1,8 @@
 # Releases: publishing a package
 
 For the platform team, who run releases, and for the workflow developers whose changes become
-them. Decision: brief D50 (adding to D5). What comes next (a case opening on a release,
-activating one in an environment, migrating open cases) is layer 12's later parts.
+them. Decisions: brief D50 (adding to D5), and D51, D53 and D54 for opening cases on a release,
+migrating them, and activating a release in an environment.
 
 ## A package, and its release
 
@@ -235,17 +235,130 @@ for id, preview in seen.items():
 ```
 
 Each case is in the answer, with the lines its history would gain or every problem refusing it; a
-case that isn't one, or was forgotten, is in it too, saying so. The cohort is the IDs you give:
-finding every open case of a release comes with the environment registry (layer 12e), since
-Temporal's test server can't list workflows. The case checks that the target's package gives its
-digest; that it is the store's release is your API's to vouch for, as it reads it from the store,
-until the registry lets the case check it itself.
+case that isn't one, or was forgotten, is in it too, saying so. The cohort is the IDs you give: in an
+environment, `open_cases` gives a release's (below). The case checks that the target's package
+gives its digest; in an environment it also asks the registry, as the approval would apply it, that
+the target was activated there and isn't retired: `refused lee's answer approve to case.change#1:
+refund-1 can't move to refund 2: production never activated refund 2: activate it first`.
 
 **Graduating a strict workflow.** A strict workflow is a case whose steps each require the one
 before and start by themselves (a `sequence`); loosening it is a release like any other, and open
 cases move to it by a migration, since a case has no position (brief, D2). Half-way through the
 payment, a refund can be moved to a release where support calls the customer at any time and the
 letter is drafted only if asked for.
+
+## Activating a release in an environment
+
+A release changes nothing in production by being published. **Activating** it in an environment
+makes it the release that environment's new cases open on, and it is refused unless the workers
+there can run it (brief, D5, D54).
+
+**An environment is created once, on purpose,** with its registry: a workflow that keeps what the
+environment's workers serve, which release of each package is active, and which cases are open on
+each release. Run the registries' worker (`registry_worker(client)`, which can share a process with
+a case worker), then:
+
+```
+$ ventoux environment create production
+production created: a production environment, where drafts never open
+```
+
+Every environment is production, where drafts never open, unless it is created with
+`--development`; `ventoux environment harden staging --by pia` makes a development one production,
+and nothing makes it a development one again.
+
+**Each case worker says what it serves, before it polls.** Name the environment on your case
+workflow, and build its worker with `environment_worker` in place of `case_worker`, giving it the
+build it was deployed from (an image tag, a commit) and its name among the queue's workers:
+
+```python
+@workflow.defn(name="ventoux.case")
+class RefundCases(CaseWorkflow):
+    catalog = CATALOG
+    environment = "production"
+    workflows = {"kyc.check@1": Binding(workflow="KycCheck", task_queue="kyc")}
+    ...
+
+worker = await environment_worker(client, "refunds", RefundCases, RefundPlans,
+                                  {"payments.refund@2": refund, ...}, build="4f2a9c1",
+                                  identity="refunds-a")
+await worker.run()
+```
+
+It publishes its **manifest** to the registry: each contract it has code for, with the hash its own
+catalog gives, its workflow types, and its bindings. If the registry refuses it, or doesn't exist,
+the worker never starts. A team whose workflow a case calls (a `workflow` step), written in another
+language, publishes the same manifest as JSON with `ventoux manifest publish FILE`.
+
+**Then activate.** The command reads the release's record, asks Temporal who polls the queue now,
+and the registry checks, for every contract the record needs, that **every** worker polling there
+serves it with the record's hash: Temporal gives a task to any worker on its queue, so one old
+worker is enough to run other code. A workflow contract is checked where your case workers bind
+it, on its team's queue. Here a second worker, `refunds-b`, was deployed from a branch where
+`payments.refund@2`'s timeout changed without a new version:
+
+```
+$ ventoux activate refund 1 --environment production --task-queue refunds --releases releases --by pia
+refund 1 not activated in production:
+payments.refund@2: worker refunds-b (build 7b0e311) serves it with hash a3773f495606, and refund 1 needs b2f325e171c6: deploy the build that serves the released contract
+```
+
+Once `refunds-b` is deployed again from the release's build:
+
+```
+$ ventoux activate refund 1 --environment production --task-queue refunds --releases releases --by pia
+pia activated refund 1 in production
+```
+
+Every problem is said at once. The others: `no worker polls refunds now`; `payments.refund@2: no
+worker on refunds serves it`; `refunds-c polls refunds and published no manifest in production:
+it may serve anything`; and for a workflow contract, its bound queue with nobody polling, a worker
+there serving it with another hash, or two case workers binding it two ways. Activating is one
+person's act, named and recorded: it changes no open case. The command exits 0 when it activated
+(or the release was active already), 1 when refused, and 2 when something can't be read.
+
+**New cases open on the active release.** `active_release(client, "production", "refund")` gives
+its number and queue; read its record from the store and pass it to `start_case`. The case asks the
+registry again as it opens, and is refused if its release isn't the active one, with that digest,
+on the queue it was activated on: `refund-7 can't open on refund 2 on refunds-old: production
+activated it on refunds`. A draft never opens in production: `refund-7 can't open as a draft in
+production: open it on a release`.
+
+**A workflow's type never moves under open cases.** A case's history records the type of each
+child workflow it started, so while open cases' release calls `kyc.check@1`, a worker binding it to
+another type is refused as it starts; moving its task queue is fine (brief, D29).
+
+**Watch it.** A check at activation isn't enough: workers are redeployed. `ventoux environment check
+production` runs the same check for every release that is active or still has open cases, each on
+the queue it was activated on, and exits 1 saying which can't run: run it from your monitoring, and
+alert on 1. An activity nobody picks up also fails loudly by itself: every activity contract has a
+schedule-to-start timeout, after which the step fails and the case needs attention.
+
+```
+$ ventoux environment check production
+production: every release that is active or has open cases can run
+```
+
+## Rolling back and retiring
+
+**Rolling back is activating the earlier release,** with the same checks: the workers must still
+serve its contracts as its record says. Its line says so: `pia activated refund 1 in production,
+rolling back from refund 2`. Cases open on either release keep running on their own.
+
+**A release with no open cases can be retired** in an environment, for good: it then opens no
+case, is no migration's target, and is never activated again. Its record stays in the store, and
+its cases' histories replay. A release that is active, or has open cases, isn't retired:
+
+```
+$ ventoux retire refund 1 --environment production --releases releases --by pia
+refund 1 not retired: it is active in production: activate another first
+```
+
+To find the cases still open on it, ask the registry: `open_cases(client, "production",
+refund_1)` lists them, the cohort to preview and migrate (above). A case ended from outside, by an
+operator terminating it in Temporal's UI, never said it closed: retiring asks Temporal how each
+listed case stands, and drops those that have ended, saying so: `refund-8 ended (terminated)
+without saying it closed: no longer open on refund 1`.
 
 ## What the tool says
 

@@ -1927,6 +1927,34 @@ opened by system:opener, with amount and order_id
   `approval_sheet` (`wording=…`), and an answer can say which wording its person read; the
   releases guide, "Open cases and new wording", says how.
 
+### A case in an environment
+
+In production your case workflow names its environment (`environment = "production"`), and its
+worker is built with `environment_worker` (the releases guide, "Activating a release in an
+environment"). Each case then asks the environment's registry, through an activity of its worker,
+three times in its life:
+
+- **as it opens:** it opens only on its package's active release, with that release's digest, on
+  the queue it was activated on, and a draft only in an environment created for development.
+  Refused, it never opens, saying why, as any refused opening does:
+
+  ```
+  refund-2 can't open on refund 2: production never activated refund 2: activate it first
+  ```
+
+- **as an approval would apply a migration:** the target must have been activated there and not
+  be retired; refused, the answer is recorded as refused, and the request waits on;
+- **as it closes,** so the registry no longer lists it open on its release.
+
+The registry's answers are in the case's history, so a replay reads them there and never asks
+again. A case opened before your workflow named an environment never asks it, then or later.
+
+**A case's workflow can't end while its registry is unreachable:** its last step is telling the
+registry it closed, retried until the registry answers. So a closed case whose registry is down
+stays running until it is back, and a request to forget it, which waits for its workflow to end
+(brief, D32), waits too. That is the safe side: a release is never retired while a case on it
+might still run.
+
 ## What `ventoux check` proves about a case
 
 `ventoux check` reads the whole definition before any case opens and lists every problem at once,
