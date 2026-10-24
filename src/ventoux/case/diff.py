@@ -50,7 +50,7 @@ from ventoux.case.releases import (
     wording,
 )
 from ventoux.case.visibility import roles_named, seen_by
-from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract
 from ventoux.core.expressions.model import Node
 from ventoux.core.output_sources import output_sources
@@ -299,7 +299,7 @@ def judged(
         elif at(leaf.path, FORGETTING):
             yield forgetting_change(leaf)
         elif any(at(leaf.path, pattern) for pattern in CONTRACTS):
-            yield from contract_changes(leaf, versions.catalog)
+            yield from contract_changes(leaf, versions)
         elif at(leaf.path, APPROVAL):
             yield approval_change(leaf, versions)
         elif at(leaf.path, APPROVAL_COUNT):
@@ -370,10 +370,10 @@ def entry_change(leaf: Leaf, found: list[Leaf]) -> Change:
 VERDICTS: dict[str, Verdict] = {"wider": "looser", "narrower": "stricter", "neither": "not proven"}
 
 
-def contract_changes(leaf: Leaf, catalog: Catalog) -> Iterator[Change]:
+def contract_changes(leaf: Leaf, versions: Versions) -> Iterator[Change]:
     """A step, or a plan's activity state, calling another contract: each input whose policies
     changed, judged; the rest of the contract said, not proven (brief, D55)."""
-    old, new = contract(catalog, str(leaf.before)), contract(catalog, str(leaf.after))
+    old, new = versions.lookup(str(leaf.before)), versions.lookup(str(leaf.after))
     called = f"{old.reference} -> {new.reference}"
     said = False
     inputs_before, inputs_after = old.input.model_fields, new.input.model_fields
@@ -403,14 +403,6 @@ def contract_changes(leaf: Leaf, catalog: Catalog) -> Iterator[Change]:
     if other or not said:
         also = f": its contract also differs: {', '.join(other)}" if other else ""
         yield Change(leaf.path, "not proven", f"{called}{also}")
-
-
-def contract(catalog: Catalog, reference: str) -> Contract:
-    """The contract `reference` names; one the catalog doesn't hold refuses the diff."""
-    try:
-        return catalog.lookup(reference)
-    except NotInCatalog as missing:
-        raise DiffRefused(f"{missing} The diff compares contracts from the catalog.") from None
 
 
 def described(policies: Sequence[Policy]) -> str:

@@ -37,12 +37,7 @@ class Versions:
         """The contract `step` calls in `case`; None if it calls none. One the catalog doesn't
         hold refuses the diff: what it would let through can't be told."""
         found = case.steps.get(step)
-        if not isinstance(found, CallStep):
-            return None
-        try:
-            return self.catalog.lookup(found.called)
-        except NotInCatalog as missing:
-            raise DiffRefused(f"{missing} The diff compares contracts from the catalog.") from None
+        return self.lookup(found.called) if isinstance(found, CallStep) else None
 
     def lookup(self, reference: str) -> Contract:
         """The contract `reference` names; one the catalog doesn't hold refuses the diff."""
@@ -161,8 +156,9 @@ def widened(path: str, said: str, old: set[str], new: set[str], comparison: str)
 
 
 def step_guards(step: str, versions: Versions) -> Iterator[Change]:
-    """What follows from a step's changes, said under it: who may approve it, and who is
-    excluded from approving it."""
+    """What follows from a step's changes, said under it, as the case reads them: what it
+    requires, how old each fact it reads may be, who may approve it, and who is excluded from
+    approving it."""
     yield from requirements_change(step, versions)
     yield from freshness(step, versions)
     yield from approvers(step, versions)

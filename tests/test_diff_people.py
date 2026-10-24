@@ -11,6 +11,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+import pytest
 from test_diff import (
     ROOT,
     Definition,
@@ -1023,6 +1024,6 @@ WITNESSES: dict[str, Callable[[], Witness]] = {
 }
 
 
-def test_each_comparison_has_a_witness() -> None:
-    for comparison, witness in WITNESSES.items():
-        witnessed(comparison, *witness())
+@pytest.mark.parametrize("comparison", list(WITNESSES))
+def test_each_comparison_has_a_witness(comparison: str) -> None:
+    witnessed(comparison, *WITNESSES[comparison]())

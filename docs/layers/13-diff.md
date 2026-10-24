@@ -700,3 +700,88 @@ what the other lets through, and the pair read the other way proves the reverse.
   contract's readable diff (13d); the CI step (13e).
 - Comparing conditions or expressions (choice 3, kept).
 - Nothing at runtime: no workflow changes, no new engine version.
+
+### Seams the tests use
+
+- `diff(before, after, catalog)`, as in 13a, with packages built by `package`; catalogs built in
+  the tests where a role (`finance`, `clerk`) or a contract (`payments.refund@8`, medium risk)
+  is needed.
+- `run_case` and its scripts (`propose`, `send`, `close`, `later`, `plan_answers`) for the
+  witnesses; `lookup_refusal` (`temporal/forget.py`) for forgetting's.
+- `main(["diff", …])` through the guide's example.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **The curriculum's negative test first:** a count lowered is looser; then raised, an approval
+   added or removed, an approval's `when` added, removed or changed; their witnesses.
+1. **Roles,** as the catalog registers them: who answers, proposes, sends and closes; who may
+   approve, as the contract's risk allows.
+2. **Exclusions:** a step that stops reading an answer lets its people approve.
+3. **When a step may run:** requirements with `sequence` folded in, a step's `when`, `automatic`,
+   `repeatable`.
+4. **Close reasons, senders, freshness, forgetting.**
+5. **A plan's approval and wait states,** and an output's source on a plan's state (choice 31).
+6. **The guide's example, the Promises.**
+
+### Decided while building
+
+- **An approval removed from a high-risk step is not looser** (slice 0, found by its witness): a
+  high-risk step with no approval never runs, as the runtime refuses it (D11), so the version
+  without one lets nothing more through. Neither removed nor added is judged there; the line says
+  why: `payments.refund@2 is high risk: without an approval, pay never runs`. A plan's high-risk
+  activity likewise (slice 5): the interpreter stops a plan at it. Choice 20's "removed: looser"
+  holds for a step of low or medium risk, which the witness uses (`orders.lookup@1`).
+- **13a counted a role nobody registered as seeing every field** (slice 1): `roles_named` names
+  it, and `seen_by` with it, but a role the catalog doesn't register gives sight of nothing
+  (D22, `may_see`). Who sees a field is now compared among registered roles, as choice 22 says
+  of every list of roles.
+- **A refused plan answer doesn't raise:** the plan waits on. The plan witnesses run the same
+  script on both versions, so only the roles differ: the plan step waits in one and is done in
+  the other.
+- **The in-memory plan runner read the development catalog,** whatever catalog `run_case` was
+  given (found by the plan approvers' witness, whose `finance` role only a test's catalog
+  registers). `run_case` said its catalog "replaces the development catalog"; its plan runner now
+  reads it too. No other test depended on it.
+- **A plan's approval roles are compared on their own leaf only:** a plan's activity moved to a
+  contract of another risk is said (13a, not proven), never re-judged for who may approve it, as a
+  case's step is. Not proven reads as looser, so nothing is claimed that doesn't hold; a known
+  limit, for 13c's readings to say.
+- **What a change is moved to `case/changes.py`, 13b's guards to `case/guards.py`,** so
+  `case/diff.py` stays the walk and 13a's guards on data. The CLI and the tests import `Change`,
+  `DiffRefused` and `COMPARISONS` from `changes`.
+- **The 12e activation test that failed once in the tutor review of #47 failed once again,** in
+  slice 5's full run (`test_activate_refuses_a_release_no_worker_serves`), and passed alone three
+  times and in its file. Its message was not kept that run; the next full runs keep their output
+  (see the pull request). Not this layer's code, and not fixed here.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`P` is `tests/test_diff_people.py` (new); `D` is 13a's `tests/test_diff.py`. Checked against the
+tests, 2026-10-24: every test named here exists, and every test in `P` is named here.
+
+| Promise | Test |
+|---|---|
+| An approval's count lowered is looser, said as how many people approve (the curriculum's negative test); raised is stricter | P `test_an_approvals_count_lowered_is_looser`, `test_an_approvals_count_raised_is_stricter` |
+| An approval removed is looser and added stricter, on a step that may run without one | P `test_an_approval_removed_is_looser`, `test_an_approval_added_is_stricter` |
+| On a high-risk step, an approval removed is not proven, saying the step never runs without one; a plan's high-risk activity likewise | P `test_a_high_risk_steps_approval_removed_is_not_proven`, `test_a_plans_high_risk_approval_removed_is_not_proven` |
+| An approval's `when` added is looser, said as asked on no more runs and on fewer wherever it is false; removed stricter; changed not proven | P `test_an_approvals_condition_added_is_looser`, `test_an_approvals_condition_removed_is_stricter`, `test_an_approvals_condition_changed_is_not_proven` |
+| Roles widened are looser, narrowed stricter, replaced not proven: who answers, proposes, sends and closes | P `test_roles_widened_are_looser`, `test_roles_narrowed_are_stricter`, `test_roles_replaced_are_not_proven` |
+| A role nobody registered counts for nothing, said so, and sees nothing | P `test_a_role_nobody_registered_counts_for_nothing` |
+| Who may approve is the listed roles allowed the contract's risk: a role that may not changes no approver; a step moved to a lower risk gains approvers, a higher one loses them | P `test_a_role_that_may_not_approve_the_risk_changes_no_approver`, `test_a_step_moved_to_a_lower_risk_gains_approvers` |
+| A step that stops reading an answer lets whoever gives it approve: looser (a change the JSON diff hides); starts reading one: stricter; both: not proven | P `test_a_step_that_stops_reading_an_answer_excludes_nobody_for_it`, `test_a_step_that_starts_reading_an_answer_excludes_its_people`, `test_exclusions_both_added_and_removed_are_not_proven` |
+| Requirements, `sequence` folded in: fewer looser, more stricter, replaced not proven; a sequence changed is said on each step it changes | P `test_a_requirement_removed_is_looser`, `test_a_requirement_added_is_stricter`, `test_a_requirement_replaced_is_not_proven`, `test_a_sequence_is_said_on_each_step_it_changes` |
+| A step's `when` removed is looser, said as running on no fewer cases; added stricter | P `test_a_steps_condition_removed_is_looser`, `test_a_steps_condition_added_is_stricter` |
+| `automatic` and `repeatable` turned on are looser, off stricter | P `test_automatic_turned_on_is_looser`, `test_repeatable_added_is_looser_and_removed_stricter` |
+| A close reason added is looser, removed stricter; a renamed one is said as a rename | P `test_a_close_reason_added_is_looser`, `test_a_close_reason_renamed_is_not_judged` |
+| An event's sender replaced, system for roles, is not proven | P `test_an_events_sender_replaced_is_not_proven` |
+| Forgetting is ordered never < while_open < allowed | P `test_forgetting_is_ordered` |
+| `max_age` compared as a duration: longer or no longer required looser, shorter or newly required stricter, the same age written otherwise not proven | P `test_a_fact_allowed_older_is_looser`, `test_a_fact_no_longer_required_fresh_is_looser` |
+| A plan's activity no longer approved is looser, newly approved stricter; its approval roles as its risk allows; its wait roles as roles; its timeouts not proven | P `test_a_plans_approval_removed_is_looser`, `test_a_plans_approvers_are_compared_as_its_risk_allows`, `test_a_plans_wait_roles_widened_are_looser`, `test_a_plans_timeout_is_not_proven` |
+| An output's source on a plan's activity state is said, never judged (from the review of #47) | P `test_an_output_source_on_a_plans_state_is_said_never_judged` |
+| Each of 13b's comparisons has a witness run, the pair read both ways, and the witnesses of 13a and 13b together cover the list | P `test_each_comparison_has_a_witness`; D `test_the_witnesses_cover_every_comparison` |
+| 13a's promises still hold, `forgetting` now judged in its order test | D, every test |
+| The guide's count example runs as written | D `test_the_guides_example_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal, in the new modules too | `tests/test_layers.py`, unchanged |
