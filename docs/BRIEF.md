@@ -2211,6 +2211,16 @@ and D50, whose text is kept.*
   kind of line, *written otherwise, the same decisions*, is listed apart and never counted as what
   may loosen, only where the diff proves both versions decide the same for every case: a
   `max_age` of the same duration, said with how the history words it.
+- **Amended 2026-10-24, from the review of layer 13c** (`docs/layers/13-diff.md`, choices 45 to
+  51; the text above stands, this adds to it): who is excluded from approving a step is compared
+  as two sets. Who *may* be excluded: every person whose answer can reach what the step reads,
+  and, wherever a registered role may edit, whoever proposes or approves an edit of a declared
+  field it reads (D52). Who is excluded *in every run*: whoever answers a task that isn't
+  repeatable, whose outcome the step's inputs or its `when` read directly. Stricter only if nobody
+  leaves either set and everyone who may be excluded is excluded in every run; looser only if
+  nobody joins either set; otherwise not proven. Every age the format holds is compared as a
+  duration, the same duration written otherwise: a fact's `max_age`, a plan state's `timeout`, a
+  rule's `after` and a reminder's `after`.
 
 ### D56. The case map and the "will never do" sheet: readings of a package, and only proven nevers
 
@@ -2234,6 +2244,13 @@ D55, whose text is kept.*
 - **`ventoux map FOLDER`** prints both, and `ventoux diff OLD NEW --plain` the plain form, in
   Markdown, against the development catalog until `ventoux check` brings the deployment's
   (layer 14).
+- **Amended 2026-10-24, from the review of layer 13c** (`docs/layers/13-diff.md`, choices 45 to
+  51; the text above stands, this adds to it): who may never approve a step is said only where it
+  holds in every run, for a task's outcome the step's inputs or its `when` read directly, the task
+  not repeatable: an outcome can't be edited (D52) and such a task is answered once. A field a
+  form sets is never said: an edit, a second answer or another writer replaces its sources. The
+  package's own lines hold while a case runs this release: their heading says so, since a
+  migration moves a case to the target release's definition (D53).
 
 ### Simplifications adopted
 

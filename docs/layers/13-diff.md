@@ -1093,6 +1093,88 @@ The notify witness needs no choice (from the review): a contract declared `notif
 `test_what_changes_the_world_is_read_from_declared_effects`, and taking `notify` out of
 `CHANGES_THE_WORLD` must fail it.
 
+### Answers to choices 45 to 51
+
+45, 47, 48 (a), 49 and 51 as recommended. 46 and 50 changed, and 47 adds a line:
+
+- **46, with two changes.** As written, the rule claimed verdicts that runs contradict. Each run
+  below uses the quickstart's refund, plus a `check` task (support) whose `ok` sets a declared
+  `checked_amount`. `pay` requires review and check, and asks for approval on every run. The
+  history is the same each time: Ana answers review approve, Tom answers check ok, Bob proposes an
+  edit of `approved_amount`, and Lee approves the edit. Then one person approves pay.
+  - **R1.** Old `pay` reads `approved_amount`, with `when` review.outcome = approve. New `pay`
+    reads `amount`, with `when` review.outcome = approve and check.outcome = ok. The rule said
+    stricter. Lee's approval: the old version refuses it ("lee set approved_amount, which pay
+    uses"), the new one takes it.
+  - **R2.** Old `pay` reads `approved_amount`, with `when` checked_amount > 0. New `pay` reads
+    `approved_amount`, with `when` review.outcome = approve. The rule said looser (check leaves
+    the first set, nobody joins it). Ana's approval: the old version takes it, the new one
+    refuses it.
+  - **R3** (the second example in choice 46). Old `pay` reads `amount`, with `when`
+    review.outcome = approve. New `pay` reads `approved_amount`, no `when`. The rule said looser.
+    Lee's approval: the old version takes it, the new one refuses it.
+
+  The changes:
+  - **(a)** who *may* be excluded also counts whoever proposes or approves an edit of each
+    declared field the step reads (D52), whenever a registered role may edit. And check that the
+    static sources cover every other way a field the step reads can get a new value, each said
+    in this note (below, "Every way a value the step reads is given");
+  - **(b)** looser only if nobody joins *either* set.
+
+  With both, R1, R2 and R3 each read "not proven", and the three runs become negative tests,
+  beside the review's three.
+
+  This makes "stricter" rare on exclusions: a step that reads any editable field is never proven
+  stricter, since an edit's people may be excluded and are never excluded in every run. That's an
+  honest doubt, never a false claim. A second proof (the new step reads every field the old one
+  read, each with the same writers) could prove more "stricter" verdicts later. It isn't needed
+  now.
+- **47:** D55's dated line also says that an edit's proposer and approver count among who may be
+  excluded.
+- **50, widened to every age the format holds:** a plan state's `timeout`, a rule's `after`
+  (`2d` -> `48h` reads "not proven" today) and a reminder's `after`, each compared as a duration.
+  The negative test is as in choice 38.
+
+#### Every way a value the step reads is given
+
+Who *may* be excluded is every person the static sources (`could_come_from`, layer 10c) name for a
+value the step's inputs or its `when` read, plus an edit's people. Checked against each way the
+runtime gives a value a source:
+
+- **the opening:** the case file's first values come from whoever opened the case. The static
+  sources read a system opener, so this person is not counted. The runtime excludes the opener
+  from approving every step of the case whichever release it runs (D11), so no change of
+  definition loosens or tightens it;
+- **a task's answer:** its outcome and the fields its form sets, from whoever answers
+  (`person:answering review`), counted;
+- **an event's arrival:** each value it carries, from whoever sends it (`person:sending noted`),
+  counted. An event may arrive again, so a value it carries is never excluded in every run;
+- **a rule's `set`:** from everything the rule read, grown until nothing changes (D42), so a
+  person reaches a field through a rule, counted. A rule's field is a declared field, so it may
+  be edited too;
+- **a call's or a plan's outcome and outputs:** from its contract or plan, plus what steered the
+  run; a start passes on only what it doesn't trust (D43), so no person, at runtime as in the
+  static sources;
+- **an edit (D52):** from its proposer and its approver. Not in the static sources until now: a
+  source for "whoever proposes or approves an edit of approved_amount" is added for each declared
+  field when the catalog registers a role that may edit, and grown through rules like any other;
+- **a migration (D53):** renames a value and may add a mark, never a person, and gives no new
+  value.
+
+#### Slices after the review, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+5. **Who may not approve, on the sheet** (choice 45): the edit's and the repeatable task's runs
+   give no line; a task's outcome read directly does, with its run.
+6. **The exclusion verdict from both sets** (choices 46 and 47): an edit's people among who may
+   be excluded; R1, R2, R3 and the review's `recheck` read not proven, each with its run; a proven
+   witness.
+7. **The heading and the guide** (choices 48 and 49).
+8. **Every age written otherwise** (choice 50): a plan state's `timeout`, a rule's `after`, a
+   reminder's `after`.
+9. **Who sees counts registered roles** (choice 51).
+
 ### The flaky activation test
 
 `test_activate_refuses_a_release_no_worker_serves` (12e) has failed twice, each in a full run, its
@@ -1100,8 +1182,8 @@ message never kept. From 13c on, every full run's output is kept (`uv run pytest
 if it fails, the whole output is kept and said in the pull request.
 
 A carried note, not fixed in 13c (from the review of #49): its root cause is not known. Load is
-not it: over three full runs, every dev-server start took 0.12 to 0.21 s, the file's first
-included, which is the one that failed, and the failing run captured no output from the server.
+not it: over three full runs, every dev-server start took 0.12 to 0.21 s, the file's first start,
+the one that fails elsewhere, included; and the failing run captured no output from the server.
 The test's harness is unchanged in this pull request. The next step is to keep the server's own
 output when a start fails, then find the cause from it.
 
@@ -1158,9 +1240,10 @@ Each starts with its negative test, seen failing for the right reason.
   `RuntimeError: Failed starting Temporal dev server: ephemeral server at 127.0.0.1:39227 did not
   start within 5s. Make sure another download isn't stuck and delete the temp file.`
   I first put it down to load and proposed one dev server per module. The review corrected it:
-  every start took 0.12 to 0.21 s over three full runs, the failing one (the file's first)
-  included, and the failing run captured no output from the server. So the cause is not known; a
-  carried note (see "The flaky activation test" above), the harness unchanged here.
+  every start took 0.12 to 0.21 s over three full runs, the file's first start, the one that
+  fails elsewhere, included; and the failing run captured no output from the server. So the
+  cause is not known; a carried note (see "The flaky activation test" above), the harness
+  unchanged here.
 
 ### Promises
 
