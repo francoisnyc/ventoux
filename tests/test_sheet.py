@@ -39,7 +39,7 @@ from ventoux.case.releases import Package
 from ventoux.case.sheet import ENGINE_WIDE, NEVERS, case_map, never_sheet, nevers
 from ventoux.core.catalog import Catalog
 from ventoux.core.policy import only_from
-from ventoux.testing import CATALOG, run_case
+from ventoux.testing import CATALOG, run_case, send
 from ventoux.tooling.cli import main
 
 TESTS = ROOT / "tests"
@@ -254,6 +254,27 @@ def test_who_may_not_approve_is_never_said_of_a_field_a_form_sets() -> None:
 def test_who_may_not_approve_is_never_said_of_a_repeatable_tasks_outcome() -> None:
     # The review of #49: review answered again, its outcome is Tom's, so Ana may approve.
     case, history = answered_again()
+    assert approver_lines(case) == []
+    assert isinstance(approved_by(case, "ana", history), CaseRun)
+
+
+def test_who_may_not_approve_is_never_said_of_an_events_value() -> None:
+    # An event may arrive again, and its values are then its new sender's (brief, D41): Ana sent
+    # the amount pay reads, Tom sent it again, so Ana may approve.
+    case = with_check("amount", {">": [{"var": "confirmed.amount"}, 0]})
+    case["events"] = {
+        "confirmed": {
+            "display": {"title": "The amount is confirmed"},
+            "sent_by": {"roles": ["support"]},
+            "payload": {"amount": {"type": "number", "display": {"title": "Amount"}}},
+        }
+    }
+    history = [
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        send("confirmed", {"amount": 250}, "ana"),
+        send("confirmed", {"amount": 250}, "tom"),
+        ("check", "ok", "tom", {"checked_amount": 250}),
+    ]
     assert approver_lines(case) == []
     assert isinstance(approved_by(case, "ana", history), CaseRun)
 
