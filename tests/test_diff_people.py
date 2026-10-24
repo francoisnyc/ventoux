@@ -298,6 +298,57 @@ def test_a_step_moved_to_a_lower_risk_gains_approvers() -> None:
     ) in judged_lines(after, before, with_clerks())
 
 
+# --- Slice 2: who is excluded from approving -----------------------------------------------------
+
+
+def excluding(amount: str) -> dict[str, Any]:
+    """The refund, its payment sending `amount` and run on every review, whatever its outcome:
+    with no `when`, only its inputs decide whose answer it reads."""
+    case = refund()
+    pay = case["steps"]["pay"]
+    pay["inputs"]["amount"] = {"var": amount}
+    del pay["when"]
+    pay["approval"] = {"roles": ["support-lead"], "display": {"reason": "A lead pays"}}
+    return case
+
+
+def test_a_step_that_stops_reading_an_answer_excludes_nobody_for_it() -> None:
+    # The change the JSON diff hides: an input changed, and whoever answers review may now
+    # approve the payment, since nobody approves a step their own answer feeds (brief, D11).
+    found = judged_lines(excluding("approved_amount"), excluding("amount"))
+    assert found == [
+        "not proven steps.pay.inputs.amount: approved_amount -> amount",
+        (
+            "looser     steps.pay.approval: whoever answers review is no longer excluded from "
+            "approving pay"
+        ),
+    ]
+
+
+def test_a_step_that_starts_reading_an_answer_excludes_its_people() -> None:
+    found = judged_lines(excluding("amount"), excluding("approved_amount"))
+    assert (
+        "stricter   steps.pay.approval: whoever answers review is now excluded from approving pay"
+        in found
+    )
+
+
+def test_exclusions_both_added_and_removed_are_not_proven() -> None:
+    before = excluding("approved_amount")
+    after = excluding("checked_amount")
+    after["fields"]["checked_amount"] = {"type": "number", "display": {"title": "Checked"}}
+    after["steps"]["check"] = {
+        "kind": "task",
+        "display": {"title": "Check the amount"},
+        "roles": ["support"],
+        "outcomes": {"checked": {"display": {"title": "Checked"}, "sets": ["checked_amount"]}},
+    }
+    assert (
+        "not proven steps.pay.approval: excluded from approving pay: whoever answers review -> "
+        "whoever answers check"
+    ) in judged_lines(before, after)
+
+
 # --- Witnesses -----------------------------------------------------------------------------------
 
 
@@ -388,6 +439,31 @@ def approvers_witness() -> Witness:
     return before, after, with_finance(), refused, isinstance(new, CaseRun) and new.reached("pay")
 
 
+def exclusions_witness() -> Witness:
+    """Ana reviews and is also a team lead: refused as the payment's approver while it sends the
+    amount she set, accepted once it sends the amount the case opened with."""
+    before, after = excluding("approved_amount"), excluding("amount")
+    people = {"ana": ["support", "support-lead"]}
+
+    def approving(case: dict[str, Any]) -> str | CaseRun:
+        try:
+            return run_case(
+                case,
+                file={"order_id": "ord-1", "amount": 250},
+                answers=[
+                    ("review", "approve", "ana", {"approved_amount": 250}),
+                    ("pay.approval#1", "approve", "ana"),
+                ],
+                people=people,
+            )
+        except AnswerRefused as refused:
+            return str(refused)
+
+    old, new = approving(before), approving(after)
+    refused = old == "ana set approved_amount, which pay uses, so cannot approve it"
+    return before, after, CATALOG, refused, isinstance(new, CaseRun) and new.reached("pay")
+
+
 def answerers_witness() -> Witness:
     """A team lead may not review while support alone answers it; then may."""
     review = ("review", "approve", "sam", {"approved_amount": 250})
@@ -432,6 +508,7 @@ WITNESSES: dict[str, Callable[[], Witness]] = {
     "approval condition": condition_witness,
     "approval count": count_witness,
     "approvers": approvers_witness,
+    "approval exclusions": exclusions_witness,
     "answerers": answerers_witness,
     "proposers": proposers_witness,
     "senders": senders_witness,

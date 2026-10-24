@@ -13,8 +13,10 @@ from typing import Literal
 
 from ventoux.case.changes import Change, DiffRefused, Leaf, Verdict, shown
 from ventoux.case.definition import Approval, CallStep, CaseDefinition
+from ventoux.case.writers import could_come_from
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
+from ventoux.core.provenance import fields_read
 from ventoux.core.roles import may_approve
 
 
@@ -147,8 +149,72 @@ def widened(path: str, said: str, old: set[str], new: set[str], comparison: str)
 
 
 def step_guards(step: str, versions: Versions) -> Iterator[Change]:
-    """What follows from a step's changes, said under it: who may approve it."""
+    """What follows from a step's changes, said under it: who may approve it, and who is
+    excluded from approving it."""
     yield from approvers(step, versions)
+    yield from exclusions(step, versions)
+
+
+def exclusions(step: str, versions: Versions) -> Iterator[Change]:
+    """Who is excluded from approving `step` for what it reads (13b, choice 23): whoever's answer
+    can reach its inputs or its `when` (brief, D11). The rule is the engine's; which answers reach
+    the step is the definition's. Fewer excluded: looser; more: stricter; both: not proven."""
+    old, new = versions.before.steps[step], versions.after.steps[step]
+    if not isinstance(old, CallStep) or not isinstance(new, CallStep):
+        return
+    if old.approval is None or new.approval is None:
+        return  # an approval added or removed is said by `approval_change`
+    excluded_before = excluded(versions.before, old, versions.catalog)
+    excluded_after = excluded(versions.after, new, versions.catalog)
+    if excluded_before == excluded_after:
+        return
+    path = f"steps.{step}.approval"
+    gone, come = excluded_before - excluded_after, excluded_after - excluded_before
+    if gone and not come:
+        said = f"{whoever(gone)} {'is' if len(gone) == 1 else 'are'} no longer excluded from "
+        yield Change(path, "looser", f"{said}approving {step}", "approval exclusions")
+    elif come and not gone:
+        said = f"{whoever(come)} {'is' if len(come) == 1 else 'are'} now excluded from "
+        yield Change(path, "stricter", f"{said}approving {step}", "approval exclusions")
+    else:
+        said = f"excluded from approving {step}: {whoever(excluded_before)} -> "
+        yield Change(path, "not proven", said + whoever(excluded_after))
+
+
+def excluded(case: CaseDefinition, step: CallStep, catalog: Catalog) -> frozenset[str]:
+    """The people whose answers can reach what `step` reads, as the static check names them
+    (`person:answering review`), from the definition alone: through a field a task's form sets,
+    a task's outcome, an event a person sends, or a rule that computes from them (brief, D42)."""
+    sources = could_come_from(case, catalog, None)
+    read = [*step.inputs.values(), *([step.when] if step.when is not None else [])]
+    fields = {field for expression in read for field in fields_read(expression)}
+    return frozenset(
+        source
+        for field in fields
+        for source in sources.get(field, frozenset())
+        if source.startswith("person:")
+    )
+
+
+# How the static check's sources name a person, and how a sentence says it.
+DOING = {"person:answering ": "answers", "person:sending ": "sends"}
+
+
+def whoever(people: frozenset[str]) -> str:
+    """`whoever answers review and whoever sends noted`, from the static check's sources
+    (`person:answering review`, `person:sending noted`)."""
+    if not people:
+        return "nobody"
+    said = []
+    for source in sorted(people):
+        found = [
+            (f"{does} {source.removeprefix(prefix)}")
+            for prefix, does in DOING.items()
+            if source.startswith(prefix)
+        ]
+        # Fail closed: a person the check names another way is said as it names them.
+        said.append(f"whoever {found[0]}" if found else source)
+    return " and ".join(said)
 
 
 def approvers(step: str, versions: Versions) -> Iterator[Change]:
