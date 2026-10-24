@@ -13,7 +13,7 @@ from typing import Annotated, Any
 import pytest
 from pydantic import BaseModel, create_model
 
-from ventoux.case.diff import COMPARISONS, Diff, DiffRefused, diff
+from ventoux.case.diff import COMPARISONS, Change, Diff, DiffRefused, diff
 from ventoux.case.memory import CaseRun
 from ventoux.case.releases import Package, changed, digest, package
 from ventoux.core.catalog import Catalog
@@ -26,6 +26,7 @@ from ventoux.core.policy import (
     trusted_only,
 )
 from ventoux.testing import CATALOG, fake_refund, payments_refund, run_case
+from ventoux.tooling.cli import main
 
 ROOT = Path(__file__).parent.parent
 REFUND = ROOT / "examples" / "refund" / "refund.json"
@@ -200,6 +201,16 @@ def test_other_contract_differences_are_said_not_proven() -> None:
             "also differs: input, risk"
         ),
     ]
+
+
+def test_a_verdict_names_its_comparison() -> None:
+    # Looser or stricter only from a comparison on the closed list; not proven from none.
+    with pytest.raises(ValueError, match="looser needs one of COMPARISONS"):
+        Change("steps.pay.when", "looser", "a guess")
+    with pytest.raises(ValueError, match="not proven needs one of COMPARISONS, and only it"):
+        Change("fields.amount.source", "not proven", "none -> untrusted:llm", "untrusted mark")
+    with pytest.raises(ValueError, match="stricter needs one of COMPARISONS"):
+        Change("steps.pay.approval.count", "stricter", "1 -> 2", "approvals")  # 13b's
 
 
 # --- Slice 1: nothing the digest sees is left out ------------------------------------------------
@@ -696,3 +707,86 @@ def test_each_comparison_has_a_witness(comparison: str) -> None:
 def test_the_witnesses_cover_every_comparison() -> None:
     # A comparison can't give a verdict without a run that shows it (brief, D55).
     assert list(WITNESSES) == list(COMPARISONS)
+
+
+# --- Slice 6: the command, and the guide ---------------------------------------------------------
+
+GUIDE = ROOT / "docs" / "guides" / "releases.md"
+
+
+def folder_of(path: Path, case: dict[str, Any], plans: list[dict[str, Any]] | None = None) -> Path:
+    """A package folder at `path` holding `case` and `plans`."""
+    path.mkdir(parents=True)
+    (path / "case.json").write_text(json.dumps(case, indent=2))
+    if plans:
+        (path / "plans").mkdir()
+        for plan in plans:
+            (path / "plans" / f"{plan['plan']}.json").write_text(json.dumps(plan, indent=2))
+    return path
+
+
+def test_the_command_says_the_diff(tmp_path: Path, capsys: Any) -> None:
+    old = folder_of(tmp_path / "old", marked("untrusted:customer"))
+    new = folder_of(tmp_path / "new", marked(None))
+    # Compared: exit 0, even with a looser change; that is the reviewer's to judge.
+    assert main(["diff", str(old), str(new)]) == 0
+    assert capsys.readouterr().out == (
+        "refund: 1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; "
+        "no wording change\n"
+        "looser     fields.approved_amount.source: untrusted:customer -> none\n"
+    )
+    # Refused: a contract the catalog doesn't hold, or a package that isn't one; exit 1.
+    elsewhere = folder_of(tmp_path / "elsewhere", calling("payments.refund@9"))
+    assert main(["diff", str(old), str(elsewhere)]) == 1
+    assert "payments.refund@9 is not in the catalog" in capsys.readouterr().err
+    (new / "notes.txt").write_text("to do")
+    assert main(["diff", str(old), str(new)]) == 1
+    assert capsys.readouterr().err == (
+        f"{new}: notes.txt isn't part of a package: a package holds case.json and plans/\n"
+    )
+    # Unreadable: exit 2.
+    (new / "notes.txt").unlink()
+    (new / "case.json").write_text("{")
+    assert main(["diff", str(old), str(new)]) == 2
+    assert capsys.readouterr().err.startswith(f"{new}: case.json isn't JSON: ")
+
+
+def guide_runs() -> list[tuple[list[str], str]]:
+    """Each `$ ventoux diff …` in the guide's "What changed: the diff", with what it prints."""
+    section = GUIDE.read_text().split("## What changed: the diff")[1].split("\n## ")[0]
+    runs = []
+    for block in section.split("```\n")[1::2]:
+        command_line, *printed = block.strip().splitlines()
+        assert command_line.startswith("$ ventoux diff ")
+        runs.append((command_line.removeprefix("$ ventoux ").split(), "\n".join(printed) + "\n"))
+    return runs
+
+
+def test_the_guides_example_runs_as_written(tmp_path: Path, capsys: Any, monkeypatch: Any) -> None:
+    monkeypatch.chdir(tmp_path)  # the guide's paths are relative, from the repository's root
+    # First, the refund moved to a @3 that takes any amount: a catalog holding it.
+    folder_of(tmp_path / "refund-before", refund())
+    folder_of(tmp_path / "refund-after", calling("payments.refund@3"))
+    # Then the releases guide's package, and the next version the guide describes: a fraud check
+    # for the fraud role, the amount marked as typed by the customer, 72 hours to approve, and
+    # the settlement reworded.
+    case, plans = settling()
+    folder_of(tmp_path / "examples" / "packages" / "refund", case, plans)
+    after, after_plans = copy.deepcopy(case), copy.deepcopy(plans)
+    after["fields"]["amount"]["source"] = "untrusted:customer"
+    after["steps"]["fraud_check"] = {
+        "kind": "task",
+        "display": {"title": "Check for fraud"},
+        "roles": ["fraud"],
+        "requires": ["review"],
+        "outcomes": {"clear": {"display": {"title": "No fraud found"}}},
+    }
+    after["steps"]["settle"]["display"]["title"] = "Pay the refund"
+    after_plans[0]["states"]["approve_refund"]["approval"]["timeout"] = "72h"
+    folder_of(tmp_path / "refund-next", after, after_plans)
+    runs = guide_runs()
+    assert len(runs) == 2
+    for (arguments, printed), catalog in zip(runs, (LOOSE, CATALOG), strict=True):
+        monkeypatch.setattr("ventoux.tooling.cli.CATALOG", catalog)
+        assert main(arguments) == 0
+        assert capsys.readouterr().out == printed

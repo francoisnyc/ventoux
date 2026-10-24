@@ -37,6 +37,8 @@ from ventoux.core.policy import Policy, UnknownPolicy, compared
 
 type Verdict = Literal["looser", "stricter", "not proven"]
 
+MISSING = object()  # an entry one version doesn't have
+
 # The comparisons that may give a verdict, a closed list: each has a witness, a run where one
 # version refuses what the other lets through (brief, D55). 13b adds the guards on people and runs.
 COMPARISONS = (
@@ -79,9 +81,9 @@ class Change:
 class Reworded:
     """A piece of wording changed: never behaviour (brief, D5)."""
 
-    path: str
-    before: str | None  # None: it wasn't written
-    after: str | None
+    path: str  # where: `steps.settle.display.title`
+    before: str | None  # the old text; None: it wasn't written
+    after: str | None  # the new text; None: it isn't written any more
 
     def __str__(self) -> str:
         return f"{'wording':<10} {self.path}: {quoted(self.before)} -> {quoted(self.after)}"
@@ -144,22 +146,20 @@ def diff(before: Package, after: Package, catalog: Catalog) -> Diff:
 
 # --- Walking the two versions --------------------------------------------------------------------
 
-MISSING = object()  # an entry one version doesn't have
-
 
 @dataclass(frozen=True)
 class Leaf:
     """Where the two versions behave differently, as deep as a reader needs: an expression whole,
     an entry added or removed whole."""
 
-    path: str
-    before: object  # MISSING: added
-    after: object  # MISSING: removed
+    path: str  # where, as the JSON writes it
+    before: object  # what the old version has there; MISSING: added
+    after: object  # what the new version has there; MISSING: removed
 
 
 def leaves(before: object, after: object, path: str) -> list[Leaf]:
     """Every place `before` and `after` behave differently, named as 12a's release notes name
-    them (`changed`, brief, D50), in the new version's order, a removed entry where it was."""
+    them (`changed`) (brief, D50), in the new version's order, a removed entry where it was."""
     if before is MISSING or after is MISSING:
         return [Leaf(path, before, after)]  # an entry only one version has
     if canonical(before) == canonical(after):
@@ -332,6 +332,7 @@ def shown(value: object) -> str:
 
 # --- Input policies ------------------------------------------------------------------------------
 
+# How `compared`'s answer reads as a verdict: an input that accepts more is looser.
 VERDICTS: dict[str, Verdict] = {"wider": "looser", "narrower": "stricter", "neither": "not proven"}
 
 
@@ -400,7 +401,7 @@ def promised(contract: Contract) -> dict[str, object]:
 
 
 def without_policies(schema: object) -> object:
-    """A JSON Schema with every input policy taken out (`x-input-policies`, brief, D21)."""
+    """A JSON Schema with every input policy taken out (`x-input-policies`) (brief, D21)."""
     if isinstance(schema, dict):
         return {
             key: without_policies(value)

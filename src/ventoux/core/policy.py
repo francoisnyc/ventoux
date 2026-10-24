@@ -118,7 +118,7 @@ class UnknownPolicy(ValueError):
 # What a list of policies accepts, among sets of sources: one of three shapes, from the widest.
 ANY = "any"  # no policy: every set of sources
 TRUSTED = "trusted"  # trusted_only: sets whose every source is trusted, none included
-# only_from: non-empty sets of the named systems, those every only_from on the input names
+SYSTEMS = "systems"  # only_from: non-empty sets of the systems every only_from on it names
 
 
 def accepted(policies: Sequence[Policy]) -> tuple[str, frozenset[str]]:
@@ -137,7 +137,7 @@ def accepted(policies: Sequence[Policy]) -> tuple[str, frozenset[str]]:
             named = frozenset(policy.systems)
             systems = named if systems is None else systems & named
     if systems is not None:
-        return ("only_from", systems)
+        return (SYSTEMS, systems)
     if any(isinstance(policy, TrustedOnly) for policy in policies):
         return (TRUSTED, frozenset())
     return (ANY, frozenset())

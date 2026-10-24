@@ -1,6 +1,7 @@
 """The `ventoux` command: `ventoux simulate STORY.json` (layer 11g2), `ventoux release FOLDER
---releases DIR --commit SHA` (layer 12a), and an environment's commands (layer 12e): `ventoux
-environment create|harden|check`, `ventoux activate`, `ventoux retire`, `ventoux manifest publish`.
+--releases DIR --commit SHA` (layer 12a), an environment's commands (layer 12e): `ventoux
+environment create|harden|check`, `ventoux activate`, `ventoux retire`, `ventoux manifest publish`,
+and `ventoux diff OLD NEW` (layer 13a).
 
 Reading files and printing happen here, never in `core` or `case`, which read no clock and do no
 I/O (brief, D45). `ventoux check` comes with the Python builder (brief, D34).
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ventoux.case.definition import CaseDefinition, CaseInvalid, parse_case
+from ventoux.case.diff import DiffRefused, diff
 from ventoux.case.releases import (
     PackageRefused,
     PackageUnreadable,
@@ -28,7 +30,7 @@ from ventoux.case.simulate import StoryRefused, simulate
 from ventoux.case.story import Story, StoryInvalid, parse_story
 from ventoux.testing import CATALOG
 from ventoux.tooling.environments import environment_command
-from ventoux.tooling.releases import FolderStore, Run, release, said
+from ventoux.tooling.releases import FolderStore, Run, read_package, release, said
 
 # What `ventoux simulate` exits with.
 HOLDS = 0  # what the story expects holds, or it expects nothing
@@ -59,12 +61,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     releasing.add_argument("package", type=Path, help="the package's folder")
     releasing.add_argument("--releases", type=Path, required=True, help="where records are kept")
     releasing.add_argument("--commit", required=True, help="the commit CI releases from")
+    diffing = commands.add_parser("diff", help="what changed between two versions of a package")
+    diffing.add_argument("old", type=Path, help="the package's folder before")
+    diffing.add_argument("new", type=Path, help="the package's folder after")
     environments(commands)
     arguments = parser.parse_args(argv)
     if arguments.command in ("environment", "activate", "retire", "manifest"):
         return environment_command(arguments)
     if arguments.command == "release":
         return release_package(arguments.package, arguments.releases, arguments.commit)
+    if arguments.command == "diff":
+        return diff_packages(arguments.old, arguments.new)
     return simulate_story(arguments.story)
 
 
@@ -130,6 +137,28 @@ def release_package(folder: Path, releases: Path, commit: str) -> int:
     for issue in run.warnings:
         print(f"warning: {said(issue)}")
     print(what_it_did(run))
+    return HOLDS
+
+
+def diff_packages(old: Path, new: Path) -> int:
+    """Print what changed from the package in `old` to the one in `new`, by effect (brief, D55).
+    Exit 0 when compared, whatever was found: a looser change is the reviewer's to judge."""
+    folder = old
+    try:
+        before = read_package(old)
+        folder = new
+        after = read_package(new)
+        found = diff(before, after, CATALOG)
+    except PackageRefused as refused:
+        print(Unreadable(folder, str(refused)), file=sys.stderr)
+        return FAILS
+    except DiffRefused as refused:
+        print(f"{old} -> {new}: {refused}", file=sys.stderr)
+        return FAILS
+    except (PackageUnreadable, OSError) as unreadable:
+        print(Unreadable(folder, str(unreadable)), file=sys.stderr)
+        return CANT_READ
+    print(found, end="")
     return HOLDS
 
 

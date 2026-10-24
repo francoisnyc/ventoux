@@ -3,8 +3,10 @@
 Status: 2026-10-24. Prior art read (the `chartering` prototype at `81389b3`, its `main`);
 layer 13 explained, split into five parts, and 13a's choices put with a recommendation each.
 Answered "all as recommended", the same day: choices 1 to 18. D55 and the releases guide's
-section "What changed: the diff" written before building 13a. Layer 12's walk-through and
-check-yourself are deferred, by the user's choice, and aren't part of this layer.
+section "What changed: the diff" written before building 13a; 13a built, slices 0–6, and its
+Promises table checked against the tests, the same day (see 13a, "Decided while building").
+Layer 12's walk-through and check-yourself are deferred, by the user's choice, and aren't part of
+this layer.
 
 ## Warm-up: learning question 40, arrival is a fact, content is not
 
@@ -427,32 +429,69 @@ Each starts with its negative test, seen failing for the right reason.
 6. **The command, the guide and D55:** exit codes; the guide's example as written; the amendment
    lines.
 
+### Decided while building
+
+- **A value set where there was none read as an entry added** (slice 1, found by the summary's
+  test): the walk took `None` for "this version has no such entry", so `source: none ->
+  untrusted:customer` said "added" and was never judged. An entry one version lacks is now its
+  own marker, never `None`.
+- **Wording inside an entry added or removed is part of that change** (slice 1): a new step listed
+  each of its titles as a wording change, and its empty descriptions too. They are left out of the
+  wording list, and an empty description reads as none, written out or not.
+- **A comparison is named only where it proves the verdict** (slice 3): readers both added and
+  removed said "not proven" while naming `readers`, and so did two `only_from` neither wider nor
+  narrower. A `Change` now refuses, when it is made, looser or stricter without a comparison on the
+  list, and not proven with one; the walk can't claim a verdict the witnesses don't cover.
+- **An untrusted amount asks for the payment's approval even under 100** (slice 5, the input
+  policy's witness): its condition reads the untrusted value, and untrusted data can't remove an
+  approval (brief, D38). The witness has a team lead approve it, so the refusal it shows is the
+  input policy's, checked by its message, never a run that merely didn't finish.
+- **Naming a role in one field's `visible_to` names it in the case** (slice 5): it then sees every
+  field without one. The readers' witness widens `amount` to `support-lead`, already named, so the
+  diff has one change to show.
+- **A contract's input class name is part of its promise** (slice 0): two test contracts whose
+  inputs were classes of different names differed in their JSON Schema's title, so "its contract
+  also differs: input" was right. The tests build each input as `RefundInput`; design question 16's
+  own example of a change nobody sees, and 13d's to show.
+- **The guide's first example calls a `payments.refund@3` the development catalog doesn't hold**:
+  its test runs the command with a catalog that holds it, as written otherwise.
+- **The walk was written whole in slice 0,** so later slices' tests passed at once; each was seen
+  failing on a deliberate break (the mark removed or added not judged, the payload pattern left
+  out, readers compared as written, the outcome line left out, removed entries appended, plans
+  skipped, the comparison check removed, the command's refusal exiting 0). Comparing whole entries
+  before walking them is a guard the section check already gives, so breaking it alone fails
+  nothing; it stays, cheap and safe.
+- **`ventoux diff`'s refusals:** a package that isn't one names its folder, as `ventoux release`
+  does; a diff refused names both folders and why.
+
 ### Promises
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
-`D` is `tests/test_diff.py` (new). Drafted before building; to be checked against the tests
-before the pull request opens.
+`D` is `tests/test_diff.py` (new). Drafted before building; checked against the tests,
+2026-10-24: every test named here exists, and every test in `D` is named here.
 
 | Promise | Test |
 |---|---|
 | A step moved to a contract whose input policy accepts more is reported looser, at the step's path, naming the input and both policies: never hidden (the curriculum's negative test) | D `test_an_input_policy_loosened_is_reported_looser` |
 | A policy that accepts less is stricter; two policies neither wider nor narrower are not proven | D `test_an_input_policy_tightened_is_stricter`, `test_policies_neither_wider_nor_narrower_are_not_proven` |
-| `compared` orders every pair of the two kinds exactly, and refuses a kind it doesn't know | D `test_policies_are_compared_exactly`, `test_a_policy_kind_the_diff_doesnt_know_is_refused` |
+| `compared` orders every pair of the two kinds exactly, and refuses a kind it doesn't know; so does the diff | D `test_policies_are_compared_exactly`, `test_a_policy_kind_the_diff_doesnt_know_is_refused` |
 | A contract the catalog doesn't hold refuses the diff, naming it | D `test_a_contract_missing_from_the_catalog_refuses_the_diff` |
 | An input in only one of the two contracts, or another difference between them, is said and not proven | D `test_other_contract_differences_are_said_not_proven` |
+| A looser or stricter verdict names a comparison on the closed list; not proven names none | D `test_a_verdict_names_its_comparison` |
 | An `untrusted:` mark removed is looser, added is stricter, relabelled is not proven, on case fields, payload fields and a plan's fields | D `test_an_untrusted_mark_removed_is_looser`, `test_an_untrusted_mark_added_is_stricter`, `test_a_relabelled_mark_is_not_proven`, `test_marks_on_payloads_and_plans_are_judged` |
 | `sensitive` removed is looser; added is stricter | D `test_sensitive_removed_is_looser`, `test_sensitive_added_is_stricter` |
 | Who sees a field is compared as `seen_by` computes it: widened looser, narrowed stricter, both not proven | D `test_visible_to_widened_is_looser`, `test_visible_to_narrowed_is_stricter`, `test_readers_both_added_and_removed_are_not_proven` |
 | A new role named anywhere is said on every field without `visible_to`, and on outcomes and outputs, naming the change that caused it (a change the JSON diff hides) | D `test_a_new_role_sees_every_unnarrowed_field` |
 | A change outside the comparisons is said at its path, not proven, with the definition's literals before and after | D `test_a_change_the_diff_doesnt_judge_is_said_not_proven` |
-| Every behaviour path 12a's `changed` sees is covered by a change | D `test_the_diff_says_everything_the_digest_sees` |
-| The same behaviour digest gives no change: reformatting and wording alone included | D `test_the_same_behaviour_has_no_changes` |
-| Wording is listed apart, before and after, never as behaviour | D `test_wording_is_listed_apart` |
-| "Not proven" is counted with looser in the summary, and listed before stricter | D `test_not_proven_counts_with_looser` |
+| Every behaviour path 12a's `changed` sees is covered by a change, over fifteen kinds of edit | D `test_the_diff_says_everything_the_digest_sees` |
+| The same behaviour digest gives no change: reformatting, a default written out and wording alone included | D `test_the_same_behaviour_has_no_changes` |
+| Wording is listed apart, before and after, never as behaviour; nothing changed says so | D `test_wording_is_listed_apart` |
+| An added or removed entry's wording is part of that change, not listed apart | D `test_an_added_entrys_wording_is_part_of_it` |
+| "Not proven" is counted with looser in the summary, as what may loosen, before stricter | D `test_not_proven_counts_with_looser` |
 | A renamed step is one removed and one added, the added one saying it behaves as the removed one did and that a migration must map it | D `test_a_renamed_step_is_removed_and_added` |
 | Changes come in the order of choice 10, the same every time | D `test_changes_come_in_the_packages_order` |
 | The diff is given only the two packages and the catalog: no case file to quote from | D `test_the_diff_reads_only_packages_and_the_catalog` |
-| Each looser and stricter comparison has a witness run, and the witnesses cover the list | D `test_each_comparison_has_a_witness`, `test_the_witnesses_cover_every_comparison` |
-| The command exits 0 when it compared, 1 when refused, 2 when unreadable, and prints the developer form | D `test_the_command_says_the_diff` |
-| The guide's example runs as written | D `test_the_guides_example_runs_as_written` |
+| Each looser and stricter comparison has a witness run, the pair read both ways, and the witnesses cover the list | D `test_each_comparison_has_a_witness`, `test_the_witnesses_cover_every_comparison` |
+| The command exits 0 when it compared, a looser change included, 1 when refused, 2 when unreadable, and prints the developer form | D `test_the_command_says_the_diff` |
+| The guide's examples run as written | D `test_the_guides_example_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |
