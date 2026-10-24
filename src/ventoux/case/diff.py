@@ -60,6 +60,7 @@ class Change:
     said: str  # what it was and is, in the definition's terms: `48h -> 72h`
     comparison: str | None = None  # which of COMPARISONS proved the verdict; None: not proven
     because: str = ""  # for a change derived from another: what caused it
+    entry: Literal["added", "removed", ""] = ""  # an entry only one version has, said whole
 
     def __str__(self) -> str:
         why = f" (because {self.because})" if self.because else ""
@@ -127,9 +128,10 @@ def diff(before: Package, after: Package, catalog: Catalog) -> Diff:
     for reference in merged(list(before.plans), list(after.plans)):
         path = f"plans.{reference}"
         changes += judged(
-            leaves(before.plans.get(reference), after.plans.get(reference), path), catalog
+            leaves(before.plans.get(reference, MISSING), after.plans.get(reference, MISSING), path),
+            catalog,
         )
-    return Diff(after.name, tuple(changes), reworded(before, after))
+    return Diff(after.name, tuple(changes), reworded(before, after, changes))
 
 
 # --- Walking the two versions --------------------------------------------------------------------
@@ -150,12 +152,8 @@ class Leaf:
 def leaves(before: object, after: object, path: str) -> list[Leaf]:
     """Every place `before` and `after` behave differently, named as 12a's release notes name
     them (`changed`, brief, D50), in the new version's order, a removed entry where it was."""
-    if before is None and after is None:
-        return []
-    if before is None or after is None:
-        return [
-            Leaf(path, MISSING if before is None else before, MISSING if after is None else after)
-        ]
+    if before is MISSING or after is MISSING:
+        return [Leaf(path, before, after)]  # an entry only one version has
     if canonical(before) == canonical(after):
         return []
     retyped = isinstance(before, BaseModel) and type(before) is not type(after)
@@ -226,7 +224,9 @@ def case_changes(
         if name == "fields":
             for field in merged(list(old), list(new)):
                 path = f"fields.{field}"
-                yield from judged(leaves(old.get(field), new.get(field), path), catalog)
+                yield from judged(
+                    leaves(old.get(field, MISSING), new.get(field, MISSING), path), catalog
+                )
                 if field in old and field in new:
                     yield from readers(before, after, field)
         else:
@@ -281,7 +281,7 @@ def entry_change(leaf: Leaf, found: list[Leaf]) -> Change:
     """An entry added or removed: never judged. An added one that behaves exactly as a removed
     one of the same map says so: the diff can't know a rename was meant (brief, D53)."""
     if leaf.after is MISSING:
-        return Change(leaf.path, "not proven", "removed")
+        return Change(leaf.path, "not proven", "removed", entry="removed")
     parent, _, name = leaf.path.rpartition(".")
     for other in found:
         other_parent, _, other_name = other.path.rpartition(".")
@@ -295,8 +295,9 @@ def entry_change(leaf: Leaf, found: list[Leaf]) -> Change:
                 "not proven",
                 f"added: behaves as the removed {other_name} did: open cases need a migration "
                 f"mapping {other_name} to {name} (brief, D53)",
+                entry="added",
             )
-    return Change(leaf.path, "not proven", "added")
+    return Change(leaf.path, "not proven", "added", entry="added")
 
 
 def shown(value: object) -> str:
@@ -502,16 +503,20 @@ def naming(case: CaseDefinition) -> dict[str, str]:
 # --- Wording -------------------------------------------------------------------------------------
 
 
-def reworded(before: Package, after: Package) -> tuple[Reworded, ...]:
-    """Every piece of wording that changed, by path, in the new version's order (brief, D5)."""
+def reworded(before: Package, after: Package, changes: Sequence[Change]) -> tuple[Reworded, ...]:
+    """Every piece of wording that changed, by path, in the new version's order (brief, D5). The
+    wording of an entry added or removed is part of that change, not listed apart."""
     old, new = wording(before), wording(after)
+    whole = [change.path for change in changes if change.entry]
     return tuple(
         Reworded(path, text(old.get(path)), text(new.get(path)))
         for path in merged(list(old), list(new))
-        if old.get(path) != new.get(path)
+        if text(old.get(path)) != text(new.get(path))
+        and not any(path.startswith(f"{entry}.") for entry in whole)
     )
 
 
 def text(value: object) -> str | None:
-    """A piece of wording: a text, or None where it isn't written."""
-    return None if value is None else str(value)
+    """A piece of wording: a text, or None where it isn't written. An empty description is none,
+    as written out or left at its default."""
+    return None if value is None or value == "" else str(value)
