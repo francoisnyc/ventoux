@@ -526,8 +526,9 @@ Each claim this section makes about behaviour, and the test that would fail if i
 
 ## 13b. Guards on people and runs
 
-Status: choices drafted 2026-10-24, from `main` at `3888f95` (13a merged as #47). Waiting for
-answers by number. Nothing built yet.
+Status: choices drafted 2026-10-24, from `main` at `3888f95` (13a merged as #47). Answered "all
+as recommended", the same day: choices 19 to 32. D55's amendment, D11's and D47's lines and the
+releases guide's verdicts written before building 13b.
 
 ### Warm-up: learning question 14, quickstart approvals
 

@@ -375,15 +375,37 @@ looser     steps.pay.activity: payments.refund@2 -> payments.refund@3: input amo
 
 Each change has a **verdict**:
 
-- **looser:** the new version lets through strictly more than the old, whatever a case holds:
-  an input policy that accepts more, an `untrusted:` mark removed from a field, a contract's
-  output that now comes from a system where it was untrusted or undeclared (a case may now decide
-  on it), `sensitive` removed, a field seen by more roles;
+- **looser:** the new version lets through strictly more than the old, whatever a case holds.
+  What may flow where and who sees it: an input policy that accepts more, an `untrusted:` mark
+  removed from a field, a contract's output that now comes from a system where it was untrusted
+  or undeclared (a case may now decide on it), `sensitive` removed, a field seen by more roles.
+  Who may act, and when a step may run: an approval removed, or approved by fewer people, or by
+  more roles, or by people it used to exclude; a step that requires less; anyone more may answer,
+  propose, send or close; a fact allowed to be older; forgetting allowed where it wasn't;
 - **stricter:** the reverse, strictly less;
-- **not proven:** anything else. Two policies that are neither wider nor narrower
-  (`only_from("payments")` against `only_from("billing")`), a change to something that isn't a
-  guard (a timer's age, a step added), or one the diff can't judge yet. Approvals, requirements and
-  conditions are judged in a later part of layer 13; until then they read "not proven".
+- **not proven:** anything else. Two policies or two lists of roles that are neither wider nor
+  narrower (`only_from("payments")` against `only_from("billing")`), a changed condition
+  (`amount > 100` against `amount > 150`: two conditions are never compared), or a change to
+  something that isn't a guard (a timer's age, a step added, a rule's action).
+
+**Where a condition is added or removed,** the diff judges that it is there, never what it says.
+An approval given a `when` is asked on no more runs than before, and on fewer wherever the
+condition is false: looser, said with the condition. A step given a `when` runs on no more cases:
+stricter.
+
+**Who may approve is more than the roles named.** A role counts only if your platform team lets
+it approve the step's risk, so adding `support`, which approves nothing, changes nobody. The
+`count` says how many people must approve. And nobody approves a step their own answer feeds:
+stop `pay` reading `approved_amount`, and whoever answered `review`, which sets it, may now
+approve `pay`. The JSON shows an input changed; the diff says who may now approve.
+
+The four-eyes refund (`examples/refund/refund-four-eyes.json`), back to one team lead:
+
+```
+$ ventoux diff refund-four-eyes refund-one-lead
+refund: 1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; no wording change
+looser     steps.pay.approval.count: 2 -> 1 (one person approves pay, where two had to)
+```
 
 **Every doubt reads as looser.** "Not proven" is counted with looser, as what *may loosen*. Its
 line says only what changed and leaves the judgement to you. A change is never left out: whatever
