@@ -2236,6 +2236,12 @@ and D50, whose text is kept.*
   past the summary's 1 MiB, the summary says where it is. It sends nothing: the summary only,
   `permissions: contents: read`, `pull_request` and never `pull_request_target`. A push to `main`
   runs the checks only.
+- **Amended 2026-10-24, from the review of layer 13e** (`docs/layers/13-diff.md`, choices 77 to
+  79; the text above stands, this adds to it): the summary inherits the escaping of D56's Markdown,
+  escapes its own pieces taken from either tree (folder names, refusal messages), and fences the
+  hash check's lines with more backticks than any run in them. Each package's line says only what
+  the two trees show: "the same behaviour and wording as the base", or a wording revision only if
+  the base's behaviour is the latest release's, which `ventoux release` decides from the records.
 
 ### D56. The case map and the "will never do" sheet: readings of a package, and only proven nevers
 
@@ -2266,6 +2272,13 @@ D55, whose text is kept.*
   form sets is never said: an edit, a second answer or another writer replaces its sources. The
   package's own lines hold while a case runs this release: their heading says so, since a
   migration moves a case to the target release's definition (D53).
+- **Amended 2026-10-24, from the review of layer 13e** (`docs/layers/13-diff.md`, choice 77; the
+  text above stands, this adds to it): the Markdown the plain form, the map and the sheet print
+  escapes every piece a definition or the catalog writes, where it is written, never at the
+  source: `&`, `<` and `>` as entities, a backslash before each of `` \ ` * _ [ ] ~ # | ! ``,
+  line breaks shown as `\n`, so a value never starts a line; a path in a code span fenced by more
+  backticks than any run in it. Text a definition writes is shown, never rendered: no HTML, link
+  or emphasis of its own. The developer forms and the records stay plain text.
 
 ### D57. Release notes in the record, and a contract's readable diff
 

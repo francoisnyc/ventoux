@@ -1843,6 +1843,8 @@ The developer forms (`ventoux diff`, `ventoux release`, `ventoux notes` without 
     sheet print escapes what a definition writes) and one on 13e's line in D55 (the summary
     inherits it, and fences the hash check by its content). *Recommended.*
 
+Answered "all as recommended", 2026-10-24: choices 77 to 79.
+
 The negative test, test-first: the review's run, the literal shown escaped and no `<` in the
 summary coming from a definition; then literals holding a backtick, a `*`, a `[` and a `#`, each
 shown as written once rendered, and a docstring holding three backticks kept inside the hash
