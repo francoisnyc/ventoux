@@ -1304,8 +1304,9 @@ Each claim this section makes about behaviour, and the test that would fail if i
 
 ## 13d. Release notes in the record, and a contract's readable diff
 
-Status: choices drafted 2026-10-24, from `main` at `e6ea6b2` (13c merged as #49). Waiting for
-answers, by number.
+Status: choices drafted 2026-10-24, from `main` at `e6ea6b2` (13c merged as #49). Answered "all
+as recommended", the same day: choices 52 to 62. D57, and the dated lines on D50 and design
+question 16, written before building 13d.
 
 ### Warm-up: learning question 11, behaviour vs wording
 
