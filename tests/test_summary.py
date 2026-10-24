@@ -12,9 +12,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
+from test_catalog import catalog_of, lookup_contract
 from test_diff import LOOSE, ROOT, calling, refund
 
-from ventoux.case.markdown import text
+from ventoux.case.markdown import code, text
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract_hash import contract_hash, promise_hash
 from ventoux.core.promise import promise_of
@@ -424,3 +426,45 @@ def test_html_a_pull_request_writes_never_reaches_the_summary(tmp_path: Path) ->
     assert "- **Looser** (`steps.pay.activity`): payments.refund@2 -&gt; payments.refund@3" in (
         found.text
     )
+
+
+def test_markdown_a_definition_writes_is_shown_as_written(tmp_path: Path) -> None:
+    # A backtick, a `*`, a `[` and a `#` in a literal: each escaped, so each reads as itself once
+    # rendered, never as code, emphasis, a link or a heading; a line break shown, never kept.
+    case = refund()
+    case["steps"]["pay"]["when"] = {"==": [{"var": "review.outcome"}, "a`b *c* [d](e) #f\ng"]}
+    found = summarized(tree(tmp_path / "base", refund()), tree(tmp_path / "head", case))
+    assert 'review.outcome = "a\\`b \\*c\\* \\[d\\](e) \\#f\\\\ng"' in found.text
+
+
+def test_a_backtick_in_a_contract_never_closes_the_hash_checks_block(tmp_path: Path) -> None:
+    # The head's own code writes the catalog: a docstring holding three backticks stays inside
+    # the block, fenced by more than any run in it.
+    class Fenced(BaseModel):
+        """Looks an order up.
+
+        ```
+        </details>
+        ```
+        """
+
+        order_id: str
+
+    earlier, later = lookup_contract(), lookup_contract(input=Fenced)
+    recorded = {earlier.reference: contract_hash(earlier)}
+    before: dict[str, object] = {earlier.reference: promise_of(earlier)}
+    base, head = with_example(tmp_path / "base"), with_example(tmp_path / "head")
+    found = summarize(base, head, [PACKAGES], catalog_of(later), recorded, before)
+    contracts = found.text.split("## Contracts\n\n")[1]
+    assert contracts.startswith("````\norders.lookup@1 changed without a new version")
+    assert contracts.endswith("\n````\n")
+    assert contracts.count("````") == 2
+
+
+def test_a_path_in_a_code_span_is_fenced_past_its_backticks() -> None:
+    # Not every key that becomes a path is checked against a name's pattern: a code span is
+    # fenced by one backtick more than its longest run, padded where it starts or ends with one.
+    assert code("steps.pay") == "`steps.pay`"
+    assert code("steps.a``b") == "```steps.a``b```"
+    assert code("`steps") == "`` `steps ``"
+    assert code("a\nb") == "`a b`"  # a line break shown as a space: a span is one line
