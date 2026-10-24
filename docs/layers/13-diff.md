@@ -1734,3 +1734,45 @@ Each starts with its negative test, seen failing for the right reason.
 3. **Fail closed and never hidden** (choices 67 and 69): a refused package fails the step; a
    summary past the limit says where the whole text is.
 4. **The workflow, the guide, the Promises** (choices 70 to 72, 75, 76): the read-only test.
+
+### Decided while building
+
+- **A package only one tree shows is never said removed, or new, while the other tree has one it
+  can't read** (slice 3, found writing its negative test): the unreadable one may be it. Such a
+  package reads "not compared: a package in the head can't be read (below)", and the step fails.
+- **Two packages of one name in a tree are refused**, naming the second folder: a record names a
+  package by its case's `case` (brief, D50), so which one merging releases would be a guess.
+- **Two messages were pinned from what the code says,** not what I guessed: the diff's refusal of
+  a contract the catalog doesn't hold, and Python's reading of a `case.json` that isn't JSON.
+- **The workflow's test reads the lines that do something,** its comments left out: the workflow's
+  own comment says it never uses `pull_request_target`.
+- **Both checkouts in `changes` keep no credentials** (`persist-credentials: false`): the token,
+  read-only anyway, stays out of their git configuration.
+- **The base's commit reaches the command through an environment variable** (`BASE_COMMIT`),
+  never written into the shell line by GitHub's expressions.
+- **The workflow's commands were run locally first**, against `main` in its own worktree: `uv run
+  --directory base --locked ventoux promises` builds the base's own environment, its progress on
+  stderr and the promises alone on stdout; then `ventoux summary`, exit 0.
+- **A diff's plain form keeps its own headings** (`## refund: what changes`), at the level of the
+  summary's `## Packages` and `## Contracts`: the summary shows it as `ventoux diff --plain` prints
+  it.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`Y` is `tests/test_summary.py` (new), `R` is 13d's `tests/test_promise.py`. Checked against the
+tests, 2026-10-24: every test named here exists, every test in `Y` is named here, and every test
+13e added to `R` is named here.
+
+| Promise | Test |
+|---|---|
+| A number written otherwise in a promise is said as the hash writes it (`2 -> 2.0`); a hash that differs where no path does says what changed can't be said, never a contract with nothing under it | R `test_a_number_written_otherwise_is_said_as_the_hash_reads_it`, `test_a_hash_that_differs_where_no_path_does_says_so` |
+| What merging does to each package, from 12a's digest and wording: nothing, a wording revision, a new release, a first release, removed, never left out; matched by name | Y `test_what_merging_does_to_each_package`, `test_a_package_only_in_the_base_is_said_removed`, `test_packages_are_matched_by_name_not_by_folder` |
+| The curriculum's negative test, end to end: an input policy loosened reads Looser in the summary, and fails nothing | Y `test_an_input_policy_loosened_reads_as_looser_in_the_summary` |
+| The contracts: the hash check with the base commit's own promises; a contract changed in place says what changed and fails the step; matching contracts are said to | Y `test_a_contract_changed_in_place_says_what_changed_and_fails`, `test_contracts_that_match_are_said_to` |
+| Fail closed: a package that can't be read, a diff the catalog can't make, a checkout that isn't a folder, base promises that can't be read: each fails the step, said in the summary, and nothing is read as removed or unchanged on a guess | Y `test_a_package_that_cant_be_read_fails_the_step_and_is_never_read_as_removed`, `test_a_diff_the_catalog_cant_make_fails_the_step`, `test_a_base_that_isnt_a_folder_cant_be_read`, `test_base_promises_that_cant_be_read_fail_and_say_so` |
+| Never hidden: the whole text to the log, appended to the summary file; past the limit, one line per package and where the whole text is | Y `test_the_command_logs_the_whole_summary_and_appends_it`, `test_a_summary_past_the_limit_says_where_the_whole_text_is`, `test_the_command_says_where_a_summary_too_long_is` |
+| Sends nothing: `permissions: contents: read`, never `pull_request_target`, nothing that writes or comments; the summary job on pull requests only, from the base's own promises, both checkouts without credentials | Y `test_the_workflow_sends_nothing_and_reads_only`, `test_the_summary_runs_on_pull_requests_from_the_base_s_own_promises` |
+| The existing checks are as they were, the cached CLI included; a push to `main` runs them only | Y `test_the_existing_checks_are_as_they_were` |
+| The releases guide's summary runs as written | Y `test_the_guides_summary_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal: the summary is `tooling`'s | `tests/test_layers.py`, unchanged |
