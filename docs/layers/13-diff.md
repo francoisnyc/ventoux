@@ -992,11 +992,118 @@ And the start of the refund's sheet:
     of every kind of entry) and D55 (the plain form, and "written otherwise"). No new dependency.
     *Recommended.*
 
+### Choices from the tutor review of #49
+
+What the review showed, each with a run. The runtime excludes from approving a step only the
+person whose answer the step reads *now* (D11, `someone_else` reads the case's current sources),
+and a later answer replaces an earlier one:
+
+- an edited value comes from its proposer and its approver (D52), so once `approved_amount` is
+  edited, whoever answered `review` may approve `pay`, which reads it;
+- a repeatable task answered a second time gives its new answerer's values, so the first answerer
+  may approve;
+- a field another task's answer also sets (13b's `recheck`) holds whichever answer came last.
+
+So the sheet's "never let whoever answers review approve pay" is false where `pay` reads a field
+a form sets, and 13b's "stricter: whoever answers recheck is now excluded from approving pay" is
+false when recheck's answer replaces review's value. The engine-wide line ("let anyone approve a
+step their own answer feeds") stays true: it says *feeds*, what the step reads now.
+
+What is fixed: a task's **outcome** can't be edited (D52: "an outcome or an output records what
+happened"), and a task that isn't repeatable is answered once. So when a step's inputs or its
+`when` read `review.outcome` itself, and `review` isn't repeatable, the person who answered review
+is the outcome's source in every run of the step, and is excluded from approving it every time.
+
+45. **"Who may not approve" on the sheet: said only where it is proven for every case,** that is,
+    for a task's outcome the step's inputs or its `when` read directly, the task not repeatable.
+    Not said for a field a form sets (an edit, a second answer or another writer replaces its
+    sources), nor for anything read through a rule (a rule's field may be edited). The line keeps
+    its words: "let whoever answers review approve pay". The cases guide's refund is unchanged:
+    none of its case steps has an approval, so it says no such line today; 13b's `excluding`
+    refund, whose `pay` reads `approved_amount`, says none after this.
+
+    Weighed: the tutor's proposal, kept as it is. Set aside: a line with its exceptions ("… unless
+    the value is edited or answered again"), which is no longer a never; and dropping the kind from
+    `NEVERS`, which loses a line that is proven. *Recommended.*
+
+46. **13b's exclusion verdict, from the same proof.** Each version gives two sets for a step: who
+    *may* be excluded (`excluded` today, every person whose answer can reach what it reads) and
+    who is excluded *in every run* (by choice 45's proof). Then:
+    - **stricter** only if nobody leaves either set and everyone the new version may exclude it
+      excludes in every run;
+    - **looser** if someone leaves either set (no longer possibly excluded, or no longer excluded
+      every time) and nobody joins the first;
+    - **not proven** otherwise, which reads as looser.
+
+    Weighed against the tutor's "a newly excluded person is not proven unless the same proof
+    holds": right for the newcomer, but not enough, for two runs it misses:
+    - a newcomer proven while an old exclusion weakens: `pay` starts reading `check.outcome`
+      (proven), and `check`'s form also sets `approved_amount`, which `pay` already read. Whoever
+      answers review was excluded before; after, not once check answers. The proposal says
+      stricter; this choice says not proven;
+    - the same people, a proof lost: `pay` stops reading `review.outcome` and reads
+      `approved_amount`, set by review. Both versions may exclude whoever answers review, so
+      nothing is said today; after an edit, they may approve. This choice says looser.
+
+    The witness becomes a proven one: `pay` with `when: review.outcome = "approve"`, then
+    without (Ana reviews and approves the payment: refused, then accepted). The three runs of the
+    review become negative tests: the edit and the repeatable task each give no sheet line, and
+    13b's `recheck` gives "not proven", never "stricter", with the run where review's answerer
+    approves `pay` after the change and is refused before it. 13b's
+    `test_a_step_that_starts_reading_an_answer_excludes_its_people` (from `amount` to
+    `approved_amount`) becomes "not proven", and says why. *Recommended.*
+
+47. **Where it is recorded:** a dated line on D55 (the exclusion verdict, choice 46) and on D56
+    (the sheet's line, choice 45, and the heading, choice 48). Nothing on D11: it says what the
+    runtime does, and the runtime is unchanged. *Recommended.*
+
+48. **The sheet's heading says for which cases it holds.** "For every case of refund" holds only
+    while a case runs this release: a migration moves a case to the target release (D53), whose
+    definition the sheet doesn't read, and a field with no `visible_to` follows the target's
+    roles. Offered:
+    - (a) `## For every case of refund, while it runs this release`;
+    - (b) `## For every case running this release of refund`;
+    - (c) `## For every case of this release of refund`.
+
+    *Recommended:* (a), the scope said where it ends. The engine's heading stays as it is: its
+    lines hold whatever release a case runs.
+
+49. **The cases guide says what a migration does to the sheet,** one sentence after the
+    paragraph on the package's own lines: "A migration moves a case to the target release, and
+    so to that release's sheet: the diff between the two releases (`ventoux diff`, in the
+    releases guide) says what the move loosens." The guide's pasted output is made again from the
+    command, and runs as written. *Recommended.*
+
+50. **A plan state's `timeout` written otherwise (optional finding).** `48h` -> `2d` counts as
+    "may loosen" today: choice 38 covered only `max_age`, and a plan's approval or wait state's
+    `timeout` falls to the default, not proven. Offered: compare a `timeout` as a duration, as
+    `max_age` is; the same duration is a "written otherwise" line, how the history words it said
+    if it does; a different one stays not proven (what a timeout leads to decides whether shorter
+    is looser, and the diff doesn't judge that). The negative test as choice 38's: no verdict,
+    never counted as may loosen, the digest's path covered. *Recommended:* small, the same
+    function, and a line nobody should have to read as a doubt.
+
+51. **A test that "who sees" on the sheet counts registered roles only (optional finding).** The
+    sheet filters roles the catalog registers (13b found the diff counted unregistered ones), and
+    no test pins it there. Offered: a field `visible_to` a role nobody registers reads as seen by
+    the registered roles only ("show … to anyone" when none), shown failing with the filter taken
+    out. *Recommended.*
+
+The notify witness needs no choice (from the review): a contract declared `notify` joins
+`test_what_changes_the_world_is_read_from_declared_effects`, and taking `notify` out of
+`CHANGES_THE_WORLD` must fail it.
+
 ### The flaky activation test
 
 `test_activate_refuses_a_release_no_worker_serves` (12e) has failed twice, each in a full run, its
 message never kept. From 13c on, every full run's output is kept (`uv run pytest > run.txt 2>&1`);
 if it fails, the whole output is kept and said in the pull request.
+
+A carried note, not fixed in 13c (from the review of #49): its root cause is not known. Load is
+not it: over three full runs, every dev-server start took 0.12 to 0.21 s, the file's first
+included, which is the one that failed, and the failing run captured no output from the server.
+The test's harness is unchanged in this pull request. The next step is to keep the server's own
+output when a start fails, then find the cause from it.
 
 ### Not in 13c
 
@@ -1050,10 +1157,10 @@ Each starts with its negative test, seen failing for the right reason.
   didn't start in time, in `WorkflowEnvironment.start_local`:
   `RuntimeError: Failed starting Temporal dev server: ephemeral server at 127.0.0.1:39227 did not
   start within 5s. Make sure another download isn't stuck and delete the temp file.`
-  `tests/test_temporal_activate.py`'s `on_dev_server` starts a fresh dev server for each test, and
-  under the full suite's load one start can take longer than the SDK's 5 seconds; alone, or in its
-  file, it never does. A cause in 12e's test harness, not in this layer's code: not fixed here, and
-  said in the pull request with a proposed fix (one dev server per module, started once).
+  I first put it down to load and proposed one dev server per module. The review corrected it:
+  every start took 0.12 to 0.21 s over three full runs, the failing one (the file's first)
+  included, and the failing run captured no output from the server. So the cause is not known; a
+  carried note (see "The flaky activation test" above), the harness unchanged here.
 
 ### Promises
 
