@@ -1332,10 +1332,11 @@ diff does:
 - **A contract changed without a new version.** The hash check says `payments.refund@2 changed
   without a new version: register it as payments.refund@3.` and nothing about what changed. The
   cause can be invisible: renaming the input class changes its JSON Schema, so the hash (design
-  question 16; the user named it "learning question 16": the learning log's 16 is task outcomes).
+  question 16, in the brief).
   The message becomes path by path: `timeouts.start_to_close: 10 -> 30`.
 
-A small example, the guide's second release (the plan's approval given 72 hours, not 48):
+A small example, the guide's second release (the plan's approval given 72 hours, not 48), as the
+choices below would print it:
 
 ```
 $ ventoux release examples/packages/refund --releases releases --commit c90d4e2
