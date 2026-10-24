@@ -8,7 +8,7 @@ refuses the release: nothing is recorded without them. See docs/layers/13-diff.m
 from collections.abc import Sequence
 
 from ventoux.case.changes import Against, DiffRefused, Notes
-from ventoux.case.diff import diff
+from ventoux.case.diff import Diff, diff
 from ventoux.case.releases import METHOD, Hash, Record, RecordRefused, changed, stored
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract_hash import contract_hash
@@ -85,3 +85,23 @@ def promised_as_recorded(earlier: Record, catalog: Catalog) -> None:
             raise NotesRefused(
                 f"{reference}'s promise in the catalog isn't the one {where} recorded"
             )
+
+
+def told(kept: Record) -> str:
+    """`kept`'s notes as a reader reads them, in the diff's own words (brief, D57): what they are
+    against, then the summary and each line as `ventoux diff` prints them."""
+    name = f"{kept.name} {kept.release}" + (f", wording {kept.wording}" if kept.wording > 1 else "")
+    if kept.notes is None:
+        return f"{name}: no notes: recorded before layer 13d\n"
+    against = kept.notes.against
+    if against is None:
+        return f"{name}: the first release, nothing to compare\n"
+    wording = f", wording {against.wording}" if against.wording > 1 else ""
+    return f"{name}, against {kept.name} {against.release}{wording}:\n{as_diff(kept)}"
+
+
+def as_diff(kept: Record) -> Diff:
+    """`kept`'s notes as the diff they were made from."""
+    assert kept.notes is not None
+    notes = kept.notes
+    return Diff(kept.name, notes.changes, notes.wording, notes.rewritten)

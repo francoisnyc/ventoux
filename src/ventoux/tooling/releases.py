@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
+from ventoux.case.changes import Notes
 from ventoux.case.notes import notes_for
 from ventoux.case.releases import (
     Hash,
@@ -147,6 +148,7 @@ class Run:
     outcome: Outcome
     warnings: Sequence[Issue]
     written: bool  # a record was written now; False when it was already there, or nothing was due
+    notes: Notes | None = None  # the notes of the record it made; None when it made none
 
 
 def release(folder: Path, store: FolderStore, commit: str, catalog: Catalog) -> Run:
@@ -156,12 +158,13 @@ def release(folder: Path, store: FolderStore, commit: str, catalog: Catalog) -> 
     warnings = checked(released, catalog)
     records = store.records(released.name)
     outcome = next_release(released, records)
-    wrote = False
+    wrote, notes = False, None
     if isinstance(outcome, Released | Reworded):
         made = record(released, outcome, commit, catalog)
         # Nothing is recorded without its notes, made from the stored packages (brief, D57).
-        wrote = store.write(replace(made, notes=notes_for(made, records, catalog)))
-    return Run(released.name, digest(released), outcome, warnings, wrote)
+        notes = notes_for(made, records, catalog)
+        wrote = store.write(replace(made, notes=notes))
+    return Run(released.name, digest(released), outcome, warnings, wrote, notes)
 
 
 def checked(released: Package, catalog: Catalog) -> list[Issue]:

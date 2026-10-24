@@ -19,6 +19,7 @@ from ventoux.case.notes import NotesRefused, notes_for
 from ventoux.case.releases import Package, Record, RecordRefused, stored
 from ventoux.core.catalog import Catalog
 from ventoux.testing import CATALOG
+from ventoux.tooling.cli import main
 from ventoux.tooling.releases import FolderStore, release
 
 # --- Slice 3: notes in the record ----------------------------------------------------------------
@@ -148,3 +149,86 @@ def test_a_wording_revisions_diff_saying_more_refuses_it(
     monkeypatch.setattr("ventoux.case.notes.diff", saying_more)
     with pytest.raises(NotesRefused, match="a wording revision's diff says more than wording$"):
         release(folder, store, "a2", CATALOG)
+
+
+# --- Slice 4: the commands -----------------------------------------------------------------------
+
+
+def test_the_release_command_refuses_when_the_notes_cant_be_made(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder, releases = copied(tmp_path), tmp_path / "releases"
+    assert main(["release", str(folder), "--releases", str(releases), "--commit", "a1"]) == 0
+    first = releases / "refund" / "1.json"
+    kept = json.loads(first.read_text())
+    kept["contracts"]["payments.refund@2"]["sha256"] = "0" * 64
+    first.write_text(json.dumps(kept, indent=2, sort_keys=True) + "\n")
+    edited(folder, requiring())
+    capsys.readouterr()
+    assert main(["release", str(folder), "--releases", str(releases), "--commit", "a2"]) == 1
+    assert capsys.readouterr().err == (
+        f"{folder}: refund 2's notes can't be made: payments.refund@2's promise in the catalog "
+        "isn't the one refund 1 recorded\n"
+    )
+
+
+def test_the_release_command_prints_the_notes_after_what_it_did(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The same words as `ventoux diff` (brief, D57); a first release has nothing to compare.
+    folder, releases = copied(tmp_path), tmp_path / "releases"
+    main(["release", str(folder), "--releases", str(releases), "--commit", "a1"])
+    assert capsys.readouterr().out.count("\n") == 1
+    edited(folder, requiring())
+    main(["release", str(folder), "--releases", str(releases), "--commit", "a2"])
+    (_, second) = FolderStore(releases).records("refund")
+    # The package's own warning first (settle now reads review's outcome without waiting for it).
+    assert capsys.readouterr().out == (
+        "warning: steps.settle.when: MAY_BE_UNSET: settle reads review.outcome, and doesn't wait "
+        "for review, which gives it: if settle runs first, it fails and needs attention: require "
+        "review\n"
+        f"refund 2 released: digest {second.digest.sha256[:12]} (method 1); behaviour changed at "
+        "steps.settle.requires\n"
+        "refund: 1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; no wording "
+        "change\n"
+        "looser     steps.settle.requires: review -> nothing\n"
+    )
+
+
+def test_the_notes_command_reads_a_records_notes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    released_twice(tmp_path)
+    releases = str(tmp_path / "releases")
+    capsys.readouterr()
+    assert main(["notes", "refund", "1", "--releases", releases]) == 0
+    assert capsys.readouterr().out == "refund 1: the first release, nothing to compare\n"
+    assert main(["notes", "refund", "2", "--releases", releases]) == 0
+    assert capsys.readouterr().out == (
+        "refund 2, against refund 1:\n"
+        "refund: 1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; no wording "
+        "change\n"
+        "looser     steps.settle.requires: review -> nothing\n"
+    )
+    assert main(["notes", "refund", "2", "--releases", releases, "--plain"]) == 0
+    said = capsys.readouterr().out
+    assert said.startswith("## refund: what changes\n")
+    assert "- **Looser** (`steps.settle.requires`): review -> nothing." in said
+
+
+def test_the_notes_command_says_a_record_has_none_and_refuses_one_it_lacks(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    released_twice(tmp_path)
+    releases = tmp_path / "releases"
+    first = releases / "refund" / "1.json"
+    kept = json.loads(first.read_text())
+    del kept["notes"]  # as 12a wrote it
+    first.write_text(json.dumps(kept))
+    capsys.readouterr()
+    assert main(["notes", "refund", "1", "--releases", str(releases)]) == 0
+    assert capsys.readouterr().out == "refund 1: no notes: recorded before layer 13d\n"
+    assert main(["notes", "refund", "3", "--releases", str(releases)]) == 1
+    assert capsys.readouterr().err == (
+        f"refund 3 isn't released: no record of it in {releases / 'refund'}\n"
+    )

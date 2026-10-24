@@ -159,8 +159,14 @@ def test_the_base_commits_promises_say_what_changed(
     lock.write_text(json.dumps(recorded))
     before.write_text(json.dumps(promises))
     assert main(["hashes", "--lock", str(lock), "--before", str(before)]) == 1
-    now = CATALOG.lookup(LOOKUP).model_dump()["timeouts"]["start_to_close"]
-    assert capsys.readouterr().out == (
+    said = capsys.readouterr().out
+    assert said == (
         "orders.lookup@1 changed without a new version: register it as orders.lookup@3.\n"
-        f"  timeouts.start_to_close: 5 -> {now}\n"
+        "  timeouts.start_to_close: 5 -> 10\n"
     )
+    # The activities guide shows this run as it prints.
+    guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
+    block = guide.split("**What changed, path by path.**")[1].split("```\n")[1]
+    command, printed = block.split("\n", 1)
+    assert command == "$ ventoux hashes --lock contracts.lock.json --before base-promises.json"
+    assert printed == said

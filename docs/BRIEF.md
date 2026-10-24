@@ -1921,7 +1921,9 @@ answers design question 16, whose text is kept.*
   that release's latest is refused.
 - **Amended 2026-10-24, by D57** (the text above stands; this adds to it): a record also keeps
   its release notes, the semantic diff against the record before it, beside the paths; "until the
-  semantic diff, those paths are the release notes" ends there.
+  semantic diff, those paths are the release notes" ends there. The paths still name no value;
+  the notes show what the definition writes (a literal input included), never a value a case
+  holds (D55).
 
 ### D51. A case runs the release it opened on, and says its engine version
 

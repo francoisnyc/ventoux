@@ -460,7 +460,11 @@ def test_the_command_says_what_it_did(tmp_path: Path, capsys: Any) -> None:
     edited(folder, retitled("Pay the refund"))
     assert command(folder, releases, "a2", capsys)[:2] == (
         0,
-        "refund 1, wording 2: steps.settle.display.title changed; no release\n",
+        (
+            "refund 1, wording 2: steps.settle.display.title changed; no release\n"
+            "refund: no behaviour change; 1 wording change\n"
+            'wording    steps.settle.display.title: "Settle the refund" -> "Pay the refund"\n'
+        ),
     )
     # Refused: exit 1, each problem said; unreadable: exit 2.
     (folder / "notes.txt").write_text("to do")
@@ -477,25 +481,33 @@ def test_the_command_says_what_it_did(tmp_path: Path, capsys: Any) -> None:
 
 
 def test_the_tool_names_paths_never_values(tmp_path: Path, capsys: Any) -> None:
+    # The record's paths name no value (brief, D50). Since layer 13d its notes follow, which show
+    # a literal as the definition writes it, never a value a case holds (brief, D57): learning
+    # question 11's letter is behaviour, said with its text.
     folder, releases = tmp_path / "letter", tmp_path / "releases"
     folder.mkdir()
     (folder / "case.json").write_text(json.dumps(lettered("We are pleased to confirm.")))
     command(folder, releases, "a1", capsys)
     (folder / "case.json").write_text(json.dumps(lettered("We are happy to confirm.")))
     code, out, _ = command(folder, releases, "a2", capsys)
-    assert code == 0 and out.endswith("; behaviour changed at steps.draft.inputs.template\n")
+    first, *notes = out.splitlines()
+    assert code == 0 and first.endswith("; behaviour changed at steps.draft.inputs.template")
+    assert notes[-1] == (
+        "not proven steps.draft.inputs.template: We are pleased to confirm. -> We are happy to "
+        "confirm."
+    )
     record = (releases / "letter" / "2.json").read_text()
     changed = json.loads(record)["changed"]
     assert changed == {"behaviour": ["steps.draft.inputs.template"], "wording": []}
     for value in ("pleased", "happy"):
-        assert value not in out and value not in json.dumps(changed)
+        assert value not in first and value not in json.dumps(changed)
 
 
 GUIDE = ROOT / "docs" / "guides" / "releases.md"
 
 
 def guide_runs() -> list[tuple[list[str], str]]:
-    """Each `$ ventoux release …` in the guide's "Running it", with what it prints."""
+    """Each `$ ventoux …` in the guide's "Running it", with what it prints."""
     section = GUIDE.read_text().split("## Running it")[1].split("\n## ")[0]
     runs = []
     for block in section.split("```\n")[1::2]:
@@ -516,6 +528,7 @@ def test_the_guides_example_runs_as_written(tmp_path: Path, capsys: Any, monkeyp
         lambda: (folder / "plans" / "refund-order.json").write_text(
             (folder / "plans" / "refund-order.json").read_text().replace('"48h"', '"72h"')
         ),
+        lambda: None,  # then the notes of release 2, read again (layer 13d)
     ]
     runs = guide_runs()
     assert len(runs) == len(changes)

@@ -400,11 +400,31 @@ A contract never changes. To change one, register a new version next to the old 
 and packages that reference `@1` keep it until they adopt `@2`, which creates a release.
 
 To catch an edit made in place, the catalog hashes each contract (everything except `display`) and
-`contracts.lock.json` records each hash. A test in CI compares them:
+`contracts.lock.json` records each hash. A test in CI compares them, and so does `ventoux hashes
+--lock contracts.lock.json`, which exits 0 when every contract matches, 1 on any problem, and 2
+when a file can't be read:
 
 - a recorded contract whose hash changed fails: "`payments.refund@2` changed without a new
   version: register it as `@3`";
 - a contract that isn't recorded yet fails with the line to add.
+
+**What changed, path by path.** A hash can't be read back, so the lockfile alone can't say what
+changed, and the cause can be invisible: renaming the input class changes its JSON Schema, so the
+hash. Given the promises the base commit's own code prints (`ventoux promises`, each contract's
+promise as the hash reads it), the check says each path that changed, as the semantic diff does.
+Here the base commit's `orders.lookup@1` had a 5-second timeout:
+
+```
+$ ventoux hashes --lock contracts.lock.json --before base-promises.json
+orders.lookup@1 changed without a new version: register it as orders.lookup@3.
+  timeouts.start_to_close: 5 -> 10
+```
+
+A promise given is compared only if it hashes to what the lockfile records: otherwise the line
+says "what changed can't be said", since it would describe someone else's promise. Without
+promises, the line says how to give them. A contract's values are written by your platform team,
+never by a case, so they are shown. In CI, the base commit's promises come with the pull request
+step (layer 13e).
 
 ## Development activities
 

@@ -2,7 +2,8 @@
 --releases DIR --commit SHA` (layer 12a), an environment's commands (layer 12e): `ventoux
 environment create|harden|check`, `ventoux activate`, `ventoux retire`, `ventoux manifest publish`,
 `ventoux diff OLD NEW [--plain]` (layers 13a, 13c), `ventoux map FOLDER` (layer 13c), and
-`ventoux promises` and `ventoux hashes --lock FILE [--before PROMISES]` (layer 13d).
+`ventoux notes PACKAGE RELEASE --releases DIR`, `ventoux promises` and `ventoux hashes --lock
+FILE [--before PROMISES]` (layer 13d).
 
 Reading files and printing happen here, never in `core` or `case`, which read no clock and do no
 I/O (brief, D45). `ventoux check` comes with the Python builder (brief, D34).
@@ -19,7 +20,8 @@ from typing import Any
 
 from ventoux.case.changes import DiffRefused
 from ventoux.case.definition import CaseDefinition, CaseInvalid, parse_case
-from ventoux.case.diff import diff
+from ventoux.case.diff import Diff, diff
+from ventoux.case.notes import NotesRefused, as_diff, told
 from ventoux.case.plain import plain
 from ventoux.case.reading import ReadingRefused
 from ventoux.case.releases import (
@@ -29,6 +31,7 @@ from ventoux.case.releases import (
     Reworded,
     SameAs,
     Unchanged,
+    stored,
 )
 from ventoux.case.sheet import SheetRefused, case_map, never_sheet
 from ventoux.case.simulate import StoryRefused, simulate
@@ -76,6 +79,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "map", help="what a case of a package can do, and what it will never do"
     )
     mapping.add_argument("package", type=Path, help="the package's folder")
+    noting = commands.add_parser("notes", help="a release's notes, as its record keeps them")
+    noting.add_argument("package", help="the package: refund")
+    noting.add_argument("release", type=int, help="its release number")
+    noting.add_argument("--wording", type=int, default=1, help="one of its wording revisions")
+    noting.add_argument("--releases", type=Path, required=True, help="where records are kept")
+    noting.add_argument("--plain", action="store_true", help="in plain language, as Markdown")
     commands.add_parser("promises", help="each contract's promise, as the contract hash reads it")
     hashing = commands.add_parser(
         "hashes", help="check each contract against contracts.lock.json, saying what changed"
@@ -94,6 +103,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return diff_packages(arguments.old, arguments.new, arguments.plain)
     if arguments.command == "map":
         return map_package(arguments.package)
+    if arguments.command == "notes":
+        return print_notes(
+            arguments.package,
+            arguments.release,
+            arguments.wording,
+            arguments.releases,
+            arguments.plain,
+        )
     if arguments.command == "promises":
         return print_promises()
     if arguments.command == "hashes":
@@ -154,7 +171,7 @@ def release_package(folder: Path, releases: Path, commit: str) -> int:
     was refused (brief, D50). Paths and names only, never a value."""
     try:
         run = release(folder, FolderStore(releases), commit, CATALOG)
-    except (PackageRefused, RecordRefused) as refused:
+    except (PackageRefused, RecordRefused, NotesRefused) as refused:
         print(Unreadable(folder, str(refused)), file=sys.stderr)
         return FAILS
     except (PackageUnreadable, OSError) as unreadable:
@@ -163,6 +180,8 @@ def release_package(folder: Path, releases: Path, commit: str) -> int:
     for issue in run.warnings:
         print(f"warning: {said(issue)}")
     print(what_it_did(run))
+    if run.notes is not None and run.notes.against is not None:
+        print(Diff(run.package, run.notes.changes, run.notes.wording, run.notes.rewritten), end="")
     return HOLDS
 
 
@@ -201,6 +220,28 @@ def map_package(folder: Path) -> int:
         return FAILS
     except (PackageUnreadable, OSError) as unreadable:
         print(Unreadable(folder, str(unreadable)), file=sys.stderr)
+        return CANT_READ
+    print(said, end="")
+    return HOLDS
+
+
+def print_notes(name: str, number: int, wording: int, releases: Path, in_plain: bool) -> int:
+    """Print a record's notes, as it keeps them: in the developer form, or the plain one, read
+    from the two stored packages (brief, D57). Exit 1 when the record isn't there or a reading is
+    refused, 2 when the records can't be read."""
+    store = FolderStore(releases)
+    try:
+        kept = store.get(name, number, wording)
+        said = told(kept)
+        against = None if kept.notes is None else kept.notes.against
+        if in_plain and against is not None:
+            before = stored(store.get(name, against.release, against.wording), name)
+            said = plain(as_diff(kept), before, stored(kept, name), CATALOG)
+    except (RecordRefused, ReadingRefused) as refused:
+        print(refused, file=sys.stderr)
+        return FAILS
+    except OSError as unreadable:
+        print(f"{releases}: can't be read: {unreadable.strerror}", file=sys.stderr)
         return CANT_READ
     print(said, end="")
     return HOLDS

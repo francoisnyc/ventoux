@@ -1338,12 +1338,13 @@ diff does:
   question 16, in the brief).
   The message becomes path by path: `timeouts.start_to_close: 10 -> 30`.
 
-A small example, the guide's second release (the plan's approval given 72 hours, not 48), as the
-choices below would print it:
+A small example, the guide's second release (the plan's approval given 72 hours, not 48), as
+13d prints it:
 
 ```
 $ ventoux release examples/packages/refund --releases releases --commit c90d4e2
-refund 2 released: digest dfdac910acbb (method 1); 1 may loosen
+refund 2 released: digest dfdac910acbb (method 1); behaviour changed at plans.refund-order@1.states.approve_refund.approval.timeout
+refund: 1 behaviour change: 1 may loosen (0 looser, 1 not proven), 0 stricter; no wording change
 not proven plans.refund-order@1.states.approve_refund.approval.timeout: 48h -> 72h
 ```
 
@@ -1502,3 +1503,58 @@ Each starts with its negative test, seen failing for the right reason.
    a contract whose hash isn't the earlier record's refused; notes that say less than the digest
    refused; a wording revision; the first release; recomputed from the records alone.
 4. **`ventoux notes`, the guides, the Promises** (choices 55 and 62).
+
+### Decided while building
+
+- **`ventoux notes PACKAGE RELEASE`, not `FOLDER`** (slice 4). Choice 55 wrote `ventoux notes
+  FOLDER`, but a folder is the working tree, which the notes never read: the package's name and
+  the records are all they need. So it takes the name and the number, as `ventoux activate` does:
+  `ventoux notes refund 2 --releases releases [--wording K] [--plain]`.
+- **The diff's wording line and `quoted` moved to `case/changes.py`** (slice 3), beside `Change`
+  and `Rewritten`: a record keeps all three, and `case/releases.py` can't import `case/diff.py`,
+  which imports it.
+- **A note shows a literal as the definition writes it** (slice 4). 12a's
+  `test_the_tool_names_paths_never_values` said `ventoux release` prints no value; its first line
+  still names paths only, and the record's `changed` too, but the notes after it show the
+  letter's text, written in the definition (13a's choice 9; learning question 11, told at this
+  part's warm-up). The test now pins both, and D50's dated line says so.
+- **The notes are made in the release tool, and the store refuses a record without them**
+  (slice 3): `record` builds the record as 12a's did, `notes_for` adds its notes from the records,
+  and `FolderStore.write` refuses a record whose notes are missing, so nothing written skips them.
+- **Two guards only a bug could trip** (notes that say less than the digest, a wording
+  revision's diff saying more than wording) are tested by giving the notes a diff that says too
+  little or too much (`monkeypatch`): no package makes the real diff do either.
+- **`promise_of` moved out of the contract hash** (slice 0), so the hash, the readable diff and
+  `ventoux promises` read one promise; every hash in `contracts.lock.json` is unchanged.
+- **Promises are read as plain JSON** (slice 1), never with numbers as decimals as a definition is:
+  a promise is hashed as JSON gives it (`2.0` stays `2.0`), and a decimal is a value no promise
+  holds.
+- **`ventoux release` prints notes only when they compare something**: a first release prints its
+  one line, as before.
+- **One partial run** (selected with `-k release`, which includes the Temporal activation tests)
+  had one failure whose output I didn't keep; the same selection passed when run again. Every run
+  after it kept its output.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`R` is `tests/test_promise.py` (new), `N` is `tests/test_notes.py` (new), `C` is
+`tests/test_catalog.py`, `D` is `tests/test_diff.py`, `E` is `tests/test_releases.py`. Checked
+against the tests, 2026-10-24: every test named here exists, and every test in `R` and `N` is
+named here.
+
+| Promise | Test |
+|---|---|
+| A promise is compared leaf by leaf, in dotted paths: a value changed as `before -> after`, a key one side has as added or removed with its value, a list whole, outcomes never by their order; the class rename the hash hides is named | R `test_a_value_changed_is_said_path_by_path`, `test_a_key_one_side_has_is_added_or_removed_with_its_value`, `test_a_list_is_shown_whole_and_outcomes_never_by_their_order`, `test_a_class_renamed_shows_the_cause_the_hash_hides` |
+| A promise holding a value no JSON holds is refused, never skipped | R `test_a_value_that_isnt_json_is_refused` |
+| A contract changed in place says what changed, given the base commit's promise; a promise given that isn't the one the lockfile records is never compared; none given for it, or none at all, is said | R `test_a_contract_changed_in_place_says_what_changed`, `test_a_promise_given_that_isnt_the_lockfiles_is_never_compared`, `test_a_contract_with_no_promise_given_says_so`; C `test_a_contract_changed_without_a_new_version_is_reported` |
+| `ventoux promises` prints each contract's promise; `ventoux hashes` passes when every contract matches, says what changed from the base's promises (the activities guide's example, as written), and exits 2 when a file can't be read | R `test_hashes_passes_when_every_contract_matches`, `test_the_base_commits_promises_say_what_changed`, `test_hashes_refuses_promises_it_cant_read` |
+| Every hash in `contracts.lock.json` is unchanged | C `test_every_development_contract_matches_its_recorded_hash` |
+| The diff's contract lines go path by path; an input or output only one contract has is said once; input policies stay judged, never repeated as paths | D `test_other_contract_differences_are_said_not_proven`, `test_an_input_policy_loosened_is_reported_looser` |
+| A record keeps its notes: the diff of the two stored packages, the same when made from the records alone; a first release's against nothing; a wording revision's wording only | N `test_a_releases_notes_are_the_diff_of_the_stored_packages`, `test_a_wording_revisions_notes_hold_wording_only` |
+| A contract the earlier record names that promises otherwise now refuses the release, and nothing is written | N `test_a_contract_whose_promise_isnt_the_earlier_records_refuses_the_release`, `test_the_release_command_refuses_when_the_notes_cant_be_made` |
+| Notes that say less than the digest refuse the release, naming the paths; a wording revision whose diff says more than wording is refused | N `test_notes_that_say_less_than_the_digest_refuse_the_release`, `test_a_wording_revisions_diff_saying_more_refuses_it` |
+| Nothing is written without its notes; a record from before 13d reads with none and is said so; notes that aren't a proof are refused when read | N `test_nothing_is_written_without_its_notes`, `test_a_record_from_before_13d_reads_with_no_notes`, `test_the_notes_command_says_a_record_has_none_and_refuses_one_it_lacks`, `test_notes_that_arent_a_proof_are_refused_when_read` |
+| Notes are given no case file; the record's paths name no value, the notes show a literal as the definition writes it | N `test_notes_are_given_no_case_file`; E `test_the_tool_names_paths_never_values` |
+| `ventoux release` prints the notes after what it did, in the diff's words; `ventoux notes` reads them again, plain with `--plain`; the releases guide's runs, as written | N `test_the_release_command_prints_the_notes_after_what_it_did`, `test_the_notes_command_reads_a_records_notes`; E `test_the_command_says_what_it_did`, `test_the_guides_example_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal, in the new modules too | `tests/test_layers.py`, unchanged |
