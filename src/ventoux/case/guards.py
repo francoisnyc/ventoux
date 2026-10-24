@@ -7,7 +7,7 @@ on fewer wherever it is false (13b, choice 19).
 See docs/layers/13-diff.md (13b).
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -18,6 +18,7 @@ from ventoux.case.sequence import requirements
 from ventoux.case.writers import could_come_from
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
+from ventoux.core.plan import ActivityState, ApprovalState, Plan
 from ventoux.core.provenance import fields_read
 from ventoux.core.roles import may_approve
 
@@ -29,6 +30,8 @@ class Versions:
     before: CaseDefinition
     after: CaseDefinition
     catalog: Catalog
+    plans_before: Mapping[str, Plan]  # the old version's plans, by reference
+    plans_after: Mapping[str, Plan]  # the new version's
 
     def called(self, case: CaseDefinition, step: str) -> Contract | None:
         """The contract `step` calls in `case`; None if it calls none. One the catalog doesn't
@@ -38,6 +41,13 @@ class Versions:
             return None
         try:
             return self.catalog.lookup(found.called)
+        except NotInCatalog as missing:
+            raise DiffRefused(f"{missing} The diff compares contracts from the catalog.") from None
+
+    def lookup(self, reference: str) -> Contract:
+        """The contract `reference` names; one the catalog doesn't hold refuses the diff."""
+        try:
+            return self.catalog.lookup(reference)
         except NotInCatalog as missing:
             raise DiffRefused(f"{missing} The diff compares contracts from the catalog.") from None
 
@@ -160,7 +170,7 @@ def step_guards(step: str, versions: Versions) -> Iterator[Change]:
 
 
 def freshness(step: str, versions: Versions) -> Iterator[Change]:
-    """How old each fact `step` reads may be (`max_age`, brief, D18), compared as a duration, never
+    """How old each fact `step` reads may be (`max_age`) (brief, D18), compared as a duration, never
     as text (13b, choice 28): longer looser, shorter stricter; a fact no longer required fresh
     looser, newly required stricter."""
     old = getattr(versions.before.steps[step], "max_age", {})
@@ -368,3 +378,77 @@ def forgetting_change(leaf: Leaf) -> Change:
     if FORGETTING.index(new) > FORGETTING.index(old):
         return Change(leaf.path, "looser", f"{said} ({ERASES[new]})", "forgetting")
     return Change(leaf.path, "stricter", said, "forgetting")
+
+
+# --- A plan's approvals --------------------------------------------------------------------------
+
+
+def plan_approvals(reference: str, versions: Versions) -> Iterator[Change]:
+    """Which of a plan's activity states an approval state approves (13b, choice 30): one no
+    approval state approves any more is looser, newly approved stricter, except a high-risk one,
+    which never runs unapproved, so neither is proven. Whether every path to it passes the
+    approval is layer 3's to check; the diff compares the approvals' targets only."""
+    old, new = versions.plans_before[reference], versions.plans_after[reference]
+    for name in merged(list(old.states), list(new.states)):
+        first, second = old.states.get(name), new.states.get(name)
+        if not isinstance(first, ActivityState) or not isinstance(second, ActivityState):
+            continue
+        by_before, by_after = approving(old, name), approving(new, name)
+        if bool(by_before) == bool(by_after):
+            continue  # approved in both, by whichever state, or in neither
+        path = f"plans.{reference}.states.{name}"
+        said = f"approved by {by_before or 'no approval state'} -> approved by "
+        said += by_after or "no approval state"
+        # The version without an approval: a high-risk activity there never runs (brief, D11).
+        bare = second if not by_after else first
+        contract = versions.lookup(bare.activity)
+        if contract.risk == "high":
+            never = "never runs" if not by_after else "never ran"
+            why = f"{contract.reference} is high risk: without an approval, {name} {never}"
+            yield Change(path, "not proven", f"{said} ({why})")
+        else:
+            verdict: Verdict = "looser" if not by_after else "stricter"
+            yield Change(path, verdict, said, "plan approvals")
+
+
+def approving(plan: Plan, state: str) -> str:
+    """The approval states that approve `state`, joined; empty if none does."""
+    return " and ".join(
+        name
+        for name, found in plan.states.items()
+        if isinstance(found, ApprovalState) and found.approval.of == state
+    )
+
+
+def plan_approvers_change(leaf: Leaf, versions: Versions) -> Change:
+    """A plan's approval roles, as the catalog lets them approve the approved activity's risk
+    (13b, choices 22, 23, 30)."""
+    parts = leaf.path.split(".")
+    reference, state = parts[1], parts[3]
+    old_roles, new_roles = leaf.before, leaf.after
+    assert isinstance(old_roles, tuple) and isinstance(new_roles, tuple)
+    first = approved_contract(versions.plans_before[reference], state, versions)
+    second = approved_contract(versions.plans_after[reference], state, versions)
+    if first is None or second is None:
+        return roles_change(leaf, versions, "plan approvers")
+    allowed_before = allowed(old_roles, first, versions)
+    allowed_after = allowed(new_roles, second, versions)
+    said = f"{shown(old_roles)} -> {shown(new_roles)}"
+    if allowed_before == allowed_after:
+        refused = [r for r in new_roles + old_roles if r not in allowed_after]
+        said += (
+            f" (the same roles may approve {second.reference}, {second.risk} risk: "
+            f"{', '.join(dict.fromkeys(refused))} may not)"
+        )
+        return Change(leaf.path, "not proven", said)
+    return widened(leaf.path, said, set(allowed_before), set(allowed_after), "plan approvers")
+
+
+def approved_contract(plan: Plan, state: str, versions: Versions) -> Contract | None:
+    """The contract of the activity the approval state `state` approves; None if it approves
+    something that isn't an activity state (an issue layer 3 reports)."""
+    found = plan.states.get(state)
+    if not isinstance(found, ApprovalState):
+        return None
+    target = plan.states.get(found.approval.of)
+    return versions.lookup(target.activity) if isinstance(target, ActivityState) else None

@@ -32,6 +32,8 @@ from ventoux.case.guards import (
     close_reason_change,
     count_change,
     forgetting_change,
+    plan_approvals,
+    plan_approvers_change,
     roles_change,
     step_condition_change,
     step_guards,
@@ -114,7 +116,7 @@ def diff(before: Package, after: Package, catalog: Catalog) -> Diff:
     """Every behaviour change from `before` to `after`, in the package's order, with wording
     apart. Refused (`DiffRefused`) if a comparison can't be made: a contract the catalog doesn't
     hold, a policy of a kind it doesn't know (brief, D55)."""
-    versions = Versions(before.case, after.case, catalog)
+    versions = Versions(before.case, after.case, catalog, before.plans, after.plans)
     changes = list(case_changes(versions))
     for reference in merged(list(before.plans), list(after.plans)):
         path = f"plans.{reference}"
@@ -122,6 +124,8 @@ def diff(before: Package, after: Package, catalog: Catalog) -> Diff:
             leaves(before.plans.get(reference, MISSING), after.plans.get(reference, MISSING), path),
             versions,
         )
+        if reference in before.plans and reference in after.plans:
+            changes += plan_approvals(reference, versions)
     return Diff(after.name, tuple(changes), reworded(before, after, changes))
 
 
@@ -263,7 +267,9 @@ ROLES = {
     ("steps", "*", "proposed_by"): "proposers",
     ("events", "*", "sent_by", "roles"): "senders",
     ("close_reasons", "*", "roles"): "closers",
+    ("plans", "*", "states", "*", "wait", "roles"): "plan answerers",
 }
+PLAN_APPROVERS = ("plans", "*", "states", "*", "approval", "roles")
 
 
 def roles_compared(path: str) -> str | None:
@@ -308,6 +314,8 @@ def judged(
             yield switch_change(leaf, switch)
         elif (comparison := roles_compared(leaf.path)) is not None:
             yield roles_change(leaf, versions, comparison)
+        elif at(leaf.path, PLAN_APPROVERS):
+            yield plan_approvers_change(leaf, versions)
         elif any(at(leaf.path, pattern) for pattern in MARKS):
             yield mark_change(leaf)
         elif at(leaf.path, SENSITIVE):
@@ -460,7 +468,12 @@ def output_changes(path: str, called: str, old: Contract, new: Contract) -> Iter
             continue
         said = f"{called}: output {name}: was {before[name]}; now {after[name]}"
         trusted_before, trusted_after = is_trusted(before[name]), is_trusted(after[name])
-        if trusted_after and not trusted_before:
+        if path.startswith("plans."):
+            # A plan keeps no activity's outputs: its fields come from the case and from answers,
+            # and a plan step gives none (brief, D28). A widening there guards nothing: said, never
+            # judged (13b, choice 31).
+            yield Change(path, "not proven", f"{said} (a plan keeps no activity's outputs)")
+        elif trusted_after and not trusted_before:
             yield Change(path, "looser", said, "output source")
         elif trusted_before and not trusted_after:
             yield Change(path, "stricter", said, "output source")

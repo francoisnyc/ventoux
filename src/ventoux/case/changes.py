@@ -47,6 +47,9 @@ COMPARISONS = (
     "close reasons",  # the ways people may close a case (brief, D10)
     "freshness",  # how old a fact a step reads may be (brief, D18)
     "forgetting",  # when a case may be forgotten (brief, D32)
+    "plan approvals",  # which of a plan's activities an approval state approves (13b, choice 30)
+    "plan approvers",  # who may approve in a plan, as its activity's risk allows (brief, D11)
+    "plan answerers",  # who may answer a plan's wait (brief, D22)
 )
 
 

@@ -19,6 +19,7 @@ from test_diff import (
     refund,
     refund_contract,
     refund_input,
+    settling,
     witnessed,
 )
 
@@ -27,6 +28,7 @@ from ventoux.case.answers import AnswerRefused
 from ventoux.case.closing import CloseRefused
 from ventoux.case.diff import diff
 from ventoux.case.memory import CaseRun
+from ventoux.case.releases import Package
 from ventoux.case.runtime import EventRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.policy import trusted_only
@@ -557,6 +559,147 @@ def test_a_fact_no_longer_required_fresh_is_looser() -> None:
     ]
 
 
+# --- Slice 5: a plan's approval and wait states --------------------------------------------------
+
+
+def lookup_plan(approved: bool, wait_roles: list[str] | None = None) -> dict[str, Any]:
+    """`lookup-order@1`: look an order up (low risk), approved first by a team lead or not, and
+    confirmed first by `wait_roles` if given."""
+    states: dict[str, Any] = {
+        "look": {
+            "activity": "orders.lookup@1",
+            "inputs": {"order_id": {"var": "order_id"}},
+            "on": {"done": "done", "not_found": "done"},
+        },
+        "done": {"final": "succeeded"},
+    }
+    initial = "look"
+    if approved:
+        states["approve_lookup"] = {
+            "approval": {"of": "look", "roles": ["support-lead"]},
+            "on": {"approve": "look", "reject": "done"},
+        }
+        initial = "approve_lookup"
+    if wait_roles is not None:
+        states["confirm"] = {
+            "wait": {"outcomes": ["ok"], "roles": wait_roles},
+            "on": {"ok": initial},
+        }
+        initial = "confirm"
+    return {
+        "plan": "lookup-order",
+        "version": 1,
+        "display": {"title": "Look an order up"},
+        "fields": {"order_id": {"type": "reference", "system": "orders"}},
+        "initial": initial,
+        "states": states,
+    }
+
+
+def looking(plan: dict[str, Any]) -> Package:
+    """A case running `plan` as its one step."""
+    case = {
+        "case": "looking",
+        "display": {"title": "An order looked up"},
+        "fields": {
+            "order_id": {"type": "reference", "system": "orders", "display": {"title": "Order"}}
+        },
+        "steps": {
+            "look_up": {
+                "kind": "plan",
+                "display": {"title": "Look it up"},
+                "plan": "lookup-order@1",
+                "inputs": {"order_id": {"var": "order_id"}},
+            }
+        },
+    }
+    return packed(case, [plan])
+
+
+def test_a_plans_approval_removed_is_looser() -> None:
+    found = lines(diff(looking(lookup_plan(True)), looking(lookup_plan(False)), CATALOG))
+    assert (
+        "looser     plans.lookup-order@1.states.look: approved by approve_lookup -> approved by "
+        "no approval state"
+    ) in found
+    reverse = lines(diff(looking(lookup_plan(False)), looking(lookup_plan(True)), CATALOG))
+    assert (
+        "stricter   plans.lookup-order@1.states.look: approved by no approval state -> approved "
+        "by approve_lookup"
+    ) in reverse
+
+
+def test_a_plans_high_risk_approval_removed_is_not_proven() -> None:
+    # A high-risk activity no approval state approves stops the plan (brief, D11): nothing more
+    # runs, so "looser" would be false.
+    case, plans = settling()
+    after = copy.deepcopy(plans)
+    del after[0]["states"]["approve_refund"]
+    after[0]["states"]["check_order"]["on"]["done"] = "pay"
+    found = lines(diff(packed(case, plans), packed(case, after), CATALOG))
+    assert (
+        "not proven plans.refund-order@1.states.pay: approved by approve_refund -> approved by no "
+        "approval state (payments.refund@2 is high risk: without an approval, pay never runs)"
+    ) in found
+
+
+def test_a_plans_approvers_are_compared_as_its_risk_allows() -> None:
+    case, plans = settling()
+    widened = copy.deepcopy(plans)
+    widened[0]["states"]["approve_refund"]["approval"]["roles"] = ["support-lead", "finance"]
+    found = lines(diff(packed(case, plans), packed(case, widened), with_finance()))
+    assert found == [
+        (
+            "looser     plans.refund-order@1.states.approve_refund.approval.roles: support-lead -> "
+            "support-lead, finance"
+        )
+    ]
+    supported = copy.deepcopy(plans)
+    supported[0]["states"]["approve_refund"]["approval"]["roles"] = ["support-lead", "support"]
+    assert lines(diff(packed(case, plans), packed(case, supported), CATALOG)) == [
+        (
+            "not proven plans.refund-order@1.states.approve_refund.approval.roles: support-lead -> "
+            "support-lead, support (the same roles may approve payments.refund@2, high risk: "
+            "support may not)"
+        )
+    ]
+
+
+def test_a_plans_wait_roles_widened_are_looser() -> None:
+    before = looking(lookup_plan(False, ["support"]))
+    after = looking(lookup_plan(False, ["support", "support-lead"]))
+    assert lines(diff(before, after, CATALOG)) == [
+        (
+            "looser     plans.lookup-order@1.states.confirm.wait.roles: support -> support, "
+            "support-lead"
+        )
+    ]
+
+
+def test_a_plans_timeout_is_not_proven() -> None:
+    case, plans = settling()
+    after = copy.deepcopy(plans)
+    after[0]["states"]["approve_refund"]["approval"]["timeout"] = "72h"
+    assert lines(diff(packed(case, plans), packed(case, after), CATALOG)) == [
+        "not proven plans.refund-order@1.states.approve_refund.approval.timeout: 48h -> 72h"
+    ]
+
+
+def test_an_output_source_on_a_plans_state_is_said_never_judged() -> None:
+    # A plan keeps no activity's outputs (brief, D28): a widening there no case can meet
+    # (found in the review of #47).
+    case, plans = settling()
+    after = copy.deepcopy(plans)
+    after[0]["states"]["check_order"]["activity"] = "orders.lookup@2"
+    found = diff(packed(case, plans), packed(case, after), CATALOG)
+    assert lines(found)[0] == (
+        "not proven plans.refund-order@1.states.check_order.activity: orders.lookup@1 -> "
+        "orders.lookup@2: output status: was untrusted:undeclared; now system:orders (a plan "
+        "keeps no activity's outputs)"
+    )
+    assert all(change.comparison is None for change in found.changes)
+
+
 # --- Witnesses -----------------------------------------------------------------------------------
 
 
@@ -805,6 +948,57 @@ def forgetting_witness() -> Witness:
     return forgetting("while_open"), forgetting("allowed"), CATALOG, refused == expected, taken
 
 
+def plan_done(version: Package, catalog: Catalog = CATALOG, *answers: tuple[str, str, str]) -> bool:
+    """Whether the case's plan step is done, its plan's waits answered by `answers`. A refused
+    answer to a plan's wait leaves the plan waiting: the same script, refused in one version and
+    taken in the other, shows the difference."""
+    case = json.loads(version.written.case)
+    (step,) = case["steps"]
+    plans = {reference: json.loads(text) for reference, text in version.written.plans.items()}
+    run = run_case(
+        case,
+        file={"order_id": "ord-1"},
+        answers=[],
+        people=PEOPLE | {"fin": ["finance"]},
+        catalog=catalog,
+        plans=plans,
+        plan_answers={step: list(answers)},
+    )
+    return run.reached(step)
+
+
+def plan_approvals_witness() -> Witness:
+    """The lookup waits for its approval; with none, the plan runs it at once."""
+    before, after = looking(lookup_plan(True)), looking(lookup_plan(False))
+    return before, after, CATALOG, not plan_done(before), plan_done(after)
+
+
+def plan_approvers_witness() -> Witness:
+    """Finance's approval of the plan's lookup is refused while only team leads approve it, and
+    taken once finance may."""
+    plan = lookup_plan(True)
+    widened = copy.deepcopy(plan)
+    widened["states"]["approve_lookup"]["approval"]["roles"] = ["support-lead", "finance"]
+    before, after = looking(plan), looking(widened)
+    answer = ("approve_lookup", "approve", "fin")
+    refused = not plan_done(before, with_finance(), answer)
+    return before, after, with_finance(), refused, plan_done(after, with_finance(), answer)
+
+
+def plan_answerers_witness() -> Witness:
+    """A team lead's confirmation is refused while support alone confirms; then taken."""
+    before = looking(lookup_plan(False, ["support"]))
+    after = looking(lookup_plan(False, ["support", "support-lead"]))
+    answer = ("confirm", "ok", "sam")
+    return (
+        before,
+        after,
+        CATALOG,
+        not plan_done(before, CATALOG, answer),
+        plan_done(after, CATALOG, answer),
+    )
+
+
 # Each of 13b's comparisons, and its witness, in the order of COMPARISONS.
 WITNESSES: dict[str, Callable[[], Witness]] = {
     "approval": approval_witness,
@@ -823,6 +1017,9 @@ WITNESSES: dict[str, Callable[[], Witness]] = {
     "close reasons": close_reasons_witness,
     "freshness": freshness_witness,
     "forgetting": forgetting_witness,
+    "plan approvals": plan_approvals_witness,
+    "plan approvers": plan_approvers_witness,
+    "plan answerers": plan_answerers_witness,
 }
 
 
