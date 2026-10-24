@@ -259,6 +259,13 @@ and record the key points. A question is closed once you can explain the answer 
 - Discussion:
 - Retrieval (layer 12 warm-up, 2026-10-22): put, not answered; left open, to be asked again at
   12a's walk-through, where the release tool gives it a concrete answer.
+- Retrieval (layer 13d warm-up, 2026-10-24): asked to be told. Release, yes: the sentence is a
+  literal input, and inputs are behaviour (the digest covers all but `display`; the input feeds
+  the approval's digest and the contract's input policies), so 13d's notes would show it as a
+  behaviour change of `steps.<step>.inputs.intro`, never as a wording revision. Next time, pass a
+  stable key (`"template": "refund_confirmed"`) and keep the sentence with the activity's
+  templates: `display` never flows into an activity, which is what keeps wording safe to change
+  unreviewed, and the draft still drafts and is read by a person before it goes. Stays open.
 
 ## 12. Releases
 

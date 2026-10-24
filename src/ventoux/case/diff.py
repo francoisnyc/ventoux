@@ -8,7 +8,6 @@ from one. Pure: no clock, no I/O, the same list in the same order every time.
 See docs/layers/13-diff.md (13a) and docs/guides/releases.md, "What changed: the diff".
 """
 
-import json
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
@@ -20,6 +19,7 @@ from ventoux.case.changes import (
     Change,
     DiffRefused,
     Leaf,
+    Reworded,
     Rewritten,
     Verdict,
     merged,
@@ -58,19 +58,8 @@ from ventoux.core.expressions.model import Node
 from ventoux.core.output_sources import output_sources
 from ventoux.core.plan import Plan
 from ventoux.core.policy import Policy, UnknownPolicy, compared
+from ventoux.core.promise import PromiseUnreadable, promise_changes
 from ventoux.core.provenance import is_trusted
-
-
-@dataclass(frozen=True)
-class Reworded:
-    """A piece of wording changed: never behaviour (brief, D5)."""
-
-    path: str  # where: `steps.settle.display.title`
-    before: str | None  # the old text; None: it wasn't written
-    after: str | None  # the new text; None: it isn't written any more
-
-    def __str__(self) -> str:
-        return f"{'wording':<10} {self.path}: {quoted(self.before)} -> {quoted(self.after)}"
 
 
 @dataclass(frozen=True)
@@ -111,11 +100,6 @@ class Diff:
 def counted(number: int, noun: str) -> str:
     """`1 behaviour change`, `2 behaviour changes`."""
     return f"{number} {noun}{'' if number == 1 else 's'}"
-
-
-def quoted(text: str | None) -> str:
-    """A piece of wording as the diff shows it: in quotes, or `none`."""
-    return "none" if text is None else json.dumps(text, ensure_ascii=False)
 
 
 def diff(before: Package, after: Package, catalog: Catalog) -> Diff:
@@ -419,9 +403,10 @@ def contract_changes(leaf: Leaf, versions: Versions) -> Iterator[Change]:
         yield change
         said = True
     other = differing(old, new)
-    if other or not said:
-        also = f": its contract also differs: {', '.join(other)}" if other else ""
-        yield Change(leaf.path, "not proven", f"{called}{also}")
+    for line in other:
+        yield Change(leaf.path, "not proven", f"{called}: {line}")
+    if not other and not said:
+        yield Change(leaf.path, "not proven", called)
 
 
 def described(policies: Sequence[Policy]) -> str:
@@ -432,11 +417,23 @@ def described(policies: Sequence[Policy]) -> str:
 
 
 def differing(old: Contract, new: Contract) -> list[str]:
-    """What else two contracts promise differently, by name: everything their hash covers but
-    their name, their version, their inputs' policies and their outputs' sources, compared
-    above."""
-    first, second = promised(old), promised(new)
-    return sorted(key for key in first.keys() | second.keys() if first.get(key) != second.get(key))
+    """What else two contracts promise differently, path by path, as a hash failure says it
+    (brief, D57): everything their hash covers but their name, their version, their inputs'
+    policies and their outputs' sources, compared above; an input or output only one has is said
+    above too, so its own path isn't said again."""
+    said = {
+        f"{side}.properties.{name}"
+        for side, first, second in (
+            ("input", old.input.model_fields, new.input.model_fields),
+            ("output", old.output.model_fields, new.output.model_fields),
+        )
+        for name in first.keys() ^ second.keys()
+    }
+    try:
+        found = promise_changes(promised(old), promised(new))
+    except PromiseUnreadable as unreadable:
+        raise DiffRefused(f"{old.reference} -> {new.reference}: {unreadable}") from None
+    return [line for line in found if line.partition(": ")[0] not in said]
 
 
 def promised(contract: Contract) -> dict[str, object]:

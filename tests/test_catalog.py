@@ -170,7 +170,10 @@ def test_a_contract_changed_without_a_new_version_is_reported() -> None:
     # The same reference, edited in place: a longer timeout.
     edited = lookup_contract(timeouts=Timeouts(start_to_close=30, schedule_to_start=60))
     assert check_hashes(catalog_of(edited), recorded) == [
-        "orders.lookup@1 changed without a new version: register it as orders.lookup@2."
+        (
+            "orders.lookup@1 changed without a new version: register it as orders.lookup@2.\n"
+            "  to see what changed, give the base commit's promises (`ventoux promises`)"
+        )
     ]
 
 

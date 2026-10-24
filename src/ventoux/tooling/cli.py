@@ -1,7 +1,9 @@
 """The `ventoux` command: `ventoux simulate STORY.json` (layer 11g2), `ventoux release FOLDER
 --releases DIR --commit SHA` (layer 12a), an environment's commands (layer 12e): `ventoux
 environment create|harden|check`, `ventoux activate`, `ventoux retire`, `ventoux manifest publish`,
-`ventoux diff OLD NEW [--plain]` (layers 13a, 13c) and `ventoux map FOLDER` (layer 13c).
+`ventoux diff OLD NEW [--plain]` (layers 13a, 13c), `ventoux map FOLDER` (layer 13c), and
+`ventoux notes PACKAGE RELEASE --releases DIR`, `ventoux promises` and `ventoux hashes --lock
+FILE [--before PROMISES]` (layer 13d).
 
 Reading files and printing happen here, never in `core` or `case`, which read no clock and do no
 I/O (brief, D45). `ventoux check` comes with the Python builder (brief, D34).
@@ -18,7 +20,8 @@ from typing import Any
 
 from ventoux.case.changes import DiffRefused
 from ventoux.case.definition import CaseDefinition, CaseInvalid, parse_case
-from ventoux.case.diff import diff
+from ventoux.case.diff import Diff, diff
+from ventoux.case.notes import NotesRefused, as_diff, told
 from ventoux.case.plain import plain
 from ventoux.case.reading import ReadingRefused
 from ventoux.case.releases import (
@@ -28,10 +31,13 @@ from ventoux.case.releases import (
     Reworded,
     SameAs,
     Unchanged,
+    stored,
 )
 from ventoux.case.sheet import SheetRefused, case_map, never_sheet
 from ventoux.case.simulate import StoryRefused, simulate
 from ventoux.case.story import Story, StoryInvalid, parse_story
+from ventoux.core.hash_check import check_hashes
+from ventoux.core.promise import promise_of
 from ventoux.testing import CATALOG
 from ventoux.tooling.environments import environment_command
 from ventoux.tooling.releases import FolderStore, Run, read_package, release, said
@@ -73,6 +79,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         "map", help="what a case of a package can do, and what it will never do"
     )
     mapping.add_argument("package", type=Path, help="the package's folder")
+    noting = commands.add_parser("notes", help="a release's notes, as its record keeps them")
+    noting.add_argument("package", help="the package: refund")
+    noting.add_argument("release", type=int, help="its release number")
+    noting.add_argument("--wording", type=int, default=1, help="one of its wording revisions")
+    noting.add_argument("--releases", type=Path, required=True, help="where records are kept")
+    noting.add_argument("--plain", action="store_true", help="in plain language, as Markdown")
+    commands.add_parser("promises", help="each contract's promise, as the contract hash reads it")
+    hashing = commands.add_parser(
+        "hashes", help="check each contract against contracts.lock.json, saying what changed"
+    )
+    hashing.add_argument("--lock", type=Path, required=True, help="contracts.lock.json")
+    hashing.add_argument(
+        "--before", type=Path, help="the base commit's promises, from its `ventoux promises`"
+    )
     environments(commands)
     arguments = parser.parse_args(argv)
     if arguments.command in ("environment", "activate", "retire", "manifest"):
@@ -83,6 +103,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return diff_packages(arguments.old, arguments.new, arguments.plain)
     if arguments.command == "map":
         return map_package(arguments.package)
+    if arguments.command == "notes":
+        return print_notes(
+            arguments.package,
+            arguments.release,
+            arguments.wording,
+            arguments.releases,
+            arguments.plain,
+        )
+    if arguments.command == "promises":
+        return print_promises()
+    if arguments.command == "hashes":
+        return check_lockfile(arguments.lock, arguments.before)
     return simulate_story(arguments.story)
 
 
@@ -139,7 +171,7 @@ def release_package(folder: Path, releases: Path, commit: str) -> int:
     was refused (brief, D50). Paths and names only, never a value."""
     try:
         run = release(folder, FolderStore(releases), commit, CATALOG)
-    except (PackageRefused, RecordRefused) as refused:
+    except (PackageRefused, RecordRefused, NotesRefused) as refused:
         print(Unreadable(folder, str(refused)), file=sys.stderr)
         return FAILS
     except (PackageUnreadable, OSError) as unreadable:
@@ -148,6 +180,8 @@ def release_package(folder: Path, releases: Path, commit: str) -> int:
     for issue in run.warnings:
         print(f"warning: {said(issue)}")
     print(what_it_did(run))
+    if run.notes is not None and run.notes.against is not None:
+        print(Diff(run.package, run.notes.changes, run.notes.wording, run.notes.rewritten), end="")
     return HOLDS
 
 
@@ -191,6 +225,59 @@ def map_package(folder: Path) -> int:
     return HOLDS
 
 
+def print_notes(name: str, number: int, wording: int, releases: Path, in_plain: bool) -> int:
+    """Print a record's notes, as it keeps them: in the developer form, or the plain one, read
+    from the two stored packages (brief, D57). Exit 1 when the record isn't there or a reading is
+    refused, 2 when the records can't be read."""
+    store = FolderStore(releases)
+    try:
+        kept = store.get(name, number, wording)
+        said = told(kept)
+        against = None if kept.notes is None else kept.notes.against
+        if in_plain and against is not None:
+            before = stored(store.get(name, against.release, against.wording), name)
+            said = plain(as_diff(kept), before, stored(kept, name), CATALOG)
+    except (RecordRefused, ReadingRefused) as refused:
+        print(refused, file=sys.stderr)
+        return FAILS
+    except OSError as unreadable:
+        print(f"{releases}: can't be read: {unreadable.strerror}", file=sys.stderr)
+        return CANT_READ
+    print(said, end="")
+    return HOLDS
+
+
+def print_promises() -> int:
+    """Print each contract's promise, by reference, as canonical JSON: what the base commit's
+    code gives `ventoux hashes --before` (brief, D57)."""
+    promises = {contract.reference: promise_of(contract) for contract in CATALOG.contracts()}
+    print(json.dumps(promises, indent=2, sort_keys=True))
+    return HOLDS
+
+
+def check_lockfile(lock: Path, before: Path | None) -> int:
+    """Print the hash check: each contract changed without a new version, with what changed
+    when `before` gives the base commit's promises (brief, D57). Exit 0 when every contract
+    matches, 1 on any problem, 2 when a file can't be read."""
+    try:
+        recorded = read_plain_json(lock)
+        given = None if before is None else read_plain_json(before)
+    except Unreadable as unreadable:
+        print(unreadable, file=sys.stderr)
+        return CANT_READ
+    for path, found in ((lock, recorded), (before, given)):
+        if path is not None and not isinstance(found, dict):
+            print(Unreadable(path, "isn't a JSON object, by contract reference"), file=sys.stderr)
+            return CANT_READ
+    problems = check_hashes(CATALOG, recorded, given)
+    for problem in problems:
+        print(problem)
+    if problems:
+        return FAILS
+    print(f"every contract matches {lock.name}")
+    return HOLDS
+
+
 def what_it_did(run: Run) -> str:
     """One line: `refund 2 released: digest 51aa… (method 1); behaviour changed at …`."""
     name, outcome = run.package, run.outcome
@@ -223,6 +310,17 @@ def read_story(path: Path) -> tuple[Story, CaseDefinition]:
     except CaseInvalid as invalid:
         raise Unreadable(definition, str(invalid)) from None
     return story, case
+
+
+def read_plain_json(path: Path) -> Any:
+    """The JSON in `path`, as plain JSON values: a promise and a hash are hashed as JSON gives
+    them, so its numbers stay as JSON reads them."""
+    try:
+        return json.loads(path.read_text())
+    except OSError as error:
+        raise Unreadable(path, f"can't be read: {error.strerror}") from None
+    except json.JSONDecodeError as error:
+        raise Unreadable(path, f"isn't JSON: {error.msg}, at line {error.lineno}") from None
 
 
 def read_json(path: Path) -> Any:

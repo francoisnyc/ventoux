@@ -4,22 +4,16 @@ import hashlib
 import json
 
 from ventoux.core.contract import Contract
+from ventoux.core.promise import promise_of
 
 
 def contract_hash(contract: Contract) -> str:
-    """SHA-256 of what the contract promises: everything but `display`, schemas as JSON Schema."""
-    # Pydantic: `model_dump(mode="json")` gives the object as plain JSON values (dicts, lists,
-    # texts, numbers); `model_json_schema()` describes a model class as JSON Schema.
-    promise = contract.model_dump(mode="json", exclude={"display", "input", "output"})
-    promise["input"] = contract.input.model_json_schema()
-    promise["output"] = contract.output.model_json_schema()
-    # Not cancellable is what every workflow contract promised before 11c, so it adds nothing:
-    # their hashes and contracts.lock.json stay as they were (brief, D40).
-    if promise.get("cancellable") is False:
-        del promise["cancellable"]
-    # The outcomes are a set of answers: their order promises nothing. A workflow has none.
-    if "outcomes" in promise:
-        promise["outcomes"] = sorted(promise["outcomes"])
+    """SHA-256 of what the contract promises (`promise_of`)."""
+    return promise_hash(promise_of(contract))
+
+
+def promise_hash(promise: object) -> str:
+    """SHA-256 of a promise: the hash `contracts.lock.json` records (method 1)."""
     # Canonical JSON: the same promise always gives the same bytes, so the same hash.
     canonical = json.dumps(promise, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()

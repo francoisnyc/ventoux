@@ -60,6 +60,8 @@ A title reworded (`steps.settle.display.title`, "Settle the refund" to "Pay the 
 ```
 $ ventoux release examples/packages/refund --releases releases --commit 7b0e311
 refund 1, wording 2: steps.settle.display.title changed; no release
+refund: no behaviour change; 1 wording change
+wording    steps.settle.display.title: "Settle the refund" -> "Pay the refund"
 ```
 
 The plan's approval given 72 hours instead of 48 (`"timeout": "72h"`):
@@ -67,6 +69,20 @@ The plan's approval given 72 hours instead of 48 (`"timeout": "72h"`):
 ```
 $ ventoux release examples/packages/refund --releases releases --commit c90d4e2
 refund 2 released: digest dfdac910acbb (method 1); behaviour changed at plans.refund-order@1.states.approve_refund.approval.timeout
+refund: 1 behaviour change: 1 may loosen (0 looser, 1 not proven), 0 stricter; no wording change
+not proven plans.refund-order@1.states.approve_refund.approval.timeout: 48h -> 72h
+```
+
+After what it did, the tool prints the record's notes: the semantic diff against the record
+before it, in the words `ventoux diff` uses ("What changed: the diff", below). A first release
+has nothing to compare, so it prints none. The record keeps them, and `ventoux notes` reads them
+again, in the plain form with `--plain`:
+
+```
+$ ventoux notes refund 2 --releases releases
+refund 2, against refund 1, wording 2:
+refund: 1 behaviour change: 1 may loosen (0 looser, 1 not proven), 0 stricter; no wording change
+not proven plans.refund-order@1.states.approve_refund.approval.timeout: 48h -> 72h
 ```
 
 The commit is given by CI; the tool never reads git. It exits with:
@@ -74,7 +90,7 @@ The commit is given by CI; the tool never reads git. It exits with:
 | Exit | When |
 |---|---|
 | 0 | it released, recorded a wording revision, or had nothing to do |
-| 1 | the package, or a record, is refused: each problem is printed |
+| 1 | the package, a record, or its notes are refused: each problem is printed |
 | 2 | something can't be read (a folder, a file that isn't JSON) |
 
 ## Only a package that passes is released
@@ -94,10 +110,22 @@ Each release is a file, `releases/<package>/<n>.json`, written once and never ag
 - every contract it needs, its plans' included, each with its hash: what activation will check
   the environment's workers serve;
 - the package as written, so a case can later be started from the record alone;
-- what changed since the release before: the paths, behaviour and wording apart.
+- what changed since the release before: the paths, behaviour and wording apart;
+- its notes: the semantic diff against the record before it, as data (which record, then each
+  change with its path, verdict and what it says, each line written otherwise, each wording
+  line), made with the record and never rewritten.
 
 A wording revision is `releases/<package>/<n>.wording-<k>.json`, numbered from 2 (the release is
-its own first wording), with the package as written and the paths whose wording changed.
+its own first wording), with the package as written and the paths whose wording changed. Its
+notes hold wording lines only.
+
+**The notes come from the records, never your working tree.** The package before is the latest
+wording of the release before, read back from its record and checked against its digest; the
+package after is the new record's own. Each contract the earlier record names must still promise,
+in the catalog, what it recorded. If the notes can't be made whole (a contract changed in place
+since, a comparison the diff refuses), the release is refused, saying why: nothing is recorded
+without its notes. A record written before layer 13d has none, and is never given them;
+`ventoux notes` says so, and `ventoux diff` on the two packages answers instead.
 
 Run the tool twice on the same merge and the second run has nothing to do. A record that already
 exists is never written over: the same bytes again are accepted, anything else is refused.
@@ -492,6 +520,6 @@ can't be read.
 
 ## What the tool says
 
-Paths and names, never values: `behaviour changed at steps.settle.when`. The diff (above) says
-what a change means; until the release notes are generated from it (layer 13d), the record's
-paths are the release notes.
+The first line names paths, never values: `behaviour changed at steps.settle.when`. The notes
+after it say what each change means, as the diff does: they show what the definition writes (a
+condition, a duration, a literal passed to an activity), never a value a case holds.

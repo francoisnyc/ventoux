@@ -202,6 +202,8 @@ def test_a_contract_missing_from_the_catalog_refuses_the_diff() -> None:
 
 
 def test_other_contract_differences_are_said_not_proven() -> None:
+    # Path by path, as a hash failure says it (brief, D57); an input or output only one contract
+    # has is said once, by name, never again as its path.
     with_a_note = refund_input(trusted_only(), note=(str, ...))
     with_a_fee = create_model("RefundOutput", refund_id=(str, ...), fee=(Decimal, ...))
     noted = refund_contract(6, with_a_note, risk="medium", output=with_a_fee)
@@ -216,9 +218,15 @@ def test_other_contract_differences_are_said_not_proven() -> None:
             "only in payments.refund@6"
         ),
         (
-            "not proven steps.pay.activity: payments.refund@2 -> payments.refund@6: its contract "
-            "also differs: input, output, risk"
+            "not proven steps.pay.activity: payments.refund@2 -> payments.refund@6: input.required: "
+            '["order_id", "amount", "idempotency_key"] -> ["order_id", "amount", "idempotency_key", '
+            '"note"]'
         ),
+        (
+            "not proven steps.pay.activity: payments.refund@2 -> payments.refund@6: "
+            'output.required: ["refund_id"] -> ["refund_id", "fee"]'
+        ),
+        "not proven steps.pay.activity: payments.refund@2 -> payments.refund@6: risk: high -> medium",
     ]
 
 

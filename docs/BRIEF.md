@@ -1919,6 +1919,11 @@ answers design question 16, whose text is kept.*
 - **Amended 2026-10-22, by D51** (the text above stands; this narrows it): only the latest release
   takes a wording revision; a package with an older release's behaviour and other wording than
   that release's latest is refused.
+- **Amended 2026-10-24, by D57** (the text above stands; this adds to it): a record also keeps
+  its release notes, the semantic diff against the record before it, beside the paths; "until the
+  semantic diff, those paths are the release notes" ends there. The paths still name no value;
+  the notes show what the definition writes (a literal input included), never a value a case
+  holds (D55).
 
 ### D51. A case runs the release it opened on, and says its engine version
 
@@ -2252,6 +2257,39 @@ D55, whose text is kept.*
   package's own lines hold while a case runs this release: their heading says so, since a
   migration moves a case to the target release's definition (D53).
 
+### D57. Release notes in the record, and a contract's readable diff
+
+*Drafted 2026-10-24, in layer 13d (`docs/layers/13-diff.md`, choices 52 to 62). Adds to D50 and
+D55, and answers design question 16's other half, whose text is kept.*
+
+- **A record keeps its notes:** the semantic diff (D55) against the record before it, as data:
+  which record it is against, each change (its path, verdict, what it says, its comparison), each
+  line written otherwise, each wording line. Made with the record and never rewritten (D50); the
+  paths the digest saw change stay beside them. A record written before layer 13d has none and is
+  never given them; `ventoux diff` on the two stored packages answers instead.
+- **From the stored packages, never the working tree:** before, the latest wording of the newest
+  release, read back and checked against its digest; after, the new record's own package, read
+  again from the text it keeps. Each contract the earlier record names must still hash, in the
+  catalog, as that record says. A wording revision's notes hold wording lines only (its diff
+  holding anything else is refused); a first release's are against nothing.
+- **The same words, rendered when read:** a note keeps the verdict and what changed, never
+  rendered text; `ventoux notes` prints them in the developer or the plain form, and `ventoux
+  release` prints them after what it did.
+- **Never less, never a case's value, fail closed:** notes that don't cover every path the digest
+  saw change are refused, naming them; notes are made from two packages and the catalog only;
+  anything the notes can't read (the diff refusing, a record that can't be read back, a contract
+  whose promise isn't the earlier record's) refuses the release. Nothing is recorded without
+  notes.
+- **A contract's readable diff, path by path:** two promises as the contract hash reads them,
+  compared leaf by leaf: `retry.maximum_attempts: 5 -> 9`, a key one side has as `added` or
+  `removed` with its value, a list whole. A promise is the platform team's, so its values are
+  shown. The diff's "its contract also differs" says the same paths.
+- **The old promise comes from the base commit's own code** (`ventoux promises`), and is used
+  only if it hashes to what `contracts.lock.json` records; otherwise the line says what changed
+  can't be said. `ventoux hashes --lock FILE [--before PROMISES]` prints the hash check, each
+  contract changed in place followed by its paths. The lockfile keeps its shape. Running the
+  base's promises in CI comes with the CI step (13e).
+
 ### Simplifications adopted
 
 - **Kinds of step:** `activity` (call one activity), `task` (one human task), `plan` (a multi-step
@@ -2449,6 +2487,8 @@ New questions found while building go here, numbered from 10.
     the lockfile's hashes included), and a release is compared by recomputing its digest from its
     stored package. The release tool says which paths changed; a readable diff of a contract is
     the semantic diff's (layer 13).
+    *Decided 2026-10-24, by D57:* a hash failure says what changed, path by path, from the base
+    commit's promise checked against the lockfile's hash; the lockfile keeps its shape.
 17. **May an untrusted value steer a condition?** (found in layer 4) An input policy checks the
     values an activity receives, not *whether* it runs. In a plan, a transition's `when` that reads
     an untrusted field (`{"==": [{"var": "llm_says_refund"}, true]}`) decides which activity runs
