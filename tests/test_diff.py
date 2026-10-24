@@ -433,3 +433,59 @@ def test_sensitive_removed_is_looser() -> None:
 def test_sensitive_added_is_stricter() -> None:
     found = diff(packed(sensitive(False)), packed(sensitive(True)), CATALOG)
     assert lines(found) == ["stricter   fields.amount.sensitive: false -> true"]
+
+
+# --- Slice 3: who sees what ----------------------------------------------------------------------
+
+
+def seen_by(*roles: str) -> dict[str, Any]:
+    """The refund, its `amount` seen only by `roles`."""
+    case = refund()
+    case["fields"]["amount"]["visible_to"] = list(roles)
+    return case
+
+
+def test_visible_to_widened_is_looser() -> None:
+    found = diff(packed(seen_by("support")), packed(seen_by("support", "support-lead")), CATALOG)
+    assert lines(found) == [
+        "looser     fields.amount.visible_to: seen by support -> support, support-lead"
+    ]
+    assert found.changes[0].comparison == "readers"
+
+
+def test_visible_to_narrowed_is_stricter() -> None:
+    # Without visible_to, every role the case names sees it: support and support-lead.
+    found = diff(packed(refund()), packed(seen_by("support")), CATALOG)
+    assert lines(found) == [
+        "stricter   fields.amount.visible_to: seen by support, support-lead -> support"
+    ]
+
+
+def test_readers_both_added_and_removed_are_not_proven() -> None:
+    found = diff(packed(seen_by("support")), packed(seen_by("support-lead")), CATALOG)
+    assert lines(found) == ["not proven fields.amount.visible_to: seen by support -> support-lead"]
+    assert found.changes[0].comparison is None
+
+
+def test_a_new_role_sees_every_unnarrowed_field() -> None:
+    # A change the JSON diff hides: nothing about the fields changes in the JSON, but a field
+    # without visible_to is seen by every role the case names (brief, D30, D53), so `fraud`,
+    # named by a new step, now sees each, and every outcome and output (brief, D55).
+    before = seen_by("support")
+    after = copy.deepcopy(before)
+    after["steps"]["fraud_check"] = {
+        "kind": "task",
+        "display": {"title": "Check for fraud"},
+        "roles": ["fraud"],
+        "requires": ["review"],
+        "outcomes": {"clear": {"display": {"title": "Clear"}}},
+    }
+    found = diff(packed(before), packed(after), CATALOG)
+    roles = "seen by support, support-lead -> fraud, support, support-lead"
+    because = "(because steps.fraud_check.roles names fraud)"
+    assert lines(found) == [
+        f"looser     fields.order_id.visible_to: {roles} {because}",
+        f"looser     fields.approved_amount.visible_to: {roles} {because}",
+        f"looser     steps: every outcome and output: {roles} {because}",
+        "not proven steps.fraud_check: added",
+    ]

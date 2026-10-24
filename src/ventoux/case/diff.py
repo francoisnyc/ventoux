@@ -10,7 +10,7 @@ See docs/layers/13-diff.md (13a) and docs/guides/releases.md, "What changed: the
 
 import json
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Literal, cast
 
@@ -61,6 +61,14 @@ class Change:
     comparison: str | None = None  # which of COMPARISONS proved the verdict; None: not proven
     because: str = ""  # for a change derived from another: what caused it
     entry: Literal["added", "removed", ""] = ""  # an entry only one version has, said whole
+
+    # Dataclass: `__post_init__` runs once the fields are set, every time a change is made.
+    def __post_init__(self) -> None:
+        # A verdict is a proof: looser or stricter only from a comparison on the closed list, and
+        # "not proven" from none (brief, D55).
+        proven = self.verdict != "not proven"
+        if proven != (self.comparison in COMPARISONS):
+            raise ValueError(f"{self.path}: {self.verdict} needs one of COMPARISONS, and only it")
 
     def __str__(self) -> str:
         why = f" (because {self.because})" if self.because else ""
@@ -350,7 +358,7 @@ def contract_changes(leaf: Leaf, catalog: Catalog) -> Iterator[Change]:
                 VERDICTS[how],
                 f"{called}: input {name}: was {described(old.policies(name))}; "
                 f"now {described(new.policies(name))}",
-                "input policy",
+                None if how == "neither" else "input policy",
             )
             said = True
     other = differing(old, new)
@@ -441,30 +449,27 @@ def readers(before: CaseDefinition, after: CaseDefinition, field: str) -> Iterat
             yield Change(path, "not proven", f"{shown(written[0])} -> {shown(written[1])}")
         return
     because = "" if declared else caused(before, after, old, new)
-    yield Change(path, roles_verdict(old, new), seen(old, new), "readers", because)
+    yield readers_change(path, old, new, because)
 
 
 def outcome_readers(before: CaseDefinition, after: CaseDefinition) -> Iterator[Change]:
     """Every outcome and output is seen by every role the case names (brief, D30): said once."""
     old, new = roles_named(before), roles_named(after)
     if old != new:
-        said = f"every outcome and output: {seen(old, new)}"
-        yield Change(
-            "steps", roles_verdict(old, new), said, "readers", caused(before, after, old, new)
-        )
+        change = readers_change("steps", old, new, caused(before, after, old, new))
+        yield replace(change, said=f"every outcome and output: {change.said}")
 
 
-def roles_verdict(old: Sequence[str], new: Sequence[str]) -> Verdict:
-    """More roles and none fewer, looser; fewer and none more, stricter; both, not proven."""
+def readers_change(path: str, old: Sequence[str], new: Sequence[str], because: str) -> Change:
+    """Seen by more roles and none fewer, looser; fewer and none more, stricter; both, not
+    proven, and no comparison named."""
+    said = f"seen by {shown(list(old))} -> {shown(list(new))}"
     added, removed = set(new) - set(old), set(old) - set(new)
     if added and not removed:
-        return "looser"
-    return "stricter" if removed and not added else "not proven"
-
-
-def seen(old: Sequence[str], new: Sequence[str]) -> str:
-    """`seen by support -> fraud, support`."""
-    return f"seen by {shown(list(old))} -> {shown(list(new))}"
+        return Change(path, "looser", said, "readers", because)
+    if removed and not added:
+        return Change(path, "stricter", said, "readers", because)
+    return Change(path, "not proven", said, because=because)
 
 
 def caused(
