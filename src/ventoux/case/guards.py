@@ -7,6 +7,7 @@ on fewer wherever it is false (13b, choice 19).
 See docs/layers/13-diff.md (13b).
 """
 
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -14,6 +15,7 @@ from ventoux.case.changes import Change, DiffRefused, Leaf, Verdict, shown
 from ventoux.case.definition import Approval, CallStep, CaseDefinition
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
+from ventoux.core.roles import may_approve
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,10 @@ class Versions:
             return self.catalog.lookup(found.called)
         except NotInCatalog as missing:
             raise DiffRefused(f"{missing} The diff compares contracts from the catalog.") from None
+
+    def registered(self, roles: Sequence[str]) -> tuple[str, ...]:
+        """Of `roles`, those the catalog registers: another gives nobody anything (brief, D22)."""
+        return tuple(role for role in roles if role in self.catalog.roles)
 
 
 # --- An approval, its count and its condition ----------------------------------------------------
@@ -106,3 +112,82 @@ def approval_condition_change(leaf: Leaf) -> Change:
         said = f"asked only if {shown(old)} -> asked on every run"
         return Change(leaf.path, "stricter", said, "approval condition")
     return Change(leaf.path, "not proven", f"{shown(old)} -> {shown(new)}")
+
+
+# --- Roles ---------------------------------------------------------------------------------------
+
+
+def roles_change(leaf: Leaf, versions: Versions, comparison: str) -> Change:
+    """A list of roles, as the catalog registers them (13b, choice 22): widened looser, narrowed
+    stricter, replaced not proven. A role the catalog doesn't register counts for nothing, said so.
+    One side with no list (an event sent by a system, then by roles) is not proven."""
+    said = f"{shown(leaf.before)} -> {shown(leaf.after)}"
+    if not isinstance(leaf.before, tuple) or not isinstance(leaf.after, tuple):
+        return Change(leaf.path, "not proven", said)
+    old, new = set(versions.registered(leaf.before)), set(versions.registered(leaf.after))
+    unknown = [role for role in (*leaf.before, *leaf.after) if role not in versions.catalog.roles]
+    if unknown:
+        names = ", ".join(dict.fromkeys(unknown))
+        one = len(set(unknown)) == 1
+        said += f" ({names} {'isn' if one else 'aren'}'t registered: "
+        said += f"{'it gives' if one else 'they give'} nobody anything)"
+    return widened(leaf.path, said, old, new, comparison)
+
+
+def widened(path: str, said: str, old: set[str], new: set[str], comparison: str) -> Change:
+    """More and none fewer: looser; fewer and none more: stricter; else not proven."""
+    if new > old:
+        return Change(path, "looser", said, comparison)
+    if new < old:
+        return Change(path, "stricter", said, comparison)
+    return Change(path, "not proven", said)
+
+
+# --- What follows under a step -------------------------------------------------------------------
+
+
+def step_guards(step: str, versions: Versions) -> Iterator[Change]:
+    """What follows from a step's changes, said under it: who may approve it."""
+    yield from approvers(step, versions)
+
+
+def approvers(step: str, versions: Versions) -> Iterator[Change]:
+    """Who may approve `step` (13b, choice 23): the roles its approval lists that the catalog
+    registers and lets approve its contract's risk (brief, D11). Compared whatever changed: the
+    roles, or the contract, whose risk may let fewer approve."""
+    old, new = versions.before.steps[step], versions.after.steps[step]
+    if not isinstance(old, CallStep) or not isinstance(new, CallStep):
+        return
+    if old.approval is None or new.approval is None:
+        return  # an approval added or removed is said by `approval_change`
+    path = f"steps.{step}.approval.roles"
+    first = versions.called(versions.before, step)
+    second = versions.called(versions.after, step)
+    assert first is not None and second is not None  # a call step calls a contract
+    allowed_before = allowed(old.approval.roles, first, versions)
+    allowed_after = allowed(new.approval.roles, second, versions)
+    if allowed_before == allowed_after:
+        if old.approval.roles != new.approval.roles:  # names changed, nobody who may approve
+            refused = [r for r in new.approval.roles + old.approval.roles if r not in allowed_after]
+            said = (
+                f"{shown(old.approval.roles)} -> {shown(new.approval.roles)} (the same roles may "
+                f"approve {second.reference}, {second.risk} risk: "
+                f"{', '.join(dict.fromkeys(refused))} may not)"
+            )
+            yield Change(path, "not proven", said)
+        return
+    said = f"approved by {' or '.join(allowed_before) or 'nobody'} -> approved by "
+    said += " or ".join(allowed_after) or "nobody"
+    if old.approval.roles == new.approval.roles:
+        said += f" (because {second.reference} is {second.risk} risk)"
+    yield widened(path, said, set(allowed_before), set(allowed_after), "approvers")
+
+
+def allowed(roles: Sequence[str], contract: Contract, versions: Versions) -> list[str]:
+    """Of an approval's roles, those the catalog registers and lets approve `contract`'s risk."""
+    able = [
+        role
+        for role in versions.registered(roles)
+        if may_approve(versions.catalog.roles[role], contract.risk)
+    ]
+    return sorted(able)

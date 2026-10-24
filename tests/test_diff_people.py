@@ -6,16 +6,31 @@ where one version refuses what the other lets through.
 See docs/layers/13-diff.md (13b) and docs/guides/releases.md, "What changed: the diff".
 """
 
+import copy
 import json
 from collections.abc import Callable
 from typing import Any
 
-from test_diff import ROOT, Definition, lines, packed, refund, witnessed
+from test_diff import (
+    ROOT,
+    Definition,
+    lines,
+    packed,
+    refund,
+    refund_contract,
+    refund_input,
+    witnessed,
+)
 
+from ventoux.case.admission import ProposalRefused
+from ventoux.case.answers import AnswerRefused
+from ventoux.case.closing import CloseRefused
 from ventoux.case.diff import diff
 from ventoux.case.memory import CaseRun
+from ventoux.case.runtime import EventRefused
 from ventoux.core.catalog import Catalog
-from ventoux.testing import CATALOG, run_case
+from ventoux.core.policy import trusted_only
+from ventoux.testing import CATALOG, close, propose, run_case, send
 
 FOUR_EYES = ROOT / "examples" / "refund" / "refund-four-eyes.json"
 
@@ -168,6 +183,121 @@ def test_an_approvals_condition_changed_is_not_proven() -> None:
     ]
 
 
+# --- Slice 1: roles, as the catalog registers them -----------------------------------------------
+
+
+def roled(**changes: list[str]) -> dict[str, Any]:
+    """The refund with every kind of role list: a close reason and an event sent by support, and
+    `recheck`, a task proposed by support; `changes` replaces lists by kind (`answers`, `proposes`,
+    `sends`, `closes`, `approves`)."""
+    case = refund()
+    case["steps"]["review"]["roles"] = changes.get("answers", ["support"])
+    case["steps"]["recheck"] = {
+        "kind": "task",
+        "display": {"title": "Review it again"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": changes.get("proposes", ["support"]),
+        "outcomes": {"done": {"display": {"title": "Done"}}},
+    }
+    case["steps"]["pay"]["approval"]["roles"] = changes.get("approves", ["support-lead"])
+    case["events"] = {
+        "noted": {
+            "display": {"title": "A note"},
+            "sent_by": {"roles": changes.get("sends", ["support"])},
+            "payload": {},
+        }
+    }
+    case["close_reasons"] = {
+        "duplicate": {
+            "display": {"title": "A duplicate"},
+            "roles": changes.get("closes", ["support"]),
+        }
+    }
+    return case
+
+
+def judged_lines(
+    before: dict[str, Any], after: dict[str, Any], catalog: Catalog = CATALOG
+) -> list[str]:
+    """The changes from `before` to `after`, as printed."""
+    return lines(diff(packed(before), packed(after), catalog))
+
+
+def test_roles_widened_are_looser() -> None:
+    # support-lead is named already (it approves pay), so who sees what doesn't change.
+    both = ["support", "support-lead"]
+    for kind, path in (
+        ("answers", "steps.review.roles"),
+        ("proposes", "steps.recheck.proposed_by"),
+        ("sends", "events.noted.sent_by.roles"),
+        ("closes", "close_reasons.duplicate.roles"),
+    ):
+        assert judged_lines(roled(), roled(**{kind: both})) == [
+            f"looser     {path}: support -> support, support-lead"
+        ], kind
+
+
+def test_roles_narrowed_are_stricter() -> None:
+    both = ["support", "support-lead"]
+    assert judged_lines(roled(answers=both), roled()) == [
+        "stricter   steps.review.roles: support, support-lead -> support"
+    ]
+
+
+def test_roles_replaced_are_not_proven() -> None:
+    assert judged_lines(roled(closes=["support"]), roled(closes=["support-lead"])) == [
+        "not proven close_reasons.duplicate.roles: support -> support-lead"
+    ]
+
+
+def test_a_role_nobody_registered_counts_for_nothing() -> None:
+    # A role the catalog doesn't register gives nobody anything (brief, D22).
+    found = judged_lines(roled(), roled(closes=["support", "auditor"]))
+    assert (
+        "not proven close_reasons.duplicate.roles: support -> support, auditor (auditor isn't "
+        "registered: it gives nobody anything)"
+    ) in found
+    # Nor does it see anything: a field without visible_to is seen by the registered roles the
+    # case names (fixed in 13b: 13a counted every name).
+    assert not any("visible_to" in line for line in found)
+
+
+def test_a_role_that_may_not_approve_the_risk_changes_no_approver() -> None:
+    # support may approve no risk, and pay is high risk: adding it changes nobody (brief, D11).
+    found = judged_lines(roled(), roled(approves=["support-lead", "support"]))
+    assert found == [
+        (
+            "not proven steps.pay.approval.roles: support-lead -> support-lead, support (the same "
+            "roles may approve payments.refund@2, high risk: support may not)"
+        )
+    ]
+
+
+def with_clerks() -> Catalog:
+    """The development catalog, with clerks who may approve up to medium risk, and a refund
+    contract of medium risk."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register_role("clerk", approves="medium")
+    catalog.register(refund_contract(8, refund_input(trusted_only()), risk="medium"))
+    return catalog
+
+
+def test_a_step_moved_to_a_lower_risk_gains_approvers() -> None:
+    before = roled(approves=["support-lead", "clerk"])
+    after = copy.deepcopy(before)
+    after["steps"]["pay"]["activity"] = "payments.refund@8"
+    found = judged_lines(before, after, with_clerks())
+    assert (
+        "looser     steps.pay.approval.roles: approved by support-lead -> approved by clerk or "
+        "support-lead (because payments.refund@8 is medium risk)"
+    ) in found
+    assert (
+        "stricter   steps.pay.approval.roles: approved by clerk or support-lead -> approved by "
+        "support-lead (because payments.refund@2 is high risk)"
+    ) in judged_lines(after, before, with_clerks())
+
+
 # --- Witnesses -----------------------------------------------------------------------------------
 
 
@@ -217,11 +347,95 @@ def condition_witness() -> Witness:
     return always_asked(), refund(), CATALOG, refused, paid(refund(), 50).reached("pay")
 
 
+def attempted(
+    case: dict[str, Any], catalog: Catalog = CATALOG, *script: Any, reviewed: bool = True
+) -> str | CaseRun:
+    """The refund reviewed by Ana (250 approved), unless not `reviewed`, then `script`: the run,
+    or why it was refused."""
+    people = PEOPLE | {"fin": ["finance"]}
+    review = [("review", "approve", "ana", {"approved_amount": 250})] if reviewed else []
+    try:
+        return run_case(
+            case,
+            file={"order_id": "ord-1", "amount": 250},
+            answers=[*review, *script],
+            people=people,
+            catalog=catalog,
+        )
+    except (AnswerRefused, CloseRefused, EventRefused, ProposalRefused) as refused:
+        return str(refused)
+
+
+def with_finance() -> Catalog:
+    """The development catalog, with a finance role that may approve high risk."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register_role("finance", approves="high")
+    return catalog
+
+
+def approvers_witness() -> Witness:
+    """A finance approver is refused while only team leads approve pay, and pays once finance
+    may. Finance may close the case in both, so who the case names doesn't change."""
+    closes = ["support", "finance"]
+    before = roled(closes=closes)
+    after = roled(closes=closes, approves=["support-lead", "finance"])
+    approval = ("pay.approval#1", "approve", "fin")
+    old, new = (
+        attempted(before, with_finance(), approval),
+        attempted(after, with_finance(), approval),
+    )
+    refused = old == "pay.approval#1 is answered by support-lead, and fin has finance"
+    return before, after, with_finance(), refused, isinstance(new, CaseRun) and new.reached("pay")
+
+
+def answerers_witness() -> Witness:
+    """A team lead may not review while support alone answers it; then may."""
+    review = ("review", "approve", "sam", {"approved_amount": 250})
+    before, after = roled(), roled(answers=["support", "support-lead"])
+    old = attempted(before, CATALOG, review, reviewed=False)
+    new = attempted(after, CATALOG, review, reviewed=False)
+    refused = old == "review#1 is answered by support, and sam has support-lead"
+    return before, after, CATALOG, refused, isinstance(new, CaseRun)
+
+
+def proposers_witness() -> Witness:
+    """A team lead may not propose a second review while support alone proposes it; then may."""
+    before, after = roled(), roled(proposes=["support", "support-lead"])
+    old = attempted(before, CATALOG, propose("recheck", "sam"))
+    new = attempted(after, CATALOG, propose("recheck", "sam"))
+    refused = old == "recheck is proposed by support, and sam has support-lead"
+    taken = isinstance(new, CaseRun) and any("recheck#1" in line for line in new.history)
+    return before, after, CATALOG, refused, taken
+
+
+def senders_witness() -> Witness:
+    """A team lead's note is refused while support alone sends it; then arrives."""
+    before, after = roled(), roled(sends=["support", "support-lead"])
+    old = attempted(before, CATALOG, send("noted", {}, "sam"))
+    new = attempted(after, CATALOG, send("noted", {}, "sam"))
+    refused = old == "noted is sent by support, and sam has support-lead"
+    return before, after, CATALOG, refused, isinstance(new, CaseRun)
+
+
+def closers_witness() -> Witness:
+    """A team lead may not close the case as a duplicate while support alone may; then may."""
+    before, after = roled(), roled(closes=["support", "support-lead"])
+    old = attempted(before, CATALOG, close("duplicate", "sam"))
+    new = attempted(after, CATALOG, close("duplicate", "sam"))
+    refused = old == "duplicate is closed by support, and sam has support-lead"
+    return before, after, CATALOG, refused, isinstance(new, CaseRun) and new.closed
+
+
 # Each of 13b's comparisons, and its witness, in the order of COMPARISONS.
 WITNESSES: dict[str, Callable[[], Witness]] = {
     "approval": approval_witness,
     "approval condition": condition_witness,
     "approval count": count_witness,
+    "approvers": approvers_witness,
+    "answerers": answerers_witness,
+    "proposers": proposers_witness,
+    "senders": senders_witness,
+    "closers": closers_witness,
 }
 
 

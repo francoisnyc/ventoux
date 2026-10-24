@@ -34,6 +34,11 @@ COMPARISONS = (
     "approval",  # whether a step's runs wait for an approval (brief, D11)
     "approval condition",  # whether an approval has a `when`, never what it says (13b, choice 19)
     "approval count",  # how many distinct people must approve (brief, D47)
+    "approvers",  # the roles that may approve a step's contract's risk (brief, D11)
+    "answerers",  # who may answer a task (brief, D22)
+    "proposers",  # who may propose a step (brief, D25)
+    "senders",  # who may send an event (brief, D41)
+    "closers",  # who may close a case with a reason (brief, D10)
 )
 
 

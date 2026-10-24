@@ -30,6 +30,8 @@ from ventoux.case.guards import (
     approval_change,
     approval_condition_change,
     count_change,
+    roles_change,
+    step_guards,
 )
 from ventoux.case.releases import (
     WRITTEN_BESIDE,
@@ -188,13 +190,27 @@ def case_changes(versions: Versions) -> Iterator[Change]:
                     leaves(old.get(field, MISSING), new.get(field, MISSING), path), versions
                 )
                 if field in old and field in new:
-                    yield from readers(before, after, field)
-        else:
-            if name == "steps":
-                yield from outcome_readers(before, after)
-            if behaviour_of(before, name) != behaviour_of(after, name):
-                where = key_of(before, name)
-                yield from judged(leaves(old, new, where) or [Leaf(where, old, new)], versions)
+                    yield from readers(versions, field)
+        elif name == "steps":
+            yield from outcome_readers(versions)
+            yield from step_changes(versions)
+        elif behaviour_of(before, name) != behaviour_of(after, name):
+            where = key_of(before, name)
+            yield from judged(leaves(old, new, where) or [Leaf(where, old, new)], versions)
+
+
+def step_changes(versions: Versions) -> Iterator[Change]:
+    """Each step's changes, then what follows from them under it: who may approve it (and, from
+    later slices, what it requires and reads)."""
+    old, new = versions.before.steps, versions.after.steps
+    found = leaves(old, new, "steps")
+    yield from judged([leaf for leaf in found if leaf.path == "steps"], versions)  # reordered
+    for step in merged(list(old), list(new)):
+        path = f"steps.{step}"
+        own = [leaf for leaf in found if leaf.path == path or leaf.path.startswith(f"{path}.")]
+        yield from judged(own, versions, peers=found)
+        if step in old and step in new:
+            yield from step_guards(step, versions)
 
 
 # --- Judging a leaf ------------------------------------------------------------------------------
@@ -216,6 +232,19 @@ CONTRACTS = (
 APPROVAL = ("steps", "*", "approval")
 APPROVAL_COUNT = ("steps", "*", "approval", "count")
 APPROVAL_WHEN = ("steps", "*", "approval", "when")
+APPROVERS = ("steps", "*", "approval", "roles")
+# Each list of roles, and the comparison that judges it (13b, choice 22).
+ROLES = {
+    ("steps", "*", "roles"): "answerers",
+    ("steps", "*", "proposed_by"): "proposers",
+    ("events", "*", "sent_by", "roles"): "senders",
+    ("close_reasons", "*", "roles"): "closers",
+}
+
+
+def roles_compared(path: str) -> str | None:
+    """The comparison judging the list of roles at `path`; None if it isn't one."""
+    return next((name for pattern, name in ROLES.items() if at(path, pattern)), None)
 
 
 def at(path: str, pattern: Sequence[str]) -> bool:
@@ -224,11 +253,14 @@ def at(path: str, pattern: Sequence[str]) -> bool:
     return len(parts) == len(pattern) and all(p in ("*", part) for part, p in zip(parts, pattern))
 
 
-def judged(found: list[Leaf], versions: Versions) -> Iterator[Change]:
-    """Each leaf as changes: judged by its comparison where one applies, else said, not proven."""
+def judged(
+    found: list[Leaf], versions: Versions, peers: list[Leaf] | None = None
+) -> Iterator[Change]:
+    """Each leaf as changes: judged by its comparison where one applies, else said, not proven.
+    An entry added is matched against the entries removed among `peers` (`found` by default)."""
     for leaf in found:
         if leaf.before is MISSING or leaf.after is MISSING:
-            yield entry_change(leaf, found)
+            yield entry_change(leaf, found if peers is None else peers)
         elif any(at(leaf.path, pattern) for pattern in CONTRACTS):
             yield from contract_changes(leaf, versions.catalog)
         elif at(leaf.path, APPROVAL):
@@ -237,6 +269,10 @@ def judged(found: list[Leaf], versions: Versions) -> Iterator[Change]:
             yield count_change(leaf)
         elif at(leaf.path, APPROVAL_WHEN):
             yield approval_condition_change(leaf)
+        elif at(leaf.path, APPROVERS):
+            continue  # said by `step_guards`, which compares who may approve, under its step
+        elif (comparison := roles_compared(leaf.path)) is not None:
+            yield roles_change(leaf, versions, comparison)
         elif any(at(leaf.path, pattern) for pattern in MARKS):
             yield mark_change(leaf)
         elif at(leaf.path, SENSITIVE):
@@ -406,12 +442,15 @@ def sensitive_change(leaf: Leaf) -> Change:
 # --- Who sees what -------------------------------------------------------------------------------
 
 
-def readers(before: CaseDefinition, after: CaseDefinition, field: str) -> Iterator[Change]:
+def readers(versions: Versions, field: str) -> Iterator[Change]:
     """Who sees `field`, as the case computes it: its `visible_to`, or every role the case names
-    (brief, D30). Compared, never the key as written: a role named anywhere new sees every field
-    without one, and the JSON says nothing about the field (brief, D55)."""
+    (brief, D30), and of those only the roles the catalog registers, since another gives sight of
+    nothing (brief, D22). Compared, never the key as written: a role named anywhere new sees every
+    field without one, and the JSON says nothing about the field (brief, D55)."""
+    before, after = versions.before, versions.after
     path = f"fields.{field}.visible_to"
-    old, new = seen_by(before, field), seen_by(after, field)
+    old = versions.registered(seen_by(before, field))
+    new = versions.registered(seen_by(after, field))
     declared = before.fields[field].visible_to != after.fields[field].visible_to
     if old == new:
         if declared:  # written differently, seen by the same roles today
@@ -422,11 +461,13 @@ def readers(before: CaseDefinition, after: CaseDefinition, field: str) -> Iterat
     yield readers_change(path, old, new, because)
 
 
-def outcome_readers(before: CaseDefinition, after: CaseDefinition) -> Iterator[Change]:
+def outcome_readers(versions: Versions) -> Iterator[Change]:
     """Every outcome and output is seen by every role the case names (brief, D30): said once."""
-    old, new = roles_named(before), roles_named(after)
+    old = versions.registered(roles_named(versions.before))
+    new = versions.registered(roles_named(versions.after))
     if old != new:
-        change = readers_change("steps", old, new, caused(before, after, old, new))
+        because = caused(versions.before, versions.after, old, new)
+        change = readers_change("steps", old, new, because)
         yield replace(change, said=f"every outcome and output: {change.said}")
 
 
