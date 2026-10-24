@@ -333,6 +333,8 @@ def test_the_summary_runs_on_pull_requests_from_the_base_s_own_promises() -> Non
     assert "uv run --directory base --locked ventoux promises > base-promises.json" in changes
     assert "uv run ventoux summary" in changes
     assert '--summary-file "$GITHUB_STEP_SUMMARY"' in changes
+    # The base's commit reaches the shell through the environment, never written into its line.
+    assert '--base-commit "$BASE_COMMIT"' in changes
 
 
 def test_the_existing_checks_are_as_they_were() -> None:
@@ -370,3 +372,16 @@ def test_the_guides_summary_runs_as_written(
     assert command.startswith("$ ventoux ")
     assert main(command.removeprefix("$ ventoux ").split()) == 0
     assert capsys.readouterr().out == printed
+
+
+def test_two_packages_of_one_name_in_a_tree_are_refused(tmp_path: Path) -> None:
+    # A record names a package by its case's `case` (brief, D50): which one merging releases
+    # would be a guess.
+    base = with_example(tmp_path / "base")
+    head = with_example(tmp_path / "head")
+    shutil.copytree(EXAMPLE, head / PACKAGES / "refund-copy")
+    found = summarized(base, head)
+    assert found.code == 1
+    assert found.failures == (
+        "examples/packages/refund-copy, in the head: another folder holds refund too",
+    )
