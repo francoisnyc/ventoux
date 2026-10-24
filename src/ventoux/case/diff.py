@@ -11,12 +11,26 @@ See docs/layers/13-diff.md (13a) and docs/guides/releases.md, "What changed: the
 import json
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
-from decimal import Decimal
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from pydantic import BaseModel
 
+from ventoux.case.changes import (
+    MISSING,
+    Change,
+    DiffRefused,
+    Leaf,
+    Verdict,
+    merged,
+    shown,
+)
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
+from ventoux.case.guards import (
+    Versions,
+    approval_change,
+    approval_condition_change,
+    count_change,
+)
 from ventoux.case.releases import (
     WRITTEN_BESIDE,
     WRITTEN_ON_FIELDS,
@@ -30,54 +44,11 @@ from ventoux.case.releases import (
 from ventoux.case.visibility import roles_named, seen_by
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
-from ventoux.core.expressions import Expression, render
 from ventoux.core.expressions.model import Node
 from ventoux.core.output_sources import output_sources
 from ventoux.core.plan import Plan
 from ventoux.core.policy import Policy, UnknownPolicy, compared
 from ventoux.core.provenance import is_trusted
-
-type Verdict = Literal["looser", "stricter", "not proven"]
-
-MISSING = object()  # an entry one version doesn't have
-
-# The comparisons that may give a verdict, a closed list: each has a witness, a run where one
-# version refuses what the other lets through (brief, D55). 13b adds the guards on people and runs.
-COMPARISONS = (
-    "input policy",  # what an input of a step's contract accepts (brief, D21)
-    "untrusted mark",  # an `untrusted:` mark on a field (brief, D12)
-    "sensitive",  # a field's value wrapped, and never given to a workflow step (brief, D31)
-    "readers",  # the roles that see a field, or every outcome and output (brief, D30)
-    "output source",  # where a step's contract says an output comes from (brief, D29)
-)
-
-
-class DiffRefused(Exception):
-    """A diff that can't be made whole: a comparison it can't make. Never a change left out."""
-
-
-@dataclass(frozen=True)
-class Change:
-    """One behaviour change: where, its verdict, and what it was and is."""
-
-    path: str  # where, as the JSON writes it: `steps.pay.activity`
-    verdict: Verdict
-    said: str  # what it was and is, in the definition's terms: `48h -> 72h`
-    comparison: str | None = None  # which of COMPARISONS proved the verdict; None: not proven
-    because: str = ""  # for a change derived from another: what caused it
-    entry: Literal["added", "removed", ""] = ""  # an entry only one version has, said whole
-
-    # Dataclass: `__post_init__` runs once the fields are set, every time a change is made.
-    def __post_init__(self) -> None:
-        # A verdict is a proof: looser or stricter only from a comparison on the closed list, and
-        # "not proven" from none (brief, D55).
-        proven = self.verdict != "not proven"
-        if proven != (self.comparison in COMPARISONS):
-            raise ValueError(f"{self.path}: {self.verdict} needs one of COMPARISONS, and only it")
-
-    def __str__(self) -> str:
-        why = f" (because {self.because})" if self.because else ""
-        return f"{self.verdict:<10} {self.path}: {self.said}{why}"
 
 
 @dataclass(frozen=True)
@@ -137,27 +108,18 @@ def diff(before: Package, after: Package, catalog: Catalog) -> Diff:
     """Every behaviour change from `before` to `after`, in the package's order, with wording
     apart. Refused (`DiffRefused`) if a comparison can't be made: a contract the catalog doesn't
     hold, a policy of a kind it doesn't know (brief, D55)."""
-    changes = list(case_changes(before.case, after.case, catalog))
+    versions = Versions(before.case, after.case, catalog)
+    changes = list(case_changes(versions))
     for reference in merged(list(before.plans), list(after.plans)):
         path = f"plans.{reference}"
         changes += judged(
             leaves(before.plans.get(reference, MISSING), after.plans.get(reference, MISSING), path),
-            catalog,
+            versions,
         )
     return Diff(after.name, tuple(changes), reworded(before, after, changes))
 
 
 # --- Walking the two versions --------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Leaf:
-    """Where the two versions behave differently, as deep as a reader needs: an expression whole,
-    an entry added or removed whole."""
-
-    path: str  # where, as the JSON writes it
-    before: object  # what the old version has there; MISSING: added
-    after: object  # what the new version has there; MISSING: removed
 
 
 def leaves(before: object, after: object, path: str) -> list[Leaf]:
@@ -211,32 +173,19 @@ def sources_leaves(before: Mapping[str, str], after: Mapping[str, str], path: st
     ]
 
 
-def merged(before: Sequence[str], after: Sequence[str]) -> list[str]:
-    """The keys of both, in `after`'s order, each key only `before` has right after the key that
-    came before it there (first, if none did)."""
-    order = list(after)
-    for index, key in enumerate(before):
-        if key in order:
-            continue
-        kept = [earlier for earlier in before[:index] if earlier in order]
-        order.insert(order.index(kept[-1]) + 1 if kept else 0, key)
-    return order
-
-
 # --- The case ------------------------------------------------------------------------------------
 
 
-def case_changes(
-    before: CaseDefinition, after: CaseDefinition, catalog: Catalog
-) -> Iterator[Change]:
+def case_changes(versions: Versions) -> Iterator[Change]:
     """The case's changes, its sections in the order the format writes them."""
+    before, after = versions.before, versions.after
     for name in type(before).model_fields:
         old, new = getattr(before, name), getattr(after, name)
         if name == "fields":
             for field in merged(list(old), list(new)):
                 path = f"fields.{field}"
                 yield from judged(
-                    leaves(old.get(field, MISSING), new.get(field, MISSING), path), catalog
+                    leaves(old.get(field, MISSING), new.get(field, MISSING), path), versions
                 )
                 if field in old and field in new:
                     yield from readers(before, after, field)
@@ -245,7 +194,7 @@ def case_changes(
                 yield from outcome_readers(before, after)
             if behaviour_of(before, name) != behaviour_of(after, name):
                 where = key_of(before, name)
-                yield from judged(leaves(old, new, where) or [Leaf(where, old, new)], catalog)
+                yield from judged(leaves(old, new, where) or [Leaf(where, old, new)], versions)
 
 
 # --- Judging a leaf ------------------------------------------------------------------------------
@@ -263,6 +212,10 @@ CONTRACTS = (
     ("steps", "*", "workflow"),
     ("plans", "*", "states", "*", "activity"),
 )
+# 13b's guards on people and runs (case/guards.py).
+APPROVAL = ("steps", "*", "approval")
+APPROVAL_COUNT = ("steps", "*", "approval", "count")
+APPROVAL_WHEN = ("steps", "*", "approval", "when")
 
 
 def at(path: str, pattern: Sequence[str]) -> bool:
@@ -271,13 +224,19 @@ def at(path: str, pattern: Sequence[str]) -> bool:
     return len(parts) == len(pattern) and all(p in ("*", part) for part, p in zip(parts, pattern))
 
 
-def judged(found: list[Leaf], catalog: Catalog) -> Iterator[Change]:
+def judged(found: list[Leaf], versions: Versions) -> Iterator[Change]:
     """Each leaf as changes: judged by its comparison where one applies, else said, not proven."""
     for leaf in found:
         if leaf.before is MISSING or leaf.after is MISSING:
             yield entry_change(leaf, found)
         elif any(at(leaf.path, pattern) for pattern in CONTRACTS):
-            yield from contract_changes(leaf, catalog)
+            yield from contract_changes(leaf, versions.catalog)
+        elif at(leaf.path, APPROVAL):
+            yield approval_change(leaf, versions)
+        elif at(leaf.path, APPROVAL_COUNT):
+            yield count_change(leaf)
+        elif at(leaf.path, APPROVAL_WHEN):
+            yield approval_condition_change(leaf)
         elif any(at(leaf.path, pattern) for pattern in MARKS):
             yield mark_change(leaf)
         elif at(leaf.path, SENSITIVE):
@@ -309,28 +268,6 @@ def entry_change(leaf: Leaf, found: list[Leaf]) -> Change:
                 entry="added",
             )
     return Change(leaf.path, "not proven", "added", entry="added")
-
-
-def shown(value: object) -> str:
-    """A value written in the definition, as the diff shows it: an expression as the renderer
-    writes it (brief, D20), a list joined, a map by its keys, nothing quoted from a case."""
-    if value is MISSING or value is None:
-        return "none"
-    if isinstance(value, Node):
-        return render(cast(Expression, value))  # Node is every operator's base
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, str | int | Decimal):
-        return str(value)
-    if isinstance(value, tuple | list):
-        return ", ".join(shown(item) for item in value) or "none"
-    if isinstance(value, Mapping):
-        return ", ".join(str(key) for key in value) or "none"
-    if isinstance(value, BaseModel):
-        written = value.model_dump(mode="json", by_alias=True, exclude_defaults=True)
-        return json.dumps(written, ensure_ascii=False)
-    # Fail closed: a kind of value this code doesn't know is never left unsaid.
-    raise DiffRefused(f"the diff can't show a {type(value).__name__}")
 
 
 # --- Input policies ------------------------------------------------------------------------------

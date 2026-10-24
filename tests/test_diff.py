@@ -13,7 +13,8 @@ from typing import Annotated, Any
 import pytest
 from pydantic import BaseModel, create_model
 
-from ventoux.case.diff import COMPARISONS, Change, Diff, DiffRefused, diff
+from ventoux.case.changes import COMPARISONS, Change, DiffRefused
+from ventoux.case.diff import Diff, diff
 from ventoux.case.memory import CaseRun
 from ventoux.case.releases import Package, changed, digest, package
 from ventoux.core.catalog import Catalog
@@ -39,6 +40,10 @@ from ventoux.tooling.cli import main
 
 ROOT = Path(__file__).parent.parent
 REFUND = ROOT / "examples" / "refund" / "refund.json"
+FOUR_EYES = ROOT / "examples" / "refund" / "refund-four-eyes.json"
+
+# A version of a definition a test compares: a case alone, or a package with its plans.
+type Definition = dict[str, Any] | Package
 
 
 def refund() -> dict[str, Any]:
@@ -820,22 +825,43 @@ WITNESSES = {
 
 @pytest.mark.parametrize("comparison", list(WITNESSES))
 def test_each_comparison_has_a_witness(comparison: str) -> None:
-    before, after, catalog, refused, taken = WITNESSES[comparison]()
+    witnessed(comparison, *WITNESSES[comparison]())
+
+
+def witnessed(
+    comparison: str,
+    before: Definition,
+    after: Definition,
+    catalog: Catalog,
+    refused: bool,
+    taken: bool,
+) -> None:
+    """Check a witness: the old version refuses what the new one takes, and the diff reads the
+    pair as looser by `comparison`, and the other way round as stricter."""
     assert refused, f"{comparison}: the old version lets it through"
     assert taken, f"{comparison}: the new version refuses it"
+    old, new = as_package(before), as_package(after)
     # What is judged, by which comparison; a change said and not proven beside it may stay (the
     # output's class renamed between orders.lookup@1 and @2 is one: its contract also differs).
-    looser = diff(packed(before), packed(after), catalog).changes
-    stricter = diff(packed(after), packed(before), catalog).changes
+    looser = diff(old, new, catalog).changes
+    stricter = diff(new, old, catalog).changes
     assert [(c.verdict, c.comparison) for c in looser if c.comparison] == [("looser", comparison)]
     assert [(c.verdict, c.comparison) for c in stricter if c.comparison] == [
         ("stricter", comparison)
     ]
 
 
+def as_package(definition: Definition) -> Package:
+    """A witness's version as a package: a case alone is packed with no plans."""
+    return definition if isinstance(definition, Package) else packed(definition)
+
+
 def test_the_witnesses_cover_every_comparison() -> None:
-    # A comparison can't give a verdict without a run that shows it (brief, D55).
-    assert list(WITNESSES) == list(COMPARISONS)
+    # A comparison can't give a verdict without a run that shows it (brief, D55). 13b's
+    # witnesses, on people and runs, are in test_diff_people.py.
+    from test_diff_people import WITNESSES as PEOPLE
+
+    assert list(WITNESSES | PEOPLE) == list(COMPARISONS)
 
 
 # --- Slice 6: the command, and the guide ---------------------------------------------------------
@@ -913,9 +939,14 @@ def test_the_guides_example_runs_as_written(tmp_path: Path, capsys: Any, monkeyp
     after["steps"]["settle"]["display"]["title"] = "Pay the refund"
     after_plans[0]["states"]["approve_refund"]["approval"]["timeout"] = "72h"
     folder_of(tmp_path / "refund-next", after, after_plans)
+    # The four-eyes refund, back to one team lead (13b).
+    folder_of(tmp_path / "refund-four-eyes", json.loads(FOUR_EYES.read_text()))
+    one_lead = json.loads(FOUR_EYES.read_text())
+    one_lead["steps"]["pay"]["approval"]["count"] = 1
+    folder_of(tmp_path / "refund-one-lead", one_lead)
     runs = guide_runs()
-    assert len(runs) == 2
-    for (arguments, printed), catalog in zip(runs, (LOOSE, CATALOG), strict=True):
+    assert len(runs) == 3
+    for (arguments, printed), catalog in zip(runs, (LOOSE, CATALOG, CATALOG), strict=True):
         monkeypatch.setattr("ventoux.tooling.cli.CATALOG", catalog)
         assert main(arguments) == 0
         assert capsys.readouterr().out == printed

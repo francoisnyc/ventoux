@@ -16,8 +16,9 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from ventoux.case.changes import DiffRefused
 from ventoux.case.definition import CaseDefinition, CaseInvalid, parse_case
-from ventoux.case.diff import DiffRefused, diff
+from ventoux.case.diff import diff
 from ventoux.case.releases import (
     PackageRefused,
     PackageUnreadable,
