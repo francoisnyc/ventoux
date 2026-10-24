@@ -6,6 +6,7 @@ firing and its reading, side by side, use the same words.
 See docs/layers/11-rules.md (11g).
 """
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -25,8 +26,19 @@ from ventoux.case.definition import (
     Then,
     WaitStep,
 )
+from ventoux.case.freshness import as_said
 from ventoux.case.sequence import requirements
-from ventoux.core.expressions import Expression, ExpressionInvalid, render
+from ventoux.case.visibility import seen_by
+from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.expressions import (
+    Expression,
+    ExpressionInvalid,
+    ListType,
+    OutcomeType,
+    ReferenceType,
+    render,
+)
+from ventoux.core.plan import ActivityState, ApprovalState, FinalState, Plan, Transition, WaitState
 
 
 class ReadingRefused(Exception):
@@ -472,3 +484,341 @@ def closes(then: Then, case: CaseDefinition) -> list[Clause]:
 def listed(parts: list[str]) -> str:
     """`a`, `a, or b`, `a, b, or c`: the reasons a start may be refused, read as one list."""
     return parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])}, or {parts[-1]}"
+
+
+# --- Every other entry, read (brief, D56) --------------------------------------------------------
+
+# The fine print of an entry's reading, a closed list too: each has a witness, a test that reads
+# an entry with it and runs a case where the engine does what it says (brief, D45) (brief, D56).
+ENTRY_CLAUSES = (
+    "unapproved where its condition is false",  # an approval's `when` (brief, D11)
+    "approvers are distinct people",  # several approve, one rejection rejects (brief, D47)
+    "the proposer never approves",  # whoever proposes a run (brief, D25)
+)
+
+# What a contract's declared effect does, as a reading says it: declared, never read from a name.
+EFFECTS = {"read": "reads", "compute": "computes", "write": "writes", "notify": "notifies"}
+
+
+@dataclass(frozen=True)
+class EntryReading:
+    """An entry of a definition in plain words: its sentence, and the fine print that applies."""
+
+    path: str  # the entry, as the JSON writes it: `steps.pay`, `fields.amount`, `closing`
+    sentence: str
+    fine_print: tuple[str, ...] = ()  # each part people get wrong that applies, one per line
+    clauses: tuple[str, ...] = ()  # which of ENTRY_CLAUSES the fine print says
+
+    def __str__(self) -> str:
+        return "\n".join([self.sentence, *(f"- {line}" for line in self.fine_print)])
+
+
+def read_entry(
+    path: str, case: CaseDefinition, plans: Mapping[str, Plan], catalog: Catalog
+) -> object | None:
+    """The reading of the entry at `path` (`steps.pay`, `rules.chase`, `closing`,
+    `plans.refund-order@1.states.pay`), from the definition and the catalog alone: never given a
+    case file, so it can't quote a value from one. None if the version has no such entry."""
+    parts = path.split(".")
+    section, name = parts[0], parts[1] if len(parts) > 1 else ""
+    if path == "closing":
+        return read_closing(case)
+    if section == "plans" and len(parts) >= 4 and name in plans:
+        plan, what, entry = plans[name], parts[2], parts[3]
+        if what == "states" and entry in plan.states:
+            return read_state(entry, plan, catalog)
+        if what == "fields" and entry in plan.fields:
+            return read_plan_field(entry, plan)
+        return None
+    readers: dict[str, Callable[[], object]] = {
+        "steps": lambda: read_step(name, case, catalog),
+        "fields": lambda: read_field(name, case, catalog),
+        "events": lambda: read_event(name, case),
+        "close_reasons": lambda: read_close_reason(name, case),
+        "rules": lambda: read_written_rule(name, case),
+    }
+    present: dict[str, Mapping[str, object]] = {
+        "steps": case.steps,
+        "fields": case.fields,
+        "events": case.events,
+        "close_reasons": case.close_reasons,
+        "rules": case.written,
+    }
+    if section not in readers or name not in present[section]:
+        return None
+    return readers[section]()
+
+
+def read_written_rule(name: str, case: CaseDefinition) -> object:
+    """A rule as written: a raw rule's reading, or a pattern's (brief, D46)."""
+    if isinstance(case.written[name], Rule):
+        return read_rule(name, case.rules[name], case)
+    return next(reading for reading in read_patterns(case) if reading.name == name)
+
+
+def read_step(name: str, case: CaseDefinition, catalog: Catalog) -> EntryReading:
+    """A step: what it is, when it may start, who approves it, what it reaches and how old its
+    facts may be (brief, D56)."""
+    step = case.steps[name]
+    if not isinstance(step, TaskStep | CallStep | PlanStep | WaitStep):
+        # Fail closed: a kind of step the reader doesn't know is refused, never guessed.
+        raise ReadingRefused(f"can't read {name}: {step!r} is no kind of step")
+    sentences = [what_it_is(name, step, catalog), when_it_starts(name, step, case)]
+    fine: list[Clause] = []
+    if isinstance(step, CallStep) and step.approval is not None:
+        sentences.append(who_approves(name, step))
+        fine += approval_print(name, step)
+    if isinstance(step, TaskStep):
+        sentences += answered(name, step)
+    if step.reaches:
+        sentences.append(f"Done, it reaches {listed_and(list(step.reaches))}.")
+    if isinstance(step, CallStep | PlanStep) and step.max_age:
+        ages = [f"{fact} at most {as_said(age)} old" for fact, age in step.max_age.items()]
+        sentences.append(f"It needs {listed_and(ages)}.")
+    return EntryReading(
+        f"steps.{name}",
+        " ".join(sentences),
+        tuple(clause.text for clause in fine),
+        tuple(clause.kind for clause in fine),
+    )
+
+
+def what_it_is(name: str, step: object, catalog: Catalog) -> str:
+    """`pay calls payments.refund@2 (high risk, it writes), giving amount from approved_amount`."""
+    if isinstance(step, TaskStep):
+        return (
+            f"{name} is a task for {' or '.join(step.roles)}, answered "
+            f"{' or '.join(step.outcomes)}."
+        )
+    if isinstance(step, CallStep):
+        return f"{name} calls {called_with(name, step.called, catalog)}{giving(name, step.inputs)}."
+    if isinstance(step, PlanStep):
+        return f"{name} runs the plan {step.plan}{giving(name, step.inputs)}."
+    if isinstance(step, WaitStep):
+        return f"{name} waits for {step.event}."
+    raise ReadingRefused(f"can't read {name}: {step!r} is no kind of step")
+
+
+def called_with(name: str, reference: str, catalog: Catalog) -> str:
+    """`payments.refund@2 (high risk, it writes)`: its risk and its declared effect, never a guess
+    from its name (brief, D56)."""
+    try:
+        contract = catalog.lookup(reference)
+    except NotInCatalog as missing:
+        raise ReadingRefused(f"can't read {name}: {missing}") from None
+    return f"{reference} ({contract.risk} risk, it {EFFECTS[contract.effect]})"
+
+
+def giving(name: str, inputs: Mapping[str, Expression]) -> str:
+    """`, giving order_id from order_id and amount from approved_amount`; nothing if none."""
+    given = [f"{field} from {expression(name, f'input {field}', v)}" for field, v in inputs.items()]
+    return f", giving {listed_and(given)}" if given else ""
+
+
+def when_it_starts(
+    name: str, step: TaskStep | CallStep | PlanStep | WaitStep, case: CaseDefinition
+) -> str:
+    """`It starts by itself once review is done, if review.outcome = "approve".`"""
+    required = [
+        f"{needed} is done" if needed in case.steps else f"{needed} is reached"
+        for needed in requirements(case)[name]
+    ]
+    once = f"once {listed_and(required)}" if required else ""
+    if step.automatic:
+        said = f"It starts by itself {once or 'when the case opens'}"
+    else:
+        who = (
+            f"{' or '.join(step.proposed_by)} proposes it"
+            if step.proposed_by
+            else ("a rule starts it")
+        )
+        said = f"It starts only when {who}{f', {once}' if once else ''}"
+    if step.when is not None:
+        said += f", if {expression(name, 'condition', step.when)}"
+    if step.automatic and step.proposed_by:
+        said += f"; {' or '.join(step.proposed_by)} may propose it"
+    if step.repeatable:
+        said += "; it may run again when proposed"
+    return said + "."
+
+
+def who_approves(name: str, step: CallStep) -> str:
+    """`One support-lead approves it, when approved_amount > 100.`"""
+    approval = step.approval
+    assert approval is not None
+    roles = " or ".join(approval.roles)
+    if approval.count == 1:
+        said = f"One {roles} approves it"
+    else:
+        said = f"{counted_people(approval.count)} approve it, each a {roles}"
+    if approval.when is not None:
+        return f"{said}, when {expression(name, 'approval condition', approval.when)}."
+    return f"{said}, on every run."
+
+
+NUMBER_WORDS = ("One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten")
+
+
+def counted_people(count: int) -> str:
+    """`Two people`, `11 people`."""
+    word = NUMBER_WORDS[count - 1] if 1 <= count <= len(NUMBER_WORDS) else str(count)
+    return f"{word} people"
+
+
+def approval_print(name: str, step: CallStep) -> list[Clause]:
+    """What people get wrong about an approval, each only where it applies (brief, D56)."""
+    approval = step.approval
+    assert approval is not None
+    fine: list[Clause] = []
+    if approval.when is not None:
+        # Asked only where its condition holds: elsewhere the step runs unapproved, a high-risk
+        # one included (brief, D11).
+        condition = expression(name, "approval condition", approval.when)
+        fine.append(
+            Clause(
+                "unapproved where its condition is false",
+                f"Where {condition} is false, it runs with no approval.",
+            )
+        )
+    if approval.count > 1:
+        fine.append(
+            Clause(
+                "approvers are distinct people",
+                f"The {approval.count} approvers are different people, each someone else; one "
+                "rejection rejects the approval.",
+            )
+        )
+    if step.proposed_by:
+        fine.append(
+            Clause("the proposer never approves", "Whoever proposes a run never approves it.")
+        )
+    return fine
+
+
+def answered(name: str, step: TaskStep) -> list[str]:
+    """`Answered approve, it sets approved_amount.`, for each outcome that sets or reaches."""
+    said: list[str] = []
+    for outcome, declared in step.outcomes.items():
+        does = [
+            *([f"sets {listed_and(list(declared.sets))}"] if declared.sets else []),
+            *([f"reaches {listed_and(list(declared.reaches))}"] if declared.reaches else []),
+        ]
+        if does:
+            said.append(f"Answered {outcome}, it {' and '.join(does)}.")
+    return said
+
+
+def read_field(name: str, case: CaseDefinition, catalog: Catalog) -> EntryReading:
+    """A field: its type, who sees it (registered roles, as the case computes it), whether it is
+    sensitive, and its mark (brief, D12) (brief, D30) (brief, D31)."""
+    field = case.fields[name]
+    seen = [role for role in seen_by(case, name) if role in catalog.roles]
+    sentences = [
+        f"{name} is {kind_of(name, field.declared)}, seen by {listed_and(seen) if seen else 'nobody'}."
+    ]
+    if field.sensitive:
+        sentences.append("It is sensitive: wrapped, and never given to a workflow step.")
+    if field.source is not None:
+        sentences.append(f"It is marked {field.source}, whoever writes it.")
+    return EntryReading(f"fields.{name}", " ".join(sentences))
+
+
+def kind_of(name: str, declared: object) -> str:
+    """A declared type, as people read it: `a number`, `a reference to orders`."""
+    if isinstance(declared, ReferenceType):
+        return f"a reference to {declared.system}"
+    if isinstance(declared, ListType):
+        return f"a list of {listed_and(list(declared.fields))}"
+    if isinstance(declared, OutcomeType):
+        return f"one of {' or '.join(declared.outcomes)}"
+    kinds = {"number": "a number", "string": "a text", "boolean": "true or false"}
+    kind = getattr(declared, "type", None)
+    if kind not in kinds:
+        raise ReadingRefused(f"can't read {name}'s type: {declared!r} isn't a type Ventoux knows")
+    return kinds[str(kind)]
+
+
+def read_event(name: str, case: CaseDefinition) -> EntryReading:
+    """An event: who sends it, and what it carries, each with its mark (brief, D41)."""
+    event = case.events[name]
+    sender = event.sent_by.system or " or ".join(event.sent_by.roles or ())
+    carried = [
+        f"{field} ({kind_of(field, payload.declared)}"
+        f"{f', marked {payload.source}' if payload.source else ''})"
+        for field, payload in event.payload.items()
+    ]
+    carrying = f", carrying {listed_and(carried)}" if carried else ", carrying nothing"
+    return EntryReading(f"events.{name}", f"{name} is sent by {sender}{carrying}.")
+
+
+def read_close_reason(name: str, case: CaseDefinition) -> EntryReading:
+    """A close reason: who may close the case with it (brief, D10)."""
+    reason = case.close_reasons[name]
+    return EntryReading(
+        f"close_reasons.{name}", f"{name}: {' or '.join(reason.roles)} may close the case with it."
+    )
+
+
+# Forgetting, as a case map says it (brief, D32).
+FORGETTING = {
+    "allowed": "Its records may be forgotten, open or closed.",
+    "while_open": "Its records may be forgotten only while it is open.",
+    "never": "Its records are never forgotten.",
+}
+
+
+def read_closing(case: CaseDefinition) -> EntryReading:
+    """How a case closes, and whether it may be forgotten (brief, D10) (brief, D32)."""
+    if case.stays_open:
+        closes = "It never closes by itself: a person closes it with a reason."
+    elif case.closes_when:
+        verb = "is" if len(case.closes_when) == 1 else "are"
+        closes = f"It closes once {listed_and(list(case.closes_when))} {verb} reached."
+    else:
+        closes = "It closes when nothing is left to do."
+    return EntryReading("closing", f"{closes} {FORGETTING[case.forgetting]}")
+
+
+def read_state(name: str, plan: Plan, catalog: Catalog) -> EntryReading:
+    """A plan's state: what it calls, who approves or answers it, and where each answer leads."""
+    state = plan.states[name]
+    path = f"plans.{plan.plan}@{plan.version}.states.{name}"
+    if isinstance(state, FinalState):
+        return EntryReading(path, f"{name} ends the plan: {state.final}.")
+    if isinstance(state, ActivityState):
+        does = f"{name} calls {called_with(name, state.activity, catalog)}{giving(name, state.inputs)}."
+    elif isinstance(state, ApprovalState):
+        within = f", within {state.approval.timeout}" if state.approval.timeout else ""
+        does = (
+            f"{name}: one {' or '.join(state.approval.roles)} approves {state.approval.of}{within}."
+        )
+    elif isinstance(state, WaitState):
+        within = f", within {state.wait.timeout}" if state.wait.timeout else ""
+        does = (
+            f"{name} waits for {' or '.join(state.wait.outcomes)} by "
+            f"{' or '.join(state.wait.roles)}{within}."
+        )
+    else:
+        raise ReadingRefused(f"can't read {name}: {state!r} is no kind of state")
+    moves = [
+        f"on {event}, {', or '.join(leads(name, transition) for transition in transitions)}"
+        for event, transitions in state.on.items()
+    ]
+    return EntryReading(path, f"{does} {'; '.join(moves).capitalize()}.")
+
+
+def leads(name: str, transition: Transition) -> str:
+    """`pay`, or `pay if amount > 100`."""
+    if transition.when is None:
+        return transition.target
+    return f"{transition.target} if {expression(name, 'transition', transition.when)}"
+
+
+def read_plan_field(name: str, plan: Plan) -> EntryReading:
+    """A plan's field: its type, and its mark (brief, D12)."""
+    source = plan.sources.get(name)
+    marked = f" It is marked {source}, whoever gives it." if source else ""
+    return EntryReading(
+        f"plans.{plan.plan}@{plan.version}.fields.{name}",
+        f"{name} is {kind_of(name, plan.fields[name])}.{marked}",
+    )

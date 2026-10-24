@@ -399,6 +399,16 @@ it approve the step's risk, so adding `support`, which approves nothing, changes
 stop `pay` reading `approved_amount`, and whoever answered `review`, which sets it, may now
 approve `pay`. The JSON shows an input changed; the diff says who may now approve.
 
+The engine excludes whoever's answer the step reads *now*, and a later answer or an edit replaces
+an earlier one: an edited value comes from the edit's proposer and approver. So the diff compares
+two sets in each version: who *may* be excluded (whoever's answer, send or edit can reach what
+the step reads) and who is excluded *in every run* (whoever answers a task that isn't repeatable,
+whose outcome the step reads directly: an outcome can't be edited). It says stricter only if
+nobody leaves either set and everyone who may be excluded is excluded every time, so a step that
+reads a field someone may edit is never proven stricter; and looser only if nobody joins either
+set. Where your platform team lets a role edit, stopping `pay` reading `approved_amount` for
+`amount` is not proven: whoever answered `review` leaves, but whoever edits `amount` joins.
+
 The four-eyes refund (`examples/refund/refund-four-eyes.json`), back to one team lead:
 
 ```
@@ -406,6 +416,36 @@ $ ventoux diff refund-four-eyes refund-one-lead
 refund: 1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; no wording change
 looser     steps.pay.approval.count: 2 -> 1 (one person approves pay, where two had to)
 ```
+
+**In plain words, for whoever reviews the business side,** `--plain` reads each entry a change
+is about, before and after, as the cases guide reads rules, then says each change in its verdict's
+words: **Looser**, **Stricter**, or **Changed, not proven either way (read it as possibly
+looser)**. Nothing is judged again: the words are the change's. It prints Markdown, so a pull
+request can show it as it is:
+
+```
+$ ventoux diff refund-four-eyes refund-one-lead --plain
+## refund: what changes
+
+1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; no wording change.
+
+### steps.pay
+
+- Before: pay calls payments.refund@2 (high risk, it writes), giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve". Two people approve it, each a support-lead, when approved_amount > 10000.
+  - Where approved_amount > 10000 is false, it runs with no approval.
+  - The 2 approvers are different people, each someone else; one rejection rejects the approval.
+- After: pay calls payments.refund@2 (high risk, it writes), giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve". One support-lead approves it, when approved_amount > 10000.
+  - Where approved_amount > 10000 is false, it runs with no approval.
+- **Looser** (`steps.pay.approval.count`): 2 -> 1 (one person approves pay, where two had to).
+```
+
+**Written otherwise, the same decisions.** Where two versions are written differently but decide
+the same for every case, as a `max_age` of `2d` and one of `48h`, the diff says so on a line of its
+own, with what the history words differently, and counts it apart: it never reads as a loosening.
+Every age is compared so: a fact's `max_age`, a rule's timer, an sla's `within`, a reminder's ages
+(whose rules are named by them, `chase_2d`, so the line says the history names them otherwise) and
+a plan state's `timeout`. An age of another duration is not proven: what the timer leads to
+decides whether sooner is looser.
 
 **Every doubt reads as looser.** "Not proven" is counted with looser, as what *may loosen*. Its
 line says only what changed and leaves the judgement to you. A change is never left out: whatever

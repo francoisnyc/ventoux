@@ -11,15 +11,24 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from ventoux.case.changes import MISSING, Change, DiffRefused, Leaf, Verdict, merged, shown
-from ventoux.case.definition import Approval, CallStep, CaseDefinition, CloseReason
-from ventoux.case.freshness import seconds_in
+from ventoux.case.changes import (
+    MISSING,
+    Change,
+    DiffRefused,
+    Leaf,
+    Rewritten,
+    Verdict,
+    merged,
+    shown,
+)
+from ventoux.case.definition import Approval, CallStep, CaseDefinition, CloseReason, TaskStep
+from ventoux.case.freshness import as_said, seconds_in
 from ventoux.case.sequence import requirements
 from ventoux.case.writers import could_come_from
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
 from ventoux.core.plan import ActivityState, ApprovalState, Plan
-from ventoux.core.provenance import fields_read
+from ventoux.core.provenance import answering, fields_read
 from ventoux.core.roles import may_approve
 
 
@@ -155,7 +164,7 @@ def widened(path: str, said: str, old: set[str], new: set[str], comparison: str)
 # --- What follows under a step -------------------------------------------------------------------
 
 
-def step_guards(step: str, versions: Versions) -> Iterator[Change]:
+def step_guards(step: str, versions: Versions) -> Iterator[Change | Rewritten]:
     """What follows from a step's changes, said under it, as the case reads them: what it
     requires, how old each fact it reads may be, who may approve it, and who is excluded from
     approving it."""
@@ -165,7 +174,7 @@ def step_guards(step: str, versions: Versions) -> Iterator[Change]:
     yield from exclusions(step, versions)
 
 
-def freshness(step: str, versions: Versions) -> Iterator[Change]:
+def freshness(step: str, versions: Versions) -> Iterator[Change | Rewritten]:
     """How old each fact `step` reads may be (`max_age`) (brief, D18), compared as a duration, never
     as text (13b, choice 28): longer looser, shorter stricter; a fact no longer required fresh
     looser, newly required stricter."""
@@ -181,12 +190,50 @@ def freshness(step: str, versions: Versions) -> Iterator[Change]:
         elif old[fact] != new[fact]:
             longer, shorter = seconds_in(new[fact]), seconds_in(old[fact])
             if longer == shorter:
-                yield Change(where, "not proven", f"{said} (the same age)")
+                # Every decision compares seconds; the history says the age as written
+                # (`freshness.as_said`), so the line says that too (13c, choice 38).
+                history = f"says {as_said(new[fact])} where it said {as_said(old[fact])}"
+                yield Rewritten(where, f"{said}: the same decisions; the history {history}")
             else:
                 verdict: Verdict = "looser" if longer > shorter else "stricter"
                 yield Change(where, verdict, said, "freshness")
     if set(old) == set(new) and list(old) != list(new):
         yield Change(path, "not proven", f"{shown(old)} -> {shown(new)}")  # reordered
+
+
+def age_change(leaf: Leaf) -> Change | Rewritten:
+    """An age besides `max_age` (13c, choice 50): a rule's timer, an sla's `within`, a reminder's
+    ages, a plan state's timeout. The same duration written otherwise decides the same for every
+    case, and the line says how the history words it; any other change is not proven, since what
+    the timer leads to decides whether sooner is looser, and the diff doesn't judge that."""
+    said = f"{shown(leaf.before)} -> {shown(leaf.after)}"
+    old, new = ages_of(leaf.before), ages_of(leaf.after)
+    if old is None or new is None or [seconds_of(a) for a in old] != [seconds_of(a) for a in new]:
+        return Change(leaf.path, "not proven", said)
+    history = f"says {shown(leaf.after)} where it said {shown(leaf.before)}"
+    rules, name, *rest = leaf.path.split(".")
+    if rules == "rules" and rest[0] == "reminder":
+        # A reminder's rules are named by their ages, `chase_2d` (brief, D46), so the history
+        # names them otherwise too.
+        before = " and ".join(f"{name}_{age}" for age in old)
+        after = " and ".join(f"{name}_{age}" for age in new)
+        history += f", and names its rules {after} where it named {before}"
+    return Rewritten(leaf.path, f"{said}: the same decisions; the history {history}")
+
+
+def ages_of(value: object) -> tuple[str, ...] | None:
+    """An age, or a reminder's ages, as a tuple; None for anything else (no timeout at all)."""
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, tuple) and all(isinstance(age, str) for age in value):
+        return value
+    return None
+
+
+def seconds_of(age: str) -> int:
+    """How many seconds an age holds: a case's units (`seconds_in`), and a plan's seconds, `30s`,
+    which a plan's timeout may be written in."""
+    return int(age[:-1]) if age.endswith("s") else seconds_in(age)
 
 
 def requirements_change(step: str, versions: Versions) -> Iterator[Change]:
@@ -203,48 +250,101 @@ def requirements_change(step: str, versions: Versions) -> Iterator[Change]:
 
 
 def exclusions(step: str, versions: Versions) -> Iterator[Change]:
-    """Who is excluded from approving `step` for what it reads (13b, choice 23): whoever's answer
-    can reach its inputs or its `when` (brief, D11). The rule is the engine's; which answers reach
-    the step is the definition's. Fewer excluded: looser; more: stricter; both: not proven."""
+    """Who is excluded from approving `step` (13b, choice 23, as choice 46 of 13c changed it),
+    compared as two sets in each version: who *may* be excluded (`excluded`) and who is excluded
+    *in every run* (`excluded_every_time`). The runtime excludes whoever's answer the step reads
+    now (brief, D11), and a later answer or an edit replaces an earlier one (brief, D52). So:
+    stricter only if nobody leaves either set and everyone who may be excluded is excluded every
+    time; looser only if nobody joins either set; otherwise not proven."""
     old, new = versions.before.steps[step], versions.after.steps[step]
     if not isinstance(old, CallStep) or not isinstance(new, CallStep):
         return
     if old.approval is None or new.approval is None:
         return  # an approval added or removed is said by `approval_change`
-    excluded_before = excluded(versions.before, old, versions.catalog)
-    excluded_after = excluded(versions.after, new, versions.catalog)
-    if excluded_before == excluded_after:
+    may_before = excluded(versions.before, old, versions.catalog)
+    may_after = excluded(versions.after, new, versions.catalog)
+    every_before = excluded_every_time(versions.before, old)
+    every_after = excluded_every_time(versions.after, new)
+    if (may_before, every_before) == (may_after, every_after):
         return
+    left = (may_before - may_after) | (every_before - every_after)
+    joined = (may_after - may_before) | (every_after - every_before)
+    said = f"excluded from approving {step}: " + "; ".join(
+        moved(may_before, may_after, every_before, every_after)
+    )
     path = f"steps.{step}.approval"
-    gone, come = excluded_before - excluded_after, excluded_after - excluded_before
-    if gone and not come:
-        said = f"{whoever(gone)} {'is' if len(gone) == 1 else 'are'} no longer excluded from "
-        yield Change(path, "looser", f"{said}approving {step}", "approval exclusions")
-    elif come and not gone:
-        said = f"{whoever(come)} {'is' if len(come) == 1 else 'are'} now excluded from "
-        yield Change(path, "stricter", f"{said}approving {step}", "approval exclusions")
+    if not left and may_after == every_after:
+        yield Change(path, "stricter", said, "approval exclusions")
+    elif not joined:
+        yield Change(path, "looser", said, "approval exclusions")
     else:
-        said = f"excluded from approving {step}: {whoever(excluded_before)} -> "
-        yield Change(path, "not proven", said + whoever(excluded_after))
+        yield Change(path, "not proven", said)
+
+
+def moved(
+    may_before: frozenset[str],
+    may_after: frozenset[str],
+    every_before: frozenset[str],
+    every_after: frozenset[str],
+) -> list[str]:
+    """Who moved between the sets, each said once: `whoever answers review, no longer`."""
+    gone = may_before - may_after
+    come = may_after - may_before
+    groups = (
+        (gone, "no longer"),
+        ((every_before - every_after) - gone, "in some runs only, no longer in every one"),
+        (come & every_after, "now in every run"),
+        (come - every_after, "now in some runs"),
+        ((every_after - every_before) - come, "now in every run, not only in some"),
+    )
+    return [f"{whoever(people)}, {how}" for people, how in groups if people]
 
 
 def excluded(case: CaseDefinition, step: CallStep, catalog: Catalog) -> frozenset[str]:
-    """The people whose answers can reach what `step` reads, as the static check names them
-    (`person:answering review`), from the definition alone: through a field a task's form sets,
-    a task's outcome, an event a person sends, or a rule that computes from them (brief, D42)."""
-    sources = could_come_from(case, catalog, None)
-    read = [*step.inputs.values(), *([step.when] if step.when is not None else [])]
-    fields = {field for expression in read for field in fields_read(expression)}
+    """The people who *may* be excluded from approving `step`: whoever's answer can reach what it
+    reads, as the static check names them (`person:answering review`), from the definition alone:
+    through a field a task's form sets, a task's outcome, an event a person sends, an edit, or a
+    rule that computes from them (brief, D42). See docs/layers/13-diff.md, "Every way a value the
+    step reads is given"."""
+    # An edit is one more writer of each declared field wherever a registered role may edit
+    # (brief, D52): its proposer and its approver may be excluded (13c, choice 46).
+    sources = could_come_from(case, catalog, None, edits=bool(catalog.editors))
     return frozenset(
         source
-        for field in fields
+        for field in read_by(step)
         for source in sources.get(field, frozenset())
         if source.startswith("person:")
     )
 
 
+def excluded_every_time(case: CaseDefinition, step: CallStep) -> frozenset[str]:
+    """The people excluded from approving `step` in every run: whoever answers a task that isn't
+    repeatable, whose outcome `step`'s inputs or its `when` read directly. An outcome can't be
+    edited (brief, D52) and such a task is answered once, so its answerer stays the outcome's
+    source; a field a form sets may be edited, answered again or set by another (13c, choice
+    45)."""
+    found: set[str] = set()
+    for value in read_by(step):
+        name, _, part = value.partition(".")
+        task = case.steps.get(name)
+        if part == "outcome" and isinstance(task, TaskStep) and not task.repeatable:
+            found.add(answering(name))
+    return frozenset(found)
+
+
+def read_by(step: CallStep) -> set[str]:
+    """The values `step`'s inputs and its `when` read: whose answers in them may not approve it
+    (brief, D11)."""
+    read = [*step.inputs.values(), *([step.when] if step.when is not None else [])]
+    return {field for expression in read for field in fields_read(expression)}
+
+
 # How the static check's sources name a person, and how a sentence says it.
-DOING = {"person:answering ": "answers", "person:sending ": "sends"}
+DOING = {
+    "person:answering ": "answers",
+    "person:sending ": "sends",
+    "person:editing ": "proposes or approves an edit of",
+}
 
 
 def whoever(people: frozenset[str]) -> str:

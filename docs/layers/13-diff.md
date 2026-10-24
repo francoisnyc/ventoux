@@ -760,7 +760,8 @@ Each starts with its negative test, seen failing for the right reason.
 
 Each claim this section makes about behaviour, and the test that would fail if it weren't true.
 `P` is `tests/test_diff_people.py` (new); `D` is 13a's `tests/test_diff.py`. Checked against the
-tests, 2026-10-24: every test named here exists, and every test in `P` is named here.
+tests, 2026-10-24: every test named here exists, and every test in `P` is named here, or in 13c's
+table for what 13c added. Two rows were changed by 13c (choices 46 and 50), each marked.
 
 | Promise | Test |
 |---|---|
@@ -771,7 +772,7 @@ tests, 2026-10-24: every test named here exists, and every test in `P` is named 
 | Roles widened are looser, narrowed stricter, replaced not proven: who answers, proposes, sends and closes | P `test_roles_widened_are_looser`, `test_roles_narrowed_are_stricter`, `test_roles_replaced_are_not_proven` |
 | A role nobody registered counts for nothing, said so, and sees nothing | P `test_a_role_nobody_registered_counts_for_nothing` |
 | Who may approve is the listed roles allowed the contract's risk: a role that may not changes no approver; a step moved to a lower risk gains approvers, a higher one loses them | P `test_a_role_that_may_not_approve_the_risk_changes_no_approver`, `test_a_step_moved_to_a_lower_risk_gains_approvers` |
-| A step that stops reading an answer lets whoever gives it approve: looser (a change the JSON diff hides); starts reading one: stricter; both: not proven | P `test_a_step_that_stops_reading_an_answer_excludes_nobody_for_it`, `test_a_step_that_starts_reading_an_answer_excludes_its_people`, `test_exclusions_both_added_and_removed_are_not_proven` |
+| A step that stops reading an answer lets whoever gives it approve: looser (a change the JSON diff hides); both added and removed: not proven. *Changed in 13c (choice 46):* looser only where nobody joins who may be excluded; a step that starts reading a form's field is not proven, never stricter | P `test_a_step_that_stops_reading_an_answer_excludes_nobody_for_it`, `test_a_step_that_starts_reading_a_forms_field_is_not_proven_stricter`, `test_exclusions_both_added_and_removed_are_not_proven` |
 | Requirements, `sequence` folded in: fewer looser, more stricter, replaced not proven; a sequence changed is said on each step it changes | P `test_a_requirement_removed_is_looser`, `test_a_requirement_added_is_stricter`, `test_a_requirement_replaced_is_not_proven`, `test_a_sequence_is_said_on_each_step_it_changes` |
 | A step's `when` removed is looser, said as running on no fewer cases; added stricter | P `test_a_steps_condition_removed_is_looser`, `test_a_steps_condition_added_is_stricter` |
 | `automatic` and `repeatable` turned on are looser, off stricter | P `test_automatic_turned_on_is_looser`, `test_repeatable_added_is_looser_and_removed_stricter` |
@@ -779,9 +780,524 @@ tests, 2026-10-24: every test named here exists, and every test in `P` is named 
 | An event's sender replaced, system for roles, is not proven | P `test_an_events_sender_replaced_is_not_proven` |
 | Forgetting is ordered never < while_open < allowed | P `test_forgetting_is_ordered` |
 | `max_age` compared as a duration: longer or no longer required looser, shorter or newly required stricter, the same age written otherwise not proven | P `test_a_fact_allowed_older_is_looser`, `test_a_fact_no_longer_required_fresh_is_looser` |
-| A plan's activity no longer approved is looser, newly approved stricter; its approval roles as its risk allows; its wait roles as roles; its timeouts not proven | P `test_a_plans_approval_removed_is_looser`, `test_a_plans_approvers_are_compared_as_its_risk_allows`, `test_a_plans_wait_roles_widened_are_looser`, `test_a_plans_timeout_is_not_proven` |
+| A plan's activity no longer approved is looser, newly approved stricter; its approval roles as its risk allows; its wait roles as roles; its timeouts not proven (*changed in 13c, choice 50:* the same duration written otherwise is no verdict) | P `test_a_plans_approval_removed_is_looser`, `test_a_plans_approvers_are_compared_as_its_risk_allows`, `test_a_plans_wait_roles_widened_are_looser`, `test_a_plans_timeout_is_not_proven` |
 | An output's source on a plan's activity state is said, never judged (from the review of #47) | P `test_an_output_source_on_a_plans_state_is_said_never_judged` |
 | Each of 13b's comparisons has a witness run, the pair read both ways, and the witnesses of 13a and 13b together cover the list | P `test_each_comparison_has_a_witness`; D `test_the_witnesses_cover_every_comparison` |
 | 13a's promises still hold, `forgetting` now judged in its order test | D, every test |
 | The guide's count example runs as written | D `test_the_guides_example_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal, in the new modules too | `tests/test_layers.py`, unchanged |
+
+## 13c. The plain-language form, the case map and the "will never do" sheet
+
+Status: choices drafted 2026-10-24, from `main` at `43dea32` (13b merged as #48). Answered "all
+as recommended", the same day: choices 33 to 44. D56, and D45's and D55's amendment lines, written
+before building 13c.
+
+### Warm-up: learning question 36, the model picks the step, never the values
+
+> What does "the model picks the step, never the values" mean in code? Using 8a: if a step
+> advisor (layer 15) suggested the next step, which seam would its suggestion go through, what
+> would the engine still check, and where could a value it made up never get in?
+
+Open since layer 8; last asked at 11e's warm-up. Answer from memory first. It is 13c's question in
+another form: the sheet and the readings say only what the definition proves, and quote nothing a
+case holds.
+
+Asked to be told, 2026-10-24; answered briefly and recorded. The question stays open.
+
+### What this part is for
+
+13a and 13b made one change list, each change with a verdict that is a proof. 13c says it in
+words a business reviewer reads, and adds two sheets of one package:
+
+- **the plain-language diff:** each changed step, approval, rule, field, event or close reason
+  read before and after, as D45 reads rules, with the verdict's words around it;
+- **the case map:** what a case of this package can do, every entry read, in the format's order;
+- **the "will never do" sheet:** what no case of this package will ever do, each line a proof
+  from a check that already proves it, with a witness.
+
+A small example, the four-eyes refund back to one team lead, in the plain form:
+
+```
+## refund: what changes
+
+### pay
+Before: pay calls payments.refund@2 (high risk, it writes) once review is done, if
+review.outcome = "approve". Two people approve it, each a support-lead, when
+approved_amount > 10000.
+After: … One support-lead approves it, when approved_amount > 10000.
+- **Looser:** one person approves pay, where two had to.
+```
+
+And the start of the refund's sheet:
+
+```
+## refund will never
+
+- call anything but payments.refund@2 (high risk, it writes).
+- give payments.refund@2 its amount or its order_id from untrusted data.
+- let anyone but support or support-lead see amount.
+- let whoever answers review approve pay.
+```
+
+### What the code does today
+
+- `case/reading.py` (11g, D45): `read_rule`, `read_patterns` and their fine print: rules only,
+  never given a case file, failing closed on a shape it doesn't know, each clause with a witness.
+- `case/diff.py`, `case/guards.py`, `case/changes.py` (13a, 13b): the change list, each change's
+  path, verdict, `said` and comparison; nothing in words yet beyond `said`.
+- `case/visibility.py`: `seen_by`, `roles_named`; `core/policy.py`: each policy's `describe()`;
+  `case/guards.py`: `excluded` (whose answers reach a step), `allowed` (who may approve a risk).
+- No reading of a step, a field, an event, a close reason or a plan exists yet.
+
+### Choices for 13c
+
+33. **The plain form renders the one change list, never judges again** (choice 2). It walks
+    `diff`'s changes in their order, groups them by the entry they are about (a step, a rule, a
+    field, an event, a close reason, a plan state), and prints per entry its reading before and
+    after, then each change's verdict in words. The verdict and its reason come only from the
+    `Change`: the renderer has no comparison of its own. A test checks that every verdict word in
+    the plain form is its change's. *Recommended.* Set aside: reading both versions and saying
+    what differs from the sentences (a second judgement, and a second place to be wrong).
+
+34. **The verdict's words, one per verdict, the same everywhere:**
+    - looser: **"Looser:"** and the change's `said` as a sentence;
+    - stricter: **"Stricter:"** likewise;
+    - not proven: **"Changed, not proven either way (read it as possibly looser):"**, so a doubt
+      reads as looser in words too (choice 4);
+    - written otherwise, the same decisions (choice 38): **"Written otherwise, the same
+      decisions:"**.
+
+    Wording changes are listed apart, last, as in the developer form. *Recommended.*
+
+35. **Readings for every kind of entry, beside the rules' (D45's rules kept):** in
+    `case/reading.py`, with the same rules as a rule's reading: names, not titles; conditions as
+    the expression renderer writes them; never given a case file; a shape the reader doesn't know
+    is refused, never left out. New readings:
+    - **a step:** what it is (a task for who answers, a call of a contract with its risk and
+      declared effect, a plan, a wait for an event), when it may start (what it requires, its
+      `when`, `automatic` or proposed by whom, `repeatable`), its approval (who, how many, when),
+      what it reaches, how old its facts may be;
+    - **a field:** its type, who sees it (as the case computes it), `sensitive`, its `untrusted:`
+      mark;
+    - **an event:** who sends it, what it carries, each payload field's mark;
+    - **a close reason:** who may close the case with it; and the case's own closing
+      (`closes_when`, `stays_open`) and `forgetting`;
+    - **a plan:** each state in its written order: what each activity state calls, each approval
+      state's roles and timeout, each wait's roles and outcomes.
+
+    *Recommended.* Set aside: one sentence per change from its `said` alone (it can't say what an
+    entry added or removed does).
+
+36. **The fine print readings already have, kept; new fine print only where a new reading needs
+    it, each with a witness** (D45's rule): an approval with a `when` on a high-risk step runs
+    unapproved where the condition is false (the quickstart's small refund); an approval's count
+    is distinct people, one rejection rejecting it (D47); a step proposed by a role is never
+    approved by its proposer (D25). *Recommended.*
+
+37. **The known limit from 13b, said in the readings.** Where a plan's activity state moves to
+    another contract and an approval state approves it, the plain form adds under that state:
+    "who may approve it in the plan was compared by its roles, not again for
+    payments.refund@3's risk: read its approval's roles above". It is a sentence about what the
+    diff did, true of every case; the change itself stays not proven. *Recommended.* Set aside:
+    re-judging it now (a 13b comparison, to be decided as one, with its witness).
+
+38. **Written otherwise, the same decisions (from the review of #48)**: a fourth kind of line,
+    beside the verdicts, never counted as "may loosen". Only where the diff *proves* the two
+    versions decide the same for every case, though the digest moves. Checked against the code
+    for this note:
+    - **a `max_age` of the same duration** (`2d` and `48h`): every decision compares seconds, so
+      both decide the same. The history still words the age as written ("needs it at most 2 days
+      old", "at most 48 hours old", `freshness.as_said`), so the line says that too: `written
+      otherwise, the same decisions: the history says 48 hours where it said 2 days`;
+    - **not requirements written in another order,** which I had first put here: a refused retry
+      or proposal names the first unmet requirement, and what steered a run is recorded in that
+      order (`runtime.py`), so the order is read. It stays not proven.
+
+    These lines go in a list of their own (`Diff.rewritten`), as wording does, so nothing can
+    mistake one for a verdict; `Change` keeps its three verdicts. The summary says `1 written
+    otherwise`. "Never less than the digest" (choice 5) still holds: every path the digest sees is
+    a change or a rewriting. A `visible_to` written to name the same roles as today stays not
+    proven: it narrows who a role added later would see. *Recommended.*
+
+39. **The case map: every entry of the package, read, in the format's order.** Its fields, then
+    its steps, rules (patterns with their expansions, D46), events, close reasons, then how it
+    closes and whether it may be forgotten, then each plan. Nothing judged and nothing derived
+    beyond what the readings say. *Recommended.* Set aside: a diagram (Mermaid, as the prototype
+    drew; a second renderer of requirements, worth its own decision later).
+
+40. **The "will never do" sheet: engine-wide guarantees said once, above it.** Each is a rule
+    of the engine for every definition, said as its decision, with a test that already proves
+    it named in the Promises:
+    - it runs nothing written in the definition as code; its conditions read no clock, randomness
+      or outside data (D20);
+    - it calls nothing but the contracts the catalog holds; a definition names them, never
+      defines one (D5, D17);
+    - untrusted data never reaches a milestone or stops a step (D38);
+    - nobody approves a step their own answer feeds, nor one they proposed, nor one in a case they
+      opened (D11, D25);
+    - one approval unlocks one run of one step (D11);
+    - a failed step is never skipped by itself: it waits for a person (D17);
+    - a sensitive value is never given to a workflow step, nor written out (D31).
+
+    *Recommended.* Set aside: "drafts, never sends" (a non-negotiable for how activities are
+    written, not something the engine checks; said nowhere until it is a check).
+
+41. **Per-package lines, only where proven for every case, each from a check that already proves
+    it, each with a witness.** Offered:
+    - **calls only:** the contracts the package's steps and plans call, each with its risk and
+      declared effect ("calls nothing but payments.refund@2 (high risk, it writes) and
+      orders.lookup@1 (low risk, it reads)"). Proof: the engine calls only what a step or state
+      names (D5). Witness: a run's history names no other contract;
+    - **changes the world only through:** the contracts whose *declared* effect is `write` or
+      `notify`, said as declared ("by what its contracts declare, it changes the world only
+      through payments.refund@2"); none: "by what its contracts declare, it only reads and
+      computes". From the contract's `effect`, never a name (the prototype's `/send/i` was a
+      guess). Witness: the declaration itself, the contract test (D6), said so;
+    - **input policies, with their sources:** for each call, each input with a policy: "never
+      gives payments.refund@2 its amount from untrusted data", "… its account from anything but
+      payments". Proof: the runtime refuses every such value (D21, layer 5). Witness: 13a's
+      input-policy witness;
+    - **who sees what:** for each field, "never shows amount to anyone but support or
+      support-lead" (registered roles, as `seen_by` reads them); "never shows outcomes or outputs
+      to anyone but …". Witness: 13a's readers witness;
+    - **sensitive values:** "never gives national_id to a workflow step" for each sensitive field
+      a workflow step could be given. Witness: 13a's sensitive witness;
+    - **who may not approve:** for each step with an approval, "never lets whoever answers review
+      approve pay" (from `excluded`). Witness: 13b's exclusion witness;
+    - **runs only approved:** for a step whose approval has no `when`: "never runs pay without a
+      support-lead's approval"; with a `when`, nothing is said here (it may run unapproved where
+      the condition is false). Witness: 13b's approval witness;
+    - **forgetting:** with `never`, "never forgets a case's records"; with `while_open`, "never
+      forgets a closed case". Witness: 13b's forgetting witness.
+
+    Not offered: anything decided by a condition or by data ("never pays more than 100"); "never
+    sends" by a name; reachability ("never reaches paid without assessed": validation's to prove,
+    D34, and a released package has no error); "never closes with open work" (an engine-wide rule
+    already, D10). *Recommended,* as a closed list (`NEVERS`), each kind with its witness and a
+    test that the witnesses cover the list, as D45's clauses do.
+
+42. **The commands:** `ventoux diff OLD NEW --plain` prints the plain form; `ventoux map FOLDER`
+    prints the case map and the sheet of one package, against the development catalog (as `diff`
+    does). Both print Markdown (headings and lists), which 13e's job summary shows as it is. Exit
+    codes as `ventoux diff`'s. *Recommended.*
+
+43. **Points kept throughout:** no value from a case file (every reading and the sheet take the
+    package and the catalog, never a case file: a test checks their signatures, as 13a's does);
+    the same order every time (the format's, choice 10); the guide's examples run by tests. The
+    guides: the releases guide's "What changed" gains the plain form; the cases guide gains "What
+    a case can do, and will never do", the map and the sheet of its refund. *Recommended.*
+
+44. **Where it is recorded:** a new decision, **D56** ("The case map and the 'will never do'
+    sheet: readings of a package, and only proven nevers"); dated amendment lines on D45 (readings
+    of every kind of entry) and D55 (the plain form, and "written otherwise"). No new dependency.
+    *Recommended.*
+
+### Choices from the tutor review of #49
+
+What the review showed, each with a run. The runtime excludes from approving a step only the
+person whose answer the step reads *now* (D11, `someone_else` reads the case's current sources),
+and a later answer replaces an earlier one:
+
+- an edited value comes from its proposer and its approver (D52), so once `approved_amount` is
+  edited, whoever answered `review` may approve `pay`, which reads it;
+- a repeatable task answered a second time gives its new answerer's values, so the first answerer
+  may approve;
+- a field another task's answer also sets (13b's `recheck`) holds whichever answer came last.
+
+So the sheet's "never let whoever answers review approve pay" is false where `pay` reads a field
+a form sets, and 13b's "stricter: whoever answers recheck is now excluded from approving pay" is
+false when recheck's answer replaces review's value. The engine-wide line ("let anyone approve a
+step their own answer feeds") stays true: it says *feeds*, what the step reads now.
+
+What is fixed: a task's **outcome** can't be edited (D52: "an outcome or an output records what
+happened"), and a task that isn't repeatable is answered once. So when a step's inputs or its
+`when` read `review.outcome` itself, and `review` isn't repeatable, the person who answered review
+is the outcome's source in every run of the step, and is excluded from approving it every time.
+
+45. **"Who may not approve" on the sheet: said only where it is proven for every case,** that is,
+    for a task's outcome the step's inputs or its `when` read directly, the task not repeatable.
+    Not said for a field a form sets (an edit, a second answer or another writer replaces its
+    sources), nor for anything read through a rule (a rule's field may be edited). The line keeps
+    its words: "let whoever answers review approve pay". The cases guide's refund is unchanged:
+    none of its case steps has an approval, so it says no such line today; 13b's `excluding`
+    refund, whose `pay` reads `approved_amount`, says none after this.
+
+    Weighed: the tutor's proposal, kept as it is. Set aside: a line with its exceptions ("… unless
+    the value is edited or answered again"), which is no longer a never; and dropping the kind from
+    `NEVERS`, which loses a line that is proven. *Recommended.*
+
+46. **13b's exclusion verdict, from the same proof.** Each version gives two sets for a step: who
+    *may* be excluded (`excluded` today, every person whose answer can reach what it reads) and
+    who is excluded *in every run* (by choice 45's proof). Then:
+    - **stricter** only if nobody leaves either set and everyone the new version may exclude it
+      excludes in every run;
+    - **looser** if someone leaves either set (no longer possibly excluded, or no longer excluded
+      every time) and nobody joins the first;
+    - **not proven** otherwise, which reads as looser.
+
+    Weighed against the tutor's "a newly excluded person is not proven unless the same proof
+    holds": right for the newcomer, but not enough, for two runs it misses:
+    - a newcomer proven while an old exclusion weakens: `pay` starts reading `check.outcome`
+      (proven), and `check`'s form also sets `approved_amount`, which `pay` already read. Whoever
+      answers review was excluded before; after, not once check answers. The proposal says
+      stricter; this choice says not proven;
+    - the same people, a proof lost: `pay` stops reading `review.outcome` and reads
+      `approved_amount`, set by review. Both versions may exclude whoever answers review, so
+      nothing is said today; after an edit, they may approve. This choice says looser.
+
+    The witness becomes a proven one: `pay` with `when: review.outcome = "approve"`, then
+    without (Ana reviews and approves the payment: refused, then accepted). The three runs of the
+    review become negative tests: the edit and the repeatable task each give no sheet line, and
+    13b's `recheck` gives "not proven", never "stricter", with the run where review's answerer
+    approves `pay` after the change and is refused before it. 13b's
+    `test_a_step_that_starts_reading_an_answer_excludes_its_people` (from `amount` to
+    `approved_amount`) becomes "not proven", and says why. *Recommended.*
+
+47. **Where it is recorded:** a dated line on D55 (the exclusion verdict, choice 46) and on D56
+    (the sheet's line, choice 45, and the heading, choice 48). Nothing on D11: it says what the
+    runtime does, and the runtime is unchanged. *Recommended.*
+
+48. **The sheet's heading says for which cases it holds.** "For every case of refund" holds only
+    while a case runs this release: a migration moves a case to the target release (D53), whose
+    definition the sheet doesn't read, and a field with no `visible_to` follows the target's
+    roles. Offered:
+    - (a) `## For every case of refund, while it runs this release`;
+    - (b) `## For every case running this release of refund`;
+    - (c) `## For every case of this release of refund`.
+
+    *Recommended:* (a), the scope said where it ends. The engine's heading stays as it is: its
+    lines hold whatever release a case runs.
+
+49. **The cases guide says what a migration does to the sheet,** one sentence after the
+    paragraph on the package's own lines: "A migration moves a case to the target release, and
+    so to that release's sheet: the diff between the two releases (`ventoux diff`, in the
+    releases guide) says what the move loosens." The guide's pasted output is made again from the
+    command, and runs as written. *Recommended.*
+
+50. **A plan state's `timeout` written otherwise (optional finding).** `48h` -> `2d` counts as
+    "may loosen" today: choice 38 covered only `max_age`, and a plan's approval or wait state's
+    `timeout` falls to the default, not proven. Offered: compare a `timeout` as a duration, as
+    `max_age` is; the same duration is a "written otherwise" line, how the history words it said
+    if it does; a different one stays not proven (what a timeout leads to decides whether shorter
+    is looser, and the diff doesn't judge that). The negative test as choice 38's: no verdict,
+    never counted as may loosen, the digest's path covered. *Recommended:* small, the same
+    function, and a line nobody should have to read as a doubt.
+
+51. **A test that "who sees" on the sheet counts registered roles only (optional finding).** The
+    sheet filters roles the catalog registers (13b found the diff counted unregistered ones), and
+    no test pins it there. Offered: a field `visible_to` a role nobody registers reads as seen by
+    the registered roles only ("show … to anyone" when none), shown failing with the filter taken
+    out. *Recommended.*
+
+The notify witness needs no choice (from the review): a contract declared `notify` joins
+`test_what_changes_the_world_is_read_from_declared_effects`, and taking `notify` out of
+`CHANGES_THE_WORLD` must fail it.
+
+### Answers to choices 45 to 51
+
+45, 47, 48 (a), 49 and 51 as recommended. 46 and 50 changed, and 47 adds a line:
+
+- **46, with two changes.** As written, the rule claimed verdicts that runs contradict. Each run
+  below uses the quickstart's refund, plus a `check` task (support) whose `ok` sets a declared
+  `checked_amount`. `pay` requires review and check, and asks for approval on every run. The
+  history is the same each time: Ana answers review approve, Tom answers check ok, Bob proposes an
+  edit of `approved_amount`, and Lee approves the edit. Then one person approves pay.
+  - **R1.** Old `pay` reads `approved_amount`, with `when` review.outcome = approve. New `pay`
+    reads `amount`, with `when` review.outcome = approve and check.outcome = ok. The rule said
+    stricter. Lee's approval: the old version refuses it ("lee set approved_amount, which pay
+    uses"), the new one takes it.
+  - **R2.** Old `pay` reads `approved_amount`, with `when` checked_amount > 0. New `pay` reads
+    `approved_amount`, with `when` review.outcome = approve. The rule said looser (check leaves
+    the first set, nobody joins it). Ana's approval: the old version takes it, the new one
+    refuses it.
+  - **R3** (the second example in choice 46). Old `pay` reads `amount`, with `when`
+    review.outcome = approve. New `pay` reads `approved_amount`, no `when`. The rule said looser.
+    Lee's approval: the old version takes it, the new one refuses it.
+
+  The changes:
+  - **(a)** who *may* be excluded also counts whoever proposes or approves an edit of each
+    declared field the step reads (D52), whenever a registered role may edit. And check that the
+    static sources cover every other way a field the step reads can get a new value, each said
+    in this note (below, "Every way a value the step reads is given");
+  - **(b)** looser only if nobody joins *either* set.
+
+  With both, R1, R2 and R3 each read "not proven", and the three runs become negative tests,
+  beside the review's three.
+
+  This makes "stricter" rare on exclusions: a step that reads any editable field is never proven
+  stricter, since an edit's people may be excluded and are never excluded in every run. That's an
+  honest doubt, never a false claim. A second proof (the new step reads every field the old one
+  read, each with the same writers) could prove more "stricter" verdicts later. It isn't needed
+  now.
+- **47:** D55's dated line also says that an edit's proposer and approver count among who may be
+  excluded.
+- **50, widened to every age the format holds:** a plan state's `timeout`, a rule's `after`
+  (`2d` -> `48h` reads "not proven" today) and a reminder's `after`, each compared as a duration.
+  The negative test is as in choice 38. An sla's `within` is an age the format holds too, so it
+  is compared the same way. A reminder's rules are named by their ages (`chase_2d`), so its line
+  also says the history names them otherwise.
+
+#### Every way a value the step reads is given
+
+Who *may* be excluded is every person the static sources (`could_come_from`, layer 10c) name for a
+value the step's inputs or its `when` read, plus an edit's people. Checked against each way the
+runtime gives a value a source:
+
+- **the opening:** the case file's first values come from whoever opened the case. The static
+  sources read a system opener, so this person is not counted. The runtime excludes the opener
+  from approving every step of the case whichever release it runs (D11), so no change of
+  definition loosens or tightens it;
+- **a task's answer:** its outcome and the fields its form sets, from whoever answers
+  (`person:answering review`), counted;
+- **an event's arrival:** each value it carries, from whoever sends it (`person:sending noted`),
+  counted. An event may arrive again, so a value it carries is never excluded in every run;
+- **a rule's `set`:** from everything the rule read, grown until nothing changes (D42), so a
+  person reaches a field through a rule, counted. A rule's field is a declared field, so it may
+  be edited too;
+- **a call's or a plan's outcome and outputs:** from its contract or plan, plus what steered the
+  run; a start passes on only what it doesn't trust (D43), so no person, at runtime as in the
+  static sources;
+- **an edit (D52):** from its proposer and its approver. Not in the static sources until now: a
+  source for "whoever proposes or approves an edit of approved_amount" is added for each declared
+  field when the catalog registers a role that may edit, and grown through rules like any other;
+- **a migration (D53):** renames a value and may add a mark, never a person, and gives no new
+  value.
+
+#### Decided while building, after the review
+
+- **The exclusion witness runs on a catalog where nobody edits** (slice 6). In the development
+  catalog support and support-lead may edit, so `pay`, which reads `order_id` and `amount`, may
+  exclude their edits' people in every version, never in every run: no change to it is proven
+  stricter. The witness needs both directions, so its catalog registers the refund's roles with no
+  right to edit; a test shows the same change not proven in the development catalog.
+- **The verdict's line names who moved, never the whole sets** (slice 6): `whoever answers review,
+  no longer`; `…, now in every run`; `…, now in some runs` (may be excluded, not every time). The
+  people of an edit every version shares are left out, so the line says only what changed.
+- **An sla's `within` and a plan's seconds** (slice 8): an sla's `within` is an age the format
+  holds, so it is compared too; a plan's timeout may be written in seconds (`3600s`), which a
+  case's ages can't, so a plan's are read with seconds as well.
+- **A reminder's ages name its rules** (slice 8): `chase_2d` becomes `chase_48h`, so the line says
+  the history names them otherwise, and ages in another order stay not proven (the rules come in
+  that order).
+- **An event's value is never excluded every time** (slice 5, from the note's list): a test shows
+  it, with the run where Tom sends the event again and Ana may then approve.
+
+#### Slices after the review, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+5. **Who may not approve, on the sheet** (choice 45): the edit's and the repeatable task's runs
+   give no line; a task's outcome read directly does, with its run.
+6. **The exclusion verdict from both sets** (choices 46 and 47): an edit's people among who may
+   be excluded; R1, R2, R3 and the review's `recheck` read not proven, each with its run; a proven
+   witness.
+7. **The heading and the guide** (choices 48 and 49).
+8. **Every age written otherwise** (choice 50): a plan state's `timeout`, a rule's `after`, an
+   sla's `within`, a reminder's `after`.
+9. **Who sees counts registered roles** (choice 51).
+
+### The flaky activation test
+
+`test_activate_refuses_a_release_no_worker_serves` (12e) has failed twice, each in a full run, its
+message never kept. From 13c on, every full run's output is kept (`uv run pytest > run.txt 2>&1`);
+if it fails, the whole output is kept and said in the pull request.
+
+A carried note, not fixed in 13c (from the review of #49): its root cause is not known. Load is
+not it: over three full runs, every dev-server start took 0.12 to 0.21 s, the file's first start,
+the one that fails elsewhere, included; and the failing run captured no output from the server.
+The test's harness is unchanged in this pull request. The next step is to keep the server's own
+output when a start fails, then find the cause from it.
+
+### Not in 13c
+
+- Release notes in the record and a contract's readable diff (13d); the CI step (13e).
+- Re-judging a plan's approvers for a changed risk (choice 37 says it, nothing judges it).
+- Nothing at runtime: no workflow changes, no new engine version.
+
+### Seams the tests use
+
+- `diff(before, after, catalog)` and its `rewritten` lines; `plain(found, before, after,
+  catalog)`; `read_entry(path, case, plans, catalog)` and `EntryReading`; `case_map(package,
+  catalog)`, `never_sheet(package, catalog)` and `nevers(package, catalog)`.
+- `run_case` and 13a's and 13b's witnesses, reused for the sheet's lines.
+- `main(["diff", …, "--plain"])` and `main(["map", …])`, through the guides' examples.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **Written otherwise** (choice 38): an age of the same duration is no verdict.
+1. **Every entry read** (choices 35 and 36): steps, fields, events, close reasons, closing, a
+   plan's states and fields; the three new clauses and their witnesses.
+2. **The plain form** (choices 33, 34 and 37).
+3. **The case map and the sheet** (choices 39 to 41): the engine's lines with the tests that prove
+   them, the package's lines with their witnesses.
+4. **The commands, the guides, the Promises** (choices 42 to 44).
+
+### Decided while building
+
+- **Requirements written in another order stay not proven** (while drafting choice 38, checked
+  against the code): the runtime names the first unmet requirement in a refusal and records what
+  steered a run in that order, so the order is read. Only a `max_age` of the same duration is said
+  as written otherwise, with how the history words it (`freshness.as_said`).
+- **A sheet is offered only for what a case's steps name:** who may not approve, and runs only
+  approved, read a case's own approvals; a plan's approval states are read in the map, not said in
+  the sheet (whether every path to an activity passes its approval is layer 3's to prove, and the
+  sheet doesn't repeat a proof it doesn't make). The releases guide's package, whose `settle` runs
+  a plan, shows it: no "who may not approve" line.
+- **Who sees, on the sheet, groups fields seen by the same roles** into one line, in the fields'
+  order; a field no registered role sees reads "show … to anyone".
+- **The proposer's witness keeps its case open** (`stays_open` and a close reason): with `pay`
+  proposed, nothing is left to do once the review is answered, and a proposal to a closed case is
+  refused before anything about approving is checked.
+- **The guides' examples are pasted from the commands' own output,** then run by the tests, as
+  12a's were: the plain form's and the map's `## ` headings sit inside the guides' code blocks, so
+  the tests read a block by its fences, never by the next heading.
+- **The engine-wide lines cite their decisions as the source does,** `(brief, D11) (brief, D25)`,
+  so the sheet prints them so: the decision-citation check (layer 3) found them bare.
+- **The 12e activation test failed a third time, and this time its output was kept** (the full run
+  of slice 4, `uv run pytest > run.txt 2>&1`). It never reached its assertion: Temporal's dev server
+  didn't start in time, in `WorkflowEnvironment.start_local`:
+  `RuntimeError: Failed starting Temporal dev server: ephemeral server at 127.0.0.1:39227 did not
+  start within 5s. Make sure another download isn't stuck and delete the temp file.`
+  I first put it down to load and proposed one dev server per module. The review corrected it:
+  every start took 0.12 to 0.21 s over three full runs, the file's first start, the one that
+  fails elsewhere, included; and the failing run captured no output from the server. So the
+  cause is not known; a carried note (see "The flaky activation test" above), the harness
+  unchanged here.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`L` is `tests/test_plain.py` (new), `S` is `tests/test_sheet.py` (new), `D` is 13a's
+`tests/test_diff.py`, `P` is 13b's `tests/test_diff_people.py`. Checked against the tests,
+2026-10-24, again after the review of #49: every test named here exists, every test in `L` and
+`S` is named here, and every test the review's round added to `P` is named here.
+
+| Promise | Test |
+|---|---|
+| An age written otherwise with the same duration is no verdict and never counted as may loosen; it says how the history words it, and covers the path the digest sees (from the review of #48) | L `test_an_age_written_otherwise_is_no_verdict` |
+| Every other age the format holds, written otherwise with the same duration, is no verdict, as `max_age` is: a rule's timer, an sla's `within`, a reminder's ages (its rules named otherwise, said), a plan's approval and wait timeouts, a plan's seconds included; another duration, or a reminder's ages reordered, stays not proven (from the review of #49, choice 50) | L `test_every_age_written_otherwise_is_no_verdict`, `test_an_age_of_another_duration_is_still_not_proven` |
+| A step reads as what it is (a task for whom, a contract with its risk and declared effect), when it starts (requirements with `sequence`, `when`, by itself or proposed by whom, repeatable), who approves it and how many, what it sets | L `test_a_call_step_reads_as_what_it_calls_and_when_it_starts`, `test_a_task_reads_as_who_answers_and_what_each_answer_does`, `test_a_proposed_step_reads_as_who_proposes_it` |
+| A field reads as its type, who sees it (registered roles only), `sensitive` and its mark | L `test_a_field_reads_as_its_type_and_who_sees_it` |
+| An event, a close reason, the closing and forgetting, and a plan's states read | L `test_an_event_a_close_reason_and_the_closing_read`, `test_a_plans_states_read` |
+| A shape the reader doesn't know is refused, never left out | L `test_a_shape_the_reader_doesnt_know_is_refused` |
+| The new fine print, each clause with its witness: unapproved where the approval's condition is false; distinct approvers, one rejection rejecting; the proposer never approves; and the witnesses cover the list | L `test_a_step_runs_unapproved_where_its_approvals_condition_is_false`, `test_several_approvers_are_distinct_and_one_rejection_rejects`, `test_whoever_proposes_a_run_never_approves_it`, `test_every_entry_clause_has_a_witness` |
+| The plain form reads each entry before and after, then each change in its verdict's words, from the change alone, in the change list's order | L `test_the_plain_form_reads_each_entry_before_and_after`, `test_every_verdict_word_is_its_changes` |
+| An entry added reads after only | L `test_an_entry_added_reads_after_only` |
+| Written otherwise and wording are listed apart, last | L `test_written_otherwise_and_wording_are_listed_apart` |
+| 13b's known limit is said where a plan's approved activity moves to another contract | L `test_a_plans_approved_activity_moved_says_the_known_limit` |
+| Readings, the plain form, the map and the sheet are given no case file | L `test_readings_are_given_no_case_file`, `test_a_plain_form_is_given_no_case_file`; S `test_the_map_and_the_sheet_are_given_no_case_file` |
+| The case map reads every entry in the format's order | S `test_the_case_map_reads_every_entry_in_the_formats_order` |
+| The sheet says the engine's guarantees once, each naming tests that exist and prove it, then the package's own lines | S `test_the_sheet_says_the_engines_guarantees_once_then_the_packages`, `test_each_engine_wide_guarantee_names_tests_that_prove_it` |
+| Each kind of line the sheet offers has a witness, and the witnesses cover the closed list: calls only; changes the world only through, from declared effects, `notify` included (from the review of #49); input policies (trusted only, only from); who sees; sensitive; who may not approve; runs only approved (never with a `when`); forgetting | S `test_a_run_calls_only_what_the_sheet_says`, `test_what_changes_the_world_is_read_from_declared_effects`, `test_an_input_policy_line_is_the_runtimes_refusal`, `test_a_who_sees_line_is_the_view`, `test_a_sensitive_line_is_the_workflow_steps_refusal`, `test_a_who_may_not_approve_line_is_the_exclusion`, `test_a_runs_only_approved_line_is_the_wait_for_approval`, `test_a_forgetting_line_is_the_requests_refusal`, `test_every_kind_of_line_has_a_witness` |
+| Who may not approve is said only where it holds in every run: a task's outcome read directly, the task not repeatable; never of a field a form sets (an edit replaces its sources), a repeatable task's outcome or an event's value (each may be given again), each with the run that lets the person approve (from the review of #49, choice 45) | S `test_who_may_not_approve_is_never_said_of_a_field_a_form_sets`, `test_who_may_not_approve_is_never_said_of_a_repeatable_tasks_outcome`, `test_who_may_not_approve_is_never_said_of_an_events_value`, `test_a_who_may_not_approve_line_is_the_exclusion` |
+| Who is excluded is compared as two sets: R1, R2, R3 and another writer of a field read are not proven, each with its runs (choice 46) | P `test_r1_a_newcomer_excluded_every_time_while_an_edit_frees_another_is_not_proven`, `test_r2_someone_excluded_every_time_who_joins_is_never_looser`, `test_r3_an_edits_people_who_join_are_never_looser`, `test_another_writer_of_a_field_read_is_never_stricter` |
+| An edit's proposer and approver may be excluded wherever a role may edit, reaching a step through a rule too; where they join, it is never looser (choices 46 and 47) | P `test_an_edits_people_who_join_make_it_not_proven`, `test_an_edits_people_reach_a_step_through_a_rule` |
+| Stricter only where everyone who may be excluded is excluded in every run: a task's outcome where nobody may edit; a step reading an editable field is never proven stricter; the comparison's witness is a proven one | P `test_a_step_that_starts_reading_a_tasks_outcome_is_stricter_where_nobody_edits`, `test_each_comparison_has_a_witness` |
+| The package's own lines say they hold while a case runs this release (choice 48) | S `test_the_sheet_says_the_engines_guarantees_once_then_the_packages`, `test_the_guides_map_runs_as_written` |
+| Who sees on the sheet counts registered roles only, for each field and for outcomes and outputs (choice 51) | S `test_who_sees_counts_registered_roles_only` |
+| `ventoux map` prints the map and the sheet, exits 1 when refused and 2 when unreadable; the cases guide's example runs as written | S `test_the_guides_map_runs_as_written`, `test_the_map_command_refuses_and_fails_to_read` |
+| `ventoux diff --plain`: the releases guide's plain example runs as written | D `test_the_guides_example_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal, in the new modules too | `tests/test_layers.py`, unchanged |

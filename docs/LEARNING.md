@@ -1164,6 +1164,13 @@ and record the key points. A question is closed once you can explain the answer 
   never starts by itself), its amount written in the definition, behind a team lead's approval.
   Tied to 11e: `set` is a new way values reach the case file, still an expression in the
   definition, and a value computed from Ana's answer still keeps Ana from approving (brief, D42).
+- Retrieval (layer 13c warm-up, 2026-10-24): asked to be told, briefly. Given: the seam is
+  `decide`, through a proposal, `Proposed(step, by, roles)`, which has no field for a value; the
+  engine checks it as a person's (a role in `proposed_by`, requirements met, its `when`, an
+  approval by someone else: never the proposer, the opener, or anyone whose answer feeds the step);
+  the values come from the step's inputs, written in the reviewed definition, and an untrusted
+  field is refused at a `trusted_only` input. Tied to 13c: the readings and the sheet say only
+  what the definition proves, and quote nothing a case holds.
 - Status: open, until the proposer's checks and the exclusions come back from memory.
 
 

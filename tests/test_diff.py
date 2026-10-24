@@ -908,7 +908,9 @@ def test_the_command_says_the_diff(tmp_path: Path, capsys: Any) -> None:
 
 def guide_runs() -> list[tuple[list[str], str]]:
     """Each `$ ventoux diff …` in the guide's "What changed: the diff", with what it prints."""
-    section = GUIDE.read_text().split("## What changed: the diff")[1].split("\n## ")[0]
+    # Up to the next section of the guide: the plain form's own `## ` headings are inside it.
+    section = GUIDE.read_text().split("## What changed: the diff")[1]
+    section = section.split("\n## What the tool says")[0]
     runs = []
     for block in section.split("```\n")[1::2]:
         command_line, *printed = block.strip().splitlines()
@@ -945,8 +947,9 @@ def test_the_guides_example_runs_as_written(tmp_path: Path, capsys: Any, monkeyp
     one_lead["steps"]["pay"]["approval"]["count"] = 1
     folder_of(tmp_path / "refund-one-lead", one_lead)
     runs = guide_runs()
-    assert len(runs) == 3
-    for (arguments, printed), catalog in zip(runs, (LOOSE, CATALOG, CATALOG), strict=True):
+    assert len(runs) == 4  # the fourth, the same refunds in plain words (13c)
+    catalogs = (LOOSE, CATALOG, CATALOG, CATALOG)
+    for (arguments, printed), catalog in zip(runs, catalogs, strict=True):
         monkeypatch.setattr("ventoux.tooling.cli.CATALOG", catalog)
         assert main(arguments) == 0
         assert capsys.readouterr().out == printed
