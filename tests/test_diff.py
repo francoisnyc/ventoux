@@ -351,3 +351,85 @@ def test_an_added_entrys_wording_is_part_of_it() -> None:
     found = diff(before, after, catalog)
     assert "not proven steps.audit: added" in lines(found)
     assert found.wording == ()
+
+
+# --- Slice 2: untrusted marks and sensitive values -----------------------------------------------
+
+
+def marked(source: str | None) -> dict[str, Any]:
+    """The refund, its `approved_amount` marked with `source`, or unmarked."""
+    case = refund()
+    if source is not None:
+        case["fields"]["approved_amount"]["source"] = source
+    return case
+
+
+def test_an_untrusted_mark_removed_is_looser() -> None:
+    # Values written there no longer carry the distrust a `trusted_only` input refuses.
+    found = diff(packed(marked("untrusted:customer")), packed(marked(None)), CATALOG)
+    assert lines(found) == ["looser     fields.approved_amount.source: untrusted:customer -> none"]
+    assert found.changes[0].comparison == "untrusted mark"
+
+
+def test_an_untrusted_mark_added_is_stricter() -> None:
+    found = diff(packed(marked(None)), packed(marked("untrusted:customer")), CATALOG)
+    assert lines(found) == ["stricter   fields.approved_amount.source: none -> untrusted:customer"]
+
+
+def test_a_relabelled_mark_is_not_proven() -> None:
+    # No policy reads a label today; "today" proves nothing for every later kind.
+    found = diff(packed(marked("untrusted:customer")), packed(marked("untrusted:llm")), CATALOG)
+    assert lines(found) == [
+        "not proven fields.approved_amount.source: untrusted:customer -> untrusted:llm"
+    ]
+
+
+def with_a_note(source: str | None) -> dict[str, Any]:
+    """The refund with an event from the portal carrying the customer's note, marked `source`."""
+    case = refund()
+    note: dict[str, Any] = {"type": "string", "display": {"title": "Note"}}
+    if source is not None:
+        note["source"] = source
+    case["events"] = {
+        "cancelled": {
+            "display": {"title": "Cancelled by the customer"},
+            "sent_by": {"system": "portal"},
+            "payload": {"note": note},
+        }
+    }
+    return case
+
+
+def test_marks_on_payloads_and_plans_are_judged() -> None:
+    found = diff(packed(with_a_note("untrusted:customer")), packed(with_a_note(None)), CATALOG)
+    assert lines(found) == [
+        "looser     events.cancelled.payload.note.source: untrusted:customer -> none"
+    ]
+    case, plans = settling()
+    after = copy.deepcopy(plans)
+    after[0]["fields"]["amount"]["source"] = "untrusted:customer"
+    found = diff(packed(case, after), packed(case, plans), CATALOG)
+    assert lines(found) == [
+        "looser     plans.refund-order@1.fields.amount.source: untrusted:customer -> none"
+    ]
+
+
+def sensitive(on: bool) -> dict[str, Any]:
+    """The refund, its `amount` sensitive or not, seen by support either way."""
+    case = refund()
+    case["fields"]["amount"]["visible_to"] = ["support"]
+    if on:
+        case["fields"]["amount"]["sensitive"] = True
+    return case
+
+
+def test_sensitive_removed_is_looser() -> None:
+    # No longer wrapped: it may be given to a workflow step, whose worker another team runs.
+    found = diff(packed(sensitive(True)), packed(sensitive(False)), CATALOG)
+    assert lines(found) == ["looser     fields.amount.sensitive: true -> false"]
+    assert found.changes[0].comparison == "sensitive"
+
+
+def test_sensitive_added_is_stricter() -> None:
+    found = diff(packed(sensitive(False)), packed(sensitive(True)), CATALOG)
+    assert lines(found) == ["stricter   fields.amount.sensitive: false -> true"]
