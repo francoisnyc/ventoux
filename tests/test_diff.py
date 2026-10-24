@@ -4,6 +4,7 @@ See docs/layers/13-diff.md (13a) and docs/guides/releases.md, "What changed: the
 """
 
 import copy
+import inspect
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -489,3 +490,67 @@ def test_a_new_role_sees_every_unnarrowed_field() -> None:
         f"looser     steps: every outcome and output: {roles} {because}",
         "not proven steps.fraud_check: added",
     ]
+
+
+# --- Slice 4: renames and order ------------------------------------------------------------------
+
+
+def test_a_renamed_step_is_removed_and_added() -> None:
+    # A migration's mapping isn't in either package, so a rename is never guessed; that the new
+    # step behaves exactly as the removed one did is a proof, and is said (brief, D53, D55).
+    after = refund()
+    steps = after["steps"]
+    after["steps"] = {
+        "review": steps["review"],
+        "pay": steps["pay"],
+        "call": steps["call_customer"],
+    }
+    found = diff(packed(refund()), packed(after), CATALOG)
+    assert lines(found) == [
+        "not proven steps.call_customer: removed",
+        (
+            "not proven steps.call: added: behaves as the removed call_customer did: open cases "
+            "need a migration mapping call_customer to call (brief, D53)"
+        ),
+    ]
+    assert found.wording == ()
+
+
+def test_changes_come_in_the_packages_order() -> None:
+    # The case before its plans; its sections in the order the format writes them; each map in
+    # the new version's order, a removed entry where it was (brief, D55).
+    case, plans = settling()
+    task = {
+        "kind": "task",
+        "display": {"title": "A task"},
+        "roles": ["support"],
+        "outcomes": {"done": {"display": {"title": "Done"}}},
+    }
+    steps = case["steps"]
+    case["steps"] = {"review": steps["review"], "note": task} | steps  # note, between two
+    after, after_plans = copy.deepcopy(case), copy.deepcopy(plans)
+    after["forgetting"] = "never"
+    after_plans[0]["states"]["approve_refund"]["approval"]["timeout"] = "72h"
+    kept = {name: step for name, step in after["steps"].items() if name != "note"}
+    audit = task | {"outcomes": {"checked": {"display": {"title": "Checked"}}}}
+    after["steps"] = {"audit": audit} | kept  # audit first, note gone
+    after["steps"]["settle"]["when"] = {"==": [{"var": "review.outcome"}, "reject"]}
+    after["fields"]["approved_amount"]["source"] = "untrusted:customer"
+    expected = [
+        "stricter   fields.approved_amount.source: none -> untrusted:customer",
+        "not proven steps.audit: added",
+        "not proven steps.note: removed",
+        'not proven steps.settle.when: review.outcome = "approve" -> review.outcome = "reject"',
+        "not proven forgetting: allowed -> never",
+        "not proven plans.refund-order@1.states.approve_refund.approval.timeout: 48h -> 72h",
+    ]
+    assert lines(diff(packed(case, plans), packed(after, after_plans), CATALOG)) == expected
+    # The same every time.
+    assert lines(diff(packed(case, plans), packed(after, after_plans), CATALOG)) == expected
+
+
+def test_the_diff_reads_only_packages_and_the_catalog() -> None:
+    # It is given no case file, so it can't quote a value from one: what it shows is what the
+    # definitions and the catalog write (brief, D55).
+    given = [parameter.annotation for parameter in inspect.signature(diff).parameters.values()]
+    assert given == [Package, Package, Catalog]
