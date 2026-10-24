@@ -31,7 +31,9 @@ from ventoux.case.guards import (
     approval_condition_change,
     count_change,
     roles_change,
+    step_condition_change,
     step_guards,
+    switch_change,
 )
 from ventoux.case.releases import (
     WRITTEN_BESIDE,
@@ -233,6 +235,16 @@ APPROVAL = ("steps", "*", "approval")
 APPROVAL_COUNT = ("steps", "*", "approval", "count")
 APPROVAL_WHEN = ("steps", "*", "approval", "when")
 APPROVERS = ("steps", "*", "approval", "roles")
+REQUIRES = ("steps", "*", "requires")
+STEP_WHEN = ("steps", "*", "when")
+SWITCHES = ("automatic", "repeatable")
+
+
+def switched(path: str) -> str | None:
+    """`automatic` or `repeatable`, if `path` is a step's; None otherwise."""
+    return next((name for name in SWITCHES if at(path, ("steps", "*", name))), None)
+
+
 # Each list of roles, and the comparison that judges it (13b, choice 22).
 ROLES = {
     ("steps", "*", "roles"): "answerers",
@@ -269,8 +281,12 @@ def judged(
             yield count_change(leaf)
         elif at(leaf.path, APPROVAL_WHEN):
             yield approval_condition_change(leaf)
-        elif at(leaf.path, APPROVERS):
-            continue  # said by `step_guards`, which compares who may approve, under its step
+        elif at(leaf.path, APPROVERS) or at(leaf.path, REQUIRES):
+            continue  # said by `step_guards`, which compares them as the case reads them
+        elif at(leaf.path, STEP_WHEN):
+            yield step_condition_change(leaf)
+        elif (switch := switched(leaf.path)) is not None:
+            yield switch_change(leaf, switch)
         elif (comparison := roles_compared(leaf.path)) is not None:
             yield roles_change(leaf, versions, comparison)
         elif any(at(leaf.path, pattern) for pattern in MARKS):

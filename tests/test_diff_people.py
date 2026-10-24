@@ -349,6 +349,96 @@ def test_exclusions_both_added_and_removed_are_not_proven() -> None:
     ) in judged_lines(before, after)
 
 
+# --- Slice 3: when a step may run ----------------------------------------------------------------
+
+
+def following(**step: Any) -> dict[str, Any]:
+    """The refund with `follow_up`, a task for support, written with `step`'s keys."""
+    case = refund()
+    case["steps"]["follow_up"] = {
+        "kind": "task",
+        "display": {"title": "Follow up"},
+        "roles": ["support"],
+        "outcomes": {"done": {"display": {"title": "Done"}}},
+    } | step
+    return case
+
+
+def test_a_requirement_removed_is_looser() -> None:
+    found = judged_lines(following(requires=["review"]), following())
+    assert found == ["looser     steps.follow_up.requires: review -> nothing"]
+    assert (
+        diff(packed(following(requires=["review"])), packed(following()), CATALOG)
+        .changes[0]
+        .comparison
+        == "requirements"
+    )
+
+
+def test_a_requirement_added_is_stricter() -> None:
+    found = judged_lines(following(requires=["review"]), following(requires=["review", "pay"]))
+    assert found == ["stricter   steps.follow_up.requires: review -> review, pay"]
+
+
+def test_a_requirement_replaced_is_not_proven() -> None:
+    found = judged_lines(following(requires=["review"]), following(requires=["pay"]))
+    assert found == ["not proven steps.follow_up.requires: review -> pay"]
+
+
+def test_a_sequence_is_said_on_each_step_it_changes() -> None:
+    # A sequence is a requirement on each step after the first: the steps are judged, the
+    # sequence itself is said (13b, choice 24). Without it, pay no longer waits for review.
+    after = refund()
+    del after["sequence"]
+    assert judged_lines(refund(), after) == [
+        "looser     steps.pay.requires: review -> nothing",
+        "not proven sequence: review, pay -> none",
+    ]
+
+
+def test_a_steps_condition_removed_is_looser() -> None:
+    reject = {"==": [{"var": "review.outcome"}, "reject"]}
+    found = judged_lines(
+        following(requires=["review"], when=reject), following(requires=["review"])
+    )
+    assert found == [
+        (
+            'looser     steps.follow_up.when: runs only if review.outcome = "reject" -> runs '
+            "whenever it is admitted (on no fewer cases, and on more wherever that was false)"
+        )
+    ]
+
+
+def test_a_steps_condition_added_is_stricter() -> None:
+    reject = {"==": [{"var": "review.outcome"}, "reject"]}
+    found = judged_lines(
+        following(requires=["review"]), following(requires=["review"], when=reject)
+    )
+    assert found == [
+        (
+            "stricter   steps.follow_up.when: runs whenever it is admitted -> runs only if "
+            'review.outcome = "reject"'
+        )
+    ]
+
+
+def test_automatic_turned_on_is_looser() -> None:
+    proposed = {"proposed_by": ["support"]}
+    found = judged_lines(following(automatic=False, **proposed), following(**proposed))
+    assert found == [
+        "looser     steps.follow_up.automatic: false -> true (it starts by itself once admitted)"
+    ]
+
+
+def test_repeatable_added_is_looser_and_removed_stricter() -> None:
+    proposed = {"automatic": False, "proposed_by": ["support"]}
+    once, again = following(**proposed), following(repeatable=True, **proposed)
+    assert judged_lines(once, again) == [
+        "looser     steps.follow_up.repeatable: false -> true (it may run again, when proposed)"
+    ]
+    assert judged_lines(again, once) == ["stricter   steps.follow_up.repeatable: true -> false"]
+
+
 # --- Witnesses -----------------------------------------------------------------------------------
 
 
@@ -502,6 +592,62 @@ def closers_witness() -> Witness:
     return before, after, CATALOG, refused, isinstance(new, CaseRun) and new.closed
 
 
+def followed(case: dict[str, Any], *script: Any) -> CaseRun | str:
+    """The refund, 50 asked, then `script`: the run, or why a proposal was refused."""
+    try:
+        return run_case(
+            case, file={"order_id": "ord-1", "amount": 50}, answers=list(script), people=PEOPLE
+        )
+    except ProposalRefused as refused:
+        return str(refused)
+
+
+def started(run: CaseRun | str, entry: str = "follow_up#1") -> bool:
+    """Whether `entry` started in `run`."""
+    return isinstance(run, CaseRun) and any(
+        line.startswith(f"started {entry}") for line in run.history
+    )
+
+
+def requirements_witness() -> Witness:
+    """Before review is answered, a follow-up that requires it waits; requiring nothing, it
+    starts at the opening."""
+    before, after = following(requires=["review"]), following()
+    return before, after, CATALOG, not started(followed(before)), started(followed(after))
+
+
+def step_condition_witness() -> Witness:
+    """A review approved: a follow-up only on a rejection doesn't start; without its condition,
+    it does."""
+    reject = {"==": [{"var": "review.outcome"}, "reject"]}
+    before = following(requires=["review"], when=reject)
+    after = following(requires=["review"])
+    approved = ("review", "approve", "ana", {"approved_amount": 50})
+    old, new = followed(before, approved), followed(after, approved)
+    return before, after, CATALOG, not started(old), started(new)
+
+
+def automatic_witness() -> Witness:
+    """A follow-up nobody proposed doesn't start; made automatic, it starts by itself."""
+    proposed = {"proposed_by": ["support"]}
+    before, after = following(automatic=False, **proposed), following(**proposed)
+    return before, after, CATALOG, not started(followed(before)), started(followed(after))
+
+
+def repeatable_witness() -> Witness:
+    """A follow-up done is refused a second proposal; made repeatable, it runs again."""
+    proposed = {"automatic": False, "proposed_by": ["support"]}
+    before, after = following(**proposed), following(repeatable=True, **proposed)
+    script = (
+        propose("follow_up", "ana"),
+        ("follow_up", "done", "ana"),
+        propose("follow_up", "ana"),
+    )
+    old, new = followed(before, *script), followed(after, *script)
+    refused = old == "follow_up has run, and is not repeatable"
+    return before, after, CATALOG, refused, started(new, "follow_up#2")
+
+
 # Each of 13b's comparisons, and its witness, in the order of COMPARISONS.
 WITNESSES: dict[str, Callable[[], Witness]] = {
     "approval": approval_witness,
@@ -513,6 +659,10 @@ WITNESSES: dict[str, Callable[[], Witness]] = {
     "proposers": proposers_witness,
     "senders": senders_witness,
     "closers": closers_witness,
+    "requirements": requirements_witness,
+    "step condition": step_condition_witness,
+    "automatic": automatic_witness,
+    "repeatable": repeatable_witness,
 }
 
 

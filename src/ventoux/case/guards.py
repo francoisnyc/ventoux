@@ -13,6 +13,7 @@ from typing import Literal
 
 from ventoux.case.changes import Change, DiffRefused, Leaf, Verdict, shown
 from ventoux.case.definition import Approval, CallStep, CaseDefinition
+from ventoux.case.sequence import requirements
 from ventoux.case.writers import could_come_from
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
@@ -151,8 +152,22 @@ def widened(path: str, said: str, old: set[str], new: set[str], comparison: str)
 def step_guards(step: str, versions: Versions) -> Iterator[Change]:
     """What follows from a step's changes, said under it: who may approve it, and who is
     excluded from approving it."""
+    yield from requirements_change(step, versions)
     yield from approvers(step, versions)
     yield from exclusions(step, versions)
+
+
+def requirements_change(step: str, versions: Versions) -> Iterator[Change]:
+    """What `step` requires, its `requires` with `sequence` folded in (13b, choice 24): fewer
+    looser, it may start with less done; more stricter; replaced not proven."""
+    old = requirements(versions.before)[step]
+    new = requirements(versions.after)[step]
+    path = f"steps.{step}.requires"
+    said = f"{shown(old) if old else 'nothing'} -> {shown(new) if new else 'nothing'}"
+    if set(old) != set(new):
+        yield widened(path, said, set(new), set(old), "requirements")  # fewer is looser
+    elif old != new:  # the same, written in another order
+        yield Change(path, "not proven", said)
 
 
 def exclusions(step: str, versions: Versions) -> Iterator[Change]:
@@ -257,3 +272,39 @@ def allowed(roles: Sequence[str], contract: Contract, versions: Versions) -> lis
         if may_approve(versions.catalog.roles[role], contract.risk)
     ]
     return sorted(able)
+
+
+# --- When a step may run -------------------------------------------------------------------------
+
+
+def step_condition_change(leaf: Leaf) -> Change:
+    """A step's `when`: removed, it runs on no fewer cases, and on more wherever it was false:
+    looser (13b, choice 19); added, stricter; changed, not proven, both shown."""
+    old, new = leaf.before, leaf.after
+    whenever = "runs whenever it is admitted"
+    if new is None:
+        said = (
+            f"runs only if {shown(old)} -> {whenever} (on no fewer cases, and on more wherever "
+            "that was false)"
+        )
+        return Change(leaf.path, "looser", said, "step condition")
+    if old is None:
+        return Change(
+            leaf.path, "stricter", f"{whenever} -> runs only if {shown(new)}", "step condition"
+        )
+    return Change(leaf.path, "not proven", f"{shown(old)} -> {shown(new)}")
+
+
+# What turning each on lets a step do, said beside a looser verdict.
+SWITCHES = {
+    "automatic": "it starts by itself once admitted",
+    "repeatable": "it may run again, when proposed",
+}
+
+
+def switch_change(leaf: Leaf, name: str) -> Change:
+    """`automatic` or `repeatable`: turned on, looser; turned off, stricter (13b, choice 26)."""
+    said = f"{shown(leaf.before)} -> {shown(leaf.after)}"
+    if leaf.after is True:
+        return Change(leaf.path, "looser", f"{said} ({SWITCHES[name]})", name)
+    return Change(leaf.path, "stricter", said, name)

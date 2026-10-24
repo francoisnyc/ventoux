@@ -40,6 +40,10 @@ COMPARISONS = (
     "proposers",  # who may propose a step (brief, D25)
     "senders",  # who may send an event (brief, D41)
     "closers",  # who may close a case with a reason (brief, D10)
+    "requirements",  # what a step waits for, `sequence` folded in (13b, choice 24)
+    "step condition",  # whether a step has a `when`, never what it says (13b, choice 19)
+    "automatic",  # whether a step starts by itself once admitted (13b, choice 26)
+    "repeatable",  # whether a step may run again, when proposed (13b, choice 26)
 )
 
 
