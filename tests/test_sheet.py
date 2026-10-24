@@ -216,6 +216,21 @@ def test_a_who_sees_line_is_the_view() -> None:
     assert refused
 
 
+def test_who_sees_counts_registered_roles_only() -> None:
+    # A role the catalog doesn't register gives sight of nothing (brief, D22): `auditor` is
+    # named, nobody registered it, so the sheet never says auditor sees anything.
+    case = refund()
+    case["fields"]["amount"]["visible_to"] = ["support", "auditor"]
+    case["fields"]["approved_amount"]["visible_to"] = ["auditor"]
+    seen = [line for kind, line in lines_of(case) if kind == "who sees"]
+    assert seen == [
+        "show order_id to anyone but support or support-lead",
+        "show amount to anyone but support",
+        "show approved_amount to anyone",
+        "show any step's outcome or outputs to anyone but support or support-lead",
+    ]
+
+
 @witness("sensitive")
 def test_a_sensitive_line_is_the_workflow_steps_refusal() -> None:
     before, _, _, refused, _ = sensitive_witness()
