@@ -498,7 +498,7 @@ def run_case(
         )
         events.append(Answered(entry, outcome, who, roles, given, at=now))
     implementations = {**FAKES, **activities}
-    runner = plan_runner(plans or {}, plan_answers or {}, implementations, people)
+    runner = plan_runner(plans or {}, plan_answers or {}, implementations, people, catalog)
     bound = {**WORKFLOW_FAKES, **workflows}
     return run_case_in_memory(
         case, catalog, implementations, events, held=held, plans=runner, workflows=bound
@@ -510,9 +510,10 @@ def plan_runner(
     plan_answers: Mapping[str, Sequence[tuple[Any, ...]]],
     activities: Mapping[str, Activity],
     people: Mapping[str, Iterable[str]],
+    catalog: Catalog = CATALOG,
 ) -> PlanRunner:
     """Runs a plan step's plan in memory, to its end or its first wait nobody answers, and says
-    how it ended as an event (brief, D28)."""
+    how it ended as an event (brief, D28). The plan reads `catalog`, as its case does."""
     scripts = {step: list(answers) for step, answers in plan_answers.items()}
 
     async def call(reference: str, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -532,7 +533,7 @@ def plan_runner(
                 interpret(
                     plan,
                     command.fields,
-                    CATALOG,
+                    catalog,
                     call,
                     scripted(script, people),
                     run_name=command.run,

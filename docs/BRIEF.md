@@ -378,6 +378,10 @@ be erased on request), has size limits, and a second copy of business records go
   skip never by anyone who may not approve the run it skips. An edited value comes from its
   proposer and its approver, so neither approves a step that reads it.
 
+- **Amended 2026-10-24, by D55** (the text above stands; this adds to it): the semantic diff
+  reads "someone else" from the definition: which tasks' answers can reach a step's inputs or
+  `when`, so a release that stops a step reading a field says who may now approve it, as looser.
+
 ### D12. A small vocabulary of sources
 
 - Three origins, each with one owner: **system** (the system that opened the case, or an activity's
@@ -1772,6 +1776,8 @@ text is kept.*
   staffing fact (D11), which the engine never looks up (D22). `APPROVAL_ROLE` and
   `APPROVER_CANT_SEE` are claimed per role, so they hold for every approver. D11's "shown as
   blocked" stays unbuilt; a count makes it likelier, a known limit.
+- **Amended 2026-10-24, by D55** (the text above stands; this adds to it): the semantic diff
+  judges `count`: lowered looser (fewer people approve), raised stricter.
 
 ### D48. Deliberate limits, recorded at the checkpoint before layer 12
 
@@ -2178,6 +2184,19 @@ and D50, whose text is kept.*
   release, in the job summary, comparing the base's digest with the head's (13e); a contract's
   readable diff, its old promise computed from the base commit when the hash check fails, the
   lockfile keeping its shape (13d).
+- **Amended 2026-10-24, in layer 13b** (`docs/layers/13-diff.md`, choices 19 to 32; the text
+  above stands, this adds to it): the guards on people and runs are judged, each with its
+  witness. An approval added stricter, removed looser; its `count` lowered looser; its `when`
+  added looser, removed stricter; a step's `when` added stricter, removed looser: a condition's
+  presence is judged, never the condition, and "looser" there says "lets through everything the
+  old version did, and more wherever the condition is false". Roles are compared as the catalog
+  registers them, widened looser, narrowed stricter, replaced not proven; who may approve is the
+  listed roles allowed the contract's risk, the count, and the tasks whose answers can reach what
+  the step reads (D11). Requirements as `sequence` folds them in, `automatic`, `repeatable`,
+  `max_age` per fact as a duration, close reasons, an event's sending roles, and forgetting
+  ordered `never`, `while_open`, `allowed`. A plan's approval targets and its approval and wait
+  roles likewise; a plan's timeouts not proven. An output's source on a plan's activity state is
+  said, never judged: a plan keeps no activity's outputs (D28).
 
 ### Simplifications adopted
 

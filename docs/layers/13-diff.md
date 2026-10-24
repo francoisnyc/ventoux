@@ -523,3 +523,265 @@ Each claim this section makes about behaviour, and the test that would fail if i
 | The command exits 0 when it compared, a looser change included, 1 when refused, 2 when unreadable, and prints the developer form | D `test_the_command_says_the_diff` |
 | The guide's examples run as written | D `test_the_guides_example_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal, in the new module too | `tests/test_layers.py`, unchanged |
+
+## 13b. Guards on people and runs
+
+Status: choices drafted 2026-10-24, from `main` at `3888f95` (13a merged as #47). Answered "all
+as recommended", the same day: choices 19 to 32. D55's amendment, D11's and D47's lines and the
+releases guide's verdicts written before building 13b.
+
+### Warm-up: learning question 14, quickstart approvals
+
+> In the quickstart, the reviewer approves a 250 refund. Which person can approve the payment, and
+> who can't? What does the case wait for at that moment, and what would a test assert?
+
+Open since the tracer bullet. The exclusion and the test's three assertions are what didn't come
+back last time. Answer from memory first. It is 13b's question: "who may approve" is more than the
+roles an approval names (choice 23).
+
+Answered 2026-10-24, after a reminder of what the exclusion is: "Sam can approve; Ana can't, she
+set approved_amount." The exclusion and its reason came back; the opener, what the case waits for,
+and the test's three assertions didn't. Discussed and recorded; the question stays open.
+
+### What this part is for
+
+13a judges what may flow where, and who may see it. 13b judges **who may act, and when a step
+may run**: approvals, requirements and conditions, who proposes, answers, sends and closes,
+freshness, forgetting, and a plan's approval and wait states. Until now each of these reads "not
+proven", which counts as what may loosen; 13b replaces that with a proof wherever one exists.
+
+The curriculum's own negative test lands here: **an approval's count lowered is looser.** In the
+JSON it is `"count": 2` becoming `"count": 1`, one character. The diff says:
+
+```
+looser     steps.pay.approval.count: 2 -> 1 (one person approves pay, where two had to)
+```
+
+And one the JSON hides: `pay` no longer reads `approved_amount`, so Ana, who set it in `review`,
+is no longer excluded from approving `pay`. The JSON shows an input changed; the diff also says who
+may now approve:
+
+```
+not proven steps.pay.inputs.amount: approved_amount -> amount
+looser     steps.pay.approval: whoever answers review is no longer excluded from approving pay
+```
+
+### What the code does today
+
+- `case/diff.py` (13a): `COMPARISONS`, each with a witness in `tests/test_diff.py`; `judged`
+  routes a leaf to its comparison by its path's pattern. 13b adds patterns and comparisons, and
+  `Change` already refuses a verdict whose comparison isn't on the list.
+- `case/sequence.py`: `requirements(case)`, each step's `requires` with `sequence` folded in.
+- `core/approval.py`: `approver_role`, the roles an approval lists that the catalog lets approve
+  the contract's risk (`core/roles.py`'s `may_approve`).
+- `case/writers.py`: where each value could come from, read from the definition alone (10c);
+  `case_sources` gives, for a field, the people who could write it (`person:answering review`).
+- The exclusions themselves (D11, D25, D26, D39, D42, D47) are the engine's, the same for every
+  definition; only what a step *reads* is the definition's.
+
+### Choices for 13b
+
+Each judged comparison is added to `COMPARISONS` with a witness run (choice 3): one version refuses
+what the other lets through, and the pair read the other way proves the reverse.
+
+19. **What "looser" claims where a condition is added or removed.** A condition can't be
+    compared (choice 3), but its presence can: an approval with no `when` is asked on every run,
+    so adding one asks it on no more runs than before, and on fewer wherever it is false. That is
+    a proof for every case, though not of *strictly* more: a `when` true for every case changes
+    nothing. So 13b's verdicts on presence say exactly that: **looser: lets through everything the
+    old version did, and more wherever the condition is false**, with the condition shown. The
+    witness is a case where it is false. *Recommended.* Set aside: deciding whether a condition
+    can be false (a second evaluator, choice 3), or leaving presence not proven (the curriculum
+    asks for approvals "asked on fewer runs" to be said).
+
+20. **An approval: there or not, and when.** On a step:
+    - added: stricter (every run it covers waits for a person); removed: looser;
+    - `when` added: looser (asked on fewer runs, choice 19); removed: stricter; changed: not
+      proven, both shown;
+    - the curriculum's negative test is choice 21's.
+
+    *Recommended.* An untrusted `when` asks anyway (D38), so adding one never asks on more runs:
+    the verdict holds.
+
+21. **An approval's count:** lowered is looser, raised is stricter (D47: distinct people, each
+    "someone else", one rejection rejecting the entry). Said with what it means: `2 -> 1 (one
+    person approves pay, where two had to)`. Witness: with `count: 2`, one team lead's *approve*
+    leaves `pay` waiting (`1 of 2 given`); with `count: 1` it starts. **The curriculum's negative
+    test for 13b.** *Recommended.*
+
+22. **Roles, compared as the case reads them.** For every list of roles (an approval's, a task's
+    who answers, `proposed_by`, an event's sending roles, a close reason's, a plan's wait and
+    approval): the roles both versions name compared as sets, **widened looser, narrowed stricter,
+    replaced (some added, some removed) not proven**. "As the case reads them": a role the catalog
+    doesn't register gives nobody anything (D22), so it counts for nothing; one the catalog
+    registers is compared by name. *Recommended.*
+
+23. **Who may approve is more than the names.** Three things beyond the roles listed:
+    - **the role must be allowed the contract's risk** (`approves="high"` on `register_role`): the
+      approvers are the listed roles that may approve the step's contract's risk, as
+      `approver_role` reads them. So adding `support`, which approves no risk, to `pay`'s roles
+      changes nothing, and is said so (not judged as looser); and a step moved to a contract of
+      higher risk may lose approvers: stricter, said under the approval;
+    - **the count** (choice 21);
+    - **who is excluded:** every person whose answer flows into the step's inputs or its `when`,
+      the opener, the proposer, and the others D11, D25, D39 and D47 list. The rules are the
+      engine's, but which answers flow in is the definition's: a step that stops reading a field a
+      task sets no longer excludes whoever answers that task. Computed from what the step reads
+      (`writers`), as the tasks whose answers can reach it: fewer looser, more stricter, both not
+      proven. Said as a derived change under the approval, naming what caused it, as 13a's readers
+      do. Witness: Ana, who answered `review`, is refused as an approver of `pay` while `pay` reads
+      `approved_amount`, and accepted once it doesn't.
+
+    *Recommended.* Set aside: comparing exclusions only by the roles (misses the hidden one above).
+
+24. **When a step may run: requirements.** Compared as `requirements(case)` gives them, `requires`
+    with `sequence` folded in: fewer looser (it may start with less done), more stricter, replaced
+    not proven. A `sequence` changed is then said on each step it changes, and the `sequence` line
+    itself stays, not proven. *Recommended.*
+
+25. **A step's `when`:** added stricter (it runs on no more cases), removed looser, changed not
+    proven (choice 19's wording, the other way round). *Recommended.*
+
+26. **`automatic`, `repeatable` and `proposed_by`:**
+    - `automatic` on: looser (it starts by itself once admitted, with nobody proposing it); off:
+      stricter;
+    - `repeatable` added: looser (it may run again, when proposed); removed: stricter;
+    - `proposed_by` widened or narrowed as choice 22.
+
+    *Recommended.*
+
+27. **Who answers, sends and closes** (choice 22's comparison, each its own witness):
+    - a task's `roles`;
+    - an event's sender: its roles compared as choice 22; its `system` replaced, or roles
+      replaced by a system or the reverse, not proven;
+    - close reasons: one added looser (a new way for people to close the case), removed stricter,
+      its roles as choice 22. `closes_when` and `stays_open` stay not proven: closing by
+      milestones is neither a permission nor its absence.
+
+    *Recommended.*
+
+28. **Freshness (`max_age`),** per fact a step reads: shorter stricter, longer looser; a fact newly
+    required fresh stricter, no longer required looser. Ages compared as durations (`2d` is longer
+    than `12h`), never as text. *Recommended.*
+
+29. **Forgetting, ordered `never` < `while_open` < `allowed`:** toward `allowed` looser (a person
+    may erase more), toward `never` stricter. Witness: forgetting a closed case refused under
+    `while_open`, accepted under `allowed`. *Recommended.*
+
+30. **A plan's approval and wait states, as their own case.** A plan has no `count`, no `when` on
+    its approval, and its path is its transitions (D49), so:
+    - **which activity states are approved:** an activity state no approval state approves any
+      more (`of`) is looser, newly approved stricter. Whether every path to it passes the approval
+      is a path property layer 3 checks; the diff compares the approvals' targets only, and says
+      so;
+    - an approval state's roles, and a wait's, as choices 22 and 23 (the risk check applies to a
+      plan's approval too);
+    - a timeout added, removed or changed: not proven (what it does is a transition).
+
+    *Recommended.*
+
+31. **An output's source on a plan's activity state is said, never judged** (found in the review
+    of #47). A plan keeps no activity's outputs: its fields come from the case and from answers,
+    and a plan step gives no outputs (D28). So "looser" there claims a widening no case can meet.
+    It is said, not proven, with why: `output status: was untrusted:undeclared; now system:orders
+    (a plan keeps no activity's outputs)`. *Recommended.* Set aside: skipping it (the change would
+    then be said nowhere, since output sources are taken out of "its contract also differs").
+    13a's test of a plan's contract moved gains the line; no witness is removed (13a's output
+    witness is a case's step).
+
+32. **Where it is recorded:** D55 gains a dated amendment line naming 13b's comparisons and choice
+    19's wording; D47 and D11 an amendment line each for what the diff says of them. The releases
+    guide's "What changed: the diff" section gets 13b's verdicts and the count example, run by its
+    test. No new dependency. *Recommended.*
+
+### Not in 13b
+
+- Readings in the diff, the case map and the "will never do" sheet (13c); release notes and a
+  contract's readable diff (13d); the CI step (13e).
+- Comparing conditions or expressions (choice 3, kept).
+- Nothing at runtime: no workflow changes, no new engine version.
+
+### Seams the tests use
+
+- `diff(before, after, catalog)`, as in 13a, with packages built by `package`; catalogs built in
+  the tests where a role (`finance`, `clerk`) or a contract (`payments.refund@8`, medium risk)
+  is needed.
+- `run_case` and its scripts (`propose`, `send`, `close`, `later`, `plan_answers`) for the
+  witnesses; `lookup_refusal` (`temporal/forget.py`) for forgetting's.
+- `main(["diff", …])` through the guide's example.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **The curriculum's negative test first:** a count lowered is looser; then raised, an approval
+   added or removed, an approval's `when` added, removed or changed; their witnesses.
+1. **Roles,** as the catalog registers them: who answers, proposes, sends and closes; who may
+   approve, as the contract's risk allows.
+2. **Exclusions:** a step that stops reading an answer lets its people approve.
+3. **When a step may run:** requirements with `sequence` folded in, a step's `when`, `automatic`,
+   `repeatable`.
+4. **Close reasons, senders, freshness, forgetting.**
+5. **A plan's approval and wait states,** and an output's source on a plan's state (choice 31).
+6. **The guide's example, the Promises.**
+
+### Decided while building
+
+- **An approval removed from a high-risk step is not looser** (slice 0, found by its witness): a
+  high-risk step with no approval never runs, as the runtime refuses it (D11), so the version
+  without one lets nothing more through. Neither removed nor added is judged there; the line says
+  why: `payments.refund@2 is high risk: without an approval, pay never runs`. A plan's high-risk
+  activity likewise (slice 5): the interpreter stops a plan at it. Choice 20's "removed: looser"
+  holds for a step of low or medium risk, which the witness uses (`orders.lookup@1`).
+- **13a counted a role nobody registered as seeing every field** (slice 1): `roles_named` names
+  it, and `seen_by` with it, but a role the catalog doesn't register gives sight of nothing
+  (D22, `may_see`). Who sees a field is now compared among registered roles, as choice 22 says
+  of every list of roles.
+- **A refused plan answer doesn't raise:** the plan waits on. The plan witnesses run the same
+  script on both versions, so only the roles differ: the plan step waits in one and is done in
+  the other.
+- **The in-memory plan runner read the development catalog,** whatever catalog `run_case` was
+  given (found by the plan approvers' witness, whose `finance` role only a test's catalog
+  registers). `run_case` said its catalog "replaces the development catalog"; its plan runner now
+  reads it too. No other test depended on it.
+- **A plan's approval roles are compared on their own leaf only:** a plan's activity moved to a
+  contract of another risk is said (13a, not proven), never re-judged for who may approve it, as a
+  case's step is. Not proven reads as looser, so nothing is claimed that doesn't hold; a known
+  limit, for 13c's readings to say.
+- **What a change is moved to `case/changes.py`, 13b's guards to `case/guards.py`,** so
+  `case/diff.py` stays the walk and 13a's guards on data. The CLI and the tests import `Change`,
+  `DiffRefused` and `COMPARISONS` from `changes`.
+- **The 12e activation test that failed once in the tutor review of #47 failed once again,** in
+  slice 5's full run (`test_activate_refuses_a_release_no_worker_serves`), and passed alone three
+  times and in its file. Its message was not kept that run; the next full runs keep their output
+  (see the pull request). Not this layer's code, and not fixed here.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`P` is `tests/test_diff_people.py` (new); `D` is 13a's `tests/test_diff.py`. Checked against the
+tests, 2026-10-24: every test named here exists, and every test in `P` is named here.
+
+| Promise | Test |
+|---|---|
+| An approval's count lowered is looser, said as how many people approve (the curriculum's negative test); raised is stricter | P `test_an_approvals_count_lowered_is_looser`, `test_an_approvals_count_raised_is_stricter` |
+| An approval removed is looser and added stricter, on a step that may run without one | P `test_an_approval_removed_is_looser`, `test_an_approval_added_is_stricter` |
+| On a high-risk step, an approval removed is not proven, saying the step never runs without one; a plan's high-risk activity likewise | P `test_a_high_risk_steps_approval_removed_is_not_proven`, `test_a_plans_high_risk_approval_removed_is_not_proven` |
+| An approval's `when` added is looser, said as asked on no more runs and on fewer wherever it is false; removed stricter; changed not proven | P `test_an_approvals_condition_added_is_looser`, `test_an_approvals_condition_removed_is_stricter`, `test_an_approvals_condition_changed_is_not_proven` |
+| Roles widened are looser, narrowed stricter, replaced not proven: who answers, proposes, sends and closes | P `test_roles_widened_are_looser`, `test_roles_narrowed_are_stricter`, `test_roles_replaced_are_not_proven` |
+| A role nobody registered counts for nothing, said so, and sees nothing | P `test_a_role_nobody_registered_counts_for_nothing` |
+| Who may approve is the listed roles allowed the contract's risk: a role that may not changes no approver; a step moved to a lower risk gains approvers, a higher one loses them | P `test_a_role_that_may_not_approve_the_risk_changes_no_approver`, `test_a_step_moved_to_a_lower_risk_gains_approvers` |
+| A step that stops reading an answer lets whoever gives it approve: looser (a change the JSON diff hides); starts reading one: stricter; both: not proven | P `test_a_step_that_stops_reading_an_answer_excludes_nobody_for_it`, `test_a_step_that_starts_reading_an_answer_excludes_its_people`, `test_exclusions_both_added_and_removed_are_not_proven` |
+| Requirements, `sequence` folded in: fewer looser, more stricter, replaced not proven; a sequence changed is said on each step it changes | P `test_a_requirement_removed_is_looser`, `test_a_requirement_added_is_stricter`, `test_a_requirement_replaced_is_not_proven`, `test_a_sequence_is_said_on_each_step_it_changes` |
+| A step's `when` removed is looser, said as running on no fewer cases; added stricter | P `test_a_steps_condition_removed_is_looser`, `test_a_steps_condition_added_is_stricter` |
+| `automatic` and `repeatable` turned on are looser, off stricter | P `test_automatic_turned_on_is_looser`, `test_repeatable_added_is_looser_and_removed_stricter` |
+| A close reason added is looser, removed stricter; a renamed one is said as a rename | P `test_a_close_reason_added_is_looser`, `test_a_close_reason_renamed_is_not_judged` |
+| An event's sender replaced, system for roles, is not proven | P `test_an_events_sender_replaced_is_not_proven` |
+| Forgetting is ordered never < while_open < allowed | P `test_forgetting_is_ordered` |
+| `max_age` compared as a duration: longer or no longer required looser, shorter or newly required stricter, the same age written otherwise not proven | P `test_a_fact_allowed_older_is_looser`, `test_a_fact_no_longer_required_fresh_is_looser` |
+| A plan's activity no longer approved is looser, newly approved stricter; its approval roles as its risk allows; its wait roles as roles; its timeouts not proven | P `test_a_plans_approval_removed_is_looser`, `test_a_plans_approvers_are_compared_as_its_risk_allows`, `test_a_plans_wait_roles_widened_are_looser`, `test_a_plans_timeout_is_not_proven` |
+| An output's source on a plan's activity state is said, never judged (from the review of #47) | P `test_an_output_source_on_a_plans_state_is_said_never_judged` |
+| Each of 13b's comparisons has a witness run, the pair read both ways, and the witnesses of 13a and 13b together cover the list | P `test_each_comparison_has_a_witness`; D `test_the_witnesses_cover_every_comparison` |
+| 13a's promises still hold, `forgetting` now judged in its order test | D, every test |
+| The guide's count example runs as written | D `test_the_guides_example_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal, in the new modules too | `tests/test_layers.py`, unchanged |

@@ -363,6 +363,16 @@ and record the key points. A question is closed once you can explain the answer 
     whoever gave the first approval is excluded from the second (D47).
   - **The test's three assertions:** `run.waiting_for == ["approval of pay by support-lead"]`,
     `not run.reached("pay")`, `not run.closed`.
+- Retrieval (layer 13b warm-up, 2026-10-24): asked first what the exclusion is (reminded: nobody
+  approves their own decision, D11; computed from provenance: anyone whose answer flows into the
+  step's inputs or `when`, the opener, the proposer, the people a starting rule's condition read,
+  and, with a count, anyone who already answered the entry). Then: "Sam can approve; Ana can't,
+  she set approved_amount." The exclusion came back, with its reason, from memory. Didn't come
+  back: the opener (excluded too, when a person opened the case), what the case waits for (`approval
+  of pay by support-lead`: `pay` hasn't run, and the case stays open, D10, D24), and the test's three
+  assertions (`waiting_for == ["approval of pay by support-lead"]`, `pay` not reached, the case not
+  closed). Why it matters in 13b: the exclusion depends on what `pay` reads, so a step that stops
+  reading `approved_amount` lets Ana approve it, a change the JSON diff hides (choice 23).
 - Status: open, until the opener and the test's three assertions come back with the exclusion.
 
 ## 15. Case data
