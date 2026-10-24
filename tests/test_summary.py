@@ -17,7 +17,7 @@ from ventoux.core.catalog import Catalog
 from ventoux.core.contract_hash import contract_hash, promise_hash
 from ventoux.core.promise import promise_of
 from ventoux.testing import CATALOG
-from ventoux.tooling.summary import Summary, summarize
+from ventoux.tooling.summary import Summary, for_summary_file, summarize
 
 PACKAGES = "examples/packages"
 EXAMPLE = ROOT / PACKAGES / "refund"
@@ -154,4 +154,64 @@ def test_contracts_that_match_are_said_to(tmp_path: Path) -> None:
     assert found.text == (
         "# What merging changes\n\n## Packages\n\n- **refund**: nothing to release.\n\n"
         "## Contracts\n\nEvery contract matches `contracts.lock.json`.\n"
+    )
+
+
+# --- Slice 3: fail closed, never hidden ----------------------------------------------------------
+
+
+def test_a_package_that_cant_be_read_fails_the_step_and_is_never_read_as_removed(
+    tmp_path: Path,
+) -> None:
+    # Fail closed: the head's refund can't be read, so the base's refund is never said removed,
+    # and the step fails saying why (13e, choice 67).
+    base = with_example(tmp_path / "base")
+    head = with_example(tmp_path / "head")
+    (head / PACKAGES / "refund" / "case.json").write_text("{")
+    found = summarized(base, head)
+    assert found.code == 1
+    assert found.outcomes == (
+        "- **refund**: not compared: a package in the head can't be read (below).",
+    )
+    assert found.text.endswith(
+        "## Why the step fails\n\n- examples/packages/refund, in the head: case.json isn't JSON: "
+        "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)\n"
+    )
+
+
+def test_a_diff_the_catalog_cant_make_fails_the_step(tmp_path: Path) -> None:
+    base = tree(tmp_path / "base", refund())
+    head = tree(tmp_path / "head", calling("payments.refund@9"))
+    found = summarized(base, head)
+    assert found.code == 1
+    assert found.failures == (
+        (
+            "refund: the diff can't be made: payments.refund@9 is not in the catalog. Registered: "
+            "payments.refund@2. Use a registered version, or register this one first. The diff "
+            "compares contracts from the catalog."
+        ),
+    )
+
+
+def test_a_base_that_isnt_a_folder_cant_be_read(tmp_path: Path) -> None:
+    found = summarized(tmp_path / "nowhere", with_example(tmp_path / "head"))
+    assert (found.code, found.outcomes) == (2, ())
+    assert found.text.endswith(
+        f"## Why the step fails\n\n- the base can't be read: {tmp_path / 'nowhere'} isn't a folder\n"
+    )
+
+
+def test_a_summary_past_the_limit_says_where_the_whole_text_is(tmp_path: Path) -> None:
+    # Never cut silently: past GitHub's limit, one line per package, the contracts, and where the
+    # whole text is (13e, choice 69).
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), unrequired)
+    found = summarized(base, head)
+    assert for_summary_file(found, limit=len(found.text.encode())) == found.text
+    short = for_summary_file(found, limit=200)
+    assert short == (
+        "# What merging changes\n\n## Packages\n\n" + found.outcomes[0] + "\n\n## Contracts\n\n"
+        "Every contract matches `contracts.lock.json`.\n\n"
+        f"The whole summary is {len(found.text.encode())} bytes, past the job summary's limit of "
+        "200 bytes: it is in this step's log, under `ventoux summary`.\n"
     )
