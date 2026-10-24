@@ -861,7 +861,8 @@ And the start of the refund's sheet:
     - stricter: **"Stricter:"** likewise;
     - not proven: **"Changed, not proven either way (read it as possibly looser):"**, so a doubt
       reads as looser in words too (choice 4);
-    - written otherwise, the same behaviour (choice 38): **"Written otherwise, the same:"**.
+    - written otherwise, the same decisions (choice 38): **"Written otherwise, the same
+      decisions:"**.
 
     Wording changes are listed apart, last, as in the developer form. *Recommended.*
 
@@ -897,16 +898,23 @@ And the start of the refund's sheet:
     diff did, true of every case; the change itself stays not proven. *Recommended.* Set aside:
     re-judging it now (a 13b comparison, to be decided as one, with its witness).
 
-38. **Written otherwise, the same behaviour (from the review of #48)**: a fourth kind of line,
+38. **Written otherwise, the same decisions (from the review of #48)**: a fourth kind of line,
     beside the verdicts, never counted as "may loosen". Only where the diff *proves* the two
-    versions behave the same for every case, though the digest moves: a `max_age` of the same
-    duration (`2d` and `48h`), and requirements written in another order (the engine reads them
-    as a set). It is listed apart, after the behaviour changes and before the wording, and the
-    summary says `1 written otherwise`. `Change` keeps three verdicts; these go in a list of
-    their own (`Diff.rewritten`), as wording does, so nothing can mistake one for a verdict, and
-    "never less than the digest" (choice 5) still holds: every path the digest sees is a change
-    or a rewriting. A `visible_to` written to name the same roles as today stays not proven: it
-    narrows who a role added later would see. *Recommended.*
+    versions decide the same for every case, though the digest moves. Checked against the code
+    for this note:
+    - **a `max_age` of the same duration** (`2d` and `48h`): every decision compares seconds, so
+      both decide the same. The history still words the age as written ("needs it at most 2 days
+      old", "at most 48 hours old", `freshness.as_said`), so the line says that too: `written
+      otherwise, the same decisions: the history says 48 hours where it said 2 days`;
+    - **not requirements written in another order,** which I had first put here: a refused retry
+      or proposal names the first unmet requirement, and what steered a run is recorded in that
+      order (`runtime.py`), so the order is read. It stays not proven.
+
+    These lines go in a list of their own (`Diff.rewritten`), as wording does, so nothing can
+    mistake one for a verdict; `Change` keeps its three verdicts. The summary says `1 written
+    otherwise`. "Never less than the digest" (choice 5) still holds: every path the digest sees is
+    a change or a rewriting. A `visible_to` written to name the same roles as today stays not
+    proven: it narrows who a role added later would see. *Recommended.*
 
 39. **The case map: every entry of the package, read, in the format's order.** Its fields, then
     its steps, rules (patterns with their expansions, D46), events, close reasons, then how it
