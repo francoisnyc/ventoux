@@ -215,36 +215,65 @@ def requirements_change(step: str, versions: Versions) -> Iterator[Change]:
 
 
 def exclusions(step: str, versions: Versions) -> Iterator[Change]:
-    """Who is excluded from approving `step` for what it reads (13b, choice 23): whoever's answer
-    can reach its inputs or its `when` (brief, D11). The rule is the engine's; which answers reach
-    the step is the definition's. Fewer excluded: looser; more: stricter; both: not proven."""
+    """Who is excluded from approving `step` (13b, choice 23, as choice 46 of 13c changed it),
+    compared as two sets in each version: who *may* be excluded (`excluded`) and who is excluded
+    *in every run* (`excluded_every_time`). The runtime excludes whoever's answer the step reads
+    now (brief, D11), and a later answer or an edit replaces an earlier one (brief, D52). So:
+    stricter only if nobody leaves either set and everyone who may be excluded is excluded every
+    time; looser only if nobody joins either set; otherwise not proven."""
     old, new = versions.before.steps[step], versions.after.steps[step]
     if not isinstance(old, CallStep) or not isinstance(new, CallStep):
         return
     if old.approval is None or new.approval is None:
         return  # an approval added or removed is said by `approval_change`
-    excluded_before = excluded(versions.before, old, versions.catalog)
-    excluded_after = excluded(versions.after, new, versions.catalog)
-    if excluded_before == excluded_after:
+    may_before = excluded(versions.before, old, versions.catalog)
+    may_after = excluded(versions.after, new, versions.catalog)
+    every_before = excluded_every_time(versions.before, old)
+    every_after = excluded_every_time(versions.after, new)
+    if (may_before, every_before) == (may_after, every_after):
         return
+    left = (may_before - may_after) | (every_before - every_after)
+    joined = (may_after - may_before) | (every_after - every_before)
+    said = f"excluded from approving {step}: " + "; ".join(
+        moved(may_before, may_after, every_before, every_after)
+    )
     path = f"steps.{step}.approval"
-    gone, come = excluded_before - excluded_after, excluded_after - excluded_before
-    if gone and not come:
-        said = f"{whoever(gone)} {'is' if len(gone) == 1 else 'are'} no longer excluded from "
-        yield Change(path, "looser", f"{said}approving {step}", "approval exclusions")
-    elif come and not gone:
-        said = f"{whoever(come)} {'is' if len(come) == 1 else 'are'} now excluded from "
-        yield Change(path, "stricter", f"{said}approving {step}", "approval exclusions")
+    if not left and may_after == every_after:
+        yield Change(path, "stricter", said, "approval exclusions")
+    elif not joined:
+        yield Change(path, "looser", said, "approval exclusions")
     else:
-        said = f"excluded from approving {step}: {whoever(excluded_before)} -> "
-        yield Change(path, "not proven", said + whoever(excluded_after))
+        yield Change(path, "not proven", said)
+
+
+def moved(
+    may_before: frozenset[str],
+    may_after: frozenset[str],
+    every_before: frozenset[str],
+    every_after: frozenset[str],
+) -> list[str]:
+    """Who moved between the sets, each said once: `whoever answers review, no longer`."""
+    gone = may_before - may_after
+    come = may_after - may_before
+    groups = (
+        (gone, "no longer"),
+        ((every_before - every_after) - gone, "in some runs only, no longer in every one"),
+        (come & every_after, "now in every run"),
+        (come - every_after, "now in some runs"),
+        ((every_after - every_before) - come, "now in every run, not only in some"),
+    )
+    return [f"{whoever(people)}, {how}" for people, how in groups if people]
 
 
 def excluded(case: CaseDefinition, step: CallStep, catalog: Catalog) -> frozenset[str]:
-    """The people whose answers can reach what `step` reads, as the static check names them
-    (`person:answering review`), from the definition alone: through a field a task's form sets,
-    a task's outcome, an event a person sends, or a rule that computes from them (brief, D42)."""
-    sources = could_come_from(case, catalog, None)
+    """The people who *may* be excluded from approving `step`: whoever's answer can reach what it
+    reads, as the static check names them (`person:answering review`), from the definition alone:
+    through a field a task's form sets, a task's outcome, an event a person sends, an edit, or a
+    rule that computes from them (brief, D42). See docs/layers/13-diff.md, "Every way a value the
+    step reads is given"."""
+    # An edit is one more writer of each declared field wherever a registered role may edit
+    # (brief, D52): its proposer and its approver may be excluded (13c, choice 46).
+    sources = could_come_from(case, catalog, None, edits=bool(catalog.editors))
     return frozenset(
         source
         for field in read_by(step)
@@ -276,7 +305,11 @@ def read_by(step: CallStep) -> set[str]:
 
 
 # How the static check's sources name a person, and how a sentence says it.
-DOING = {"person:answering ": "answers", "person:sending ": "sends"}
+DOING = {
+    "person:answering ": "answers",
+    "person:sending ": "sends",
+    "person:editing ": "proposes or approves an edit of",
+}
 
 
 def whoever(people: frozenset[str]) -> str:

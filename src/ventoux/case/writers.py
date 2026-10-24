@@ -49,16 +49,30 @@ def sending(event: str) -> str:
     return f"person:sending {event}"
 
 
+def editing(field: str) -> str:
+    """The static check's source for a value an edit gives `field`: its proposer and its
+    approver, two people nobody knows until they decide it (brief, D52). At runtime they are
+    `person:bob` and `person:lee`."""
+    return f"person:editing {field}"
+
+
 def case_sources(
-    case: CaseDefinition, contracts: Mapping[str, Contract], opener: str
+    case: CaseDefinition, contracts: Mapping[str, Contract], opener: str, edits: bool = False
 ) -> dict[str, frozenset[str]]:
     """Where each value of `case` may come from, by the name an expression reads it with, when
     `opener` opens it: the union of what each of its writers may stamp (brief, D34). A field
     rules set comes from what its rules read, so it is grown from nothing until a round changes
     nothing; it ends, since each round only adds, out of finitely many fields and sources
-    (brief, D42)."""
+    (brief, D42). With `edits`, an edit is one more writer of every declared field
+    (brief, D52)."""
     sources = stamped(case, contracts, opener)
     computed = computed_writes(case, contracts)
+    if edits:
+        for name in case.fields:
+            if name in computed:  # a field a rule sets is a declared field too
+                computed[name] = [*computed[name], (frozenset(), frozenset({editing(name)}))]
+            else:
+                sources[name] = sources[name] | {editing(name)}
     for field in computed:
         sources[field] = frozenset()
     while True:
@@ -247,10 +261,11 @@ def stamped(
 
 
 def could_come_from(
-    case: CaseDefinition, catalog: Catalog, opened_by: str | None
+    case: CaseDefinition, catalog: Catalog, opened_by: str | None, edits: bool = False
 ) -> dict[str, frozenset[str]]:
     """Where each value of a case `opened_by` opened (None: a system) could come from, with the
-    contracts the catalog holds: what the runtime reads for a value nobody has set yet."""
+    contracts the catalog holds: what the runtime reads for a value nobody has set yet. With
+    `edits`, an edit's people too, as the diff counts them (brief, D52)."""
     contracts: dict[str, Contract] = {}
     for name, step in case.steps.items():
         if isinstance(step, CallStep):
@@ -259,7 +274,7 @@ def could_come_from(
             except NotInCatalog:
                 continue  # it gives nothing: a step reading it fails, saying so
     opener = OPENER if opened_by is None else f"person:{opened_by}"
-    return case_sources(case, contracts, opener)
+    return case_sources(case, contracts, opener, edits)
 
 
 def read_sources(

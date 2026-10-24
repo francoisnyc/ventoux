@@ -399,6 +399,16 @@ it approve the step's risk, so adding `support`, which approves nothing, changes
 stop `pay` reading `approved_amount`, and whoever answered `review`, which sets it, may now
 approve `pay`. The JSON shows an input changed; the diff says who may now approve.
 
+The engine excludes whoever's answer the step reads *now*, and a later answer or an edit replaces
+an earlier one: an edited value comes from the edit's proposer and approver. So the diff compares
+two sets in each version: who *may* be excluded (whoever's answer, send or edit can reach what
+the step reads) and who is excluded *in every run* (whoever answers a task that isn't repeatable,
+whose outcome the step reads directly: an outcome can't be edited). It says stricter only if
+nobody leaves either set and everyone who may be excluded is excluded every time, so a step that
+reads a field someone may edit is never proven stricter; and looser only if nobody joins either
+set. Where your platform team lets a role edit, stopping `pay` reading `approved_amount` for
+`amount` is not proven: whoever answered `review` leaves, but whoever edits `amount` joins.
+
 The four-eyes refund (`examples/refund/refund-four-eyes.json`), back to one team lead:
 
 ```

@@ -34,7 +34,16 @@ from ventoux.case.runtime import EventRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.policy import trusted_only
 from ventoux.temporal.forget import CaseLookup, lookup_refusal
-from ventoux.testing import CATALOG, close, edit, later, propose, run_case, send
+from ventoux.testing import (
+    CATALOG,
+    close,
+    edit,
+    later,
+    payments_refund,
+    propose,
+    run_case,
+    send,
+)
 
 FOUR_EYES = ROOT / "examples" / "refund" / "refund-four-eyes.json"
 
@@ -316,24 +325,49 @@ def excluding(amount: str) -> dict[str, Any]:
     return case
 
 
+def editing_nothing() -> Catalog:
+    """The refund's system, contract and roles, none of which may edit a case file: only answers
+    and events give a step's values (brief, D52)."""
+    catalog = Catalog()
+    catalog.register_system("orders")
+    catalog.register(payments_refund)
+    catalog.register_role("support")
+    catalog.register_role("support-lead", approves="high")
+    return catalog
+
+
+NO_EDITS = editing_nothing()
+
+
 def test_a_step_that_stops_reading_an_answer_excludes_nobody_for_it() -> None:
     # The change the JSON diff hides: an input changed, and whoever answers review may now
     # approve the payment, since nobody approves a step their own answer feeds (brief, D11).
-    found = judged_lines(excluding("approved_amount"), excluding("amount"))
+    # Where nobody may edit, amount comes from the opening alone, so nobody joins.
+    found = judged_lines(excluding("approved_amount"), excluding("amount"), NO_EDITS)
     assert found == [
         "not proven steps.pay.inputs.amount: approved_amount -> amount",
-        (
-            "looser     steps.pay.approval: whoever answers review is no longer excluded from "
-            "approving pay"
-        ),
+        "looser     steps.pay.approval: excluded from approving pay: whoever answers review, no longer",
     ]
 
 
-def test_a_step_that_starts_reading_an_answer_excludes_its_people() -> None:
-    found = judged_lines(excluding("amount"), excluding("approved_amount"))
-    assert (
-        "stricter   steps.pay.approval: whoever answers review is now excluded from approving pay"
-        in found
+def test_an_edits_people_who_join_make_it_not_proven() -> None:
+    # Where a role may edit, whoever edits amount may now be excluded: someone joins, so it is
+    # never looser, though whoever answers review leaves (13c, choice 46).
+    found = judged_lines(excluding("approved_amount"), excluding("amount"))
+    assert found[1] == (
+        "not proven steps.pay.approval: excluded from approving pay: whoever answers review and "
+        "whoever proposes or approves an edit of approved_amount, no longer; whoever proposes or "
+        "approves an edit of amount, now in some runs"
+    )
+
+
+def test_a_step_that_starts_reading_a_forms_field_is_not_proven_stricter() -> None:
+    # Whoever answers review joins, but only until approved_amount is edited, or set again: it
+    # may be excluded, never in every run (13c, choice 46).
+    found = judged_lines(excluding("amount"), excluding("approved_amount"), NO_EDITS)
+    assert found[1] == (
+        "not proven steps.pay.approval: excluded from approving pay: whoever answers review, now "
+        "in some runs"
     )
 
 
@@ -348,9 +382,45 @@ def test_exclusions_both_added_and_removed_are_not_proven() -> None:
         "outcomes": {"checked": {"display": {"title": "Checked"}, "sets": ["checked_amount"]}},
     }
     assert (
-        "not proven steps.pay.approval: excluded from approving pay: whoever answers review -> "
-        "whoever answers check"
-    ) in judged_lines(before, after)
+        "not proven steps.pay.approval: excluded from approving pay: whoever answers review, no "
+        "longer; whoever answers check, now in some runs"
+    ) in judged_lines(before, after, NO_EDITS)
+
+
+def test_a_step_that_starts_reading_a_tasks_outcome_is_stricter_where_nobody_edits() -> None:
+    # Review's outcome can't be edited and review is answered once: whoever answers it is
+    # excluded in every run (13c, choice 45). Where nobody may edit, nobody else may be.
+    before = with_check("amount", REVIEWED)
+    after = with_check("amount", {">": [{"var": "amount"}, 0]})
+    assert (
+        "stricter   steps.pay.approval: excluded from approving pay: whoever answers review, now "
+        "in every run"
+    ) in judged_lines(after, before, NO_EDITS)
+    # Where a role may edit, pay's order_id and amount may be edited, so its edit's people may be
+    # excluded, never in every run: a step reading an editable field is never proven stricter.
+    assert (
+        "not proven steps.pay.approval: excluded from approving pay: whoever answers review, now "
+        "in every run"
+    ) in judged_lines(after, before)
+
+
+def test_an_edits_people_reach_a_step_through_a_rule() -> None:
+    # A rule's field comes from what the rule read (brief, D42), so an edit of approved_amount
+    # reaches owed when the rule sets it again; and owed, a declared field, may be edited itself.
+    before, after = excluding("amount"), excluding("owed")
+    for case in (before, after):
+        case["fields"]["fee"] = {"type": "number", "display": {"title": "Handling fee"}}
+        case["fields"]["owed"] = {"type": "number", "display": {"title": "What is owed"}}
+        case["rules"] = {
+            "work_out_owed": {
+                "display": {"title": "Work out what is owed"},
+                "on": {"answered": "review"},
+                "then": {"set": {"owed": {"-": [{"var": "approved_amount"}, {"var": "fee"}]}}},
+            }
+        }
+    (line,) = [line for line in judged_lines(before, after) if "steps.pay.approval:" in line]
+    assert "an edit of approved_amount" in line
+    assert "an edit of owed" in line
 
 
 # --- From the review of #49: excluded in every run, or only maybe ---------------------------------
@@ -397,17 +467,19 @@ def with_check(amount: str, when: dict[str, Any] | None) -> dict[str, Any]:
     return case
 
 
-def approved_by(case: dict[str, Any], who: str, history: list[Any] = EDITED) -> str | CaseRun:
+def approved_by(
+    case: dict[str, Any], who: str, history: list[Any] = EDITED, catalog: Catalog = CATALOG
+) -> str | CaseRun:
     """`history`, then `who` approves the payment: the run, or why it was refused. An edit
     withdraws an approval that read the old value and asks again (brief, D52), so `who` answers
     the approval open then."""
     file = {"order_id": "ord-1", "amount": 250}
-    before = run_case(case, file=file, answers=history, people=REVIEW_PEOPLE)
+    people = REVIEW_PEOPLE
+    before = run_case(case, file=file, answers=history, people=people, catalog=catalog)
     (entry,) = [name for name in before.state.waiting if name.startswith("pay.approval#")]
     try:
-        return run_case(
-            case, file=file, answers=[*history, (entry, "approve", who)], people=REVIEW_PEOPLE
-        )
+        approving = [*history, (entry, "approve", who)]
+        return run_case(case, file=file, answers=approving, people=people, catalog=catalog)
     except AnswerRefused as refused:
         return str(refused)
 
@@ -424,6 +496,65 @@ def answered_again() -> tuple[dict[str, Any], list[Any]]:
         ("check", "ok", "bob", {"checked_amount": 250}),
     ]
     return case, history
+
+
+def exclusion_line(before: dict[str, Any], after: dict[str, Any]) -> str:
+    """The one change on who is excluded from approving pay."""
+    (line,) = [line for line in judged_lines(before, after) if "steps.pay.approval:" in line]
+    return line
+
+
+def test_r1_a_newcomer_excluded_every_time_while_an_edit_frees_another_is_not_proven() -> None:
+    # The review of #49, R1: check's answerer joins, excluded in every run, but pay stops reading
+    # approved_amount, so the people of its edit leave. Lee approved that edit: refused, then not.
+    old = with_check("approved_amount", REVIEWED)
+    new = with_check("amount", {"and": [REVIEWED, {"==": [{"var": "check.outcome"}, "ok"]}]})
+    assert exclusion_line(old, new).startswith("not proven")
+    assert (
+        approved_by(old, "lee") == "lee set approved_amount, which pay uses, so cannot approve it"
+    )
+    assert isinstance(approved_by(new, "lee"), CaseRun)
+
+
+def test_r2_someone_excluded_every_time_who_joins_is_never_looser() -> None:
+    # R2: pay stops reading checked_amount and starts reading review's outcome. Nobody joins who
+    # may be excluded, but whoever answers review is now excluded in every run: Ana is refused.
+    old = with_check("approved_amount", {">": [{"var": "checked_amount"}, 0]})
+    new = with_check("approved_amount", REVIEWED)
+    assert exclusion_line(old, new).startswith("not proven")
+    assert isinstance(approved_by(old, "ana"), CaseRun)
+    assert approved_by(new, "ana") == (
+        "ana set review.outcome, which decides whether pay runs, so cannot approve it"
+    )
+
+
+def test_r3_an_edits_people_who_join_are_never_looser() -> None:
+    # R3: pay stops reading review's outcome and reads approved_amount, which Bob and Lee edit.
+    old, new = with_check("amount", REVIEWED), with_check("approved_amount", None)
+    assert exclusion_line(old, new).startswith("not proven")
+    assert isinstance(approved_by(old, "lee"), CaseRun)
+    assert (
+        approved_by(new, "lee") == "lee set approved_amount, which pay uses, so cannot approve it"
+    )
+
+
+def rechecking(sets: list[str]) -> dict[str, Any]:
+    """The review's case, pay reading approved_amount, check's `ok` setting `sets`."""
+    case = with_check("approved_amount", None)
+    case["steps"]["check"]["outcomes"]["ok"]["sets"] = sets
+    return case
+
+
+def test_another_writer_of_a_field_read_is_never_stricter() -> None:
+    # The review of #49: check's answer now also sets approved_amount, replacing review's, so
+    # Ana, who answered review, may approve pay once Tom has answered check.
+    old, new = rechecking([]), rechecking(["approved_amount"])
+    assert exclusion_line(old, new).startswith("not proven")
+    reviewed = ("review", "approve", "ana", {"approved_amount": 250})
+    old_run = approved_by(old, "ana", [reviewed, ("check", "ok", "tom", {})])
+    new_run = approved_by(new, "ana", [reviewed, ("check", "ok", "tom", {"approved_amount": 200})])
+    assert old_run == "ana set approved_amount, which pay uses, so cannot approve it"
+    assert isinstance(new_run, CaseRun)
 
 
 # --- Slice 3: when a step may run ----------------------------------------------------------------
@@ -863,28 +994,19 @@ def approvers_witness() -> Witness:
 
 
 def exclusions_witness() -> Witness:
-    """Ana reviews and is also a team lead: refused as the payment's approver while it sends the
-    amount she set, accepted once it sends the amount the case opened with."""
-    before, after = excluding("approved_amount"), excluding("amount")
-    people = {"ana": ["support", "support-lead"]}
-
-    def approving(case: dict[str, Any]) -> str | CaseRun:
-        try:
-            return run_case(
-                case,
-                file={"order_id": "ord-1", "amount": 250},
-                answers=[
-                    ("review", "approve", "ana", {"approved_amount": 250}),
-                    ("pay.approval#1", "approve", "ana"),
-                ],
-                people=people,
-            )
-        except AnswerRefused as refused:
-            return str(refused)
-
-    old, new = approving(before), approving(after)
-    refused = old == "ana set approved_amount, which pay uses, so cannot approve it"
-    return before, after, CATALOG, refused, isinstance(new, CaseRun) and new.reached("pay")
+    """Ana reviews and is also a team lead: refused as the payment's approver while its condition
+    reads review's outcome, accepted once it reads the amount the case opened with. Nobody may
+    edit, so who may be excluded is who is excluded in every run (13c, choice 46)."""
+    before = with_check("amount", REVIEWED)
+    after = with_check("amount", {">": [{"var": "amount"}, 0]})
+    history: list[Any] = [
+        ("review", "approve", "ana", {"approved_amount": 250}),
+        ("check", "ok", "tom", {"checked_amount": 250}),
+    ]
+    old = approved_by(before, "ana", history, NO_EDITS)
+    new = approved_by(after, "ana", history, NO_EDITS)
+    refused = old == "ana set review.outcome, which decides whether pay runs, so cannot approve it"
+    return before, after, NO_EDITS, refused, isinstance(new, CaseRun) and new.reached("pay")
 
 
 def answerers_witness() -> Witness:
