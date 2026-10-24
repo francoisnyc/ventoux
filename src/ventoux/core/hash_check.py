@@ -59,6 +59,8 @@ def what_changed(
             )
         ]
     try:
-        return promise_changes(earlier, promise_of(contract))
+        found = promise_changes(earlier, promise_of(contract))
     except PromiseUnreadable as unreadable:
         return [f"what changed can't be said: {unreadable}"]
+    # The hashes differ, so something does: never a changed contract with nothing under it.
+    return found or ["what changed can't be said: no path differs as written"]

@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# Every job's token reads and nothing more: the summary sends nothing, and nothing here writes
+# (layer 13e, choice 70). Never `pull_request_target`, which would run the head's code with the
+# base's rights.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -25,3 +31,38 @@ jobs:
       - run: uv run ruff check
       - run: uv run mypy
       - run: uv run pytest
+
+  # What merging a pull request changes, in its job summary (layer 13e): for each package, a
+  # release, a wording revision or nothing, then the diff; and each contract changed in place.
+  # A push has no pull request base, so a push runs `check` only.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # GitHub checks out the merge commit it makes: what merging creates. Its first parent is
+      # the base it was made on.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: base
+        run: echo "sha=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.base.outputs.sha }}
+          path: base
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      # The base's promises, from the base's own code and environment (layer 13d, choice 59).
+      - run: uv run --directory base --locked ventoux promises > base-promises.json
+      # The summary's logic is the command's; this only calls it. It fails the step when
+      # something can't be read or is refused, and says why.
+      - name: ventoux summary
+        env:
+          BASE_COMMIT: ${{ steps.base.outputs.sha }}
+        run: >-
+          uv run ventoux summary --base base --head . --packages examples/packages
+          --lock contracts.lock.json --before base-promises.json
+          --summary-file "$GITHUB_STEP_SUMMARY"
+          --base-commit "$BASE_COMMIT" --head-commit "$(git rev-parse HEAD)"

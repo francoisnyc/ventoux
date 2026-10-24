@@ -1070,8 +1070,14 @@ and record the key points. A question is closed once you can explain the answer 
     still on the old one (layer 12).
   In one line: the static check prevents, for the author, on every path; the runtime check
   enforces, for this value, on this path. Neither replaces the other.
+- Retrieval (layer 13e warm-up, 2026-10-24), the follow-up: "because the static gives an
+  understanding of the flow, even without the data used at runtime?" The core, **every path**,
+  came back a third time: without the run's data, the static check looks at every path, where the
+  runtime sees only the one a run takes. Two parts didn't: **when it costs** (an edit before
+  release; a new release and open cases on the old one after) and **who hears of it** (the author,
+  who can change the definition, against an operator with a case stuck). The second is 13e: the
+  job summary is the static check's voice in the pull request, where the author is.
 - Status: open, until "who hears of it" comes back from memory.
-
 
 ## 35. Layer 6: what lives in workflow history
 

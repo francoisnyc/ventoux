@@ -20,8 +20,9 @@ The folder holds exactly the plans the case names: a plan a step names that is m
 step names, the same plan twice, or any other file is refused, and nothing is released.
 
 A **release** is an immutable, numbered version of a package. Nobody numbers it by hand: on merge,
-CI runs `ventoux release` on each package, which compares it with the package's latest release
-and does one of three things:
+run `ventoux release` on each package, where your records are kept (CI doesn't run it yet: where a
+deployment keeps its records comes with `ventoux check`, layer 14). It compares the package with
+its latest release and does one of three things:
 
 - **the behaviour changed:** a new release, the next number, and its record;
 - **only the wording changed:** no release; a *wording revision* of the current release, which
@@ -459,12 +460,12 @@ $ ventoux diff refund-four-eyes refund-one-lead --plain
 
 ### steps.pay
 
-- Before: pay calls payments.refund@2 (high risk, it writes), giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve". Two people approve it, each a support-lead, when approved_amount > 10000.
-  - Where approved_amount > 10000 is false, it runs with no approval.
+- Before: pay calls payments.refund@2 (high risk, it writes), giving order\_id from order\_id and amount from approved\_amount. It starts by itself once review is done, if review.outcome = "approve". Two people approve it, each a support-lead, when approved\_amount &gt; 10000.
+  - Where approved\_amount &gt; 10000 is false, it runs with no approval.
   - The 2 approvers are different people, each someone else; one rejection rejects the approval.
-- After: pay calls payments.refund@2 (high risk, it writes), giving order_id from order_id and amount from approved_amount. It starts by itself once review is done, if review.outcome = "approve". One support-lead approves it, when approved_amount > 10000.
-  - Where approved_amount > 10000 is false, it runs with no approval.
-- **Looser** (`steps.pay.approval.count`): 2 -> 1 (one person approves pay, where two had to).
+- After: pay calls payments.refund@2 (high risk, it writes), giving order\_id from order\_id and amount from approved\_amount. It starts by itself once review is done, if review.outcome = "approve". One support-lead approves it, when approved\_amount &gt; 10000.
+  - Where approved\_amount &gt; 10000 is false, it runs with no approval.
+- **Looser** (`steps.pay.approval.count`): 2 -&gt; 1 (one person approves pay, where two had to).
 ```
 
 **Written otherwise, the same decisions.** Where two versions are written differently but decide
@@ -523,3 +524,59 @@ can't be read.
 The first line names paths, never values: `behaviour changed at steps.settle.when`. The notes
 after it say what each change means, as the diff does: they show what the definition writes (a
 condition, a duration, a literal passed to an activity), never a value a case holds.
+
+## On each pull request
+
+CI's `changes` job writes the pull request's **job summary** (on the run's page, under the
+summary of each job): what merging it changes, before anyone merges. GitHub checks out the merge
+commit it makes, which is what merging creates, and the job checks out its first parent, the base,
+beside it. Then one command says it all:
+
+- **for each package,** matched by name in both, only what the two trees show: the same
+  behaviour and wording as the base, the same behaviour with other wording (a wording revision, if
+  the base's behaviour is the latest release's), a new release, a new package (its first release),
+  or removed; which release each makes is `ventoux release`'s to say on merge, from the records.
+  Then, for one that changed, the diff in the plain form, the verdicts in their words. What the
+  diff quotes from a definition (a literal, a title, a name) is shown, never rendered: no HTML,
+  link or emphasis a pull request writes reaches the page;
+- **the contracts:** the hash check, given the promises the base commit's own code prints
+  (`ventoux promises`), so a contract changed in place says what changed, path by path.
+
+Here the base is the package as it is, and the pull request lets `settle` start without waiting
+for the review:
+
+```
+$ ventoux summary --base base --head . --packages examples/packages --lock contracts.lock.json --before base-promises.json --summary-file summary.md
+# What merging changes
+
+## Packages
+
+- **refund**: a new release, unless an earlier release has this behaviour (`ventoux release` decides on merge, from the records).
+
+## refund: what changes
+
+1 behaviour change: 1 may loosen (1 looser, 0 not proven), 0 stricter; no wording change.
+
+### steps.settle
+
+- Before: settle runs the plan refund-order@1, giving order\_id from order\_id and amount from approved\_amount. It starts by itself once review is done, if review.outcome = "approve".
+- After: settle runs the plan refund-order@1, giving order\_id from order\_id and amount from approved\_amount. It starts by itself when the case opens, if review.outcome = "approve".
+- **Looser** (`steps.settle.requires`): review -&gt; nothing.
+
+## Contracts
+
+Every contract matches `contracts.lock.json`.
+```
+
+The command prints the whole summary to the step's log and appends it to the summary file
+(`$GITHUB_STEP_SUMMARY` in CI). A looser change fails nothing: it is yours to judge. The step
+fails, saying why, when something can't be read or is refused: a checkout, a package, the base's
+promises, a comparison the diff can't make, or a contract changed in place. It is never read as
+"nothing changed". A summary past GitHub's 1 MiB keeps one line per package and says the whole text
+is in the log.
+
+**It sends nothing.** The workflow's token can only read (`permissions: contents: read`), the job
+writes nothing but its summary (no comment, no third-party action), and it runs on
+`pull_request`, never `pull_request_target`, which would run the pull request's code with the
+base's rights. A pull request from a fork runs it the same way. A push to `main` has no pull
+request base, so it runs the checks only.

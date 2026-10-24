@@ -65,8 +65,9 @@ def readable(value: object, path: str) -> None:
 
 
 def differing(before: object, after: object, path: str) -> list[str]:
-    """Where two readable values differ, below `path`."""
-    if before == after:
+    """Where two readable values differ, below `path`, as the hash writes them: `2` and `2.0` are
+    equal to Python, never to the hash (13e, choice 73)."""
+    if written(before) == written(after):
         return []
     if isinstance(before, dict) and isinstance(after, dict):
         found: list[str] = []
@@ -80,6 +81,11 @@ def differing(before: object, after: object, path: str) -> list[str]:
                 found += differing(before[key], after[key], where)
         return found
     return [f"{path}: {shown(before)} -> {shown(after)}"]
+
+
+def written(value: object) -> str:
+    """`value` as the contract hash writes it: canonical JSON, keys sorted."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def joined(path: str, key: str) -> str:

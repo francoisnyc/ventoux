@@ -1564,3 +1564,307 @@ named here.
 | Notes are given no case file; the record's paths name no value, the notes show a literal as the definition writes it | N `test_notes_are_given_no_case_file`; E `test_the_tool_names_paths_never_values` |
 | `ventoux release` prints the notes after what it did, in the diff's words; `ventoux notes` reads them again, plain with `--plain`; the releases guide's runs, as written | N `test_the_release_command_prints_the_notes_after_what_it_did`, `test_the_notes_command_reads_a_records_notes`; E `test_the_command_says_what_it_did`, `test_the_guides_example_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal, in the new modules too | `tests/test_layers.py`, unchanged |
+
+## 13e. The CI step: what merging a pull request changes, in its job summary
+
+Status: choices drafted 2026-10-24, from `main` at `9004cbd` (the 12e cold-start fix merged as
+#51). Answered "all as recommended", the same day: choices 63 to 76. The dated lines on D55 and
+D57 written before building 13e.
+
+### Warm-up: learning question 34, why check input policies twice
+
+> Why check sink policies twice? (`validate` before the plan runs, and again before each activity
+> is scheduled; "input policies" since brief, D21.) Follow-up: if the runtime check catches
+> everything with the real sources, why keep the static one at all?
+
+Open since layer 5; last asked at 11d's warm-up, where "every path" came back a second time.
+Answer the follow-up from memory first. It is 13e's question: the summary is the static check's
+voice in the pull request, so whoever can change the definition hears of a loosening before any
+case runs it.
+
+Answered from memory, 2026-10-24: "every path" came back; "when it costs" and "who hears of it"
+didn't, and were discussed. Recorded in the log; the question stays open.
+
+### What this part is for
+
+13a to 13d made the diff, its verdicts, its plain form and the release notes, all run by hand.
+13e runs them where a change is reviewed: on each pull request, the job summary (choice 7) says
+for each package whether merging it creates a release, a wording revision or nothing, then what
+changes, in the plain form. And the hash check gets the base commit's promises, so a contract
+changed in place says what changed (13d's choice 59).
+
+### What the code does today
+
+- `.github/workflows/ci.yml`: one job, `check`, on every push and pull request: `uv sync --locked`,
+  `ruff format --check`, `ruff check`, `mypy`, `pytest`, with the dev server's CLI cached in
+  `TEMPORAL_CLI_DIR` (12e). No `permissions` block, so the token has the repository's default
+  rights. One checkout, of what GitHub gives: on a pull request, the merge commit it makes
+  (`refs/pull/N/merge`), whose first parent is the base it was made on.
+- The tools exist, each by hand: `digest`, `wording` and `changed` (12a); `diff` and `plain`
+  (13a to 13c); `ventoux promises` and `ventoux hashes --before` (13d). The hash check also runs
+  as a test (`test_every_development_contract_matches_its_recorded_hash`), saying only that a
+  hash changed.
+- `ventoux release` isn't run by CI, though the releases guide says "CI runs `ventoux release`":
+  where records are kept for a deployment is still open (choice 76).
+
+### Choices for 13e
+
+63. **One command makes the summary; the YAML only calls it.** `ventoux summary --base BASE
+    --head HEAD --packages DIR [--packages DIR …] --lock FILE --before PROMISES --summary-file FILE
+    [--base-commit SHA --head-commit SHA]`: reads both trees, says each package and the contracts,
+    prints the whole Markdown to the log, and appends it to the summary file (choice 69). Its
+    logic is `tooling/summary.py`, tested with any catalog; the command uses the development
+    catalog, as `ventoux diff` does (until `ventoux check` brings the deployment's, layer 14).
+    The commits are given by CI, only to name them in the heading: the tool never reads git
+    (brief, D50). *Recommended.*
+
+64. **What is compared: the merge commit against its first parent.** On a pull request GitHub
+    checks out the merge commit it makes, which is what merging creates; its first parent is the
+    base it was made on. So the head is the default checkout (fetched with depth 2), and the base
+    is a second checkout, into `base/`, of `HEAD^1`. Set aside: the pull request's head commit
+    against `pull_request.base.sha`, which may be a base the branch was never merged with.
+    *Recommended.*
+
+65. **Per package, what merging does, from 12a's digest and wording, base against head**
+    (brief, D50):
+    - the same digest and wording: "nothing to release";
+    - the same digest, other wording: "a wording revision of its latest release";
+    - another digest: "a new release, unless an earlier release has this behaviour (`ventoux
+      release` decides on merge, from the records)": the summary reads no records (choice 7);
+    - only in the head: "a new package: its first release";
+    - only in the base: "removed: merging it releases nothing; its records and the cases open on
+      them are untouched";
+
+    then, for a package in both whose digest or wording differs, the diff in the plain form
+    (13c), which carries the verdicts' words and the paths. Packages are matched by name (the
+    case's `case`, as a record names them), found as the folders holding a `case.json` under each
+    `--packages` directory, in both trees. *Recommended.*
+
+66. **The contracts: the hash check with the base commit's own promises.** CI runs `ventoux
+    promises` in `base/` with the base's own code and environment (`uv run --directory base`), then
+    the summary runs the hash check against `contracts.lock.json` with them (13d's choices 59 and
+    60): a contract changed in place says what changed, path by path, in its own section.
+    *Recommended.*
+
+67. **Fail closed.** The step fails, saying why, and never reads as "nothing changed" when:
+    - the base can't be checked out (the checkout step fails) or read (`--base` isn't a folder:
+      exit 2);
+    - a package in either tree can't be read or is refused (exit 1, naming it, its tree and why);
+    - the diff refuses (a contract the catalog doesn't hold, a policy it doesn't know): exit 1;
+    - the base's `ventoux promises` can't run, or prints what isn't promises: exit 2;
+    - a contract changed in place: exit 1, after the summary says what changed.
+
+    What the summary says up to the failure is still written, with the failure last. A looser
+    change fails nothing: it is the reviewer's to judge, as `ventoux diff` exits 0.
+    *Recommended.*
+
+68. **The curriculum's negative test, end to end.** A base whose refund calls `payments.refund@2`
+    and a head whose refund calls `@3`, which takes any amount: the summary's Markdown says "a new
+    release" and "**Looser** … input amount …", and the summary file holds it. Through
+    `tooling/summary.py` with a catalog holding `@3` (as 13a's tests do), and once through `main`
+    with the development catalog for a change it holds (an approval removed, looser). *Recommended.*
+
+69. **Never hidden, within GitHub's limit.** A step's summary may hold at most 1 MiB
+    (1,048,576 bytes); more isn't shown. The whole text always goes to the step's log. When it
+    fits, it goes to the summary too; when it doesn't, the summary holds one line per package
+    (what merging does) and the contracts' status, then "The whole summary is N bytes, past the
+    job summary's 1 MiB: it is in this step's log, under 'ventoux summary'." Never cut silently.
+    Set aside: uploading it as an artifact (another action and a download, for a case that may
+    never come). *Recommended.*
+
+70. **Sends nothing.** The job summary only: no comment, no third-party action, no `gh`. The
+    workflow gets `permissions: contents: read` at its top, so every job's token reads and nothing
+    more, and it runs on `pull_request`, never `pull_request_target`, which would run the head's
+    code with the base's rights and a token that can write. A pull request from a fork runs it the
+    same way, with a read-only token. A test reads `ci.yml` as text and fails if it lacks the
+    read-only permissions, names `pull_request_target`, or gives a step `write`. *Recommended.*
+
+71. **On a push to `main`:** only `check` runs, as today. The summary job runs on pull requests
+    only (`if: github.event_name == 'pull_request'`): a push has no pull request base, and what a
+    merge released is `ventoux release`'s to record, which CI doesn't run yet (above). Said in the
+    guide. *Recommended.*
+
+72. **The existing checks stay as they are**, the cached CLI included. The summary is a second job,
+    `changes`, beside `check`, so a red test never hides the summary and the summary never delays
+    the tests. *Recommended.*
+
+73. **The number written otherwise in a promise (from the review of #50).** `2` and `2.0` (or
+    `true` and `1`) are equal to Python, not to the hash, so a base promise differing only so
+    prints a changed contract with nothing under it. 13e is where that line reaches a reviewer.
+    Offered: compare leaves as the hash writes them (canonical JSON), and say "what changed can't
+    be said: no path differs as written" if still nothing differs. *Recommended:* in this pull
+    request, with its negative test.
+
+74. **The dev server's flags pinned to temporalio 1.34.0 (from the review of #51).** Not this
+    layer's: *recommended* for the carried pull request with the idle thread-pool workers.
+
+75. **Where it is recorded:** a dated line on D55 (the CI step: the job summary, what it compares,
+    fail closed, read-only) and on D57 (the base's promises in CI); the releases guide's "What
+    changed: the diff" gains "On each pull request", with the summary's example run as written.
+    No new dependency: no third-party action, no YAML parser (the workflow test reads text).
+    *Recommended.*
+
+76. **`ventoux release` in CI, and where records live:** not in 13e. Running it on a merge needs a
+    place to keep records that outlives a runner, which is a deployment's decision (layer 14,
+    with `ventoux check`). Until then the releases guide's "CI runs `ventoux release`" becomes
+    "run `ventoux release` on merge, where your records are kept". *Recommended.*
+
+### Not in 13e
+
+- Running `ventoux release` in CI (choice 76).
+- A comment on the pull request (choice 7, set aside).
+- The pinned flags and the idle thread-pool workers (choice 74, carried).
+
+### Seams the tests use
+
+- `summarize(base, head, packages, catalog, recorded, before)` in `tooling/summary.py`, and what
+  it returns: the Markdown and the exit code.
+- `main(["summary", …])`, with a summary file in a temporary folder.
+- `.github/workflows/ci.yml`, read as text.
+
+### Slices, in order
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **A promise's number written otherwise** (choice 73).
+1. **What merging does, per package** (choices 63 to 65): a package only in the base said
+   removed, never left out.
+2. **The diff and the contracts in the summary** (choices 66 to 68): the curriculum's test end to
+   end; a contract changed in place.
+3. **Fail closed and never hidden** (choices 67 and 69): a refused package fails the step; a
+   summary past the limit says where the whole text is.
+4. **The workflow, the guide, the Promises** (choices 70 to 72, 75, 76): the read-only test.
+
+### Decided while building
+
+- **A package only one tree shows is never said removed, or new, while the other tree has one it
+  can't read** (slice 3, found writing its negative test): the unreadable one may be it. Such a
+  package reads "not compared: a package in the head can't be read (below)", and the step fails.
+- **Two packages of one name in a tree are refused**, naming the second folder: a record names a
+  package by its case's `case` (brief, D50), so which one merging releases would be a guess.
+- **Two messages were pinned from what the code says,** not what I guessed: the diff's refusal of
+  a contract the catalog doesn't hold, and Python's reading of a `case.json` that isn't JSON.
+- **The workflow's test reads the lines that do something,** its comments left out: the workflow's
+  own comment says it never uses `pull_request_target`.
+- **Both checkouts in `changes` keep no credentials** (`persist-credentials: false`): the token,
+  read-only anyway, stays out of their git configuration.
+- **The base's commit reaches the command through an environment variable** (`BASE_COMMIT`),
+  never written into the shell line by GitHub's expressions.
+- **The workflow's commands were run locally first**, against `main` in its own worktree: `uv run
+  --directory base --locked ventoux promises` builds the base's own environment, its progress on
+  stderr and the promises alone on stdout; then `ventoux summary`, exit 0.
+- **A diff's plain form keeps its own headings** (`## refund: what changes`), at the level of the
+  summary's `## Packages` and `## Contracts`: the summary shows it as `ventoux diff --plain` prints
+  it.
+
+#### Decided while building, after the review of #52
+
+- **Escaped where Markdown is written, so what is data stays plain.** A sheet's lines (`nevers`,
+  which its tests read), a summary's failures and a change's `said` stay as written; only
+  `plain`, `case_map`, `never_sheet` and the summary escape them as they place them. The
+  developer forms print what they printed before.
+- **Fifteen expectations changed, each an escape only:** `order_id` reads `order\_id`, `>`
+  reads `&gt;` and `->` in what a change says reads `-&gt;`, outside code spans; paths in code
+  spans are unchanged. Each diff was read before the expectation was updated, and the guides'
+  examples were made again from the commands, never edited by hand.
+- **No Markdown renderer is a dependency,** none is installed, so the tests check the escaped text
+  itself (every `<` gone, each character escaped), not a rendering.
+- **The review's run, as a test:** a task `vet` before `pay`, its condition comparing review's
+  outcome with the review's literal, and `pay` moved to an `@3` that takes any amount.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`Y` is `tests/test_summary.py` (new), `R` is 13d's `tests/test_promise.py`, `D` is 13a's
+`tests/test_diff.py`. Checked against the tests, 2026-10-24, again after the review of #52: every
+test named here exists, every test in `Y` is named here, and every test 13e added to `R` is named
+here.
+
+| Promise | Test |
+|---|---|
+| A number written otherwise in a promise is said as the hash writes it (`2 -> 2.0`); a hash that differs where no path does says what changed can't be said, never a contract with nothing under it | R `test_a_number_written_otherwise_is_said_as_the_hash_reads_it`, `test_a_hash_that_differs_where_no_path_does_says_so` |
+| What merging does to each package, from 12a's digest and wording, said as only the two trees show (the same behaviour and wording as the base; the same behaviour, other wording; a new release; a first release; removed), never left out; matched by name | Y `test_what_merging_does_to_each_package`, `test_a_package_only_in_the_base_is_said_removed`, `test_packages_are_matched_by_name_not_by_folder` |
+| The curriculum's negative test, end to end: an input policy loosened reads Looser in the summary, and fails nothing | Y `test_an_input_policy_loosened_reads_as_looser_in_the_summary` |
+| The contracts: the hash check with the base commit's own promises; a contract changed in place says what changed and fails the step; matching contracts are said to | Y `test_a_contract_changed_in_place_says_what_changed_and_fails`, `test_contracts_that_match_are_said_to` |
+| Fail closed: a package that can't be read, a diff the catalog can't make, a checkout that isn't a folder, base promises that can't be read: each fails the step, said in the summary, and nothing is read as removed or unchanged on a guess | Y `test_a_package_that_cant_be_read_fails_the_step_and_is_never_read_as_removed`, `test_a_diff_the_catalog_cant_make_fails_the_step`, `test_a_base_that_isnt_a_folder_cant_be_read`, `test_base_promises_that_cant_be_read_fail_and_say_so` |
+| Never hidden: the whole text to the log, appended to the summary file; past the limit, one line per package and where the whole text is | Y `test_the_command_logs_the_whole_summary_and_appends_it`, `test_a_summary_past_the_limit_says_where_the_whole_text_is`, `test_the_command_says_where_a_summary_too_long_is` |
+| Sends nothing: `permissions: contents: read`, never `pull_request_target`, nothing that writes or comments; the summary job on pull requests only, from the base's own promises, both checkouts without credentials | Y `test_the_workflow_sends_nothing_and_reads_only`, `test_the_summary_runs_on_pull_requests_from_the_base_s_own_promises` |
+| Two packages of one name in a tree are refused, naming the second folder | Y `test_two_packages_of_one_name_in_a_tree_are_refused` |
+| The existing checks are as they were, the cached CLI included; a push to `main` runs them only | Y `test_the_existing_checks_are_as_they_were` |
+| The releases guide's summary runs as written | Y `test_the_guides_summary_runs_as_written` |
+| Text a definition writes is shown, never rendered: the review's run has no `<` from a definition in the summary, its literal shown escaped and the Looser line visible; a backtick, `*`, `[`, `#` and a line break shown as written (from the review of #52, choice 77) | Y `test_html_a_pull_request_writes_never_reaches_the_summary`, `test_markdown_a_definition_writes_is_shown_as_written` |
+| A path's code span and the hash check's block are fenced past any backtick run in them | Y `test_a_path_in_a_code_span_is_fenced_past_its_backticks`, `test_a_backtick_in_a_contract_never_closes_the_hash_checks_block` |
+| The plain form, the map and the sheet escape what they place, and their tests and the guides' examples pin it | 13c's `tests/test_plain.py` and `tests/test_sheet.py`, `test_the_guides_map_runs_as_written`; D `test_the_guides_example_runs_as_written` |
+| `case` reads no clock or I/O and imports no Temporal: the summary is `tooling`'s | `tests/test_layers.py`, unchanged |
+
+### From the tutor review of #52: text a pull request writes reaches rendered Markdown
+
+The review's run: a head adds a task before `pay` whose condition is `review.outcome =
+"approve</li></ul><details><summary>checked: nothing loosens</summary>"`, and moves `pay` to an
+`@3` that takes any amount. `summarize` exits 0, and rendered (CommonMark, then the HTML tree
+browsers and GitHub's sanitizer build), the Looser line and everything after it sit inside a
+collapsed `<details>` reading "checked: nothing loosens". A pull request can hide the curriculum's
+negative test from its reviewer.
+
+Every route found, checked against the code:
+
+- **the plain form** (`case/plain.py`): each change's `said` (literals as the expression renderer
+  writes them, through `json.dumps`, which leaves `<` and `>` as they are), the readings and their
+  fine print, the wording lines' titles, the entries' and changes' paths;
+- **the map and the sheet** (`case/sheet.py`): the readings, the rules' sentences, the package's
+  name in its headings, the sheet's lines (roles, contract references, field names);
+- **the summary** (`tooling/summary.py`): the folder names and refusal messages in "Why the step
+  fails", which quote what the tree holds; and the hash check's block, fenced with three
+  backticks, which a docstring or a field's title holding three backticks ends early (the head's
+  own code writes the catalog);
+- names a definition gives are checked against patterns (a case's `case`, `[a-z][a-z0-9-]*`), but
+  not every key that becomes a path is, so a path is treated as text too.
+
+The developer forms (`ventoux diff`, `ventoux release`, `ventoux notes` without `--plain`,
+`ventoux hashes`) print plain text to a terminal, and a record keeps data: neither is Markdown.
+
+77. **Where the escaping goes: where Markdown is written, never at the source.** One small module,
+    `case/markdown.py`, and every renderer of Markdown uses it for every piece of text it didn't
+    write itself: the plain form, the map and the sheet, so `ventoux diff --plain`, `ventoux notes
+    --plain`, `ventoux map` and the summary all inherit it; and the summary's own pieces (package
+    and folder names, refusal messages, commits):
+    - `text(s)` for text in a paragraph or list item: `&`, `<` and `>` as the entities `&amp;`,
+      `&lt;` and `&gt;`; a backslash before each of `\`, `` ` ``, `*`, `_`, `[`, `]`, `~`, `#`,
+      `|` and `!`; and a line break, a carriage return or a tab shown as `\n`, `\r` or `\t`, so a
+      value never starts a line of its own;
+    - `code(s)` for a path in a code span: fenced with one backtick more than the longest run in
+      it, as CommonMark allows, so nothing in it closes it;
+    - `block(lines)` for the hash check's lines: fenced with one backtick more than the longest
+      run in them, never less than three.
+
+    Set aside: escaping at the source (the diff's `said`, the readings), which would put entities
+    in the developer forms and in every record's notes; and backslashes before every ASCII
+    punctuation mark, which CommonMark allows and which would be safe without an argument, but
+    turns every `refund-order@1, giving order_id` into `refund\-order\@1\, giving order\_id` in
+    the raw text the guides show. The set above is enough because a value never starts a line (its
+    line breaks are shown, not kept), so only what can open a construct inside a line matters:
+    raw HTML and autolinks (`<`), entities (`&`), emphasis (`*`, `_`, `~`), code (`` ` ``), links
+    and images (`[`, `]`, `!`), and the escape itself (`\`); `#` and `|` are escaped too, should a
+    value ever be placed at a line's start. *Recommended.*
+
+78. **"Nothing to release" claims what the summary doesn't know (optional, from the review).** It
+    assumes the base was released when it merged; the summary reads no records. Offered: each line
+    says only what the two trees show, and leaves releasing to `ventoux release`:
+    - the same digest and wording: "the same behaviour and wording as the base";
+    - the same digest, other wording: "the same behaviour as the base, other wording: a wording
+      revision, if the base's behaviour is the latest release's (`ventoux release` decides on
+      merge, from the records)";
+    - the others as they are (a new release already says `ventoux release` decides).
+
+    *Recommended:* yes, in this pull request, beside the escaping.
+
+79. **Where it is recorded:** a dated line on D56 (the Markdown the plain form, the map and the
+    sheet print escapes what a definition writes) and one on 13e's line in D55 (the summary
+    inherits it, and fences the hash check by its content). *Recommended.*
+
+Answered "all as recommended", 2026-10-24: choices 77 to 79.
+
+The negative test, test-first: the review's run, the literal shown escaped and no `<` in the
+summary coming from a definition; then literals holding a backtick, a `*`, a `[` and a `#`, each
+shown as written once rendered, and a docstring holding three backticks kept inside the hash
+check's block.

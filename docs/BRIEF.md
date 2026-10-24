@@ -2226,6 +2226,22 @@ and D50, whose text is kept.*
   nobody joins either set; otherwise not proven. Every age the format holds is compared as a
   duration, the same duration written otherwise: a fact's `max_age`, a plan state's `timeout`, a
   rule's `after`, an sla's `within` and a reminder's `after`.
+- **Amended 2026-10-24, in layer 13e** (`docs/layers/13-diff.md`, choices 63 to 76; the text
+  above stands, this adds to it): on each pull request, a second CI job writes the job summary
+  with `ventoux summary`: for each package, matched by name, whether merging creates a release, a
+  wording revision or nothing (the digest of the merge commit against its first parent), a new
+  package or a removed one, then the diff in the plain form; and the hash check with the base
+  commit's own promises. Anything it can't read or the diff refuses fails the step, saying why,
+  never read as nothing changed; a looser change fails nothing. The whole text goes to the log;
+  past the summary's 1 MiB, the summary says where it is. It sends nothing: the summary only,
+  `permissions: contents: read`, `pull_request` and never `pull_request_target`. A push to `main`
+  runs the checks only.
+- **Amended 2026-10-24, from the review of layer 13e** (`docs/layers/13-diff.md`, choices 77 to
+  79; the text above stands, this adds to it): the summary inherits the escaping of D56's Markdown,
+  escapes its own pieces taken from either tree (folder names, refusal messages), and fences the
+  hash check's lines with more backticks than any run in them. Each package's line says only what
+  the two trees show: "the same behaviour and wording as the base", or a wording revision only if
+  the base's behaviour is the latest release's, which `ventoux release` decides from the records.
 
 ### D56. The case map and the "will never do" sheet: readings of a package, and only proven nevers
 
@@ -2256,6 +2272,13 @@ D55, whose text is kept.*
   form sets is never said: an edit, a second answer or another writer replaces its sources. The
   package's own lines hold while a case runs this release: their heading says so, since a
   migration moves a case to the target release's definition (D53).
+- **Amended 2026-10-24, from the review of layer 13e** (`docs/layers/13-diff.md`, choice 77; the
+  text above stands, this adds to it): the Markdown the plain form, the map and the sheet print
+  escapes every piece a definition or the catalog writes, where it is written, never at the
+  source: `&`, `<` and `>` as entities, a backslash before each of `` \ ` * _ [ ] ~ # | ! ``,
+  line breaks shown as `\n`, so a value never starts a line; a path in a code span fenced by more
+  backticks than any run in it. Text a definition writes is shown, never rendered: no HTML, link
+  or emphasis of its own. The developer forms and the records stay plain text.
 
 ### D57. Release notes in the record, and a contract's readable diff
 
@@ -2289,6 +2312,11 @@ D55, and answers design question 16's other half, whose text is kept.*
   can't be said. `ventoux hashes --lock FILE [--before PROMISES]` prints the hash check, each
   contract changed in place followed by its paths. The lockfile keeps its shape. Running the
   base's promises in CI comes with the CI step (13e).
+- **Amended 2026-10-24, in layer 13e** (the text above stands; this adds to it): CI runs the
+  base commit's `ventoux promises` in a second checkout, with the base's own code, and the job
+  summary says each contract changed in place, path by path. Leaves are compared as the hash
+  writes them, so `2` and `2.0` differ; a promise whose hash differs where no path does says what
+  changed can't be said.
 
 ### Simplifications adopted
 

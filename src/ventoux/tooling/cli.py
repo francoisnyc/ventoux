@@ -3,7 +3,7 @@
 environment create|harden|check`, `ventoux activate`, `ventoux retire`, `ventoux manifest publish`,
 `ventoux diff OLD NEW [--plain]` (layers 13a, 13c), `ventoux map FOLDER` (layer 13c), and
 `ventoux notes PACKAGE RELEASE --releases DIR`, `ventoux promises` and `ventoux hashes --lock
-FILE [--before PROMISES]` (layer 13d).
+FILE [--before PROMISES]` (layer 13d), and `ventoux summary`, CI's job summary (layer 13e).
 
 Reading files and printing happen here, never in `core` or `case`, which read no clock and do no
 I/O (brief, D45). `ventoux check` comes with the Python builder (brief, D34).
@@ -41,6 +41,7 @@ from ventoux.core.promise import promise_of
 from ventoux.testing import CATALOG
 from ventoux.tooling.environments import environment_command
 from ventoux.tooling.releases import FolderStore, Run, read_package, release, said
+from ventoux.tooling.summary import LIMIT, cant_be_read, for_summary_file, summarize
 
 # What `ventoux simulate` exits with.
 HOLDS = 0  # what the story expects holds, or it expects nothing
@@ -93,6 +94,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     hashing.add_argument(
         "--before", type=Path, help="the base commit's promises, from its `ventoux promises`"
     )
+    summing = commands.add_parser(
+        "summary", help="what merging a pull request changes, for CI's job summary"
+    )
+    summing.add_argument("--base", type=Path, required=True, help="the base commit's checkout")
+    summing.add_argument("--head", type=Path, required=True, help="the merge commit's checkout")
+    summing.add_argument(
+        "--packages", action="append", required=True, help="a folder of packages, in both"
+    )
+    summing.add_argument("--lock", type=Path, required=True, help="contracts.lock.json")
+    summing.add_argument(
+        "--before", type=Path, required=True, help="the base commit's `ventoux promises`"
+    )
+    summing.add_argument("--summary-file", type=Path, required=True, help="$GITHUB_STEP_SUMMARY")
+    summing.add_argument("--base-commit", help="the base's commit, to name it")
+    summing.add_argument("--head-commit", help="the merge commit, to name it")
+    summing.add_argument("--limit", type=int, default=LIMIT, help="bytes the summary may hold")
     environments(commands)
     arguments = parser.parse_args(argv)
     if arguments.command in ("environment", "activate", "retire", "manifest"):
@@ -111,6 +128,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.releases,
             arguments.plain,
         )
+    if arguments.command == "summary":
+        return summarize_merge(arguments)
     if arguments.command == "promises":
         return print_promises()
     if arguments.command == "hashes":
@@ -245,6 +264,41 @@ def print_notes(name: str, number: int, wording: int, releases: Path, in_plain: 
         return CANT_READ
     print(said, end="")
     return HOLDS
+
+
+def summarize_merge(arguments: argparse.Namespace) -> int:
+    """Print what merging a pull request changes to the log, whole, and append it to the job
+    summary, or where it is when it is too long (brief, D55, as amended in 13e). Exit 0 when
+    everything is compared, 1 when something is refused, 2 when something can't be read."""
+    commits = None
+    if arguments.base_commit and arguments.head_commit:
+        commits = (arguments.base_commit, arguments.head_commit)
+    try:
+        recorded = read_plain_json(arguments.lock)
+        before = read_plain_json(arguments.before)
+        for path, found in ((arguments.lock, recorded), (arguments.before, before)):
+            if not isinstance(found, dict):
+                raise Unreadable(path, "isn't a JSON object, by contract reference")
+    except Unreadable as unreadable:
+        # Fail closed: said in the log and the summary, never read as nothing changed.
+        print(unreadable, file=sys.stderr)
+        failed = cant_be_read(str(unreadable))
+        with arguments.summary_file.open("a") as summary:
+            summary.write(for_summary_file(failed, arguments.limit))
+        return CANT_READ
+    found = summarize(
+        arguments.base,
+        arguments.head,
+        arguments.packages,
+        CATALOG,
+        recorded,
+        before,
+        commits,
+    )
+    print(found.text, end="")
+    with arguments.summary_file.open("a") as summary:  # earlier steps' summaries are kept
+        summary.write(for_summary_file(found, arguments.limit))
+    return found.code
 
 
 def print_promises() -> int:
