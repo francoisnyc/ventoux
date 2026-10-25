@@ -179,3 +179,61 @@ def test_a_run_that_passes_writes_nothing_either(
     )
     assert snapshot(tmp_path) == before
     assert sorted(p.name for p in tmp_path.iterdir()) == ["cases", "packages", "pyproject.toml"]
+
+
+# --- The CI step (choices 44 and 45) -------------------------------------------------------------
+
+WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def ci_runs(line: str) -> bool:
+    """Whether the `check` job runs `line`, read from the workflow as text, comments left out."""
+    job = WORKFLOW.read_text().split("  check:")[1].split("\n  changes:")[0]
+    return any(l.strip() == line for l in job.splitlines() if not l.strip().startswith("#"))
+
+
+def this_repositorys_project(folder: Path) -> Path:
+    """A copy of this repository's own project: its configuration, builder files and packages."""
+    shutil.copy(ROOT / "pyproject.toml", folder / "pyproject.toml")
+    shutil.copytree(ROOT / "examples" / "cases", folder / "examples" / "cases")
+    shutil.copytree(ROOT / "examples" / "packages", folder / "examples" / "packages")
+    return folder
+
+
+def test_ci_runs_the_regeneration_check_against_the_configured_catalog() -> None:
+    # One line in `check`, after pytest; and once more in the quickstart's own project.
+    assert ci_runs("- run: uv run ventoux check --unchanged")
+    assert ci_runs(
+        "- run: cd examples/quickstart && uv run --project ../.. ventoux check --unchanged"
+    )
+    text = WORKFLOW.read_text()
+    doing = [l for l in text.splitlines() if not l.strip().startswith("#")]  # comments left out
+    assert text.count("permissions:") == 1  # 13e's: read-only, at the top, unchanged
+    assert "  contents: read" in doing
+    assert not any("pull_request_target" in l for l in doing)
+
+
+def test_the_curriculums_negative_test_end_to_end_through_the_ci_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The command the workflow runs, on this repository's own project, with one committed byte
+    # changed, then with the Python changed and the JSON left stale: each fails CI.
+    assert ci_runs("- run: uv run ventoux check --unchanged")
+    monkeypatch.chdir(this_repositorys_project(tmp_path))
+    assert main(["check", "--unchanged"]) == 0
+    committed = tmp_path / "examples" / "packages" / "refund" / "case.json"
+    committed.write_text(committed.read_text().replace('"Customer refund"', '"Customer refunds"'))
+    before = snapshot(tmp_path)
+    assert main(["check", "--unchanged"]) == 1
+    said = capsys.readouterr().out
+    assert (
+        "examples/packages/refund/case.json differs from what examples/cases/refund.py writes"
+        in said
+    )
+    assert '  committed: "title": "Customer refunds"' in said
+    assert snapshot(tmp_path) == before
+    committed.write_text(committed.read_text().replace('"Customer refunds"', '"Customer refund"'))
+    builder = tmp_path / "examples" / "cases" / "refund.py"
+    builder.write_text(builder.read_text().replace('title="Customer refund"', 'title="Refund"'))
+    assert main(["check", "--unchanged"]) == 1
+    assert '  written:   "title": "Refund"' in capsys.readouterr().out
