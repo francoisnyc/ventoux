@@ -107,6 +107,12 @@ def with_field(name: str, field: dict[str, Any]) -> dict[str, Any]:
     return case
 
 
+def with_step(name: str, **changes: Any) -> dict[str, Any]:
+    case = loaded(REFUND)
+    case["steps"][name] |= changes
+    return case
+
+
 WRONG_CASES: dict[str, dict[str, Any]] = {
     # The curriculum's negative test: an operator D20 doesn't list matches no shape.
     "an operator D20 doesn't list": with_approval(
@@ -138,6 +144,21 @@ WRONG_CASES: dict[str, dict[str, Any]] = {
     ),
     "a step of no kind": {**a_case(), "steps": {"review": {"display": {"title": "x"}}}},
     "no steps at all": a_case(steps={}),
+    # From the tutor review of #62: a type is written with its `type` wherever one is written.
+    "a list's field with no type": with_field(
+        "lines", {"type": "list", "fields": {"amount": {}}, "display": {"title": "x"}}
+    ),
+    "a reference field with no type": with_field(
+        "order", {"system": "crm", "display": {"title": "x"}}
+    ),
+    # Booleans as written, `true` or `false`: never "no", "yes", "on", 1 or 1.0 (brief, D60).
+    # Each the lax reading of its field's default, so nothing else refuses it.
+    "automatic written as a word": with_step("review", automatic="yes"),
+    "repeatable written as a number": with_step("review", repeatable=0),
+    "sensitive written as a letter": with_field(
+        "note", {"type": "string", "sensitive": "f", "display": {"title": "x"}}
+    ),
+    "stays_open written as a word": a_case(stays_open="off"),
 }
 
 
@@ -148,6 +169,12 @@ def test_a_wrong_case_is_refused_by_the_schema_as_by_the_parser(wrong: str) -> N
     assert not schema_accepts(case_schema(), data)
 
 
+def test_a_boolean_written_as_a_word_is_refused_at_its_path() -> None:
+    # The parser's side of the promise, with its path, as `ventoux check` would say it.
+    with pytest.raises(CaseInvalid, match=r"steps\.review\.automatic: "):
+        parse_case(with_step("review", automatic="no"))
+
+
 def a_plan(**changes: Any) -> dict[str, Any]:
     return {**loaded(REFUND_ORDER), **changes}
 
@@ -155,6 +182,8 @@ def a_plan(**changes: Any) -> dict[str, Any]:
 WRONG_PLANS: dict[str, dict[str, Any]] = {
     "version zero": a_plan(version=0),
     "a version written as a string": a_plan(version="1"),
+    "a version written as a decimal": a_plan(version=Decimal("1.0")),
+    "a version written as true": a_plan(version=True),
     "an unknown key": a_plan(owner="ana"),
     "a sources key of the plan's own": a_plan(sources={"amount": "untrusted:x"}),
     "a state of no kind": a_plan(states={**loaded(REFUND_ORDER)["states"], "limbo": {"on": {}}}),
@@ -271,3 +300,32 @@ def test_ci_checks_the_committed_schemas_unchanged() -> None:
     assert not any("pull_request_target" in l for l in doing)
     changes = text.split("\n  changes:")[1]
     assert "schema" not in changes
+
+
+def test_unchanged_fails_on_a_missing_schema_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["schema"]) == 0
+    (tmp_path / "schema" / "plan.schema.json").unlink()
+    before = snapshot(tmp_path)
+    assert main(["schema", "--unchanged"]) == 1
+    said = capsys.readouterr().out
+    assert "✓ schema/case.schema.json is unchanged" in said
+    assert "schema/plan.schema.json is missing: ventoux schema writes it" in said
+    assert snapshot(tmp_path) == before
+
+
+def test_unchanged_fails_on_other_line_endings_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["schema"]) == 0
+    committed = tmp_path / "schema" / "case.schema.json"
+    committed.write_bytes(committed.read_bytes().replace(b"\n", b"\r\n"))
+    before = snapshot(tmp_path)
+    assert main(["schema", "--unchanged"]) == 1
+    said = capsys.readouterr().out
+    assert "schema/case.schema.json differs from what the models say, first at line 1:" in said
+    assert "the committed line ends with \\r\\n" in said
+    assert snapshot(tmp_path) == before

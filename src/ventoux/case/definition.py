@@ -14,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    StrictBool,
     Tag,
     ValidationError,
     model_validator,
@@ -86,7 +87,9 @@ class CaseField(Shape):
     # Who may see it, narrowing the default: anyone holding a role the case names (brief, D30).
     visible_to: Roles | None = None
     # Personal data a decision needs: encrypted with the case's key, never written out (brief, D31).
-    sensitive: bool = False
+    # Pydantic: `StrictBool` reads `true` and `false` only, never "no", "on", 1 or 1.0, as the
+    # published schema says (brief, D60).
+    sensitive: StrictBool = False
 
     # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
     @model_validator(mode="before")
@@ -227,9 +230,9 @@ class Step(Shape):
     display: Display
     requires: tuple[Name, ...] = ()  # milestones reached, or steps whose latest run is done
     when: PlanExpression | None = None  # read once `requires` are met
-    automatic: bool = True  # starts by itself once admitted, at most once
+    automatic: StrictBool = True  # starts by itself once admitted, at most once
     proposed_by: tuple[RoleName, ...] = ()  # who may propose it
-    repeatable: bool = False  # may run again, when proposed
+    repeatable: StrictBool = False  # may run again, when proposed
     reaches: tuple[Name, ...] = ()  # milestones reached when it completes
 
 
@@ -572,7 +575,7 @@ class CaseDefinition(Shape):
     ] = {}  # what may come from outside, and who sends it (brief, D41)
     close_reasons: dict[Name, CloseReason] = {}  # how a person may close it, and who (brief, D10)
     closes_when: tuple[Name, ...] = ()  # milestones that close it once all are reached
-    stays_open: bool = False  # True: it never closes by itself; a person closes it
+    stays_open: StrictBool = False  # True: it never closes by itself; a person closes it
     # Whether a request may forget it (brief, D32): `allowed` open or closed; `while_open`, refused
     # once it is closed (books and records); `never`, always refused.
     forgetting: Literal["allowed", "while_open", "never"] = "allowed"
