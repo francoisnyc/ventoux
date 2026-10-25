@@ -45,6 +45,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 38 | Layer 9d: stale facts, and why replay decides the same way | open |
 | 39 | Layer 10: why a fixpoint is needed | open |
 | 40 | Layer 11: arrival is a fact, content is not | open |
+| 41 | Layer 13: what the JSON diff hides | open |
 
 ---
 
@@ -1412,3 +1413,94 @@ and record the key points. A question is closed once you can explain the answer 
     widened, is the diff's "looser": either turns content into something that may decide.
 - Status: open, until an example comes back with the sender check and "informs, never decides".
 
+## 41. Layer 13: what the JSON diff hides
+
+> What would a reviewer have missed with only the JSON diff?
+
+- Walk-through first (2026-10-25): one pull request traced through what layer 13 built, each stop
+  asked before it was shown. The pull request edits `settle` in `examples/packages/refund`: its
+  title "Settle the refund" becomes "Pay the refund", and its `requires: ["review"]` becomes `[]`,
+  "since the `when` already checks the review's outcome".
+  1. **The two packages.** Answer: "matched by case name; a new release, title is display." Right:
+     matched by the case's `case`, so a moved folder is the same package; the digest covers all
+     but `display`, so dropping `requires` is a release and the title rides in it. Didn't come
+     back: why the line never says "release 4". The summary reads no records, so the number,
+     and whether an earlier release has this behaviour (a revert gives `SameAs`, nothing
+     released), are `ventoux release`'s to say on merge (13e, choice 78).
+  2. **The change list.** Answer: "one looser change on requires; title has no verdict." Right.
+     Didn't come back: the author's claim is wrong. With no `requires`, `settle` is considered
+     when the case opens, its condition reads a field nobody set, and a missing field is an
+     error: every new case starts with `settle#1 failed: ... review.outcome has no value`, waiting
+     for a person. Validation warns (`MAY_BE_UNSET` at `steps.settle.when`). A looser change fails
+     nothing: it is the reviewer's to judge (brief, D55; choice 67).
+  3. **People.** A second pull request lets `support-lead` answer `review`. Answer: "more fields
+     become visible to support-lead; all looser." Right: five looser entries for one JSON line,
+     because a role the case names sees every field that doesn't narrow itself (brief, D30); on
+     the quickstart's refund, where `pay`'s approval already names `support-lead`, the same line
+     makes one entry. Didn't come back: who is excluded from approving is computed from
+     provenance, never written (brief, D11): whoever answered a task whose value flows into the
+     step's inputs or `when`, the case's opener, an edit's proposer and approver (13c). Moving
+     `pay`'s amount from `approved_amount` to `amount` says "not proven: excluded from approving
+     pay: whoever proposes or approves an edit of approved\_amount, no longer; ... of amount, now
+     in some runs"; Sam stays excluded after answering `review`, since `pay`'s `when` reads
+     `review.outcome`.
+  4. **The plain form.** Answer: "before/after sentences; it never judges again; escape the
+     title." Right on all three: readings of what the step does (brief, D45); one change list,
+     so the two forms can't disagree (choice 33); a title is shown, never rendered (choice 77,
+     the review of #52). Its limit: the After sentence says what the definition says ("starts by
+     itself when the case opens"), not that every run fails there.
+  5. **The map and the sheet.** Answer: "one map sentence changes, sheet unchanged; visibility
+     lines widen." Right. Didn't come back: the engine's section holds whatever a definition says;
+     the release's section is computed from this definition and the catalog, and a line is said
+     only where it is proven, since a line true "usually" would read as a guarantee. The sheet
+     didn't change while behaviour loosened: it says what can't happen, the diff what changed.
+  6. **The notes.** Answer: "against the previous release, from the records; data so it renders
+     later." Right. Added: the base may not be the latest release (another merge, a revert, a
+     wording revision), so the notes come from the stored packages, each read again and checked
+     (`stored()`); records are immutable (brief, D50), so release 1's notes, written before the
+     escaping, still print escaped. Didn't come back: a contract's "before" is the base commit's
+     own `ventoux promises`, used only if it hashes to what the lockfile records; the head's code
+     is what changed it (brief, D57).
+  7. **The CI step.** Answer: "merge commit vs its first parent; read-only token; it passes."
+     Right on all three. Added: `pull_request.base.sha` may be a base the branch was never merged
+     with; `persist-credentials: false` and no secrets on `pull_request`; `pull_request_target`
+     would run the head's code with the base's rights and a token that can write.
+- Found in the walk-through, not fixed (recorded for their own fix, as asked):
+  - **The summary never validates the head** (stop 2). `summarize` reads each package with
+    `read_package`, which parses it, and never runs `checked`, the validation `ventoux release`
+    runs. The pull request above gets its Looser line and exit 0, and `MAY_BE_UNSET` is said only
+    by `ventoux release`, on merge, which releases anyway. Worse, a head with errors
+    (`EXPRESSION_INVALID`, `UNKNOWN_ROLE`), which `ventoux release` refuses, is said "a new
+    release, unless..." and exits 0: choice 67 promised that a package that "is refused" fails the
+    step, and its test only refuses one that can't be read. Proposed fix: the summary checks each
+    head package as `ventoux release` would; errors fail the step and say the package can't be
+    released as it is, warnings are shown under its diff.
+  - **A contract changed in place passes when the pull request rewrites its hash** (stop 7).
+    `orders.lookup@1`'s `start_to_close` 10 -> 5, and its entry in `contracts.lock.json`
+    replaced by the new hash, in one commit: the head's `ventoux summary`, given the real base's
+    promises, says "Every contract matches `contracts.lock.json`." and exits 0; `ventoux hashes`
+    the same. The step reads the head's lockfile, and the base's promises only describe a
+    mismatch, never find one. The brief's line, "CI hashes each contract ... and fails if it
+    changed without a new number" (brief, D5), doesn't hold. Proposed fix: a hash the base's
+    lockfile records never changes; each contract the base records is checked against the base's
+    lockfile (or its promise), and the head's lockfile only adds references.
+- Your answer (layer 13's check-yourself, after the walk-through, 2026-10-25): "the verdicts by
+  effect, not the lines that changed."
+- Discussion: the core is right, and it is the layer's lesson. What it covers, each from the
+  walk-through:
+  - **Effects away from the edited line:** one role added to `review` widened what three fields,
+    every outcome and every output show; an input moved changed who may approve `pay`. Neither is
+    written anywhere in the JSON.
+  - **What an edit means at runtime:** `requires: []` reads as a tidy-up; the plain form says
+    `settle` now starts when the case opens (and validation, not yet the summary, says it fails
+    there).
+  - **Which way it goes:** one character, `"count": 2` to `1`, is looser; what can't be proven
+    either way counts as may loosen.
+  - **Whether merging releases:** a release, a wording revision or nothing, from the digest.
+  - **A contract changed in place, path by path,** where the JSON diff shows two lines of hex
+    (or nothing, for the code that changed it).
+  - **What it will never do,** said only where proven.
+  - **What a literal does on the page:** shown, never rendered.
+  In one line: the JSON diff shows which lines changed; the semantic diff shows what the case may
+  now do, to whom, and whether a person must judge it.
+- Status: open, until explained back.
