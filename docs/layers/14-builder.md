@@ -1128,8 +1128,9 @@ is `tests/test_check.py`, `Dc` is `tests/test_deployment_catalog.py` (both new),
 
 ## 14d. The same JSON, checked in CI
 
-Status: choices drafted 2026-10-25, from `main` at `2a79e55` (14c merged as #58). Waiting for your
-answers, and for the warm-up, before anything is built.
+Status: choices drafted 2026-10-25, from `main` at `2a79e55` (14c merged as #58). The warm-up
+answered and recorded; choices 40 to 47 answered "all as recommended", the same day. The dated
+lines on D1, D58 and D59 and the guides' sentences written before building.
 
 ### Warm-up: learning question 1, JSON or code first
 

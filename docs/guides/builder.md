@@ -590,3 +590,24 @@ named, every command that reads contracts or roles refuses to run. The developme
 
 A builder file is your team's own code, reviewed like any code: `ventoux check` never runs a file a
 definition names, and never what a model wrote. A model's draft is JSON, checked as JSON.
+
+### In CI: `--unchanged`
+
+```sh
+uv run ventoux check --unchanged
+```
+
+The same run, writing nothing: every package is generated again and compared with the committed
+files byte for byte. A file that differs is named with its first differing line, the committed
+line and the written line; a missing file, or a file no builder case writes any more, is named
+too. Any difference fails: run `ventoux check` and commit what it writes. CI runs it on every
+push and pull request, so the JSON that runs is always what the code writes (brief, D1).
+
+A package you write as JSON, with no builder file, is still allowed: list it, and it is checked
+but never compared. A package folder that is neither a builder case's nor listed is refused, since
+stale output of a removed case and a hand-written package look the same on disk:
+
+```toml
+[tool.ventoux]
+by_hand = ["legacy-claim"]
+```

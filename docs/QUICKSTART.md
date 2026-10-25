@@ -104,7 +104,8 @@ uv run ventoux check
 `ventoux check` runs your Python file, checks the definition it writes against your deployment's
 catalog, and writes `packages/refund/case.json`, the definition Ventoux actually runs. You never
 edit it by hand: it's generated from your Python file, and you commit both. Nothing is written
-unless every case is valid. `uv run ventoux map packages/refund` prints what a refund case can
+unless every case is valid. In CI, `ventoux check --unchanged` generates it again and fails if the
+committed JSON isn't what your Python writes. `uv run ventoux map packages/refund` prints what a refund case can
 do, and what it will never do.
 
 The catalog is named in your project's `pyproject.toml`, which `ventoux init` writes:
