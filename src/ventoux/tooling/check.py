@@ -16,13 +16,14 @@ from pathlib import Path
 from traceback import extract_tb
 
 from ventoux.case.definition import CaseInvalid, parse_case
-from ventoux.case.releases import PackageRefused, read_json
+from ventoux.case.releases import PackageRefused, PackageUnreadable, read_json
 from ventoux.case.releases import package as read_package
 from ventoux.core.catalog import Catalog
 from ventoux.core.plan import PlanInvalid, parse_plan
 from ventoux.tooling.builder.case import Case
 from ventoux.tooling.builder.written import package
 from ventoux.tooling.releases import issues_of
+from ventoux.tooling.releases import read_package as read_folder
 
 
 class CheckRefused(Exception):
@@ -53,6 +54,7 @@ class Checked:
     steps: int  # how many steps its case has, to say so
     files: Mapping[str, str]  # by path in its folder: `case.json`, `plans/refund-order.json`
     problems: Sequence[Problem] = field(default_factory=tuple)
+    source: str = ""  # the builder file that defines its case: `cases/refund.py`
 
     @property
     def refused(self) -> bool:
@@ -113,14 +115,15 @@ def check(case: Case, catalog: Catalog) -> Checked:
     files = package(case)
     where = recorded(case)
     steps = len(case.steps)
+    source = shown(case.where[""]).rpartition(":")[0]  # the file `Case(...)` was called in
     shape = shape_problems(files, where)
     if shape:
-        return Checked(case.name, steps, files, shape)
+        return Checked(case.name, steps, files, shape, source)
     plans = [text for name, text in files.items() if name != "case.json"]
     try:
         released = read_package(files["case.json"], plans)
     except PackageRefused as refused:
-        return Checked(case.name, steps, files, said_at(str(refused), where))
+        return Checked(case.name, steps, files, said_at(str(refused), where), source)
     problems = [
         Problem(
             at(issue.path, where),
@@ -131,7 +134,7 @@ def check(case: Case, catalog: Catalog) -> Checked:
         )
         for issue in issues_of(released, catalog)
     ]
-    return Checked(case.name, steps, files, problems)
+    return Checked(case.name, steps, files, problems, source)
 
 
 def recorded(case: Case) -> dict[str, str]:
@@ -200,6 +203,81 @@ def write(checked: Sequence[Checked], packages: Path) -> None:
             target = folder / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text)
+
+
+def differences(each: Checked, packages: Path) -> list[str]:
+    """What `--unchanged` says about `each`'s committed folder: each file that differs from what
+    the builder writes, with the first line that does (brief, D1). Nothing is written."""
+    folder = packages / each.name
+    found: list[str] = []
+    for name, text in each.files.items():
+        committed = folder / name
+        if not committed.is_file():
+            # Missing counts as different: a JSON never committed ran nowhere (14a's lesson).
+            found.append(f"{shown(committed)} is missing: {each.source} writes it")
+        elif committed.read_text() != text:
+            found.append(differs(shown(committed), each.source, committed.read_text(), text))
+    for old in sorted(folder.rglob("*.json")) if folder.is_dir() else []:
+        if str(old.relative_to(folder)) not in each.files:
+            found.append(f"{shown(old)}: no builder case writes it any more")
+    return found
+
+
+def by_hand_checked(folder: Path, catalog: Catalog) -> Checked:
+    """A package written by hand, read from its folder and checked as `ventoux release` checks
+    it, each problem at its file (brief, D58). Never compared: there is nothing to compare with."""
+    try:
+        released = read_folder(folder)
+    except PackageUnreadable as unreadable:
+        return Checked(folder.name, 0, {}, [Problem(shown(folder), "", "REFUSED", str(unreadable))])
+    except PackageRefused as refused:
+        return Checked(folder.name, 0, {}, said_in(str(refused), folder))
+    problems = [
+        Problem(
+            shown(folder / file_of(issue.path)),
+            issue.path,
+            issue.code,
+            issue.message,
+            issue.severity == "warning",
+        )
+        for issue in issues_of(released, catalog)
+    ]
+    return Checked(released.name, len(released.case.steps), {}, problems)
+
+
+def said_in(lines: str, folder: Path) -> list[Problem]:
+    """Each line of a package reader's refusal, at the file its path names."""
+    problems: list[Problem] = []
+    for line in lines.splitlines():
+        path, colon, message = line.partition(": ")
+        if not colon or " " in path:
+            path, message = "", line
+        problems.append(Problem(shown(folder / file_of(path)), path, "REFUSED", message))
+    return problems
+
+
+def file_of(path: str) -> str:
+    """The file of a package an issue's path is in: `plans/<name>.json` for `plans.<name>@<n>.…`,
+    else `case.json`."""
+    if path.startswith("plans."):
+        reference = path.split(".")[1]
+        return f"plans/{reference.partition('@')[0]}.json"
+    return "case.json"
+
+
+def differs(path: str, source: str, committed: str, written: str) -> str:
+    """One file's difference, at the first line that differs, both lines shown: they are
+    definition text, which may be shown (brief, D55)."""
+    old, new = committed.splitlines(), written.splitlines()
+    for number, (was, now) in enumerate(zip(old, new, strict=False), start=1):
+        if was != now:
+            return (
+                f"{path} differs from what {source} writes, first at line {number}:\n"
+                f"  committed: {was.strip()}\n  written:   {now.strip()}"
+            )
+    number = min(len(old), len(new)) + 1
+    ends = "committed" if len(old) < len(new) else "written"
+    return f"{path} differs from what {source} writes, first at line {number}: the {ends} file ends"
 
 
 def shown(location: str | Path) -> str:

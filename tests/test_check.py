@@ -165,9 +165,11 @@ def test_a_folder_holds_exactly_its_package(
     assert main(["check"]) == 0
     assert not stale.exists()
     assert other.read_text() == "{}"
-    assert "packages/old: no builder file defines this package; left as it is" in (
-        capsys.readouterr().out
-    )
+    # Said as `--unchanged` says it (14d, choice 42): it may be stale, or written by hand.
+    assert (
+        "packages/old: no builder file defines it and by_hand doesn't list it: stale output of a "
+        "removed case, or a hand-written package not yet listed; left as it is"
+    ) in capsys.readouterr().out
 
 
 def test_two_cases_of_one_name_are_refused_naming_both_files(
