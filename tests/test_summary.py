@@ -516,3 +516,31 @@ def test_a_package_release_would_refuse_fails_the_step(tmp_path: Path) -> None:
         ),
     )
     assert "### steps.settle" in found.text  # the diff is still shown
+
+
+def unregistered_role(case: dict[str, Any]) -> None:
+    """A role nobody registered, on a task: `ventoux release` refuses the package."""
+    case["steps"]["call_customer"]["roles"] = ["nobody-has-this"]
+
+
+def test_an_unchanged_package_release_would_refuse_fails_the_step(tmp_path: Path) -> None:
+    # A pull request can break a package without touching it: its code changes the catalog, or
+    # the checks. `ventoux release` checks before it compares, so it refuses it on merge
+    # (fix-summary-validation, choice 1).
+    base = edited(with_example(tmp_path / "base"), unregistered_role)
+    head = edited(with_example(tmp_path / "head"), unregistered_role)
+    found = summarized(base, head)
+    assert found.code == 1
+    assert found.outcomes == (
+        "- **refund**: can't be released as it is: `ventoux release` refuses it (below).",
+    )
+
+
+def test_the_base_is_never_checked(tmp_path: Path) -> None:
+    # The base isn't what merging releases, and its issues aren't this pull request's.
+    base = edited(with_example(tmp_path / "base"), unreleasable)
+    head = with_example(tmp_path / "head")
+    found = summarized(base, head)
+    assert found.code == 0
+    assert found.failures == ()
+    assert "EXPRESSION_INVALID" not in found.text
