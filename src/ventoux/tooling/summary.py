@@ -84,9 +84,10 @@ def summarize(
 ) -> Summary:
     """What merging `head` onto `base` does to each package under `packages`, in either tree,
     each changed one's diff in the plain form (brief, D56), then the contracts: the hash check
-    against `base_recorded`, the base's lockfile, and `recorded`, the head's, with `before`, the
-    base commit's promises (brief, D5, D57, as amended by the base lockfile fix). Anything it can't
-    read or compare fails the step, said last; never read as nothing changed (fail closed)."""
+    against `base_recorded`, the base's lockfile, and `recorded`, the head's (brief, D5, as amended
+    by the base lockfile fix), with `before`, the base commit's promises (brief, D57). Anything it
+    can't read or compare fails the step, said last; never read as nothing changed (fail
+    closed)."""
     for tree, which in ((base, "base"), (head, "head")):
         if not tree.is_dir():
             return cant_be_read(f"the {which} can't be read: {tree} isn't a folder")
@@ -188,7 +189,9 @@ def contracts_line(problems: Sequence[str]) -> str:
     """The contracts' status in one line, as the short summary says it."""
     if not problems:
         return MATCHED
-    return f"{len(problems)} contract{'s' if len(problems) > 1 else ''} not as recorded: see the log."
+    return (
+        f"{len(problems)} contract{'s' if len(problems) > 1 else ''} not as recorded: see the log."
+    )
 
 
 def changed_at_all(before: Package, after: Package) -> bool:
