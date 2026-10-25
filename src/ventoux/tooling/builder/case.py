@@ -130,6 +130,9 @@ class Case:
 
     def sequence(self, *steps: Step) -> None:
         """`steps` run in this order, each starting by itself when the one before is done."""
+        if self.order:
+            # One `sequence` per case: a second would replace the first without a word.
+            raise ValueError(f"{self.name} already has a sequence: give it every step once")
         self.order = [step.name for step in steps]
 
     def new_name(self, name: str, taken: Mapping[str, object], what: str) -> str:
