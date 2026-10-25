@@ -15,7 +15,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 8 | Engine language | open |
 | 9 | D4: Python engine | open |
 | 10 | Versions (pending D5) | closed |
-| 11 | Behaviour vs wording | open |
+| 11 | Behaviour vs wording | closed |
 | 12 | Releases | closed |
 | 13 | Workflow steps | closed |
 | 14 | Quickstart: approvals | open |
@@ -38,13 +38,15 @@ and record the key points. A question is closed once you can explain the answer 
 | 31 | Pydantic: when checks run | closed |
 | 32 | Layer 2: why `now` can't be written | open |
 | 33 | Layer 3: why plans can be checked and code can't | open |
-| 34 | Layer 5: why check input policies twice | open |
+| 34 | Layer 5: why check input policies twice | closed |
 | 35 | Layer 6: what lives in workflow history | closed |
 | 36 | Layer 8: the model picks the step, never the values | open |
 | 37 | Layer 9c: what the audit keeps after forgetting | open |
-| 38 | Layer 9d: stale facts, and why replay decides the same way | open |
+| 38 | Layer 9d: stale facts, and why replay decides the same way | closed |
 | 39 | Layer 10: why a fixpoint is needed | open |
 | 40 | Layer 11: arrival is a fact, content is not | open |
+| 41 | Layer 13: what the JSON diff hides | open |
+| 42 | Layer 12: why plans don't migrate | closed |
 
 ---
 
@@ -266,6 +268,15 @@ and record the key points. A question is closed once you can explain the answer 
   stable key (`"template": "refund_confirmed"`) and keep the sentence with the activity's
   templates: `display` never flows into an activity, which is what keeps wording safe to change
   unreviewed, and the draft still drafts and is read by a person before it goes. Stays open.
+- Retrieval (wrap-up of layers 12 and 13, 2026-10-25), from memory for the first time: "release
+  because it's a new input, use a template instead." Both parts came back. The two whys didn't:
+  an input is outside `display`, so in the digest, and it flows into the activity, its approval's
+  digest and its contract's input policies (13d's notes say `steps.<step>.inputs.intro`, a
+  behaviour change); and the template lives with the activity, the definition passing a stable
+  key (`"template": "refund_confirmed"`), since `display` never reaches an activity.
+- Explained back, asked why the sentence can't move into `display` and what still protects the
+  customer: "display never reaches the activity; a person still reads the draft."
+- Status: closed.
 
 ## 12. Releases
 
@@ -1077,7 +1088,13 @@ and record the key points. A question is closed once you can explain the answer 
   release; a new release and open cases on the old one after) and **who hears of it** (the author,
   who can change the definition, against an operator with a case stuck). The second is 13e: the
   job summary is the static check's voice in the pull request, where the author is.
-- Status: open, until "who hears of it" comes back from memory.
+- Retrieval (wrap-up of layers 12 and 13, 2026-10-25), the follow-up: "every path; the author
+  hears it, before release." All three came back: every path, for the fourth time; **who hears
+  of it**, the author, who can change the definition, where the runtime refusal reaches an
+  operator with a case stuck; and **when**, before release, while it is an edit. Layer 13 gave
+  it a place: the job summary is the static check's voice in the pull request, where the author
+  is (and the walk-through found it doesn't yet carry validation's own issues, question 41).
+- Status: closed.
 
 ## 35. Layer 6: what lives in workflow history
 
@@ -1234,6 +1251,19 @@ and record the key points. A question is closed once you can explain the answer 
   In one line: after forgetting, the audit explains the decision (rule, people, order, facts by
   name) but can't show the personal values it rested on; if those must be shown, the definition
   must never let the case be forgotten.
+- Retrieval (wrap-up of layers 12 and 13, 2026-10-25), the follow-up: "everything except the
+  data, all the rest, actors, steps, time stamps etc. is still there." The core came back a
+  second time. Neither of the two parts did:
+  - **The facts, by name and source:** the audit can say the denial rested on `policy_status`
+    from `system:policies`, or `approved_amount` from Ana's review, even where the value is
+    gone; and under which rule, since the definition and release are in history.
+  - **Not every value goes:** a value that wasn't sensitive stays where it was used
+    (`estimated_damage` in a later step's start); what goes is every sensitive field, every value
+    in a form answer (the client seals them all, D31) and every failure's message.
+  - **The retention choice, made beforehand:** if a regulator may ask for the values, the
+    definition says `"forgetting": "while_open"` (refused once the case is closed, for books and
+    records) or `"never"` (brief, D32), and a request to forget is refused. A business decision
+    about a kind of record, so it lives in the definition and changes with a release.
 - Status: open, until "the facts by name and source" and the retention choice (D32) come back
   from memory.
 
@@ -1294,7 +1324,12 @@ and record the key points. A question is closed once you can explain the answer 
   In one line: a stale read is refreshed, a stale answer goes to a person; replay decides the
   same because each event's time is recorded, never read from a clock.
 - Retrieval (layer 12b warm-up, 2026-10-22): put, not answered; left open.
-- Status: open, until a (a read refreshed, a person's answer to a person) comes back from memory.
+- Retrieval (wrap-up of layers 12 and 13, 2026-10-25), a: "the lookup is refreshed; Ana's answer
+  goes to a person." Came back from memory, at the third asking. The why, said with it: a read
+  changes nothing in the world, so running it again only fetches today's value; the engine can't
+  ask a person again, so a person decides (send the review back, then retry `pay`, or close)
+  (brief, D18, D33).
+- Status: closed.
 
 
 ## 39. Layer 10: why a fixpoint is needed
@@ -1412,3 +1447,178 @@ and record the key points. A question is closed once you can explain the answer 
     widened, is the diff's "looser": either turns content into something that may decide.
 - Status: open, until an example comes back with the sender check and "informs, never decides".
 
+## 41. Layer 13: what the JSON diff hides
+
+> What would a reviewer have missed with only the JSON diff?
+
+- Walk-through first (2026-10-25): one pull request traced through what layer 13 built, each stop
+  asked before it was shown. The pull request edits `settle` in `examples/packages/refund`: its
+  title "Settle the refund" becomes "Pay the refund", and its `requires: ["review"]` becomes `[]`,
+  "since the `when` already checks the review's outcome".
+  1. **The two packages.** Answer: "matched by case name; a new release, title is display." Right:
+     matched by the case's `case`, so a moved folder is the same package; the digest covers all
+     but `display`, so dropping `requires` is a release and the title rides in it. Didn't come
+     back: why the line never says "release 4". The summary reads no records, so the number,
+     and whether an earlier release has this behaviour (a revert gives `SameAs`, nothing
+     released), are `ventoux release`'s to say on merge (13e, choice 78).
+  2. **The change list.** Answer: "one looser change on requires; title has no verdict." Right.
+     Didn't come back: the author's claim is wrong. With no `requires`, `settle` is considered
+     when the case opens, its condition reads a field nobody set, and a missing field is an
+     error: every new case starts with `settle#1 failed: ... review.outcome has no value`, waiting
+     for a person. Validation warns (`MAY_BE_UNSET` at `steps.settle.when`). A looser change fails
+     nothing: it is the reviewer's to judge (brief, D55; choice 67).
+  3. **People.** A second pull request lets `support-lead` answer `review`. Answer: "more fields
+     become visible to support-lead; all looser." Right: five looser entries for one JSON line,
+     because a role the case names sees every field that doesn't narrow itself (brief, D30); on
+     the quickstart's refund, where `pay`'s approval already names `support-lead`, the same line
+     makes one entry. Didn't come back: who is excluded from approving is computed from
+     provenance, never written (brief, D11): whoever answered a task whose value flows into the
+     step's inputs or `when`, the case's opener, an edit's proposer and approver (13c). Moving
+     `pay`'s amount from `approved_amount` to `amount` says "not proven: excluded from approving
+     pay: whoever proposes or approves an edit of approved_amount, no longer; ... of amount, now
+     in some runs"; Sam stays excluded after answering `review`, since `pay`'s `when` reads
+     `review.outcome`.
+  4. **The plain form.** Answer: "before/after sentences; it never judges again; escape the
+     title." Right on all three: readings of what the step does (brief, D45); one change list,
+     so the two forms can't disagree (choice 33); a title is shown, never rendered (choice 77,
+     the review of #52). Its limit: the After sentence says what the definition says ("starts by
+     itself when the case opens"), not that every run fails there.
+  5. **The map and the sheet.** Answer: "one map sentence changes, sheet unchanged; visibility
+     lines widen." Right. Didn't come back: the engine's section holds whatever a definition says;
+     the release's section is computed from this definition and the catalog, and a line is said
+     only where it is proven, since a line true "usually" would read as a guarantee. The sheet
+     didn't change while behaviour loosened: it says what can't happen, the diff what changed.
+  6. **The notes.** Answer: "against the previous release, from the records; data so it renders
+     later." Right. Added: the base may not be the latest release (another merge, a revert, a
+     wording revision), so the notes come from the stored packages, each read again and checked
+     (`stored()`); records are immutable (brief, D50), so release 1's notes, written before the
+     escaping, still print escaped. Didn't come back: a contract's "before" is the base commit's
+     own `ventoux promises`, used only if it hashes to what the lockfile records; the head's code
+     is what changed it (brief, D57).
+  7. **The CI step.** Answer: "merge commit vs its first parent; read-only token; it passes."
+     Right on all three. Added: `pull_request.base.sha` may be a base the branch was never merged
+     with; `persist-credentials: false` and no secrets on `pull_request`; `pull_request_target`
+     would run the head's code with the base's rights and a token that can write.
+- Found in the walk-through, not fixed (recorded for their own fix, as asked):
+  - **The summary never validates the head** (stop 2). `summarize` reads each package with
+    `read_package`, which parses it, and never runs `checked`, the validation `ventoux release`
+    runs. The pull request above gets its Looser line and exit 0, and `MAY_BE_UNSET` is said only
+    by `ventoux release`, on merge, which releases anyway. Worse, a head with errors
+    (`EXPRESSION_INVALID`, `UNKNOWN_ROLE`), which `ventoux release` refuses, is said "a new
+    release, unless..." and exits 0: choice 67 promised that a package that "is refused" fails the
+    step, and its test only refuses one that can't be read. Proposed fix: the summary checks each
+    head package as `ventoux release` would; errors fail the step and say the package can't be
+    released as it is, warnings are shown under its diff.
+  - **A contract changed in place passes when the pull request rewrites its hash** (stop 7).
+    `orders.lookup@1`'s `start_to_close` 10 -> 5, and its entry in `contracts.lock.json`
+    replaced by the new hash, in one commit: the head's `ventoux summary`, given the real base's
+    promises, says "Every contract matches `contracts.lock.json`." and exits 0; `ventoux hashes`
+    the same. The step reads the head's lockfile, and the base's promises only describe a
+    mismatch, never find one. The brief's line, "CI hashes each contract ... and fails if it
+    changed without a new number" (brief, D5), doesn't hold. Proposed fix: a hash the base's
+    lockfile records never changes; each contract the base records is checked against the base's
+    lockfile (or its promise), and the head's lockfile only adds references.
+- Your answer (layer 13's check-yourself, after the walk-through, 2026-10-25): "the verdicts by
+  effect, not the lines that changed."
+- Discussion: the core is right, and it is the layer's lesson. What it covers, each from the
+  walk-through:
+  - **Effects away from the edited line:** one role added to `review` widened what three fields,
+    every outcome and every output show; an input moved changed who may approve `pay`. Neither is
+    written anywhere in the JSON.
+  - **What an edit means at runtime:** `requires: []` reads as a tidy-up; the plain form says
+    `settle` now starts when the case opens (and validation, not yet the summary, says it fails
+    there).
+  - **Which way it goes:** one character, `"count": 2` to `1`, is looser; what can't be proven
+    either way counts as may loosen.
+  - **Whether merging releases:** a release, a wording revision or nothing, from the digest.
+  - **A contract changed in place, path by path,** where the JSON diff shows two lines of hex
+    (or nothing, for the code that changed it).
+  - **What it will never do,** said only where proven.
+  - **What a literal does on the page:** shown, never rendered.
+  In one line: the JSON diff shows which lines changed; the semantic diff shows what the case may
+  now do, to whom, and whether a person must judge it.
+- Explained back (2026-10-25), asked for two things the JSON diff hides, and why: "the lockfile
+  rewrite and the unvalidated head; the JSON shows neither." Those are the two findings, which
+  the semantic diff missed too: what the step should catch, not what layer 13 adds over the JSON.
+  And the JSON shows the lockfile rewrite, as two lines of hex: it is in the diff, unreadable,
+  where the step was meant to read it for the reviewer. What layer 13 adds is the other list: a
+  role that widens what three fields show, an input that moves who may approve, a requirement
+  dropped that starts a step at opening, a count lowered that is looser, a contract's change
+  path by path. Each is computed from more than the line that changed (the catalog, the other
+  steps, provenance), which is why the JSON can't show it.
+- Status: open, until two of those come back with why the JSON can't show them.
+
+## 42. Layer 12: why plans don't migrate
+
+> Why do plans not migrate?
+
+- Walk-through first (2026-10-25), deferred from layer 12 to after layer 13: one package traced
+  through releases and changing open cases, 12a, 12b, 12e, 12c, 12d, each stop asked before it was
+  shown. `refund 1` is released and active in production, 40 refunds open on it.
+  1. **The release tool (12a).** Marketing retitles `pay`. Answer: "wording revision 2 of release
+     1; open cases see it." Right: the digest doesn't move; reading a case is a query, given the
+     latest wording of the case's own release, checked against its digest, so nothing is recorded
+     and nothing decided changes; an answer may say `as worded in refund 1, wording 2`. Didn't
+     come back: what a record keeps (name, number, digest with its method, commit, every contract
+     with its hash, the package as written, what changed, the notes; written once; every record
+     read again and its digest recomputed before comparing); and a revert with the newer
+     release's titles, refused (`same behaviour as refund 1, other wording: rewording an older
+     release reaches its open cases; bring back its wording`): one digest, one release, and only
+     the latest release takes new wording, since open cases read it at once.
+  2. **A case's release and engine (12b).** `refund 2` is released and the deployment's
+     `refund-order@1` changes; `refund-7`, on `refund 1`, starts `settle`. Answer: "release 1's
+     definition and plan, from the case's start." Right: `CaseStart.release` carries the
+     release's plans as stored data, across every continue-as-new; the worker's plans serve drafts
+     only (choice 19). Didn't come back: the engine version (`ENGINE = 2`, `KNOWN = (2, 1)`),
+     data in the case's state, set once at the opening, moved only by a migration, so a fix to
+     Ventoux's own code never decides a recorded history differently (brief, D51); and the
+     workflow checking what it was given, depending on nothing the client did (choice 18): a
+     start whose package doesn't give its digest is refused at the opening, and fails the task
+     (`StartUnread`) at a continue-as-new, which is why method 1 is pinned for ever.
+  3. **Activation (12e).** `refund 2` calls `payments.refund@3`; the workers serve `@2`, then
+     one serves `@3` with another hash. Answer: "manifests and hashes match; refused, hash
+     differs; new open on 2." Right on all three. Added: every worker polling the queue now,
+     asked of Temporal, since it gives a task to any of them; a worker with no manifest "may
+     serve anything"; the same reference with another hash is a promise nobody reviewed (brief,
+     D5); the 40 open stay on `refund 1` to the end or a migration; rolling back is activating
+     `refund 1` again, with the same checks; `ventoux environment check` from monitoring.
+  4. **Change requests (12c).** Ana typed 2500 for 250 and `pay` waits for Sam's approval.
+     Answer: "someone else, not Ana; Sam's approval is withdrawn; not applied." Right. Added:
+     a role registered with `edits=True`; excluded the proposer, the case's opener (D25), and
+     whoever's answer gave the field its value (D11), so Ana twice; `pay.approval#2` asked on the
+     new value, never needing attention (choice 35); neither value in the history. The third
+     question was wrong as asked: `review` isn't repeatable, so Ana can't answer it again; with
+     a second edit applied first, the first is `not applied: approved_amount changed since it
+     was proposed: propose it again` (choice 34).
+  5. **Migration (12d).** `refund 2` adds `fraud_check` and renames `approved_amount`. Answer:
+     "mapping keeps answers; refused, wait until pay finishes." Right on the core. Added: names,
+     never positions, read strictly; the rename left out is refused (`approved_amount holds a
+     value, and refund 2 has no field approved_amount: map it`); values never converted, nothing
+     loosens. Didn't come back: the history (`applied case.change#1: migrated from refund 1,
+     engine 2 to refund 2, engine 2, proposed by pia, approved by lee`, then `withdrew
+     pay.approval#1: refund 2 changed pay`, `started fraud_check#1`). A running `pay#1` on
+     another contract refuses it, checked again when applied: a payment half done is never
+     terminated (brief, D17, D53).
+  Nothing found in this walk-through that every review missed.
+- Your answer (layer 12's check-yourself, after the walk-through, 2026-10-25): "a running case
+  keeps its plan from its start."
+- Discussion: that is *what* happens (brief, D53: "a running plan finishes on the plan in its
+  start (D28): plans don't migrate"), not *why*. The why is D2's line: "open cases can migrate
+  from the strict to the loose version because cases have no position."
+  - **A case has no position, a plan has one.** A case's state is facts: milestones reached,
+    values with their sources, runs and their outcomes. A migration maps those by name, and the
+    target's rules read them again. A running plan is a state machine at a state (`pay`, after
+    `approve_refund`); moving it means saying where it now is in another machine, which a name
+    mapping can't, and a position mapping gets silently wrong.
+  - **A plan is short by design.** "Short sequences without people stay inside a plan. Anything
+    that waits on people or runs for days is a case step, where it can change" (brief, D2). So a
+    running plan finishes soon, and the migration waits for it, as for any running step.
+  - **Its child workflow holds its plan in its start** (D28): replay reads that plan, so changing
+    it under a running child would decide a recorded history differently.
+  In one line: what may change while open lives in the case, which has no position; a plan has
+  one, is short, and finishes on what it started with.
+- Explained back (2026-10-25), asked why an open case may move to a new release and a running
+  plan may not: "cases have no position; a plan is short and finishes." Both came back: a case's
+  state is facts, mapped by name; a plan is a state machine at a state, kept short so it finishes
+  on what it started with, and the migration waits for it.
+- Status: closed.
