@@ -126,7 +126,7 @@ FILES = {
 
 def schema_files() -> dict[str, str]:
     """Both schemas as their bytes will be, by file name: `$schema`, `$id` (the format, named by
-    the engine version that parses it, brief D51), `title` and `description` first."""
+    the engine version that parses it) (brief, D51), `title` and `description` first."""
     files = {}
     for name, (title, what, generated) in FILES.items():
         schema = generated()
@@ -136,7 +136,7 @@ def schema_files() -> dict[str, str]:
             "$schema": DRAFT,
             "$id": f"https://ventoux.dev/schema/engine-{ENGINE}/{name}",
             "title": title,
-            "description": " ".join([what, described, SHAPE_ONLY]),
+            "description": f"{what} {described} {SHAPE_ONLY}",
         }
         # `json.dumps` and not the builder's `layout`: a schema holds `null` (a field's default),
         # which a definition never does; the layout is the same, two spaces and a final newline.
