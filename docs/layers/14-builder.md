@@ -4,7 +4,9 @@ Status: 2026-10-25, from `main` at `a2ea563` (layers 0 to 13 merged). The warm-u
 recorded. Prior art read: the `chartering` prototype at `81389b3` (its `main`), whose
 `thoughts/qrspi/2026-10-01-01/task.md` defers three research questions to this layer. Layer 14 is
 explained and split into five parts below. Each choice, for the whole layer and for 14a, has a
-recommendation. Waiting for your answers before anything is built.
+recommendation. Answered "all as recommended", the same day: choices 1 to 16, `jsonschema` as a
+dev dependency included (choice 10, for 14e). D58 and the dated line on D7 written before
+building 14a.
 
 ## Warm-up: learning question 1, JSON or code first
 
