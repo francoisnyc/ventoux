@@ -257,3 +257,15 @@ def test_ruff_rejects_relative_imports_in_src() -> None:
     result = ruff_check(source, "src/ventoux/core/example.py")
     assert result.returncode == 1
     assert "TID252" in result.stdout
+
+
+def test_importing_ventoux_brings_no_temporal() -> None:
+    # The builder's names are re-exported from `ventoux`, and Python runs `ventoux/__init__.py`
+    # before any `ventoux.core` import: so the builder must import no Temporal (layer 14a, choice 2).
+    loaded = subprocess.run(
+        [sys.executable, "-c", "import sys, ventoux.core; print('temporalio' in sys.modules)"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert loaded.stdout.strip() == "False"
