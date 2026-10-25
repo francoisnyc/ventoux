@@ -61,7 +61,11 @@ from ventoux.case.rules import said
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
 from ventoux.case.types import case_types
-from ventoux.case.warnings import first_start_issues, warning_issues
+from ventoux.case.warnings import (
+    first_start_issues,
+    kept_from_starting_issues,
+    warning_issues,
+)
 from ventoux.core.catalog import Catalog
 from ventoux.core.validate import Issue
 
@@ -119,6 +123,8 @@ def validate_case(
     said = {issue.path for issue in found}
     found += warning_issues(case, contracts, supplied, said, missing | refused)
     found += first_start_issues(case, {issue.path for issue in found})
+    # Untrusted data keeping a step from starting: allowed, so said, never refused (brief, D48).
+    found += kept_from_starting_issues(case, contracts, missing | refused)
     # Steps the structure lets run are still kept out if the case closes when it opens. If every
     # step is dead anyway, their own issues say why; and a rule on the opening with its own issue
     # may fail, so the case may need attention instead of closing: one cause, one issue. Said
