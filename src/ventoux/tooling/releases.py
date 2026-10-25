@@ -168,8 +168,18 @@ def release(folder: Path, store: FolderStore, commit: str, catalog: Catalog) -> 
 
 
 def checked(released: Package, catalog: Catalog) -> list[Issue]:
-    """The package's warnings, once no error refuses it: each plan (layer 3), then the case
-    (layer 10), against `catalog`. Only a package that passes is released (brief, D50)."""
+    """The package's warnings, once no error refuses it. Only a package that passes is released
+    (brief, D50)."""
+    issues = issues_of(released, catalog)
+    errors = [issue for issue in issues if is_error(issue)]
+    if errors:
+        raise PackageRefused("\n".join(said(issue) for issue in errors))
+    return issues
+
+
+def issues_of(released: Package, catalog: Catalog) -> list[Issue]:
+    """Every issue in the package: each plan's (layer 3), then the case's (layer 10), against
+    `catalog`. What `checked` refuses on, and what CI's summary says before merge."""
     stored: dict[str, Any] = {
         reference: json.loads(text, parse_float=Decimal)
         for reference, text in released.written.plans.items()
@@ -180,10 +190,12 @@ def checked(released: Package, catalog: Catalog) -> list[Issue]:
         for issue in validate(plan, catalog)
     ]
     issues += validate_case(released.case, catalog, stored)
-    errors = [issue for issue in issues if issue.severity != "warning"]  # neither is an error
-    if errors:
-        raise PackageRefused("\n".join(said(issue) for issue in errors))
     return issues
+
+
+def is_error(issue: Issue) -> bool:
+    """Whether `issue` refuses the package: anything but a warning (fail closed)."""
+    return issue.severity != "warning"
 
 
 def said(issue: Issue) -> str:

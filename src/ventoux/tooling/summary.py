@@ -19,7 +19,9 @@ from ventoux.case.reading import ReadingRefused
 from ventoux.case.releases import Package, PackageRefused, PackageUnreadable, digest, wording
 from ventoux.core.catalog import Catalog
 from ventoux.core.hash_check import check_hashes
-from ventoux.tooling.releases import read_package
+from ventoux.core.validate import Issue
+from ventoux.tooling.releases import is_error, issues_of, read_package
+from ventoux.tooling.releases import said as as_release_says
 
 # How the step ends: as `ventoux diff` does, a looser change fails nothing (brief, D55).
 COMPARED = 0  # every package compared, every contract as the lockfile records
@@ -44,6 +46,9 @@ FIRST = "a new package: its first release."
 REMOVED = (
     "removed: merging it releases nothing; its records and the cases open on them are untouched."
 )
+# A package in the head `ventoux release` would refuse, changed or not: never said released
+# (fix-summary-validation, choice 3).
+CANT_RELEASE = "can't be released as it is: `ventoux release` refuses it (below)."
 # The most a step's job summary may hold: GitHub shows none of a larger one.
 LIMIT = 1024 * 1024
 
@@ -95,7 +100,13 @@ def summarize(
                 f"- **{text(name)}**: not compared: a package in the {other} can't be read (below)."
             )
             continue
-        outcomes.append(f"- **{text(name)}**: {what_merging_does(earlier, later)}")
+        # Every package in the head is checked as `ventoux release` checks it, changed or not;
+        # the base never is (fix-summary-validation, choice 1).
+        issues = issues_of(later, catalog) if later is not None else []
+        errors = [issue for issue in issues if is_error(issue)]
+        failures += [f"{name}, in the head: {as_release_says(issue)}" for issue in errors]
+        line = CANT_RELEASE if errors else what_merging_does(earlier, later)
+        outcomes.append(f"- **{text(name)}**: {line}")
         if earlier is not None and later is not None and changed_at_all(earlier, later):
             try:
                 diffs.append(plain(diff(earlier, later, catalog), earlier, later, catalog))

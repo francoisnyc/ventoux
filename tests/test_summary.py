@@ -195,8 +195,10 @@ def test_a_package_that_cant_be_read_fails_the_step_and_is_never_read_as_removed
 
 
 def test_a_diff_the_catalog_cant_make_fails_the_step(tmp_path: Path) -> None:
-    base = tree(tmp_path / "base", refund())
-    head = tree(tmp_path / "head", calling("payments.refund@9"))
+    # The base calls what the catalog no longer holds, so the head passes `ventoux release`'s
+    # check and only the diff refuses.
+    base = tree(tmp_path / "base", calling("payments.refund@9"))
+    head = tree(tmp_path / "head", refund())
     found = summarized(base, head)
     assert found.code == 1
     assert found.failures == (
@@ -463,7 +465,8 @@ def test_a_backtick_in_a_contract_never_closes_the_hash_checks_block(tmp_path: P
     earlier, later = lookup_contract(), lookup_contract(input=Fenced)
     recorded = {earlier.reference: contract_hash(earlier)}
     before: dict[str, object] = {earlier.reference: promise_of(earlier)}
-    base, head = with_example(tmp_path / "base"), with_example(tmp_path / "head")
+    # No package: the test's catalog holds one contract, which no package could run on.
+    base, head = tree(tmp_path / "base"), tree(tmp_path / "head")
     found = summarize(base, head, [PACKAGES], catalog_of(later), recorded, before)
     contracts = found.text.split("## Contracts\n\n")[1]
     assert contracts.startswith("````\norders.lookup@1 changed without a new version")
@@ -478,3 +481,34 @@ def test_a_path_in_a_code_span_is_fenced_past_its_backticks() -> None:
     assert code("steps.a``b") == "```steps.a``b```"
     assert code("`steps") == "`` `steps ``"
     assert code("a\nb") == "`a b`"  # a line break shown as a space: a span is one line
+
+
+# --- The summary validation fix: the head checked as `ventoux release` checks it -----------------
+
+
+def unreleasable(case: dict[str, Any]) -> None:
+    """Two errors `ventoux release` refuses: a condition reading an undeclared field, and a role
+    nobody registered."""
+    case["steps"]["settle"]["when"] = {"==": [{"var": "nosuch"}, "approve"]}
+    case["steps"]["call_customer"]["roles"] = ["nobody-has-this"]
+
+
+def test_a_package_release_would_refuse_fails_the_step(tmp_path: Path) -> None:
+    # Found in layer 13's walk-through: said "a new release" and exit 0, while `ventoux release`
+    # refuses it on merge. The same check, never a copy (fix-summary-validation, choices 2, 3).
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), unreleasable)
+    found = summarized(base, head)
+    assert found.code == 1
+    assert found.outcomes == (
+        "- **refund**: can't be released as it is: `ventoux release` refuses it (below).",
+    )
+    assert found.failures == (
+        "refund, in the head: steps.settle.when: EXPRESSION_INVALID: ==[0]: nosuch is not a "
+        "declared field",
+        "refund, in the head: steps.call_customer.roles: UNKNOWN_ROLE: nobody-has-this is a role "
+        "nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, "
+        "platform, privacy, support, support-lead; use one of them, or ask the platform team to "
+        "register it",
+    )
+    assert "### steps.settle" in found.text  # the diff is still shown
