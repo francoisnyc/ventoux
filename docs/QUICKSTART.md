@@ -98,16 +98,30 @@ uv run ventoux check
 ```
 
 ```text
-✓ refund is valid (3 steps)
-  review         task for support · outcomes: approve (sets approved_amount), reject
-  pay            runs payments.refund@2 · only after review = approve
-                 · needs approval by support-lead when approved_amount > 100
-  call_customer  task for support · only after pay = declined
-  Case map: build/refund.md
+✓ refund is valid (3 steps): packages/refund/
 ```
 
-`ventoux check` also writes `build/refund.json`, the definition Ventoux actually runs. You never edit
-it by hand: it's generated from your Python file, and you commit both.
+`ventoux check` runs your Python file, checks the definition it writes against your deployment's
+catalog, and writes `packages/refund/case.json`, the definition Ventoux actually runs. You never
+edit it by hand: it's generated from your Python file, and you commit both. Nothing is written
+unless every case is valid. `uv run ventoux map packages/refund` prints what a refund case can
+do, and what it will never do.
+
+The catalog is named in your project's `pyproject.toml`, which `ventoux init` writes:
+
+```toml
+[tool.ventoux]
+catalog = "ventoux.testing:CATALOG"
+```
+
+That is the development catalog. In production the platform team names its own, the contracts and
+roles your deployment really has, and `ventoux check` refuses to run with no catalog named rather
+than guess one.
+
+*Changed 2026-10-25, in layer 14c:* this section showed one line per step, a case map in
+`build/refund.md`, and `build/refund.json`. A package is a folder (brief, D50), and `build/` is
+ignored by most repositories, so the JSON that runs would never be reviewed: it is
+`packages/refund/case.json` now. The case map is `ventoux map`'s.
 
 ## 4. Run it
 
@@ -183,10 +197,12 @@ inputs={"order_id": order_id, "amount": message_amount}
 ```
 
 ```text
-✗ refund: pay.inputs.amount comes from customer_amount, which the customer typed (untrusted).
-  payments.refund@2 takes amount only from a system or a person, never from untrusted data.
-  Use a value a person confirmed, for example `approved_amount`, set by the reviewer.
+cases/refund.py:19: steps.pay.inputs.amount INPUT_POLICY: payments.refund@2 takes amount only from a system or a person, never from untrusted data, and this value comes from customer_amount (the opener, untrusted:customer): use a value a system or a person gave
+✗ refund is refused: 1 error. Nothing was written.
 ```
+
+The line is the call that wrote the step, `refund.activity("pay", …)`, and the path and the code
+are the check's own: the same rule refuses the release.
 
 You didn't write any security rule: the platform team set it once on `payments.refund@2`, as an
 input policy on `amount`. Ventoux checks it for every case that uses the activity.

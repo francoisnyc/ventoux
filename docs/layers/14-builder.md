@@ -832,8 +832,9 @@ is `tests/test_builder_coverage.py`, `F` is `tests/test_builder_format.py`, `P` 
 
 ## 14c. `ventoux check` and the deployment's catalog
 
-Status: choices drafted 2026-10-25, from `main` at `8a766d8` (14b merged as #57). Waiting for your
-answers, and for the warm-up, before anything is built.
+Status: choices drafted 2026-10-25, from `main` at `8a766d8` (14b merged as #57). The warm-up
+answered and recorded; choices 29 to 39 answered "all as recommended", the same day. D59, its
+dated lines and the quickstart's sections 3 and 6 written before building.
 
 ### Warm-up: learning question 33, why plans can be checked and code can't
 
