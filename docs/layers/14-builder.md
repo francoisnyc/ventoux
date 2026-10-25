@@ -524,6 +524,11 @@ and a plan step name a contract or a plan, and the builder must write that refer
 knowing the catalog. What the reference promises is the catalog's, checked by `ventoux check`
 (14c), never by the builder. Answer from memory first.
 
+Answered 2026-10-25: "catalog contains contracts and policies and binding." Contracts came back
+for the catalog; policies are inside a contract, and a binding is per environment, never in the
+catalog. The contract and the binding, the examples and the "changes when…" column didn't come
+back. Discussed and recorded; the card stays open.
+
 ### What this part is for
 
 14a wrote the quickstart's refund. 14b writes everything else a case or a plan can say, one entry

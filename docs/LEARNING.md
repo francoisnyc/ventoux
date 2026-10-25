@@ -768,6 +768,23 @@ and record the key points. A question is closed once you can explain the answer 
     manifests say. That is exactly what 12e adds to the card: a catalog and bindings are code a
     worker holds, and only a running environment can say whether that code is serving.
   - The examples and the "changes when…" column didn't come back, again.
+- Retrieval (layer 14b warm-up, 2026-10-25): "catalog contains contracts and policies and
+  binding." One word answered; the three questions, the examples and the "changes when…" column
+  didn't come back. Discussion:
+  - **Catalog:** contracts, yes, this time (not steps). Policies aren't beside them: they are
+    *inside* a contract, on its inputs (`amount` takes only trusted data). Besides contracts, the
+    catalog holds what the platform team registers: roles, source labels, systems. It changes when
+    a contract is added or retired. And **the binding is not in the catalog**: the catalog is the
+    same everywhere, a binding is per environment.
+  - **Contract:** what one entry promises (inputs and outputs with their policies and sources,
+    risk, effect, retries and timeouts, idempotency, outcomes). Example: `payments.refund@2`. It
+    never changes: a change is a new `@N`.
+  - **Binding:** where an entry runs, here: production serves `payments.refund@2` on queue
+    `payments-v2`. It changes when operations move it, with no version and no release.
+  - Why it matters in 14b: a workflow step writes `"workflow": "kyc.check@1"` and a plan step
+    `"plan": "settle-claim@1"`. The builder writes the reference only; what it promises is the
+    catalog's, checked by `ventoux check` (14c); where it runs is the binding's, never in a
+    definition.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
 
 ## 29. Layer 1: why `@1` and not `@1.0`
