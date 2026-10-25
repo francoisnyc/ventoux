@@ -544,3 +544,32 @@ def test_the_base_is_never_checked(tmp_path: Path) -> None:
     assert found.code == 0
     assert found.failures == ()
     assert "EXPRESSION_INVALID" not in found.text
+
+
+MAY_BE_UNSET = (
+    "## refund: what `ventoux release` warns\n\n"
+    "- steps.settle.when: MAY\\_BE\\_UNSET: settle reads review.outcome, and doesn't wait for "
+    "review, which gives it: if settle runs first, it fails and needs attention: require review\n"
+)
+
+
+def test_a_changed_packages_warnings_are_shown_after_its_diff(tmp_path: Path) -> None:
+    # The guide's own pull request: `settle` no longer waits for the review, so every new case
+    # would start with settle#1 failed. `ventoux release` warns and releases; the reviewer reads
+    # it before merge, and the step fails nothing (fix-summary-validation, choice 4).
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), unrequired)
+    found = summarized(base, head)
+    assert found.code == 0
+    assert found.text.split("## Contracts")[0].endswith(
+        "- **Looser** (`steps.settle.requires`): review -&gt; nothing.\n\n" + MAY_BE_UNSET + "\n"
+    )
+
+
+def test_an_unchanged_packages_warnings_arent_shown(tmp_path: Path) -> None:
+    # Not this pull request's: repeated on every one, they would teach people to skip them.
+    base = edited(with_example(tmp_path / "base"), unrequired)
+    head = edited(with_example(tmp_path / "head"), unrequired)
+    found = summarized(base, head)
+    assert found.code == 0
+    assert "MAY\\_BE\\_UNSET" not in found.text

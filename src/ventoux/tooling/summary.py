@@ -19,6 +19,7 @@ from ventoux.case.reading import ReadingRefused
 from ventoux.case.releases import Package, PackageRefused, PackageUnreadable, digest, wording
 from ventoux.core.catalog import Catalog
 from ventoux.core.hash_check import check_hashes
+from ventoux.core.validate import Issue
 from ventoux.tooling.releases import is_error, issues_of, read_package
 from ventoux.tooling.releases import said as as_release_says
 
@@ -111,12 +112,24 @@ def summarize(
                 diffs.append(plain(diff(earlier, later, catalog), earlier, later, catalog))
             except (DiffRefused, ReadingRefused) as refused:
                 failures.append(f"{name}: the diff can't be made: {refused}")
+        warnings = [issue for issue in issues if not is_error(issue)]
+        if warnings and (earlier is None or changed_at_all(earlier, later)):
+            # Shown, failing nothing, for a package merging changes; an unchanged package's
+            # aren't this pull request's (fix-summary-validation, choice 4).
+            diffs.append(warned(name, warnings))
     problems = check_hashes(catalog, recorded, before)
     ending = REFUSED if failures or problems else COMPARED
     said = said_as(outcomes, diffs, problems, failures, commits)
     return Summary(
         tuple(outcomes), ending, said, contracts_line(problems), tuple(failures), commits
     )
+
+
+def warned(name: str, warnings: Sequence[Issue]) -> str:
+    """What `ventoux release` warns about the package `name`, each as it says it."""
+    lines = [f"## {text(name)}: what `ventoux release` warns", ""]
+    lines += [f"- {text(as_release_says(issue))}" for issue in warnings]
+    return "\n".join(lines) + "\n"
 
 
 def cant_be_read(why: str) -> Summary:

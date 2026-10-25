@@ -563,10 +563,17 @@ $ ventoux summary --base base --head . --packages examples/packages --lock contr
 - After: settle runs the plan refund-order@1, giving order\_id from order\_id and amount from approved\_amount. It starts by itself when the case opens, if review.outcome = "approve".
 - **Looser** (`steps.settle.requires`): review -&gt; nothing.
 
+## refund: what `ventoux release` warns
+
+- steps.settle.when: MAY\_BE\_UNSET: settle reads review.outcome, and doesn't wait for review, which gives it: if settle runs first, it fails and needs attention: require review
+
 ## Contracts
 
 Every contract matches `contracts.lock.json`.
 ```
+
+The warning is the one `ventoux release` would print on merge, said before it: nothing has set
+`review.outcome` when the case opens, so every new case would start with `settle` failed.
 
 The command prints the whole summary to the step's log and appends it to the summary file
 (`$GITHUB_STEP_SUMMARY` in CI). A looser change fails nothing: it is yours to judge. The step
