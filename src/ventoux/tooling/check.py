@@ -88,8 +88,10 @@ def cases_in(path: Path) -> list[Case]:
         # Python: `run_path` runs a file as a script and gives back its top-level names. The file
         # is the team's own builder code, reviewed in a pull request (brief, D58).
         names = runpy.run_path(str(path), run_name="__ventoux_check__")
-    # Any error in the team's file is said, at its line, whatever it is: nothing is checked then.
-    except Exception as error:  # noqa: BLE001
+    # Any error in the team's file is said, at its line, whatever it is, `sys.exit` included: a
+    # file that exits would end the command having checked nothing, hiding every other file's
+    # problems (from the tutor review of #58). Only KeyboardInterrupt stops the command.
+    except (Exception, SystemExit) as error:  # noqa: BLE001
         line = raised_at(error, path)
         raise CheckRefused(f"{shown(path)}:{line}: {type(error).__name__}: {error}") from None
     return [value for value in names.values() if isinstance(value, Case)]

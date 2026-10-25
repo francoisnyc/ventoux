@@ -206,3 +206,20 @@ def test_a_plans_shape_the_reader_refuses_is_said_at_the_plans_call(
         f"cases/refund.py:{line}: plans.refund-order@1.states.failed.final REFUSED: a final "
         "state is succeeded or failed"
     ) in said
+
+
+def test_a_builder_file_that_exits_is_refused_at_its_line_and_hides_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # From the tutor review of #58: `sys.exit(0)` in one file made the command exit 0 having
+    # checked nothing, hiding another file's problem. Only KeyboardInterrupt stops the command.
+    unknown_role = QUICKSTART.read_text().replace('roles=["support-lead"]', 'roles=["nobody"]')
+    exiting = "import sys\n\nsys.exit(0)\n"
+    monkeypatch.chdir(a_project(tmp_path, a=unknown_role, b=exiting))
+    assert main(["check", "cases/a.py"]) == 1
+    assert "UNKNOWN_ROLE" in capsys.readouterr().out
+    assert main(["check"]) == 2
+    said = capsys.readouterr().err
+    assert "cases/b.py:3: SystemExit: 0" in said
+    assert "Nothing was written." in said
+    assert not (tmp_path / "packages").exists()
