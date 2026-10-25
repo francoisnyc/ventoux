@@ -113,7 +113,8 @@ def summarize(
             except (DiffRefused, ReadingRefused) as refused:
                 failures.append(f"{name}: the diff can't be made: {refused}")
         warnings = [issue for issue in issues if not is_error(issue)]
-        if warnings and (earlier is None or changed_at_all(earlier, later)):
+        changes = later is not None and (earlier is None or changed_at_all(earlier, later))
+        if warnings and changes:
             # Shown, failing nothing, for a package merging changes; an unchanged package's
             # aren't this pull request's (fix-summary-validation, choice 4).
             diffs.append(warned(name, warnings))
