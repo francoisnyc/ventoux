@@ -6,20 +6,64 @@ from typing import TYPE_CHECKING, Any
 # never runs inside the engine (brief, D58), so it is loaded only when one of its names is asked
 # for: a worker importing `ventoux.temporal` runs this file and never loads the builder.
 # Written out, not computed: mypy reads what a module exports only from a literal `__all__`.
-__all__ = ["Approval", "Case", "Expr", "Field", "Outcome", "and_", "literal", "not_", "or_"]
+__all__ = [
+    "OPENED",
+    "Approval",
+    "Case",
+    "Expr",
+    "Field",
+    "Outcome",
+    "Payload",
+    "Plan",
+    "SentBy",
+    "Then",
+    "Transition",
+    "after",
+    "and_",
+    "cat",
+    "count",
+    "exists",
+    "four_eyes",
+    "if_",
+    "in_",
+    "literal",
+    "not_",
+    "or_",
+    "package",
+    "string",
+    "sum_",
+    "written",
+]
 
 if TYPE_CHECKING:
     # Python: `TYPE_CHECKING` is true only for the type checker, which reads the names from here.
     from ventoux.tooling.builder import (
+        OPENED,
         Approval,
         Case,
         Expr,
         Field,
         Outcome,
+        Payload,
+        Plan,
+        SentBy,
+        Then,
+        Transition,
+        after,
         and_,
+        cat,
+        count,
+        exists,
+        four_eyes,
+        if_,
+        in_,
         literal,
         not_,
         or_,
+        package,
+        string,
+        sum_,
+        written,
     )
 
 

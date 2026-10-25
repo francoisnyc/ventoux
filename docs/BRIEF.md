@@ -2367,6 +2367,17 @@ D20 and D47, whose text is kept.*
   as the JSON writes it (D7 amended).
 - **A definition may still be written as JSON,** and is checked the same way: the builder is a
   front door, never the only one.
+- **Amended 2026-10-25, in layer 14b** (`docs/layers/14-builder.md`, choices 17 to 28; the text
+  above stands, this adds to it): the builder writes every key of the format, and a test reads the
+  keys from the format's own models, so a key added later fails it until the builder writes it.
+  D20's operators are functions named after the JSON's (`if_`, `in_`, `cat`, `string`, `exists`,
+  `count`, `sum_`); `==` is typed by what the expression holds; every condition, a plan
+  transition's included, is an `Expr[bool]`. What the builder can't know is written as the
+  developer declares it (`kyc.output("risk_score", Field.number())`) and checked against the
+  catalog by `ventoux check`. Moments are values (`OPENED`, `review.started`, `after(...)`), a
+  rule's actions a `Then`, a plan's targets names, and `package(case)` gives a case and the plans
+  its steps name. The builder refuses only what keeps it from writing the JSON as given; what the
+  engine refuses stays the engine's to refuse.
 
 ### Simplifications adopted
 

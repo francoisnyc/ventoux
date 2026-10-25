@@ -1,36 +1,106 @@
 {
   "case": "refund",
-  "display": {"title": "Customer refund"},
+  "display": {
+    "title": "Customer refund"
+  },
   "fields": {
-    "order_id": {"type": "reference", "system": "orders", "display": {"title": "Order"}},
-    "amount": {"type": "number", "display": {"title": "Amount requested"}},
-    "approved_amount": {"type": "number", "display": {"title": "Amount approved"}}
+    "order_id": {
+      "type": "reference",
+      "system": "orders",
+      "display": {
+        "title": "Order"
+      }
+    },
+    "amount": {
+      "type": "number",
+      "display": {
+        "title": "Amount requested"
+      }
+    },
+    "approved_amount": {
+      "type": "number",
+      "display": {
+        "title": "Amount approved"
+      }
+    }
   },
   "steps": {
     "review": {
       "kind": "task",
-      "display": {"title": "Review the refund request"},
-      "roles": ["support"],
+      "display": {
+        "title": "Review the refund request"
+      },
+      "roles": [
+        "support"
+      ],
       "outcomes": {
-        "approve": {"display": {"title": "Approve the refund"}, "sets": ["approved_amount"]},
-        "reject": {"display": {"title": "Reject the refund"}}
+        "approve": {
+          "display": {
+            "title": "Approve the refund"
+          },
+          "sets": [
+            "approved_amount"
+          ]
+        },
+        "reject": {
+          "display": {
+            "title": "Reject the refund"
+          }
+        }
       }
     },
     "settle": {
       "kind": "plan",
-      "display": {"title": "Settle the refund"},
+      "display": {
+        "title": "Settle the refund"
+      },
       "plan": "refund-order@1",
-      "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "approved_amount"}},
-      "requires": ["review"],
-      "when": {"==": [{"var": "review.outcome"}, "approve"]}
+      "inputs": {
+        "order_id": {
+          "var": "order_id"
+        },
+        "amount": {
+          "var": "approved_amount"
+        }
+      },
+      "requires": [
+        "review"
+      ],
+      "when": {
+        "==": [
+          {
+            "var": "review.outcome"
+          },
+          "approve"
+        ]
+      }
     },
     "call_customer": {
       "kind": "task",
-      "display": {"title": "Call the customer about the declined refund"},
-      "roles": ["support"],
-      "requires": ["settle"],
-      "when": {"==": [{"var": "settle.outcome"}, "failed"]},
-      "outcomes": {"called": {"display": {"title": "Customer called"}}}
+      "display": {
+        "title": "Call the customer about the declined refund"
+      },
+      "roles": [
+        "support"
+      ],
+      "requires": [
+        "settle"
+      ],
+      "when": {
+        "==": [
+          {
+            "var": "settle.outcome"
+          },
+          "failed"
+        ]
+      },
+      "outcomes": {
+        "called": {
+          "display": {
+            "title": "Customer called"
+          }
+        }
+      }
     }
   }
 }
