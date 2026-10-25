@@ -508,6 +508,225 @@ is named here, and every guard was broken once to see its test fail.
 | Importing `ventoux` brings no Temporal | L `test_importing_ventoux_brings_no_temporal` |
 | The engine's processes never load the builder | L `test_the_engines_processes_never_load_the_builder` |
 
+## 14b. The rest of the format
+
+Status: choices drafted 2026-10-25, from `main` at `b6a8aa5` (14a merged as #56). Waiting for your
+answers, and for the warm-up, before anything is built.
+
+### Warm-up: learning question 28, the card: catalog, contract, binding
+
+> Three words, three questions. Without looking: what question does each answer, give an example,
+> and say what happens when it changes.
+
+Open, a card kept in the rotation; last asked at 12e's warm-up, where the binding came back and
+the catalog was "steps and contracts" for the fourth time. It is 14b's question: a workflow step
+and a plan step name a contract or a plan, and the builder must write that reference without
+knowing the catalog. What the reference promises is the catalog's, checked by `ventoux check`
+(14c), never by the builder. Answer from memory first.
+
+### What this part is for
+
+14a wrote the quickstart's refund. 14b writes everything else a case or a plan can say, one entry
+per call, with the names the JSON uses: milestones, events and wait steps, workflow and plan
+steps, rules and the two patterns, approvals by several people, close reasons, what a field
+hides or narrows, how old a fact may be, forgetting, and plans with their states. A package, a
+case and the plans it runs, is written in Python and committed as JSON, byte for byte.
+
+A small example: a claim with a rule and a timer, and a plan step:
+
+```python
+paid = claim.milestone("paid", title="Claim paid")
+assess = claim.task("assess", title="Assess the claim", roles=["adjuster"], outcomes={...})
+claim.sla(
+    "assess_late",
+    title="Escalate an assessment late by 5 days",
+    step=assess,
+    within="5d",
+    then=Then(start=[escalate]),
+)
+settle = claim.plan_step("settle", plan=settle_claim, inputs={"amount": payout}, reaches=[paid])
+```
+
+`settle_claim` is a `Plan` built in the same file. The package written is `case.json` and
+`plans/settle-claim@1.json`.
+
+### What the code does today
+
+- `case/definition.py`: the case's models (`CaseDefinition` and around 30 shapes). Steps come in
+  five kinds, rules in three (a raw rule, `sla`, `reminder`), moments in six.
+- `core/plan.py`: `Plan` and its four kinds of state. A transition is a target and an optional
+  `when`; a bare target is shorthand for one transition with no `when`.
+- `core/expressions/model.py`: D20's operators as models (`Var`, the comparisons, `and`, `or`, `!`,
+  arithmetic, `if`, `in`, `cat`, `string`, `exists`, `item`, `count`, `sum`) and the field types.
+- `tooling/builder/` (14a): `Expr` and `NumberExpr`, `Case` with fields, references, tasks,
+  activities, an approval and `sequence`; `written`.
+- The repository's example packages: `examples/packages/refund/` (a case and
+  `plans/refund-order.json`) and 14a's `examples/quickstart/packages/refund/`. Every other example
+  JSON (`examples/refund/`, `claim/`, `witnesses/`, `checks/`) is a single definition, read by
+  stories and tests.
+
+### Choices for 14b
+
+17. **The coverage test, read from the format's own models** (the negative test):
+    - It walks every model reachable from `CaseDefinition` and `Plan` through their annotations,
+      expression nodes included, and lists each key as the JSON writes it: the field's alias
+      (`rules`, `==`), or its name. It also lists each value of a field that picks a shape
+      (`kind`, `type`, `final`, `forgetting`, the `"opened"` moment).
+    - **Two places where a model keeps a key differently from the JSON,** each a line in the test,
+      which fails if it names a field no model has: a field's `declared` is written flat (`type`
+      and what goes with it), and a plan's `sources` is written on each field as `source`.
+    - **Covered** means: some JSON the builder writes in the repository (the example packages and
+      the guide's examples, below), parsed with `parse_case` or `parse_plan`, has the key *given*,
+      not defaulted (Pydantic's `model_fields_set`), and has every shape-picking value.
+    - So a key added to the format later fails the test, naming the key and its model, until the
+      builder writes it and an example uses it.
+
+    *Recommended.* Set aside: a list of keys written in the test, which would pass a key added to
+    the format later.
+
+18. **Every D20 operator is written from Python,** since operators are keys of the format too
+    (`{"count": …}`):
+    - **Functions named after the JSON's operator,** with a trailing `_` where Python has the name
+      already, as 14a's `and_` does: `if_(c, a, b)`, `in_(x, [1, 2])`, `cat(a, b)`, `string(x)`,
+      `exists(field)`, `count(lines, where=…)`, `sum_(lines, value=…, where=…)`.
+    - **`item`:** a list field is declared `Field.list(amount=Field.number(), sku=Field.string())`,
+      and read with `lines.number("amount")` or `lines.text("sku")`. These are typed accessors, and
+      each is refused if the list doesn't declare that field with that type, since that would write
+      a different definition. Whether an `item` is used outside `count` or `sum` is the engine's
+      to refuse (choice 25).
+
+    *Recommended.*
+
+19. **The other kinds of `Expr`, and `==` typed by `T`** (deferred from 14a):
+    - `TextExpr` (`string`), `BoolExpr` (`boolean`, and what comparisons give), `OutcomeExpr` (a
+      step's outcome), `ReferenceExpr` (a reference) and `ListExpr` (a list), beside 14a's
+      `NumberExpr`.
+    - `==` and `!=` take the same kind or its Python literal: a number with `int` or `Decimal`, a
+      text or an outcome with `str`, a truth value with `bool`, a reference with a reference. So
+      `review.outcome == 5` and `amount == "x"` fail mypy. Each override carries `# type:
+      ignore[override]`, since narrowing a parameter breaks Python's own typing of `__eq__`, with
+      the comment saying why.
+    - **Every condition is `Expr[bool]`:** a step's `when`, an approval's, a rule's, an sla's, a
+      reminder's, and a plan transition's.
+
+    *Recommended.*
+
+20. **What the builder can't know is written as the developer says it:**
+    - **A step's output:** `kyc.output("risk_score", Field.number())` writes
+      `{"var": "kyc.risk_score"}`, typed as the developer declares it. The contract is the
+      catalog's, so whether it gives `risk_score`, and as a number, is `ventoux check`'s (14c),
+      never the builder's guess.
+    - **An event's payload is declared in the case,** so the builder types it from that
+      declaration: `cancelled.field("note")`.
+    - **`max_age`:** keys are written as the JSON writes them, `{"lookup.status": "1d"}`. An `Expr`
+      can't be a dict key, since its `==` builds an expression.
+
+    *Recommended.*
+
+21. **Moments, rules and the patterns:**
+    - **Moments as values:** `OPENED`, `review.started`, `review.answered`, `paid.reached`,
+      `cancelled.arrived`, and a timer, `after("2d", since=review.started)`.
+    - **A rule:** `claim.rule(name, title=, on=, when=, then=Then(set={field: expr}, reach=[…],
+      start=[…], stop=[…]))`. `Then` mirrors the JSON's `then`, so a reader of the diff finds the
+      same shape. `set=` takes the field object as its key, `{approved: amount}`, written by name.
+    - **The two patterns:** `claim.sla(name, title=, step=, within=, when=, then=)` and
+      `claim.reminder(name, title=, task=, after=["2d", "4d"], start=, when=)` (brief, D46). There
+      is no `since=` parameter: `since=first_start` isn't offered, so writing it fails the type
+      check and the call (brief, D46).
+
+    *Recommended.*
+
+22. **`four_eyes`** (brief, D47): `four_eyes(roles=, reason=, when=)` gives `Approval(count=2, …)`,
+    which writes `"count": 2`; `Approval(count=n)` is there too, one-to-one. A `bool` or a number
+    under 1 is refused as a count, as D47 refuses it in the JSON. *Recommended.*
+
+23. **Plans and packages:**
+    - `Plan("refund-order", 1, title=)` with `.field(name, Field…, source=)` (a plan's fields have
+      no `display`), and states made by `.activity`, `.wait`, `.approval` and `.final`.
+      `.initial(state)` is called once, refused a second time, as `sequence` is.
+    - A state's `on` maps outcomes to targets **by name**, as the JSON does:
+      `on={"done": "approve_refund", "not_found": "failed"}`. Names, because a plan may loop back
+      to a state made later, which an object can't name. A target with a condition is
+      `Transition("pay", when=…)`, and a list of them is written as a list. A single target with no
+      condition is written as the shorthand, as the guides write it.
+    - A case's plan step takes the `Plan` itself, `claim.plan_step("settle", plan=settle_claim, …)`,
+      and writes its reference, `"plan": "settle-claim@1"`. `package(case)` gives the package's
+      files: `case.json`, and each plan its plan steps name under `plans/`. A plan written but
+      named by no step is not written, as D50 refuses a plan nobody names.
+
+    *Recommended.*
+
+24. **Which examples are written in Python, and compared byte for byte:**
+    - **Both packages the repository holds,** each with its plans: 14a's quickstart, and
+      `examples/packages/refund/` (its case and `refund-order@1`), written from
+      `examples/cases/refund.py`. Its `case.json` and `plans/refund-order.json` become the
+      builder's layout once. Their digest doesn't change, and a test shows it. CI's summary then
+      reads "the same behaviour and wording as the base".
+    - **The single definitions** (`examples/refund/*.json`, `claim/`, `witnesses/`, `checks/`)
+      stay hand-written JSON, for two reasons. First, they are the engine's fixtures: stories name
+      them by path, and several are written to be refused or warned about. Second, a definition
+      may still be written as JSON (brief, D58), and these show it. Those the builder guide writes
+      in Python are compared with them **as data and by digest**, not byte for byte: the four-eyes
+      refund, the reminded refund and the claim.
+    - **Coverage comes from both:** the packages and the guide's examples, together, must give
+      every key (choice 17).
+
+    *Recommended.* Set aside: rewriting all 30 example definitions in Python. That is two copies of
+    every fixture, for no reader.
+
+25. **It writes data and decides nothing.** The builder refuses only what keeps it from writing
+    the JSON as given: a Python value where an expression is required, a number that wouldn't read
+    back, two entries of one name, a second `sequence` or `initial`, a list accessor for a field
+    the list doesn't declare. Everything the engine refuses is written as given and refused by
+    `parse_case`, `parse_plan` and validation, so by `ventoux check`. Tests write such
+    definitions through the builder and assert the refusal comes from the engine:
+    - a plan transition whose condition reads an untrusted field (`UNTRUSTED_TRANSITION`) (brief, D49);
+    - a sensitive field given to a workflow step (brief, D31) (brief, D36);
+    - a transition to a state that doesn't exist (`UNKNOWN_TARGET`);
+    - an `item` outside `count`.
+
+    *Recommended.*
+
+26. **The builder guide, `docs/guides/builder.md`,** for workflow developers, beside the cases guide:
+    - One section per part of the format, in the cases guide's order: fields, steps, approvals,
+      milestones and closing, events, rules and patterns, plans, packages.
+    - Each example is word for word a file in `examples/builder/`, compared with the guide by a
+      test, as 14a's quickstart is. That file is run by its test: the guide's text is never run
+      itself.
+    - Where a hand-written example exists, the guide says which, and its test compares the two.
+
+    *Recommended.*
+
+27. **`description` everywhere `display` has it,** and the approval's `reason`, as keywords on
+    each call (`description=`). Wording is written as given (brief, D5). *Recommended.*
+
+28. **Where it is recorded:** a dated line on D58 naming 14b's names (`if_`, `in_`, `sum_`,
+    `output`, `Then`, `OPENED`, `after`, `four_eyes`, `plan_step`, `Transition`, `package`). No new
+    decision: 14b builds what D58 decided for the whole format. *Recommended.*
+
+### Slices, in order (14b)
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **The coverage test** (choice 17): it fails, listing every key 14a's builder doesn't write.
+1. **The kinds of `Expr`, typed `==`, the operators, outputs** (choices 18 to 20): `review.outcome
+   == 5` fails mypy.
+2. **Milestones, step options, closing, field options, `description`** (choice 27): a step given
+   where a milestone is required (`reaches=[pay]`) fails mypy.
+3. **Events, wait steps, moments, rules, `sla`, `reminder`** (choices 21 and 22): `since=` doesn't
+   type-check.
+4. **Plans, plan and workflow steps, packages** (choice 23): `examples/packages/refund/` byte for
+   byte.
+5. **Decides nothing** (choice 25): the engine's refusals, through the builder.
+6. **The guide and its examples** (choices 24 and 26), until the coverage test passes; the
+   Promises.
+
+### Not in 14b
+
+- `ventoux check`, source lines, the deployment's catalog (14c); CI's regeneration check (14d);
+  the schema (14e).
+- Rewriting the single example definitions in Python (choice 24).
+
 ## Not in layer 14
 
 - Turning a JSON definition into builder code. A model's kept draft (D1) is written as builder
