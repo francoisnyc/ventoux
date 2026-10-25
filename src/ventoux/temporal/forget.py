@@ -218,7 +218,6 @@ class ForgetWorkflow:
         """Close the case as `forgotten`, wait until its workflow has ended, then destroy its
         key: work still running needs the key to read its own values (brief, D32)."""
         case = start.case
-        self.report.status = "closing the case"
         sent = CaseForget(start.by, start.roles, approved.by, approved.roles)
         try:
             await workflow.get_external_workflow_handle(case).signal("forget", sent)
@@ -231,6 +230,10 @@ class ForgetWorkflow:
                 self.report.history.append(f"refused: {closed_first(case)}")
                 return
             self.report.history.append(f"{case} was already closed")
+        # The status changes with its line, after the signal: a query between workflow tasks
+        # reads the report as it is, so set before the signal it said `closing the case` with
+        # no line saying the case was asked (fix-flaky-temporal).
+        self.report.status = "closing the case"
         ended = await workflow.execute_activity_method(
             ForgetActivities.case_ended,
             case,
