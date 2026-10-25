@@ -956,6 +956,11 @@ Each starts with its negative test, seen failing for the right reason.
   forgotten; a rejection refused without the role, and accepted from the proposer; a new
   request accepted after a rejection; an answer other than `approve` or `reject` (already
   tested, now in the table). All passed when written: their code came with earlier slices.
+- **The request's status changes with its line** (2026-10-25, `docs/layers/fix-flaky-temporal.md`):
+  `closing the case` was set before the signal to the case and its line written after, so a
+  query between the two workflow tasks read the status with no line, and
+  `test_the_key_goes_only_after_the_case_has_ended` failed once in a loaded full run. Both now
+  change in the task after the signal; a reading saying `closing the case` says the case was asked.
 
 ### From the tutor review
 

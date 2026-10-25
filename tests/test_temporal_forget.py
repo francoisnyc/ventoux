@@ -422,6 +422,53 @@ def test_the_key_goes_only_after_the_case_has_ended() -> None:
     assert (ended.status, key) == ("forgotten", "destroyed")
 
 
+def test_a_report_closing_the_case_already_says_the_case_was_asked() -> None:
+    # From fix-flaky-temporal: a query reads the report between workflow tasks. The status and
+    # its line change in one task, so no reading says `closing the case` without saying the case
+    # was asked (seen once in a full run, with the status set before the signal). Polled as fast
+    # as the server answers, since the window is a signal's round trip.
+    release = threading.Event()
+    paying: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        paying.append(inputs["idempotency_key"])
+        release.wait(timeout=10)
+        return {"refund_id": "refund-ord-1"}
+
+    async def scenario(client: Client) -> list[tuple[str, bool]]:
+        case = await start_case(
+            client,
+            DevelopmentCases,
+            REFUND,
+            as_json({"order_id": "ord-1", "amount": 40}),
+            "refund-1",
+            QUEUE,
+        )
+        form = as_json({"approved_amount": 40})
+        await answer(case, "review#1", "approve", "ana", ["support"], form)
+        for _ in range(100):  # until the payment runs
+            if paying:
+                break
+            await asyncio.sleep(0.05)
+        request = await propose_forget(
+            client, DevelopmentForget, "refund-1", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        seen: list[tuple[str, bool]] = []
+        for _ in range(10_000):  # every reading until the case has been asked
+            now = await forget_report(request)
+            seen.append((now.status, "refund-1 asked to close as forgotten" in now.history))
+            if seen[-1][1]:
+                break
+        release.set()
+        await request.result()
+        return seen
+
+    seen = on_temporal(scenario, {**FAKES, "payments.refund@2": refund})
+    assert seen[-1] == ("closing the case", True)
+    assert ("closing the case", False) not in seen
+
+
 def test_the_key_goes_only_after_a_child_plan_has_ended() -> None:
     # The same with a plan step: its child workflow, `refund-1/settle#1`, seals with the case's
     # key. Forgotten while the plan's lookup runs, the case stops the plan, the lookup finishes,

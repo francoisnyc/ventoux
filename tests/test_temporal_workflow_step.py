@@ -751,13 +751,16 @@ def cancel_requests(history: WorkflowHistory) -> list[Any]:
 def test_a_stopped_cancellable_workflow_is_cancelled_on_temporal() -> None:
     # The check sleeps when the customer withdraws: the rule's stop cancels it through Temporal,
     # its reason naming the rule's entry only; the case waits for it to end cancelled, flags it,
-    # and closes (brief, D40).
+    # and closes (brief, D40). The payment is let finish first: the case records events in the
+    # order they reach it, so a payment still running would land its line anywhere in the
+    # three asserted below (fix-flaky-temporal).
     async def scenario(environment: WorkflowEnvironment) -> tuple[CaseReport, str, list[Any]]:
         client = environment.client
         case = await reviewed(
             client, withdrawn_kyc(), cases=CasesWithCancellableKyc, customer="c-sleeps"
         )
         await started(case)
+        await reported(case, lambda now: any(line.startswith("pay#1 done") for line in now.history))
         await withdrawn(case)
         ended = await case.result()
         child = await client.get_workflow_handle("refund-1/kyc#1").fetch_history()
