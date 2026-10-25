@@ -6,7 +6,8 @@ request; confirmed in the code by the tutor review of #53.
 
 Status: choices put, 2026-10-25, each with a recommendation. Answered "1 to 10, all as
 recommended", the same day. The dated lines on D5 and D57, the activities guide's paragraph and
-learning question 41's lines written before building.
+learning question 41's lines written before building. Built test-first, slices 0 to 8, and the
+Promises table checked against the tests, the same day (see "Decided while building").
 
 ## The bug
 
@@ -118,3 +119,68 @@ Answer by number.
       land with #54, which merged first) and this pull request for the second.
 
     *Recommended.*
+
+## Seams the tests use
+
+`summarize(base, head, packages, catalog, recorded, before, base_recorded)` and what its
+`Summary` says (`code`, `text`), the `ventoux summary` command for an unreadable base lockfile and
+the guide's example, and the workflow's text. `check_hashes` is reached through the summary, as CI
+reaches it.
+
+## Slices, in order
+
+0. The plumbing: `summarize` takes the base's lockfile, the command `--base-lock` (required), CI
+   the argument; nothing reads it yet.
+1. The walk-through's run fails: a contract changed with its hash rewritten (choices 1, 2),
+   negative first.
+2. A recorded hash rewritten or dropped alone fails, saying what to put back (choice 2).
+3. The head's lockfile records what the base doesn't (choice 3).
+4. A contract retired from the catalog is never an error (choice 3).
+5. The base's promise is read against the base's hash (choice 4).
+6. A base lockfile that can't be read fails, exit 2 (choice 5).
+7. CI passes the base checkout's lockfile (choice 6).
+8. The all-clear line says what was compared; the guide's example made again (choices 7, 10).
+
+## Decided while building
+
+- **The plumbing came first** (slice 0): `--base-lock` is required, so the workflow had to pass
+  it in the same commit or the `changes` job would stop at the command line. Nothing read it until
+  slice 1, whose test then failed for the right reason: "Every contract matches", exit 0. The
+  workflow's own test is slice 7.
+- **`summarize` takes the base's lockfile with no default:** a caller that forgets it can't run
+  blind (fail closed). `check_hashes` takes it as an optional `base`, so `ventoux hashes` and the
+  `check` job's test, which have no base, are unchanged (choice 8); a contract the base records is
+  checked in `against_base`.
+- **"Rewrites" or "drops"** (choice 2): an entry the head's lockfile removes says it drops the
+  hash the base recorded, and what to put back.
+- **The tests use a one-contract catalog** with no package, so a changed `orders.lookup@1`
+  registers as `orders.lookup@2` there; the walk-through's run in the development catalog says
+  `@3`.
+- **The short form's contracts line** said "not as `contracts.lock.json` records", which names one
+  lockfile when two are read; it now says "not as recorded", and gets the test it didn't have.
+- **The releases guide** says the base's lockfile among what fails the step when it can't be read,
+  and a recorded hash rewritten among what is refused.
+- **Each later slice's test passed at once or was written after the code it pins,** and was seen
+  to bite on a deliberate break: no lockfile line for an unchanged contract, the promise read
+  against the head's hash, a retired contract said gone, the base's lockfile not checked as a JSON
+  object, the argument removed from the workflow.
+
+## Promises
+
+Checked against the tests before the pull request, both ways: every promise names a test that
+exists, and every test this fix added is named. `S` is `tests/test_summary.py`, `C` is
+`tests/test_catalog.py`, `P` is `tests/test_promise.py`.
+
+| Promise | Test |
+|---|---|
+| A contract the base records is checked against the hash recorded there, whatever the head's lockfile says: changed in place, it fails, path by path from the base's promises | S `test_a_contract_changed_with_its_hash_rewritten_fails` |
+| A recorded hash never changes: rewritten or dropped by the head's lockfile, it is said under the contract's line, or alone with what to put back, and fails | S `test_a_contract_changed_with_its_hash_rewritten_fails`, `test_a_recorded_hash_rewritten_or_dropped_alone_fails` |
+| The head's lockfile records what the base doesn't: a new contract recorded passes, one not recorded fails with the line to add | S `test_the_heads_lockfile_records_what_the_base_doesnt` |
+| A contract retired from the catalog is never an error, its base entry kept or dropped | S `test_a_contract_retired_from_the_catalog_is_never_an_error` |
+| The base's promise is read against the base's hash | S `test_the_bases_promise_is_read_against_the_bases_hash` |
+| A base lockfile that is missing, can't be read or isn't a JSON object fails the step, exit 2, said in the log and the summary | S `test_a_base_lockfile_that_cant_be_read_fails_and_says_so` |
+| CI passes the base checkout's lockfile, one argument, with the same permissions | S `test_ci_passes_the_base_checkouts_lockfile`, `test_the_workflow_sends_nothing_and_reads_only` |
+| The all-clear line says what was compared | S `test_contracts_that_match_are_said_to` |
+| Past the limit, the contracts not as recorded are counted | S `test_past_the_limit_a_contract_not_as_recorded_is_counted` |
+| The guide's example runs as written | S `test_the_guides_summary_runs_as_written` |
+| `ventoux hashes` and the `check` job's test still compare with the head's lockfile, as before | C `test_every_development_contract_matches_its_recorded_hash`; P `test_hashes_passes_when_every_contract_matches`, `test_the_base_commits_promises_say_what_changed` |
