@@ -270,10 +270,17 @@ def check_files(
                     f"{shown(case.where[''].rpartition(':')[0])} defines it: one or the other"
                 )
         checked = [check(case, catalog) for case in cases]
+        packages = root / found.packages
+        for name in found.by_hand:
+            # A misspelled entry would hide a stale folder (from the tutor review of #61).
+            if not (packages / name).is_dir():
+                raise CheckRefused(
+                    f"by_hand lists {name}, and {shown(packages / name)}/ doesn't exist: "
+                    "a misspelling, or a folder not committed"
+                )
     except CheckRefused as refused:
         print(f"{refused}\nNothing was written.", file=sys.stderr)
         return CANT_READ
-    packages = root / found.packages
     # A folder no builder case defines: written by hand, if listed; else it may be stale output.
     others = [
         folder
