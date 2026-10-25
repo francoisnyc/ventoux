@@ -510,8 +510,9 @@ is named here, and every guard was broken once to see its test fail.
 
 ## 14b. The rest of the format
 
-Status: choices drafted 2026-10-25, from `main` at `b6a8aa5` (14a merged as #56). Waiting for your
-answers, and for the warm-up, before anything is built.
+Status: choices drafted 2026-10-25, from `main` at `b6a8aa5` (14a merged as #56). The warm-up
+answered and recorded; choices 17 to 28 answered "all as recommended", the same day. The dated line
+on D58 written before building.
 
 ### Warm-up: learning question 28, the card: catalog, contract, binding
 
