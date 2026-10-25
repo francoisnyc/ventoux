@@ -2242,6 +2242,13 @@ and D50, whose text is kept.*
   hash check's lines with more backticks than any run in them. Each package's line says only what
   the two trees show: "the same behaviour and wording as the base", or a wording revision only if
   the base's behaviour is the latest release's, which `ventoux release` decides from the records.
+- **Amended 2026-10-25, by the summary validation fix** (`docs/layers/fix-summary-validation.md`,
+  choices 1 to 8, found in layer 13's walk-through; the text above stands, this adds to it): the
+  summary checks every package in the head as `ventoux release` does before it releases, with the
+  same check and catalog; the base is never checked. An error fails the step, and the package's
+  line says it can't be released as it is, its errors said as release says them, its diff still
+  shown. A warning fails nothing and is shown after the diff of a package merging changes; an
+  unchanged package's warnings aren't the pull request's, and aren't shown.
 
 ### D56. The case map and the "will never do" sheet: readings of a package, and only proven nevers
 

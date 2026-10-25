@@ -1658,6 +1658,11 @@ changed in place says what changed (13d's choice 59).
     change fails nothing: it is the reviewer's to judge, as `ventoux diff` exits 0.
     *Recommended.*
 
+    *Amended 2026-10-25* (`docs/layers/fix-summary-validation.md`, found in layer 13's
+    walk-through): "refused" covered only a package that can't be read. The summary now checks
+    every package in the head as `ventoux release` does: an error fails the step, and the
+    package's line says it can't be released as it is.
+
 68. **The curriculum's negative test, end to end.** A base whose refund calls `payments.refund@2`
     and a head whose refund calls `@3`, which takes any amount: the summary's Markdown says "a new
     release" and "**Looser** … input amount …", and the summary file holds it. Through

@@ -17,11 +17,13 @@ from test_catalog import catalog_of, lookup_contract
 from test_diff import LOOSE, ROOT, calling, refund
 
 from ventoux.case.markdown import code, text
+from ventoux.case.releases import PackageRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract_hash import contract_hash, promise_hash
 from ventoux.core.promise import promise_of
 from ventoux.testing import CATALOG
 from ventoux.tooling.cli import main
+from ventoux.tooling.releases import checked, read_package
 from ventoux.tooling.summary import Summary, for_summary_file, summarize
 
 PACKAGES = "examples/packages"
@@ -195,8 +197,10 @@ def test_a_package_that_cant_be_read_fails_the_step_and_is_never_read_as_removed
 
 
 def test_a_diff_the_catalog_cant_make_fails_the_step(tmp_path: Path) -> None:
-    base = tree(tmp_path / "base", refund())
-    head = tree(tmp_path / "head", calling("payments.refund@9"))
+    # The base calls what the catalog no longer holds, so the head passes `ventoux release`'s
+    # check and only the diff refuses.
+    base = tree(tmp_path / "base", calling("payments.refund@9"))
+    head = tree(tmp_path / "head", refund())
     found = summarized(base, head)
     assert found.code == 1
     assert found.failures == (
@@ -463,7 +467,8 @@ def test_a_backtick_in_a_contract_never_closes_the_hash_checks_block(tmp_path: P
     earlier, later = lookup_contract(), lookup_contract(input=Fenced)
     recorded = {earlier.reference: contract_hash(earlier)}
     before: dict[str, object] = {earlier.reference: promise_of(earlier)}
-    base, head = with_example(tmp_path / "base"), with_example(tmp_path / "head")
+    # No package: the test's catalog holds one contract, which no package could run on.
+    base, head = tree(tmp_path / "base"), tree(tmp_path / "head")
     found = summarize(base, head, [PACKAGES], catalog_of(later), recorded, before)
     contracts = found.text.split("## Contracts\n\n")[1]
     assert contracts.startswith("````\norders.lookup@1 changed without a new version")
@@ -478,3 +483,147 @@ def test_a_path_in_a_code_span_is_fenced_past_its_backticks() -> None:
     assert code("steps.a``b") == "```steps.a``b```"
     assert code("`steps") == "`` `steps ``"
     assert code("a\nb") == "`a b`"  # a line break shown as a space: a span is one line
+
+
+# --- The summary validation fix: the head checked as `ventoux release` checks it -----------------
+
+
+def unreleasable(case: dict[str, Any]) -> None:
+    """Two errors `ventoux release` refuses: a condition reading an undeclared field, and a role
+    nobody registered."""
+    case["steps"]["settle"]["when"] = {"==": [{"var": "nosuch"}, "approve"]}
+    case["steps"]["call_customer"]["roles"] = ["nobody-has-this"]
+
+
+def test_a_package_release_would_refuse_fails_the_step(tmp_path: Path) -> None:
+    # Found in layer 13's walk-through: said "a new release" and exit 0, while `ventoux release`
+    # refuses it on merge. The same check, never a copy (fix-summary-validation, choices 2, 3).
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), unreleasable)
+    found = summarized(base, head)
+    assert found.code == 1
+    assert found.outcomes == (
+        "- **refund**: can't be released as it is: `ventoux release` refuses it (below).",
+    )
+    assert found.failures == (
+        (
+            "refund, in the head: steps.settle.when: EXPRESSION_INVALID: ==[0]: nosuch is not a "
+            "declared field"
+        ),
+        (
+            "refund, in the head: steps.call_customer.roles: UNKNOWN_ROLE: nobody-has-this is a role "
+            "nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, "
+            "platform, privacy, support, support-lead; use one of them, or ask the platform team to "
+            "register it"
+        ),
+    )
+    assert "### steps.settle" in found.text  # the diff is still shown
+
+
+def unregistered_role(case: dict[str, Any]) -> None:
+    """A role nobody registered, on a task: `ventoux release` refuses the package."""
+    case["steps"]["call_customer"]["roles"] = ["nobody-has-this"]
+
+
+def test_an_unchanged_package_release_would_refuse_fails_the_step(tmp_path: Path) -> None:
+    # A pull request can break a package without touching it: its code changes the catalog, or
+    # the checks. `ventoux release` checks before it compares, so it refuses it on merge
+    # (fix-summary-validation, choice 1).
+    base = edited(with_example(tmp_path / "base"), unregistered_role)
+    head = edited(with_example(tmp_path / "head"), unregistered_role)
+    found = summarized(base, head)
+    assert found.code == 1
+    assert found.outcomes == (
+        "- **refund**: can't be released as it is: `ventoux release` refuses it (below).",
+    )
+
+
+def test_the_base_is_never_checked(tmp_path: Path) -> None:
+    # The base isn't what merging releases, and its issues aren't this pull request's.
+    base = edited(with_example(tmp_path / "base"), unreleasable)
+    head = with_example(tmp_path / "head")
+    found = summarized(base, head)
+    assert found.code == 0
+    assert found.failures == ()
+    assert "EXPRESSION_INVALID" not in found.text
+
+
+MAY_BE_UNSET = (
+    "## refund: what `ventoux release` warns\n\n"
+    "- steps.settle.when: MAY\\_BE\\_UNSET: settle reads review.outcome, and doesn't wait for "
+    "review, which gives it: if settle runs first, it fails and needs attention: require review\n"
+)
+
+
+def test_a_changed_packages_warnings_are_shown_after_its_diff(tmp_path: Path) -> None:
+    # The guide's own pull request: `settle` no longer waits for the review, so every new case
+    # would start with settle#1 failed. `ventoux release` warns and releases; the reviewer reads
+    # it before merge, and the step fails nothing (fix-summary-validation, choice 4).
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), unrequired)
+    found = summarized(base, head)
+    assert found.code == 0
+    assert found.text.split("## Contracts")[0].endswith(
+        "- **Looser** (`steps.settle.requires`): review -&gt; nothing.\n\n" + MAY_BE_UNSET + "\n"
+    )
+
+
+def test_an_unchanged_packages_warnings_arent_shown(tmp_path: Path) -> None:
+    # Not this pull request's: repeated on every one, they would teach people to skip them.
+    base = edited(with_example(tmp_path / "base"), unrequired)
+    head = edited(with_example(tmp_path / "head"), unrequired)
+    found = summarized(base, head)
+    assert found.code == 0
+    assert "MAY\\_BE\\_UNSET" not in found.text
+
+
+def test_an_issues_message_is_shown_as_written(tmp_path: Path) -> None:
+    # A message quotes what the definition writes; here a condition's field name, since a role's
+    # name is refused by its pattern before any check (fix-summary-validation, choice 6).
+    def quoting(case: dict[str, Any]) -> None:
+        case["steps"]["settle"]["when"] = {"==": [{"var": "no<such*"}, "approve"]}
+
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), quoting)
+    found = summarized(base, head)
+    assert found.code == 1
+    assert (
+        "- refund, in the head: steps.settle.when: EXPRESSION\\_INVALID: ==\\[0\\]: no&lt;such\\* is "
+        "not a declared field\n"
+    ) in found.text
+
+
+def test_past_the_limit_a_refused_package_and_its_errors_stay(tmp_path: Path) -> None:
+    # The short form keeps each package's line and why the step fails; the warnings are in the
+    # whole text, in the log (fix-summary-validation, choice 5).
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), unreleasable)
+    short = for_summary_file(summarized(base, head), limit=100)
+    assert (
+        "- **refund**: can't be released as it is: `ventoux release` refuses it (below)." in short
+    )
+    assert short.count("- refund, in the head: steps.") == 2
+    assert "it is in this step's log" in short
+
+
+def test_a_new_package_and_a_wording_revision_show_their_warnings_too(tmp_path: Path) -> None:
+    # Merging changes them too: a first release, and a wording revision (choice 4).
+    head = edited(with_example(tmp_path / "head"), unrequired)
+    first = summarized(tree(tmp_path / "empty"), head)
+    base = edited(with_example(tmp_path / "base"), unrequired)
+    reworded = edited(edited(with_example(tmp_path / "reworded"), unrequired), retitled)
+    revision = summarized(base, reworded)
+    for found in (first, revision):
+        assert found.code == 0
+        assert MAY_BE_UNSET in found.text
+
+
+def test_the_summary_refuses_exactly_what_release_refuses(tmp_path: Path) -> None:
+    # The same check, never a copy (choice 2): each error as `ventoux release` says it.
+    head = edited(with_example(tmp_path / "head"), unreleasable)
+    with pytest.raises(PackageRefused) as refused:
+        checked(read_package(head / PACKAGES / "refund"), CATALOG)
+    found = summarized(with_example(tmp_path / "base"), head)
+    assert found.failures == tuple(
+        f"refund, in the head: {line}" for line in str(refused.value).splitlines()
+    )
