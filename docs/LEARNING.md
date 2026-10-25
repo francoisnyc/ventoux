@@ -1251,6 +1251,19 @@ and record the key points. A question is closed once you can explain the answer 
   In one line: after forgetting, the audit explains the decision (rule, people, order, facts by
   name) but can't show the personal values it rested on; if those must be shown, the definition
   must never let the case be forgotten.
+- Retrieval (wrap-up of layers 12 and 13, 2026-10-25), the follow-up: "everything except the
+  data, all the rest, actors, steps, time stamps etc. is still there." The core came back a
+  second time. Neither of the two parts did:
+  - **The facts, by name and source:** the audit can say the denial rested on `policy_status`
+    from `system:policies`, or `approved_amount` from Ana's review, even where the value is
+    gone; and under which rule, since the definition and release are in history.
+  - **Not every value goes:** a value that wasn't sensitive stays where it was used
+    (`estimated_damage` in a later step's start); what goes is every sensitive field, every value
+    in a form answer (the client seals them all, D31) and every failure's message.
+  - **The retention choice, made beforehand:** if a regulator may ask for the values, the
+    definition says `"forgetting": "while_open"` (refused once the case is closed, for books and
+    records) or `"never"` (brief, D32), and a request to forget is refused. A business decision
+    about a kind of record, so it lives in the definition and changes with a release.
 - Status: open, until "the facts by name and source" and the retention choice (D32) come back
   from memory.
 
