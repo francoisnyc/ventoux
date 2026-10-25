@@ -589,3 +589,16 @@ def test_an_issues_message_is_shown_as_written(tmp_path: Path) -> None:
         "- refund, in the head: steps.settle.when: EXPRESSION\\_INVALID: ==\\[0\\]: no&lt;such\\* is "
         "not a declared field\n"
     ) in found.text
+
+
+def test_past_the_limit_a_refused_package_and_its_errors_stay(tmp_path: Path) -> None:
+    # The short form keeps each package's line and why the step fails; the warnings are in the
+    # whole text, in the log (fix-summary-validation, choice 5).
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), unreleasable)
+    short = for_summary_file(summarized(base, head), limit=100)
+    assert (
+        "- **refund**: can't be released as it is: `ventoux release` refuses it (below)." in short
+    )
+    assert short.count("- refund, in the head: steps.") == 2
+    assert "it is in this step's log" in short
