@@ -64,6 +64,8 @@ from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.contract_check import check_workflow_contract
 from ventoux.temporal.forget import ForgetReport, ForgetStart, ForgetWorkflow
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
+from ventoux.tooling.builder.case import Case
+from ventoux.tooling.builder.written import written
 
 # Temporal: this module defines workflows, so the workflow sandbox imports it afresh for each run;
 # the converter and the key provider are passed through, imported once: `cryptography` is compiled
@@ -406,7 +408,7 @@ DAY = 24 * 60 * 60  # a day, in seconds: `START + 3 * DAY`
 
 
 def run_case(
-    definition: dict[str, Any],
+    definition: dict[str, Any] | Case,
     file: dict[str, Any],
     answers: Sequence[Any],
     people: Mapping[str, Iterable[str]],
@@ -433,7 +435,11 @@ def run_case(
     workflow contract to a function from its inputs to its output, by reference, replacing the
     fake workflows; a workflow contract with none is not bound, and its step fails. The case opens
     at `at`, seconds since the epoch; `later("3d")` in the script moves time on, every timer due
-    by then fires, and every event after it happens then."""
+    by then fires, and every event after it happens then. `definition` may be the builder's
+    `Case`: its JSON is written and read back, and that runs, as the engine would get it."""
+    if isinstance(definition, Case):
+        # The JSON runs, never the builder's objects (brief, D58).
+        definition = json.loads(written(definition), parse_float=Decimal)
     case = parse_case(definition)  # fail closed: a definition that can't be read runs nothing
     now = at
     # On `release`, the case is named as opened on it; on Temporal its start carries it, and the

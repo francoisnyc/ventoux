@@ -27,7 +27,7 @@ file** holds the data. Its **steps** are the work: a person's task, or a call to
 Create `cases/refund.py`:
 
 ```python
-from ventoux import Case, Field, Approval, Outcome
+from ventoux import Approval, Case, Field, Outcome
 
 refund = Case("refund", title="Customer refund")
 
