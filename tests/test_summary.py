@@ -244,12 +244,12 @@ LOCK = ROOT / "contracts.lock.json"
 
 
 def run_summary(
-    tmp_path: Path, base: Path, head: Path, before: Path, *more: str
+    tmp_path: Path, base: Path, head: Path, before: Path, *more: str, base_lock: Path = LOCK
 ) -> tuple[int, list[str]]:
     """`ventoux summary` as the workflow calls it, the job summary file already holding an
     earlier step's line: its exit code, and the arguments it was given."""
     arguments = ["summary", "--base", str(base), "--head", str(head), "--packages", PACKAGES]
-    arguments += ["--lock", str(LOCK), "--base-lock", str(LOCK), "--before", str(before)]
+    arguments += ["--lock", str(LOCK), "--base-lock", str(base_lock), "--before", str(before)]
     arguments += ["--summary-file", str(tmp_path / "summary.md"), *more]
     (tmp_path / "summary.md").write_text("an earlier step's summary\n")
     return main(arguments), arguments
@@ -724,3 +724,27 @@ def test_the_bases_promise_is_read_against_the_bases_hash(tmp_path: Path) -> Non
         "  what changed can't be said: the promise given for orders.lookup@1 isn't the one "
         "contracts.lock.json records\n"
     ) in found.text
+
+
+@pytest.mark.parametrize(
+    ("written", "said"),
+    [
+        (None, "can't be read: No such file or directory"),
+        ("[]", "isn't a JSON object, by contract reference"),
+    ],
+)
+def test_a_base_lockfile_that_cant_be_read_fails_and_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], written: str | None, said: str
+) -> None:
+    # Fail closed: a base with no lockfile, or one that isn't one, is never read as one recording
+    # nothing (choice 5): exit 2, said in the log and the summary.
+    base_lock = tmp_path / "base-lock.json"
+    if written is not None:
+        base_lock.write_text(written)
+    before = tmp_path / "base-promises.json"
+    before.write_text("{}")
+    base, head = with_example(tmp_path / "base"), with_example(tmp_path / "head")
+    code, _ = run_summary(tmp_path, base, head, before, base_lock=base_lock)
+    assert code == 2
+    assert capsys.readouterr().err == f"{base_lock}: {said}\n"
+    assert (tmp_path / "summary.md").read_text().endswith(f"- {text(f'{base_lock}: {said}')}\n")
