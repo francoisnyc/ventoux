@@ -1542,6 +1542,17 @@ wrong shapes is refused by both. The schema checks shape. `ventoux check` stays 
   the model's docstring after the file's name. Kept: the docstring is the model's, written once.
 - **Slice 0, the tutor's two points:** `splitlines()` eats a `\r`, so the comparison splits on
   `\n` and names the line ending; `.gitattributes` keeps a checkout from committing one.
+- **From the tutor review of #62.** Four readings the parser now refuses, that `main` read, are
+  recorded in the brief as a dated line on D60 (which, why no engine version: refusing a reading
+  changes nothing a readable definition decides; what a case holding one does: waits for code,
+  `StartUnread` on a continued run; why none is expected) and a pointer on D51. Booleans were
+  still lax (`"no"`, `"on"`, `1.0` read as a boolean) while the schema refused them: the four
+  boolean fields are `StrictBool` now, each with a refused shape that is the lax reading of its
+  default, so nothing else refuses it (the first draft used `"no"`, which a task step refuses for
+  another reason: a negative test must fail for its own reason). The list-field fix and
+  `type_written` had no test of their own: a list's field with no `type` and a reference field
+  with no `type` join the refused shapes, and each mutation fails them now. `schema --unchanged`
+  is tested on a missing file alone and on line endings alone.
 - **Code ahead of its tests, said plainly:** the refused-shape list (slice 3) was written beside
   the corpus test (slice 1) before the fixes, since both drive the same code; the generator's two
   renderings came together. Every guard was broken once: thirteen mutations, each failing its
@@ -1552,17 +1563,21 @@ wrong shapes is refused by both. The schema checks shape. `ventoux check` stays 
 Each claim this part makes about behaviour, and the test that would fail if it weren't true. `S`
 is `tests/test_schema.py` (new), `U` is `tests/test_unchanged.py`. Checked against the tests,
 2026-10-25: every test named here exists, every test in `S` and every test 14e added to `U` is
-named here, and every guard was broken once to see its test fail.
+named here, and every guard was broken once to see its test fail (the review's additions too:
+the lax booleans, the list field's discriminator and `type_written`, each failing its tests).
 
 | Promise | Test |
 |---|---|
 | The corpus holds every committed definition, at least twenty cases and one plan | S `test_the_corpus_is_not_empty` |
 | Every committed case is accepted by the schema as by the parser: a field's type flat, names, numbers, every key | S `test_every_committed_case_is_accepted_by_the_schema_as_by_the_parser` |
 | Every committed plan is accepted by both: the bare state name, a field's source on the field | S `test_every_committed_plan_is_accepted_by_the_schema_as_by_the_parser` |
-| A wrong case is refused by both: an operator D20 doesn't list, an unknown key, a count or a number as a string, a field with no type or an unknown one, a name the pattern refuses as a value or a key, a step of no kind, no steps | S `test_a_wrong_case_is_refused_by_the_schema_as_by_the_parser` |
-| A wrong plan is refused by both: version 0 or `"1"`, an unknown key, a `sources` key, a state of no kind, a state name the pattern refuses, an operator D20 doesn't list | S `test_a_wrong_plan_is_refused_by_the_schema_as_by_the_parser` |
+| A wrong case is refused by both: an operator D20 doesn't list, an unknown key, a count or a number as a string, a field with no type or an unknown one, a list's or a reference field with no type, a name the pattern refuses as a value or a key, a step of no kind, no steps, a boolean written as a word or a number | S `test_a_wrong_case_is_refused_by_the_schema_as_by_the_parser` |
+| A boolean written as a word is refused by the parser at its path | S `test_a_boolean_written_as_a_word_is_refused_at_its_path` |
+| A wrong plan is refused by both: version 0, `"1"`, `1.0` or `true`, an unknown key, a `sources` key, a state of no kind, a state name the pattern refuses, an operator D20 doesn't list | S `test_a_wrong_plan_is_refused_by_the_schema_as_by_the_parser` |
 | `ventoux schema` writes both files, draft 2020-12, `$id` by the engine version, title and description first, the description saying shape only and never a trust boundary; `--out` names the folder | S `test_ventoux_schema_writes_both_files_naming_the_format_they_describe` |
 | `--unchanged` fails on a changed schema naming the file and first line, on a missing one, and writes nothing | S `test_unchanged_fails_on_a_changed_or_missing_schema_naming_the_line_and_writes_nothing` |
+| `--unchanged` fails on a missing schema alone, the other said unchanged, writing nothing | S `test_unchanged_fails_on_a_missing_schema_alone` |
+| `--unchanged` fails on other line endings alone, naming the line ending, writing nothing | S `test_unchanged_fails_on_other_line_endings_alone` |
 | The committed schemas are what the models say | S `test_the_committed_schemas_are_what_the_models_say` |
 | CI's `check` job runs `ventoux schema --unchanged`, read-only, the `changes` job untouched | S `test_ci_checks_the_committed_schemas_unchanged` |
 | `check --unchanged` compares bytes: other line endings differ, named; `.gitattributes` forces LF on JSON | U `test_a_committed_file_with_other_line_endings_differs` |
