@@ -46,7 +46,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 39 | Layer 10: why a fixpoint is needed | open |
 | 40 | Layer 11: arrival is a fact, content is not | open |
 | 41 | Layer 13: what the JSON diff hides | open |
-| 42 | Layer 12: why plans don't migrate | open |
+| 42 | Layer 12: why plans don't migrate | closed |
 
 ---
 
@@ -1584,4 +1584,8 @@ and record the key points. A question is closed once you can explain the answer 
     it under a running child would decide a recorded history differently.
   In one line: what may change while open lives in the case, which has no position; a plan has
   one, is short, and finishes on what it started with.
-- Status: open, until "cases have no position" and "short by design" come back.
+- Explained back (2026-10-25), asked why an open case may move to a new release and a running
+  plan may not: "cases have no position; a plan is short and finishes." Both came back: a case's
+  state is facts, mapped by name; a plan is a state machine at a state, kept short so it finishes
+  on what it started with, and the migration waits for it.
+- Status: closed.
