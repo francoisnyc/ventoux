@@ -135,3 +135,14 @@ def test_the_same_story_against_the_development_catalog_fails_its_step(
     monkeypatch.chdir(a_team_project(tmp_path))
     assert main(["simulate", "story.json", "--catalog", "ventoux.testing:CATALOG"]) == 0
     assert "pay#1 failed: acme.refund@2 is not in the catalog" in capsys.readouterr().out
+
+
+def test_an_unknown_setting_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A misspelled `packages` would otherwise write to the default folder, unnoticed (from the
+    # tutor review of #58).
+    configuration = '[tool.ventoux]\ncatalog = "ventoux.testing:CATALOG"\npackage = "out"\n'
+    monkeypatch.chdir(a_project(tmp_path, configuration))
+    assert main(["map", "packages/refund"]) == 2
+    assert "[tool.ventoux] has no setting package" in capsys.readouterr().err
