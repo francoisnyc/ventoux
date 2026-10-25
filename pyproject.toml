@@ -42,6 +42,10 @@ ban-relative-imports = "all"
 strict = true
 files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
+# The quickstart's project, so its tests import `cases.refund` as the quickstart writes it.
+mypy_path = "examples/quickstart"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The quickstart's project, so its tests import `cases.refund` as the quickstart writes it.
+pythonpath = ["examples/quickstart"]

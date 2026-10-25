@@ -291,6 +291,10 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   built, `since=first_start` is not offered, and `four_eyes` is approvals by several people
   (D47, to come), not a rule pattern. Of the teaching warnings, only the timer on a first start
   is still a warning; the rest are errors or designed behaviour (D46).
+- **Amended 2026-10-25, by D58** (the text above stands; this changes one name): in the Python
+  builder a condition is `when=`, as the JSON writes it since D38, not `unless=` / `only_if=`.
+  Those names come from rules written *when / if / then*; a rule's condition is now `when`, and
+  `if` is no key. `unless=` would be a second spelling of `not_`.
 
 ### D8. Ventoux is not a system of record
 
@@ -2336,6 +2340,33 @@ D55, and answers design question 16's other half, whose text is kept.*
   above stands, this adds to it): in the pull request's summary, the base commit's promise is used
   only if it hashes to what the **base's** lockfile records, the hash it must give; the summary
   takes the base's lockfile (`--base-lock`), and one that can't be read fails the step.
+
+### D58. The Python builder: code that produces data, typed runtime expressions, the same JSON
+
+*Decided 2026-10-25, in layer 14 (`docs/layers/14-builder.md`, choices 1 to 16). Adds to D1, D7,
+D20 and D47, whose text is kept.*
+
+- **Code that produces data.** The builder is Python a developer writes and a pull request
+  reviews. Running it writes JSON, and that JSON is what is checked, released and run. The
+  builder never runs inside the engine, and never on model output; nothing is evaluated,
+  executed or imported from a definition. It lives in `tooling`, its names re-exported from
+  `ventoux`, and imports no Temporal.
+- **Build time and runtime, told apart by type.** A field, a step's outcome and an output are
+  runtime values, `Expr[T]`: an operator on them gives another `Expr`, never a Python value, and a
+  Python value beside one is a literal written into the JSON. Where the format needs an
+  expression, the parameter is typed `Expr`, so a plain `True` or `250` fails the type check; a
+  literal input is written `literal(250)`. Asking an `Expr` for a `bool` (an `if`, `and`, `or`,
+  `not`, a chained comparison) raises. `and`, `or` and `!` are `and_`, `or_` and `not_`. Numbers
+  are `int` or `Decimal`, never `float` and never `bool`.
+- **The same JSON, byte for byte.** One layout, the standard library's `indent=2`, keys in the
+  order the format writes them, maps in the order the builder made them, a key at its default left
+  out unless given, a number as the decimal the engine holds; a value that doesn't read back the
+  same is refused. CI writes the JSON again and fails on any difference.
+- **One-to-one with the JSON, names kept:** `four_eyes` is `Approval(count=2)` (D47); `sla` and
+  `reminder` as D46 writes them; `since=first_start` not offered (D46); a condition is `when=`,
+  as the JSON writes it (D7 amended).
+- **A definition may still be written as JSON,** and is checked the same way: the builder is a
+  front door, never the only one.
 
 ### Simplifications adopted
 

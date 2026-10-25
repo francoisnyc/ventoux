@@ -1,19 +1,26 @@
 """The quickstart's refund case, run end to end: the tracer bullet's acceptance tests.
 
 They go only through the seams the quickstart shows (`run_case` and what a run reports), so they
-stay green while later layers replace everything behind them. See docs/layers/tracer-refund.md.
+stay green while later layers replace everything behind them. Since layer 14a they run the
+quickstart's Python definition, `cases/refund.py`, exactly as the quickstart writes it (curriculum,
+tracer bullet); a test that changes the definition changes its JSON. See
+docs/layers/tracer-refund.md and docs/layers/14-builder.md.
 """
 
 import copy
+import json
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from cases.refund import refund
 
 from ventoux.case.definition import CaseInvalid
 from ventoux.testing import AnswerRefused, CaseRefused, Outcome, load_definition, run_case
+from ventoux.tooling.builder.written import written
 
-REFUND = load_definition(Path(__file__).parent.parent / "examples" / "refund" / "refund.json")
+# The JSON the builder writes, for the tests that change it: the definition is data.
+REFUND = json.loads(written(refund), parse_float=Decimal)
 
 # Who has which role, as the quickstart's tests say it: the test plays the Ventoux API, which
 # states each person's roles with their answer (brief, D22).
@@ -23,7 +30,7 @@ PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
 def test_an_undeclared_outcome_is_refused() -> None:
     with pytest.raises(AnswerRefused, match="aprove"):
         run_case(
-            REFUND,
+            refund,
             file={"order_id": "ord-1", "amount": 40},
             answers=[("review", "aprove", "ana")],
             people=PEOPLE,
@@ -32,7 +39,7 @@ def test_an_undeclared_outcome_is_refused() -> None:
 
 def test_small_refund_needs_no_team_lead() -> None:
     run = run_case(
-        REFUND,
+        refund,
         file={"order_id": "ord-1", "amount": 40},
         answers=[("review", "approve", "ana", {"approved_amount": 40})],
         people=PEOPLE,
@@ -43,7 +50,7 @@ def test_small_refund_needs_no_team_lead() -> None:
 
 def test_large_refund_waits_for_a_team_lead() -> None:
     run = run_case(
-        REFUND,
+        refund,
         file={"order_id": "ord-2", "amount": 250},
         answers=[("review", "approve", "ana", {"approved_amount": 250})],
         people=PEOPLE,
@@ -61,7 +68,7 @@ def decline(inputs: dict[str, object]) -> dict[str, object]:
 def test_a_declined_refund_asks_support_to_call_the_customer() -> None:
     # A declined refund never closes the case with nobody told (layer 10d, brief, D37).
     run = run_case(
-        REFUND,
+        refund,
         file={"order_id": "ord-1", "amount": 40},
         answers=[("review", "approve", "ana", {"approved_amount": 40})],
         people=PEOPLE,
@@ -74,7 +81,7 @@ def test_a_declined_refund_asks_support_to_call_the_customer() -> None:
 
 def test_rejected_review_closes_without_paying() -> None:
     run = run_case(
-        REFUND,
+        refund,
         file={"order_id": "ord-3", "amount": 250},
         answers=[("review", "reject", "ana")],
         people=PEOPLE,
@@ -89,7 +96,7 @@ def test_the_reviewer_cannot_approve_the_payment() -> None:
         AnswerRefused, match="sam set approved_amount, which pay uses, so cannot approve it"
     ):
         run_case(
-            REFUND,
+            refund,
             file={"order_id": "ord-4", "amount": 250},
             answers=[
                 ("review", "approve", "sam", {"approved_amount": 250}),
@@ -101,7 +108,7 @@ def test_the_reviewer_cannot_approve_the_payment() -> None:
 
 def test_a_team_lead_who_did_not_review_approves_and_the_refund_is_paid() -> None:
     run = run_case(
-        REFUND,
+        refund,
         file={"order_id": "ord-5", "amount": 250},
         answers=[
             ("review", "approve", "ana", {"approved_amount": 250}),
@@ -117,7 +124,7 @@ def test_approving_needs_the_approval_role() -> None:
     # Ana didn't review this one, but she isn't a team lead.
     with pytest.raises(AnswerRefused, match="support-lead"):
         run_case(
-            REFUND,
+            refund,
             file={"order_id": "ord-6", "amount": 250},
             answers=[
                 ("review", "approve", "sam", {"approved_amount": 250}),
@@ -131,7 +138,7 @@ def test_answering_a_task_needs_its_role() -> None:
     # Eve has no role on refunds, so she can't review one.
     with pytest.raises(AnswerRefused, match="support"):
         run_case(
-            REFUND,
+            refund,
             file={"order_id": "ord-7", "amount": 40},
             answers=[("review", "approve", "eve", {"approved_amount": 40})],
             people=PEOPLE,
@@ -188,7 +195,7 @@ def test_an_input_that_does_not_fit_is_refused_before_the_refund() -> None:
     # layer 8 the case file is checked against its fields' types when the case opens, earlier.
     with pytest.raises(CaseRefused, match="order_id is a reference to orders, and the opening"):
         run_case(
-            REFUND,
+            refund,
             file={"order_id": 1001, "amount": 40},  # a number: payments.refund@2 takes a text
             answers=[("review", "approve", "ana", {"approved_amount": 40})],
             people=PEOPLE,
@@ -200,7 +207,7 @@ def test_a_misspelled_approval_is_refused_never_read_as_not_approved() -> None:
     # question 13). An approval's answers are checked like a task's (brief, D23).
     with pytest.raises(AnswerRefused, match="pay's approval offers approve or reject"):
         run_case(
-            REFUND,
+            refund,
             file={"order_id": "ord-9", "amount": 250},
             answers=[
                 ("review", "approve", "ana", {"approved_amount": 250}),
@@ -214,7 +221,7 @@ def test_a_rejected_approval_closes_the_case_without_paying() -> None:
     # Found in the tracer review: a rejection left the case waiting for approval forever. A
     # rejection is an outcome: the step doesn't run, and the case closes (brief, D23).
     run = run_case(
-        REFUND,
+        refund,
         file={"order_id": "ord-10", "amount": 250},
         answers=[
             ("review", "approve", "ana", {"approved_amount": 250}),
@@ -231,7 +238,7 @@ def test_a_person_spelled_another_way_is_refused() -> None:
     # "Sam" is not "sam": the reviewer can't approve under another spelling (brief, D22).
     with pytest.raises(AnswerRefused, match="'Sam' is not written as a person's identifier"):
         run_case(
-            REFUND,
+            refund,
             file={"order_id": "ord-11", "amount": 250},
             answers=[
                 ("review", "approve", "sam", {"approved_amount": 250}),
@@ -239,3 +246,12 @@ def test_a_person_spelled_another_way_is_refused() -> None:
             ],
             people={**PEOPLE, "Sam": ["support", "support-lead"]},
         )
+
+
+def test_the_quickstarts_python_file_is_the_one_its_tests_run() -> None:
+    # The quickstart's section 2, word for word, is `examples/quickstart/cases/refund.py`: the
+    # docs can't drift from what runs.
+    root = Path(__file__).parent.parent
+    guide = (root / "docs" / "QUICKSTART.md").read_text()
+    block = guide.split("Create `cases/refund.py`:\n\n```python\n")[1].split("```")[0]
+    assert block == (root / "examples" / "quickstart" / "cases" / "refund.py").read_text()

@@ -1,0 +1,123 @@
+{
+  "case": "refund",
+  "display": {
+    "title": "Customer refund"
+  },
+  "fields": {
+    "order_id": {
+      "type": "reference",
+      "system": "orders",
+      "display": {
+        "title": "Order"
+      }
+    },
+    "amount": {
+      "type": "number",
+      "display": {
+        "title": "Amount requested"
+      }
+    },
+    "approved_amount": {
+      "type": "number",
+      "display": {
+        "title": "Amount approved"
+      }
+    }
+  },
+  "steps": {
+    "review": {
+      "kind": "task",
+      "display": {
+        "title": "Review the refund request"
+      },
+      "roles": [
+        "support"
+      ],
+      "outcomes": {
+        "approve": {
+          "display": {
+            "title": "Approve the refund"
+          },
+          "sets": [
+            "approved_amount"
+          ]
+        },
+        "reject": {
+          "display": {
+            "title": "Reject the refund"
+          }
+        }
+      }
+    },
+    "pay": {
+      "kind": "activity",
+      "display": {
+        "title": "Refund the customer"
+      },
+      "activity": "payments.refund@2",
+      "inputs": {
+        "order_id": {
+          "var": "order_id"
+        },
+        "amount": {
+          "var": "approved_amount"
+        }
+      },
+      "when": {
+        "==": [
+          {
+            "var": "review.outcome"
+          },
+          "approve"
+        ]
+      },
+      "approval": {
+        "when": {
+          ">": [
+            {
+              "var": "approved_amount"
+            },
+            100
+          ]
+        },
+        "roles": [
+          "support-lead"
+        ],
+        "display": {
+          "reason": "Refunds over 100 need a team lead"
+        }
+      }
+    },
+    "call_customer": {
+      "kind": "task",
+      "display": {
+        "title": "Call the customer about the declined refund"
+      },
+      "roles": [
+        "support"
+      ],
+      "requires": [
+        "pay"
+      ],
+      "when": {
+        "==": [
+          {
+            "var": "pay.outcome"
+          },
+          "declined"
+        ]
+      },
+      "outcomes": {
+        "called": {
+          "display": {
+            "title": "Customer called"
+          }
+        }
+      }
+    }
+  },
+  "sequence": [
+    "review",
+    "pay"
+  ]
+}
