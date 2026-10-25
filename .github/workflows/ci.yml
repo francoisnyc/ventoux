@@ -31,6 +31,11 @@ jobs:
       - run: uv run ruff check
       - run: uv run mypy
       - run: uv run pytest
+      # The committed JSON is what the builder files write, byte for byte (layer 14d, brief D1):
+      # every package generated again and compared, nothing written. Against the configured
+      # catalog; then the same in the quickstart's own project.
+      - run: uv run ventoux check --unchanged
+      - run: cd examples/quickstart && uv run --project ../.. ventoux check --unchanged
 
   # What merging a pull request changes, in its job summary (layer 13e): for each package, a
   # release, a wording revision or nothing, then the diff; and each contract changed in place.

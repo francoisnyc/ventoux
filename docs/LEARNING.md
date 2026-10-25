@@ -72,7 +72,14 @@ and record the key points. A question is closed once you can explain the answer 
   - **The point:** code is the developer's front door, JSON is the one thing everything checks,
     diffs and runs. The two kinds of AI follow from it: at design time an assistant writes builder
     code reviewed like any code; at runtime a model only writes JSON.
-- Status: open, until both cases come back from memory, each with its reason.
+- Retrieval (layer 14d warm-up, 2026-10-25): first "should the developer resync with the
+  JSON?" (the developer's direction: edit the Python, run `ventoux check`, commit both, and CI's
+  `--unchanged`, 14d, proves the JSON is still the code's); after one nudge towards the AI's half,
+  "code only means running the draft, so the AI writes JSON". Both cases, each with its reason,
+  in one line. Still missing: the path from the model's JSON draft to the code the developer
+  edits (a reviewed pull request, written as builder code by a developer; then `ventoux check`
+  regenerates, and `--unchanged` checks).
+- Status: open, nearly closed: next time, the path from the draft to the code, unprompted.
 
 ## 2. Design principles
 

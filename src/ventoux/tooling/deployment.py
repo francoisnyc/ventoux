@@ -36,6 +36,10 @@ class Configuration:
     catalog: str | None = None  # `module:NAME`, the deployment's catalog
     cases: str = "cases"  # where `ventoux check` finds the builder files
     packages: str = "packages"  # where it writes the packages
+    # Packages written by hand, as JSON, with no builder file: checked, never compared. Named,
+    # since stale output of a removed case looks the same on disk (brief, D58).
+    by_hand: tuple[str, ...] = ()
+    releases: str | None = None  # where `ventoux release` keeps its records (brief, D59)
 
 
 def configuration(start: Path) -> Configuration:
@@ -56,16 +60,23 @@ def read(path: Path) -> Configuration:
         raise Unconfigured(f"{path} isn't TOML: {error}") from None
     said = data.get("tool", {}).get("ventoux", {})
     for key in said:
-        if key not in ("catalog", "cases", "packages"):
+        if key not in ("catalog", "cases", "packages", "releases", "by_hand"):
             raise Unconfigured(f"{path}: [tool.ventoux] has no setting {key}")
     for key, value in said.items():
-        if not isinstance(value, str):
+        if key == "by_hand":
+            if not isinstance(value, list) or not all(isinstance(n, str) for n in value):
+                raise Unconfigured(
+                    f'{path}: [tool.ventoux] by_hand is a list of package names, such as ["legacy"]'
+                )
+        elif not isinstance(value, str):
             raise Unconfigured(f'{path}: [tool.ventoux] {key} is a text, such as "cases"')
     return Configuration(
         root=path.parent,
         catalog=said.get("catalog"),
         cases=said.get("cases", "cases"),
         packages=said.get("packages", "packages"),
+        releases=said.get("releases"),
+        by_hand=tuple(said.get("by_hand", ())),
     )
 
 

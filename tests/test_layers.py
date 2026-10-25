@@ -7,6 +7,7 @@ time, and in a plain test. See docs/layers/00-repository.md.
 import ast
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -269,6 +270,21 @@ def test_importing_ventoux_brings_no_temporal() -> None:
         check=True,
     )
     assert loaded.stdout.strip() == "False"
+
+
+def test_the_re_export_gives_the_builders_own_class_whatever_the_package_attribute_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Temporal's workflow sandbox imports the builder afresh for every run and hangs its copy on
+    # the shared `ventoux.tooling` package, as its `builder` attribute. `from ventoux import Case`
+    # must still give the class `ventoux check` looks for: the module by name, never the attribute
+    # (found by the whole test suite, layer 14d).
+    import ventoux
+    import ventoux.tooling
+    from ventoux.tooling.builder.case import Case
+
+    monkeypatch.setattr(ventoux.tooling, "builder", types.ModuleType("a sandbox's copy"))
+    assert ventoux.Case is Case
 
 
 def test_the_engines_processes_never_load_the_builder() -> None:

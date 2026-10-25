@@ -39,7 +39,16 @@ from ventoux.case.story import Story, StoryInvalid, parse_story
 from ventoux.core.catalog import Catalog
 from ventoux.core.hash_check import check_hashes
 from ventoux.core.promise import promise_of
-from ventoux.tooling.check import CheckRefused, built, check, shown, write
+from ventoux.tooling.check import (
+    Checked,
+    CheckRefused,
+    built,
+    by_hand_checked,
+    check,
+    differences,
+    shown,
+    write,
+)
 from ventoux.tooling.deployment import (
     Configuration,
     Unconfigured,
@@ -77,6 +86,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     checking.add_argument(
         "files", type=Path, nargs="*", help="builder files, your own code (else the cases folder)"
     )
+    checking.add_argument(
+        "--unchanged",
+        action="store_true",
+        help="write nothing: fail if any package differs from its committed files (for CI)",
+    )
     simulating = commands.add_parser(
         "simulate", help="play a story on the in-memory engine, and check what it expects"
     )
@@ -85,7 +99,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "release", help="release a package whose behaviour changed, or record its new wording"
     )
     releasing.add_argument("package", type=Path, help="the package's folder")
-    releasing.add_argument("--releases", type=Path, required=True, help="where records are kept")
+    releasing.add_argument(
+        "--releases", type=Path, help="where records are kept (else pyproject.toml's releases)"
+    )
     releasing.add_argument("--commit", required=True, help="the commit CI releases from")
     diffing = commands.add_parser("diff", help="what changed between two versions of a package")
     diffing.add_argument("old", type=Path, help="the package's folder before")
@@ -99,7 +115,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     noting.add_argument("package", help="the package: refund")
     noting.add_argument("release", type=int, help="its release number")
     noting.add_argument("--wording", type=int, default=1, help="one of its wording revisions")
-    noting.add_argument("--releases", type=Path, required=True, help="where records are kept")
+    noting.add_argument(
+        "--releases", type=Path, help="where records are kept (else pyproject.toml's releases)"
+    )
     noting.add_argument("--plain", action="store_true", help="in plain language, as Markdown")
     promising = commands.add_parser(
         "promises", help="each contract's promise, as the contract hash reads it"
@@ -157,9 +175,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(refused, file=sys.stderr)
         return CANT_READ
     if arguments.command == "check":
-        return check_files(arguments.files, found, catalog)
+        return check_files(arguments.files, found, catalog, arguments.unchanged)
+    if arguments.command in ("release", "notes"):
+        # Where the deployment keeps its records: the flag, or the configuration; neither is
+        # refused, never a default folder (brief, D59).
+        try:
+            releases = releases_folder(arguments.releases, found)
+        except Unconfigured as refused:
+            print(refused, file=sys.stderr)
+            return CANT_READ
     if arguments.command == "release":
-        return release_package(arguments.package, arguments.releases, arguments.commit, catalog)
+        return release_package(arguments.package, releases, arguments.commit, catalog)
     if arguments.command == "diff":
         return diff_packages(arguments.old, arguments.new, catalog, arguments.plain)
     if arguments.command == "map":
@@ -169,7 +195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.package,
             arguments.release,
             arguments.wording,
-            arguments.releases,
+            releases,
             arguments.plain,
             catalog,
         )
@@ -212,15 +238,50 @@ def environments(commands: Any) -> None:
         each.add_argument("--namespace", default="default")
 
 
-def check_files(files: Sequence[Path], found: Configuration, catalog: Catalog) -> int:
-    """Run the builder files, check every package, and write them all, or nothing (brief, D59)."""
+def releases_folder(flag: Path | None, found: Configuration) -> Path:
+    """The folder release records are kept in: `--releases`, or the configuration's `releases`,
+    relative to the project's root. The tool reads and writes that folder only; keeping it is the
+    deployment's (brief, D59)."""
+    if flag is not None:
+        return flag
+    if found.releases is None:
+        raise Unconfigured(
+            "no releases folder is named: name where the deployment keeps its records in "
+            'pyproject.toml, [tool.ventoux] releases = "releases", or with --releases DIR'
+        )
+    root = found.root if found.root is not None else Path.cwd()
+    return root / found.releases
+
+
+def check_files(
+    files: Sequence[Path], found: Configuration, catalog: Catalog, unchanged: bool = False
+) -> int:
+    """Run the builder files, check every package, and write them all, or nothing (brief, D59).
+    With `unchanged`, write nothing: compare each package with its committed files instead, and
+    fail on any difference (brief, D1)."""
     root = found.root if found.root is not None else Path.cwd()
     paths = [path.resolve() for path in files] or sorted((root / found.cases).glob("*.py"))
     try:
-        checked = [check(case, catalog) for case in built(paths, root)]
+        cases = built(paths, root)
+        for case in cases:
+            if case.name in found.by_hand:
+                raise CheckRefused(
+                    f"{case.name} is listed in by_hand, and "
+                    f"{shown(case.where[''].rpartition(':')[0])} defines it: one or the other"
+                )
+        checked = [check(case, catalog) for case in cases]
     except CheckRefused as refused:
         print(f"{refused}\nNothing was written.", file=sys.stderr)
         return CANT_READ
+    packages = root / found.packages
+    # A folder no builder case defines: written by hand, if listed; else it may be stale output.
+    others = [
+        folder
+        for folder in (sorted(packages.glob("*/")) if packages.is_dir() else [])
+        if folder.is_dir() and folder.name not in {each.name for each in checked}
+    ]
+    if unchanged:
+        checked += [by_hand_checked(f, catalog) for f in others if f.name in found.by_hand]
     for each in checked:
         for problem in each.problems:
             print(problem)
@@ -231,14 +292,53 @@ def check_files(files: Sequence[Path], found: Configuration, catalog: Catalog) -
             print(f"✗ {each.name} is refused: {errors} error{'s' if errors > 1 else ''}.")
         print("Nothing was written.")
         return FAILS
-    packages = root / found.packages
+    if unchanged:
+        stale = [f for f in others if f.name not in found.by_hand]
+        return compared(checked, packages, stale)
     write(checked, packages)
     for each in checked:
         print(f"✓ {each.name} is valid ({each.steps} steps): {shown(packages / each.name)}/")
-    written = {each.name for each in checked}
-    for folder in sorted(packages.glob("*/")) if packages.is_dir() else []:
-        if folder.is_dir() and folder.name not in written:
-            print(f"{shown(folder)}: no builder file defines this package; left as it is")
+    for folder in others:
+        if folder.name in found.by_hand:
+            print(f"{shown(folder)}: written by hand; left as it is")
+        else:
+            print(f"{shown(folder)}: {STALE}; left as it is")
+    return HOLDS
+
+
+# A package folder neither a builder case defines nor `by_hand` lists (brief, D58).
+STALE = (
+    "no builder file defines it and by_hand doesn't list it: stale output of a removed case, or a "
+    "hand-written package not yet listed"
+)
+
+
+def compared(checked: Sequence[Checked], packages: Path, stale: Sequence[Path]) -> int:
+    """Say each file of each package that isn't the committed one, and fail if any (brief, D1).
+    A package written by hand (no files to compare) is said checked; a `stale` folder is refused."""
+    failed = bool(stale)
+    for folder in stale:
+        print(f"{shown(folder)}: {STALE}")
+    for each in checked:
+        if not each.files:
+            print(
+                f"✓ {each.name} is valid ({each.steps} steps): written by hand, checked, not compared"
+            )
+            continue
+        found = differences(each, packages)
+        for difference in found:
+            print(difference)
+        if found:
+            failed = True
+            count = len(found)
+            print(f"✗ {each.name}: {count} file{'s differ' if count > 1 else ' differs'}.")
+        else:
+            print(
+                f"✓ {each.name} is unchanged: {shown(packages / each.name)}/ is what {each.source} writes"
+            )
+    if failed:
+        print("Run `ventoux check` and commit what it writes.")
+        return FAILS
     return HOLDS
 
 

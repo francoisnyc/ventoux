@@ -146,3 +146,30 @@ def test_an_unknown_setting_is_refused(
     monkeypatch.chdir(a_project(tmp_path, configuration))
     assert main(["map", "packages/refund"]) == 2
     assert "[tool.ventoux] has no setting package" in capsys.readouterr().err
+
+
+# --- Where a deployment keeps its release records (layer 14d, choice 46) ----------------------
+
+
+def test_release_and_notes_take_the_configured_releases_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    configuration = '[tool.ventoux]\ncatalog = "ventoux.testing:CATALOG"\nreleases = "records"\n'
+    monkeypatch.chdir(a_project(tmp_path, configuration))
+    assert main(["release", "packages/refund", "--commit", "abc1234"]) == 0
+    assert (tmp_path / "records" / "refund" / "1.json").is_file()
+    assert main(["notes", "refund", "1"]) == 0
+    assert "refund" in capsys.readouterr().out
+
+
+def test_no_releases_folder_named_is_refused_never_a_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(a_project(tmp_path, '[tool.ventoux]\ncatalog = "ventoux.testing:CATALOG"\n'))
+    assert main(["release", "packages/refund", "--commit", "abc1234"]) == 2
+    said = capsys.readouterr().err
+    assert "no releases folder is named" in said
+    assert '[tool.ventoux] releases = "releases"' in said
+    assert "--releases" in said
+    assert not (tmp_path / "releases").exists()
+    assert main(["release", "packages/refund", "--commit", "abc1234", "--releases", "r"]) == 0

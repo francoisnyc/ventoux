@@ -20,8 +20,11 @@ The folder holds exactly the plans the case names: a plan a step names that is m
 step names, the same plan twice, or any other file is refused, and nothing is released.
 
 A **release** is an immutable, numbered version of a package. Nobody numbers it by hand: on merge,
-run `ventoux release` on each package, where your records are kept (CI doesn't run it yet: where a
-deployment keeps its records comes with `ventoux check`, layer 14). It compares the package with
+run `ventoux release` on each package, where your records are kept: a folder the deployment names
+in `pyproject.toml` (`[tool.ventoux] releases = "releases"`) or with `--releases`, with neither
+named refused. The tool reads and writes that folder only; keeping it, as a checkout of a records
+repository or a mounted volume, is the deployment's job, and this repository's CI doesn't run it
+(its token can't write). It compares the package with
 its latest release and does one of three things:
 
 - **the behaviour changed:** a new release, the next number, and its record;

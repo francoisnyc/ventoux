@@ -116,6 +116,11 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   for approving. Analysts propose changes in plain words; an AI drafts them as a pull request; the
   analyst approves the meaning (the plain-language diff), a developer approves the code. There is no
   visual editor; a read-only case map with comments is the compromise.
+- **Amended 2026-10-25, in layer 14d** (`docs/layers/14-builder.md`, choices 40 to 47; the text
+  above stands, this adds to it): "CI fails if the committed JSON differs from what the code
+  generates" is built: `ventoux check --unchanged` runs the builder files, generates every package
+  again and compares each file with the committed one byte for byte, writing nothing; a file that
+  differs, is missing or is no longer written fails, named with its first differing line.
 
 ### D2. One model from structured workflows to case management
 
@@ -2391,6 +2396,11 @@ D20 and D47, whose text is kept.*
   rule's actions a `Then`, a plan's targets names, and `package(case)` gives a case and the plans
   its steps name. The builder refuses only what keeps it from writing the JSON as given; what the
   engine refuses stays the engine's to refuse.
+- **Amended 2026-10-25, in layer 14d** (the text above stands; this adds to it): `--unchanged` is
+  the check CI runs. A package written by hand (JSON, the other front door) is listed in the
+  configuration, `[tool.ventoux] by_hand`, and is checked but never compared; a package folder
+  neither a builder case defines nor `by_hand` lists is refused, since stale output of a removed
+  case and a hand-written package look the same on disk.
 
 ### D59. `ventoux check` and the deployment's catalog
 
@@ -2419,6 +2429,10 @@ D48, D50, D55, D56 and D58, whose text is kept.*
 - **Untrusted data keeping a step from starting is a warning** (`KEPT_FROM_STARTING`, D48): on
   an automatic step whose own condition reads a value that may be untrusted, unless the step
   reaches a milestone the case closes on. It names the field and its source, never a value.
+- **Amended 2026-10-25, in layer 14d** (the text above stands; this adds to it): a deployment names
+  where its release records are kept, `[tool.ventoux] releases`, which `ventoux release` and
+  `ventoux notes` read when `--releases` isn't given; neither named is refused. The tool reads and
+  writes a folder only; keeping it is the deployment's. This answers 13e's choice 76.
 
 ### Simplifications adopted
 
