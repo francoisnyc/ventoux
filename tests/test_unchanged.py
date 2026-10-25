@@ -254,7 +254,10 @@ def test_a_committed_file_with_other_line_endings_differs(
     before = snapshot(tmp_path)
     assert main(["check", "--unchanged"]) == 1
     said = capsys.readouterr().out
-    assert "packages/refund/case.json differs from what cases/refund.py writes, first at line 1:" in said
+    assert (
+        "packages/refund/case.json differs from what cases/refund.py writes, first at line 1:"
+        in said
+    )
     assert "the committed line ends with \\r\\n" in said
     assert snapshot(tmp_path) == before
     attributes = (ROOT / ".gitattributes").read_text().splitlines()
