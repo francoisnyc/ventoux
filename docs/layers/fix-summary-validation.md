@@ -4,7 +4,9 @@ A fix, not a layer: no warm-up, and nothing new to build. Found in layer 13's wa
 stop 2 (learning question 41, "Found in the walk-through, not fixed"), and left for its own pull
 request.
 
-Status: choices put, 2026-10-25, each with a recommendation; waiting for answers by number.
+Status: choices put, 2026-10-25, each with a recommendation. Answered "1 to 8, all as recommended",
+the same day. The dated lines on D55 and on 13e's choice 67, and the releases guide's sentence,
+written before building.
 
 ## The bug
 
@@ -127,3 +129,18 @@ Answer by number.
      #53, so this line lands once #53 is merged, or in #53 if it isn't yet).
 
    *Recommended.*
+
+## Seams the tests use
+
+The ones 13e's tests already use, nothing new: `summarize(base, head, packages, catalog,
+recorded, before)` and what its `Summary` says (`outcomes`, `code`, `text`, `failures`), and the
+`ventoux summary` command for the guide's example. `checked` is called, never tested again here.
+
+## Slices, in order
+
+1. The head with two errors fails the step, its line saying so (choices 2 and 3), negative first.
+2. An unchanged package the head's catalog refuses fails it too (choice 1).
+3. A changed package's warnings are shown after its diff; an unchanged one's aren't (choice 4).
+4. A base that fails validation says nothing (choice 1).
+5. An issue's message is shown as written (choice 6).
+6. The guide's example, made again from the command (choice 8).

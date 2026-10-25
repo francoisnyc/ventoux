@@ -571,7 +571,10 @@ Every contract matches `contracts.lock.json`.
 The command prints the whole summary to the step's log and appends it to the summary file
 (`$GITHUB_STEP_SUMMARY` in CI). A looser change fails nothing: it is yours to judge. The step
 fails, saying why, when something can't be read or is refused: a checkout, a package, the base's
-promises, a comparison the diff can't make, or a contract changed in place. It is never read as
+promises, a comparison the diff can't make, or a contract changed in place. Every package in the
+head is checked as `ventoux release` checks it, changed or not: one it would refuse fails the step,
+its line saying it can't be released as it is, and its errors said as release says them. What
+release only warns about fails nothing; it is shown after the diff of a package that changes. It is never read as
 "nothing changed". A summary past GitHub's 1 MiB keeps one line per package and says the whole text
 is in the log.
 
