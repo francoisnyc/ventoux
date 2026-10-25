@@ -62,15 +62,16 @@ before the fix replays, since no command moved.
 
 ## Checked
 
-Two loops of 50 runs of the four tests (the two that failed, the sibling that read the case's
-status in the same window, and the new one), each loop with the full suite running beside it
-in another process, the fix in place: 49 then 46 runs green, and **no run failed on what the
-tests assert**. The 5 failed runs all read `RuntimeError: Failed starting test server: …
-did not start within 5s`: Temporal's time-skipping test server (a Java process) didn't start
-within the 5 seconds the SDK's core allows, under two suites at once on a 16-core i9 at load
-average 5; `start_time_skipping` takes no startup timeout. The run's tests never ran, so they
-neither passed nor failed. Not this fix's: alone or in one full run, the server starts in well
-under a second (layer 6). The same doubled load also timed out two unrelated tests once each
+Three loops of 50 runs of the four tests (the two that failed, the sibling that read the case's
+status in the same window, and the new one), the fix in place, each loop with another pytest
+process running beside it: the full suite twice, then the suite without its Temporal tests.
+49, 46 and 48 runs green, and **no run failed on what the tests assert**, 143 of 143. The 7
+other runs all read `RuntimeError: Failed starting test server: … did not start within 5s`:
+Temporal's time-skipping test server didn't start within the 5 seconds the SDK's core allows,
+though asked alone at the same moment it started in 0.11 s (five times, load average 4.5 on 16
+cores); `start_time_skipping` takes no startup timeout. The run's tests never ran, so they
+neither passed nor failed. Not this fix's, and not the machine's load alone: left for its own
+investigation. The doubled full-suite load also timed out two unrelated tests once each
 (`test_a_continued_run_whose_digest_changed_waits_for_its_code`, 60 s;
 `test_the_registry_knows_each_releases_open_cases`), noted
 for their own fix. Each race was reproduced by a probe before the fix (above).
