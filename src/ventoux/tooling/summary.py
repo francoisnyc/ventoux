@@ -19,7 +19,6 @@ from ventoux.case.reading import ReadingRefused
 from ventoux.case.releases import Package, PackageRefused, PackageUnreadable, digest, wording
 from ventoux.core.catalog import Catalog
 from ventoux.core.hash_check import check_hashes
-from ventoux.core.validate import Issue
 from ventoux.tooling.releases import is_error, issues_of, read_package
 from ventoux.tooling.releases import said as as_release_says
 

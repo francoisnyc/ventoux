@@ -504,11 +504,15 @@ def test_a_package_release_would_refuse_fails_the_step(tmp_path: Path) -> None:
         "- **refund**: can't be released as it is: `ventoux release` refuses it (below).",
     )
     assert found.failures == (
-        "refund, in the head: steps.settle.when: EXPRESSION_INVALID: ==[0]: nosuch is not a "
-        "declared field",
-        "refund, in the head: steps.call_customer.roles: UNKNOWN_ROLE: nobody-has-this is a role "
-        "nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, "
-        "platform, privacy, support, support-lead; use one of them, or ask the platform team to "
-        "register it",
+        (
+            "refund, in the head: steps.settle.when: EXPRESSION_INVALID: ==[0]: nosuch is not a "
+            "declared field"
+        ),
+        (
+            "refund, in the head: steps.call_customer.roles: UNKNOWN_ROLE: nobody-has-this is a role "
+            "nobody registered: the roles are adjuster, claims-sensitive, fraud, operations, "
+            "platform, privacy, support, support-lead; use one of them, or ask the platform team to "
+            "register it"
+        ),
     )
     assert "### steps.settle" in found.text  # the diff is still shown
