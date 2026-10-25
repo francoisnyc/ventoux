@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.common.v1 import Payload
 from temporalio.api.failure.v1 import Failure
@@ -24,7 +25,6 @@ from temporalio.converter import (
     WorkflowSerializationContext,
 )
 from temporalio.exceptions import ApplicationError
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 
 from ventoux.case.visibility import CaseView
@@ -296,12 +296,9 @@ def on_temporal[T](
     `SensitiveCases` and a lookup that quotes what it was given."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=converter or development_converter()
-        )
         activities = {**FAKES, "orders.lookup@1": quoting}
         async with (
-            environment,
+            time_skipping(converter or development_converter()) as environment,
             case_worker(environment.client, QUEUE, SensitiveCases, DevelopmentPlans, activities),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=20)
@@ -421,9 +418,7 @@ def test_a_client_without_the_codec_is_refused() -> None:
     )
 
     async def go() -> None:
-        async with await WorkflowEnvironment.start_time_skipping(
-            data_converter=exact_only
-        ) as environment:
+        async with time_skipping(exact_only) as environment:
             refused = (
                 "^this client doesn't encrypt sensitive values: connect it with data_converter"
             )
@@ -496,9 +491,7 @@ def test_a_history_from_before_9b_replays() -> None:
     )
 
     async def go() -> WorkflowHistory:
-        async with await WorkflowEnvironment.start_time_skipping(
-            data_converter=before_9b
-        ) as environment:
+        async with time_skipping(before_9b) as environment:
             client = environment.client
             async with Worker(
                 client,
@@ -631,9 +624,7 @@ def test_the_workers_log_keeps_only_an_exceptions_type(caplog: pytest.LogCapture
     # A failed workflow task is logged as a failed activity is, on another of Temporal's loggers:
     # once a worker is made, each keeps the exception's type and drops its text (brief, D31).
     async def go() -> None:
-        async with await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
-        ) as environment:
+        async with time_skipping(development_converter()) as environment:
             case_worker(environment.client, QUEUE, SensitiveCases, DevelopmentPlans, FAKES)
 
     asyncio.run(go())

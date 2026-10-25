@@ -1977,7 +1977,9 @@ process behind.
 86. **The time-skipping test server** (`start_time_skipping`, an 84 MB binary, started by most
     Temporal tests) waits on sdk-core the same way. It has never failed in a run whose output was
     kept. *Recommended:* leave it, and say so as a known risk in the note: if it ever fails, the
-    same fix applies (its binary started by the harness).
+    same fix applies (its binary started by the harness). *2026-10-25: it failed, its port
+    taken by another pytest process's server, and is started by the harness now
+    (`docs/layers/fix-flaky-temporal.md`, "The port race").*
 
 87. **The idle thread-pool workers (optional).** `case_worker` and `plan_worker`
     (`src/ventoux/temporal/worker.py`) give each Worker a `ThreadPoolExecutor()` that Temporal's
@@ -2013,7 +2015,8 @@ process behind.
   `start_local` printed them to the terminal (`Cluster Id … is not a valid uuid`).
 - **The time-skipping test server keeps `start_time_skipping`** (choice 86): it waits on
   sdk-core's 5 s too, with an 84 MB binary, and has never failed in a run whose output was kept. A
-  known risk: if it fails, its binary is started by the harness the same way.
+  known risk: if it fails, its binary is started by the harness the same way. *2026-10-25: it did,
+  and it is: `tests/skipping_server.py` (`docs/layers/fix-flaky-temporal.md`, "The port race").*
 - **The idle thread-pool workers are a carried note** (choice 87): `case_worker` and
   `plan_worker` give each Worker a `ThreadPoolExecutor()` Temporal never shuts down; fixed in its
   own pull request, by deciding who owns the executor.

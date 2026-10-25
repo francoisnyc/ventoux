@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from skipping_server import time_skipping
 from temporalio import activity, workflow
 from temporalio.api.enums.v1 import EventType
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
@@ -216,15 +217,13 @@ def on_temporal[T](
     for a test that replays what it recorded; else fresh ones."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=converter or development_converter()
-        )
-        client = environment.client
         async with (
-            environment,
-            case_worker(client, CASES, cases, DevelopmentPlans, FAKES, forget=DevelopmentForget),
+            time_skipping(converter or development_converter()) as environment,
+            case_worker(
+                environment.client, CASES, cases, DevelopmentPlans, FAKES, forget=DevelopmentForget
+            ),
             Worker(
-                client,
+                environment.client,
                 task_queue=KYC,
                 workflows=[KycCheck],
                 activities=[read_documents, slow_read],
@@ -589,10 +588,7 @@ def test_the_guides_contract_test_runs_as_written() -> None:
     exec(example, namespace)  # noqa: S102 -- our guide, run so it can't drift from the code
 
     async def go() -> None:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
-        )
-        async with environment:
+        async with time_skipping(development_converter()) as environment:
             await namespace["test_kyc_check_keeps_its_contract"](environment)
 
     asyncio.run(go())

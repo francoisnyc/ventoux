@@ -11,9 +11,9 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
 
 from ventoux.temporal.cases import CaseReport, CaseWorkflow, answer, report, shown, start_case, view
@@ -62,11 +62,8 @@ def on_temporal[T](
     replays what it recorded; else fresh ones."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=converter or development_converter()
-        )
         async with (
-            environment,
+            time_skipping(converter or development_converter()) as environment,
             case_worker(environment.client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=20)

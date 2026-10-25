@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.enums.v1 import EventType
 from temporalio.client import (
@@ -25,7 +26,6 @@ from temporalio.client import (
     WorkflowHistory,
 )
 from temporalio.exceptions import ApplicationError
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
@@ -452,10 +452,7 @@ def test_a_continued_run_whose_digest_changed_waits_for_its_code(tmp_path: Path)
     refund_1 = released(tmp_path, proposed=True)
 
     async def scenario() -> tuple[list[str], bool, CaseReport]:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
-        )
-        async with environment:
+        async with time_skipping(development_converter()) as environment:
             client = environment.client
 
             def serving(cases: type[CaseWorkflow]) -> Worker:

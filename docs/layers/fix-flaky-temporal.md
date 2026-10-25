@@ -190,8 +190,7 @@ report polled on a one-second bound against a replay that can take two.
   `test_a_case_with_a_refresh_replays` each failed in `start_time_skipping`, the Java test server
   saying `Failed to bind to address 0.0.0.0:<port>`: the two pytest processes were given the same
   free port at the same moment. A second way two suites on one machine fail each other, in the
-  SDK's choice of port; a carried note, its own fix if it recurs (choice 86 of the cold-start fix
-  already names the time-skipping server's start as the risk).
+  SDK's choice of port: found and fixed below, "The port race".
 - The full suite on `main` merged (#59 and 14c in): 3661 pass, 1 fail, again the Java test
   server's `Failed to bind to address` (`test_an_activity_failing_in_a_stopped_plan_flags_the_case`),
   while two runs of the fixed test overlapped the suite's first minute; alone, it passes. Ruff and
@@ -207,3 +206,96 @@ promises: a test that asserted them would be the flaky test again.
 |---|---|
 | A continued run whose digest changed fails its workflow task and waits, running, never failed for good; code that gives the digest again lets it go on, and the case reports open on refund 1 | C `test_a_continued_run_whose_digest_changed_waits_for_its_code` |
 | After a switch, the next worker takes the case's task as soon as the server offers it: the workers cache nothing, so no task waits on a stopped worker's own queue | C `test_a_continued_run_whose_digest_changed_waits_for_its_code` (its third phase, bounded by `reported`) |
+
+## The port race: the test server started by the harness
+
+*Added 2026-10-25, after "The third test" above, which found it.* Running the full suite beside
+another pytest process, 3 tests of 3636 failed before they ran, in `start_time_skipping`:
+`RuntimeError: Failed starting test server: ephemeral server at 127.0.0.1:58564 did not start
+within 5s`, and from the Java test server itself, `Failed to bind to address 0.0.0.0/0.0.0.0:58564`.
+One more failed the same way in the run on `main` merged, while two runs of the fixed test
+overlapped the suite's first minute. The 7 failed starts in "Checked" above, and the one in choice
+86 of the cold start (`docs/layers/12-releases.md`), read the same first line.
+
+### The probe
+
+- **Two bare processes, 50 starts each, taking turns:** no collision. Whatever takes the port, it
+  is the suite's own traffic, not the picking itself.
+- **The binary, given a port something holds** (`temporal-test-server-sdk-python-1.34.0 PORT`,
+  the SDK's whole command line, read from `ps`): a socket bound and silent on 127.0.0.1, or
+  listening there, doesn't stop it on this Mac: it binds every address, `*:PORT`, beside them. A
+  listener on every address, as another test server is, does: within 70 ms it prints `Failed to
+  bind to address`, and then **stays up, listening on nothing**: no exit, no exit code. So the
+  SDK's start, which waits for the port to answer, waits the whole 5 s and leaves that process
+  behind; `ps` found three such servers on this machine after the day's runs.
+- **Given port 0**, the server binds an OS-given port and prints nothing: no way to learn it.
+
+### The cause
+
+Nobody can hand a port from one process to another: `start_time_skipping` picks a free port by
+binding and releasing it, then starts the server, which binds it again a moment later. Another
+process's test server, binding every address in that moment, wins, and the loser says so and sits.
+Which socket held the port in the failing runs the output can't say; the one that fits is the
+other pytest process's own test server. The SDK's start can't tell a server that failed to bind
+from one slow to answer: both are "did not start within 5s".
+
+### Decided
+
+1. **The harness starts the test server, as it starts the dev server** (choice 81 of the cold
+   start, and choice 86, which named this server as the next if it ever failed):
+   `tests/skipping_server.py`, beside `tests/dev_server.py` and sharing its folder, port, stop
+   and message helpers. It runs the SDK's binary with the SDK's one argument, the port, its
+   output to a file; waits 30 s for a client to connect and be answered; and reads the file as it
+   waits: **a port taken is seen in what the server prints, within a moment, and the server is
+   stopped and started on another port at once**, three ports at most, then the start fails
+   saying so. A server that exits fails at once, with its code and output; one that never answers
+   fails at the deadline, showing its output. The 5 s is no longer in the path.
+2. **The environment it gives is the SDK's in behaviour:** `TimeSkipping`, a `WorkflowEnvironment`
+   whose `sleep` moves the server's clock through its test service, whose `get_current_time` reads
+   it, and whose `shutdown` stops the server; and a client interceptor that lets time skip while a
+   workflow's `result` is awaited, as the SDK's does, by giving each handle `start_workflow`
+   returns a `result` that unlocks skipping first. Written against public API only
+   (`Client.test_service`, the test service's messages, `Interceptor`, `WorkflowHandle`); the
+   SDK's own classes for this are private.
+3. **What answered must be the harness's own server.** A client that got through to the port
+   before the server printed its line may have reached another process's server on it. So the
+   line is read again once the client is connected, and again when the environment is left: a
+   server that said its port was taken, however late, fails the test, saying its results weren't
+   its own. Fail closed: never a test passing on somebody else's server.
+4. **Every Temporal test goes through it:** `time_skipping(data_converter)` replaces
+   `WorkflowEnvironment.start_time_skipping(...)` in the 20 places that called it, across 13 files,
+   each `async with time_skipping(...) as environment:`. `tests/test_skipping_server.py` holds the
+   harness's own tests; the suite's are the proof that the environment behaves as the SDK's.
+5. **Set aside:** retrying `start_time_skipping` itself on a new port (5 s a collision, and a
+   collision indistinguishable from a cold start); a port range per process (two processes with
+   the same remainder collide again, and a client connection can hold a port too); port 0 (the
+   server doesn't say which it got); `psutil` or `lsof` to read the server's own sockets (a
+   dependency for a check the server's output already gives).
+6. **A pytest killed mid-run still leaves its server behind,** the harness's as the SDK's: the
+   server is stopped when the environment is left, and a process killed leaves nothing. Noted,
+   not fixed: the shell's job, or a `prctl` Linux has and this Mac doesn't.
+
+### Checked
+
+- The harness's own tests, `tests/test_skipping_server.py`: 6 pass in 6 s, the taken port costing
+  2 s (the client's bound), never the 5 s.
+- The full suite on the harness, alone: 3668 pass, 0 fail, no `Failed to bind`, no server left
+  behind. Ruff and mypy clean.
+- Beside that run, as load: `test_temporal_case_release.py`, `test_temporal_approvals.py` and the
+  harness's tests, twice: 24 pass each time, no `Failed to bind`, no missed start, in either
+  process.
+
+### Promises
+
+Each claim this section makes about behaviour, and the test that would fail if it weren't true.
+`K` is `tests/test_skipping_server.py` (new).
+
+| Promise | Test |
+|---|---|
+| The cause, reproduced with the real server: a port held by a listener on every address, the server says so and stays up; the harness starts on the next port within a moment, never the 5 s, and the environment skips time | K `test_a_port_another_server_holds_is_left_for_the_next` |
+| Every port taken, three of them: each server stopped, the start fails saying what the last printed, never a fourth | K `test_every_port_taken_fails_showing_what_the_server_said` |
+| A server that exits first fails at once, with its exit code and output | K `test_a_server_that_exits_first_fails_at_once_showing_its_output` |
+| A server that never answers fails at the deadline, showing its output, and is stopped | K `test_a_server_that_never_answers_fails_showing_its_output` |
+| The SDK's binary missing under its name after the download fails, naming what the folder holds | K `test_a_binary_the_sdk_names_otherwise_fails_naming_what_is_there` |
+| `time_skipping` gives the harness's environment, its clock moved by `sleep` | K `test_the_tests_environment_is_the_harness_s` |
+| Time skips while a result is awaited, as in the SDK's environment | every Temporal test that awaits a `result` past a timer, `tests/test_temporal.py` among them: the suite, green on the harness |

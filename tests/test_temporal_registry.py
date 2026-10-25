@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHistory
 from temporalio.exceptions import ApplicationError
@@ -128,10 +129,10 @@ def in_production[T](
     case workers, since each publishes its manifest as it starts."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
-        )
-        async with environment, registry_worker(environment.client, registry):
+        async with (
+            time_skipping(development_converter()) as environment,
+            registry_worker(environment.client, registry),
+        ):
             if create:
                 await create_environment(environment.client, "production", development)
             return await asyncio.wait_for(scenario(environment.client), timeout=20)
