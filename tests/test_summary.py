@@ -640,13 +640,15 @@ def shortened() -> Any:
 
 
 def hashes_checked(
-    tmp_path: Path, contract: Any, base_lock: dict[str, str], head_lock: dict[str, str]
+    tmp_path: Path, contracts: Any, base_lock: dict[str, str], head_lock: dict[str, str]
 ) -> Summary:
-    """The summary of trees with no package, the head's catalog holding `contract`, the base's
-    promises those of the development `orders.lookup@1`, each lockfile as given."""
+    """The summary of trees with no package, the head's catalog holding `contracts` (one, or a
+    list), the base's promise that of `orders.lookup@1` as `lookup_contract` gives it, each
+    lockfile as given."""
     before: dict[str, object] = {"orders.lookup@1": promise_of(lookup_contract())}
+    catalog = catalog_of(*(contracts if isinstance(contracts, list) else [contracts]))
     base, head = tree(tmp_path / "base"), tree(tmp_path / "head")
-    return summarize(base, head, [PACKAGES], catalog_of(contract), head_lock, before, base_lock)
+    return summarize(base, head, [PACKAGES], catalog, head_lock, before, base_lock)
 
 
 RECORDED = {"orders.lookup@1": contract_hash(lookup_contract())}  # what the base recorded
@@ -664,3 +666,61 @@ def test_a_contract_changed_with_its_hash_rewritten_fails(tmp_path: Path) -> Non
         "orders.lookup@2.\n  timeouts.start_to_close: 10 -> 5\n  contracts.lock.json rewrites "
         "the hash the base recorded: a recorded hash never changes\n```\n"
     )
+
+
+def test_a_recorded_hash_rewritten_or_dropped_alone_fails(tmp_path: Path) -> None:
+    # The contract didn't change, so it isn't said to: the lockfile did, and what to put back is
+    # said (choice 2).
+    hashed = RECORDED["orders.lookup@1"]
+    rewritten = hashes_checked(
+        tmp_path / "a", lookup_contract(), RECORDED, {"orders.lookup@1": "0"}
+    )
+    dropped = hashes_checked(tmp_path / "b", lookup_contract(), RECORDED, {})
+    assert (rewritten.code, dropped.code) == (1, 1)
+    assert (
+        "orders.lookup@1: contracts.lock.json rewrites the hash the base recorded: a recorded hash "
+        f"never changes; put back {hashed}"
+    ) in rewritten.text
+    assert (
+        "orders.lookup@1: contracts.lock.json drops the hash the base recorded: a recorded hash "
+        f"never changes; put back {hashed}"
+    ) in dropped.text
+    assert "changed without a new version" not in rewritten.text + dropped.text
+
+
+def test_the_heads_lockfile_records_what_the_base_doesnt(tmp_path: Path) -> None:
+    # A new contract is recorded in the head's lockfile, as before; one that isn't fails with the
+    # line to add (choice 3).
+    added = lookup_contract(version=2)
+    head_lock = {**RECORDED, "orders.lookup@2": contract_hash(added)}
+    recorded = hashes_checked(tmp_path / "a", [lookup_contract(), added], RECORDED, head_lock)
+    unrecorded = hashes_checked(tmp_path / "b", [lookup_contract(), added], RECORDED, RECORDED)
+    assert recorded.code == 0
+    assert unrecorded.code == 1
+    assert (
+        f'orders.lookup@2 is not recorded yet: add "orders.lookup@2": "{contract_hash(added)}".'
+    ) in unrecorded.text
+
+
+def test_a_contract_retired_from_the_catalog_is_never_an_error(tmp_path: Path) -> None:
+    # The base records it and the head's catalog no longer holds it: retired, whatever either
+    # lockfile says (choice 3).
+    other = lookup_contract(version=2)
+    base_lock = {**RECORDED, "orders.lookup@2": contract_hash(other)}
+    kept = hashes_checked(tmp_path / "a", [other], base_lock, base_lock)
+    dropped = hashes_checked(
+        tmp_path / "b", [other], base_lock, {"orders.lookup@2": contract_hash(other)}
+    )
+    assert (kept.code, dropped.code) == (0, 0)
+
+
+def test_the_bases_promise_is_read_against_the_bases_hash(tmp_path: Path) -> None:
+    # A promise given that isn't the one the base recorded would describe someone else's
+    # (choice 4; brief, D57, as amended by the base lockfile fix).
+    # The head's lockfile records the promise given, the base's another: the base's decides.
+    others = {"orders.lookup@1": contract_hash(lookup_contract(risk="high"))}
+    found = hashes_checked(tmp_path, shortened(), others, RECORDED)
+    assert (
+        "  what changed can't be said: the promise given for orders.lookup@1 isn't the one "
+        "contracts.lock.json records\n"
+    ) in found.text
