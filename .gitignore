@@ -9,6 +9,8 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+# Except the definitions the builder writes: they are committed, and what runs (layer 14a).
+!examples/quickstart/build/
 develop-eggs/
 dist/
 downloads/

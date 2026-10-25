@@ -438,6 +438,10 @@ Each starts with its negative test, seen failing for the right reason.
 - **The quickstart's project is on pytest's and mypy's paths** (`examples/quickstart`), so its
   tests import `cases.refund` as the quickstart writes it. The quickstart's import line is sorted
   as ruff sorts it (`Approval, Case, Field, Outcome`), the one change to its text.
+- **The built JSON is committed, so `.gitignore` lets it through** (`!examples/quickstart/build/`,
+  found by CI on #56): the repository's Python template ignores every `build/`, so
+  `case.json` passed locally, untracked, and was missing in CI. A team's project needs the same:
+  `ventoux init` (14c) mustn't leave `build/` ignored, or the JSON that runs is never reviewed.
 - **The built package was written once with `written`;** `ventoux check` writes it from 14c, and
   CI checks it from 14d. Until then a test holds the committed bytes to `written`.
 - **Code ahead of its test, said plainly:** the task, the activity and the approval were written
