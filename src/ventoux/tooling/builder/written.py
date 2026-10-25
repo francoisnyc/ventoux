@@ -10,6 +10,7 @@ import json
 from decimal import Decimal
 
 from ventoux.tooling.builder.case import Case
+from ventoux.tooling.builder.plan import Plan
 
 INDENT = "  "
 
@@ -18,13 +19,13 @@ class NotWritable(ValueError):
     """A value the JSON can't hold so that it reads back the same."""
 
 
-def written(case: Case) -> str:
-    """`case`'s `case.json`, as its bytes will be: what is checked, released and run."""
-    text = layout(case.definition()) + "\n"
+def written(definition: Case | Plan) -> str:
+    """A case's or a plan's JSON, as its bytes will be: what is checked, released and run."""
+    text = layout(definition.definition()) + "\n"
     # Fail closed: a text that doesn't read back to itself would be another definition once read.
     again = layout(json.loads(text, parse_float=Decimal)) + "\n"
     if again != text:
-        raise NotWritable(f"{case.name} doesn't read back as written")
+        raise NotWritable(f"{definition.name} doesn't read back as written")
     return text
 
 
@@ -68,3 +69,22 @@ def decimal(value: Decimal) -> str:
     if str(Decimal(said)) != str(value):
         raise NotWritable(f'{value} reads back as {Decimal(said)}: write Decimal("{said}")')
     return said
+
+
+def package(case: Case) -> dict[str, str]:
+    """`case`'s package, as its files will be, by path (brief, D50): `case.json`, and each plan
+    its plan steps name, under `plans/`, in the order of their references. A plan named by no step
+    is never written: a package refuses a plan nobody names."""
+    files = {"case.json": written(case)}
+    names: dict[str, str] = {}
+    for reference in sorted(case.plans):
+        plan = case.plans[reference]
+        # One file per plan name: two versions of one plan would need two files of one name.
+        if plan.name in names:
+            raise NotWritable(
+                f"{case.name} runs {names[plan.name]} and {reference}: a package holds one file "
+                f"per plan name, plans/{plan.name}.json"
+            )
+        names[plan.name] = reference
+        files[f"plans/{plan.name}.json"] = written(plan)
+    return files

@@ -1,95 +1,112 @@
-"""A case definition, built in Python: each call writes one entry of the JSON (layer 14a)
+"""A case definition, built in Python: each call writes one entry of the JSON (layer 14a, 14b)
 (brief, D58).
 
 The builder is one-to-one with the JSON: `refund.task("review", …)` writes `steps.review`, with the
 same names. It writes data and decides nothing: whether the definition holds together is
-`ventoux check`'s, against the catalog, and running it is the engine's, on the JSON.
-See docs/layers/14-builder.md and docs/QUICKSTART.md, section 2.
+`ventoux check`'s, against the catalog, and running it is the engine's, on the JSON. It refuses
+only what keeps it from writing the JSON as given (choice 25).
+See docs/layers/14-builder.md, docs/guides/builder.md and docs/QUICKSTART.md, section 2.
 """
 
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal
 
-from ventoux.tooling.builder.expressions import Expr, NumberExpr
+from ventoux.tooling.builder.common import display, field_name, given
+from ventoux.tooling.builder.entries import (
+    Approval,
+    Event,
+    Milestone,
+    Moment,
+    Outcome,
+    Payload,
+    SentBy,
+    Step,
+    Task,
+    Then,
+    Timer,
+)
+from ventoux.tooling.builder.expressions import Expr, ReferenceExpr
+from ventoux.tooling.builder.fields import Data, Field, FieldType
+from ventoux.tooling.builder.plan import Plan
 
-# A definition's JSON, as plain data: dicts, lists, texts, numbers and truth values.
-type Data = dict[str, Any]
-
-
-@dataclass(frozen=True)
-class FieldType[E: Expr[Any]]:
-    """A field's type: what the JSON declares, and the runtime expression the field reads as."""
-
-    declared: Data  # `{"type": "number"}`, written beside the field's `display`
-    reads_as: Callable[[object], E]  # `NumberExpr`: so `amount > 100` type-checks, `"x"` doesn't
-
-
-class Field:
-    """The types a field is declared with: `Field.number()`."""
-
-    @staticmethod
-    def number() -> FieldType[NumberExpr]:
-        """A number: one type, an exact decimal (brief, D20)."""
-        return FieldType({"type": "number"}, NumberExpr)
-
-
-@dataclass(frozen=True)
-class Outcome:
-    """A task's answer: what people read, and the case-file fields its form sets (brief, D9)."""
-
-    title: str
-    sets: Sequence[Expr[Any]] = ()  # fields, such as `approved`
-
-
-@dataclass(frozen=True)
-class Approval:
-    """A step's approval: who approves, when it is needed, and why (brief, D11)."""
-
-    roles: Sequence[str]  # who may approve; every approver holds one of them
-    reason: str  # what an approver reads
-    when: Expr[bool] | None = None  # None: every run needs it
-
-
-class Step:
-    """A step the builder made: its name, and its answer as a runtime value."""
-
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    @property
-    def outcome(self) -> Expr[str]:
-        """The outcome of the step's latest run: `review.outcome == "approve"`."""
-        return Expr({"var": f"{self.name}.outcome"})
+# Whether a request may forget a case (brief, D32).
+type Forgetting = Literal["allowed", "while_open", "never"]
 
 
 class Case:
     """A case definition, built one entry at a time, in the order the calls are made: steps are
-    admitted in the order written (brief, D38)."""
+    admitted, and rules on one moment act, in the order written (brief, D38)."""
 
-    def __init__(self, name: str, title: str) -> None:
+    def __init__(
+        self,
+        name: str,
+        title: str,
+        description: str | None = None,
+        stays_open: bool | None = None,
+        forgetting: Forgetting | None = None,
+    ) -> None:
         self.name = name
-        self.title = title
+        self.display = display(title, description)
         self.fields: dict[str, Data] = {}
+        self.milestones: dict[str, Data] = {}
         self.steps: dict[str, Data] = {}
         self.order: list[str] = []  # `sequence`: each step requires the one before it
+        self.rules: dict[str, Data] = {}
+        self.events: dict[str, Data] = {}
+        self.close_reasons: dict[str, Data] = {}
+        self.closing: list[str] = []  # `closes_when`: milestones that close it once all are reached
+        self.stays_open = stays_open  # True: it never closes by itself; a person closes it
+        self.forgetting = forgetting
+        self.plans: dict[str, Plan] = {}  # the plans its plan steps run, by reference
+
+    # The case file.
 
     def field[E: Expr[Any]](
-        self, name: str, kind: FieldType[E], title: str, source: str | None = None
+        self,
+        name: str,
+        kind: FieldType[E],
+        title: str,
+        description: str | None = None,
+        source: str | None = None,
+        visible_to: Sequence[str] | None = None,
+        sensitive: bool | None = None,
     ) -> E:
         """A field of the case file, `fields.<name>`, read in expressions as itself."""
-        entry: Data = {**kind.declared, "display": {"title": title}}
+        entry: Data = {**kind.declared, "display": display(title, description)}
         if source is not None:
             entry["source"] = source  # `untrusted:<label>`, never trusted (brief, D12)
+        if visible_to is not None:
+            entry["visible_to"] = list(visible_to)  # who may see it (brief, D30)
+        if sensitive is not None:
+            entry["sensitive"] = sensitive  # encrypted with the case's key (brief, D31)
         self.fields[self.new_name(name, self.fields, "field")] = entry
         return kind.reads_as({"var": name})
 
-    def reference(self, name: str, system: str, title: str) -> Expr[str]:
+    def reference(
+        self,
+        name: str,
+        system: str,
+        title: str,
+        description: str | None = None,
+        source: str | None = None,
+        visible_to: Sequence[str] | None = None,
+        sensitive: bool | None = None,
+    ) -> ReferenceExpr:
         """A reference to a record kept in `system`: its ID, never a copy (brief, D8)
-        (brief, D16)."""
-        entry: Data = {"type": "reference", "system": system, "display": {"title": title}}
-        self.fields[self.new_name(name, self.fields, "field")] = entry
-        return Expr({"var": name})
+        (brief, D16). The same as `field(name, Field.reference(system), …)`."""
+        return self.field(
+            name, Field.reference(system), title, description, source, visible_to, sensitive
+        )
+
+    def milestone(self, name: str, title: str, description: str | None = None) -> Milestone:
+        """A fact the case reaches, such as `paid`: recorded, never undone."""
+        self.milestones[self.new_name(name, self.milestones, "milestone")] = {
+            "display": display(title, description)
+        }
+        return Milestone(name)
+
+    # Steps. Every kind takes the same keywords for when it may start (`requires`, `when`,
+    # `automatic`, `proposed_by`, `repeatable`) and what it reaches, written after its own keys.
 
     def task(
         self,
@@ -97,15 +114,20 @@ class Case:
         title: str,
         roles: Sequence[str],
         outcomes: Mapping[str, Outcome],
-        requires: Sequence[Step] = (),
+        description: str | None = None,
+        requires: Sequence[Step | Milestone] = (),
         when: Expr[bool] | None = None,
-    ) -> Step:
+        automatic: bool | None = None,
+        proposed_by: Sequence[str] | None = None,
+        repeatable: bool | None = None,
+        reaches: Sequence[Milestone] | None = None,
+    ) -> Task:
         """A task for a person holding one of `roles`, answered with one of `outcomes`."""
-        entry: Data = {"kind": "task", "display": {"title": title}, "roles": list(roles)}
-        entry |= starting(requires, when)
+        entry: Data = {"kind": "task", "display": display(title, description), "roles": list(roles)}
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
         entry["outcomes"] = {key: answer(outcome) for key, outcome in outcomes.items()}
-        self.steps[self.new_name(name, self.steps, "step")] = entry
-        return Step(name)
+        self.add(name, entry)
+        return Task(name)
 
     def activity(
         self,
@@ -113,19 +135,95 @@ class Case:
         activity: str,
         title: str,
         inputs: Mapping[str, Expr[Any]] | None = None,
-        requires: Sequence[Step] = (),
+        description: str | None = None,
+        requires: Sequence[Step | Milestone] = (),
         when: Expr[bool] | None = None,
+        automatic: bool | None = None,
+        proposed_by: Sequence[str] | None = None,
+        repeatable: bool | None = None,
+        reaches: Sequence[Milestone] | None = None,
         approval: Approval | None = None,
+        max_age: Mapping[str, str] | None = None,
     ) -> Step:
         """A call to `activity` (`payments.refund@2`), a contract in the catalog, with `inputs`
         read from the case file."""
-        entry: Data = {"kind": "activity", "display": {"title": title}, "activity": activity}
-        if inputs:
-            entry["inputs"] = {key: given(value).data for key, value in inputs.items()}
-        entry |= starting(requires, when)
-        if approval is not None:
-            entry["approval"] = approved_by(approval)
-        self.steps[self.new_name(name, self.steps, "step")] = entry
+        entry: Data = {"kind": "activity", "display": display(title, description)}
+        entry["activity"] = activity
+        entry |= calling(inputs)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= guarded(approval, max_age)
+        self.add(name, entry)
+        return Step(name)
+
+    def workflow(
+        self,
+        name: str,
+        workflow: str,
+        title: str,
+        inputs: Mapping[str, Expr[Any]] | None = None,
+        description: str | None = None,
+        requires: Sequence[Step | Milestone] = (),
+        when: Expr[bool] | None = None,
+        automatic: bool | None = None,
+        proposed_by: Sequence[str] | None = None,
+        repeatable: bool | None = None,
+        reaches: Sequence[Milestone] | None = None,
+        approval: Approval | None = None,
+        max_age: Mapping[str, str] | None = None,
+    ) -> Step:
+        """An existing Temporal workflow, run as one step: its workflow contract in the catalog
+        (`kyc.check@1`), where it runs bound by the deployment (brief, D6)."""
+        entry: Data = {"kind": "workflow", "display": display(title, description)}
+        entry["workflow"] = workflow
+        entry |= calling(inputs)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= guarded(approval, max_age)
+        self.add(name, entry)
+        return Step(name)
+
+    def wait(
+        self,
+        name: str,
+        event: Event,
+        title: str,
+        description: str | None = None,
+        requires: Sequence[Step | Milestone] = (),
+        when: Expr[bool] | None = None,
+        automatic: bool | None = None,
+        proposed_by: Sequence[str] | None = None,
+        repeatable: bool | None = None,
+        reaches: Sequence[Milestone] | None = None,
+    ) -> Step:
+        """A step that waits for `event`'s next arrival (brief, D41)."""
+        entry: Data = {"kind": "wait", "display": display(title, description), "event": event.name}
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        self.add(name, entry)
+        return Step(name)
+
+    def plan_step(
+        self,
+        name: str,
+        plan: Plan,
+        title: str,
+        inputs: Mapping[str, Expr[Any]] | None = None,
+        description: str | None = None,
+        requires: Sequence[Step | Milestone] = (),
+        when: Expr[bool] | None = None,
+        automatic: bool | None = None,
+        proposed_by: Sequence[str] | None = None,
+        repeatable: bool | None = None,
+        reaches: Sequence[Milestone] | None = None,
+        max_age: Mapping[str, str] | None = None,
+    ) -> Step:
+        """`plan`, run as one step, its fields given from the case file (brief, D28). It joins
+        the case's package (brief, D50)."""
+        entry: Data = {"kind": "plan", "display": display(title, description)}
+        entry["plan"] = plan.reference
+        entry |= calling(inputs)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= guarded(None, max_age)
+        self.add(name, entry)
+        self.plans[plan.reference] = plan
         return Step(name)
 
     def sequence(self, *steps: Step) -> None:
@@ -134,6 +232,101 @@ class Case:
             # One `sequence` per case: a second would replace the first without a word.
             raise ValueError(f"{self.name} already has a sequence: give it every step once")
         self.order = [step.name for step in steps]
+
+    # Events, rules and the two patterns (brief, D41) (brief, D38) (brief, D46).
+
+    def event(
+        self,
+        name: str,
+        title: str,
+        sent_by: SentBy,
+        payload: Mapping[str, Payload] | None = None,
+        description: str | None = None,
+    ) -> Event:
+        """An event from outside: who may send it, and what it carries (brief, D41)."""
+        sender: Data = {}
+        if sent_by.system is not None:
+            sender["system"] = sent_by.system
+        if sent_by.roles is not None:
+            sender["roles"] = list(sent_by.roles)
+        entry: Data = {"display": display(title, description), "sent_by": sender}
+        if payload is not None:
+            entry["payload"] = {key: carried(value) for key, value in payload.items()}
+        self.events[self.new_name(name, self.events, "event")] = entry
+        types = {key: str(value.kind.declared["type"]) for key, value in (payload or {}).items()}
+        return Event(name, types)
+
+    def rule(
+        self,
+        name: str,
+        title: str,
+        on: Moment | Timer,
+        then: Then,
+        when: Expr[bool] | None = None,
+        description: str | None = None,
+    ) -> None:
+        """On a moment, when a condition holds, then act on the case (brief, D38)."""
+        entry: Data = {"display": display(title, description), "on": on.data}
+        if when is not None:
+            entry["when"] = given(when).data
+        entry["then"] = acting(then)
+        self.rules[self.new_name(name, self.rules, "rule")] = entry
+
+    def sla(
+        self,
+        name: str,
+        title: str,
+        step: Step,
+        within: str,
+        then: Then,
+        when: Expr[bool] | None = None,
+        description: str | None = None,
+    ) -> None:
+        """When a run of `step` isn't done within an age of its own start, act (brief, D46).
+        Measured from each run's start: `since=first_start` isn't offered."""
+        entry: Data = {"display": display(title, description)}
+        entry["sla"] = {"step": step.name, "within": within}
+        if when is not None:
+            entry["when"] = given(when).data
+        entry["then"] = acting(then)
+        self.rules[self.new_name(name, self.rules, "rule")] = entry
+
+    def reminder(
+        self,
+        name: str,
+        title: str,
+        task: Task,
+        after: Sequence[str],
+        start: Step,
+        when: Expr[bool] | None = None,
+        description: str | None = None,
+    ) -> None:
+        """While a run of `task` is open, start `start` after each age (brief, D46)."""
+        entry: Data = {"display": display(title, description)}
+        entry["reminder"] = {"task": task.name, "after": list(after), "start": start.name}
+        if when is not None:
+            entry["when"] = given(when).data
+        self.rules[self.new_name(name, self.rules, "rule")] = entry
+
+    # Closing (brief, D10).
+
+    def close_reason(
+        self, name: str, title: str, roles: Sequence[str], description: str | None = None
+    ) -> None:
+        """A reason a person holding one of `roles` may close the case with."""
+        entry: Data = {"display": display(title, description), "roles": list(roles)}
+        self.close_reasons[self.new_name(name, self.close_reasons, "close reason")] = entry
+
+    def closes_when(self, *milestones: Milestone) -> None:
+        """The case closes once all `milestones` are reached: said once."""
+        if self.closing:
+            raise ValueError(f"{self.name} already closes when {', '.join(self.closing)}")
+        self.closing = [milestone.name for milestone in milestones]
+
+    # Writing.
+
+    def add(self, name: str, entry: Data) -> None:
+        self.steps[self.new_name(name, self.steps, "step")] = entry
 
     def new_name(self, name: str, taken: Mapping[str, object], what: str) -> str:
         """`name`, refused if this case already has a `what` of that name: a second entry would
@@ -146,58 +339,107 @@ class Case:
 
     def definition(self) -> Data:
         """The case's JSON, as plain data, its keys in the order the format writes them."""
-        data: Data = {"case": self.name, "display": {"title": self.title}}
-        if self.fields:
-            data["fields"] = self.fields
-        data["steps"] = self.steps
-        if self.order:
-            data["sequence"] = self.order
+        data: Data = {"case": self.name, "display": self.display}
+        for key, value in (
+            ("fields", self.fields),
+            ("milestones", self.milestones),
+            ("steps", self.steps),
+            ("sequence", self.order),
+            ("rules", self.rules),
+            ("events", self.events),
+            ("close_reasons", self.close_reasons),
+            ("closes_when", self.closing),
+        ):
+            if value or key == "steps":
+                data[key] = value
+        if self.stays_open is not None:
+            data["stays_open"] = self.stays_open
+        if self.forgetting is not None:
+            data["forgetting"] = self.forgetting
         return data
 
 
-def starting(requires: Sequence[Step], when: Expr[bool] | None) -> Data:
-    """When a step may start: the steps it waits for, then the condition read once they are."""
+def starting(
+    requires: Sequence[Step | Milestone],
+    when: Expr[bool] | None,
+    automatic: bool | None,
+    proposed_by: Sequence[str] | None,
+    repeatable: bool | None,
+    reaches: Sequence[Milestone] | None,
+) -> Data:
+    """When a step may start, and what it reaches when it completes."""
     data: Data = {}
     if requires:
-        data["requires"] = [step.name for step in requires]
+        data["requires"] = [entry.name for entry in requires]
     if when is not None:
         data["when"] = given(when).data
+    if automatic is not None:
+        data["automatic"] = automatic  # False: it starts only when proposed
+    if proposed_by is not None:
+        data["proposed_by"] = list(proposed_by)
+    if repeatable is not None:
+        data["repeatable"] = repeatable
+    if reaches is not None:
+        data["reaches"] = [milestone.name for milestone in reaches]
+    return data
+
+
+def calling(inputs: Mapping[str, Expr[Any]] | None) -> Data:
+    """What a step gives what it calls: each input, read from the case file."""
+    if not inputs:
+        return {}
+    return {"inputs": {key: given(value).data for key, value in inputs.items()}}
+
+
+def guarded(approval: Approval | None, max_age: Mapping[str, str] | None) -> Data:
+    """A call's approval, and how old each fact it reads may be (brief, D18)."""
+    data: Data = {}
+    if approval is not None:
+        data["approval"] = approved_by(approval)
+    if max_age is not None:
+        data["max_age"] = dict(max_age)
     return data
 
 
 def answer(outcome: Outcome) -> Data:
-    """An outcome's JSON: what people read, and the fields its form sets."""
-    data: Data = {"display": {"title": outcome.title}}
+    """An outcome's JSON: what people read, the fields its form sets, the milestones it reaches."""
+    data: Data = {"display": display(outcome.title, outcome.description)}
     if outcome.sets:
         data["sets"] = [field_name(field) for field in outcome.sets]
+    if outcome.reaches:
+        data["reaches"] = [milestone.name for milestone in outcome.reaches]
     return data
 
 
 def approved_by(approval: Approval) -> Data:
-    """An approval's JSON: when, who, and the reason people read."""
+    """An approval's JSON: when, who, how many, and the reason people read."""
     data: Data = {}
     if approval.when is not None:
         data["when"] = given(approval.when).data
     data["roles"] = list(approval.roles)
+    if approval.count is not None:
+        data["count"] = approval.count  # how many distinct people (brief, D47)
     data["display"] = {"reason": approval.reason}
     return data
 
 
-def given(value: object) -> Expr[Any]:
-    """`value`, where a runtime expression is required: refused if it is a Python value, which
-    the type checker refuses first (brief, D58)."""
-    if not isinstance(value, Expr):
-        raise TypeError(
-            f"{value!r} is a Python value where a runtime expression is required: give a field, "
-            "an expression, or literal(…) for a constant"
-        )
-    return value
+def acting(then: Then) -> Data:
+    """A rule's `then`: fields set, milestones reached, steps started and stopped."""
+    data: Data = {}
+    if then.set:
+        data["set"] = {field_name(field): given(value).data for field, value in then.set}
+    if then.reach:
+        data["reach"] = [milestone.name for milestone in then.reach]
+    if then.start:
+        data["start"] = [step.name for step in then.start]
+    if then.stop:
+        data["stop"] = [step.name for step in then.stop]
+    return data
 
 
-def field_name(field: object) -> str:
-    """The name of `field`, a case-file field: anything else can't be set by a form."""
-    data = field.data if isinstance(field, Expr) else None
-    if isinstance(data, dict) and set(data) == {"var"} and "." not in data["var"]:
-        name: str = data["var"]
-        return name
-    raise TypeError(f"{field!r} is not a field of the case file: a form sets fields only")
+def carried(value: Payload) -> Data:
+    """A payload field's JSON: its type, what people read, and a declared untrusted source."""
+    data: Data = {**value.kind.declared, "display": display(value.title, value.description)}
+    if value.source is not None:
+        data["source"] = value.source
+    return data
