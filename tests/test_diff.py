@@ -958,6 +958,9 @@ def test_the_guides_example_runs_as_written(tmp_path: Path, capsys: Any, monkeyp
     assert len(runs) == 4  # the fourth, the same refunds in plain words (13c)
     catalogs = (LOOSE, CATALOG, CATALOG, CATALOG)
     for (arguments, printed), catalog in zip(runs, catalogs, strict=True):
-        monkeypatch.setattr("ventoux.tooling.cli.CATALOG", catalog)
+        # The deployment's catalog for this run: the guide's own, as its project would name it.
+        monkeypatch.setattr(
+            "ventoux.tooling.cli.deployment_catalog", lambda *_, chosen=catalog: chosen
+        )
         assert main(arguments) == 0
         assert capsys.readouterr().out == printed

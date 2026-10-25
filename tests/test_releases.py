@@ -519,6 +519,10 @@ def guide_runs() -> list[tuple[list[str], str]]:
 
 def test_the_guides_example_runs_as_written(tmp_path: Path, capsys: Any, monkeypatch: Any) -> None:
     shutil.copytree(REFUND, tmp_path / "examples" / "packages" / "refund")
+    # A project names its catalog in its configuration (brief, D59); here, the development one.
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.ventoux]\ncatalog = "ventoux.testing:CATALOG"\n'
+    )
     monkeypatch.chdir(tmp_path)  # the guide's paths are relative, from the repository's root
     folder = tmp_path / "examples" / "packages" / "refund"
     # Between its runs the guide rewords a title, then gives the plan's approval 72 hours.

@@ -81,13 +81,16 @@ def summarize(
     before: Mapping[str, object],
     base_recorded: Mapping[str, str],
     commits: tuple[str, str] | None = None,
+    catalogs: tuple[str | None, str | None] | None = None,
 ) -> Summary:
     """What merging `head` onto `base` does to each package under `packages`, in either tree,
     each changed one's diff in the plain form (brief, D56), then the contracts: the hash check
     against `base_recorded`, the base's lockfile, and `recorded`, the head's (brief, D5, as amended
     by the base lockfile fix), with `before`, the base commit's promises (brief, D57). Anything it
     can't read or compare fails the step, said last; never read as nothing changed (fail
-    closed)."""
+    closed). `catalogs` are the base's and the head's catalog names: the summary runs the head's
+    own code, so its catalog is the head's, and another name than the base's is said
+    (brief, D59)."""
     for tree, which in ((base, "base"), (head, "head")):
         if not tree.is_dir():
             return cant_be_read(f"the {which} can't be read: {tree} isn't a folder")
@@ -127,7 +130,7 @@ def summarize(
             diffs.append(warned(name, warnings))
     problems = check_hashes(catalog, recorded, before, base_recorded)
     ending = REFUSED if failures or problems else COMPARED
-    said = said_as(outcomes, diffs, problems, failures, commits)
+    said = said_as(outcomes, diffs, problems, failures, commits, renamed(catalogs))
     return Summary(
         tuple(outcomes), ending, said, contracts_line(problems), tuple(failures), commits
     )
@@ -152,6 +155,7 @@ def said_as(
     problems: Sequence[str],
     failures: Sequence[str],
     commits: tuple[str, str] | None = None,
+    catalog_line: str | None = None,
 ) -> str:
     """The whole summary, in Markdown: the commits compared, the packages, their diffs, the
     contracts, then why the step fails, if it does."""
@@ -165,10 +169,25 @@ def said_as(
         lines += block([line for problem in problems for line in problem.splitlines()])
     else:
         lines.append(MATCHED)
+    if catalog_line is not None:
+        lines += ["", catalog_line]
     if failures:
         lines += ["", "## Why the step fails", ""]
         lines += [f"- {text(failure)}" for failure in failures]
     return "\n".join(lines) + "\n"
+
+
+def renamed(catalogs: tuple[str | None, str | None] | None) -> str | None:
+    """The line saying the head names another catalog than the base, or None. It fails nothing:
+    a reviewer judges it, as with a looser change. The names are text a pull request writes, so
+    they are fenced, never rendered (brief, D56)."""
+    if catalogs is None or catalogs[0] == catalogs[1]:
+        return None
+    base, head = (code(name) if name is not None else "none" for name in catalogs)
+    return (
+        f"The head names another catalog than the base: {head}, where the base names {base}. "
+        "Everything here was checked against the head's."
+    )
 
 
 def heading(commits: tuple[str, str] | None) -> list[str]:
