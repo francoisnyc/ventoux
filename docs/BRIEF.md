@@ -1076,6 +1076,8 @@ be erased on request), has size limits, and a second copy of business records go
   reached`. It is still flagged, never hidden (D28): a payment retried after the case's end was
   reached may still need a person's look. A history line and no command, so replay decides the
   same.
+- **Amended 2026-10-25, by D59** (the text above stands; this adds to it): `ventoux check` is
+  built, and maps each issue to the line of the builder call that wrote its entry.
 
 ### D35. Case validation reads each step against what it calls; the runtime refuses the same
 
@@ -1847,6 +1849,8 @@ D30, D38, D40, D42 and D46, whose text is kept.*
   to D29, to come), each in its own pull request after the checkpoint. What layer 12 decides
   (open cases replaying differently after an engine change, change requests, bindings changing
   under open cases) is listed in the checkpoint's note, not decided here.
+- **Amended 2026-10-25, by D59** (the text above stands; this adds to it): the warning is built,
+  `KEPT_FROM_STARTING`, said by `ventoux check`, `ventoux release` and CI's summary.
 
 ### D49. A plan's path is never chosen by untrusted data
 
@@ -1936,6 +1940,9 @@ answers design question 16, whose text is kept.*
   semantic diff, those paths are the release notes" ends there. The paths still name no value;
   the notes show what the definition writes (a literal input included), never a value a case
   holds (D55).
+- **Amended 2026-10-25, by D59** (the text above stands; this changes one thing): "against the
+  development catalog until `ventoux check` brings the deployment's" ends: every command takes the
+  deployment's catalog, named in configuration, and refuses to run with none named.
 
 ### D51. A case runs the release it opened on, and says its engine version
 
@@ -2261,6 +2268,9 @@ and D50, whose text is kept.*
   line says it can't be released as it is, its errors said as release says them, its diff still
   shown. A warning fails nothing and is shown after the diff of a package merging changes; an
   unchanged package's warnings aren't the pull request's, and aren't shown.
+- **Amended 2026-10-25, by D59** (the text above stands; this changes one thing): "against the
+  development catalog until `ventoux check` brings the deployment's" ends: every command takes the
+  deployment's catalog, named in configuration, and refuses to run with none named.
 
 ### D56. The case map and the "will never do" sheet: readings of a package, and only proven nevers
 
@@ -2298,6 +2308,9 @@ D55, whose text is kept.*
   line breaks shown as `\n`, so a value never starts a line; a path in a code span fenced by more
   backticks than any run in it. Text a definition writes is shown, never rendered: no HTML, link
   or emphasis of its own. The developer forms and the records stay plain text.
+- **Amended 2026-10-25, by D59** (the text above stands; this changes one thing): "against the
+  development catalog until `ventoux check` brings the deployment's" ends: every command takes the
+  deployment's catalog, named in configuration, and refuses to run with none named.
 
 ### D57. Release notes in the record, and a contract's readable diff
 
@@ -2378,6 +2391,34 @@ D20 and D47, whose text is kept.*
   rule's actions a `Then`, a plan's targets names, and `package(case)` gives a case and the plans
   its steps name. The builder refuses only what keeps it from writing the JSON as given; what the
   engine refuses stays the engine's to refuse.
+
+### D59. `ventoux check` and the deployment's catalog
+
+*Decided 2026-10-25, in layer 14c (`docs/layers/14-builder.md`, choices 29 to 39). Adds to D34,
+D48, D50, D55, D56 and D58, whose text is kept.*
+
+- **`ventoux check` runs the builder files** named on its command line, or every `*.py` in the
+  configured `cases` folder, in its own process, the project's root on the path. A builder file
+  is the team's own code, reviewed like any code: never a file named by a definition, a story or
+  a package, and never model output (D58). A file that raises is refused, at its file and line,
+  and nothing is written.
+- **One check:** each case at a file's top level is a package, checked with the issues
+  `ventoux release` refuses on, against the deployment's catalog, never a second set of rules.
+  Each problem is said at the line of the builder call that wrote the entry it is about, with
+  the path and code validation gives it; a path no call wrote is said at the case's own line.
+- **All or nothing:** only if every package passes is anything written, each into
+  `packages/<case>/` (configured), holding exactly its package's files. Never `build/`: the JSON
+  that runs is committed and reviewed.
+- **The deployment's catalog is the platform team's code, named in configuration:**
+  `[tool.ventoux] catalog = "module:NAME"` in the project's `pyproject.toml`, or `--catalog`,
+  which wins; imported by that name, never by a name read from a definition. No catalog named is
+  refused; the development catalog (`ventoux.testing:CATALOG`) comes only when named.
+- **Every command that reads contracts or roles takes it:** `check`, `release`, `summary`,
+  `diff`, `map`, `notes`, `simulate`, `promises` and `hashes`. CI's summary runs the head's own
+  code, so its catalog is the head's; it says when the head names another catalog than the base.
+- **Untrusted data keeping a step from starting is a warning** (`KEPT_FROM_STARTING`, D48): on
+  an automatic step whose own condition reads a value that may be untrusted, unless the step
+  reaches a milestone the case closes on. It names the field and its source, never a value.
 
 ### Simplifications adopted
 

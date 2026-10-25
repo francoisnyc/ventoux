@@ -27,7 +27,11 @@ it (`100`) is a literal, written into the JSON. Where the format needs an expres
 parameter is typed `Expr`, so mypy refuses a plain value. `if approved > 100:` in your file raises:
 use `when=`. `and`, `or` and `not` are `and_`, `or_` and `not_`; the other operators are
 `if_`, `in_`, `cat`, `string`, `exists`, `count` and `sum_`. `==` compares the same kind: a number
-with a number, a text with a text, an outcome with its name, a reference with a reference.
+with a number, a text with a text, an outcome with its name, a reference with a reference. A
+mismatched `==`, `review.outcome == 5`, is reported where you use it, not where you write it: Python
+falls back to the other side's own `==`, so mypy reads the comparison as a plain `bool`, and says
+`incompatible type "bool"; expected "Expr[bool] | None"` at the `when=` it is given to. When the
+file runs, the comparison itself raises.
 
 **What the builder can't know** is written as you declare it: a step's output,
 `kyc.output("risk_score", Field.number())`, is checked against the contract by `ventoux check`.
@@ -548,3 +552,41 @@ refund.task(
 
 Its JSON is committed beside it, where git keeps it (`packages/`, never `build/`, which most
 repositories ignore), and a test regenerates it and compares it byte for byte.
+
+## Checking a builder file
+
+```sh
+uv run ventoux check
+```
+
+`ventoux check` runs every builder file in `cases/` (or the files you name), checks each case it
+finds, with the plans its plan steps run, against your deployment's catalog, and says each problem
+at the line of the builder call that wrote it, with the path and the code the check gives:
+
+```text
+cases/refund.py:19: steps.pay.inputs.amount INPUT_POLICY: payments.refund@2 takes amount only from …
+✗ refund is refused: 1 error.
+Nothing was written.
+```
+
+The check is the one `ventoux release` refuses on, never a second set of rules. Only if every case
+passes are the packages written, each into `packages/<case>/` holding exactly its files, which you
+commit. A builder file that raises is refused at the line inside it where it raised, and nothing is
+written. Warnings, such as a step untrusted data may keep from starting (`KEPT_FROM_STARTING`), are
+printed and refuse nothing.
+
+The catalog is your deployment's, named in `pyproject.toml`:
+
+```toml
+[tool.ventoux]
+catalog = "acme_platform.catalog:CATALOG"
+cases = "cases"
+packages = "packages"
+```
+
+or with `--catalog`, which wins. It is the platform team's code, imported by that name; with none
+named, every command that reads contracts or roles refuses to run. The development catalog is
+`ventoux.testing:CATALOG`, used only when named.
+
+A builder file is your team's own code, reviewed like any code: `ventoux check` never runs a file a
+definition names, and never what a model wrote. A model's draft is JSON, checked as JSON.

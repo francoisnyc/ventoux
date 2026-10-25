@@ -7,7 +7,10 @@ choice 6.
 from pathlib import Path
 from typing import Any
 
-from ventoux.testing import load_definition, run_case, send
+from ventoux.case.definition import parse_case
+from ventoux.case.validate import validate_case
+from ventoux.core.validate import Issue
+from ventoux.testing import CATALOG, load_definition, run_case, send
 
 WITNESS = Path(__file__).parent.parent / "examples" / "witnesses"
 
@@ -101,3 +104,44 @@ def test_a_rule_that_only_sets_names_the_field_it_kept_from_being_set() -> None:
         "say_goodbye#1 on event cancelled: its condition reads cancelled.note, from "
         "untrusted:customer, and is false: cancel_note not set"
     )
+
+
+# --- Layer 14c: said before any case runs, as a warning -----------------------------------------
+
+
+def warnings_of(definition: dict[str, Any]) -> list[Issue]:
+    """The `KEPT_FROM_STARTING` warnings validation gives `definition`, against the development
+    catalog."""
+    issues = validate_case(parse_case(definition), CATALOG)
+    return [issue for issue in issues if issue.code == "KEPT_FROM_STARTING"]
+
+
+def test_a_step_untrusted_data_may_keep_from_starting_is_warned_about() -> None:
+    # Before any case runs, as the history says it once one closes (layer 14c, choice 37).
+    [warning] = warnings_of(checked())
+    assert warning.path == "steps.check.when"
+    assert warning.severity == "warning"
+    assert "note (untrusted:customer)" in warning.message
+    assert "the case may close without it" in warning.message
+    assert "skip" not in warning.message  # a definition's literal is shown, never a case's value
+
+
+def test_a_trusted_condition_is_no_warning() -> None:
+    assert warnings_of(checked(source=None)) == []
+
+
+def test_a_step_the_case_cant_close_without_is_no_warning() -> None:
+    # It reaches a milestone the case closes on: false keeps it from starting, and the case waits.
+    definition = checked()
+    definition["milestones"] = {"checked": {"display": {"title": "Checked"}}}
+    definition["steps"]["check"]["reaches"] = ["checked"]
+    definition["closes_when"] = ["checked"]
+    assert warnings_of(definition) == []
+
+
+def test_a_step_that_doesnt_start_by_itself_is_no_warning() -> None:
+    # A step that waits to be proposed is a person's to start: its condition keeps nothing alone.
+    definition = checked()
+    definition["steps"]["check"]["automatic"] = False
+    definition["steps"]["check"]["proposed_by"] = ["support"]
+    assert warnings_of(definition) == []

@@ -50,3 +50,10 @@ mypy_path = "examples/quickstart"
 testpaths = ["tests"]
 # The quickstart's project, so its tests import `cases.refund` as the quickstart writes it.
 pythonpath = ["examples/quickstart"]
+
+# The deployment's catalog, its builder files and its packages (layer 14c) (brief, D59). This
+# repository's deployment is the development one, named, never guessed.
+[tool.ventoux]
+catalog = "ventoux.testing:CATALOG"
+cases = "examples/cases"
+packages = "examples/packages"

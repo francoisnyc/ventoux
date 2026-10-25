@@ -27,7 +27,7 @@ from ventoux.case.rules import said as moment_said
 from ventoux.case.rules import unknown_moment
 from ventoux.case.runtime import listed
 from ventoux.case.types import expressions_of
-from ventoux.case.writers import OPENER, untrusted_of
+from ventoux.case.writers import OPENER, case_sources, untrusted_of
 from ventoux.case.writers import always as always_refused
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.expressions.model import (
@@ -561,4 +561,39 @@ def elsewhere_issues(case: CaseDefinition, refused: Collection[str]) -> list[Iss
                     "warning",
                 )
             )
+    return found
+
+
+def kept_from_starting_issues(
+    case: CaseDefinition, contracts: Mapping[str, Contract], missing: Collection[str]
+) -> list[Issue]:
+    """A step that starts by itself whose own condition reads a value that may be untrusted:
+    false keeps it from starting, and the case may close without it. Allowed (brief, D48), so a
+    warning, never an error; the history says it too when it happens. Not said for a step the case
+    can't close without (it reaches a `closes_when` milestone), nor one a person proposes. Names the
+    field and its source, never a value (brief, D30)."""
+    sources = case_sources(case, contracts, OPENER)
+    closing = set(case.closes_when)
+    found: list[Issue] = []
+    for name, step in case.steps.items():
+        if step.when is None or not step.automatic or name in missing:
+            continue
+        if closing & set(step.reaches):
+            continue
+        read = {field: sources.get(field, frozenset()) for field in fields_read(step.when)}
+        untrusted = untrusted_of(read)
+        if not untrusted:
+            continue
+        reads = "; ".join(f"{field} ({', '.join(sorted(s))})" for field, s in untrusted.items())
+        found.append(
+            Issue(
+                f"steps.{name}.when",
+                "KEPT_FROM_STARTING",
+                f"{name} starts by itself only when its condition holds, and its condition reads "
+                f"{reads}: untrusted data may keep {name} from starting, and the case may close "
+                f"without it. If {name} must happen, let it reach a closes_when milestone only it "
+                "reaches, or let a person decide in a task",
+                "warning",
+            )
+        )
     return found

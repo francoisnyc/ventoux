@@ -830,6 +830,302 @@ is `tests/test_builder_coverage.py`, `F` is `tests/test_builder_format.py`, `P` 
   the schema (14e).
 - Rewriting the single example definitions in Python (choice 24).
 
+## 14c. `ventoux check` and the deployment's catalog
+
+Status: choices drafted 2026-10-25, from `main` at `8a766d8` (14b merged as #57). The warm-up
+answered and recorded; choices 29 to 39 answered "all as recommended", the same day. D59, its
+dated lines and the quickstart's sections 3 and 6 written before building.
+
+### Warm-up: learning question 33, why plans can be checked and code can't
+
+> Why is this impossible to check on ordinary workflow code? ("This": what the validator proves
+> before anything runs, such as "every path to `pay` passes an approval".)
+
+Open since layer 3. Its follow-up (why `reach` ends on a cycle, and why slice 8's loop is unsafe)
+came back in parts at 5, 10a and 11f. It is 14c's question: `ventoux check` *runs* Python, the
+builder files, and then checks what they wrote, never the Python itself. Answer the main question
+from memory first.
+
+Answered 2026-10-25: "the code can loop, so no one can list all paths", after asking whether it
+is impossible (in general, yes). Half of it: a plan loops too and is still checked, since its
+moves are written down; code's paths depend on values computed as it runs. The other half, that a
+plan declares its meaning (an approval, a risk) where code doesn't, didn't come back. Discussed
+and recorded; the question stays open.
+
+### What this part is for
+
+14a and 14b write the JSON from Python, through a test or by hand. 14c is the command a developer
+runs, as the quickstart's section 3 shows:
+
+```sh
+uv run ventoux check
+```
+
+```text
+✓ refund is valid (3 steps): packages/refund/
+```
+
+It runs the builder files, checks each package as `ventoux release` would against the
+deployment's catalog, says each problem at the line of Python that made it, and writes the package
+folders only if every one passes:
+
+```text
+cases/refund.py:24: steps.pay.inputs.amount INPUT_POLICY: amount comes from customer_amount, …
+✗ refund is refused: 1 error. Nothing was written.
+```
+
+### What the code does today
+
+- `tooling/releases.py`: `issues_of(package, catalog)`, every issue of a package (each plan's,
+  layer 3, then the case's, layer 10). `ventoux release` refuses on its errors (`checked`), and the
+  CI summary uses the same list since #54.
+- `tooling/builder/` (14a, 14b): `package(case)` gives a package's files by path; `written` writes
+  them. No builder call records where it was made.
+- `tooling/cli.py`: every command that reads contracts or roles imports `ventoux.testing.CATALOG`,
+  the development catalog: `simulate`, `release`, `diff`, `map`, `notes`, `summary`, `promises`,
+  `hashes`.
+- `case/closing.py`: the D48 history line, `say_kept_from_starting`, said when a case closes. There
+  is no warning for it before a case runs.
+
+### Choices for 14c
+
+29. **How `ventoux check` runs a builder file:**
+    - In the same process, with `runpy.run_path` (the standard library), the project's root on
+      `sys.path` for the run, so a builder file may import the team's own modules
+      (`from cases.plans import settle`).
+    - The files are named on the command line (`ventoux check cases/refund.py`), or, with none
+      named, every `*.py` in `[tool.ventoux] cases` (default `cases`).
+    - A builder file is the team's own code, reviewed in a pull request like any code. It is never
+      a file named by a definition, a story or a package, and never model output (brief, D58).
+      The command's help and the guide say so.
+    - **A file that raises** is refused: exit 2, with the file and line inside it where it raised,
+      the exception's type and message (`cases/refund.py:31: BuildTimeDecision: approved_amount >
+      100 is decided by each case…`), and nothing written for any package.
+
+    *Recommended.* Set aside: a subprocess per file. It isolates nothing the team doesn't already
+    trust, and it would make the line mapping go through text.
+
+30. **Which packages:** every `Case` at a file's top level, found by type, each one package with
+    the plans its plan steps name (14b's `package`). Two cases of one name, in one file or two, are
+    refused, naming both files: a package is known by its case's name (brief, D50). *Recommended.*
+
+31. **Each problem at the line that made it** (the negative test):
+    - Each builder call records where it was made: the first frame outside
+      `ventoux.tooling.builder`, its file and line. A multi-line call gives its first line. The
+      record is kept by the path the call wrote: `Case(...)` the case itself, `refund.activity("pay",
+      …)` `steps.pay`, `plan.wait("confirm", …)` `plans.settle-claim@1.states.confirm`.
+    - Each issue, as `issues_of` gives it (its path, code, severity and message), is printed at the
+      line of the longest recorded path it starts with:
+      `cases/refund.py:24: steps.pay.inputs.amount INPUT_POLICY: …`.
+    - A path no call recorded gets the `Case(...)` line, never dropped.
+    - A shape refused when the package is read (`parse_case`'s `CaseInvalid`, one line per path)
+      is mapped the same way.
+
+    *Recommended.*
+
+32. **One check, `issues_of`:** the very list `ventoux release` refuses on and the CI summary
+    reports, against the deployment's catalog, never a second set of rules. An error refuses the
+    package; warnings are printed and let it through (brief, D34). *Recommended.*
+
+33. **The package folders:**
+    - Written by 14b's `package`, into `[tool.ventoux] packages` (default `packages`), each in
+      `<packages>/<case>/`.
+    - **Never `build/`** (14a's lesson, from the review of #56): most repositories' `.gitignore`
+      hides it, and the JSON that runs would never reach review.
+    - **All or nothing:** every file is run and every package checked first; only if every package
+      passes is anything written. A refused package, or a file that raises, writes nothing at all.
+    - **A folder holds exactly its package:** the package's `case.json` and `plans/*.json`; a
+      `.json` file there the package no longer writes (a plan no step names now) is removed, since
+      `ventoux release` refuses a package folder holding any other file (brief, D50). Folders of
+      cases no builder file defines are left as they are, and said.
+
+    *Recommended.*
+
+34. **The deployment's catalog, named in configuration:**
+    - `[tool.ventoux] catalog = "acme_platform.catalog:CATALOG"` in the project's
+      `pyproject.toml`, found from the current folder upwards, read with `tomllib` (the standard
+      library); or `--catalog acme_platform.catalog:CATALOG` on any command that takes it, which
+      wins.
+    - **Loaded as the platform team's code:** `importlib.import_module` on the name before the
+      colon, with the project's root on `sys.path`; the attribute must be a `Catalog`, else
+      refused. This name is written by the platform team in its own configuration, never read
+      from a definition, a story or a package. CLAUDE.md forbids `importlib` on definitions, and a
+      comment where it is called says why this isn't one.
+    - **No catalog named is refused** (the other negative test): exit 2, saying both ways to name
+      one. It is never read as the development catalog, which comes only when asked for by name:
+      `ventoux.testing:CATALOG`. This repository's `pyproject.toml` names it, so its own commands
+      and CI keep working; tests that run a command from a temporary folder name it with
+      `--catalog`.
+
+    *Recommended.*
+
+35. **Which commands take it, each by the same configuration or `--catalog`:**
+    - `check`, `release` and `summary`: they check packages (`issues_of`);
+    - `diff`, `map` and `notes`: they read contracts and roles to judge and render;
+    - `simulate`: contracts and roles, the story's fakes still the only implementations (choice
+      38);
+    - `promises` and `hashes`: the contracts the lockfile records are the deployment's.
+
+    The environment commands read manifests and the registry, never the catalog, and don't
+    change.
+
+    **The CI summary's caveat (from #55):** the summary runs the head's own code, so its catalog
+    is the head's, configuration included: a pull request can change the catalog's code, and its
+    name. #55's hash check against the base's lockfile already catches a contract changed in place.
+    The name is said too: the summary reads the base's `pyproject.toml` as text (`tomllib`,
+    nothing imported) and, when the head names another catalog than the base, says so under
+    "Contracts", in the summary's own words, failing nothing (a reviewer judges it, as with a
+    looser change). *Recommended.*
+
+36. **Exit codes, as `ventoux release`'s:** 0 when every package is valid (warnings printed), 1
+    when one is refused, 2 when something can't be read or run: a file missing or raising, no
+    catalog named, a catalog that isn't one, a configuration that isn't TOML. *Recommended.*
+
+37. **The D48 warning, `KEPT_FROM_STARTING`** (choice 7c, carried): in case validation's warnings,
+    so `check`, `release` and the summary all say it. A step that starts by itself (`automatic`),
+    whose own `when` reads a value that may be untrusted, as validation's flow already works out
+    sources: false keeps it from starting, and the case may close without it. Not said when the
+    step reaches a `closes_when` milestone, since the case can't close without it then. The message
+    names the step, the field and its source, never a value, and says how to guard a step that
+    must happen. A warning refuses nothing (brief, D48). Set aside, for now: a rule's untrusted
+    condition that starts a step. A rule's start is a proposal admission decides (brief, D39), and
+    saying it needs the same analysis on rules; it can follow if you want it. *Recommended.*
+
+38. **`ventoux simulate` against a team's catalog** (choice 7b, carried): it takes the catalog like
+    the others; the story's fakes stay the only implementations that run, so nothing real is
+    reached (brief, D45). A test simulates against a catalog of its own, and a contract the
+    development catalog doesn't hold. *Recommended.*
+
+39. **The guides and the brief:**
+    - The quickstart's section 3, written first: `ventoux check`'s output, `packages/refund/` and
+      the catalog's line in `pyproject.toml`, with a dated line where it changes what it said
+      (`build/refund.json`).
+    - The builder guide gains "Checking a builder file", and the sentence #57's review asked for:
+      a mismatched `==` is reported where it is used, as `incompatible type "bool"; expected
+      "Expr[bool] | None"`.
+    - The releases guide's and the cases guide's "until `ventoux check` brings the deployment's"
+      sentences, and "the command arrives with the builder", updated.
+    - **D59, "`ventoux check` and the deployment's catalog"**, a new decision; dated lines on D34
+      (`ventoux check` built), D48 (the warning built), D50, D55 and D56 (the deployment's catalog
+      in place of the development one).
+
+    *Recommended.*
+
+### Slices, in order (14c)
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **No catalog named is refused** (choices 34 and 36); a catalog by name, from the configuration
+   or `--catalog`; one that isn't a `Catalog` refused.
+1. **`ventoux check` runs the builder files** (choices 29 and 30): a file that raises is refused at
+   its line, nothing written.
+2. **Each problem at its line** (choices 31 and 32): `INPUT_POLICY` at `refund.activity("pay", …)`'s
+   line, with the path and code `issues_of` gives.
+3. **The package folders** (choice 33): all or nothing, exactly the package's files.
+4. **Every command takes the catalog** (choice 35), and the summary says a catalog renamed.
+5. **The D48 warning** (choice 37).
+6. **`simulate` against a team's catalog, the guides, D59, the Promises** (choices 38 and 39).
+
+### Decided while building (14c)
+
+- **"Nothing was written." is a line of its own,** after every refused package's line, not
+  appended to the one line the quickstart's section 6 first showed: with several packages, it
+  follows them all. The quickstart, written before building, was corrected to the output, and a
+  test compares the two.
+- **A builder call's line is its first line,** checked before choosing: Python gives a multi-line
+  call's caller frame the line the call starts on, so `refund.activity(` is the line said.
+- **The line is found by walking the stack to the first frame outside the builder's own
+  modules** (`called_from`), so `refund.reference(...)`, which calls `field`, records the
+  developer's line, never the builder's.
+- **A case's shape refusal needs no mapping of its own:** the package reader's refusal names the
+  path on each line, and the same mapping places it. `shape_problems` exists for a plan's shape,
+  whose refusal lines don't say which plan; found when breaking it left every test passing, and a
+  test for a plan's refused state was added (see the Promises), now failing when it is broken.
+- **`simulate` against a catalog that lacks a contract doesn't refuse the story:** the step fails
+  as a case's would, and waits for a person. My first test assumed a refusal; it now checks what
+  each catalog does to the same story.
+- **Existing tests that run a guide's commands from a temporary folder now name their catalog,**
+  as a project would: the releases guide's and the summary guide's in a `pyproject.toml`, the diff
+  guide's by replacing the catalog lookup. Two summary tests' bases name the same catalog as the
+  head, as `main` will once this merges; without it the summary rightly says "the base names none".
+- **CI's summary on this pull request says the head names `ventoux.testing:CATALOG` where the base
+  names none:** true, since `main` names no catalog before this merges. It fails nothing.
+- **The quickstart is its own project:** `examples/quickstart/pyproject.toml` names the
+  development catalog, as `ventoux init` would write it. Without it, `ventoux check` from that
+  folder found the repository's configuration and would have written into `examples/packages/`.
+  Run in each project, `ventoux check` writes exactly the committed packages: nothing changed.
+- **This repository's `pyproject.toml` names its catalog, cases and packages:**
+  `ventoux.testing:CATALOG`, `examples/cases`, `examples/packages`.
+- **The warning reuses validation's flow** (`case_sources`, `untrusted_of`, with the opener a
+  system, as the other flow checks do): no new analysis.
+- **Code ahead of its tests, said plainly:** `check.py` was written whole in slice 1, so slices 2
+  and 3's tests passed on their first run, except the quickstart's output, which failed on the line
+  above. Every guard was broken once afterwards: 14 mutations, each failing its test (one only
+  after the plan-shape test was added).
+- **A mutation left a stale `.pyc` behind, and a test then failed on correct code.** Breaking
+  `if shape:` into `if False:` keeps the file's size, and the backup copy and the mutated write
+  fell in the same second: Python's bytecode cache, keyed on the source's size and its modification
+  time in whole seconds, kept the mutated bytecode once the original was restored. `inspect`
+  showed the right source while the mutated function ran. Found when the plan-shape test failed
+  alone, with `shape_problems` returning the mapped problem and `check` ignoring it. The cache is
+  cleared after each restore now, and the full run below is on a clean cache.
+- **A Temporal test failed once in a full run,**
+  `test_a_stopped_cancellable_workflow_is_cancelled_on_temporal`, as in 14a's first run: two
+  history lines in the other order. It passed alone three times and in the next full run; it is
+  outside this layer, and a separate task is suggested for it.
+
+- **From the tutor review of #58: a builder file that exits hid every other file's problems.**
+  `cases_in` caught `Exception`, and `SystemExit` isn't one: `sys.exit(0)` in one builder file
+  ended the command with exit 0 having checked nothing, so another file's `UNKNOWN_ROLE` went
+  unsaid, and 14d's `--unchanged` in CI would have been a green step that checked nothing. Now
+  `SystemExit` is caught with the other errors and refused at its line (`cases/b.py:3:
+  SystemExit: 0`), nothing written; only `KeyboardInterrupt` stops the command. The review's run
+  is the test. Optional, taken: an unknown `[tool.ventoux]` setting is refused (it already was;
+  the test was added and the guard broken once), since a misspelled `packages` would write to the
+  default folder unnoticed.
+
+### Promises (14c)
+
+Each claim this part makes about behaviour, and the test that would fail if it weren't true. `K`
+is `tests/test_check.py`, `Dc` is `tests/test_deployment_catalog.py` (both new), `S` is
+`tests/test_summary.py`, `W` is `tests/test_kept_from_starting.py`. Checked against the tests,
+2026-10-25, and again after the tutor review of #58: every test named here exists, every test in `K` and `Dc` and every test 14c added to
+`S` and `W` is named here, and every guard was broken once to see its test fail.
+
+| Promise | Test |
+|---|---|
+| No catalog named is refused, never read as the development one | Dc `test_no_catalog_named_is_refused_never_read_as_the_development_one` |
+| A catalog named in the configuration is used | Dc `test_a_catalog_named_in_the_configuration_is_used` |
+| `--catalog` names it, and wins | Dc `test_the_flag_names_the_catalog_and_wins` |
+| A name that is no catalog, a module that can't be imported, a name without `:NAME`, are refused | Dc `test_a_name_that_is_no_catalog_is_refused` |
+| A configuration that isn't TOML is refused | Dc `test_a_configuration_that_isnt_toml_is_refused` |
+| An unknown `[tool.ventoux]` setting is refused | Dc `test_an_unknown_setting_is_refused` |
+| A story simulates against the team's own catalog, only its fakes running | Dc `test_a_story_simulates_against_the_teams_own_catalog` |
+| Which catalog a story runs against changes what it shows | Dc `test_the_same_story_against_the_development_catalog_fails_its_step` |
+| A builder file that raises is refused at its line, and nothing is written | K `test_a_builder_file_that_raises_is_refused_at_its_line_and_nothing_is_written` |
+| A builder file that exits is refused at its line, hiding no other file's problem; nothing is written | K `test_a_builder_file_that_exits_is_refused_at_its_line_and_hides_nothing` |
+| Each problem is said at the line of the call that made it, with validation's path and code (the negative test) | K `test_each_problem_is_said_at_the_line_of_the_call_that_made_it` |
+| The quickstart's refusal reads as the quickstart shows it | K `test_the_quickstarts_refusal_reads_as_the_quickstart_shows_it` |
+| A shape the reader refuses is said at its line | K `test_a_shape_the_reader_refuses_is_said_at_its_line` |
+| A plan's shape the reader refuses is said at the plan's call | K `test_a_plans_shape_the_reader_refuses_is_said_at_the_plans_call` |
+| A problem no call wrote is said at the case's line | K `test_a_problem_no_call_wrote_is_said_at_the_cases_line` |
+| Nothing is written unless every package passes | K `test_nothing_is_written_unless_every_package_passes` |
+| Every package is written into `packages/`, as the builder writes it; the quickstart's section 3 reads as printed | K `test_every_package_is_written_where_git_keeps_it_as_the_builder_writes_it` |
+| A folder holds exactly its package; a folder no file defines is left, and said | K `test_a_folder_holds_exactly_its_package` |
+| Two cases of one name are refused, naming both files | K `test_two_cases_of_one_name_are_refused_naming_both_files` |
+| A catalog named otherwise than the base's is said, failing nothing | S `test_a_catalog_named_otherwise_than_the_bases_is_said_failing_nothing` |
+| The base's catalog is read from its configuration as text, nothing imported | S `test_the_command_reads_the_bases_catalog_from_its_configuration` |
+| A step untrusted data may keep from starting is warned about, naming the field and its source, never a value | W `test_a_step_untrusted_data_may_keep_from_starting_is_warned_about` |
+| A trusted condition is no warning | W `test_a_trusted_condition_is_no_warning` |
+| A step the case can't close without is no warning | W `test_a_step_the_case_cant_close_without_is_no_warning` |
+| A step a person proposes is no warning | W `test_a_step_that_doesnt_start_by_itself_is_no_warning` |
+
+### Not in 14c
+
+- `ventoux check --unchanged` in CI, and where release records live (14d).
+- The JSON Schema (14e).
+- A rule's untrusted condition that starts a step, as a warning (choice 37, set aside).
+
 ## Not in layer 14
 
 - Turning a JSON definition into builder code. A model's kept draft (D1) is written as builder

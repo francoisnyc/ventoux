@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from ventoux.tooling.builder.common import display, field_name, given
+from ventoux.tooling.builder.common import called_from, display, field_name, given
 from ventoux.tooling.builder.expressions import Expr
 from ventoux.tooling.builder.fields import Data, FieldType
 
@@ -38,6 +38,8 @@ class Plan:
         self.fields: dict[str, Data] = {}
         self.states: dict[str, Data] = {}
         self.start: str | None = None  # `initial`: the state it starts in
+        # Where each entry was written, by its path in the plan (`states.pay`), `""` the plan.
+        self.where: dict[str, str] = {"": called_from()}
 
     @property
     def reference(self) -> str:
@@ -50,6 +52,7 @@ class Plan:
         if source is not None:
             entry["source"] = source  # `untrusted:<label>`, never trusted (brief, D12)
         self.fields[self.new_name(name, self.fields, "field")] = entry
+        self.where[f"fields.{name}"] = called_from()
         return kind.reads_as({"var": name})
 
     def activity(
@@ -109,9 +112,11 @@ class Plan:
         if self.start is not None:
             raise ValueError(f"{self.name} already starts in {self.start}: say it once")
         self.start = state
+        self.where["initial"] = called_from()
 
     def add(self, name: str, state: Data) -> str:
         self.states[self.new_name(name, self.states, "state")] = state
+        self.where[f"states.{name}"] = called_from()
         return name
 
     def new_name(self, name: str, taken: Mapping[str, object], what: str) -> str:

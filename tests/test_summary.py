@@ -284,6 +284,8 @@ def test_the_command_logs_the_whole_summary_and_appends_it(
     before = tmp_path / "base-promises.json"
     before.write_text(capsys.readouterr().out)
     base = with_example(tmp_path / "base")
+    # The base names the catalog the head's configuration names (layer 14c, choice 35).
+    (base / "pyproject.toml").write_text('[tool.ventoux]\ncatalog = "ventoux.testing:CATALOG"\n')
     head = edited(with_example(tmp_path / "head"), unrequired)
     code, _ = run_summary(
         tmp_path, base, head, before, "--base-commit", "231a0e7", "--head-commit", "9004cbd"
@@ -385,9 +387,15 @@ def test_the_guides_summary_runs_as_written(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # As the job runs it, from the repository's root: the head checked out at `.`, its base at
-    # `base`, the base's promises beside them.
+    # `base`, the base's promises beside them. The head names its catalog (brief, D59).
     monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.ventoux]\ncatalog = "ventoux.testing:CATALOG"\n'
+    )
     with_example(tmp_path / "base")
+    (tmp_path / "base" / "pyproject.toml").write_text(
+        '[tool.ventoux]\ncatalog = "ventoux.testing:CATALOG"\n'
+    )
     edited(with_example(tmp_path), unrequired)
     shutil.copy(LOCK, tmp_path / "contracts.lock.json")
     shutil.copy(LOCK, tmp_path / "base" / "contracts.lock.json")
@@ -766,3 +774,57 @@ def test_past_the_limit_a_contract_not_as_recorded_is_counted(tmp_path: Path) ->
     rewritten = {"orders.lookup@1": contract_hash(shortened())}
     found = hashes_checked(tmp_path, shortened(), RECORDED, rewritten)
     assert "\n1 contract not as recorded: see the log.\n" in for_summary_file(found, limit=100)
+
+
+# --- Layer 14c: the head's catalog is the head's own ---------------------------------------------
+
+
+def test_a_catalog_named_otherwise_than_the_bases_is_said_failing_nothing(tmp_path: Path) -> None:
+    # The summary runs the head's own code, so its catalog is the head's: a pull request may name
+    # another one, and the reviewer is told (layer 14c, choice 35).
+    base, head = with_example(tmp_path / "base"), with_example(tmp_path / "head")
+    recorded = {c.reference: contract_hash(c) for c in CATALOG.contracts()}
+    before: dict[str, object] = {c.reference: promise_of(c) for c in CATALOG.contracts()}
+    found = summarize(
+        base,
+        head,
+        [PACKAGES],
+        CATALOG,
+        recorded,
+        before,
+        recorded,
+        catalogs=("acme_platform.catalog:CATALOG", "ventoux.testing:CATALOG"),
+    )
+    assert found.code == 0
+    assert (
+        "The head names another catalog than the base: `ventoux.testing:CATALOG`, where the base "
+        "names `acme_platform.catalog:CATALOG`. Everything here was checked against the head's."
+    ) in found.text
+    same = summarize(
+        base,
+        head,
+        [PACKAGES],
+        CATALOG,
+        recorded,
+        before,
+        recorded,
+        catalogs=("ventoux.testing:CATALOG", "ventoux.testing:CATALOG"),
+    )
+    assert "another catalog" not in same.text
+
+
+def test_the_command_reads_the_bases_catalog_from_its_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Read as text, nothing imported: the base's code never runs here.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.ventoux]\ncatalog = "ventoux.testing:CATALOG"\n'
+    )
+    base, head = with_example(tmp_path / "base"), with_example(tmp_path / "head")
+    (base / "pyproject.toml").write_text('[tool.ventoux]\ncatalog = "not.imported:CATALOG"\n')
+    promises = tmp_path / "promises.json"
+    promises.write_text(json.dumps({c.reference: promise_of(c) for c in CATALOG.contracts()}))
+    code, _ = run_summary(tmp_path, base, head, promises)
+    assert code == 0
+    assert "where the base names `not.imported:CATALOG`" in capsys.readouterr().out

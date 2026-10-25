@@ -36,9 +36,17 @@ from ventoux.case.releases import (
 from ventoux.case.sheet import SheetRefused, case_map, never_sheet
 from ventoux.case.simulate import StoryRefused, simulate
 from ventoux.case.story import Story, StoryInvalid, parse_story
+from ventoux.core.catalog import Catalog
 from ventoux.core.hash_check import check_hashes
 from ventoux.core.promise import promise_of
-from ventoux.testing import CATALOG
+from ventoux.tooling.check import CheckRefused, built, check, shown, write
+from ventoux.tooling.deployment import (
+    Configuration,
+    Unconfigured,
+    configuration,
+    deployment_catalog,
+    read,
+)
 from ventoux.tooling.environments import environment_command
 from ventoux.tooling.releases import FolderStore, Run, read_package, release, said
 from ventoux.tooling.summary import LIMIT, cant_be_read, for_summary_file, summarize
@@ -62,6 +70,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     # unknown command by itself.
     parser = argparse.ArgumentParser(prog="ventoux", description="Ventoux, from the command line.")
     commands = parser.add_subparsers(dest="command", required=True)
+    checking = commands.add_parser(
+        "check",
+        help="run the builder files, check each package, and write them if every one passes",
+    )
+    checking.add_argument(
+        "files", type=Path, nargs="*", help="builder files, your own code (else the cases folder)"
+    )
     simulating = commands.add_parser(
         "simulate", help="play a story on the in-memory engine, and check what it expects"
     )
@@ -86,7 +101,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     noting.add_argument("--wording", type=int, default=1, help="one of its wording revisions")
     noting.add_argument("--releases", type=Path, required=True, help="where records are kept")
     noting.add_argument("--plain", action="store_true", help="in plain language, as Markdown")
-    commands.add_parser("promises", help="each contract's promise, as the contract hash reads it")
+    promising = commands.add_parser(
+        "promises", help="each contract's promise, as the contract hash reads it"
+    )
     hashing = commands.add_parser(
         "hashes", help="check each contract against contracts.lock.json, saying what changed"
     )
@@ -113,16 +130,40 @@ def main(argv: Sequence[str] | None = None) -> int:
     summing.add_argument("--base-commit", help="the base's commit, to name it")
     summing.add_argument("--head-commit", help="the merge commit, to name it")
     summing.add_argument("--limit", type=int, default=LIMIT, help="bytes the summary may hold")
+    for taking in (
+        checking,
+        simulating,
+        releasing,
+        diffing,
+        mapping,
+        noting,
+        promising,
+        hashing,
+        summing,
+    ):
+        taking.add_argument(
+            "--catalog", help="the deployment's catalog, module:NAME (else pyproject.toml's)"
+        )
     environments(commands)
     arguments = parser.parse_args(argv)
     if arguments.command in ("environment", "activate", "retire", "manifest"):
         return environment_command(arguments)
+    # Every other command reads contracts or roles: the deployment's catalog, named in
+    # configuration, never guessed (brief, D59).
+    try:
+        found = configuration(Path.cwd())
+        catalog = deployment_catalog(arguments.catalog, found)
+    except Unconfigured as refused:
+        print(refused, file=sys.stderr)
+        return CANT_READ
+    if arguments.command == "check":
+        return check_files(arguments.files, found, catalog)
     if arguments.command == "release":
-        return release_package(arguments.package, arguments.releases, arguments.commit)
+        return release_package(arguments.package, arguments.releases, arguments.commit, catalog)
     if arguments.command == "diff":
-        return diff_packages(arguments.old, arguments.new, arguments.plain)
+        return diff_packages(arguments.old, arguments.new, catalog, arguments.plain)
     if arguments.command == "map":
-        return map_package(arguments.package)
+        return map_package(arguments.package, catalog)
     if arguments.command == "notes":
         return print_notes(
             arguments.package,
@@ -130,14 +171,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.wording,
             arguments.releases,
             arguments.plain,
+            catalog,
         )
     if arguments.command == "summary":
-        return summarize_merge(arguments)
+        head_catalog = arguments.catalog if arguments.catalog is not None else found.catalog
+        return summarize_merge(arguments, catalog, head_catalog)
     if arguments.command == "promises":
-        return print_promises()
+        return print_promises(catalog)
     if arguments.command == "hashes":
-        return check_lockfile(arguments.lock, arguments.before)
-    return simulate_story(arguments.story)
+        return check_lockfile(arguments.lock, arguments.before, catalog)
+    return simulate_story(arguments.story, catalog)
 
 
 def environments(commands: Any) -> None:
@@ -169,11 +212,41 @@ def environments(commands: Any) -> None:
         each.add_argument("--namespace", default="default")
 
 
-def simulate_story(path: Path) -> int:
+def check_files(files: Sequence[Path], found: Configuration, catalog: Catalog) -> int:
+    """Run the builder files, check every package, and write them all, or nothing (brief, D59)."""
+    root = found.root if found.root is not None else Path.cwd()
+    paths = [path.resolve() for path in files] or sorted((root / found.cases).glob("*.py"))
+    try:
+        checked = [check(case, catalog) for case in built(paths, root)]
+    except CheckRefused as refused:
+        print(f"{refused}\nNothing was written.", file=sys.stderr)
+        return CANT_READ
+    for each in checked:
+        for problem in each.problems:
+            print(problem)
+    not_valid = [each for each in checked if each.refused]
+    if not_valid:
+        for each in not_valid:
+            errors = sum(not problem.warning for problem in each.problems)
+            print(f"✗ {each.name} is refused: {errors} error{'s' if errors > 1 else ''}.")
+        print("Nothing was written.")
+        return FAILS
+    packages = root / found.packages
+    write(checked, packages)
+    for each in checked:
+        print(f"✓ {each.name} is valid ({each.steps} steps): {shown(packages / each.name)}/")
+    written = {each.name for each in checked}
+    for folder in sorted(packages.glob("*/")) if packages.is_dir() else []:
+        if folder.is_dir() and folder.name not in written:
+            print(f"{shown(folder)}: no builder file defines this package; left as it is")
+    return HOLDS
+
+
+def simulate_story(path: Path, catalog: Catalog) -> int:
     """Print the story's simulation, then whether what it expects holds."""
     try:
         story, case = read_story(path)
-        simulation = simulate(story, case, CATALOG)
+        simulation = simulate(story, case, catalog)
     except StoryRefused as refused:
         print(Unreadable(path, str(refused)), file=sys.stderr)
         return CANT_READ
@@ -188,11 +261,11 @@ def simulate_story(path: Path) -> int:
     return HOLDS
 
 
-def release_package(folder: Path, releases: Path, commit: str) -> int:
+def release_package(folder: Path, releases: Path, commit: str, catalog: Catalog) -> int:
     """Print what releasing `folder` did: a release, a wording revision, or nothing; or why it
     was refused (brief, D50). Paths and names only, never a value."""
     try:
-        run = release(folder, FolderStore(releases), commit, CATALOG)
+        run = release(folder, FolderStore(releases), commit, catalog)
     except (PackageRefused, RecordRefused, NotesRefused) as refused:
         print(Unreadable(folder, str(refused)), file=sys.stderr)
         return FAILS
@@ -207,7 +280,7 @@ def release_package(folder: Path, releases: Path, commit: str) -> int:
     return HOLDS
 
 
-def diff_packages(old: Path, new: Path, in_plain: bool = False) -> int:
+def diff_packages(old: Path, new: Path, catalog: Catalog, in_plain: bool = False) -> int:
     """Print what changed from the package in `old` to the one in `new`, by effect (brief, D55),
     in plain language if asked (brief, D56). Exit 0 when compared, whatever was found: a looser
     change is the reviewer's to judge."""
@@ -216,8 +289,8 @@ def diff_packages(old: Path, new: Path, in_plain: bool = False) -> int:
         before = read_package(old)
         folder = new
         after = read_package(new)
-        found = diff(before, after, CATALOG)
-        said = plain(found, before, after, CATALOG) if in_plain else str(found)
+        found = diff(before, after, catalog)
+        said = plain(found, before, after, catalog) if in_plain else str(found)
     except PackageRefused as refused:
         print(Unreadable(folder, str(refused)), file=sys.stderr)
         return FAILS
@@ -231,12 +304,12 @@ def diff_packages(old: Path, new: Path, in_plain: bool = False) -> int:
     return HOLDS
 
 
-def map_package(folder: Path) -> int:
+def map_package(folder: Path, catalog: Catalog) -> int:
     """Print what a case of the package in `folder` can do, then what it will never do
     (brief, D56). Exit 1 when the package or a reading is refused, 2 when it can't be read."""
     try:
         package = read_package(folder)
-        said = f"{case_map(package, CATALOG)}\n{never_sheet(package, CATALOG)}"
+        said = f"{case_map(package, catalog)}\n{never_sheet(package, catalog)}"
     except (PackageRefused, ReadingRefused, SheetRefused) as refused:
         print(Unreadable(folder, str(refused)), file=sys.stderr)
         return FAILS
@@ -247,7 +320,9 @@ def map_package(folder: Path) -> int:
     return HOLDS
 
 
-def print_notes(name: str, number: int, wording: int, releases: Path, in_plain: bool) -> int:
+def print_notes(
+    name: str, number: int, wording: int, releases: Path, in_plain: bool, catalog: Catalog
+) -> int:
     """Print a record's notes, as it keeps them: in the developer form, or the plain one, read
     from the two stored packages (brief, D57). Exit 1 when the record isn't there or a reading is
     refused, 2 when the records can't be read."""
@@ -258,7 +333,7 @@ def print_notes(name: str, number: int, wording: int, releases: Path, in_plain: 
         against = None if kept.notes is None else kept.notes.against
         if in_plain and against is not None:
             before = stored(store.get(name, against.release, against.wording), name)
-            said = plain(as_diff(kept), before, stored(kept, name), CATALOG)
+            said = plain(as_diff(kept), before, stored(kept, name), catalog)
     except (RecordRefused, ReadingRefused) as refused:
         print(refused, file=sys.stderr)
         return FAILS
@@ -269,7 +344,9 @@ def print_notes(name: str, number: int, wording: int, releases: Path, in_plain: 
     return HOLDS
 
 
-def summarize_merge(arguments: argparse.Namespace) -> int:
+def summarize_merge(
+    arguments: argparse.Namespace, catalog: Catalog, head_catalog: str | None
+) -> int:
     """Print what merging a pull request changes to the log, whole, and append it to the job
     summary, or where it is when it is too long (brief, D55, as amended in 13e). Exit 0 when
     everything is compared, 1 when something is refused, 2 when something can't be read."""
@@ -288,6 +365,16 @@ def summarize_merge(arguments: argparse.Namespace) -> int:
         for path, found in given:
             if not isinstance(found, dict):
                 raise Unreadable(path, "isn't a JSON object, by contract reference")
+        # The base's catalog, by the name its configuration gives, read as text: nothing of the
+        # base is imported here (brief, D59).
+        base_configuration = arguments.base / "pyproject.toml"
+        base_catalog = read(base_configuration).catalog if base_configuration.is_file() else None
+    except Unconfigured as unconfigured:
+        print(unconfigured, file=sys.stderr)
+        failed = cant_be_read(str(unconfigured))
+        with arguments.summary_file.open("a") as summary:
+            summary.write(for_summary_file(failed, arguments.limit))
+        return CANT_READ
     except Unreadable as unreadable:
         # Fail closed: said in the log and the summary, never read as nothing changed.
         print(unreadable, file=sys.stderr)
@@ -299,11 +386,12 @@ def summarize_merge(arguments: argparse.Namespace) -> int:
         arguments.base,
         arguments.head,
         arguments.packages,
-        CATALOG,
+        catalog,
         recorded,
         before,
         base_recorded,
         commits,
+        (base_catalog, head_catalog),
     )
     print(found.text, end="")
     with arguments.summary_file.open("a") as summary:  # earlier steps' summaries are kept
@@ -311,15 +399,15 @@ def summarize_merge(arguments: argparse.Namespace) -> int:
     return found.code
 
 
-def print_promises() -> int:
+def print_promises(catalog: Catalog) -> int:
     """Print each contract's promise, by reference, as canonical JSON: what the base commit's
     code gives `ventoux hashes --before` (brief, D57)."""
-    promises = {contract.reference: promise_of(contract) for contract in CATALOG.contracts()}
+    promises = {contract.reference: promise_of(contract) for contract in catalog.contracts()}
     print(json.dumps(promises, indent=2, sort_keys=True))
     return HOLDS
 
 
-def check_lockfile(lock: Path, before: Path | None) -> int:
+def check_lockfile(lock: Path, before: Path | None, catalog: Catalog) -> int:
     """Print the hash check: each contract changed without a new version, with what changed
     when `before` gives the base commit's promises (brief, D57). Exit 0 when every contract
     matches, 1 on any problem, 2 when a file can't be read."""
@@ -333,7 +421,7 @@ def check_lockfile(lock: Path, before: Path | None) -> int:
         if path is not None and not isinstance(found, dict):
             print(Unreadable(path, "isn't a JSON object, by contract reference"), file=sys.stderr)
             return CANT_READ
-    problems = check_hashes(CATALOG, recorded, given)
+    problems = check_hashes(catalog, recorded, given)
     for problem in problems:
         print(problem)
     if problems:
