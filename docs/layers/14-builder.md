@@ -1354,7 +1354,8 @@ see its test fail.
 ## 14e. The JSON Schema, published from Pydantic
 
 Status: choices drafted 2026-10-25, from `main` at `f51a298` (14d merged as #61). The warm-up
-answered and recorded (question 32 closed); choices 48 to 54 waiting for answers.
+answered and recorded (question 32 closed); choices 48 to 54 answered "all as recommended", the
+same day. D60 and the dated lines on D4 and D20 written before building.
 
 ### Warm-up: learning question 32, why `now` can't be written
 

@@ -174,6 +174,8 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
 - No lock-in to the engine language: the definition format is published as **JSON Schema**
   (generated from Pydantic), and a **conformance suite** (definitions, expected validation results
   and run histories) checks any implementation, including the TypeScript prototype.
+  *Added 2026-10-25, in layer 14e:* the schema is published, `schema/case.schema.json` and
+  `schema/plan.schema.json`, generated from the parser's models and checked unchanged in CI (D60).
 - Activities stay polyglot: Python or Java workers, connected through Temporal task queues.
 - Browser front ends (an inbox, business views) stay separate, in TypeScript, and use the JSON Schema
   and an API.
@@ -589,6 +591,9 @@ be erased on request), has size limits, and a second copy of business records go
   `review.outcome = "approve" and approved_amount > 100`, with `=` and `!=`, `and`, `or`,
   `not(...)`. Display only: the text is never parsed back, so none of FEEL's runtime behaviour
   (a failure returns `null`, `now()`) comes with it.
+- *Added 2026-10-25, in layer 14e:* the published JSON Schema (D60) holds exactly this list of
+  operators, as one recursive shape, and a number as a JSON number: an operator not listed here
+  matches no shape, so it can't be written, neither by a person nor by a model.
 
 ### D21. Input policies: their name, their kinds, and where they are written
 
@@ -2454,6 +2459,35 @@ D48, D50, D55, D56 and D58, whose text is kept.*
   a maximum on a repeatable step; a "field set" moment; a repeating timer (`every`, with a count);
   steps the case doesn't wait for; reopening a closed case. A due date shown in the inbox comes
   with claiming and reassigning tasks, after layer 15, in v1.0.
+
+### D60. The JSON Schema, published from Pydantic: shape only, never a trust boundary
+
+*Decided 2026-10-25, in layer 14e (`docs/layers/14-builder.md`, choices 48 to 54). Adds to D4,
+D20 and D58, whose text is kept.*
+
+- **Two schemas, generated from the models the engine parses with:** `schema/case.schema.json`
+  from `CaseDefinition` and `schema/plan.schema.json` from `Plan`, JSON Schema draft 2020-12, by
+  `ventoux schema`. Committed, and `ventoux schema --unchanged` in CI regenerates and compares
+  them byte for byte, as D1 does for the packages: a model changed without the schema regenerated
+  fails CI. There is no hand-written schema, so the schema can't drift from the parser.
+- **They describe the JSON as written:** every key, with an unknown key refused; a field's type
+  flat beside `display` (`"type": "number"`); the name patterns; an expression as one recursive
+  shape holding D20's operators and nothing else; a number as a JSON number, read as a decimal.
+  Each said once, where the thing is declared, with Pydantic's own hooks.
+- **Named by the engine version that parses the format** (D51), in each schema's `$id`:
+  `https://ventoux.dev/schema/engine-N/case.schema.json`. A format change is a change in what the
+  engine decides, so it bumps the engine version, and the `$id` moves with it.
+- **The schema checks shape; `ventoux check` stays the check.** It can't say that a `var` names a
+  declared field of the right type, that a role is registered, that a plan reference exists, that
+  a step can be reached, that an expression nests at most 32 levels, or that a number fits
+  decimal128. Those are the parser's and the checker's. Proven on a corpus, both ways: every
+  committed definition is accepted by the schema and the parser, and a fixed set of wrong shapes
+  (an operator not in D20, an unknown key, a wrong type, a name the pattern refuses) is refused by
+  both.
+- **Never a trust boundary.** The schema is what a model's output can be constrained by (layer
+  15), so a draft is at least well-formed. Output that matches it is still a draft: read by
+  `parse_case`, checked by `ventoux check` against the deployment's catalog, reviewed in a pull
+  request. The builder never runs on model output (D58).
 
 ## Concepts
 
