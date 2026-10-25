@@ -1441,7 +1441,7 @@ and record the key points. A question is closed once you can explain the answer 
      provenance, never written (brief, D11): whoever answered a task whose value flows into the
      step's inputs or `when`, the case's opener, an edit's proposer and approver (13c). Moving
      `pay`'s amount from `approved_amount` to `amount` says "not proven: excluded from approving
-     pay: whoever proposes or approves an edit of approved\_amount, no longer; ... of amount, now
+     pay: whoever proposes or approves an edit of approved_amount, no longer; ... of amount, now
      in some runs"; Sam stays excluded after answering `review`, since `pay`'s `when` reads
      `review.outcome`.
   4. **The plain form.** Answer: "before/after sentences; it never judges again; escape the
