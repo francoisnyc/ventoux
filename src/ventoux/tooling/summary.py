@@ -52,8 +52,12 @@ CANT_RELEASE = "can't be released as it is: `ventoux release` refuses it (below)
 # The most a step's job summary may hold: GitHub shows none of a larger one.
 LIMIT = 1024 * 1024
 
-# The contracts' line when every one matches the lockfile.
-MATCHED = "Every contract matches `contracts.lock.json`."
+# The contracts' line when every one matches: the base's recorded hashes, and the head's lockfile
+# for new ones (base lockfile fix, choice 7).
+MATCHED = (
+    "Every contract matches the hash the base recorded, and every new one is recorded in "
+    "`contracts.lock.json`."
+)
 
 
 @dataclass(frozen=True)
@@ -75,12 +79,15 @@ def summarize(
     catalog: Catalog,
     recorded: Mapping[str, str],
     before: Mapping[str, object],
+    base_recorded: Mapping[str, str],
     commits: tuple[str, str] | None = None,
 ) -> Summary:
     """What merging `head` onto `base` does to each package under `packages`, in either tree,
     each changed one's diff in the plain form (brief, D56), then the contracts: the hash check
-    against `recorded`, with `before`, the base commit's promises (brief, D57). Anything it can't
-    read or compare fails the step, said last; never read as nothing changed (fail closed)."""
+    against `base_recorded`, the base's lockfile, and `recorded`, the head's (brief, D5, as amended
+    by the base lockfile fix), with `before`, the base commit's promises (brief, D57). Anything it
+    can't read or compare fails the step, said last; never read as nothing changed (fail
+    closed)."""
     for tree, which in ((base, "base"), (head, "head")):
         if not tree.is_dir():
             return cant_be_read(f"the {which} can't be read: {tree} isn't a folder")
@@ -118,7 +125,7 @@ def summarize(
             # Shown, failing nothing, for a package merging changes; an unchanged package's
             # aren't this pull request's (fix-summary-validation, choice 4).
             diffs.append(warned(name, warnings))
-    problems = check_hashes(catalog, recorded, before)
+    problems = check_hashes(catalog, recorded, before, base_recorded)
     ending = REFUSED if failures or problems else COMPARED
     said = said_as(outcomes, diffs, problems, failures, commits)
     return Summary(
@@ -182,7 +189,9 @@ def contracts_line(problems: Sequence[str]) -> str:
     """The contracts' status in one line, as the short summary says it."""
     if not problems:
         return MATCHED
-    return f"{len(problems)} contract{'s' if len(problems) > 1 else ''} not as `contracts.lock.json` records: see the log."
+    return (
+        f"{len(problems)} contract{'s' if len(problems) > 1 else ''} not as recorded: see the log."
+    )
 
 
 def changed_at_all(before: Package, after: Package) -> bool:

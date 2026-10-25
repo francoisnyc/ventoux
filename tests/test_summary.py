@@ -19,6 +19,7 @@ from test_diff import LOOSE, ROOT, calling, refund
 from ventoux.case.markdown import code, text
 from ventoux.case.releases import PackageRefused
 from ventoux.core.catalog import Catalog
+from ventoux.core.contract import Timeouts
 from ventoux.core.contract_hash import contract_hash, promise_hash
 from ventoux.core.promise import promise_of
 from ventoux.testing import CATALOG
@@ -52,7 +53,7 @@ def summarized(base: Path, head: Path, catalog: Catalog = CATALOG) -> Summary:
     as the base's promise: its contracts match."""
     recorded = {c.reference: contract_hash(c) for c in catalog.contracts()}
     before: dict[str, object] = {c.reference: promise_of(c) for c in catalog.contracts()}
-    return summarize(base, head, [PACKAGES], catalog, recorded, before)
+    return summarize(base, head, [PACKAGES], catalog, recorded, before, recorded)
 
 
 # --- Slice 1: what merging does, per package -----------------------------------------------------
@@ -157,7 +158,7 @@ def test_a_contract_changed_in_place_says_what_changed_and_fails(tmp_path: Path)
     before["orders.lookup@1"]["timeouts"]["start_to_close"] = 5
     recorded = {c.reference: contract_hash(c) for c in CATALOG.contracts()}
     recorded["orders.lookup@1"] = promise_hash(before["orders.lookup@1"])
-    found = summarize(base, head, [PACKAGES], CATALOG, recorded, before)
+    found = summarize(base, head, [PACKAGES], CATALOG, recorded, before, recorded)
     assert found.code == 1
     assert found.text.endswith(
         "## Contracts\n\n```\norders.lookup@1 changed without a new version: register it as "
@@ -170,7 +171,8 @@ def test_contracts_that_match_are_said_to(tmp_path: Path) -> None:
     assert found.text == (
         "# What merging changes\n\n## Packages\n\n- **refund**: the same behaviour and wording as "
         "the base.\n\n"
-        "## Contracts\n\nEvery contract matches `contracts.lock.json`.\n"
+        "## Contracts\n\nEvery contract matches the hash the base recorded, and every new one is "
+        "recorded in `contracts.lock.json`.\n"
     )
 
 
@@ -231,7 +233,8 @@ def test_a_summary_past_the_limit_says_where_the_whole_text_is(tmp_path: Path) -
     short = for_summary_file(found, limit=200)
     assert short == (
         "# What merging changes\n\n## Packages\n\n" + found.outcomes[0] + "\n\n## Contracts\n\n"
-        "Every contract matches `contracts.lock.json`.\n\n"
+        "Every contract matches the hash the base recorded, and every new one is recorded in "
+        "`contracts.lock.json`.\n\n"
         f"The whole summary is {len(found.text.encode())} bytes, past the job summary's limit of "
         "200 bytes: it is in this step's log, under `ventoux summary`.\n"
     )
@@ -243,12 +246,12 @@ LOCK = ROOT / "contracts.lock.json"
 
 
 def run_summary(
-    tmp_path: Path, base: Path, head: Path, before: Path, *more: str
+    tmp_path: Path, base: Path, head: Path, before: Path, *more: str, base_lock: Path = LOCK
 ) -> tuple[int, list[str]]:
     """`ventoux summary` as the workflow calls it, the job summary file already holding an
     earlier step's line: its exit code, and the arguments it was given."""
     arguments = ["summary", "--base", str(base), "--head", str(head), "--packages", PACKAGES]
-    arguments += ["--lock", str(LOCK), "--before", str(before)]
+    arguments += ["--lock", str(LOCK), "--base-lock", str(base_lock), "--before", str(before)]
     arguments += ["--summary-file", str(tmp_path / "summary.md"), *more]
     (tmp_path / "summary.md").write_text("an earlier step's summary\n")
     return main(arguments), arguments
@@ -292,7 +295,10 @@ def test_the_command_logs_the_whole_summary_and_appends_it(
         "## Packages\n\n- **refund**: a new release"
     )
     assert "- **Looser** (`steps.settle.requires`): review -&gt; nothing." in logged
-    assert logged.endswith("## Contracts\n\nEvery contract matches `contracts.lock.json`.\n")
+    assert logged.endswith(
+        "## Contracts\n\nEvery contract matches the hash the base recorded, and every new one is "
+        "recorded in `contracts.lock.json`.\n"
+    )
     assert (tmp_path / "summary.md").read_text() == f"an earlier step's summary\n{logged}"
 
 
@@ -384,6 +390,7 @@ def test_the_guides_summary_runs_as_written(
     with_example(tmp_path / "base")
     edited(with_example(tmp_path), unrequired)
     shutil.copy(LOCK, tmp_path / "contracts.lock.json")
+    shutil.copy(LOCK, tmp_path / "base" / "contracts.lock.json")
     assert main(["promises"]) == 0
     (tmp_path / "base-promises.json").write_text(capsys.readouterr().out)
     section = GUIDE.read_text().split("\n## On each pull request\n")[1]
@@ -469,7 +476,7 @@ def test_a_backtick_in_a_contract_never_closes_the_hash_checks_block(tmp_path: P
     before: dict[str, object] = {earlier.reference: promise_of(earlier)}
     # No package: the test's catalog holds one contract, which no package could run on.
     base, head = tree(tmp_path / "base"), tree(tmp_path / "head")
-    found = summarize(base, head, [PACKAGES], catalog_of(later), recorded, before)
+    found = summarize(base, head, [PACKAGES], catalog_of(later), recorded, before, recorded)
     contracts = found.text.split("## Contracts\n\n")[1]
     assert contracts.startswith("````\norders.lookup@1 changed without a new version")
     assert contracts.endswith("\n````\n")
@@ -627,3 +634,135 @@ def test_the_summary_refuses_exactly_what_release_refuses(tmp_path: Path) -> Non
     assert found.failures == tuple(
         f"refund, in the head: {line}" for line in str(refused.value).splitlines()
     )
+
+
+# --- The base lockfile fix: each contract against the hash the base recorded --------------------
+
+
+def shortened() -> Any:
+    """`orders.lookup@1`, its `start_to_close` 10 -> 5: changed in place."""
+    return lookup_contract(timeouts=Timeouts(start_to_close=5, schedule_to_start=60))
+
+
+def hashes_checked(
+    tmp_path: Path, contracts: Any, base_lock: dict[str, str], head_lock: dict[str, str]
+) -> Summary:
+    """The summary of trees with no package, the head's catalog holding `contracts` (one, or a
+    list), the base's promise that of `orders.lookup@1` as `lookup_contract` gives it, each
+    lockfile as given."""
+    before: dict[str, object] = {"orders.lookup@1": promise_of(lookup_contract())}
+    catalog = catalog_of(*(contracts if isinstance(contracts, list) else [contracts]))
+    base, head = tree(tmp_path / "base"), tree(tmp_path / "head")
+    return summarize(base, head, [PACKAGES], catalog, head_lock, before, base_lock)
+
+
+RECORDED = {"orders.lookup@1": contract_hash(lookup_contract())}  # what the base recorded
+
+
+def test_a_contract_changed_with_its_hash_rewritten_fails(tmp_path: Path) -> None:
+    # Found in layer 13's walk-through: the head's own lockfile said every contract matched. The
+    # base's lockfile is what was recorded; a hash rewritten with the contract changes nothing
+    # (brief, D5, as amended by the base lockfile fix; choices 1, 2).
+    rewritten = {"orders.lookup@1": contract_hash(shortened())}
+    found = hashes_checked(tmp_path, shortened(), RECORDED, rewritten)
+    assert found.code == 1
+    assert found.text.endswith(
+        "## Contracts\n\n```\norders.lookup@1 changed without a new version: register it as "
+        "orders.lookup@2.\n  timeouts.start_to_close: 10 -> 5\n  contracts.lock.json rewrites "
+        "the hash the base recorded: a recorded hash never changes\n```\n"
+    )
+
+
+def test_a_recorded_hash_rewritten_or_dropped_alone_fails(tmp_path: Path) -> None:
+    # The contract didn't change, so it isn't said to: the lockfile did, and what to put back is
+    # said (choice 2).
+    hashed = RECORDED["orders.lookup@1"]
+    rewritten = hashes_checked(
+        tmp_path / "a", lookup_contract(), RECORDED, {"orders.lookup@1": "0"}
+    )
+    dropped = hashes_checked(tmp_path / "b", lookup_contract(), RECORDED, {})
+    assert (rewritten.code, dropped.code) == (1, 1)
+    assert (
+        "orders.lookup@1: contracts.lock.json rewrites the hash the base recorded: a recorded hash "
+        f"never changes; put back {hashed}"
+    ) in rewritten.text
+    assert (
+        "orders.lookup@1: contracts.lock.json drops the hash the base recorded: a recorded hash "
+        f"never changes; put back {hashed}"
+    ) in dropped.text
+    assert "changed without a new version" not in rewritten.text + dropped.text
+
+
+def test_the_heads_lockfile_records_what_the_base_doesnt(tmp_path: Path) -> None:
+    # A new contract is recorded in the head's lockfile, as before; one that isn't fails with the
+    # line to add (choice 3).
+    added = lookup_contract(version=2)
+    head_lock = {**RECORDED, "orders.lookup@2": contract_hash(added)}
+    recorded = hashes_checked(tmp_path / "a", [lookup_contract(), added], RECORDED, head_lock)
+    unrecorded = hashes_checked(tmp_path / "b", [lookup_contract(), added], RECORDED, RECORDED)
+    assert recorded.code == 0
+    assert unrecorded.code == 1
+    assert (
+        f'orders.lookup@2 is not recorded yet: add "orders.lookup@2": "{contract_hash(added)}".'
+    ) in unrecorded.text
+
+
+def test_a_contract_retired_from_the_catalog_is_never_an_error(tmp_path: Path) -> None:
+    # The base records it and the head's catalog no longer holds it: retired, whatever either
+    # lockfile says (choice 3).
+    other = lookup_contract(version=2)
+    base_lock = {**RECORDED, "orders.lookup@2": contract_hash(other)}
+    kept = hashes_checked(tmp_path / "a", [other], base_lock, base_lock)
+    dropped = hashes_checked(
+        tmp_path / "b", [other], base_lock, {"orders.lookup@2": contract_hash(other)}
+    )
+    assert (kept.code, dropped.code) == (0, 0)
+
+
+def test_the_bases_promise_is_read_against_the_bases_hash(tmp_path: Path) -> None:
+    # A promise given that isn't the one the base recorded would describe someone else's
+    # (choice 4; brief, D57, as amended by the base lockfile fix).
+    # The head's lockfile records the promise given, the base's another: the base's decides.
+    others = {"orders.lookup@1": contract_hash(lookup_contract(risk="high"))}
+    found = hashes_checked(tmp_path, shortened(), others, RECORDED)
+    assert (
+        "  what changed can't be said: the promise given for orders.lookup@1 isn't the one "
+        "contracts.lock.json records\n"
+    ) in found.text
+
+
+@pytest.mark.parametrize(
+    ("written", "said"),
+    [
+        (None, "can't be read: No such file or directory"),
+        ("[]", "isn't a JSON object, by contract reference"),
+    ],
+)
+def test_a_base_lockfile_that_cant_be_read_fails_and_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], written: str | None, said: str
+) -> None:
+    # Fail closed: a base with no lockfile, or one that isn't one, is never read as one recording
+    # nothing (choice 5): exit 2, said in the log and the summary.
+    base_lock = tmp_path / "base-lock.json"
+    if written is not None:
+        base_lock.write_text(written)
+    before = tmp_path / "base-promises.json"
+    before.write_text("{}")
+    base, head = with_example(tmp_path / "base"), with_example(tmp_path / "head")
+    code, _ = run_summary(tmp_path, base, head, before, base_lock=base_lock)
+    assert code == 2
+    assert capsys.readouterr().err == f"{base_lock}: {said}\n"
+    assert (tmp_path / "summary.md").read_text().endswith(f"- {text(f'{base_lock}: {said}')}\n")
+
+
+def test_ci_passes_the_base_checkouts_lockfile() -> None:
+    # One argument, and nothing else: the permissions are checked as before, by
+    # `test_the_workflow_sends_nothing_and_reads_only` (choice 6).
+    assert "--base-lock base/contracts.lock.json" in job("changes")
+
+
+def test_past_the_limit_a_contract_not_as_recorded_is_counted(tmp_path: Path) -> None:
+    # The short form's contracts line no longer names one lockfile: the base's is compared too.
+    rewritten = {"orders.lookup@1": contract_hash(shortened())}
+    found = hashes_checked(tmp_path, shortened(), RECORDED, rewritten)
+    assert "\n1 contract not as recorded: see the log.\n" in for_summary_file(found, limit=100)

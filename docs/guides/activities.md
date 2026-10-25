@@ -426,6 +426,14 @@ promises, the line says how to give them. A contract's values are written by you
 never by a case, so they are shown. In CI, the base commit's promises come with the pull request
 step (layer 13e).
 
+**Where the rule is enforced: the pull request, against the base.** The test and `ventoux hashes`
+see only your branch's lockfile, so they catch an edit whose hash you didn't touch, never one whose
+hash was rewritten with it. On each pull request, the summary checks every contract the **base's**
+`contracts.lock.json` records against the hash recorded there: an edit in place fails, path by path,
+whatever the branch's lockfile says, and so does a recorded hash rewritten or dropped. A recorded
+hash never changes. The branch's lockfile is for new contracts; a contract removed from the
+catalog is never an error.
+
 ## Development activities
 
 `ventoux.testing` ships five activities and one workflow, with fake implementations that touch no

@@ -237,6 +237,14 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   environment, a case ended from outside never blocking it; the second line is
   `ventoux environment check`, for every release active or with open cases, and the
   schedule-to-start timeout every activity contract already declares.
+- **Amended 2026-10-25, by the base lockfile fix** (`docs/layers/fix-base-lockfile.md`, choices 1
+  to 10, found in layer 13's walk-through; the text above stands, this adds to it): "fails if it
+  changed without a new number" is enforced in the pull request's summary, against the hash the
+  **base's** `contracts.lock.json` records: a contract the base records must hash as recorded
+  there, and a recorded hash never changes, so a pull request that edits a contract and rewrites
+  its hash in the same commit fails. The head's lockfile records only what the base doesn't. The
+  `check` job's test and `ventoux hashes` compare with the head's lockfile only: they catch an
+  edit whose hash wasn't rewritten, never one whose hash was.
 
 ### D6. Existing Temporal workflows as steps
 
@@ -2324,6 +2332,10 @@ D55, and answers design question 16's other half, whose text is kept.*
   summary says each contract changed in place, path by path. Leaves are compared as the hash
   writes them, so `2` and `2.0` differ; a promise whose hash differs where no path does says what
   changed can't be said.
+- **Amended 2026-10-25, by the base lockfile fix** (`docs/layers/fix-base-lockfile.md`; the text
+  above stands, this adds to it): in the pull request's summary, the base commit's promise is used
+  only if it hashes to what the **base's** lockfile records, the hash it must give; the summary
+  takes the base's lockfile (`--base-lock`), and one that can't be read fails the step.
 
 ### Simplifications adopted
 

@@ -63,6 +63,7 @@ jobs:
           BASE_COMMIT: ${{ steps.base.outputs.sha }}
         run: >-
           uv run ventoux summary --base base --head . --packages examples/packages
-          --lock contracts.lock.json --before base-promises.json
+          --lock contracts.lock.json --base-lock base/contracts.lock.json
+          --before base-promises.json
           --summary-file "$GITHUB_STEP_SUMMARY"
           --base-commit "$BASE_COMMIT" --head-commit "$(git rev-parse HEAD)"
