@@ -192,7 +192,10 @@ report polled on a one-second bound against a replay that can take two.
   free port at the same moment. A second way two suites on one machine fail each other, in the
   SDK's choice of port; a carried note, its own fix if it recurs (choice 86 of the cold-start fix
   already names the time-skipping server's start as the risk).
-- The full suite alone, on `main` merged, ruff and mypy: FULL_SUITE_ALONE
+- The full suite on `main` merged (#59 and 14c in): 3661 pass, 1 fail, again the Java test
+  server's `Failed to bind to address` (`test_an_activity_failing_in_a_stopped_plan_flags_the_case`),
+  while two runs of the fixed test overlapped the suite's first minute; alone, it passes. Ruff and
+  mypy clean.
 
 ### Promises
 
