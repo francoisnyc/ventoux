@@ -11,7 +11,7 @@ See docs/layers/14-builder.md, docs/guides/builder.md and docs/QUICKSTART.md, se
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-from ventoux.tooling.builder.common import display, field_name, given
+from ventoux.tooling.builder.common import called_from, display, field_name, given
 from ventoux.tooling.builder.entries import (
     Approval,
     Event,
@@ -58,6 +58,9 @@ class Case:
         self.stays_open = stays_open  # True: it never closes by itself; a person closes it
         self.forgetting = forgetting
         self.plans: dict[str, Plan] = {}  # the plans its plan steps run, by reference
+        # Where each entry was written, by its path (`steps.pay`), `""` the case itself: where
+        # `ventoux check` says a problem (brief, D59).
+        self.where: dict[str, str] = {"": called_from()}
 
     # The case file.
 
@@ -80,6 +83,7 @@ class Case:
         if sensitive is not None:
             entry["sensitive"] = sensitive  # encrypted with the case's key (brief, D31)
         self.fields[self.new_name(name, self.fields, "field")] = entry
+        self.where[f"fields.{name}"] = called_from()
         return kind.reads_as({"var": name})
 
     def reference(
@@ -103,6 +107,7 @@ class Case:
         self.milestones[self.new_name(name, self.milestones, "milestone")] = {
             "display": display(title, description)
         }
+        self.where[f"milestones.{name}"] = called_from()
         return Milestone(name)
 
     # Steps. Every kind takes the same keywords for when it may start (`requires`, `when`,
@@ -232,6 +237,7 @@ class Case:
             # One `sequence` per case: a second would replace the first without a word.
             raise ValueError(f"{self.name} already has a sequence: give it every step once")
         self.order = [step.name for step in steps]
+        self.where["sequence"] = called_from()
 
     # Events, rules and the two patterns (brief, D41) (brief, D38) (brief, D46).
 
@@ -253,6 +259,7 @@ class Case:
         if payload is not None:
             entry["payload"] = {key: carried(value) for key, value in payload.items()}
         self.events[self.new_name(name, self.events, "event")] = entry
+        self.where[f"events.{name}"] = called_from()
         types = {key: str(value.kind.declared["type"]) for key, value in (payload or {}).items()}
         return Event(name, types)
 
@@ -271,6 +278,7 @@ class Case:
             entry["when"] = given(when).data
         entry["then"] = acting(then)
         self.rules[self.new_name(name, self.rules, "rule")] = entry
+        self.where[f"rules.{name}"] = called_from()
 
     def sla(
         self,
@@ -290,6 +298,7 @@ class Case:
             entry["when"] = given(when).data
         entry["then"] = acting(then)
         self.rules[self.new_name(name, self.rules, "rule")] = entry
+        self.where[f"rules.{name}"] = called_from()
 
     def reminder(
         self,
@@ -307,6 +316,7 @@ class Case:
         if when is not None:
             entry["when"] = given(when).data
         self.rules[self.new_name(name, self.rules, "rule")] = entry
+        self.where[f"rules.{name}"] = called_from()
 
     # Closing (brief, D10).
 
@@ -316,17 +326,20 @@ class Case:
         """A reason a person holding one of `roles` may close the case with."""
         entry: Data = {"display": display(title, description), "roles": list(roles)}
         self.close_reasons[self.new_name(name, self.close_reasons, "close reason")] = entry
+        self.where[f"close_reasons.{name}"] = called_from()
 
     def closes_when(self, *milestones: Milestone) -> None:
         """The case closes once all `milestones` are reached: said once."""
         if self.closing:
             raise ValueError(f"{self.name} already closes when {', '.join(self.closing)}")
         self.closing = [milestone.name for milestone in milestones]
+        self.where["closes_when"] = called_from()
 
     # Writing.
 
     def add(self, name: str, entry: Data) -> None:
         self.steps[self.new_name(name, self.steps, "step")] = entry
+        self.where[f"steps.{name}"] = called_from()
 
     def new_name(self, name: str, taken: Mapping[str, object], what: str) -> str:
         """`name`, refused if this case already has a `what` of that name: a second entry would

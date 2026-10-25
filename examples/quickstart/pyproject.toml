@@ -1,0 +1,3 @@
+# The quickstart's project, as `ventoux init` writes it: the development catalog, named (brief, D59).
+[tool.ventoux]
+catalog = "ventoux.testing:CATALOG"
