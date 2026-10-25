@@ -15,6 +15,9 @@ from ventoux.core.promise import PromiseUnreadable, promise_changes, promise_of
 
 # Where the promises before come from: printed by the base commit's own code.
 GIVE_THEM = "to see what changed, give the base commit's promises (`ventoux promises`)"
+# A hash the base recorded, rewritten or dropped by the head's lockfile.
+REWRITTEN = "contracts.lock.json rewrites the hash the base recorded: a recorded hash never changes"
+DROPPED = "contracts.lock.json drops the hash the base recorded: a recorded hash never changes"
 
 
 def check_hashes(
@@ -24,11 +27,16 @@ def check_hashes(
     base: Mapping[str, str] | None = None,
 ) -> list[str]:
     """What CI reports: contracts changed without a new version (brief, D5), each with what
-    changed if `before` gives its earlier promise, and unrecorded ones."""
+    changed if `before` gives its earlier promise, and unrecorded ones. Given `base`, the base's
+    lockfile, a contract it records is checked against the hash recorded there, whatever
+    `recorded`, the head's, says; `recorded` is then for what the base doesn't record (brief, D5,
+    as amended by the base lockfile fix)."""
     problems: list[str] = []
     for contract in catalog.contracts():
         digest = contract_hash(contract)
-        if contract.reference not in recorded:
+        if base is not None and contract.reference in base:
+            problems += against_base(catalog, contract, base[contract.reference], recorded, before)
+        elif contract.reference not in recorded:
             problems.append(
                 f'{contract.reference} is not recorded yet: add "{contract.reference}": "{digest}".'
             )
@@ -40,6 +48,29 @@ def check_hashes(
             said = what_changed(contract, recorded[contract.reference], before)
             problems.append("\n".join([line, *(f"  {each}" for each in said)]))
     return problems
+
+
+def against_base(
+    catalog: Catalog,
+    contract: Contract,
+    hashed: str,
+    recorded: Mapping[str, str],
+    before: Mapping[str, object] | None,
+) -> list[str]:
+    """`contract` against `hashed`, the hash the base recorded: changed in place if it differs,
+    whatever the head's lockfile says; and a recorded hash the head's lockfile rewrites or drops,
+    since a recorded hash never changes."""
+    reference = contract.reference
+    kept = recorded.get(reference)
+    lockfile = [] if kept == hashed else [DROPPED if kept is None else REWRITTEN]
+    if contract_hash(contract) != hashed:
+        line = (
+            f"{reference} changed without a new version: "
+            f"register it as {catalog.next_reference(contract.name)}."
+        )
+        said = [*what_changed(contract, hashed, before), *lockfile]
+        return ["\n".join([line, *(f"  {each}" for each in said)])]
+    return [f"{reference}: {each}; put back {hashed}" for each in lockfile]
 
 
 def what_changed(

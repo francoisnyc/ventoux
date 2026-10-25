@@ -19,6 +19,7 @@ from test_diff import LOOSE, ROOT, calling, refund
 from ventoux.case.markdown import code, text
 from ventoux.case.releases import PackageRefused
 from ventoux.core.catalog import Catalog
+from ventoux.core.contract import Timeouts
 from ventoux.core.contract_hash import contract_hash, promise_hash
 from ventoux.core.promise import promise_of
 from ventoux.testing import CATALOG
@@ -627,4 +628,39 @@ def test_the_summary_refuses_exactly_what_release_refuses(tmp_path: Path) -> Non
     found = summarized(with_example(tmp_path / "base"), head)
     assert found.failures == tuple(
         f"refund, in the head: {line}" for line in str(refused.value).splitlines()
+    )
+
+
+# --- The base lockfile fix: each contract against the hash the base recorded --------------------
+
+
+def shortened() -> Any:
+    """`orders.lookup@1`, its `start_to_close` 10 -> 5: changed in place."""
+    return lookup_contract(timeouts=Timeouts(start_to_close=5, schedule_to_start=60))
+
+
+def hashes_checked(
+    tmp_path: Path, contract: Any, base_lock: dict[str, str], head_lock: dict[str, str]
+) -> Summary:
+    """The summary of trees with no package, the head's catalog holding `contract`, the base's
+    promises those of the development `orders.lookup@1`, each lockfile as given."""
+    before: dict[str, object] = {"orders.lookup@1": promise_of(lookup_contract())}
+    base, head = tree(tmp_path / "base"), tree(tmp_path / "head")
+    return summarize(base, head, [PACKAGES], catalog_of(contract), head_lock, before, base_lock)
+
+
+RECORDED = {"orders.lookup@1": contract_hash(lookup_contract())}  # what the base recorded
+
+
+def test_a_contract_changed_with_its_hash_rewritten_fails(tmp_path: Path) -> None:
+    # Found in layer 13's walk-through: the head's own lockfile said every contract matched. The
+    # base's lockfile is what was recorded; a hash rewritten with the contract changes nothing
+    # (brief, D5, as amended by the base lockfile fix; choices 1, 2).
+    rewritten = {"orders.lookup@1": contract_hash(shortened())}
+    found = hashes_checked(tmp_path, shortened(), RECORDED, rewritten)
+    assert found.code == 1
+    assert found.text.endswith(
+        "## Contracts\n\n```\norders.lookup@1 changed without a new version: register it as "
+        "orders.lookup@2.\n  timeouts.start_to_close: 10 -> 5\n  contracts.lock.json rewrites "
+        "the hash the base recorded: a recorded hash never changes\n```\n"
     )
