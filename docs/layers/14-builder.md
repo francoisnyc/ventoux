@@ -1126,6 +1126,161 @@ is `tests/test_check.py`, `Dc` is `tests/test_deployment_catalog.py` (both new),
 - The JSON Schema (14e).
 - A rule's untrusted condition that starts a step, as a warning (choice 37, set aside).
 
+## 14d. The same JSON, checked in CI
+
+Status: choices drafted 2026-10-25, from `main` at `2a79e55` (14c merged as #58). Waiting for your
+answers, and for the warm-up, before anything is built.
+
+### Warm-up: learning question 1, JSON or code first
+
+> An AI drafts a new case definition. A developer then wants to change one rule in it. What happens
+> if code is the only way people edit definitions? And what if JSON is the contract?
+
+Open; asked at 14a's warm-up, where both halves came only after a nudge. It is 14d's question
+twice over: D1's last clause, "CI fails if the committed JSON differs from what the code
+generates", is what this part builds, and its first clause is why a JSON-only package must stay
+allowed beside the builder's. Answer from memory first, both halves, each with its reason.
+
+### What this part is for
+
+14c's `ventoux check` writes the packages a developer commits. Nothing yet proves that what is
+committed is what the Python writes: someone edits `packages/refund/case.json` by hand, or changes
+`cases/refund.py` and forgets to run the check, and the JSON that runs is no longer the code's.
+14d adds the check CI runs on every push and pull request:
+
+```sh
+uv run ventoux check --unchanged
+```
+
+```text
+packages/refund/case.json differs from what cases/refund.py writes, first at line 23:
+  committed: "when": {">": [{"var": "approved_amount"}, 1000]},
+  written:   "when": {">": [{"var": "approved_amount"}, 100]},
+✗ refund: 1 file differs. Run `ventoux check` and commit what it writes.
+```
+
+It runs the builder files as `ventoux check` does, generates every package again in memory, and
+compares each file with the committed one byte for byte. Any difference fails; nothing is written.
+This is the curriculum's second negative test, end to end through the CI step.
+
+### What the code does today
+
+- `tooling/check.py` (14c): `built` runs the builder files (a file that raises or exits is refused
+  at its line), `check` gives a package's files and its problems, `write` writes the folders.
+  `check_files` in `cli.py` ties them together: all or nothing.
+- `tooling/deployment.py` (14c): `[tool.ventoux]` with `catalog`, `cases`, `packages`; an unknown
+  setting is refused.
+- `.github/workflows/ci.yml`: the `check` job runs `uv sync --locked`, `ruff format --check`,
+  `ruff check`, `mypy`, `pytest`; `permissions: contents: read`; the `changes` job on pull requests
+  only. A test reads it as text (`test_the_existing_checks_are_as_they_were`).
+- `ventoux release` and `ventoux notes` take `--releases DIR`, required; the releases guide says
+  "run `ventoux release` on merge, where your records are kept" (13e's choice 76).
+- Tests already hold both committed packages to the builder byte for byte
+  (`test_every_package_is_the_committed_json_byte_for_byte`), from inside pytest. Nothing runs
+  the command a team would run.
+
+### Choices for 14d
+
+40. **`--unchanged` is `ventoux check` that writes nothing.** The same run: the builder files are
+    run with `built` (so 14c holds: a file that raises or exits is refused at its line, exit 2,
+    and a package validation refuses fails, exit 1, each said as `check` says it); then, instead
+    of writing, each package's files are compared with the committed ones. Every package is
+    compared and every difference said before the command ends, so one run shows all of them.
+    Exit 0 when every package is valid and every file is the committed one; 1 when a package is
+    refused or a file differs; 2 when something can't be read or run. *Recommended.* Set aside: a
+    comparison without validation. A refused package's committed files can't be the check's
+    output, and one check is 14c's rule (choice 32).
+
+41. **What a difference says:** per file, three kinds, each naming the file:
+    - **differs:** `packages/refund/case.json differs from what cases/refund.py writes, first at
+      line 23:`, then the committed line and the written line, indented. Both are definition text,
+      which may be shown (brief, D55). A file that differs only past its last common line says
+      `first at line N: the committed file ends` or `the written file ends`.
+    - **missing:** `packages/refund/case.json is missing: the builder writes it` (14a's lesson, a
+      committed JSON that was never committed).
+    - **not written:** `packages/refund/plans/old.json: no builder case writes it any more`, for a
+      `.json` file in a builder package's folder (a plan no step names now).
+
+    Then one line per package, `✗ refund: 2 files differ.`, and once, `Run \`ventoux check\` and
+    commit what it writes.` *Recommended.*
+
+42. **A folder no builder case defines: written by hand, or stale?** Both look the same on disk:
+    a JSON-only package (brief, D58, allowed) and the output of a builder case since removed or
+    renamed are each a folder under `packages/` with a `case.json` and no builder case of that
+    name. Bytes can't tell them apart, so `--unchanged` doesn't guess: a package is written by
+    hand only if the configuration says so,
+
+    ```toml
+    [tool.ventoux]
+    by_hand = ["legacy-claim"]
+    ```
+
+    and a folder neither a builder case defines nor `by_hand` lists is refused: `packages/old: no
+    builder file defines it and by_hand doesn't list it: stale output of a removed case, or a
+    hand-written package not yet listed`. A name both a builder defines and `by_hand` lists is
+    refused too, naming the builder file. A `by_hand` package is still checked (`issues_of`,
+    against the catalog), never compared. `ventoux check` (writing) says the same of such a folder
+    where it said "left as it is". *Recommended.* Set aside: a marker file in the folder; a release
+    refuses any file but the package's (brief, D50). Set aside: guessing from the layout; a
+    hand-written file may be in the builder's layout, and a stale one surely is.
+
+43. **Writing nothing, proven.** A test records every committed file's bytes before a run, runs
+    `--unchanged` on a project where one package differs, one is missing a file, and one is
+    refused by validation, and checks every byte is as it was and no folder appeared. The same
+    for a run that passes. *Recommended.*
+
+44. **The CI step**, with 13e's care: one line in the `check` job, after `pytest`,
+    `uv run ventoux check --unchanged`, against the configured catalog
+    (`ventoux.testing:CATALOG`, this repository's `pyproject.toml`). A second line runs it in the
+    quickstart's own project, `cd examples/quickstart && uv run --project ../.. ventoux check
+    --unchanged`, since that package is what the quickstart shows and the project is laid out as a
+    team's would be. `permissions: contents: read` unchanged; `pull_request` and `push` as now;
+    nothing writes; the `changes` job unchanged. `test_the_existing_checks_are_as_they_were` gains
+    the two lines. *Recommended.*
+
+45. **The curriculum's negative test, end to end:** a test takes the `run:` line from `ci.yml` as
+    text, checks it is the command above, and runs that command (`main([...])`) on a copy of this
+    repository's project in which one committed byte changed: exit 1, the file and the first
+    differing line named, nothing written. A second test changes the builder file instead, so the
+    committed JSON is stale: the same. *Recommended.*
+
+46. **Where a deployment keeps its release records** (choice 8c, carried): `[tool.ventoux]
+    releases = "releases"` in the configuration, read by `ventoux release` and `ventoux notes`
+    when `--releases` isn't given; the flag wins; neither named is refused, saying both ways, as
+    the catalog is (fail closed, never a default folder). The tool reads and writes a folder only
+    (`FolderStore`), never git or a network: keeping it is the deployment's job, a checkout of a
+    records repository or a mounted volume. `activate` and `retire` keep their required
+    `--releases`: they talk to an environment, and change nothing here. This repository's CI still
+    doesn't run `ventoux release`: writing records needs a token that writes, which 13e's read-only
+    workflow refuses on purpose. *Recommended.*
+
+47. **Where it is recorded:** no new decision. Dated lines on D1 (the CI check built, as the
+    decision promised in 2026-10), D58 (`--unchanged`, `by_hand`) and D59 (`releases` in the
+    configuration; 13e's choice 76 answered). The guides: the quickstart's section 3 gains the
+    sentence "CI runs `ventoux check --unchanged`, which fails if the committed JSON isn't what
+    your Python writes"; the builder guide's "Checking a builder file" gains `--unchanged` and
+    `by_hand`; the releases guide's "run `ventoux release` on merge, where your records are kept"
+    names the `releases` setting. *Recommended.*
+
+### Slices, in order (14d)
+
+Each starts with its negative test, seen failing for the right reason.
+
+0. **A committed file that differs fails, naming it and the first line** (choices 40 and 41):
+   the curriculum's test; nothing written.
+1. **Missing and not written** (choice 41); **a folder of no builder case** (choice 42): `by_hand`
+   or refused.
+2. **A file that raises or exits, and a refused package, through `--unchanged`** (choice 40);
+   **writing nothing, proven** (choice 43).
+3. **The CI step and its tests** (choices 44 and 45).
+4. **`releases` in the configuration** (choice 46).
+5. **The guides, the dated lines, the Promises** (choice 47).
+
+### Not in 14d
+
+- The JSON Schema (14e).
+- Running `ventoux release` in this repository's CI (choice 46).
+
 ## Not in layer 14
 
 - Turning a JSON definition into builder code. A model's kept draft (D1) is written as builder
