@@ -412,10 +412,66 @@ Each starts with its negative test, seen failing for the right reason.
    hand-written one's.
 4. **The quickstart's tests on the Python definition,** through `run_case(refund, …)`.
 
+### Decided while building (14a)
+
+- **`ventoux` is marked as typed** (`src/ventoux/py.typed`, PEP 561). Found by slice 0's first run:
+  without the marker mypy skips the package, so a team's builder file would type-check against
+  nothing, and the curriculum's negative test would pass nowhere outside this repository.
+- **The layout is written by one small function, `layout`,** not by `json.dumps`: the standard
+  library can write a `Decimal` only through a binary float. It writes `json.dumps`'s `indent=2`
+  layout exactly, and a test holds the two together on the quickstart's JSON (choice 4).
+- **A number is written with every digit** (`format(value, "f")`): `Decimal("1E-7")` is written
+  `0.0000001`, which reads back as the same decimal. `Decimal("1E+2")` would be written `100` and
+  read back as another one, so it is refused, saying to write `Decimal("100")`.
+- **The keys' order is the guides' and the hand-written JSON's, not the models' fields':** a step
+  writes `kind` and `display` first, then what it is (`roles`, or `activity` and `inputs`), then
+  when it may start (`requires`, `when`), then what it gives or needs (`outcomes`, `approval`).
+  The models put `kind` last, through inheritance. The built refund is the hand-written one as
+  data, key for key.
+- **A number operator takes numbers only:** `amount + True` is refused when the file runs, as a
+  `float` is, found writing slice 1's negative test (`operand` let `True` through as a literal).
+- **Two entries of one name are refused** (`refund already has a field named amount`): a dict
+  would keep the second and drop the first without a word.
+- **`==` and `!=` accept any operand at type level,** checked when the file runs: a misspelled
+  outcome (`"aprove"`) is `ventoux check`'s to catch, as the quickstart says, since it needs the
+  task's declared outcomes.
+- **The quickstart's project is on pytest's and mypy's paths** (`examples/quickstart`), so its
+  tests import `cases.refund` as the quickstart writes it. The quickstart's import line is sorted
+  as ruff sorts it (`Approval, Case, Field, Outcome`), the one change to its text.
+- **The built package was written once with `written`;** `ventoux check` writes it from 14c, and
+  CI checks it from 14d. Until then a test holds the committed bytes to `written`.
+- **Code ahead of its test, said plainly:** the task, the activity and the approval were written
+  in one go with slice 1, so slice 2's test passed on its first run instead of failing first.
+  Each refusal in them got a negative test afterwards, and each was broken once to see it fail.
+
 ### Promises (14a)
 
-Filled in while building, each claim named with the test that would fail without it, and checked
-both ways before the pull request.
+Each claim this part makes about behaviour, and the test that would fail if it weren't true. `T`
+is `tests/test_builder_types.py` (new), `B` is `tests/test_builder.py` (new), `Q` is
+`tests/test_quickstart.py`, `L` is `tests/test_layers.py`. Checked against the tests, 2026-10-25:
+every test named here exists, every test in `T` and `B` is named here, and every guard was
+broken once to see its test fail.
+
+| Promise | Test |
+|---|---|
+| A plain Python value where a runtime expression is required fails mypy: `when=True` (the curriculum's test) | T `test_a_plain_value_where_a_runtime_expression_is_required_fails_the_type_check` |
+| A plain value as an input fails mypy; `literal(250)` type-checks | T `test_a_plain_value_as_an_input_fails_the_type_check` |
+| A text beside a number fails mypy | T `test_a_text_beside_a_number_fails_the_type_check` |
+| The quickstart's builder file type-checks clean, so each refusal above comes from its own line | T `test_the_quickstarts_builder_file_type_checks` |
+| A runtime value asked for a build-time decision (`if`, a chained comparison) raises, naming the expression | B `test_a_runtime_value_asked_for_a_build_time_decision_is_refused` |
+| Operators write D20's JSON, a Python value beside one as a literal, either side | B `test_a_comparison_writes_d20s_json` |
+| `and_`, `or_` and `not_` write `and`, `or` and `!` | B `test_and_or_and_not_are_functions_writing_d20s_operators` |
+| A `float`, NaN or `True` is refused as a number, the float saying to write a `Decimal` | B `test_a_float_or_a_truth_value_is_refused_as_a_number` |
+| A plain value the type checker missed is refused when the file runs | B `test_a_plain_value_the_type_checker_missed_is_refused_when_the_file_runs` |
+| A form sets fields only | B `test_a_form_sets_fields_only` |
+| Two entries of one name are refused | B `test_two_entries_of_one_name_are_refused` |
+| The built refund is the hand-written one as data, with the same behaviour digest | B `test_the_quickstarts_refund_reads_as_the_hand_written_one` |
+| The written JSON is the committed one, byte for byte, the same every time | B `test_the_written_json_is_the_committed_one_byte_for_byte` |
+| The layout is `json.dumps(indent=2, ensure_ascii=False)`'s | B `test_the_layout_is_the_standard_librarys` |
+| A number that would read back as another is refused | B `test_a_number_that_would_read_back_as_another_is_refused` |
+| `run_case` runs a builder case's written JSON; the quickstart's tests run the Python definition | Q every test passing `refund`, among them `test_small_refund_needs_no_team_lead`, `test_large_refund_waits_for_a_team_lead`, `test_an_undeclared_outcome_is_refused` |
+| The quickstart's Python, word for word, is the file its tests run | Q `test_the_quickstarts_python_file_is_the_one_its_tests_run` |
+| Importing `ventoux` brings no Temporal | L `test_importing_ventoux_brings_no_temporal` |
 
 ## Not in layer 14
 
