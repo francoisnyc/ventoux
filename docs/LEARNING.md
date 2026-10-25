@@ -42,7 +42,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 35 | Layer 6: what lives in workflow history | closed |
 | 36 | Layer 8: the model picks the step, never the values | open |
 | 37 | Layer 9c: what the audit keeps after forgetting | open |
-| 38 | Layer 9d: stale facts, and why replay decides the same way | open |
+| 38 | Layer 9d: stale facts, and why replay decides the same way | closed |
 | 39 | Layer 10: why a fixpoint is needed | open |
 | 40 | Layer 11: arrival is a fact, content is not | open |
 | 41 | Layer 13: what the JSON diff hides | open |
@@ -1324,7 +1324,12 @@ and record the key points. A question is closed once you can explain the answer 
   In one line: a stale read is refreshed, a stale answer goes to a person; replay decides the
   same because each event's time is recorded, never read from a clock.
 - Retrieval (layer 12b warm-up, 2026-10-22): put, not answered; left open.
-- Status: open, until a (a read refreshed, a person's answer to a person) comes back from memory.
+- Retrieval (wrap-up of layers 12 and 13, 2026-10-25), a: "the lookup is refreshed; Ana's answer
+  goes to a person." Came back from memory, at the third asking. The why, said with it: a read
+  changes nothing in the world, so running it again only fetches today's value; the engine can't
+  ask a person again, so a person decides (send the review back, then retry `pay`, or close)
+  (brief, D18, D33).
+- Status: closed.
 
 
 ## 39. Layer 10: why a fixpoint is needed
