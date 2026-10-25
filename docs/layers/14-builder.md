@@ -1074,12 +1074,22 @@ Each starts with its negative test, seen failing for the right reason.
   history lines in the other order. It passed alone three times and in the next full run; it is
   outside this layer, and a separate task is suggested for it.
 
+- **From the tutor review of #58: a builder file that exits hid every other file's problems.**
+  `cases_in` caught `Exception`, and `SystemExit` isn't one: `sys.exit(0)` in one builder file
+  ended the command with exit 0 having checked nothing, so another file's `UNKNOWN_ROLE` went
+  unsaid, and 14d's `--unchanged` in CI would have been a green step that checked nothing. Now
+  `SystemExit` is caught with the other errors and refused at its line (`cases/b.py:3:
+  SystemExit: 0`), nothing written; only `KeyboardInterrupt` stops the command. The review's run
+  is the test. Optional, taken: an unknown `[tool.ventoux]` setting is refused (it already was;
+  the test was added and the guard broken once), since a misspelled `packages` would write to the
+  default folder unnoticed.
+
 ### Promises (14c)
 
 Each claim this part makes about behaviour, and the test that would fail if it weren't true. `K`
 is `tests/test_check.py`, `Dc` is `tests/test_deployment_catalog.py` (both new), `S` is
 `tests/test_summary.py`, `W` is `tests/test_kept_from_starting.py`. Checked against the tests,
-2026-10-25: every test named here exists, every test in `K` and `Dc` and every test 14c added to
+2026-10-25, and again after the tutor review of #58: every test named here exists, every test in `K` and `Dc` and every test 14c added to
 `S` and `W` is named here, and every guard was broken once to see its test fail.
 
 | Promise | Test |
@@ -1089,9 +1099,11 @@ is `tests/test_check.py`, `Dc` is `tests/test_deployment_catalog.py` (both new),
 | `--catalog` names it, and wins | Dc `test_the_flag_names_the_catalog_and_wins` |
 | A name that is no catalog, a module that can't be imported, a name without `:NAME`, are refused | Dc `test_a_name_that_is_no_catalog_is_refused` |
 | A configuration that isn't TOML is refused | Dc `test_a_configuration_that_isnt_toml_is_refused` |
+| An unknown `[tool.ventoux]` setting is refused | Dc `test_an_unknown_setting_is_refused` |
 | A story simulates against the team's own catalog, only its fakes running | Dc `test_a_story_simulates_against_the_teams_own_catalog` |
 | Which catalog a story runs against changes what it shows | Dc `test_the_same_story_against_the_development_catalog_fails_its_step` |
 | A builder file that raises is refused at its line, and nothing is written | K `test_a_builder_file_that_raises_is_refused_at_its_line_and_nothing_is_written` |
+| A builder file that exits is refused at its line, hiding no other file's problem; nothing is written | K `test_a_builder_file_that_exits_is_refused_at_its_line_and_hides_nothing` |
 | Each problem is said at the line of the call that made it, with validation's path and code (the negative test) | K `test_each_problem_is_said_at_the_line_of_the_call_that_made_it` |
 | The quickstart's refusal reads as the quickstart shows it | K `test_the_quickstarts_refusal_reads_as_the_quickstart_shows_it` |
 | A shape the reader refuses is said at its line | K `test_a_shape_the_reader_refuses_is_said_at_its_line` |
