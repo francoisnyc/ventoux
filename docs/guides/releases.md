@@ -546,7 +546,7 @@ Here the base is the package as it is, and the pull request lets `settle` start 
 for the review:
 
 ```
-$ ventoux summary --base base --head . --packages examples/packages --lock contracts.lock.json --before base-promises.json --summary-file summary.md
+$ ventoux summary --base base --head . --packages examples/packages --lock contracts.lock.json --base-lock base/contracts.lock.json --before base-promises.json --summary-file summary.md
 # What merging changes
 
 ## Packages

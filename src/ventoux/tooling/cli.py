@@ -104,6 +104,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     summing.add_argument("--lock", type=Path, required=True, help="contracts.lock.json")
     summing.add_argument(
+        "--base-lock", type=Path, required=True, help="the base checkout's contracts.lock.json"
+    )
+    summing.add_argument(
         "--before", type=Path, required=True, help="the base commit's `ventoux promises`"
     )
     summing.add_argument("--summary-file", type=Path, required=True, help="$GITHUB_STEP_SUMMARY")
@@ -275,8 +278,14 @@ def summarize_merge(arguments: argparse.Namespace) -> int:
         commits = (arguments.base_commit, arguments.head_commit)
     try:
         recorded = read_plain_json(arguments.lock)
+        base_recorded = read_plain_json(arguments.base_lock)
         before = read_plain_json(arguments.before)
-        for path, found in ((arguments.lock, recorded), (arguments.before, before)):
+        given = (
+            (arguments.lock, recorded),
+            (arguments.base_lock, base_recorded),
+            (arguments.before, before),
+        )
+        for path, found in given:
             if not isinstance(found, dict):
                 raise Unreadable(path, "isn't a JSON object, by contract reference")
     except Unreadable as unreadable:
@@ -293,6 +302,7 @@ def summarize_merge(arguments: argparse.Namespace) -> int:
         CATALOG,
         recorded,
         before,
+        base_recorded,
         commits,
     )
     print(found.text, end="")

@@ -75,11 +75,13 @@ def summarize(
     catalog: Catalog,
     recorded: Mapping[str, str],
     before: Mapping[str, object],
+    base_recorded: Mapping[str, str],
     commits: tuple[str, str] | None = None,
 ) -> Summary:
     """What merging `head` onto `base` does to each package under `packages`, in either tree,
     each changed one's diff in the plain form (brief, D56), then the contracts: the hash check
-    against `recorded`, with `before`, the base commit's promises (brief, D57). Anything it can't
+    against `base_recorded`, the base's lockfile, and `recorded`, the head's, with `before`, the
+    base commit's promises (brief, D5, D57, as amended by the base lockfile fix). Anything it can't
     read or compare fails the step, said last; never read as nothing changed (fail closed)."""
     for tree, which in ((base, "base"), (head, "head")):
         if not tree.is_dir():
@@ -118,7 +120,7 @@ def summarize(
             # Shown, failing nothing, for a package merging changes; an unchanged package's
             # aren't this pull request's (fix-summary-validation, choice 4).
             diffs.append(warned(name, warnings))
-    problems = check_hashes(catalog, recorded, before)
+    problems = check_hashes(catalog, recorded, before, base_recorded)
     ending = REFUSED if failures or problems else COMPARED
     said = said_as(outcomes, diffs, problems, failures, commits)
     return Summary(

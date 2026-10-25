@@ -52,7 +52,7 @@ def summarized(base: Path, head: Path, catalog: Catalog = CATALOG) -> Summary:
     as the base's promise: its contracts match."""
     recorded = {c.reference: contract_hash(c) for c in catalog.contracts()}
     before: dict[str, object] = {c.reference: promise_of(c) for c in catalog.contracts()}
-    return summarize(base, head, [PACKAGES], catalog, recorded, before)
+    return summarize(base, head, [PACKAGES], catalog, recorded, before, recorded)
 
 
 # --- Slice 1: what merging does, per package -----------------------------------------------------
@@ -157,7 +157,7 @@ def test_a_contract_changed_in_place_says_what_changed_and_fails(tmp_path: Path)
     before["orders.lookup@1"]["timeouts"]["start_to_close"] = 5
     recorded = {c.reference: contract_hash(c) for c in CATALOG.contracts()}
     recorded["orders.lookup@1"] = promise_hash(before["orders.lookup@1"])
-    found = summarize(base, head, [PACKAGES], CATALOG, recorded, before)
+    found = summarize(base, head, [PACKAGES], CATALOG, recorded, before, recorded)
     assert found.code == 1
     assert found.text.endswith(
         "## Contracts\n\n```\norders.lookup@1 changed without a new version: register it as "
@@ -248,7 +248,7 @@ def run_summary(
     """`ventoux summary` as the workflow calls it, the job summary file already holding an
     earlier step's line: its exit code, and the arguments it was given."""
     arguments = ["summary", "--base", str(base), "--head", str(head), "--packages", PACKAGES]
-    arguments += ["--lock", str(LOCK), "--before", str(before)]
+    arguments += ["--lock", str(LOCK), "--base-lock", str(LOCK), "--before", str(before)]
     arguments += ["--summary-file", str(tmp_path / "summary.md"), *more]
     (tmp_path / "summary.md").write_text("an earlier step's summary\n")
     return main(arguments), arguments
@@ -384,6 +384,7 @@ def test_the_guides_summary_runs_as_written(
     with_example(tmp_path / "base")
     edited(with_example(tmp_path), unrequired)
     shutil.copy(LOCK, tmp_path / "contracts.lock.json")
+    shutil.copy(LOCK, tmp_path / "base" / "contracts.lock.json")
     assert main(["promises"]) == 0
     (tmp_path / "base-promises.json").write_text(capsys.readouterr().out)
     section = GUIDE.read_text().split("\n## On each pull request\n")[1]
@@ -469,7 +470,7 @@ def test_a_backtick_in_a_contract_never_closes_the_hash_checks_block(tmp_path: P
     before: dict[str, object] = {earlier.reference: promise_of(earlier)}
     # No package: the test's catalog holds one contract, which no package could run on.
     base, head = tree(tmp_path / "base"), tree(tmp_path / "head")
-    found = summarize(base, head, [PACKAGES], catalog_of(later), recorded, before)
+    found = summarize(base, head, [PACKAGES], catalog_of(later), recorded, before, recorded)
     contracts = found.text.split("## Contracts\n\n")[1]
     assert contracts.startswith("````\norders.lookup@1 changed without a new version")
     assert contracts.endswith("\n````\n")

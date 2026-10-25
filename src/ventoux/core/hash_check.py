@@ -18,7 +18,10 @@ GIVE_THEM = "to see what changed, give the base commit's promises (`ventoux prom
 
 
 def check_hashes(
-    catalog: Catalog, recorded: Mapping[str, str], before: Mapping[str, object] | None = None
+    catalog: Catalog,
+    recorded: Mapping[str, str],
+    before: Mapping[str, object] | None = None,
+    base: Mapping[str, str] | None = None,
 ) -> list[str]:
     """What CI reports: contracts changed without a new version (brief, D5), each with what
     changed if `before` gives its earlier promise, and unrecorded ones."""
