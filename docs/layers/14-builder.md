@@ -1141,6 +1141,11 @@ twice over: D1's last clause, "CI fails if the committed JSON differs from what 
 generates", is what this part builds, and its first clause is why a JSON-only package must stay
 allowed beside the builder's. Answer from memory first, both halves, each with its reason.
 
+Answered 2026-10-25: "should the developer resync with the JSON?", then, after one nudge, "code
+only means running the draft, so the AI writes JSON". Both halves with their reason this time;
+the path from the draft to the developer's code didn't come. Recorded; the question stays open,
+nearly closed.
+
 ### What this part is for
 
 14c's `ventoux check` writes the packages a developer commits. Nothing yet proves that what is
