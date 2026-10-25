@@ -1041,6 +1041,22 @@ and record the key points. A question is closed once you can explain the answer 
     `APPROVAL_REUSED` refuses it; the fix sends the loop back through the approval.
   - **Why it came up in 11f:** a timer that re-arms itself would be a loop with no person in
     between, which 11f's choice 3 rules out.
+- Retrieval (layer 14c warm-up, 2026-10-25): asked first "is it impossible?" (yes, in general;
+  a nudge with the same refund as a plan and as code); then "the code can loop, so no one can list
+  all paths". Discussion: half right, and the half matters.
+  - **Loops alone aren't it:** a plan can loop too (slice 8's retry loop), and `reach` still lists
+    every path, because a plan's moves are a finite list of arrows, each written in some state's
+    `on`, and `reach` visits each state once.
+  - **What code has that a plan doesn't:** where it goes next depends on values computed while it
+    runs (`self.score() > LIMIT`), on calls, on exceptions. The states aren't written down; they
+    are whatever the program's variables can hold. "Can `pay` run without the approval first?" is
+    then undecidable in general (Rice's theorem): a tool can only guess or give up.
+  - **The other half didn't come back: the meaning is declared.** In the plan, "an approval" is a
+    state offering `approve` and `reject`, and `payments.refund@2` is high risk because its
+    contract says so. In code, `wait_condition(lambda: self.approved)` says neither who approves
+    nor what is approved, and nothing says `pay` is risky.
+  - **Why 14c:** `ventoux check` runs Python, the builder files, and checks what they *wrote*:
+    the JSON, which is a plan's kind of thing, never the Python.
 - Status: open, until the follow-up comes from memory.
 
 

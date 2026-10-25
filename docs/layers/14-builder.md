@@ -845,6 +845,12 @@ came back in parts at 5, 10a and 11f. It is 14c's question: `ventoux check` *run
 builder files, and then checks what they wrote, never the Python itself. Answer the main question
 from memory first.
 
+Answered 2026-10-25: "the code can loop, so no one can list all paths", after asking whether it
+is impossible (in general, yes). Half of it: a plan loops too and is still checked, since its
+moves are written down; code's paths depend on values computed as it runs. The other half, that a
+plan declares its meaning (an approval, a risk) where code doesn't, didn't come back. Discussed
+and recorded; the question stays open.
+
 ### What this part is for
 
 14a and 14b write the JSON from Python, through a test or by hand. 14c is the command a developer
