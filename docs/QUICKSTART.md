@@ -198,7 +198,8 @@ inputs={"order_id": order_id, "amount": message_amount}
 
 ```text
 cases/refund.py:19: steps.pay.inputs.amount INPUT_POLICY: payments.refund@2 takes amount only from a system or a person, never from untrusted data, and this value comes from customer_amount (the opener, untrusted:customer): use a value a system or a person gave
-✗ refund is refused: 1 error. Nothing was written.
+✗ refund is refused: 1 error.
+Nothing was written.
 ```
 
 The line is the call that wrote the step, `refund.activity("pay", …)`, and the path and the code

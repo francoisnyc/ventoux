@@ -2034,9 +2034,11 @@ $ ventoux map examples/packages/refund
 ## What `ventoux check` proves about a case
 
 `ventoux check` reads the whole definition before any case opens and lists every problem at once,
-each with its path, a code and a message saying what is wrong, then what to do. Nothing runs. The
-command arrives with the Python builder (layer 14); today, call `validate_case(case, catalog)`
-from `ventoux.case.validate`, which gives the same list.
+each with its path, a code and a message saying what is wrong, then what to do. No case runs. It
+runs your builder files, checks the JSON they write against the deployment's catalog, and says each
+problem at the line of Python that made it (the builder guide, "Checking a builder file"). For a
+definition already parsed, `validate_case(case, catalog)` from `ventoux.case.validate` gives the
+same list.
 
 An **error** is something proven wrong for every case of the definition, or something the check
 can't read: the definition is refused. A **warning** may be what you meant, or depends on things

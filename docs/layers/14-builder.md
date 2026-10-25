@@ -1026,6 +1026,88 @@ Each starts with its negative test, seen failing for the right reason.
 5. **The D48 warning** (choice 37).
 6. **`simulate` against a team's catalog, the guides, D59, the Promises** (choices 38 and 39).
 
+### Decided while building (14c)
+
+- **"Nothing was written." is a line of its own,** after every refused package's line, not
+  appended to the one line the quickstart's section 6 first showed: with several packages, it
+  follows them all. The quickstart, written before building, was corrected to the output, and a
+  test compares the two.
+- **A builder call's line is its first line,** checked before choosing: Python gives a multi-line
+  call's caller frame the line the call starts on, so `refund.activity(` is the line said.
+- **The line is found by walking the stack to the first frame outside the builder's own
+  modules** (`called_from`), so `refund.reference(...)`, which calls `field`, records the
+  developer's line, never the builder's.
+- **A case's shape refusal needs no mapping of its own:** the package reader's refusal names the
+  path on each line, and the same mapping places it. `shape_problems` exists for a plan's shape,
+  whose refusal lines don't say which plan; found when breaking it left every test passing, and a
+  test for a plan's refused state was added (see the Promises), now failing when it is broken.
+- **`simulate` against a catalog that lacks a contract doesn't refuse the story:** the step fails
+  as a case's would, and waits for a person. My first test assumed a refusal; it now checks what
+  each catalog does to the same story.
+- **Existing tests that run a guide's commands from a temporary folder now name their catalog,**
+  as a project would: the releases guide's and the summary guide's in a `pyproject.toml`, the diff
+  guide's by replacing the catalog lookup. Two summary tests' bases name the same catalog as the
+  head, as `main` will once this merges; without it the summary rightly says "the base names none".
+- **CI's summary on this pull request says the head names `ventoux.testing:CATALOG` where the base
+  names none:** true, since `main` names no catalog before this merges. It fails nothing.
+- **The quickstart is its own project:** `examples/quickstart/pyproject.toml` names the
+  development catalog, as `ventoux init` would write it. Without it, `ventoux check` from that
+  folder found the repository's configuration and would have written into `examples/packages/`.
+  Run in each project, `ventoux check` writes exactly the committed packages: nothing changed.
+- **This repository's `pyproject.toml` names its catalog, cases and packages:**
+  `ventoux.testing:CATALOG`, `examples/cases`, `examples/packages`.
+- **The warning reuses validation's flow** (`case_sources`, `untrusted_of`, with the opener a
+  system, as the other flow checks do): no new analysis.
+- **Code ahead of its tests, said plainly:** `check.py` was written whole in slice 1, so slices 2
+  and 3's tests passed on their first run, except the quickstart's output, which failed on the line
+  above. Every guard was broken once afterwards: 14 mutations, each failing its test (one only
+  after the plan-shape test was added).
+- **A mutation left a stale `.pyc` behind, and a test then failed on correct code.** Breaking
+  `if shape:` into `if False:` keeps the file's size, and the backup copy and the mutated write
+  fell in the same second: Python's bytecode cache, keyed on the source's size and its modification
+  time in whole seconds, kept the mutated bytecode once the original was restored. `inspect`
+  showed the right source while the mutated function ran. Found when the plan-shape test failed
+  alone, with `shape_problems` returning the mapped problem and `check` ignoring it. The cache is
+  cleared after each restore now, and the full run below is on a clean cache.
+- **A Temporal test failed once in a full run,**
+  `test_a_stopped_cancellable_workflow_is_cancelled_on_temporal`, as in 14a's first run: two
+  history lines in the other order. It passed alone three times and in the next full run; it is
+  outside this layer, and a separate task is suggested for it.
+
+### Promises (14c)
+
+Each claim this part makes about behaviour, and the test that would fail if it weren't true. `K`
+is `tests/test_check.py`, `Dc` is `tests/test_deployment_catalog.py` (both new), `S` is
+`tests/test_summary.py`, `W` is `tests/test_kept_from_starting.py`. Checked against the tests,
+2026-10-25: every test named here exists, every test in `K` and `Dc` and every test 14c added to
+`S` and `W` is named here, and every guard was broken once to see its test fail.
+
+| Promise | Test |
+|---|---|
+| No catalog named is refused, never read as the development one | Dc `test_no_catalog_named_is_refused_never_read_as_the_development_one` |
+| A catalog named in the configuration is used | Dc `test_a_catalog_named_in_the_configuration_is_used` |
+| `--catalog` names it, and wins | Dc `test_the_flag_names_the_catalog_and_wins` |
+| A name that is no catalog, a module that can't be imported, a name without `:NAME`, are refused | Dc `test_a_name_that_is_no_catalog_is_refused` |
+| A configuration that isn't TOML is refused | Dc `test_a_configuration_that_isnt_toml_is_refused` |
+| A story simulates against the team's own catalog, only its fakes running | Dc `test_a_story_simulates_against_the_teams_own_catalog` |
+| Which catalog a story runs against changes what it shows | Dc `test_the_same_story_against_the_development_catalog_fails_its_step` |
+| A builder file that raises is refused at its line, and nothing is written | K `test_a_builder_file_that_raises_is_refused_at_its_line_and_nothing_is_written` |
+| Each problem is said at the line of the call that made it, with validation's path and code (the negative test) | K `test_each_problem_is_said_at_the_line_of_the_call_that_made_it` |
+| The quickstart's refusal reads as the quickstart shows it | K `test_the_quickstarts_refusal_reads_as_the_quickstart_shows_it` |
+| A shape the reader refuses is said at its line | K `test_a_shape_the_reader_refuses_is_said_at_its_line` |
+| A plan's shape the reader refuses is said at the plan's call | K `test_a_plans_shape_the_reader_refuses_is_said_at_the_plans_call` |
+| A problem no call wrote is said at the case's line | K `test_a_problem_no_call_wrote_is_said_at_the_cases_line` |
+| Nothing is written unless every package passes | K `test_nothing_is_written_unless_every_package_passes` |
+| Every package is written into `packages/`, as the builder writes it; the quickstart's section 3 reads as printed | K `test_every_package_is_written_where_git_keeps_it_as_the_builder_writes_it` |
+| A folder holds exactly its package; a folder no file defines is left, and said | K `test_a_folder_holds_exactly_its_package` |
+| Two cases of one name are refused, naming both files | K `test_two_cases_of_one_name_are_refused_naming_both_files` |
+| A catalog named otherwise than the base's is said, failing nothing | S `test_a_catalog_named_otherwise_than_the_bases_is_said_failing_nothing` |
+| The base's catalog is read from its configuration as text, nothing imported | S `test_the_command_reads_the_bases_catalog_from_its_configuration` |
+| A step untrusted data may keep from starting is warned about, naming the field and its source, never a value | W `test_a_step_untrusted_data_may_keep_from_starting_is_warned_about` |
+| A trusted condition is no warning | W `test_a_trusted_condition_is_no_warning` |
+| A step the case can't close without is no warning | W `test_a_step_the_case_cant_close_without_is_no_warning` |
+| A step a person proposes is no warning | W `test_a_step_that_doesnt_start_by_itself_is_no_warning` |
+
 ### Not in 14c
 
 - `ventoux check --unchanged` in CI, and where release records live (14d).

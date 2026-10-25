@@ -98,8 +98,10 @@ The commit is given by CI; the tool never reads git. It exits with:
 
 The tool checks each plan (as `ventoux check` does for plans) and the case against the catalog
 before anything else. An error refuses the release, printing each issue with its path; a warning
-is printed and the release goes on. Until `ventoux check` comes with the builder, the catalog is
-the development one.
+is printed and the release goes on. The catalog is the deployment's, named in the project's
+`pyproject.toml` (`[tool.ventoux] catalog = "module:NAME"`) or with `--catalog`; with none named the
+tool refuses to run, rather than check against the wrong one. `ventoux check` runs the same check
+before a pull request, at the line of Python that made each problem.
 
 ## The release record
 
