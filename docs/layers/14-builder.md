@@ -1354,7 +1354,7 @@ see its test fail.
 ## 14e. The JSON Schema, published from Pydantic
 
 Status: choices drafted 2026-10-25, from `main` at `f51a298` (14d merged as #61). The warm-up
-asked; choices 48 to 54 waiting for answers.
+answered and recorded (question 32 closed); choices 48 to 54 waiting for answers.
 
 ### Warm-up: learning question 32, why `now` can't be written
 
@@ -1366,6 +1366,10 @@ Open; the follow-up's *if* ("not yet assessed") has not yet come back in its pla
 question: "can't be written, not refused" is a sentence about the published JSON Schema, which
 this part makes real. Answer from memory first, the three parts of the follow-up: how the rule is
 written (*when*, *if*, *then*), where the time comes from, and why replay decides the same way.
+
+Answered 2026-10-25, after a reminder of what a rule's *when* is: "when 5 days after the claim
+opened, if not assessed, then escalate", then "a Temporal timer fires it, and replay reads
+TimerFired from history". All three parts, the *if* in its place for the first time. Closed.
 
 ### What this part is for
 
