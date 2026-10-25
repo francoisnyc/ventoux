@@ -36,6 +36,9 @@ jobs:
       # catalog; then the same in the quickstart's own project.
       - run: uv run ventoux check --unchanged
       - run: cd examples/quickstart && uv run --project ../.. ventoux check --unchanged
+      # The committed JSON Schema is what the engine's models say (layer 14e, brief D60): a model
+      # changed without `ventoux schema` run again fails here. Nothing written.
+      - run: uv run ventoux schema --unchanged
 
   # What merging a pull request changes, in its job summary (layer 13e): for each package, a
   # release, a wording revision or nothing, then the diff; and each contract changed in place.
