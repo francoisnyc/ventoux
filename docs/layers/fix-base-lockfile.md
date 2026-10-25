@@ -4,7 +4,9 @@ A fix, not a layer: no warm-up, and nothing new to build. Found in layer 13's wa
 stop 7 (learning question 41, "Found in the walk-through, not fixed"), and left for its own pull
 request; confirmed in the code by the tutor review of #53.
 
-Status: choices put, 2026-10-25, each with a recommendation; waiting for answers by number.
+Status: choices put, 2026-10-25, each with a recommendation. Answered "1 to 10, all as
+recommended", the same day. The dated lines on D5 and D57, the activities guide's paragraph and
+learning question 41's lines written before building.
 
 ## The bug
 

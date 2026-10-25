@@ -1508,7 +1508,8 @@ and record the key points. A question is closed once you can explain the answer 
     release, unless..." and exits 0: choice 67 promised that a package that "is refused" fails the
     step, and its test only refuses one that can't be read. Proposed fix: the summary checks each
     head package as `ventoux release` would; errors fail the step and say the package can't be
-    released as it is, warnings are shown under its diff.
+    released as it is, warnings are shown under its diff. Fixed in #54
+    (`docs/layers/fix-summary-validation.md`).
   - **A contract changed in place passes when the pull request rewrites its hash** (stop 7).
     `orders.lookup@1`'s `start_to_close` 10 -> 5, and its entry in `contracts.lock.json`
     replaced by the new hash, in one commit: the head's `ventoux summary`, given the real base's
@@ -1517,7 +1518,8 @@ and record the key points. A question is closed once you can explain the answer 
     mismatch, never find one. The brief's line, "CI hashes each contract ... and fails if it
     changed without a new number" (brief, D5), doesn't hold. Proposed fix: a hash the base's
     lockfile records never changes; each contract the base records is checked against the base's
-    lockfile (or its promise), and the head's lockfile only adds references.
+    lockfile (or its promise), and the head's lockfile only adds references. Fixed by the base
+    lockfile fix (`docs/layers/fix-base-lockfile.md`).
 - Your answer (layer 13's check-yourself, after the walk-through, 2026-10-25): "the verdicts by
   effect, not the lines that changed."
 - Discussion: the core is right, and it is the layer's lesson. What it covers, each from the
