@@ -55,8 +55,24 @@ and record the key points. A question is closed once you can explain the answer 
 > An AI drafts a new case definition. A developer then wants to change one rule in it. What happens
 > if code is the only way people edit definitions? And what if JSON is the contract?
 
-- Your answer:
-- Discussion:
+- Your answer (layer 14 warm-up, 2026-10-25): "the developer changes the code and regenerates
+  the contract?"; after a nudge towards the AI's half, "AI produces JSON directly?".
+- Discussion: both are right, but neither half was put in its own case. In full:
+  - **Code as the only way to edit.** The model's draft would have to be code. A program's meaning
+    is only known by running it (learning question 33: paths go through loops, calls and values
+    computed at run time), so nothing could check the draft before it runs, and running a model's
+    output is exactly what the brief forbids. Every runtime draft would also need a developer to
+    review it as code before anyone could even look at it.
+  - **JSON as the contract.** The model writes JSON directly (brief, D1: AI at runtime only
+    produces JSON, which is untrusted, validated and never executed). It is checked like any
+    definition, and the analyst reads the plain-language diff, not code. A draft worth keeping
+    becomes a reviewed pull request; because the builder is one-to-one with the JSON, the
+    developer can write it as builder code and change the rule there. CI then fails if the
+    committed JSON isn't byte for byte what the code generates.
+  - **The point:** code is the developer's front door, JSON is the one thing everything checks,
+    diffs and runs. The two kinds of AI follow from it: at design time an assistant writes builder
+    code reviewed like any code; at runtime a model only writes JSON.
+- Status: open, until both cases come back from memory, each with its reason.
 
 ## 2. Design principles
 
