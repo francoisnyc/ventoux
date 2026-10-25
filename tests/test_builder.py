@@ -10,7 +10,22 @@ from pathlib import Path
 
 import pytest
 
-from ventoux import Case, Field, Outcome, and_, literal, not_, or_
+from ventoux import (
+    Case,
+    Field,
+    Outcome,
+    and_,
+    cat,
+    count,
+    exists,
+    if_,
+    in_,
+    literal,
+    not_,
+    or_,
+    string,
+    sum_,
+)
 from ventoux.case.definition import parse_case
 from ventoux.case.releases import behaviour_digest
 from ventoux.testing import load_definition
@@ -156,3 +171,66 @@ def test_a_second_sequence_is_refused() -> None:
     refund.sequence(review, pay)
     with pytest.raises(ValueError, match="refund already has a sequence: give it every step once"):
         refund.sequence(pay, review)
+
+
+def test_every_operator_writes_its_json() -> None:
+    # D20's operators, each a function named after the JSON's, with `_` where Python has the name
+    # already (choice 18).
+    claim = Case("claim", title="Insurance claim")
+    payout = claim.field("payout", Field.number(), title="Payout")
+    note = claim.field("note", Field.string(), title="Note")
+    urgent = claim.field("urgent", Field.boolean(), title="Urgent")
+    order_id = claim.reference("order_id", system="orders", title="Order")
+    lines = claim.field(
+        "lines", Field.list(amount=Field.number(), sku=Field.string()), title="Lines"
+    )
+    review = claim.task(
+        "review", title="Review", roles=["adjuster"], outcomes={"ok": Outcome("Fine")}
+    )
+    assert if_(urgent, payout, 0).data == {"if": [{"var": "urgent"}, {"var": "payout"}, 0]}
+    assert in_(review.outcome, ["ok"]).data == {"in": [{"var": "review.outcome"}, ["ok"]]}
+    assert cat(note, " for ", string(order_id)).data == {
+        "cat": [{"var": "note"}, " for ", {"string": [{"var": "order_id"}]}]
+    }
+    assert exists(payout).data == {"exists": "payout"}
+    assert count(lines, where=lines.number("amount") > 10).data == {
+        "count": {"over": {"var": "lines"}, "where": {">": [{"item": "amount"}, 10]}}
+    }
+    assert sum_(lines, value=lines.number("amount")).data == {
+        "sum": {"over": {"var": "lines"}, "value": {"item": "amount"}}
+    }
+    assert (lines.text("sku") == "x").data == {"==": [{"item": "sku"}, "x"]}
+
+
+def test_a_list_item_is_read_as_its_list_declares_it() -> None:
+    # Reading `sku` as a number would write another definition than the one declared (choice 18).
+    claim = Case("claim", title="Insurance claim")
+    lines = claim.field("lines", Field.list(sku=Field.string()), title="Lines")
+    with pytest.raises(TypeError, match="lines declares sku as a string, not a number"):
+        lines.number("sku")
+    with pytest.raises(TypeError, match="lines declares no field colour"):
+        lines.text("colour")
+
+
+def test_an_output_is_written_as_the_developer_declares_it() -> None:
+    # The contract is the catalog's: whether `kyc` gives `risk_score` is `ventoux check`'s to say
+    # (choice 20).
+    claim = Case("claim", title="Insurance claim")
+    kyc = claim.activity("kyc", "kyc.check@1", title="Check the customer")
+    assert (kyc.output("risk_score", Field.number()) > 50).data == {
+        ">": [{"var": "kyc.risk_score"}, 50]
+    }
+
+
+def test_a_mismatched_comparison_is_refused_when_the_file_runs() -> None:
+    # mypy reads a mismatched `==` as Python's own, a `bool`, refused where a condition is
+    # required; when the file runs, the expression refuses it at once (choice 19).
+    refund = Case("refund", title="Customer refund")
+    review = refund.task(
+        "review", title="Review", roles=["support"], outcomes={"ok": Outcome("Fine")}
+    )
+    order_id = refund.reference("order_id", system="orders", title="Order")
+    with pytest.raises(TypeError, match="5 can't be compared with OutcomeExpr"):
+        review.outcome == 5  # noqa: B015
+    with pytest.raises(TypeError, match="'ord-1' can't be compared with ReferenceExpr"):
+        order_id == "ord-1"  # noqa: B015

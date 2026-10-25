@@ -41,6 +41,71 @@ pay = refund.activity(
     "pay", "payments.refund@2", title="Refund the customer", inputs={"amount": literal(250)}
 )
 """,
+    "outcome_beside_a_number": """
+from ventoux import Case, Outcome
+
+refund = Case("refund", title="Customer refund")
+review = refund.task("review", title="Review", roles=["support"], outcomes={"ok": Outcome("Fine")})
+pay = refund.activity("pay", "payments.refund@2", title="Refund", when=review.outcome == 5)
+""",
+    "kinds_compared_as_written": """
+from ventoux import Case, Field, Outcome
+
+refund = Case("refund", title="Customer refund")
+amount = refund.field("amount", Field.number(), title="Amount")
+note = refund.field("note", Field.string(), title="Note")
+urgent = refund.field("urgent", Field.boolean(), title="Urgent")
+order_id = refund.reference("order_id", system="orders", title="Order")
+review = refund.task("review", title="Review", roles=["support"], outcomes={"ok": Outcome("Fine")})
+for condition in (
+    amount == 5, note == "x", urgent == True, review.outcome == "ok", order_id == order_id
+):
+    refund.activity(f"pay_{len(refund.steps)}", "payments.refund@2", title="Pay", when=condition)
+""",
+    "text_beside_a_reference": """
+from ventoux import Case
+
+refund = Case("refund", title="Customer refund")
+order_id = refund.reference("order_id", system="orders", title="Order")
+pay = refund.activity("pay", "payments.refund@2", title="Refund", when=order_id == "ord-1")
+""",
+    "step_where_a_milestone_is_required": """
+from ventoux import Case
+
+refund = Case("refund", title="Customer refund")
+pay = refund.activity("pay", "payments.refund@2", title="Refund")
+call = refund.activity("call", "letters.draft@2", title="Write", reaches=[pay])
+""",
+    "sla_since_first_start": """
+from ventoux import Case, Outcome, Then
+
+claim = Case("claim", title="Claim")
+assess = claim.task("assess", title="Assess", roles=["adjuster"], outcomes={"ok": Outcome("Fine")})
+escalate = claim.activity("escalate", "letters.draft@2", title="Escalate")
+claim.sla(
+    "late", title="Late", step=assess, within="5d", since="first_start", then=Then(start=[escalate])
+)
+""",
+    "timer_on_a_timer": """
+from ventoux import Case, Outcome, Then, after
+
+claim = Case("claim", title="Claim")
+assess = claim.task("assess", title="Assess", roles=["adjuster"], outcomes={"ok": Outcome("Fine")})
+paid = claim.milestone("paid", title="Paid")
+claim.rule(
+    "late",
+    title="Late",
+    on=after("2d", since=after("1d", since=assess.started)),
+    then=Then(reach=[paid]),
+)
+""",
+    "number_as_a_transition_condition": """
+from ventoux import Field, Plan, Transition
+
+plan = Plan("refund-order", 1, title="Refund an order")
+amount = plan.field("amount", Field.number())
+plan.activity("pay", "payments.refund@2", on={"done": [Transition("paid", when=amount)]})
+""",
     "quickstart": (
         Path(__file__).parent.parent / "examples/quickstart/cases/refund.py"
     ).read_text(),
@@ -92,3 +157,38 @@ def test_a_text_beside_a_number_fails_the_type_check(type_errors: dict[str, list
 def test_the_quickstarts_builder_file_type_checks(type_errors: dict[str, list[str]]) -> None:
     # So each refusal above comes from its own line, never from the builder refusing everything.
     assert type_errors["quickstart"] == []
+
+
+def test_equality_is_typed_by_what_the_expression_holds(type_errors: dict[str, list[str]]) -> None:
+    # `==` compares the same kind, or an outcome with its name (choice 19): an outcome is never a
+    # number, and a reference compares only with a reference, as the expression check says. A
+    # mismatched `==` is Python's own to mypy, a `bool`, so it fails where a condition is required.
+    for snippet in ("outcome_beside_a_number", "text_beside_a_reference"):
+        assert any('"when"' in error and '"bool"' in error for error in type_errors[snippet]), (
+            type_errors[snippet]
+        )
+    assert type_errors["kinds_compared_as_written"] == []
+
+
+def test_a_step_where_a_milestone_is_required_fails_the_type_check(
+    type_errors: dict[str, list[str]],
+) -> None:
+    errors = type_errors["step_where_a_milestone_is_required"]
+    assert any('"Step"; expected "Milestone"' in error for error in errors), errors
+
+
+def test_since_first_start_is_not_offered(type_errors: dict[str, list[str]]) -> None:
+    # An sla measures each run from its own start; `since=first_start` isn't offered (brief, D46).
+    errors = type_errors["sla_since_first_start"]
+    assert any('"since"' in error for error in errors), errors
+
+
+def test_a_timer_is_never_set_on_a_timer(type_errors: dict[str, list[str]]) -> None:
+    # A timer is set on one of the five moments, never another timer (brief, D44).
+    errors = type_errors["timer_on_a_timer"]
+    assert any('"since"' in error and '"Timer"' in error for error in errors), errors
+
+
+def test_a_transitions_condition_is_a_condition(type_errors: dict[str, list[str]]) -> None:
+    errors = type_errors["number_as_a_transition_condition"]
+    assert any('"when"' in error and '"NumberExpr"' in error for error in errors), errors
