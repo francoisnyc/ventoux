@@ -38,7 +38,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 31 | Pydantic: when checks run | closed |
 | 32 | Layer 2: why `now` can't be written | open |
 | 33 | Layer 3: why plans can be checked and code can't | open |
-| 34 | Layer 5: why check input policies twice | open |
+| 34 | Layer 5: why check input policies twice | closed |
 | 35 | Layer 6: what lives in workflow history | closed |
 | 36 | Layer 8: the model picks the step, never the values | open |
 | 37 | Layer 9c: what the audit keeps after forgetting | open |
@@ -1088,7 +1088,13 @@ and record the key points. A question is closed once you can explain the answer 
   release; a new release and open cases on the old one after) and **who hears of it** (the author,
   who can change the definition, against an operator with a case stuck). The second is 13e: the
   job summary is the static check's voice in the pull request, where the author is.
-- Status: open, until "who hears of it" comes back from memory.
+- Retrieval (wrap-up of layers 12 and 13, 2026-10-25), the follow-up: "every path; the author
+  hears it, before release." All three came back: every path, for the fourth time; **who hears
+  of it**, the author, who can change the definition, where the runtime refusal reaches an
+  operator with a case stuck; and **when**, before release, while it is an edit. Layer 13 gave
+  it a place: the job summary is the static check's voice in the pull request, where the author
+  is (and the walk-through found it doesn't yet carry validation's own issues, question 41).
+- Status: closed.
 
 ## 35. Layer 6: what lives in workflow history
 
