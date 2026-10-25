@@ -105,7 +105,7 @@ Two mistakes the types catch:
   Python asks the expression for a `bool`, and the builder refuses: "approved_amount > 100 is
   decided by each case, when it runs, never when the file runs: give it as `when=`".
 
-And a mistake only the bytes catch: someone edits `build/refund/case.json` by hand, or changes
+And a mistake only the bytes catch: someone edits `packages/refund/case.json` by hand, or changes
 `refund.py` and forgets to regenerate. CI writes the JSON again from the Python, compares it byte
 for byte with what is committed, and fails on any difference. This is the curriculum's second
 negative test.
@@ -233,6 +233,13 @@ Answer by number. "Recommended" is what I'd do; the options set aside are named.
      as it is.
 
    *Recommended.*
+
+   *Amended 2026-10-25, from the tutor review of #56* (the text above stands; 14c decides the
+   rest): the written JSON is committed and is what runs, so it never goes in `build/`, which
+   Python's usual `.gitignore` ignores. A team's repository very likely ignores it too, and the
+   JSON would then pass on the developer's machine, never reach review, and be missing in CI.
+   14c's choice of where `ventoux check` writes package folders starts from `packages/<case>/`
+   (`packages/refund/case.json`), the layout 14a's quickstart project already uses.
 
 7. **The deployment's catalog, and which commands take it:**
    - **How it is loaded.** The catalog is the platform team's Python, never anything from a
@@ -387,7 +394,8 @@ bytes every time. The quickstart's tests pass `refund` to `run_case`.
 
 15. **Where the quickstart lives in this repository:** `examples/quickstart/cases/refund.py`, and
     the package it writes, `examples/quickstart/build/refund/case.json`, a project laid out as
-    the quickstart shows. `tests/test_quickstart.py` imports `refund` from it, exactly as the
+    the quickstart shows. *(Amended 2026-10-25, from the tutor review of #56: the package is
+    `examples/quickstart/packages/refund/case.json`, where git keeps it; see choice 6's line.)* `tests/test_quickstart.py` imports `refund` from it, exactly as the
     quickstart writes it (curriculum, tracer bullet). `examples/refund/refund.json` stays as
     hand-written JSON: stories and other tests read it, and a definition may still be written as
     JSON (choice 12's hatch). A test checks that it and the built one have the same behaviour
@@ -438,10 +446,30 @@ Each starts with its negative test, seen failing for the right reason.
 - **The quickstart's project is on pytest's and mypy's paths** (`examples/quickstart`), so its
   tests import `cases.refund` as the quickstart writes it. The quickstart's import line is sorted
   as ruff sorts it (`Approval, Case, Field, Outcome`), the one change to its text.
-- **The built JSON is committed, so `.gitignore` lets it through** (`!examples/quickstart/build/`,
-  found by CI on #56): the repository's Python template ignores every `build/`, so
-  `case.json` passed locally, untracked, and was missing in CI. A team's project needs the same:
-  `ventoux init` (14c) mustn't leave `build/` ignored, or the JSON that runs is never reviewed.
+- **The written JSON lives in `packages/`, never `build/`** (found by CI on #56, decided in the
+  tutor review): the repository's Python template ignores every `build/`, so
+  `examples/quickstart/build/refund/case.json` was written in the working tree, passed locally,
+  was never committed, and was missing in CI (`FileNotFoundError`). A first fix un-ignored the
+  quickstart's `build/`; the review asked instead for a folder git keeps by default, since a
+  team's own repository very likely ignores `build/` too. So the package is
+  `examples/quickstart/packages/refund/case.json`, `.gitignore` is `main`'s, and 14c's choice of
+  where `ventoux check` writes starts from `packages/<case>/` (choice 6's dated line). Confirmed
+  the way CI sees it: a fresh clone of the pushed head, then the full test run.
+- **From the tutor review of #56, the optional items, each decided:**
+  - *a form never sets a step's outcome:* tested on its own. The earlier test gave
+    `[amount + 1, review.outcome]`, and `amount + 1` was refused first, so the outcome was never
+    reached. The guard already held; it was broken once to see the new test fail.
+  - *`sequence()` called twice is refused,* as a second entry of one name is: a case has one
+    `sequence`, and a second call replaced the first without a word. Test first, seen failing.
+  - *the engine's processes never load the builder:* `ventoux` re-exports the builder's names
+    lazily (a module `__getattr__`, PEP 562), so `import ventoux.temporal.worker` leaves
+    `ventoux.tooling.builder` unloaded. That makes "never runs inside the engine" (D58) checkable.
+    `__all__` is written out, since strict mypy reads exports only from a literal one, found by
+    the type tests.
+  - *`==` typed by the expression's `T`:* deferred to 14b, which adds the other kinds of `Expr`
+    (outcomes, references, truth values, lists). Typing `==` then covers every kind in one place,
+    where doing it now would type only numbers. A misspelled outcome still needs the task's
+    declared outcomes, so it stays `ventoux check`'s to catch either way.
 - **The built package was written once with `written`;** `ventoux check` writes it from 14c, and
   CI checks it from 14d. Until then a test holds the committed bytes to `written`.
 - **Code ahead of its test, said plainly:** the task, the activity and the approval were written
@@ -452,9 +480,9 @@ Each starts with its negative test, seen failing for the right reason.
 
 Each claim this part makes about behaviour, and the test that would fail if it weren't true. `T`
 is `tests/test_builder_types.py` (new), `B` is `tests/test_builder.py` (new), `Q` is
-`tests/test_quickstart.py`, `L` is `tests/test_layers.py`. Checked against the tests, 2026-10-25:
-every test named here exists, every test in `T` and `B` is named here, and every guard was
-broken once to see its test fail.
+`tests/test_quickstart.py`, `L` is `tests/test_layers.py`. Checked against the tests, 2026-10-25,
+and again after the tutor review of #56: every test named here exists, every test in `T` and `B`
+is named here, and every guard was broken once to see its test fail.
 
 | Promise | Test |
 |---|---|
@@ -467,15 +495,18 @@ broken once to see its test fail.
 | `and_`, `or_` and `not_` write `and`, `or` and `!` | B `test_and_or_and_not_are_functions_writing_d20s_operators` |
 | A `float`, NaN or `True` is refused as a number, the float saying to write a `Decimal` | B `test_a_float_or_a_truth_value_is_refused_as_a_number` |
 | A plain value the type checker missed is refused when the file runs | B `test_a_plain_value_the_type_checker_missed_is_refused_when_the_file_runs` |
-| A form sets fields only | B `test_a_form_sets_fields_only` |
+| A form sets fields only: an expression is refused | B `test_a_form_sets_fields_only` |
+| A form never sets a step's outcome | B `test_a_form_never_sets_a_steps_outcome` |
 | Two entries of one name are refused | B `test_two_entries_of_one_name_are_refused` |
+| A second `sequence` is refused | B `test_a_second_sequence_is_refused` |
 | The built refund is the hand-written one as data, with the same behaviour digest | B `test_the_quickstarts_refund_reads_as_the_hand_written_one` |
-| The written JSON is the committed one, byte for byte, the same every time | B `test_the_written_json_is_the_committed_one_byte_for_byte` |
+| The written JSON is the committed one, byte for byte, the same every time, in `packages/`, where git keeps it | B `test_the_written_json_is_the_committed_one_byte_for_byte`, run on a fresh clone |
 | The layout is `json.dumps(indent=2, ensure_ascii=False)`'s | B `test_the_layout_is_the_standard_librarys` |
 | A number that would read back as another is refused | B `test_a_number_that_would_read_back_as_another_is_refused` |
 | `run_case` runs a builder case's written JSON; the quickstart's tests run the Python definition | Q every test passing `refund`, among them `test_small_refund_needs_no_team_lead`, `test_large_refund_waits_for_a_team_lead`, `test_an_undeclared_outcome_is_refused` |
 | The quickstart's Python, word for word, is the file its tests run | Q `test_the_quickstarts_python_file_is_the_one_its_tests_run` |
 | Importing `ventoux` brings no Temporal | L `test_importing_ventoux_brings_no_temporal` |
+| The engine's processes never load the builder | L `test_the_engines_processes_never_load_the_builder` |
 
 ## Not in layer 14
 
