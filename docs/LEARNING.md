@@ -15,7 +15,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 8 | Engine language | open |
 | 9 | D4: Python engine | open |
 | 10 | Versions (pending D5) | closed |
-| 11 | Behaviour vs wording | open |
+| 11 | Behaviour vs wording | closed |
 | 12 | Releases | closed |
 | 13 | Workflow steps | closed |
 | 14 | Quickstart: approvals | open |
@@ -268,6 +268,15 @@ and record the key points. A question is closed once you can explain the answer 
   stable key (`"template": "refund_confirmed"`) and keep the sentence with the activity's
   templates: `display` never flows into an activity, which is what keeps wording safe to change
   unreviewed, and the draft still drafts and is read by a person before it goes. Stays open.
+- Retrieval (wrap-up of layers 12 and 13, 2026-10-25), from memory for the first time: "release
+  because it's a new input, use a template instead." Both parts came back. The two whys didn't:
+  an input is outside `display`, so in the digest, and it flows into the activity, its approval's
+  digest and its contract's input policies (13d's notes say `steps.<step>.inputs.intro`, a
+  behaviour change); and the template lives with the activity, the definition passing a stable
+  key (`"template": "refund_confirmed"`), since `display` never reaches an activity.
+- Explained back, asked why the sentence can't move into `display` and what still protects the
+  customer: "display never reaches the activity; a person still reads the draft."
+- Status: closed.
 
 ## 12. Releases
 
