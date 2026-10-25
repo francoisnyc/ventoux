@@ -573,3 +573,19 @@ def test_an_unchanged_packages_warnings_arent_shown(tmp_path: Path) -> None:
     found = summarized(base, head)
     assert found.code == 0
     assert "MAY\\_BE\\_UNSET" not in found.text
+
+
+def test_an_issues_message_is_shown_as_written(tmp_path: Path) -> None:
+    # A message quotes what the definition writes; here a condition's field name, since a role's
+    # name is refused by its pattern before any check (fix-summary-validation, choice 6).
+    def quoting(case: dict[str, Any]) -> None:
+        case["steps"]["settle"]["when"] = {"==": [{"var": "no<such*"}, "approve"]}
+
+    base = with_example(tmp_path / "base")
+    head = edited(with_example(tmp_path / "head"), quoting)
+    found = summarized(base, head)
+    assert found.code == 1
+    assert (
+        "- refund, in the head: steps.settle.when: EXPRESSION\\_INVALID: ==\\[0\\]: no&lt;such\\* is "
+        "not a declared field\n"
+    ) in found.text
