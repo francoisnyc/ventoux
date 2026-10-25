@@ -687,7 +687,10 @@ Built test-first, 2026-10-23.
   the tutor's way: workers taken in turn, the second giving another digest; the case stays
   running with a failed workflow task, and the third, giving the digest again, lets it go on. The
   test's workers cache no workflow: a cached run's tasks go to its stopped worker's own queue for
-  a while, which made the next worker wait.
+  a while, which made the next worker wait. *2026-10-25: with no cache, every report asked
+  replayed the case in the sandbox, 2 s under pytest on an Intel Mac against the 1 s each ask
+  waits, and the test stalled under load; its workers now run unsandboxed
+  (`docs/layers/fix-flaky-temporal.md`).*
 - **Method 1 pinned** (the request, second part): `tests/digests/method-1.json` keeps method 1's
   digest of every example definition, the example package, and `tests/digests/every-shape`, a
   package written to use what the examples don't (workflow and wait steps, every operator, list
