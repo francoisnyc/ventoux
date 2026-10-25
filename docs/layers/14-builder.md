@@ -1355,7 +1355,8 @@ see its test fail.
 
 Status: choices drafted 2026-10-25, from `main` at `f51a298` (14d merged as #61). The warm-up
 answered and recorded (question 32 closed); choices 48 to 54 answered "all as recommended", the
-same day. D60 and the dated lines on D4 and D20 written before building.
+same day. D60 and the dated lines on D4 and D20 written before building. Built the same day:
+slices 0 to 5; see "Decided while building (14e)".
 
 ### Warm-up: learning question 32, why `now` can't be written
 
@@ -1509,6 +1510,63 @@ wrong shapes is refused by both. The schema checks shape. `ventoux check` stays 
    `description` (choices 48, 50, 53).
 5. The CI line, with its test; the guide's section; D60 and the dated lines; the schemas
    committed.
+
+### Decided while building (14e)
+
+- **The wrong shapes passed before the corpus did.** With today's schema every case was refused
+  (the `declared` key), so the refused-shape tests passed for the wrong reason until the corpus
+  test passed too: a reminder that a negative test proves something only beside its positive.
+- **Two shapes a model holds otherwise than the JSON** can't be said with `WithJsonSchema` where
+  they are declared: a field's `declared` and a plan's `sources` are gathered by before-validators
+  from keys the schema needs flat. Each model carries an `x-written` mark in its config, and
+  `ventoux schema`'s generator (`Published`, a `GenerateJsonSchema` subclass, Pydantic's extension
+  point) renders the mark from the type models' own schemas in `$defs`: no shape is typed by hand.
+  The mark is data on the model, so `core` and `case` import nothing from `tooling`.
+- **Pydantic writes a constrained dict key as `patternProperties` and nothing else,** so a key the
+  pattern refuses was accepted by the schema; the generator closes such a dict
+  (`additionalProperties: false`).
+- **A declared type's `type` is required in the schema and now everywhere in the parser.** The
+  type models keep their default for code that builds them (`NumberType()`), and say `type` is
+  required in their schema. `ListType.fields` was a plain union, which read `{}` as a number; it
+  is a discriminated union now, as `DeclaredType` is, so a type without `type` is refused wherever
+  one is written.
+- **`"1"` as a version was read as 1.** Pydantic's lax mode coerced it; the schema says `integer`.
+  `version` and `count` share one annotation, `Whole`, that is both the check (a whole number as
+  written, D47's rule) and the schema (`integer`, `minimum`), as `Matching` is for names.
+- **The bare state name in `on`** is said as `anyOf` string or list by the same kind of
+  annotation, `Shorthand`, so the parser's reading and the schema's stay one declaration.
+- **`json.dumps`, not the builder's `layout`,** writes a schema: a schema holds `null` (a field's
+  default), which a definition never does and `layout` refuses. Same layout: two spaces, a final
+  newline.
+- **The description reads oddly once:** "A case's `case.json`. A case: its case file's fields…",
+  the model's docstring after the file's name. Kept: the docstring is the model's, written once.
+- **Slice 0, the tutor's two points:** `splitlines()` eats a `\r`, so the comparison splits on
+  `\n` and names the line ending; `.gitattributes` keeps a checkout from committing one.
+- **Code ahead of its tests, said plainly:** the refused-shape list (slice 3) was written beside
+  the corpus test (slice 1) before the fixes, since both drive the same code; the generator's two
+  renderings came together. Every guard was broken once: thirteen mutations, each failing its
+  test.
+
+### Promises (14e)
+
+Each claim this part makes about behaviour, and the test that would fail if it weren't true. `S`
+is `tests/test_schema.py` (new), `U` is `tests/test_unchanged.py`. Checked against the tests,
+2026-10-25: every test named here exists, every test in `S` and every test 14e added to `U` is
+named here, and every guard was broken once to see its test fail.
+
+| Promise | Test |
+|---|---|
+| The corpus holds every committed definition, at least twenty cases and one plan | S `test_the_corpus_is_not_empty` |
+| Every committed case is accepted by the schema as by the parser: a field's type flat, names, numbers, every key | S `test_every_committed_case_is_accepted_by_the_schema_as_by_the_parser` |
+| Every committed plan is accepted by both: the bare state name, a field's source on the field | S `test_every_committed_plan_is_accepted_by_the_schema_as_by_the_parser` |
+| A wrong case is refused by both: an operator D20 doesn't list, an unknown key, a count or a number as a string, a field with no type or an unknown one, a name the pattern refuses as a value or a key, a step of no kind, no steps | S `test_a_wrong_case_is_refused_by_the_schema_as_by_the_parser` |
+| A wrong plan is refused by both: version 0 or `"1"`, an unknown key, a `sources` key, a state of no kind, a state name the pattern refuses, an operator D20 doesn't list | S `test_a_wrong_plan_is_refused_by_the_schema_as_by_the_parser` |
+| `ventoux schema` writes both files, draft 2020-12, `$id` by the engine version, title and description first, the description saying shape only and never a trust boundary; `--out` names the folder | S `test_ventoux_schema_writes_both_files_naming_the_format_they_describe` |
+| `--unchanged` fails on a changed schema naming the file and first line, on a missing one, and writes nothing | S `test_unchanged_fails_on_a_changed_or_missing_schema_naming_the_line_and_writes_nothing` |
+| The committed schemas are what the models say | S `test_the_committed_schemas_are_what_the_models_say` |
+| CI's `check` job runs `ventoux schema --unchanged`, read-only, the `changes` job untouched | S `test_ci_checks_the_committed_schemas_unchanged` |
+| `check --unchanged` compares bytes: other line endings differ, named; `.gitattributes` forces LF on JSON | U `test_a_committed_file_with_other_line_endings_differs` |
+| A `by_hand` name with no folder is refused, naming it, writing or `--unchanged` | U `test_a_by_hand_name_with_no_folder_is_refused` |
 
 ### Not in 14e
 
