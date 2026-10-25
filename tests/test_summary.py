@@ -17,11 +17,13 @@ from test_catalog import catalog_of, lookup_contract
 from test_diff import LOOSE, ROOT, calling, refund
 
 from ventoux.case.markdown import code, text
+from ventoux.case.releases import PackageRefused
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract_hash import contract_hash, promise_hash
 from ventoux.core.promise import promise_of
 from ventoux.testing import CATALOG
 from ventoux.tooling.cli import main
+from ventoux.tooling.releases import checked, read_package
 from ventoux.tooling.summary import Summary, for_summary_file, summarize
 
 PACKAGES = "examples/packages"
@@ -602,3 +604,26 @@ def test_past_the_limit_a_refused_package_and_its_errors_stay(tmp_path: Path) ->
     )
     assert short.count("- refund, in the head: steps.") == 2
     assert "it is in this step's log" in short
+
+
+def test_a_new_package_and_a_wording_revision_show_their_warnings_too(tmp_path: Path) -> None:
+    # Merging changes them too: a first release, and a wording revision (choice 4).
+    head = edited(with_example(tmp_path / "head"), unrequired)
+    first = summarized(tree(tmp_path / "empty"), head)
+    base = edited(with_example(tmp_path / "base"), unrequired)
+    reworded = edited(edited(with_example(tmp_path / "reworded"), unrequired), retitled)
+    revision = summarized(base, reworded)
+    for found in (first, revision):
+        assert found.code == 0
+        assert MAY_BE_UNSET in found.text
+
+
+def test_the_summary_refuses_exactly_what_release_refuses(tmp_path: Path) -> None:
+    # The same check, never a copy (choice 2): each error as `ventoux release` says it.
+    head = edited(with_example(tmp_path / "head"), unreleasable)
+    with pytest.raises(PackageRefused) as refused:
+        checked(read_package(head / PACKAGES / "refund"), CATALOG)
+    found = summarized(with_example(tmp_path / "base"), head)
+    assert found.failures == tuple(
+        f"refund, in the head: {line}" for line in str(refused.value).splitlines()
+    )
