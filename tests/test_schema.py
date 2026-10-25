@@ -1,0 +1,178 @@
+"""The JSON Schema, published from the parser's models (layer 14e, choices 48 to 53): it describes
+the JSON as written, and agrees with the parser on every committed definition and on a fixed set
+of wrong shapes. See docs/layers/14-builder.md and docs/BRIEF.md, D60.
+"""
+
+import json
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import pytest
+from jsonschema import Draft202012Validator
+
+from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.core.plan import PlanInvalid, parse_plan
+from ventoux.tooling.schema import case_schema, plan_schema
+
+ROOT = Path(__file__).parent.parent
+EXAMPLES = ROOT / "examples"
+
+# Every committed case definition: the packages, the quickstart's, and the examples the guides
+# and the checks read. Stories are not definitions.
+CASES = sorted(
+    [
+        *EXAMPLES.glob("packages/*/case.json"),
+        *EXAMPLES.glob("quickstart/packages/*/case.json"),
+        *EXAMPLES.glob("refund/*.json"),
+        *EXAMPLES.glob("claim/*.json"),
+        *EXAMPLES.glob("checks/*.json"),
+        *EXAMPLES.glob("witnesses/*.json"),
+    ]
+)
+PLANS = sorted(
+    [
+        *EXAMPLES.glob("packages/*/plans/*.json"),
+        *EXAMPLES.glob("quickstart/packages/*/plans/*.json"),
+    ]
+)
+
+
+def loaded(path: Path) -> dict[str, Any]:
+    """A definition as the engine reads it: numbers as decimals (brief, D20)."""
+    data: dict[str, Any] = json.loads(path.read_text(), parse_float=Decimal)
+    return data
+
+
+def schema_accepts(schema: dict[str, Any], data: Any) -> bool:
+    Draft202012Validator.check_schema(schema)
+    return bool(Draft202012Validator(schema).is_valid(data))
+
+
+def parser_accepts_case(data: Any) -> bool:
+    try:
+        parse_case(data)
+    except CaseInvalid:
+        return False
+    return True
+
+
+def parser_accepts_plan(data: Any) -> bool:
+    try:
+        parse_plan(data)
+    except PlanInvalid:
+        return False
+    return True
+
+
+def test_the_corpus_is_not_empty() -> None:
+    assert len(CASES) >= 20
+    assert len(PLANS) >= 1
+
+
+@pytest.mark.parametrize("path", CASES, ids=lambda p: str(p.relative_to(EXAMPLES)))
+def test_every_committed_case_is_accepted_by_the_schema_as_by_the_parser(path: Path) -> None:
+    data = loaded(path)
+    assert parser_accepts_case(data), f"{path} is not a valid case; the corpus holds only those"
+    assert schema_accepts(case_schema(), data)
+
+
+@pytest.mark.parametrize("path", PLANS, ids=lambda p: str(p.relative_to(EXAMPLES)))
+def test_every_committed_plan_is_accepted_by_the_schema_as_by_the_parser(path: Path) -> None:
+    data = loaded(path)
+    assert parser_accepts_plan(data)
+    assert schema_accepts(plan_schema(), data)
+
+
+# --- Wrong shapes, refused by both (choice 51) ---------------------------------------------------
+
+REFUND = EXAMPLES / "packages" / "refund" / "case.json"
+REFUND_ORDER = EXAMPLES / "packages" / "refund" / "plans" / "refund-order.json"
+
+
+def a_case(**changes: Any) -> dict[str, Any]:
+    """The refund case, with top-level keys replaced."""
+    return {**loaded(REFUND), **changes}
+
+
+def with_approval(approval: dict[str, Any]) -> dict[str, Any]:
+    case = loaded(REFUND)
+    case["steps"]["settle"]["approval"] = approval
+    return case
+
+
+def with_field(name: str, field: dict[str, Any]) -> dict[str, Any]:
+    case = loaded(REFUND)
+    case["fields"][name] = field
+    return case
+
+
+WRONG_CASES: dict[str, dict[str, Any]] = {
+    # The curriculum's negative test: an operator D20 doesn't list matches no shape.
+    "an operator D20 doesn't list": with_approval(
+        {"when": {"now": []}, "roles": ["support-lead"], "display": {"title": "x"}}
+    ),
+    "an unknown key at the root": a_case(owner="ana"),
+    "an unknown key in a step": {
+        **a_case(),
+        "steps": {
+            **loaded(REFUND)["steps"],
+            "review": {**loaded(REFUND)["steps"]["review"], "x": 1},
+        },
+    },
+    "a count written as a string": with_approval(
+        {"roles": ["support-lead"], "count": "2", "display": {"title": "x"}}
+    ),
+    "a field with no type": with_field("note", {"display": {"title": "Note"}}),
+    "a field of an unknown type": with_field("note", {"type": "text", "display": {"title": "x"}}),
+    "a case name the pattern refuses": a_case(case="Refund"),
+    "a field name the pattern refuses": with_field(
+        "Approved Amount", {"type": "number", "display": {"title": "x"}}
+    ),
+    "a number written as a string": with_approval(
+        {
+            "when": {">": [{"var": "amount"}, "100"]},
+            "roles": ["support-lead"],
+            "display": {"title": "x"},
+        }
+    ),
+    "a step of no kind": {**a_case(), "steps": {"review": {"display": {"title": "x"}}}},
+    "no steps at all": a_case(steps={}),
+}
+
+
+@pytest.mark.parametrize("wrong", WRONG_CASES, ids=str)
+def test_a_wrong_case_is_refused_by_the_schema_as_by_the_parser(wrong: str) -> None:
+    data = WRONG_CASES[wrong]
+    assert not parser_accepts_case(data), f"the parser accepts {wrong}; the list holds refusals"
+    assert not schema_accepts(case_schema(), data)
+
+
+def a_plan(**changes: Any) -> dict[str, Any]:
+    return {**loaded(REFUND_ORDER), **changes}
+
+
+WRONG_PLANS: dict[str, dict[str, Any]] = {
+    "version zero": a_plan(version=0),
+    "a version written as a string": a_plan(version="1"),
+    "an unknown key": a_plan(owner="ana"),
+    "a sources key of the plan's own": a_plan(sources={"amount": "untrusted:x"}),
+    "a state of no kind": a_plan(states={**loaded(REFUND_ORDER)["states"], "limbo": {"on": {}}}),
+    "a state name the pattern refuses": a_plan(initial="Check Order"),
+    "an operator D20 doesn't list": a_plan(
+        states={
+            **loaded(REFUND_ORDER)["states"],
+            "check_order": {
+                **loaded(REFUND_ORDER)["states"]["check_order"],
+                "on": {"done": [{"target": "paid", "when": {"now": []}}]},
+            },
+        }
+    ),
+}
+
+
+@pytest.mark.parametrize("wrong", WRONG_PLANS, ids=str)
+def test_a_wrong_plan_is_refused_by_the_schema_as_by_the_parser(wrong: str) -> None:
+    data = WRONG_PLANS[wrong]
+    assert not parser_accepts_plan(data), f"the parser accepts {wrong}; the list holds refusals"
+    assert not schema_accepts(plan_schema(), data)

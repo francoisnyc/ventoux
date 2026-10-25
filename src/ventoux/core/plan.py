@@ -16,10 +16,15 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    GetCoreSchemaHandler,
+    GetJsonSchemaHandler,
     Tag,
     ValidationError,
     model_validator,
 )
+from pydantic.config import JsonDict
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema, core_schema
 
 from ventoux.core.contract import REFERENCE
 from ventoux.core.expressions import (
@@ -41,16 +46,40 @@ KINDS = ("activity", "wait", "approval", "final")
 APPROVE, REJECT = "approve", "reject"
 
 
-def matching(pattern: str, message: str) -> AfterValidator:
-    """A check that a text matches `pattern`, refusing it with `message`."""
-    compiled = re.compile(pattern)
+class Matching:
+    """A text matching `pattern`, refused with `message`: one annotation that is both the check and
+    what the published schema says (`"pattern"`), so the two can't drift (brief, D60).
 
-    def check(text: str) -> str:
-        if not compiled.fullmatch(text):
-            raise ValueError(message)
+    Pydantic: a class with these two methods is used in `Annotated[...]` like a validator; the first
+    gives the validation, the second what `model_json_schema` writes for it.
+    """
+
+    def __init__(self, pattern: str, message: str) -> None:
+        self.pattern = pattern
+        self.message = message
+        self.compiled = re.compile(pattern)
+
+    def check(self, text: str) -> str:
+        if not self.compiled.fullmatch(text):
+            raise ValueError(self.message)
         return text
 
-    return AfterValidator(check)
+    def __get_pydantic_core_schema__(
+        self, source: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(self.check, handler(source))
+
+    def __get_pydantic_json_schema__(
+        self, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        written = handler(schema)
+        written["pattern"] = f"^{self.pattern}$"  # `fullmatch`, said in JSON Schema's way
+        return written
+
+
+def matching(pattern: str, message: str) -> Matching:
+    """A check that a text matches `pattern`, refusing it with `message`."""
+    return Matching(pattern, message)
 
 
 def expression(data: object) -> Expression:
@@ -61,10 +90,30 @@ def expression(data: object) -> Expression:
         raise ValueError(str(refused)) from None
 
 
-def version(number: int) -> int:
-    if number < 1:
-        raise ValueError("a version is a whole number, 1 or more")
-    return number
+class Whole:
+    """A whole number of at least `minimum`, written as one: `"2"`, `2.0` and `true` are refused
+    with `message`, never read as a number (brief, D47). Both the check and what the published
+    schema says (`integer`, `minimum`), as `Matching` is (brief, D60)."""
+
+    def __init__(self, minimum: int, message: str) -> None:
+        self.minimum = minimum
+        self.message = message
+
+    def check(self, value: object) -> object:
+        # `type(...) is int`, not `isinstance`: `True` is an int to `isinstance`.
+        if type(value) is not int or value < self.minimum:
+            raise ValueError(self.message)
+        return value
+
+    def __get_pydantic_core_schema__(
+        self, source: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_before_validator_function(self.check, handler(source))
+
+    def __get_pydantic_json_schema__(
+        self, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        return {"type": "integer", "minimum": self.minimum}
 
 
 def some_outcomes(outcomes: tuple[str, ...]) -> tuple[str, ...]:
@@ -104,13 +153,29 @@ def declared_source(source: str) -> str:
     return source
 
 
-def shorthand(transitions: object) -> object:
-    """A bare state name in `on` is shorthand for one transition with no condition."""
-    return [{"target": transitions}] if isinstance(transitions, str) else transitions
+class Shorthand:
+    """A bare state name in `on` is shorthand for one transition with no condition: read as that
+    transition, and published as "a state name, or a list of transitions" (brief, D60)."""
+
+    @staticmethod
+    def read(transitions: object) -> object:
+        return [{"target": transitions}] if isinstance(transitions, str) else transitions
+
+    def __get_pydantic_core_schema__(
+        self, source: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_before_validator_function(self.read, handler(source))
+
+    def __get_pydantic_json_schema__(
+        self, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        name = {"type": "string", "pattern": f"^{STATE_NAME}$"}
+        return {"anyOf": [name, handler(schema)]}
 
 
+STATE_NAME = r"[a-z][a-z0-9_]*"
 PlanName = Annotated[str, matching(r"[a-z][a-z0-9-]*", 'a plan name looks like "refund-pay"')]
-StateName = Annotated[str, matching(r"[a-z][a-z0-9_]*", 'a state name looks like "await_approval"')]
+StateName = Annotated[str, matching(STATE_NAME, 'a state name looks like "await_approval"')]
 RoleName = Annotated[str, matching(r"[a-z][a-z0-9-]*", 'a role looks like "support-lead"')]
 EventName = Annotated[str, matching(r"[a-z][a-z0-9_]*", 'an event name looks like "approve"')]
 ActivityReference = Annotated[
@@ -125,6 +190,12 @@ DeclaredType = Annotated[
     NumberType | StringType | BooleanType | OutcomeType | ReferenceType | ListType,
     Field(discriminator="type"),
 ]
+
+
+# How the published schema differs from a model's own shape, read by `ventoux schema` (brief, D60):
+# a field's type written flat, beside the other keys; a plan field's source written on the field.
+WRITTEN_FLAT: JsonDict = {"x-written": {"flat": "declared"}}
+WRITTEN_SOURCE_ON_FIELD: JsonDict = {"x-written": {"source_on": "fields"}}
 
 
 class Shape(BaseModel):
@@ -147,7 +218,7 @@ class Transition(Shape):
     when: PlanExpression | None = None
 
 
-type Transitions = Annotated[tuple[Transition, ...], BeforeValidator(shorthand)]
+type Transitions = Annotated[tuple[Transition, ...], Shorthand()]
 
 
 class ActivityState(Shape):
@@ -238,8 +309,14 @@ type State = Annotated[
 class Plan(Shape):
     """A plan: its fields, where it starts, and its states."""
 
+    # The published schema says the JSON as written: each field's `source` on the field, no
+    # `sources` key (brief, D60). `ventoux schema` reads this mark.
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, json_schema_extra=WRITTEN_SOURCE_ON_FIELD
+    )
+
     plan: PlanName
-    version: Annotated[int, AfterValidator(version)]
+    version: Annotated[int, Whole(1, "a version is a whole number, 1 or more")]
     display: Display
     fields: dict[str, DeclaredType] = {}  # each field's type, which expressions are checked against
     # Each field's declared source, written on the field (`"source": "untrusted:llm"`) and kept

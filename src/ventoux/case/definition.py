@@ -11,7 +11,6 @@ from typing import Annotated, Any, Literal
 from pydantic import (
     AfterValidator,
     BaseModel,
-    BeforeValidator,
     ConfigDict,
     Discriminator,
     Field,
@@ -24,6 +23,7 @@ from ventoux.case.freshness import seconds_in
 from ventoux.core.before_activity import given_as_reference
 from ventoux.core.expressions import FieldType, ListType, ReferenceType
 from ventoux.core.plan import (
+    WRITTEN_FLAT,
     ActivityReference,
     DeclaredType,
     Display,
@@ -31,6 +31,7 @@ from ventoux.core.plan import (
     PlanExpression,
     RoleName,
     Source,
+    Whole,
     matching,
     some_roles,
 )
@@ -75,6 +76,9 @@ class Shape(BaseModel):
 
 class CaseField(Shape):
     """A field of the case file: its type, what people read, and a declared untrusted source."""
+
+    # The published schema says the type flat, as written (brief, D60). `ventoux schema` reads this.
+    model_config = ConfigDict(extra="forbid", frozen=True, json_schema_extra=WRITTEN_FLAT)
 
     declared: DeclaredType  # its type, written beside `display` (`"type": "number"`)
     display: Display  # what people read
@@ -128,6 +132,8 @@ class SentBy(Shape):
 
 class PayloadField(Shape):
     """One value an event carries: its type, what people read, and a declared untrusted source."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, json_schema_extra=WRITTEN_FLAT)
 
     declared: DeclaredType  # its type, written beside `display` (`"type": "string"`)
     display: Display  # what people read
@@ -188,22 +194,16 @@ class ApprovalDisplay(Shape):
     reason: str = Field(min_length=1)
 
 
-def whole_count(value: object) -> object:
-    """A count of people is a whole number of at least 1, written as one: `"2"`, `2.0` and `true`
-    are refused, never read as a number (brief, D47)."""
-    if type(value) is not int or value < 1:
-        raise ValueError("how many people must approve: a whole number of at least 1, such as 2")
-    return value
-
-
 class Approval(Shape):
     """`count` different people with one of `roles` approve running the step, when `when` holds
     (brief, D11) (brief, D47)."""
 
     when: PlanExpression | None = None  # None: every run needs it
     roles: Roles  # who may approve; every approver holds one of them
-    # Pydantic: a `BeforeValidator` sees the value as written, before Pydantic turns `"2"` into 2.
-    count: Annotated[int, BeforeValidator(whole_count)] = 1  # how many people must approve
+    # A whole number of at least 1, as written: `"2"` is refused, never read as 2 (brief, D47).
+    count: Annotated[
+        int, Whole(1, "how many people must approve: a whole number of at least 1, such as 2")
+    ] = 1  # how many people must approve
     display: ApprovalDisplay
 
 
