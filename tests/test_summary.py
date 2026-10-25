@@ -748,3 +748,9 @@ def test_a_base_lockfile_that_cant_be_read_fails_and_says_so(
     assert code == 2
     assert capsys.readouterr().err == f"{base_lock}: {said}\n"
     assert (tmp_path / "summary.md").read_text().endswith(f"- {text(f'{base_lock}: {said}')}\n")
+
+
+def test_ci_passes_the_base_checkouts_lockfile() -> None:
+    # One argument, and nothing else: the permissions are checked as before, by
+    # `test_the_workflow_sends_nothing_and_reads_only` (choice 6).
+    assert "--base-lock base/contracts.lock.json" in job("changes")
