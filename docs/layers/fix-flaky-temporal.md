@@ -72,7 +72,7 @@ average 5; `start_time_skipping` takes no startup timeout. The run's tests never
 neither passed nor failed. Not this fix's: alone or in one full run, the server starts in well
 under a second (layer 6). The same doubled load also timed out two unrelated tests once each
 (`test_a_continued_run_whose_digest_changed_waits_for_its_code`, 60 s;
-`test_a_payment_in_a_plan_a_rule_stopped_completes_flagged_or_fails_for_a_person`), noted
+`test_the_registry_knows_each_releases_open_cases`), noted
 for their own fix. Each race was reproduced by a probe before the fix (above).
 
 ## Promises
