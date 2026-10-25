@@ -1503,4 +1503,13 @@ and record the key points. A question is closed once you can explain the answer 
   - **What a literal does on the page:** shown, never rendered.
   In one line: the JSON diff shows which lines changed; the semantic diff shows what the case may
   now do, to whom, and whether a person must judge it.
-- Status: open, until explained back.
+- Explained back (2026-10-25), asked for two things the JSON diff hides, and why: "the lockfile
+  rewrite and the unvalidated head; the JSON shows neither." Those are the two findings, which
+  the semantic diff missed too: what the step should catch, not what layer 13 adds over the JSON.
+  And the JSON shows the lockfile rewrite, as two lines of hex: it is in the diff, unreadable,
+  where the step was meant to read it for the reviewer. What layer 13 adds is the other list: a
+  role that widens what three fields show, an input that moves who may approve, a requirement
+  dropped that starts a step at opening, a count lowered that is looser, a contract's change
+  path by path. Each is computed from more than the line that changed (the catalog, the other
+  steps, provenance), which is why the JSON can't show it.
+- Status: open, until two of those come back with why the JSON can't show them.
