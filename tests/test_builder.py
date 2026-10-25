@@ -52,7 +52,7 @@ def test_a_float_or_a_truth_value_is_refused_as_a_number() -> None:
 
 
 ROOT = Path(__file__).parent.parent
-BUILT = ROOT / "examples" / "quickstart" / "build" / "refund" / "case.json"
+BUILT = ROOT / "examples" / "quickstart" / "packages" / "refund" / "case.json"
 
 
 def test_the_quickstarts_refund_reads_as_the_hand_written_one() -> None:
@@ -121,13 +121,38 @@ def test_a_plain_value_the_type_checker_missed_is_refused_when_the_file_runs() -
 def test_a_form_sets_fields_only() -> None:
     refund = Case("refund", title="Customer refund")
     amount = refund.field("amount", Field.number(), title="Amount requested")
-    review = refund.task(
-        "review", title="Review", roles=["support"], outcomes={"ok": Outcome("Fine")}
-    )
-    with pytest.raises(TypeError, match="not a field of the case file"):
+    with pytest.raises(TypeError, match=r"amount \+ 1\) is not a field of the case file"):
         refund.task(
             "check",
             title="Check",
             roles=["support"],
-            outcomes={"ok": Outcome("Fine", sets=[amount + 1, review.outcome])},
+            outcomes={"ok": Outcome("Fine", sets=[amount + 1])},
         )
+
+
+def test_a_form_never_sets_a_steps_outcome() -> None:
+    # A step's outcome is its run's answer, never written by another step's form (brief, D9).
+    refund = Case("refund", title="Customer refund")
+    review = refund.task(
+        "review", title="Review", roles=["support"], outcomes={"ok": Outcome("Fine")}
+    )
+    with pytest.raises(TypeError, match=r"review.outcome\) is not a field of the case file"):
+        refund.task(
+            "check",
+            title="Check",
+            roles=["support"],
+            outcomes={"ok": Outcome("Fine", sets=[review.outcome])},
+        )
+
+
+def test_a_second_sequence_is_refused() -> None:
+    # A case has one `sequence`; a second call would replace the first without a word, as a second
+    # entry of one name would.
+    refund = Case("refund", title="Customer refund")
+    review = refund.task(
+        "review", title="Review", roles=["support"], outcomes={"ok": Outcome("Fine")}
+    )
+    pay = refund.activity("pay", "payments.refund@2", title="Refund the customer")
+    refund.sequence(review, pay)
+    with pytest.raises(ValueError, match="refund already has a sequence: give it every step once"):
+        refund.sequence(pay, review)
