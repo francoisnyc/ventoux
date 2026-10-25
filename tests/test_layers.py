@@ -269,3 +269,19 @@ def test_importing_ventoux_brings_no_temporal() -> None:
         check=True,
     )
     assert loaded.stdout.strip() == "False"
+
+
+def test_the_engines_processes_never_load_the_builder() -> None:
+    # The builder never runs inside the engine (brief, D58): `ventoux` re-exports its names
+    # lazily, so a worker that imports the engine never imports the builder (layer 14a).
+    loaded = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, ventoux.temporal.worker; print('ventoux.tooling.builder' in sys.modules)",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert loaded.stdout.strip() == "False"
