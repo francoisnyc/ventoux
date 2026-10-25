@@ -171,7 +171,8 @@ def test_contracts_that_match_are_said_to(tmp_path: Path) -> None:
     assert found.text == (
         "# What merging changes\n\n## Packages\n\n- **refund**: the same behaviour and wording as "
         "the base.\n\n"
-        "## Contracts\n\nEvery contract matches `contracts.lock.json`.\n"
+        "## Contracts\n\nEvery contract matches the hash the base recorded, and every new one is "
+        "recorded in `contracts.lock.json`.\n"
     )
 
 
@@ -232,7 +233,8 @@ def test_a_summary_past_the_limit_says_where_the_whole_text_is(tmp_path: Path) -
     short = for_summary_file(found, limit=200)
     assert short == (
         "# What merging changes\n\n## Packages\n\n" + found.outcomes[0] + "\n\n## Contracts\n\n"
-        "Every contract matches `contracts.lock.json`.\n\n"
+        "Every contract matches the hash the base recorded, and every new one is recorded in "
+        "`contracts.lock.json`.\n\n"
         f"The whole summary is {len(found.text.encode())} bytes, past the job summary's limit of "
         "200 bytes: it is in this step's log, under `ventoux summary`.\n"
     )
@@ -293,7 +295,10 @@ def test_the_command_logs_the_whole_summary_and_appends_it(
         "## Packages\n\n- **refund**: a new release"
     )
     assert "- **Looser** (`steps.settle.requires`): review -&gt; nothing." in logged
-    assert logged.endswith("## Contracts\n\nEvery contract matches `contracts.lock.json`.\n")
+    assert logged.endswith(
+        "## Contracts\n\nEvery contract matches the hash the base recorded, and every new one is "
+        "recorded in `contracts.lock.json`.\n"
+    )
     assert (tmp_path / "summary.md").read_text() == f"an earlier step's summary\n{logged}"
 
 
@@ -754,3 +759,10 @@ def test_ci_passes_the_base_checkouts_lockfile() -> None:
     # One argument, and nothing else: the permissions are checked as before, by
     # `test_the_workflow_sends_nothing_and_reads_only` (choice 6).
     assert "--base-lock base/contracts.lock.json" in job("changes")
+
+
+def test_past_the_limit_a_contract_not_as_recorded_is_counted(tmp_path: Path) -> None:
+    # The short form's contracts line no longer names one lockfile: the base's is compared too.
+    rewritten = {"orders.lookup@1": contract_hash(shortened())}
+    found = hashes_checked(tmp_path, shortened(), RECORDED, rewritten)
+    assert "\n1 contract not as recorded: see the log.\n" in for_summary_file(found, limit=100)

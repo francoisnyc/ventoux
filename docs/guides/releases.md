@@ -539,8 +539,11 @@ beside it. Then one command says it all:
   Then, for one that changed, the diff in the plain form, the verdicts in their words. What the
   diff quotes from a definition (a literal, a title, a name) is shown, never rendered: no HTML,
   link or emphasis a pull request writes reaches the page;
-- **the contracts:** the hash check, given the promises the base commit's own code prints
-  (`ventoux promises`), so a contract changed in place says what changed, path by path.
+- **the contracts:** the hash check against what the **base** recorded: each contract the base's
+  `contracts.lock.json` records must hash as recorded there, whatever the pull request's lockfile
+  says, and a recorded hash never changes; the pull request's lockfile records only new contracts.
+  Given the promises the base commit's own code prints (`ventoux promises`), a contract changed in
+  place says what changed, path by path.
 
 Here the base is the package as it is, and the pull request lets `settle` start without waiting
 for the review:
@@ -569,7 +572,7 @@ $ ventoux summary --base base --head . --packages examples/packages --lock contr
 
 ## Contracts
 
-Every contract matches `contracts.lock.json`.
+Every contract matches the hash the base recorded, and every new one is recorded in `contracts.lock.json`.
 ```
 
 The warning is the one `ventoux release` would print on merge, said before it: nothing has set
@@ -578,7 +581,8 @@ The warning is the one `ventoux release` would print on merge, said before it: n
 The command prints the whole summary to the step's log and appends it to the summary file
 (`$GITHUB_STEP_SUMMARY` in CI). A looser change fails nothing: it is yours to judge. The step
 fails, saying why, when something can't be read or is refused: a checkout, a package, the base's
-promises, a comparison the diff can't make, or a contract changed in place. Every package in the
+promises or lockfile, a comparison the diff can't make, a contract changed in place, or a recorded
+hash rewritten. Every package in the
 head is checked as `ventoux release` checks it, changed or not: one it would refuse fails the step,
 its line saying it can't be released as it is, and its errors said as release says them. What
 release only warns about fails nothing; it is shown after the diff of a package that changes. It is never read as
