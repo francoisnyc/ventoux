@@ -1292,6 +1292,12 @@ each, and answered "go with all recommendations", 2026-10-18. Below, "Agreed in 
   workflow step's lines from their own tests.
 - **The driver's own "never twice"** (`stopping` in `temporal/cases.py`) is a second guard: the
   case never asks twice, so it is never alone under test.
+- **The stop's three lines are asserted once the payment is done** (2026-10-25,
+  `docs/layers/fix-flaky-temporal.md`): `test_a_stopped_cancellable_workflow_is_cancelled_on_temporal`
+  let `pay#1` run beside the withdrawal, and under load its completion landed between the stop
+  request and the child's cancellation. The case records completions in the order they reach it
+  (layer 8; brief, D47), which is the server's real time for two in flight: the test now waits for
+  the payment first, and keeps asserting the order of the three lines, which is the engine's.
 
 ### From the code map
 
