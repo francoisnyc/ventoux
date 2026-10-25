@@ -1058,6 +1058,14 @@ Each starts with its negative test, seen failing for the right reason.
   `ventoux.testing:CATALOG`, `examples/cases`, `examples/packages`.
 - **The warning reuses validation's flow** (`case_sources`, `untrusted_of`, with the opener a
   system, as the other flow checks do): no new analysis.
+- **The whole suite found a second `Case` class.** Alone, every `--unchanged` test passed; after
+  the Temporal tests, eight failed with "no builder file defines it": the builder file's
+  `from ventoux import Case` gave a class that `isinstance(value, Case)` in `check` didn't know.
+  Temporal's workflow sandbox imports `ventoux.testing` afresh for every run, and with it the
+  builder package, and Python hangs that fresh copy on the shared `ventoux.tooling` package as
+  its `builder` attribute. `ventoux`'s lazy re-export read that attribute (`from ventoux.tooling
+  import builder`); it now imports the module by name, which is the one in `sys.modules`. A test
+  in `tests/test_layers.py` overwrites the attribute and asks for `ventoux.Case`.
 - **Code ahead of its tests, said plainly:** `check.py` was written whole in slice 1, so slices 2
   and 3's tests passed on their first run, except the quickstart's output, which failed on the line
   above. Every guard was broken once afterwards: 14 mutations, each failing its test (one only
@@ -1282,7 +1290,63 @@ Each starts with its negative test, seen failing for the right reason.
 4. **`releases` in the configuration** (choice 46).
 5. **The guides, the dated lines, the Promises** (choice 47).
 
-### Not in 14d
+### Decided while building (14d)
+
+- **The committed JSON's lines are the builder's layout,** one value per line: the curriculum's
+  test changes the approval's threshold, `100` on its own line, so "first at line 80" names a line
+  a reader can find.
+- **`ventoux check` (writing) says of a stray folder what `--unchanged` says,** and still leaves it
+  as it is: 14c's "no builder file defines this package; left as it is" became "no builder file
+  defines it and by_hand doesn't list it: stale output of a removed case, or a hand-written
+  package not yet listed; left as it is", and 14c's test was updated to the new words.
+- **A hand-written package's problems are said at its file,** `packages/legacy/case.json:
+  steps.review.roles UNKNOWN_ROLE: …`, a plan's at `plans/<name>.json`: there is no builder line
+  to say them at.
+- **A refused package through `--unchanged` still prints "Nothing was written."**: true, and the
+  same text as `check`'s, which the quickstart's section 6 shows.
+- **Python's bytecode caches are no package's file.** Running the test suite, a `__pycache__`
+  appeared in a test project's `cases/`: Python writes one when a builder file is imported as a
+  module (the quickstart's `cases` is a namespace package on pytest's path, so a project's `cases`
+  joins it), and git ignores it. The "writes nothing" snapshots leave `__pycache__` out and say
+  why; everything else is compared byte for byte, before and after, refused or not.
+- **The workflow's own comment names `pull_request_target`,** as 13e's does to say it is never
+  used: the test reads the lines that do something, comments left out, as 13e's test does.
+- **`releases` is resolved from the project's root,** like `cases` and `packages`, so `ventoux
+  release` run from a subfolder finds the same records.
+- **Both `--unchanged` lines were run here before they went into the workflow:** in this
+  repository, `✓ refund is unchanged: examples/packages/refund/ is what examples/cases/refund.py
+  writes`; in the quickstart's project, the same for `packages/refund/`.
+- **Code ahead of its tests, said plainly:** slice 1's comparison function was written with the
+  three kinds of difference at once after slice 0's test; slices 2's tests passed on their first
+  run, since 14c's `built` already gave them. Every guard was broken once: eleven mutations, each
+  failing its test.
+
+### Promises (14d)
+
+Each claim this part makes about behaviour, and the test that would fail if it weren't true. `U`
+is `tests/test_unchanged.py` (new), `Dc` is `tests/test_deployment_catalog.py`, `K` is
+`tests/test_check.py`, `L` is `tests/test_layers.py`. Checked against the tests, 2026-10-25: every test named here exists, every
+test in `U` and every test 14d added to `Dc` is named here, and every guard was broken once to
+see its test fail.
+
+| Promise | Test |
+|---|---|
+| A committed file that differs fails, naming it and the first line that differs, both lines shown; nothing written (the curriculum's test) | U `test_a_committed_file_that_differs_fails_naming_it_and_the_first_line` |
+| A missing committed file fails, saying the builder writes it | U `test_a_missing_committed_file_fails_saying_so` |
+| A committed file the builder no longer writes fails | U `test_a_committed_file_the_builder_no_longer_writes_fails` |
+| A folder no builder case defines is refused unless `by_hand` lists it; listed, it is checked and not compared | U `test_a_folder_no_builder_case_defines_is_refused_unless_listed_by_hand` |
+| A `by_hand` package is still checked, its problems at its file | U `test_a_by_hand_package_is_still_checked` |
+| A name both a builder defines and `by_hand` lists is refused | U `test_a_name_both_a_builder_defines_and_by_hand_lists_is_refused` |
+| A file that raises or exits is refused at its line through `--unchanged` too | U `test_a_file_that_raises_or_exits_is_refused_through_unchanged_too` |
+| A refused package fails through `--unchanged`, nothing written | U `test_a_refused_package_fails_through_unchanged_and_nothing_is_written` |
+| A run that passes writes nothing either | U `test_a_run_that_passes_writes_nothing_either` |
+| CI's `check` job runs `--unchanged` in this repository and in the quickstart's project, read-only, never `pull_request_target` | U `test_ci_runs_the_regeneration_check_against_the_configured_catalog` |
+| The curriculum's negative test end to end: the command CI runs, on this repository's project, fails on one changed byte and on a stale JSON | U `test_the_curriculums_negative_test_end_to_end_through_the_ci_step` |
+| `ventoux check` says of a stray folder what `--unchanged` says, and leaves it | K `test_a_folder_holds_exactly_its_package` |
+| `from ventoux import Case` gives the builder's own class, whatever the `ventoux.tooling` package's `builder` attribute holds after a sandbox run | L `test_the_re_export_gives_the_builders_own_class_whatever_the_package_attribute_holds` |
+| `release` and `notes` take the configured `releases` folder | Dc `test_release_and_notes_take_the_configured_releases_folder` |
+| No releases folder named is refused, never a default | Dc `test_no_releases_folder_named_is_refused_never_a_default` |
+
 
 - The JSON Schema (14e).
 - Running `ventoux release` in this repository's CI (choice 46).
