@@ -40,7 +40,8 @@ ban-relative-imports = "all"
 
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+# The builder files the guide and the packages are written in, type-checked as a team's would be.
+files = ["src", "tests", "examples/builder", "examples/cases"]
 plugins = ["pydantic.mypy"]
 # The quickstart's project, so its tests import `cases.refund` as the quickstart writes it.
 mypy_path = "examples/quickstart"
