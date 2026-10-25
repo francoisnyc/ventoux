@@ -6,7 +6,8 @@ request.
 
 Status: choices put, 2026-10-25, each with a recommendation. Answered "1 to 8, all as recommended",
 the same day. The dated lines on D55 and on 13e's choice 67, and the releases guide's sentence,
-written before building.
+written before building. Built test-first, slices 1 to 6, and the Promises table checked against
+the tests, the same day (see "Decided while building").
 
 ## The bug
 
@@ -144,3 +145,46 @@ recorded, before)` and what its `Summary` says (`outcomes`, `code`, `text`, `fai
 4. A base that fails validation says nothing (choice 1).
 5. An issue's message is shown as written (choice 6).
 6. The guide's example, made again from the command (choice 8).
+
+## Decided while building
+
+- **One check, split so both can read it** (choice 2): `issues_of(package, catalog)` in
+  `tooling/releases.py` gives every issue; `checked` refuses on its errors as before, and the
+  summary reads the same list. `is_error` says what refuses: anything but a warning (fail
+  closed). `ventoux release` is unchanged.
+- **The warnings' heading names the package** (choice 4): a first release has no diff to sit
+  under, so the heading is ``## refund: what `ventoux release` warns``, after the package's diff
+  when it has one.
+- **A role's name can't carry a `<`** (choice 6): its pattern refuses it when the package is
+  read, before any check, so it fails as a package that can't be read, already escaped. The test
+  uses a condition's field name instead: `no<such*`, shown `no&lt;such\*`.
+- **The review's head is one `ventoux release` refuses** (slice 5): `vet`'s condition compares
+  `review.outcome` with an outcome `review` doesn't declare. It now fails the step, and its error
+  quotes the literal: a second way in, escaped too, which a deliberate break (failures not
+  escaped) showed failing both tests.
+- **Two of 13e's tests changed their trees, not what they check.** The diff the catalog can't
+  make now comes from the base (it calls `@9`), so the head passes the check and only the diff
+  refuses; and the contracts' block is read from trees with no package, since that test's catalog
+  holds one contract no package could run on.
+- **Each later slice's test passed at once** (slice 1's code checks every head package), and was
+  seen to bite on a deliberate break: checking only changed packages, checking the base,
+  warnings shown for every package, warnings only where behaviour changed, failures not escaped.
+
+## Promises
+
+Checked against the tests before the pull request, both ways: every promise names a test that
+exists, and every test this fix added is named. `S` is `tests/test_summary.py`.
+
+| Promise | Test |
+|---|---|
+| A package `ventoux release` would refuse fails the step; its line says it can't be released as it is; each error said as release says it, with the package and its tree; its diff still shown | S `test_a_package_release_would_refuse_fails_the_step` |
+| The same check as release, never a copy: the summary refuses exactly what release refuses | S `test_the_summary_refuses_exactly_what_release_refuses` |
+| Every package in the head is checked, changed or not | S `test_an_unchanged_package_release_would_refuse_fails_the_step` |
+| The base is never checked | S `test_the_base_is_never_checked` |
+| A warning fails nothing, and is shown after the diff of a package merging changes | S `test_a_changed_packages_warnings_are_shown_after_its_diff` |
+| A first release and a wording revision show their warnings too | S `test_a_new_package_and_a_wording_revision_show_their_warnings_too` |
+| An unchanged package's warnings aren't shown | S `test_an_unchanged_packages_warnings_arent_shown` |
+| Past the limit, a refused package's line and its errors stay | S `test_past_the_limit_a_refused_package_and_its_errors_stay` |
+| An issue's message is shown as written, never rendered | S `test_an_issues_message_is_shown_as_written`, `test_html_a_pull_request_writes_never_reaches_the_summary` |
+| The guide's example runs as written, its warning included | S `test_the_guides_summary_runs_as_written` |
+| A diff the catalog can't make still fails the step (13e, kept) | S `test_a_diff_the_catalog_cant_make_fails_the_step` |
