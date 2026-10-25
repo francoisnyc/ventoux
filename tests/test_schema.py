@@ -176,3 +176,98 @@ def test_a_wrong_plan_is_refused_by_the_schema_as_by_the_parser(wrong: str) -> N
     data = WRONG_PLANS[wrong]
     assert not parser_accepts_plan(data), f"the parser accepts {wrong}; the list holds refusals"
     assert not schema_accepts(plan_schema(), data)
+
+
+# --- `ventoux schema`, and `--unchanged` (choices 48, 50, 52, 53) --------------------------------
+
+from ventoux.case.engine import ENGINE
+from ventoux.tooling.cli import main
+
+SCHEMAS = ("case.schema.json", "plan.schema.json")
+
+
+def snapshot(folder: Path) -> dict[str, bytes]:
+    return {str(p.relative_to(folder)): p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+
+
+def test_ventoux_schema_writes_both_files_naming_the_format_they_describe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["schema"]) == 0
+    said = capsys.readouterr().out
+    for name in SCHEMAS:
+        written = tmp_path / "schema" / name
+        assert f"✓ schema/{name}" in said
+        text = written.read_text()
+        assert text.endswith("}\n")
+        assert text == json.dumps(json.loads(text), indent=2, ensure_ascii=False) + "\n"
+        schema = json.loads(text)
+        # Draft 2020-12, named by the engine version that parses the format (brief, D51, D60).
+        assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+        assert schema["$id"] == f"https://ventoux.dev/schema/engine-{ENGINE}/{name}"
+        assert list(schema)[:4] == ["$schema", "$id", "title", "description"]
+        # Shape only, never a trust boundary: said in the schema itself (choices 50, 53).
+        assert "ventoux check" in schema["description"]
+        assert "never runs on model output" in schema["description"]
+    case = json.loads((tmp_path / "schema" / "case.schema.json").read_text())
+    assert case["title"] == "Ventoux case definition"
+    assert {k: v for k, v in case.items() if not k.startswith("$") and k != "title"} == {
+        k: v for k, v in case_schema().items() if k not in ("title", "description", "$defs")
+    } | {"description": case["description"]}
+    # `--out` names another folder.
+    assert main(["schema", "--out", "elsewhere"]) == 0
+    assert (tmp_path / "elsewhere" / "plan.schema.json").read_text() == (
+        tmp_path / "schema" / "plan.schema.json"
+    ).read_text()
+
+
+def test_unchanged_fails_on_a_changed_or_missing_schema_naming_the_line_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["schema"]) == 0
+    capsys.readouterr()
+    assert main(["schema", "--unchanged"]) == 0
+    assert "✓ schema/case.schema.json is unchanged" in capsys.readouterr().out
+    # A model changed and the schema not regenerated looks like this: one line differs.
+    committed = tmp_path / "schema" / "case.schema.json"
+    text = committed.read_text()
+    line = text.splitlines().index('  "title": "Ventoux case definition",') + 1
+    committed.write_text(text.replace('"Ventoux case definition"', '"An old format"'))
+    (tmp_path / "schema" / "plan.schema.json").unlink()
+    before = snapshot(tmp_path)
+    assert main(["schema", "--unchanged"]) == 1
+    said = capsys.readouterr().out
+    assert (
+        f"schema/case.schema.json differs from what the models say, first at line {line}:" in said
+    )
+    assert '  committed: "title": "An old format",' in said
+    assert '  written:   "title": "Ventoux case definition",' in said
+    assert "schema/plan.schema.json is missing: ventoux schema writes it" in said
+    assert "Run `ventoux schema` and commit what it writes." in said
+    assert snapshot(tmp_path) == before  # nothing written
+
+
+def test_the_committed_schemas_are_what_the_models_say() -> None:
+    # What CI checks, checked here too: the two files at the repository's root.
+    for name in SCHEMAS:
+        committed = (ROOT / "schema" / name).read_text()
+        assert json.loads(committed)["$id"].endswith(name)
+    from ventoux.tooling.schema import schema_files
+
+    assert {name: (ROOT / "schema" / name).read_text() for name in SCHEMAS} == schema_files()
+
+
+def test_ci_checks_the_committed_schemas_unchanged() -> None:
+    # One line in `check`, after 14d's; 13e's care kept: read-only, the `changes` job untouched.
+    from test_unchanged import WORKFLOW, ci_runs
+
+    assert ci_runs("- run: uv run ventoux schema --unchanged")
+    text = WORKFLOW.read_text()
+    doing = [l for l in text.splitlines() if not l.strip().startswith("#")]
+    assert text.count("permissions:") == 1
+    assert "  contents: read" in doing
+    assert not any("pull_request_target" in l for l in doing)
+    changes = text.split("\n  changes:")[1]
+    assert "schema" not in changes

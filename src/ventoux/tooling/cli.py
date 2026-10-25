@@ -58,6 +58,7 @@ from ventoux.tooling.deployment import (
 )
 from ventoux.tooling.environments import environment_command
 from ventoux.tooling.releases import FolderStore, Run, read_package, release, said
+from ventoux.tooling.schema import write_schemas
 from ventoux.tooling.summary import LIMIT, cant_be_read, for_summary_file, summarize
 
 # What `ventoux simulate` exits with.
@@ -90,6 +91,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--unchanged",
         action="store_true",
         help="write nothing: fail if any package differs from its committed files (for CI)",
+    )
+    publishing = commands.add_parser(
+        "schema", help="write the JSON Schema of a case and of a plan, from the engine's models"
+    )
+    publishing.add_argument(
+        "--out", type=Path, default=Path("schema"), help="the folder to write into (schema/)"
+    )
+    publishing.add_argument(
+        "--unchanged",
+        action="store_true",
+        help="write nothing: fail if a committed schema differs from the models (for CI)",
     )
     simulating = commands.add_parser(
         "simulate", help="play a story on the in-memory engine, and check what it expects"
@@ -166,6 +178,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     if arguments.command in ("environment", "activate", "retire", "manifest"):
         return environment_command(arguments)
+    if arguments.command == "schema":
+        return write_schemas(arguments.out, arguments.unchanged)  # needs no catalog: shape only
     # Every other command reads contracts or roles: the deployment's catalog, named in
     # configuration, never guessed (brief, D59).
     try:
