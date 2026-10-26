@@ -272,6 +272,26 @@ def preview_migration(
     return MigrationPreview(lines=tuple(state.history[seen:]))
 
 
+def proposal_refused(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    step: str,
+    by: str,
+    roles: frozenset[str],
+    at: int,
+) -> str | None:
+    """Why `by`, holding `roles`, couldn't propose `step` at `at`, or None if admission would
+    accept it. Decided as their proposal would be, by `decide` on a copy of the state, so it
+    checks everything a person's proposal meets, never a second set of checks; the case is
+    unchanged (brief, D61)."""
+    try:
+        decide(case, catalog, state, Proposed(step, by, roles, at=at))  # `decide` copies the state
+    except ProposalRefused as refused:
+        return str(refused)
+    return None
+
+
 def receive(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Sent) -> None:
     """An event from outside reaches the case (brief, D41)."""
     if event.event not in case.events:
@@ -559,6 +579,12 @@ def propose(
     # Who proposed is written one way, before anything is checked against it (brief, D22).
     if (wrong := identifier_problem(event.by)) is not None:
         raise ProposalRefused(wrong)
+    # Only the step advisor suggests: anything else would be a caller's words in the history
+    # (brief, D61).
+    if event.suggested_by not in (None, "step-advisor"):
+        raise ProposalRefused(
+            "a proposal is suggested by the step advisor or by nobody; this one names something else"
+        )
     if state.phase != "open":
         raise ProposalRefused(f"the case is {state.phase}: nothing starts")
     if close_held(case, state):
@@ -585,7 +611,8 @@ def propose(
     # Its expressions checked over the case's types before any is read (brief, D35).
     if (problem := expression_problem(case, catalog, event.step)) is not None:
         raise ProposalRefused(problem)
-    state.history.append(f"{event.by} proposed {event.step} as {role}")
+    suggested = ", suggested by the step advisor" if event.suggested_by is not None else ""
+    state.history.append(f"{event.by} proposed {event.step} as {role}{suggested}")
     state.proposers[event.step] = event.by  # never its approver (brief, D25)
     # Hers is the proposal now: a rule's start whose approval was withdrawn is over (brief, D39).
     state.proposed_by_rules.pop(event.step, None)

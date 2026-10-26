@@ -476,7 +476,32 @@ Answer by number. "Recommended" is what I'd do; the options set aside are named.
 ## Promises
 
 Written as each part is built, as in layers 13 and 14: every claim this note makes about
-behaviour, and the test that would fail if it weren't true, checked both ways.
+behaviour, and the test that would fail if it weren't true, checked both ways. "Shown failing"
+says how the test was seen to fail: first, before the code that passes it, or by breaking that
+code on purpose afterwards (a mutation), then putting it back.
+
+### 15a: the step advisor, in memory
+
+All in `tests/test_advisor.py`.
+
+| # | Promise | Test | Shown failing |
+|---|---|---|---|
+| 1 | An answer naming a step admission refuses is refused, with admission's own reason (the curriculum's negative test) | `test_an_answer_naming_a_step_admission_refuses_is_refused_with_its_reason` | first: `advise` passed the name through unchecked |
+| 2 | An answer naming a step the case doesn't have is refused, with admission's reason | `test_an_answer_naming_a_step_the_case_doesnt_have_is_refused` | mutation: `advise` without the admission check |
+| 3 | Admission's check leaves the case unchanged | `test_asking_the_advisor_changes_nothing_in_the_case` | mutation: `proposal_refused` deciding on the state itself |
+| 4 | An answer that isn't one step name suggests nothing, and quotes nothing of it: prose, two names, a value beside the name, a number, text not written as a name, another key, a list, one key given twice | `test_an_answer_that_isnt_one_step_name_suggests_nothing` (8 cases) | first: crashes, the amount ignored, the model's text quoted; then a mutation for each of the key check, the name's pattern and the repeated key |
+| 5 | `{"step": null}` suggests nothing, and says so | `test_an_answer_naming_no_step_suggests_nothing_and_says_so` | mutation: null read as a name |
+| 6 | One fenced block around the answer is read | `test_an_admitted_step_is_suggested_even_inside_one_fenced_block` | mutation: `unfenced` removed |
+| 7 | The advisor is shown each field's name, kind, whether it is set, its sources' kinds; hidden fields said hidden, sensitive ones sensitive; milestones, latest runs with outcomes, `waiting_for` | `test_the_advisor_is_shown_names_kinds_and_states_and_no_case_file_value` | first: nothing was shown |
+| 8 | Only the steps the person's proposal would be admitted for now are listed | same test | mutation: every step listed |
+| 9 | No case-file value of any kind, no person's identifier and no history line is in the request | same test | mutations: a value leaked into the shown data; a person's identifier leaked into the request alone |
+| 10 | A suggestion a person proposes is theirs: the history says "suggested by the step advisor", and they can't approve the run | `test_a_suggestion_a_person_proposes_says_so_and_its_proposer_cant_approve_it` | first: `propose` took no `suggested_by` |
+| 11 | `suggested_by` is a closed value: anything but `step-advisor` refuses the proposal | `test_a_proposal_suggested_by_anyone_but_the_step_advisor_is_refused` | first: `Proposed` took no `suggested_by`; then a mutation removing the check |
+| 12 | A recording answers only the request it recorded, saying where another differs | `test_a_recording_replays_only_the_requests_it_recorded` | first: the import was missing; then a mutation, `difference` always None |
+| 13 | A recording gives nothing past its last answer | `test_a_recording_gives_nothing_past_its_last_answer` | mutation: the count check removed |
+| 14 | What the advisor sends the model is the request recorded in `tests/recordings/advisor-goodwill.json`, so a changed prompt fails a test | `test_the_advisors_request_is_the_one_recorded` | mutation: one word of the instructions changed |
+| 15 | The guide quotes what the advisor and admission say, word for word | `test_the_guide_quotes_what_the_advisor_and_admission_say`, `test_the_guides_history_line_is_what_a_suggested_proposal_writes` | mutation: one word of a quoted line changed in the guide |
+| 16 | A proposal with no `suggested_by` writes the history line it always did, so histories replay as they were, with no engine version | every existing test asserting a proposal's line (`… proposed … as …`), in the full run | mutation: the clause written whatever `suggested_by` is |
 
 ## Check yourself (end of the layer)
 

@@ -303,6 +303,9 @@ class Proposed:
     by: str  # who proposed it, as the trusted caller states (brief, D19)
     roles: frozenset[str]  # their roles, stated with the proposal (brief, D22)
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+    # Who suggested it, if anyone: only the step advisor, a closed value, so no caller writes
+    # words of its own into the history line (brief, D61).
+    suggested_by: Literal["step-advisor"] | None = field(kw_only=True, default=None)
 
 
 @dataclass(frozen=True)

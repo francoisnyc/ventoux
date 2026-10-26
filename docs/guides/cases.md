@@ -137,6 +137,51 @@ rework, with two keys added to `review`:
 A step may **reach milestones**: `"reaches": ["reviewed"]` on a step is reached when it completes,
 and on a task's outcome when it is answered with that outcome. A milestone is a fact, never undone.
 
+## The step advisor
+
+The **step advisor** is a model that looks at an open case and names the one step it thinks
+should start next. It only **suggests**: the person it was asked for proposes the step, or
+doesn't, and admission decides, as for any proposal (brief, D61).
+
+It is asked on behalf of one person, say Ana, and is shown less than she sees. It gets each field's
+name and kind, whether it is set, and where its value came from (a person is said only as
+`person`). A field hidden from Ana is said `hidden`, and a sensitive one `sensitive`. It also gets
+the milestones reached, each step's latest run with its status and outcome, what the case waits
+for, and the steps Ana's proposal would be admitted for now. **It is never shown a value**, trusted
+or not, nor anyone's name, nor a line of history. A customer's email may hold an instruction meant
+for the model; the advisor never reads it.
+
+Its answer is one step's name, and nothing else:
+
+```json
+{"step": "goodwill"}
+```
+
+or `{"step": null}` when nothing should start. There is no place for an amount: `goodwill`'s
+inputs are written in the definition, so a refund's amount is the case file's, whatever the model
+"wanted". An answer that isn't one step name (prose, a second key, two names) suggests nothing:
+
+```text
+the advisor's answer is not one step name, so it suggests nothing
+```
+
+A name admission refuses is refused with admission's own reason, the one Ana would get proposing
+it herself:
+
+```text
+goodwill requires review, which hasn't completed
+```
+
+Whatever it suggests is shown as the step advisor's, `untrusted:llm`. If Ana proposes it, the
+proposal is hers: she can't approve the run, and the history says so:
+
+```text
+ana proposed goodwill as support, suggested by the step advisor
+```
+
+`suggested_by` takes one value, `step-advisor`; anything else refuses the proposal, so no caller
+writes its own words into the history.
+
 ## The case file
 
 A case opens with the fields a system (or a person) gives it. Each value is checked against its
