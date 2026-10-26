@@ -1553,6 +1553,15 @@ wrong shapes is refused by both. The schema checks shape. `ventoux check` stays 
   `type_written` had no test of their own: a list's field with no `type` and a reference field
   with no `type` join the refused shapes, and each mutation fails them now. `schema --unchanged`
   is tested on a missing file alone and on line endings alone.
+- **What a stored record holding a refused reading does, checked rather than guessed.** The first
+  dated line said "a release would be refused on activation"; the tutor ran it: activation reads
+  the record's contracts, never its package, so it goes through; the next `release` of that
+  package is refused ("refund 1's package can't be read again"), and the package is stuck until
+  code that reads the record is deployed; a case opening on it is refused at the opening; a first
+  run replayed by the new code fails with Temporal's non-determinism error, not `StartUnread`.
+  D60's line says these now, and a test reaches the "can't be read again" branch with a record as
+  the earlier tool kept it. The D51 pointer moved to its own "Amended by D60" bullet, as D51's
+  later changes are.
 - **Code ahead of its tests, said plainly:** the refused-shape list (slice 3) was written beside
   the corpus test (slice 1) before the fixes, since both drive the same code; the generator's two
   renderings came together. Every guard was broken once: thirteen mutations, each failing its
@@ -1561,7 +1570,8 @@ wrong shapes is refused by both. The schema checks shape. `ventoux check` stays 
 ### Promises (14e)
 
 Each claim this part makes about behaviour, and the test that would fail if it weren't true. `S`
-is `tests/test_schema.py` (new), `U` is `tests/test_unchanged.py`. Checked against the tests,
+is `tests/test_schema.py` (new), `U` is `tests/test_unchanged.py`, `R` is `tests/test_releases.py`. Checked
+against the tests,
 2026-10-25: every test named here exists, every test in `S` and every test 14e added to `U` is
 named here, and every guard was broken once to see its test fail (the review's additions too:
 the lax booleans, the list field's discriminator and `type_written`, each failing its tests).
@@ -1580,6 +1590,7 @@ the lax booleans, the list field's discriminator and `type_written`, each failin
 | `--unchanged` fails on other line endings alone, naming the line ending, writing nothing | S `test_unchanged_fails_on_other_line_endings_alone` |
 | The committed schemas are what the models say | S `test_the_committed_schemas_are_what_the_models_say` |
 | CI's `check` job runs `ventoux schema --unchanged`, read-only, the `changes` job untouched | S `test_ci_checks_the_committed_schemas_unchanged` |
+| A record whose package holds a reading now refused refuses the next release of that package, naming it | R `test_a_record_whose_package_no_longer_reads_refuses_the_next_release` |
 | `check --unchanged` compares bytes: other line endings differ, named; `.gitattributes` forces LF on JSON | U `test_a_committed_file_with_other_line_endings_differs` |
 | A `by_hand` name with no folder is refused, naming it, writing or `--unchanged` | U `test_a_by_hand_name_with_no_folder_is_refused` |
 

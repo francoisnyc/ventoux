@@ -1996,9 +1996,7 @@ D27, D28 and D50, whose text is kept.*
   checked when the case opened, so a definition that no longer reads, or a release that no longer
   gives its digest, on a later run means the code changed: the workflow task fails, and the case
   waits until code that reads it is deployed (D17), as for an engine version the code doesn't
-  know, never failed for good. At the opening, refusing stays. *Added 2026-10-25, in layer 14e:* the
-  parser refuses four lax readings it accepted before (D60's dated line says which, and why no
-  engine version follows); a start holding one waits here. And method 1 is pinned: its digest
+  know, never failed for good. At the opening, refusing stays. And method 1 is pinned: its digest
   of packages that between them write every field of the format is kept in the tests, so a change
   to the models that would change it fails before any open case meets it; a new method is a
   decision of its own. *Added in the tutor review of 12b, before D51 was merged.*
@@ -2016,6 +2014,9 @@ D27, D28 and D50, whose text is kept.*
   environment a draft is refused at its opening; a case in an environment opens only on its
   package's active release there, with its digest, on the queue it was activated on, the
   registry's answer read from its history.
+- **Amended 2026-10-25, by D60** (the text above stands; this adds to it): the parser refuses four
+  lax readings it accepted before, with no new engine version; D60's dated line says which, why,
+  and what a record, a case or a run holding one does.
 
 ### D52. Change requests: proposed, approved by someone else, checked again, applied
 
@@ -2485,11 +2486,18 @@ D20 and D58, whose text is kept.*
   `version` written as `"1"`, `1.0` or `true`; a list's field with no `type` (read as a number); a
   boolean (`automatic`, `repeatable`, `sensitive`, `stays_open`) written as a word or a number
   (`"no"`, `"on"`, `1.0`) where only `true` and `false` are read now; and `count` stays as D47 made
-  it. The engine stays at version 2. A case or a release that held one would wait for code: a run
-  continued as new fails its workflow task with `StartUnread` and waits, never failed for good
-  (D51); a release would be refused on activation. None is expected: the builder writes whole
-  numbers and `true`/`false`, and no committed definition or example holds any of them (the corpus
-  test reads them all).
+  it. The engine stays at version 2. What holds one, as released by the earlier tool (checked by
+  the tutor on #62 with `"automatic": "yes"`): its **activation** goes through, since `activate`
+  reads the record's contracts, never its package; **releasing the package again**, the fix
+  included, is refused, "refund 1's package can't be read again: … steps.review.automatic: Input
+  should be a valid boolean", and since records are kept for good the package is stuck until code
+  that reads the record is deployed; a **case opening** on it fails at its opening (D51: at the
+  opening, refusing stays); a **first run** recorded by the earlier code and replayed by this one
+  (a worker restart) fails its workflow task with Temporal's non-determinism error, the
+  `ventoux-engine-2` marker with no command behind it, and waits for code: so "waits for code"
+  holds by that, not by `StartUnread`. None is expected: the builder writes whole numbers and
+  `true`/`false`, and no committed definition or example holds any of them (the corpus test reads
+  them all).
 - **The schema checks shape; `ventoux check` stays the check.** It can't say that a `var` names a
   declared field of the right type, that a role is registered, that a plan reference exists, that
   a step can be reached, that an expression nests at most 32 levels, or that a number fits
