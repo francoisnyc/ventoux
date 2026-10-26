@@ -1,8 +1,8 @@
 """Providers: what asks a model, as one small protocol (brief, D61).
 
 A provider is given a request (the system text and the messages, in order) and gives the model's
-answer as text. What it answers is untrusted data (`untrusted:llm`, brief D12): read, checked, and
-never run. `Recorded` answers from a recording, so tests need no network and no key.
+answer as text. What it answers is untrusted data, `untrusted:llm`: read, checked, and never run
+(brief, D12). `Recorded` answers from a recording, so tests need no network and no key.
 """
 
 import json

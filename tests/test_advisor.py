@@ -128,6 +128,7 @@ def test_asking_the_advisor_changes_nothing_in_the_case() -> None:
     assert asked_as("ana", run, '{"step": "goodwill"}') == Advice("goodwill", None, "recorded")
     assert run.state == before
 
+
 NOT_ONE_NAME = "the advisor's answer is not one step name, so it suggests nothing"
 
 

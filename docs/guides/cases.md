@@ -151,13 +151,8 @@ for, and the steps Ana's proposal would be admitted for now. **It is never shown
 or not, nor anyone's name, nor a line of history. A customer's email may hold an instruction meant
 for the model; the advisor never reads it.
 
-Its answer is one step's name, and nothing else:
-
-```json
-{"step": "goodwill"}
-```
-
-or `{"step": null}` when nothing should start. There is no place for an amount: `goodwill`'s
+Its answer is one step's name, and nothing else, `{"step": "goodwill"}`, or `{"step": null}`
+when nothing should start. There is no place for an amount: `goodwill`'s
 inputs are written in the definition, so a refund's amount is the case file's, whatever the model
 "wanted". An answer that isn't one step name (prose, a second key, two names) suggests nothing:
 
