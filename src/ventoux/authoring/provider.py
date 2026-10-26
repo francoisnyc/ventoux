@@ -45,9 +45,10 @@ class ProviderFailed(Exception):
     message names the setting or the failure, never a key or what was asked (brief, D62)."""
 
 
-class ReplayRefused(Exception):
+class ReplayRefused(ProviderFailed):
     """A recording was asked something it didn't record: a request that differs, or one more
-    than it holds. Never answered with the nearest answer it has (fail closed)."""
+    than it holds. Never answered with the nearest answer it has (fail closed). A provider that
+    gives no answer, as any other (from the tutor's review of 15b)."""
 
 
 @dataclass(frozen=True)

@@ -16,6 +16,7 @@ import pytest
 from ventoux.authoring.advisor import Advice, advise, shown_to_advisor
 from ventoux.authoring.provider import (
     Message,
+    Provider,
     ProviderFailed,
     Recorded,
     Recording,
@@ -94,6 +95,17 @@ def answering(*answers: str) -> Recorded:
     """A provider that gives `answers` in order, whatever it is asked: for tests about reading
     the answer, not about the request."""
     return Recorded.answering(*answers)
+
+
+def asked_by(provider: Provider, run: CaseRun, person: str) -> Advice:
+    """What `provider`'s model suggests to `person` on `run`, checked by admission."""
+    roles = frozenset(PEOPLE[person])
+    shown = shown_to_advisor(run.definition, CATALOG, run.state, person, roles, at=START)
+
+    async def refused(step: str) -> str | None:
+        return proposal_refused(run.definition, CATALOG, run.state, step, person, roles, at=START)
+
+    return asyncio.run(advise(shown, provider, refused))
 
 
 def asked_as(person: str, run: CaseRun, answer: str) -> Advice:
@@ -332,6 +344,13 @@ def test_a_provider_that_gives_no_answer_suggests_nothing_saying_why() -> None:
         return proposal_refused(run.definition, CATALOG, run.state, step, "ana", roles, START)
 
     advice = asyncio.run(advise(shown, Failing(), refused))
-    assert advice == Advice(
-        None, "the step advisor gave no answer: the model refused to answer", "failing"
-    )
+    why = "the step advisor gave no answer: the model refused to answer"
+    assert advice == Advice(None, why, "failing", gave_no_answer=True)
+
+
+def test_a_recording_that_cant_answer_is_a_provider_giving_no_answer() -> None:
+    # Asked a request it didn't record, a recording gives no answer, as a live provider can't:
+    # the advisor suggests nothing, saying why (from the tutor's review of 15b).
+    advice = asked_by(Recorded.read(RECORDING), opened(), "ana")
+    why = "the step advisor gave no answer: request 1 differs from the one recorded, at message 1"
+    assert advice == Advice(None, why, "recorded", gave_no_answer=True)

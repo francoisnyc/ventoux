@@ -37,7 +37,7 @@ class Anthropic:
                 "never from a file"
             )
         self._model = model
-        self._client = client or AsyncAnthropic(api_key=key)
+        self._client = client or client_for(key)
 
     @property
     def name(self) -> str:
@@ -65,6 +65,17 @@ class Anthropic:
         if not text:
             raise ProviderFailed("the model gave no text")
         return text
+
+
+def client_for(key: str) -> AsyncAnthropic:
+    """The SDK's client, asking Anthropic's API with `key`. Both are given, so the SDK looks for
+    neither: not another credential, and not ANTHROPIC_BASE_URL, which would send the key and
+    the prompts elsewhere. ANTHROPIC_CUSTOM_HEADERS, which the SDK reads whatever it is given,
+    can add headers only (brief, D62)."""
+    return AsyncAnthropic(api_key=key, base_url=API)
+
+
+API = "https://api.anthropic.com"  # Anthropic's API, the one place the live provider asks
 
 
 # The stop reasons after which the model's text is its whole answer: it finished, or reached a

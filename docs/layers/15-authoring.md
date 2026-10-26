@@ -647,6 +647,11 @@ All in `tests/test_advisor.py`.
 | 13 | `ventoux advise` with no model named is refused before Temporal is asked | `test_ventoux_advise_with_no_model_named_is_refused_before_anything_is_asked` | first; then a mutation giving a default model |
 | 14 | Prose around a fenced answer suggests nothing (from the tutor's review of 15a) | `test_an_answer_that_isnt_one_step_name_suggests_nothing` (its 9th case) | mutation: `unfenced` taking the first fence anywhere, as the prototype's `extractJson` |
 | 15 | The guide quotes the label word for word | `test_the_guide_quotes_what_the_advisor_and_admission_say` | mutation: a word of the guide's line changed |
+| 16 | A recording asked what it didn't record is a provider giving no answer: the advisor suggests nothing, saying why | `test_a_recording_that_cant_answer_is_a_provider_giving_no_answer` | mutation: `ReplayRefused` no longer a `ProviderFailed` |
+| 17 | `ventoux advise` replaying a recording of another request prints the labelled "gave no answer" line, exits 2, with no traceback, and proposes nothing | `test_ventoux_advise_with_a_recording_of_another_request_exits_2_and_proposes_nothing` | first: `ReplayRefused` escaped `main` (the tutor's run); then a mutation exiting 0 |
+| 18 | `ventoux advise` naming a workflow without the advisor's queries (a plan's run) exits 2, saying what to check, with no traceback | `test_ventoux_advise_naming_a_plan_run_exits_2_saying_what_to_check` | first: `WorkflowQueryFailedError: Encoded failure` escaped `main` (the tutor's run); then a mutation |
+| 19 | On a running case, the advisor sees only what the asker may see: a field narrowed by `visible_to` is said hidden | `test_the_advisor_sees_on_a_running_case_only_what_the_asker_may_see` | mutation: the query computing with every registered role (the tutor's) |
+| 20 | The live provider's client holds the key the environment gives, and asks Anthropic's API whatever `ANTHROPIC_BASE_URL` says | `test_the_client_built_from_the_environment_holds_its_key_and_asks_anthropics_api` | first: the address was the environment's; then a mutation building the client with no key (the tutor's) |
 
 ### Decided while building (15b)
 
@@ -656,3 +661,20 @@ All in `tests/test_advisor.py`.
 - **The SDK is in the `dev` group too,** pinned as the extra pins it, so every `uv sync` (CI's included) installs it for mypy and the tests; users still get it only through the extra. CI's commands are unchanged.
 - **`ventoux advise` connects with no key** (the registry's converter): its queries carry no case-file value, sealed or not, so it holds none.
 - **No model identifier is written in the repository:** the guide's example names `"<the model's ID, as Anthropic names it>"`, and the tests a made-up `example-model`.
+
+### From the tutor's review of 15b (before merge)
+
+- **Two runs of `ventoux advise` raised out of `main`, with a traceback.** A recording of another
+  request (`ReplayRefused` wasn't a `ProviderFailed`), and an ID naming a plan's run (a
+  `WorkflowQueryFailedError` is none of the errors the command caught, and its text is sealed:
+  "Encoded failure"). Now `ReplayRefused` is a `ProviderFailed`, and the command says
+  `<id> didn't answer the advisor's queries: is it a case, served by a worker that has them?`.
+- **Exit 2 for a provider that gave no answer, not 0.** The review asked for both: the recording
+  turned into "the step advisor gave no answer" by `advise`, and exit 2. `advise` returns, never
+  raises, so `Advice` says it: `gave_no_answer`, set only there, and the command exits 2 on it
+  after printing the labelled line. A live model that refuses gives exit 2 too: the command
+  couldn't get an answer.
+- **`ANTHROPIC_CUSTOM_HEADERS` is read whatever `base_url` is given** in SDK 1.13.0 (its client's
+  constructor, read for this), not only when none is: so the explicit `base_url` keeps the key
+  and the prompts at Anthropic's API, and D62's dated line says the custom headers are honoured,
+  adding headers only.

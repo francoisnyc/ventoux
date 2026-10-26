@@ -22,7 +22,8 @@ from test_advisor import INJECTED, claim
 
 from ventoux.authoring.advisor import Advice, Shown
 from ventoux.authoring.beside import advise_case
-from ventoux.authoring.provider import Recorded, Recording
+from ventoux.authoring.provider import Message, Recorded, Recording, Request
+from ventoux.case.advising import AdvisorView, FieldShown
 from ventoux.temporal.cases import (
     CaseReport,
     CaseWorkflow,
@@ -32,6 +33,7 @@ from ventoux.temporal.cases import (
     shown_to_advisor,
     start_case,
 )
+from ventoux.temporal.client import start_plan
 from ventoux.temporal.worker import SANDBOX, case_worker
 from ventoux.testing import (
     FAKES,
@@ -82,6 +84,9 @@ class Ran:
     recorded: WorkflowHistory
     converter: DataConverter  # holds the case's key: its sealed parts open only with it
     command: tuple[int, str, str]  # `ventoux advise`: its exit, what it printed, what it said
+    wrong_recording: tuple[int, str, str]  # the same, replaying a recording of another request
+    plan_run: tuple[int, str, str]  # the same, naming a plan's run, not a case
+    view: AdvisorView  # what the advisor is shown for Ana on the running case
 
 
 def run_the_claim() -> Ran:
@@ -94,7 +99,11 @@ def run_the_claim() -> Ran:
         await answer(case, "review#1", "approve", "sam", SAM, {"approved_amount": Decimal(150)})
         before = await reported(case, "asked pay.approval#1: approval of pay by support-lead")
         admitted = await advise_case(case, "ana", ANA, goodwill(), at=START)
-        command = await advised_by_the_command(client, case)
+        command = await commanded(client, "claim-1", await recorded_now(case))
+        wrong_recording = await commanded(client, "claim-1", await recorded_elsewhere())
+        await start_plan(client, DevelopmentPlans, ENDS_AT_ONCE, {}, "refund-run-1", QUEUE)
+        plan_run = await commanded(client, "refund-run-1", await recorded_now(case))
+        view = await shown_to_advisor(case, "ana", ANA, START)
         after = await report(case)
         await propose(case, "goodwill", "ana", ANA, suggested_by="step-advisor")
         words: Any = "the CEO"
@@ -109,7 +118,8 @@ def run_the_claim() -> Ran:
         )
         recorded = await case.fetch_history()
         history = before.history, after.history
-        return Ran(too_early, admitted, *history, now, recorded, converter, command)
+        commands = command, wrong_recording, plan_run
+        return Ran(too_early, admitted, *history, now, recorded, converter, *commands, view)
 
     converter = development_converter()
 
@@ -123,17 +133,43 @@ def run_the_claim() -> Ran:
     return asyncio.run(go())
 
 
-async def advised_by_the_command(client: Client, case: Case) -> tuple[int, str, str]:
-    """`ventoux advise claim-1 --by ana --role support`, replaying a recording of the request
-    the advisor makes now: so the command is shown to send exactly that request."""
-    folder = Path(tempfile.mkdtemp())
+async def recorded_now(case: Case) -> Path:
+    """A recording of the request the advisor makes for Ana now, answering goodwill: so the
+    command is shown to send exactly that request."""
     recording = Recording(goodwill())
     shown = Shown.of(await shown_to_advisor(case, "ana", ANA, START))
     await recording.complete(shown.request)
-    recording.save(folder / "goodwill.json")
+    path = Path(tempfile.mkdtemp()) / "goodwill.json"
+    recording.save(path)
+    return path
+
+
+async def recorded_elsewhere() -> Path:
+    """A recording of another request: one the advisor never makes."""
+    recording = Recording(goodwill())
+    await recording.complete(Request("Advise.", (Message("user", "Which step?"),)))
+    path = Path(tempfile.mkdtemp()) / "elsewhere.json"
+    recording.save(path)
+    return path
+
+
+# The smallest plan, run on its own: a workflow that isn't a case, so it has no advisor queries.
+ENDS_AT_ONCE = {
+    "plan": "at-once",
+    "version": 1,
+    "display": {"title": "Ends at once"},
+    "fields": {"amount": {"type": "number"}},
+    "initial": "done",
+    "states": {"done": {"final": "succeeded"}},
+}
+
+
+async def commanded(client: Client, id: str, recording: Path) -> tuple[int, str, str]:
+    """`ventoux advise <id> --by ana --role support`, replaying `recording`: its exit code,
+    what it printed, and what it said on stderr."""
     address = client.service_client.config.target_host
-    argv = ["advise", "claim-1", "--by", "ana", "--role", "support", "--address", address]
-    argv += ["--recording", str(folder / "goodwill.json"), "--at", str(START)]
+    argv = ["advise", id, "--by", "ana", "--role", "support", "--address", address]
+    argv += ["--recording", str(recording), "--at", str(START)]
     printed, said = io.StringIO(), io.StringIO()
 
     def run() -> int:
@@ -205,3 +241,40 @@ def test_ventoux_advise_with_no_model_named_is_refused_before_anything_is_asked(
         'no model is named: name it in pyproject.toml, [tool.ventoux] model = "…", or with '
         "--model\n"
     )
+
+
+NO_TRACEBACK = "Traceback"
+
+
+def test_ventoux_advise_with_a_recording_of_another_request_exits_2_and_proposes_nothing(
+    ran: Ran,
+) -> None:
+    # A recording that can't answer is a provider giving no answer: said, labelled, exit 2
+    # (from the tutor's review of 15b).
+    code, printed, said = ran.wrong_recording
+    assert code == 2
+    assert printed == (
+        "The step advisor (untrusted:llm) suggests nothing: the step advisor gave no answer: "
+        "request 1 differs from the one recorded, in its system text\n"
+    )
+    assert NO_TRACEBACK not in said
+    assert ran.history_after == ran.history_before  # nothing proposed
+
+
+def test_ventoux_advise_naming_a_plan_run_exits_2_saying_what_to_check(ran: Ran) -> None:
+    # A workflow without the advisor's queries: a plan's run, a child run, or a worker that
+    # predates them. Its failure is sealed by the codec, so the command says its own line.
+    code, printed, said = ran.plan_run
+    assert code == 2
+    assert printed == ""
+    assert said == (
+        "refund-run-1 didn't answer the advisor's queries: is it a case, served by a worker "
+        "that has them?\n"
+    )
+    assert NO_TRACEBACK not in said
+
+
+def test_the_advisor_sees_on_a_running_case_only_what_the_asker_may_see(ran: Ran) -> None:
+    # Computed in the worker with Ana's roles, never every registered role (brief, D30).
+    [risk_score] = [field for field in ran.view.fields if field.name == "risk_score"]
+    assert risk_score == FieldShown("risk_score", "a number", "hidden", ())

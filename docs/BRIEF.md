@@ -2574,6 +2574,14 @@ Adds to D12, D30, D59 and D61, whose text is kept.*
 - **A suggestion is always shown labelled:** "Suggested by the step advisor (untrusted:llm): …"
   (D61's "labelled so wherever it is shown"), by one function every caller uses. `ventoux advise`
   prints it, and never proposes.
+- *Added in the tutor review of 15b, before D62 was merged:* the live provider asks Anthropic's
+  API at its own address, given to the SDK, so `ANTHROPIC_BASE_URL` can't send the key and the
+  prompts elsewhere; `ANTHROPIC_CUSTOM_HEADERS`, which the SDK reads whatever it is given, is
+  honoured, and can only add headers. A recording asked what it didn't record is a provider
+  giving no answer, as any other. `ventoux advise` exits 0 when the advisor answered (a
+  suggestion, or nothing and why) and 2 when it couldn't be asked: a setting, a recording, the
+  model, or a workflow that doesn't answer its queries (a plan's run, a child's, or a worker that
+  predates them), said in the command's own words, since that failure is sealed by the codec.
 
 ## Concepts
 

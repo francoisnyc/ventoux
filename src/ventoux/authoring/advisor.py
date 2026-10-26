@@ -66,6 +66,9 @@ class Advice:
     step: str | None  # the step to suggest; None: nothing to suggest
     refused: str | None  # why nothing is suggested, or None
     by: str  # the provider that answered
+    # Whether the provider gave no answer at all (a setting, the model or a recording failed):
+    # nothing is suggested, and a command says it couldn't ask (brief, D62).
+    gave_no_answer: bool = False
     # Where a suggestion comes from: a model's answer, untrusted data, always (brief, D12).
     source: Literal["untrusted:llm"] = "untrusted:llm"
 
@@ -95,7 +98,8 @@ async def advise(shown: Shown, provider: Provider, refused: Refused) -> Advice:
     try:
         answer = await provider.complete(shown.request)
     except ProviderFailed as failed:  # no answer is never read as one (brief, D62)
-        return Advice(None, f"the step advisor gave no answer: {failed}", provider.name)
+        no_answer = f"the step advisor gave no answer: {failed}"
+        return Advice(None, no_answer, provider.name, gave_no_answer=True)
     try:
         step = step_named(answer)
     except NotOneName:

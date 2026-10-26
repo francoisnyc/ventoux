@@ -12,7 +12,7 @@ import anthropic
 import httpx2
 import pytest
 
-from ventoux.authoring.anthropic import Anthropic
+from ventoux.authoring.anthropic import Anthropic, client_for
 from ventoux.authoring.provider import Message, ProviderFailed, Request
 
 KEY = "sk-ant-test-0123456789"
@@ -101,3 +101,16 @@ def test_a_refusal_a_cut_answer_no_text_or_an_api_error_fails_closed(
         asyncio.run(live.complete(ASKED))
     assert str(failed.value) == said
     assert KEY not in str(failed.value)
+
+
+def test_the_client_built_from_the_environment_holds_its_key_and_asks_anthropics_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The key is the one `env` gives, never one the SDK finds for itself; the address is
+    # Anthropic's, whatever ANTHROPIC_BASE_URL says, so no variable sends the key and the prompts
+    # elsewhere (from the tutor's review of 15b) (brief, D62).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-another")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://elsewhere.example")
+    client = client_for(KEY)
+    assert client.api_key == KEY
+    assert str(client.base_url) == "https://api.anthropic.com"

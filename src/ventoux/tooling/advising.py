@@ -11,16 +11,17 @@ import sys
 import time
 from pathlib import Path
 
-from temporalio.client import Client
+from temporalio.client import Client, WorkflowQueryFailedError
 from temporalio.service import RPCError
 
+from ventoux.authoring.advisor import Advice
 from ventoux.authoring.beside import advise_case
 from ventoux.authoring.provider import Provider, ProviderFailed, Recorded
 from ventoux.temporal.converter import registry_converter
 from ventoux.tooling.deployment import Configuration
 
 DONE = 0  # the advisor answered: a suggestion, or nothing and why
-CANT_READ = 2  # a setting, a recording, or Temporal can't be read
+CANT_READ = 2  # a setting, a recording, the model, or Temporal can't be read
 
 
 def advise_command(arguments: argparse.Namespace, found: Configuration) -> int:
@@ -31,12 +32,22 @@ def advise_command(arguments: argparse.Namespace, found: Configuration) -> int:
         print(unreadable, file=sys.stderr)
         return CANT_READ
     try:
-        said = asyncio.run(advised(arguments, provider))
+        advice = asyncio.run(advised(arguments, provider))
+    except WorkflowQueryFailedError:
+        # Its own failure is sealed by the codec ("Encoded failure"), so the command says what
+        # to check: a plan's or a child's run, or a worker that predates the queries.
+        print(
+            f"{arguments.case} didn't answer the advisor's queries: is it a case, served by a "
+            "worker that has them?",
+            file=sys.stderr,
+        )
+        return CANT_READ
     except (OSError, RPCError, RuntimeError) as unreadable:
         print(unreadable, file=sys.stderr)
         return CANT_READ
-    print(said)
-    return DONE
+    print(advice.said())
+    # A provider that gave no answer (a setting, the model, a recording) couldn't be read.
+    return CANT_READ if advice.gave_no_answer else DONE
 
 
 def provider_for(arguments: argparse.Namespace, found: Configuration) -> Provider:
@@ -54,8 +65,8 @@ def provider_for(arguments: argparse.Namespace, found: Configuration) -> Provide
     return Anthropic(arguments.model if arguments.model is not None else found.model)
 
 
-async def advised(arguments: argparse.Namespace, provider: Provider) -> str:
-    """The advice for the case, as every caller shows it: labelled (brief, D61)."""
+async def advised(arguments: argparse.Namespace, provider: Provider) -> Advice:
+    """The advice for the case, from the advisor beside it (brief, D61)."""
     # No key: the advisor's queries carry no case-file value, sealed or not (brief, D61).
     client = await Client.connect(
         arguments.address, namespace=arguments.namespace, data_converter=registry_converter()
@@ -63,5 +74,4 @@ async def advised(arguments: argparse.Namespace, provider: Provider) -> str:
     case = client.get_workflow_handle(arguments.case)
     # The asker's time, against which facts' ages are told, as an approval sheet's (brief, D33).
     at = arguments.at if arguments.at is not None else int(time.time())
-    advice = await advise_case(case, arguments.by, arguments.role, provider, at)
-    return advice.said()
+    return await advise_case(case, arguments.by, arguments.role, provider, at)
