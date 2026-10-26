@@ -281,6 +281,14 @@ such a holder, and only such a one; a holder that answers is decision 3's and 7'
    check has a test: a stand-in printing the line within the grace, while the SDK's own server
    answers on the port, moves the harness off it; one printing it after the grace fails the test
    on the way out, saying so.
+   *Corrected again 2026-10-26, from the tutor's second review of #60:* the grace cost every
+   start. The real server answers 30 to 43 ms after its spawn, so the "waits nothing" above was
+   wrong: every start with no collision took 0.3 s, the full suite 318 s against 267 s, CI's
+   pytest step 4:11 against 3:22. The grace is gone, and the read after connecting with it: the
+   port is **probed before any start** (decision 9), so what answers once the server is up is the
+   harness's own, but for a holder that took the port in the moment between the probe and the
+   bind. That narrow window is left to the check on the way out, which stays and has its test: a
+   stand-in printing its line late, while the SDK's own server takes the port after the probe.
 4. **Every Temporal test goes through it:** `time_skipping(data_converter)` replaces
    `WorkflowEnvironment.start_time_skipping(...)` in the 20 places that called it, across 13 files,
    each `async with time_skipping(...) as environment:`. `tests/test_skipping_server.py` holds the
@@ -300,10 +308,29 @@ such a holder, and only such a one; a holder that answers is decision 3's and 7'
    skipped without a start, counted as one of the three. The printed line stays for any other
    holder (the SDK's own server, a listener), which no lock can see. Set aside: a port range per
    process (two processes with the same remainder collide again).
+   *Added 2026-10-26, from the tutor's second review:* the lock had no test of its own (with
+   `flock` removed, every lock granted, the second server was moved by the grace instead). The
+   environment now records what the harness did with each port (`tried`: "port N is held by
+   another harness", "port N answers already", "started on N"), and the test asserts the second
+   start skipped the first's port by the lock, not by the probe, which would see the first's
+   server answer there too. The lock files are never removed, on purpose: unlinking a file another
+   process is about to lock would give two processes two files, and so one port; a few hundred
+   empty files under `ports/` in the CLI folder are the safe choice.
 8. **The holder in the harness's own test is IPv4 where IPv6 isn't there** (*2026-10-26*): the
    test's listener on every address bound `::`, which raises "address family not supported" in a
    container without IPv6 (Claude Code's cloud containers), failing every full run there; it
    falls back to `0.0.0.0`, and the server prints the line just the same.
+9. **The port is probed before any start** (*added 2026-10-26, from the tutor's second
+   review*): after the lock, the harness tries a connection to the port, half a second at most;
+   anything accepting there (the SDK's own server, a listener) is seen before any server is
+   spawned, and the port is skipped, counted as one of the three. A refused connection costs a
+   millisecond, so a start with no collision waits nothing: the measured cost of the grace is
+   gone. The holder in the reproduction (decision 8's listener) is skipped this way now, the real
+   server starting on the next port; the printed line is read for a holder that binds in the
+   moment between the probe and the bind, and on the way out.
+   The two tests that start "the other server" with the SDK's own start give it the CLI folder
+   (`download_dest_dir`), where CI caches the binary, so it is never downloaded into `/tmp` on
+   every run.
 
 ### Checked
 
@@ -314,9 +341,9 @@ such a holder, and only such a one; a holder that answers is decision 3's and 7'
 - Beside that run, as load: `test_temporal_case_release.py`, `test_temporal_approvals.py` and the
   harness's tests, twice: 24 pass each time, no `Failed to bind`, no missed start, in either
   process.
-- *2026-10-26, in a container without IPv6:* the harness's 9 tests pass in 17 s; the four guards
-  broken once each (the lock not consulted, the check after connecting removed, the check on the
-  way out removed, no grace before reading again), each failing its test. The full suite on the
+- *2026-10-26, in a container without IPv6:* the harness's 9 tests pass in 14 s; the three
+  guards broken once each (`flock` removed so every lock is granted, the probe before the start
+  removed, the check on the way out removed), each failing its test. The full suite on the
   branch, pytest, ruff, `ruff format --check` and mypy: see the pull request.
 
 ### Promises
@@ -326,14 +353,14 @@ Each claim this section makes about behaviour, and the test that would fail if i
 
 | Promise | Test |
 |---|---|
-| The cause, reproduced with the real server: a port held by a listener on every address, the server says so and stays up; the harness starts on the next port within a moment, never the 5 s, and the environment skips time | K `test_a_port_another_server_holds_is_left_for_the_next` |
+| The cause, reproduced with the real server: a port held by a listener on every address, the server says so and stays up; the harness starts on the next port within a moment, never the 5 s, and the environment skips time (*2026-10-26: the held port is skipped before any start now, decision 9; the server's line is reached through the stand-ins below*) | K `test_a_port_another_server_holds_is_left_for_the_next` |
 | Every port taken, three of them: each server stopped, the start fails saying what the last printed, never a fourth | K `test_every_port_taken_fails_showing_what_the_server_said` |
 | A server that exits first fails at once, with its exit code and output | K `test_a_server_that_exits_first_fails_at_once_showing_its_output` |
 | A server that never answers fails at the deadline, showing its output, and is stopped | K `test_a_server_that_never_answers_fails_showing_its_output` |
 | The SDK's binary missing under its name after the download fails, naming what the folder holds | K `test_a_binary_the_sdk_names_otherwise_fails_naming_what_is_there` |
 | `time_skipping` gives the harness's environment, its clock moved by `sleep` | K `test_the_tests_environment_is_the_harness_s` |
-| Two harness servers given one port never share it: the second skips it without a start, and its sleep leaves the first's clock alone (decision 7) | K `test_two_harness_servers_given_one_port_never_share_it` |
-| A line printed within the grace, while another server answers on the port, moves the harness off it; on every port, the start fails saying so, never "after the test began" (decision 3) | K `test_a_line_printed_within_the_grace_moves_the_harness_off_a_port_that_answered` |
-| A line printed after the grace fails the test on the way out, saying its results weren't its own (decision 3) | K `test_a_line_printed_after_the_grace_fails_the_test_on_the_way_out` |
-| The holder in the reproduction is IPv6 and IPv4 where the machine has IPv6, IPv4 alone where it hasn't (decision 8) | K `test_a_port_another_server_holds_is_left_for_the_next` |
+| Two harness servers given one port never share it: the second skips it by the lock, not the probe, without a start, and its sleep leaves the first's clock alone (decision 7) | K `test_two_harness_servers_given_one_port_never_share_it` |
+| A port something answers on is skipped before any start: nothing is spawned on it; on every port, the start fails saying so, never "after the test began" (decision 9) | K `test_a_port_something_answers_on_is_skipped_before_any_start` |
+| A holder that takes the port between the probe and the bind, whose line comes late, fails the test on the way out, saying its results weren't its own (decision 3) | K `test_a_line_printed_late_fails_the_test_on_the_way_out` |
+| The holder in the reproduction is IPv6 and IPv4 where the machine has IPv6, IPv4 alone where it hasn't; the listener's port is skipped before any start, the real server starts on the next (decisions 8, 9) | K `test_a_port_another_server_holds_is_left_for_the_next` |
 | Time skips while a result is awaited, as in the SDK's environment | every Temporal test that awaits a `result` past a timer, `tests/test_temporal.py` among them: the suite, green on the harness |
