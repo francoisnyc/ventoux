@@ -1,0 +1,17 @@
+{
+  "provider": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "system": "You advise on a case: work a team does step by step. Pick the one step, among those listed under steps_that_may_start_now, that should start next, or none.\n\nYou are shown the case's fields by name and kind, whether each is set, and where its value came from; never a value. A person decides whether to propose what you pick, and the engine checks it again.\n\nAnswer with one JSON object and nothing else: {\"step\": \"<a step's name>\"}, or {\"step\": null} if no step should start now.",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\n  \"case\": \"refund\",\n  \"title\": \"Customer refund\",\n  \"fields\": [\n    {\n      \"name\": \"order_id\",\n      \"kind\": \"a reference to orders\",\n      \"state\": \"set\",\n      \"sources\": [\n        \"system:opener\"\n      ]\n    },\n    {\n      \"name\": \"amount\",\n      \"kind\": \"a number\",\n      \"state\": \"set\",\n      \"sources\": [\n        \"system:opener\"\n      ]\n    },\n    {\n      \"name\": \"approved_amount\",\n      \"kind\": \"a number\",\n      \"state\": \"set\",\n      \"sources\": [\n        \"person\"\n      ]\n    },\n    {\n      \"name\": \"note\",\n      \"kind\": \"a text\",\n      \"state\": \"set\",\n      \"sources\": [\n        \"system:opener\",\n        \"untrusted:customer\"\n      ]\n    },\n    {\n      \"name\": \"birth_date\",\n      \"kind\": \"a text\",\n      \"state\": \"set, sensitive\",\n      \"sources\": [\n        \"system:opener\"\n      ]\n    },\n    {\n      \"name\": \"risk_score\",\n      \"kind\": \"a number\",\n      \"state\": \"hidden\",\n      \"sources\": []\n    }\n  ],\n  \"milestones_reached\": [],\n  \"latest_runs\": [\n    {\n      \"entry\": \"review#1\",\n      \"status\": \"done\",\n      \"outcome\": \"approve\"\n    }\n  ],\n  \"waiting_for\": [\n    \"approval of pay by support-lead\"\n  ],\n  \"steps_that_may_start_now\": [\n    {\n      \"name\": \"goodwill\",\n      \"title\": \"Refund a goodwill gesture\",\n      \"description\": \"An extra refund\"\n    }\n  ]\n}"
+          }
+        ]
+      },
+      "answer": "{\"step\": \"goodwill\"}"
+    }
+  ]
+}

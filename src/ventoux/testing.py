@@ -7,7 +7,7 @@ import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple
 
 from pydantic import BaseModel
 from temporalio import workflow
@@ -457,7 +457,10 @@ def run_case(
             events.append(Finish(item.entry, at=now))
             continue
         if isinstance(item, Proposal):
-            events.append(Proposed(item.step, item.by, frozenset(people.get(item.by, ())), at=now))
+            roles = frozenset(people.get(item.by, ()))
+            events.append(
+                Proposed(item.step, item.by, roles, at=now, suggested_by=item.suggested_by)
+            )
             continue
         if isinstance(item, Retry):
             events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ())), at=now))
@@ -587,10 +590,12 @@ def scripted(script: list[tuple[Any, ...]], people: Mapping[str, Iterable[str]])
 
 
 class Proposal(NamedTuple):
-    """A scripted proposal: `who` proposes starting `step`."""
+    """A scripted proposal: `who` proposes starting `step`, perhaps on the step advisor's
+    suggestion (brief, D61)."""
 
     step: str
     by: str
+    suggested_by: Literal["step-advisor"] | None = None
 
 
 class Retry(NamedTuple):
@@ -723,9 +728,10 @@ def send(event: str, payload: Mapping[str, Any], by: str) -> Sending:
     return Sending(event, payload, by)
 
 
-def propose(step: str, who: str) -> Proposal:
-    """A script's proposal: `propose("check_order", "ana")`, played in order with the answers."""
-    return Proposal(step, who)
+def propose(step: str, who: str, suggested_by: Literal["step-advisor"] | None = None) -> Proposal:
+    """A script's proposal: `propose("check_order", "ana")`, played in order with the answers;
+    `suggested_by="step-advisor"` when the step advisor suggested it (brief, D61)."""
+    return Proposal(step, who, suggested_by)
 
 
 def run_plan(
