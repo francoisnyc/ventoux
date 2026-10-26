@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.common.v1 import Payload
 from temporalio.client import (
@@ -25,7 +26,6 @@ from temporalio.client import (
 )
 from temporalio.converter import WorkflowSerializationContext
 from temporalio.exceptions import ApplicationError
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 from test_temporal_case import LARGE, REVIEW_FORM, CasesWithPlans, refund_with_plan
 from test_temporal_sensitive import (
@@ -100,11 +100,8 @@ def on_temporal[T](
     `activities` and requests to forget."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
-        )
         async with (
-            environment,
+            time_skipping(development_converter()) as environment,
             case_worker(
                 environment.client,
                 QUEUE,

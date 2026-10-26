@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
@@ -88,11 +89,8 @@ def skipping[T](
     served = activities or {**FAKES, "orders.lookup@2": FAKES["orders.lookup@1"]}
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=converter or development_converter()
-        )
         async with (
-            environment,
+            time_skipping(converter or development_converter()) as environment,
             case_worker(environment.client, QUEUE, cases, DevelopmentPlans, served),
         ):
             return await asyncio.wait_for(scenario(environment), timeout=30)

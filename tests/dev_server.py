@@ -129,10 +129,10 @@ async def answering(
     raise DevServerFailed(said(f"didn't answer within {deadline:g} s", command, log))
 
 
-def said(what: str, command: list[str], log: Path) -> str:
-    """Why the dev server didn't start, with the command and everything it printed."""
+def said(what: str, command: list[str], log: Path, server: str = "the dev server") -> str:
+    """Why `server` didn't start, with the command and everything it printed."""
     printed = log.read_text(errors="replace").strip() or "(nothing)"
-    return f"the dev server {what}: {' '.join(command)}\nit printed:\n{printed}"
+    return f"{server} {what}: {' '.join(command)}\nit printed:\n{printed}"
 
 
 async def stop(process: Process) -> None:

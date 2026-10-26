@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.enums.v1 import EventType
 from temporalio.client import (
@@ -25,8 +26,7 @@ from temporalio.client import (
     WorkflowHistory,
 )
 from temporalio.exceptions import ApplicationError
-from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Worker
+from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_temporal_approvals import EveryEventCases
@@ -68,7 +68,6 @@ from ventoux.temporal.cases import (
     wording_of,
 )
 from ventoux.temporal.converter import keys_of
-from ventoux.temporal.worker import SANDBOX
 from ventoux.testing import (
     CATALOG,
     FAKES,
@@ -453,22 +452,26 @@ def test_a_continued_run_whose_digest_changed_waits_for_its_code(tmp_path: Path)
     refund_1 = released(tmp_path, proposed=True)
 
     async def scenario() -> tuple[list[str], bool, CaseReport]:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
-        )
-        async with environment:
+        async with time_skipping(development_converter()) as environment:
             client = environment.client
 
             def serving(cases: type[CaseWorkflow]) -> Worker:
                 # Temporal: with no workflow cached, each task goes to the queue every worker
                 # polls, never to a stopped worker's own, so the next worker takes it at once.
+                # The price: every task, each `report` asked included, replays the case from its
+                # start. The sandbox re-imports the workflow's module for each replay: this test
+                # module, and the sixteen it imports, through pytest's assertion rewriting, 2 s
+                # on an idle Intel Mac, over the 1 s each ask of `reported` waits; and once one
+                # ask is late, the next comes while the worker still replays for the last, so
+                # every ask is late. Unsandboxed, a replay takes 10 ms
+                # (docs/layers/fix-flaky-temporal.md).
                 return Worker(
                     client,
                     task_queue=QUEUE,
                     workflows=[cases, DevelopmentPlans],
                     activities=plan_activities(cases.catalog, FAKES),
                     activity_executor=ThreadPoolExecutor(),
-                    workflow_runner=SANDBOX,
+                    workflow_runner=UnsandboxedWorkflowRunner(),
                     max_cached_workflows=0,
                 )
 

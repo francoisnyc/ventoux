@@ -11,8 +11,8 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from skipping_server import time_skipping
 from temporalio.client import Client
-from temporalio.testing import WorkflowEnvironment
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_events import CANCELLED, RECEIPT_SENT, WAIT_FOR_RECEIPT, WITHDRAW
@@ -188,10 +188,7 @@ def before_the_worker(id: str, signals: Callable[[Case], Awaitable[None]]) -> Ca
     sent before then lands in the case's first workflow task, with its opening."""
 
     async def go() -> CaseReport:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
-        )
-        async with environment:
+        async with time_skipping(development_converter()) as environment:
             client = environment.client
             case = await opened(client, cancellable(), id)
             await signals(case)

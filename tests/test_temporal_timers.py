@@ -10,6 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHistory
 from temporalio.testing import WorkflowEnvironment
 
@@ -214,10 +215,7 @@ def test_a_timer_already_due_and_an_answer_in_one_workflow_task_fire_timer_first
     assert carried.timers[0].due == START + 2 * DAY  # long past on the test server
 
     async def go() -> CaseReport:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
-        )
-        async with environment:
+        async with time_skipping(development_converter()) as environment:
             client = environment.client
             keys_of(client).create("refund-1")
             start = CaseStart(chased(), {}, None, state_as_data(carried))

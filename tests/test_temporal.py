@@ -10,10 +10,10 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
 from temporalio.workflow import NondeterminismError
 from test_interpreter import (
@@ -56,11 +56,8 @@ def on_temporal[T](
     `converter` holds the keys, for a test that replays what it recorded; else fresh ones."""
 
     async def go() -> T:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=converter or development_converter()
-        )
         async with (
-            environment,
+            time_skipping(converter or development_converter()) as environment,
             plan_worker(environment.client, QUEUE, DevelopmentPlans, activities),
         ):
             return await scenario(environment.client)
@@ -197,7 +194,7 @@ def test_a_client_without_exact_numbers_is_refused() -> None:
     # would read it back as a number: exact numbers are checked where a client is used, never
     # assumed (brief, D20).
     async def go() -> None:
-        async with await WorkflowEnvironment.start_time_skipping() as environment:
+        async with time_skipping() as environment:
             with pytest.raises(ValueError, match="exact numbers"):
                 plan_worker(environment.client, QUEUE, DevelopmentPlans, FAKES)
             with pytest.raises(ValueError, match="exact numbers"):
@@ -259,10 +256,7 @@ def test_the_runtime_check_blocks_the_injection_on_temporal() -> None:
 def test_an_implementation_the_catalog_does_not_hold_is_refused() -> None:
     # A typo would register an activity no plan can call, and leave the real one unserved.
     async def go() -> None:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
-        )
-        async with environment:
+        async with time_skipping(development_converter()) as environment:
             with pytest.raises(NotInCatalog, match="payments.refnd@2"):
                 plan_worker(
                     environment.client, QUEUE, DevelopmentPlans, {"payments.refnd@2": fake_refund}

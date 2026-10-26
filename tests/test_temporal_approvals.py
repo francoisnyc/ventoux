@@ -10,9 +10,9 @@ from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 
+from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowHistory
-from temporalio.testing import WorkflowEnvironment
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_approvals import FOUR_EYES, PEOPLE
@@ -136,10 +136,7 @@ def before_the_worker(id: str, signals: Callable[[Case], Awaitable[None]]) -> Ca
     signal sent before then lands in the case's first workflow task, with its opening."""
 
     async def go() -> CaseReport:
-        environment = await WorkflowEnvironment.start_time_skipping(
-            data_converter=development_converter()
-        )
-        async with environment:
+        async with time_skipping(development_converter()) as environment:
             client = environment.client
             case = await start_case(client, DevelopmentCases, CLOSABLE, LARGE, id, QUEUE)
             await signals(case)
