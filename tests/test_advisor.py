@@ -288,6 +288,7 @@ GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "cases.md"
         NOT_ONE_NAME,
         "goodwill requires review, which hasn't completed",
         "ana proposed goodwill as support, suggested by the step advisor",
+        "Suggested by the step advisor (untrusted:llm): goodwill",
     ],
 )
 def test_the_guide_quotes_what_the_advisor_and_admission_say(line: str) -> None:

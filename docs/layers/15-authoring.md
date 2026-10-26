@@ -627,3 +627,32 @@ All in `tests/test_advisor.py`.
 ## Check yourself (end of the layer)
 
 > What can an injected instruction still influence, and what can't it?
+
+### 15b: the advisor beside a running case, and the live provider
+
+| # | Promise | Test | Shown failing |
+|---|---|---|---|
+| 1 | The live provider with no `ANTHROPIC_API_KEY` is refused, naming the setting | `test_no_key_in_the_environment_is_refused_naming_the_setting` | first: the SDK's client was made without one (it would look for a saved profile); then a mutation |
+| 2 | With no model named it is refused, saying where to name one, never a key | `test_no_model_named_is_refused_naming_where_to_name_one` | first; then a mutation |
+| 3 | A refusal, an answer cut short (by `max_tokens` or any stop reason but `end_turn` and `stop_sequence`), no text, or an API error is a failure, said by kind, never with a key | `test_a_refusal_a_cut_answer_no_text_or_an_api_error_fails_closed` (5 cases) | first, each case; then mutations of the stop reasons, the error caught and the empty text |
+| 4 | It sends the request's system text and messages, and joins the model's text | `test_it_sends_the_requests_system_text_and_messages_and_joins_the_models_text` | mutation: the system text dropped |
+| 5 | A provider that gives no answer: the advisor suggests nothing, saying why | `test_a_provider_that_gives_no_answer_suggests_nothing_saying_why` | first: the failure escaped `advise`; then a mutation |
+| 6 | No module of `ventoux.temporal` imports `authoring` or an LLM SDK | `test_temporal_imports_nothing_that_asks_a_model`, `test_temporal_may_not_import_authoring_or_an_llm_sdk` | an `import anthropic` planted in `temporal/client.py` |
+| 7 | On a running case, an inadmissible answer is refused with admission's reason (the curriculum's negative test, on Temporal) | `test_on_a_running_case_an_inadmissible_answer_is_refused_with_admissions_reason` | mutation: the admission query skipped |
+| 8 | An admitted answer is suggested, and asking (queries) changes nothing in the case | `test_on_a_running_case_an_admitted_answer_is_suggested_and_asking_changes_nothing` | mutation: the query writing to the case's state |
+| 9 | A proposal sent through the client with `suggested_by` is the person's, says so, and asks its approval; another value is refused by the case | `test_a_suggested_proposal_sent_through_the_client_says_so_and_another_value_is_refused` | mutation: the signal dropping `suggested_by` |
+| 10 | The case's history replays with no model in the worker | `test_the_cases_history_replays_without_asking_a_model` | its failing side is promise 6: the worker can't import a model |
+| 11 | Every suggestion is said labelled `untrusted:llm`, by one function | `test_every_suggestion_is_said_labelled_untrusted_llm` | first: `Advice` had no `source`; then a mutation |
+| 12 | `ventoux advise` prints the labelled suggestion, sends the request as recorded, and proposes nothing | `test_ventoux_advise_prints_the_labelled_suggestion_and_proposes_nothing` | first: no such command; then a mutation printing the bare step |
+| 13 | `ventoux advise` with no model named is refused before Temporal is asked | `test_ventoux_advise_with_no_model_named_is_refused_before_anything_is_asked` | first; then a mutation giving a default model |
+| 14 | Prose around a fenced answer suggests nothing (from the tutor's review of 15a) | `test_an_answer_that_isnt_one_step_name_suggests_nothing` (its 9th case) | mutation: `unfenced` taking the first fence anywhere, as the prototype's `extractJson` |
+| 15 | The guide quotes the label word for word | `test_the_guide_quotes_what_the_advisor_and_admission_say` | mutation: a word of the guide's line changed |
+
+### Decided while building (15b)
+
+- **"Suggests nothing" is labelled too.** Choice 22 wrote `The step advisor suggests nothing: <why>`; built as `The step advisor (untrusted:llm) suggests nothing: <why>`, so every line `said()` gives carries the label.
+- **Any stop reason but `end_turn` and `stop_sequence` is no answer.** Choice 25 named `max_tokens` and a refusal; the SDK has others (`model_context_window_exceeded`, `pause_turn`), and a list of the whole ones fails closed where a list of the bad ones wouldn't.
+- **`ProviderFailed` is the protocol's,** in `provider.py`, not the live provider's: `advise` catches it for any provider, and needs no SDK to.
+- **The SDK is in the `dev` group too,** pinned as the extra pins it, so every `uv sync` (CI's included) installs it for mypy and the tests; users still get it only through the extra. CI's commands are unchanged.
+- **`ventoux advise` connects with no key** (the registry's converter): its queries carry no case-file value, sealed or not, so it holds none.
+- **No model identifier is written in the repository:** the guide's example names `"<the model's ID, as Anthropic names it>"`, and the tests a made-up `example-model`.

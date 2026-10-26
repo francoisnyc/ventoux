@@ -21,7 +21,7 @@ ASKED = Request("Advise.", (Message("user", "Which step?"),))
 
 def test_no_key_in_the_environment_is_refused_naming_the_setting() -> None:
     with pytest.raises(ProviderFailed) as failed:
-        Anthropic("claude-opus-5-5", env={})
+        Anthropic("example-model", env={})
     assert str(failed.value) == (
         "ANTHROPIC_API_KEY is not set: the live provider reads its key from the environment, "
         "never from a file"
@@ -67,15 +67,15 @@ def unreachable() -> anthropic.APIConnectionError:
 def provider(answer: Any) -> tuple[Anthropic, FakeMessages]:
     messages = FakeMessages(answer)
     client = cast(Any, SimpleNamespace(messages=messages))
-    return Anthropic("claude-opus-5-5", env={"ANTHROPIC_API_KEY": KEY}, client=client), messages
+    return Anthropic("example-model", env={"ANTHROPIC_API_KEY": KEY}, client=client), messages
 
 
 def test_it_sends_the_requests_system_text_and_messages_and_joins_the_models_text() -> None:
     live, messages = provider(replied("end_turn", '{"step": ', '"goodwill"}'))
     assert asyncio.run(live.complete(ASKED)) == '{"step": "goodwill"}'
-    assert live.name == "anthropic:claude-opus-5-5"
+    assert live.name == "anthropic:example-model"
     [asked] = messages.asked
-    assert asked["model"] == "claude-opus-5-5"
+    assert asked["model"] == "example-model"
     assert asked["system"] == "Advise."
     assert asked["messages"] == [{"role": "user", "content": "Which step?"}]
 
