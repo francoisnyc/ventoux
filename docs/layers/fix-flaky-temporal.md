@@ -239,6 +239,13 @@ Which socket held the port in the failing runs the output can't say; the one tha
 other pytest process's own test server. The SDK's start can't tell a server that failed to bind
 from one slow to answer: both are "did not start within 5s".
 
+*Corrected 2026-10-26, from the tutor review of #60, who measured it:* the holder in the failing
+runs was **not** another process's test server. The SDK's start on a port such a server answers
+on starts in 0.6 s with no error, on that other server (3 of 3): it would never have said "did
+not start within 5s". The holder answered nothing: a socket bound or listening on every address,
+with no Temporal behind it. So decision 1's "stopped and started on another port at once" covers
+such a holder, and only such a one; a holder that answers is decision 3's and 7's.
+
 ### Decided
 
 1. **The harness starts the test server, as it starts the dev server** (choice 81 of the cold
@@ -249,7 +256,8 @@ from one slow to answer: both are "did not start within 5s".
    waits: **a port taken is seen in what the server prints, within a moment, and the server is
    stopped and started on another port at once**, three ports at most, then the start fails
    saying so. A server that exits fails at once, with its code and output; one that never answers
-   fails at the deadline, showing its output. The 5 s is no longer in the path.
+   fails at the deadline, showing its output. The 5 s is no longer in the path. *Corrected
+   2026-10-26:* this is the whole fix only for a holder that answers nothing; see 3 and 7.
 2. **The environment it gives is the SDK's in behaviour:** `TimeSkipping`, a `WorkflowEnvironment`
    whose `sleep` moves the server's clock through its test service, whose `get_current_time` reads
    it, and whose `shutdown` stops the server; and a client interceptor that lets time skip while a
@@ -262,6 +270,17 @@ from one slow to answer: both are "did not start within 5s".
    line is read again once the client is connected, and again when the environment is left: a
    server that said its port was taken, however late, fails the test, saying its results weren't
    its own. Fail closed: never a test passing on somebody else's server.
+   *Corrected 2026-10-26, from the tutor review of #60:* as written, neither check caught a
+   holder that answers. The loser prints its line 20 to 27 ms after its spawn; the client's
+   first connection reaches the other server before that, so the read after connecting found
+   nothing (20 of 20), and the test ran on the other process's server, failing only on the way
+   out, and only when its body took 0.1 s or more. Both checks were untested: removing either
+   passed the harness's tests. Now, once a client got through, the server is given `GRACE`
+   (0.3 s) since its spawn to say its port is taken before the line is read again; the real
+   server takes longer than that to answer, so a start that isn't a collision waits nothing. Each
+   check has a test: a stand-in printing the line within the grace, while the SDK's own server
+   answers on the port, moves the harness off it; one printing it after the grace fails the test
+   on the way out, saying so.
 4. **Every Temporal test goes through it:** `time_skipping(data_converter)` replaces
    `WorkflowEnvironment.start_time_skipping(...)` in the 20 places that called it, across 13 files,
    each `async with time_skipping(...) as environment:`. `tests/test_skipping_server.py` holds the
@@ -274,6 +293,17 @@ from one slow to answer: both are "did not start within 5s".
 6. **A pytest killed mid-run still leaves its server behind,** the harness's as the SDK's: the
    server is stopped when the environment is left, and a process killed leaves nothing. Noted,
    not fixed: the shell's job, or a `prctl` Linux has and this Mac doesn't.
+7. **Two harness processes never share a port** (*added 2026-10-26, from the tutor review of
+   #60*): before starting a server, the harness takes a lock on the port, one file per port under
+   `ports/` in the CLI folder, held with `flock` (Linux and macOS) while the server runs and
+   released when the environment is left or the process ends. A port another harness holds is
+   skipped without a start, counted as one of the three. The printed line stays for any other
+   holder (the SDK's own server, a listener), which no lock can see. Set aside: a port range per
+   process (two processes with the same remainder collide again).
+8. **The holder in the harness's own test is IPv4 where IPv6 isn't there** (*2026-10-26*): the
+   test's listener on every address bound `::`, which raises "address family not supported" in a
+   container without IPv6 (Claude Code's cloud containers), failing every full run there; it
+   falls back to `0.0.0.0`, and the server prints the line just the same.
 
 ### Checked
 
@@ -284,6 +314,10 @@ from one slow to answer: both are "did not start within 5s".
 - Beside that run, as load: `test_temporal_case_release.py`, `test_temporal_approvals.py` and the
   harness's tests, twice: 24 pass each time, no `Failed to bind`, no missed start, in either
   process.
+- *2026-10-26, in a container without IPv6:* the harness's 9 tests pass in 17 s; the four guards
+  broken once each (the lock not consulted, the check after connecting removed, the check on the
+  way out removed, no grace before reading again), each failing its test. The full suite on the
+  branch, pytest, ruff, `ruff format --check` and mypy: see the pull request.
 
 ### Promises
 
@@ -298,4 +332,8 @@ Each claim this section makes about behaviour, and the test that would fail if i
 | A server that never answers fails at the deadline, showing its output, and is stopped | K `test_a_server_that_never_answers_fails_showing_its_output` |
 | The SDK's binary missing under its name after the download fails, naming what the folder holds | K `test_a_binary_the_sdk_names_otherwise_fails_naming_what_is_there` |
 | `time_skipping` gives the harness's environment, its clock moved by `sleep` | K `test_the_tests_environment_is_the_harness_s` |
+| Two harness servers given one port never share it: the second skips it without a start, and its sleep leaves the first's clock alone (decision 7) | K `test_two_harness_servers_given_one_port_never_share_it` |
+| A line printed within the grace, while another server answers on the port, moves the harness off it; on every port, the start fails saying so, never "after the test began" (decision 3) | K `test_a_line_printed_within_the_grace_moves_the_harness_off_a_port_that_answered` |
+| A line printed after the grace fails the test on the way out, saying its results weren't its own (decision 3) | K `test_a_line_printed_after_the_grace_fails_the_test_on_the_way_out` |
+| The holder in the reproduction is IPv6 and IPv4 where the machine has IPv6, IPv4 alone where it hasn't (decision 8) | K `test_a_port_another_server_holds_is_left_for_the_next` |
 | Time skips while a result is awaited, as in the SDK's environment | every Temporal test that awaits a `result` past a timer, `tests/test_temporal.py` among them: the suite, green on the harness |
