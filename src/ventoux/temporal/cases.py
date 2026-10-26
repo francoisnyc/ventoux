@@ -12,7 +12,7 @@ from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from temporalio import workflow
 from temporalio.client import (
@@ -37,6 +37,7 @@ from temporalio.service import RPCError, RPCStatusCode
 # holds them to that), so they are shared.
 with workflow.unsafe.imports_passed_through():
     from ventoux.case.admission import ProposalRefused, RetryRefused
+    from ventoux.case.advising import AdvisorView, advisor_view
     from ventoux.case.answers import AnswerRefused
     from ventoux.case.called import unbound
     from ventoux.case.closing import CloseRefused, needs_attention
@@ -55,6 +56,7 @@ with workflow.unsafe.imports_passed_through():
         ShownRefused,
         decide,
         preview_migration,
+        proposal_refused,
     )
     from ventoux.case.state import (
         Answered,
@@ -272,6 +274,35 @@ class CaseRequest:
     what: str  # the step proposed, the run retried (`pay#1`), or the close reason
     by: str  # who asks, as the trusted caller states (brief, D19)
     roles: list[str]  # their roles, stated with the request (brief, D22)
+    # Who suggested a proposal: the step advisor, or nobody. Text as it crosses Temporal, so the
+    # case, never the client, refuses any other value (brief, D61).
+    suggested_by: str | None = None
+
+
+@dataclass
+class AdvisorAsked:
+    """The step advisor asked for a person: who, with which roles, at what time."""
+
+    by: str  # the person it is asked for, as the trusted caller states (brief, D19)
+    roles: list[str]  # their roles (brief, D22)
+    at: int  # the asker's time, in seconds since the epoch, against which facts' ages are told
+
+
+@dataclass
+class ProposalAsked:
+    """Whether a person's proposal of a step would be admitted now."""
+
+    step: str
+    by: str  # the person, as the trusted caller states (brief, D19)
+    roles: list[str]  # their roles (brief, D22)
+    at: int  # the asker's time, in seconds since the epoch
+
+
+@dataclass
+class Refusal:
+    """Why a proposal would be refused, or None if admission would accept it."""
+
+    reason: str | None
 
 
 @dataclass
@@ -381,7 +412,9 @@ class CaseWorkflow:
 
     @workflow.signal(name="propose")
     def propose(self, sent: CaseRequest) -> None:
-        self.inbox.append(Proposed(sent.what, sent.by, frozenset(sent.roles), at=now()))
+        roles = frozenset(sent.roles)
+        suggested: Any = sent.suggested_by  # any text: `propose` refuses all but the advisor
+        self.inbox.append(Proposed(sent.what, sent.by, roles, at=now(), suggested_by=suggested))
 
     @workflow.signal(name="retry")
     def retry(self, sent: CaseRequest) -> None:
@@ -451,6 +484,23 @@ class CaseWorkflow:
         """The case file as a person holding `roles` sees it, filtered here, in the worker, so
         nothing hidden from them leaves it (brief, D30)."""
         return case_view(self.case, self.state, roles, self.catalog.roles)
+
+    @workflow.query(name="advisor_view")
+    def advisor_view(self, asked: AdvisorAsked) -> AdvisorView:
+        """What the step advisor is shown, asked for a person: computed here, in the worker,
+        from the case's state, so no value leaves it (brief, D30) (brief, D62)."""
+        roles = frozenset(asked.roles)
+        return advisor_view(self.case, self.catalog, self.state, asked.by, roles, asked.at)
+
+    @workflow.query(name="proposal_refused")
+    def proposal_refused(self, asked: ProposalAsked) -> Refusal:
+        """Why a person's proposal of a step would be refused now, decided on a copy of the
+        state: a query, so nothing is decided or recorded (brief, D61)."""
+        roles = frozenset(asked.roles)
+        why = proposal_refused(
+            self.case, self.catalog, self.state, asked.step, asked.by, roles, asked.at
+        )
+        return Refusal(why)
 
     @workflow.query(name="worded_view")
     def worded_view(self, asked: ViewAsked) -> ViewAnswer:
@@ -1085,10 +1135,36 @@ async def answer(
 
 
 async def propose(
-    case: WorkflowHandle[CaseWorkflow, CaseReport], step: str, by: str, roles: list[str]
+    case: WorkflowHandle[CaseWorkflow, CaseReport],
+    step: str,
+    by: str,
+    roles: list[str],
+    suggested_by: Literal["step-advisor"] | None = None,
 ) -> None:
-    """Propose starting `step`, as the person `by`, who has `roles`; admission decides."""
-    await case.signal(CaseWorkflow.propose, CaseRequest(step, by, sorted(roles)))
+    """Propose starting `step`, as the person `by`, who has `roles`, perhaps on the step
+    advisor's suggestion; admission decides (brief, D61)."""
+    await case.signal(CaseWorkflow.propose, CaseRequest(step, by, sorted(roles), suggested_by))
+
+
+async def shown_to_advisor(
+    case: WorkflowHandle[CaseWorkflow, CaseReport], by: str, roles: list[str], at: int
+) -> AdvisorView:
+    """What the step advisor is shown of the case for `by`, who has `roles`, at `at`: a query,
+    computed in the worker (brief, D62)."""
+    return await case.query(CaseWorkflow.advisor_view, AdvisorAsked(by, sorted(roles), at))
+
+
+async def refused_proposal(
+    case: WorkflowHandle[CaseWorkflow, CaseReport],
+    step: str,
+    by: str,
+    roles: list[str],
+    at: int,
+) -> str | None:
+    """Why `by`'s proposal of `step` would be refused at `at`, or None: a query, deciding
+    nothing (brief, D61)."""
+    asked = ProposalAsked(step, by, sorted(roles), at)
+    return (await case.query(CaseWorkflow.proposal_refused, asked)).reason
 
 
 async def retry(
