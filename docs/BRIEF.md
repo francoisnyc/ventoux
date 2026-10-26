@@ -2550,6 +2550,31 @@ to D12, D14, D22, D25 and D43, whose text is kept.*
   imports `authoring` or an LLM SDK. Set aside: a registered activity calling the model, which
   would make the advisor part of each definition and put an LLM SDK on the case worker.
 
+### D62. Providers: one small protocol, recordings for tests, a live provider that fails closed
+
+*Decided 2026-10-26, in layer 15b (`docs/layers/15-authoring.md`, choices 6, 7 and 20 to 26).
+Adds to D12, D30, D59 and D61, whose text is kept.*
+
+- **A provider is asked one request at a time, asynchronously:** the system text and the messages,
+  in order, and it gives the model's answer as text. What it answers is `untrusted:llm` (D12): read,
+  checked, never run.
+- **Tests replay recordings.** A recording answers only the request it recorded, in order, and
+  nothing past its last; a request that differs is refused, saying where. So no test needs the
+  network or a key, and a changed prompt fails the test that recorded it.
+- **The live provider is Anthropic's, behind an optional extra** (`ventoux[anthropic]`), imported
+  only by the module that builds it. Its key is read from `ANTHROPIC_API_KEY` alone, never from a
+  definition, a recording, a file or the command line, and is never logged or said. The model is
+  named in configuration, `[tool.ventoux] model` or `--model`, with no default, as the catalog is
+  (D59). No key, no model, a refusal, an answer cut short or an API error is a failure, said by
+  the setting's name, never its value; the step advisor then suggests nothing.
+- **The advisor is a client of a running case.** What it is shown is computed in the worker, from
+  `case`, as a view is filtered there (D30); admission's preview is `decide` on a copy. Both are
+  queries, never recorded in history, and the advisor never signals a case. No module of
+  `temporal` imports `authoring` or an LLM SDK, so a case's replay can't ask a model.
+- **A suggestion is always shown labelled:** "Suggested by the step advisor (untrusted:llm): …"
+  (D61's "labelled so wherever it is shown"), by one function every caller uses. `ventoux advise`
+  prints it, and never proposes.
+
 ## Concepts
 
 | Term | Meaning |

@@ -478,6 +478,11 @@ Answer by number. "Recommended" is what I'd do; the options set aside are named.
 Written 2026-10-26, after 15a's merge (#63) and the 15b warm-up (learning question 40). It also
 takes in two optional points from the tutor's review of 15a.
 
+**Answered 2026-10-26:** "Build", given after layer 14's wrap-up was cut short at its second stop.
+Read as choices 20 to 27 as recommended, choice 26's renumbering included (D62 here, D63 for the
+loop, D64 for "Approve this plan"). The extra is pinned `anthropic>=1.13.0,<2`, locked at 1.13.0,
+the newest release at least two weeks old; 2.0 is a major release with API-version changes.
+
 20. **What the advisor is shown is computed in the worker, so its pure part moves to `case`.**
     On Temporal the case's state lives in the worker, and a view is filtered there, so nothing
     hidden leaves it (brief, D30). The advisor's view must be computed there too. Workflow code
