@@ -1263,6 +1263,18 @@ and record the key points. A question is closed once you can explain the answer 
   the values come from the step's inputs, written in the reviewed definition, and an untrusted
   field is refused at a `trusted_only` input. Tied to 13c: the readings and the sheet say only
   what the definition proves, and quote nothing a case holds.
+- Retrieval (layer 15 warm-up, 2026-10-26), asked in four parts, after two hints:
+  - the seam: "is it decide?", right; the event's fields were asked for and reminded:
+    `Proposed(step, by, roles, at)`, with no field for a value;
+  - what is still checked: "proposed_by role and requires", two of the checks, both right. Given:
+    the step exists (the refusal an advisor naming a made-up step meets); the case is open, with
+    no close held; the step isn't waiting for its approval, waiting to start or running; it may
+    run again (`repeatable`); its `when` holds, and one that can't be read refuses (fail closed).
+    In `propose`, `src/ventoux/case/runtime.py`, and `proposal_refusal`,
+    `src/ventoux/case/admission.py`;
+  - who may approve, and where the amount comes from: skipped, not recalled.
+  Tied to layer 15: the step advisor's answer is checked by exactly this seam, so the parts
+  missed come up again there.
 - Status: open, until the proposer's checks and the exclusions come back from memory.
 
 
