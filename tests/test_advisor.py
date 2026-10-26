@@ -13,16 +13,10 @@ from typing import Any
 
 import pytest
 
-from ventoux.authoring.advisor import (
-    Advice,
-    FieldShown,
-    RunShown,
-    StepShown,
-    advise,
-    shown_to_advisor,
-)
+from ventoux.authoring.advisor import Advice, advise, shown_to_advisor
 from ventoux.authoring.provider import Message, Recorded, Recording, ReplayRefused, Request
 from ventoux.case.admission import ProposalRefused
+from ventoux.case.advising import FieldShown, RunShown, StepShown
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.memory import CaseRun
 from ventoux.case.runtime import decide, proposal_refused
