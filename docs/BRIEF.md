@@ -2510,6 +2510,46 @@ D20 and D58, whose text is kept.*
   `parse_case`, checked by `ventoux check` against the deployment's catalog, reviewed in a pull
   request. The builder never runs on model output (D58).
 
+### D61. The step advisor suggests a step; a person proposes it, and admission decides
+
+*Decided 2026-10-26, in layer 15 (`docs/layers/15-authoring.md`, choices 2 to 5, 17 to 19). Adds
+to D12, D14, D22, D25 and D43, whose text is kept.*
+
+- **It suggests; a person proposes.** The step advisor is asked on behalf of one person, holds no
+  role and has no identity in a case. What it names reaches the case only if that person proposes
+  it, in their own name, checked by admission as every proposal is. The history says so: `ana
+  proposed goodwill as support, suggested by the step advisor`. So a person is where the model's
+  influence ends (D43), the proposer may not approve the run (D25), and nothing runs on the model's
+  word alone. Set aside: the advisor proposing as its own role, which would need every step it
+  proposes to ask an approval and D43 loosened for it; an opt-in that can come later.
+- **It only names a step.** Its answer is exactly `{"step": "<name>"}` or `{"step": null}`, at most
+  inside one fenced block; anything else (prose, a list, a second key such as an amount, a name
+  that isn't text) suggests nothing, saying why (fail closed). It gives no reason in words. Its
+  answer is `untrusted:llm` (D12), labelled so wherever it is shown.
+- **What it names is checked by the same seam as a person's proposal:** `decide` on a copy of the
+  case, with `Proposed(step, <the person>, <their roles>, at)`. A step the case doesn't have, one
+  the person may not propose, one that is running, waiting or can't run again, one whose `requires`
+  aren't met or whose `when` doesn't hold, and anything else admission refuses, is refused with
+  admission's own reason; the case is unchanged. The person's proposal is checked again from
+  nothing.
+- **`suggested_by` is a closed value** on a proposal, `step-advisor` or absent, never free text, so
+  no caller writes words of its own into a history line; any other value refuses the proposal. A
+  history recorded before it has none and replays as it was: no engine version (D51).
+- **What it is shown: no case-file value at all.** Each field's name and type, whether it is set,
+  and its source labels; a field hidden from the person is said hidden, a sensitive one sensitive;
+  the milestones reached; each step's latest run, with its status and outcome; `waiting_for` (D24);
+  and the steps admission would accept now from that person, with their titles and descriptions.
+  Never a value, trusted or not, never a history line, never a person's identifier. A request to a
+  provider is a message, and no message quotes a case-file value; an untrusted value is where an
+  injected instruction lives, and a trusted one may still be personal data leaving the deployment.
+  A per-field opt-in, written in the definition, would be a decision of its own.
+- **A model call is I/O, made beside the engine.** The advisor is a client: it reads what it is
+  shown and the admission preview by query, read-only and never recorded in history, and never
+  signals a case. Only a person's proposal reaches the case, as a signal history records; replay
+  reads it there and never asks the model again. Nothing in `core`, `case` or workflow code
+  imports `authoring` or an LLM SDK. Set aside: a registered activity calling the model, which
+  would make the advisor part of each definition and put an LLM SDK on the case worker.
+
 ## Concepts
 
 | Term | Meaning |

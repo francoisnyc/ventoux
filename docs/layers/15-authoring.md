@@ -7,7 +7,14 @@ Prior art read: the `chartering` prototype at `197d519`, its `main`. The files r
 `src/authoring/loop.ts`, `prompt.ts`, `render.ts`, `case-planner.ts`, `provider.ts`,
 `anthropic.ts`, `adhoc.ts` and `promote.ts`, and `docs/design.md` §6, with §7 and §10 where they
 touch the advisor. The layer is explained and split into four parts below. Each choice has a
-recommendation. **Nothing is built until the choices are answered.**
+recommendation.
+
+**Answered 2026-10-26.** Choices 1, 2 (a), 4, 5, 7 (yes to the `anthropic` extra), 8 to 12 and 14
+to 16 as recommended. Six are changed, each said where the choice is, marked *Answered*: 3 (no
+case-file value at all, trusted ones included), 6 (`complete` is async), 13 (the heading never
+guesses a pronoun), 17 (`proposal_refused`, and why `proposal_refusal` isn't reused), 18 (test 4
+also checks for people's identifiers and history lines) and 19 (`suggested_by` is a closed value).
+D61 is written before building 15a.
 
 ## Warm-up: learning question 36, the model picks the step, never the values
 
@@ -206,6 +213,15 @@ Answer by number. "Recommended" is what I'd do; the options set aside are named.
 
    *Recommended.*
 
+   *Answered: no case-file value at all in v1.0, trusted ones included.* The advisor is shown each
+   field's name and type, "set" or "not set", and its source labels; the milestones reached; each
+   step's latest run, with its status and outcome; and the steps admission would accept now. A
+   request to a provider is a message, and no message quotes a case-file value (CLAUDE.md); a
+   trusted field can still be personal data leaving the deployment; and the prototype's own design
+   says "types and trust labels, never values". The advisor only chooses among steps admission
+   already allows, so it needs no value to do that. A per-field opt-in, written in the definition
+   and reviewed, can be its own decision later.
+
 4. **What the advisor answers.**
    - Exactly `{"step": "<name>"}`, or `{"step": null}` for "nothing to suggest". It may sit inside
      at most one fenced block. Nothing else counts as an answer: prose, a list, a second key
@@ -250,6 +266,10 @@ Answer by number. "Recommended" is what I'd do; the options set aside are named.
      hand to make a fixture. No test runs it.
 
    *Recommended.*
+
+   *Answered: `complete` is async* (`async def complete(request) -> str`). In 15b the advisor runs
+   inside async Temporal client code, and a synchronous call would block the event loop for the
+   whole model call.
 
 7. **The live provider, and a new dependency.** You said to ask first.
    - **For:** the Anthropic Python SDK, `anthropic`, as an optional extra. It is installed with
@@ -378,6 +398,9 @@ Answer by number. "Recommended" is what I'd do; the options set aside are named.
     never shown for approval (fail closed). It is given no case file, so it quotes no case's value.
     The command is `ventoux draft-sheet DRAFT --package FOLDER`. *Recommended.*
 
+    *Answered: the heading never guesses a pronoun.* It reads "Drafted by `<provider>`
+    (`<model>`) for omar, from the goal:", or "Goal:", never "from his goal".
+
 14. **The ad hoc inline plan stays deferred** (brief, D13; Simplifications). A plan drafted for one
     case and run in it would need a running case to accept unreleased behaviour. Every guarantee
     since D50 rests on a case running a reviewed release. *Recommended.* I see no reason to argue
@@ -413,6 +436,11 @@ Answer by number. "Recommended" is what I'd do; the options set aside are named.
 
     *Recommended.*
 
+    *Answered: named as a reason, `proposal_refused`.* `proposal_refusal` (layer 8) isn't reused:
+    it checks only whether the step is busy and its `requires`, while `decide` on a copy also
+    checks that the step exists, who may propose it, the case's phase and a held close, its fresh
+    facts and its `when`, which is everything a person's proposal meets.
+
 18. **The tests, in order, negative first.** Each one fails first for the right reason.
     1. An answer naming `goodwill` before `review` is done is refused, with admission's reason
        (the curriculum's negative test).
@@ -431,12 +459,19 @@ Answer by number. "Recommended" is what I'd do; the options set aside are named.
 
     *Recommended.*
 
+    *Answered: test 4 also checks* that no person's identifier and no history line appears in the
+    request, beside no case-file value of any kind (choice 3 as answered).
+
 19. **Where the code lives.** `src/ventoux/authoring/provider.py` (the protocol, `Recorded`,
     `Recording`) and `src/ventoux/authoring/advisor.py` (what it is shown, the prompt, reading
     the answer). `admitted` goes beside `preview_migration` in `src/ventoux/case/runtime.py`.
     `suggested_by` is one optional field on `Proposed`, defaulting to `None`. A history recorded
     before it has none, so it replays as it was, and no engine version is needed (brief, D51:
     only a changed decision on a recorded path needs one). *Recommended.*
+
+    *Answered: `suggested_by` is a closed value, never free text,* so no caller can write words of
+    its own into a history line. It is `Literal["step-advisor"]` or `None`, and the history reads
+    "suggested by the step advisor" from it; any other value is refused with the proposal.
 
 ## Promises
 
