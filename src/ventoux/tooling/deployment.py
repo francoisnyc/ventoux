@@ -40,7 +40,7 @@ class Configuration:
     # since stale output of a removed case looks the same on disk (brief, D58).
     by_hand: tuple[str, ...] = ()
     releases: str | None = None  # where `ventoux release` keeps its records (brief, D59)
-    model: str | None = None  # the model the live provider asks; none named is refused (D62)
+    model: str | None = None  # the model the live provider asks; none named is refused (brief, D62)
 
 
 def configuration(start: Path) -> Configuration:
