@@ -6,7 +6,7 @@ It is asked on behalf of one person, and suggests to them; they propose it, or d
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -66,6 +66,15 @@ class Advice:
     step: str | None  # the step to suggest; None: nothing to suggest
     refused: str | None  # why nothing is suggested, or None
     by: str  # the provider that answered
+    # Where a suggestion comes from: a model's answer, untrusted data, always (brief, D12).
+    source: Literal["untrusted:llm"] = "untrusted:llm"
+
+    def said(self) -> str:
+        """The advice as every caller shows it, labelled with its source, so the label is never
+        left off (brief, D61) (brief, D62)."""
+        if self.step is not None:
+            return f"Suggested by the step advisor ({self.source}): {self.step}"
+        return f"The step advisor ({self.source}) suggests nothing: {self.refused}"
 
 
 def shown_to_advisor(

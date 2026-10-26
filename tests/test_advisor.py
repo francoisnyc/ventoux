@@ -137,6 +137,7 @@ NOT_ONE_NAME = "the advisor's answer is not one step name, so it suggests nothin
         '{"steps": "goodwill"}',  # another key
         '{"step": "pay", "step": "goodwill"}',  # one key twice: JSON readers keep either
         '["goodwill"]',  # not an object
+        'Sure:\n```json\n{"step": "goodwill"}\n```',  # prose around one fenced block
     ],
 )
 def test_an_answer_that_isnt_one_step_name_suggests_nothing(answer: str) -> None:
@@ -291,3 +292,15 @@ def test_the_guides_history_line_is_what_a_suggested_proposal_writes() -> None:
     suggested = propose("goodwill", "ana", suggested_by="step-advisor")
     run = run_case(claim(), file=OPENED, answers=[REVIEWED_150, suggested], people=PEOPLE)
     assert "ana proposed goodwill as support, suggested by the step advisor" in run.history
+
+
+def test_every_suggestion_is_said_labelled_untrusted_llm() -> None:
+    # One function says a suggestion wherever it is shown, so the label can't be left off
+    # (brief, D61) (brief, D62).
+    suggested = asked_as("ana", reviewed(), '{"step": "goodwill"}')
+    nothing = asked_as("ana", reviewed(), '{"step": null}')
+    assert suggested.source == nothing.source == "untrusted:llm"
+    assert suggested.said() == "Suggested by the step advisor (untrusted:llm): goodwill"
+    assert nothing.said() == (
+        "The step advisor (untrusted:llm) suggests nothing: the advisor has no step to suggest"
+    )
