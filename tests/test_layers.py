@@ -260,6 +260,7 @@ def test_temporal_imports_nothing_that_asks_a_model() -> None:
         "(docs/layers/15-authoring.md, choice 24)"
     )
 
+
 # Fail closed: a relative import doesn't say which layer it reaches, so it is reported, never skipped.
 def test_relative_imports_are_reported() -> None:
     assert forbidden_imports("core", "from ..temporal import worker\n") == ["..temporal"]

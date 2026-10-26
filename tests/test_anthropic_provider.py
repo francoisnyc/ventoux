@@ -12,8 +12,8 @@ import anthropic
 import httpx2
 import pytest
 
-from ventoux.authoring.anthropic import Anthropic, ProviderFailed
-from ventoux.authoring.provider import Message, Request
+from ventoux.authoring.anthropic import Anthropic
+from ventoux.authoring.provider import Message, ProviderFailed, Request
 
 KEY = "sk-ant-test-0123456789"
 ASKED = Request("Advise.", (Message("user", "Which step?"),))

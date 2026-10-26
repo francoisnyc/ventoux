@@ -5,8 +5,12 @@ See docs/layers/15-authoring.md (15b) and brief D61, D62.
 """
 
 import asyncio
+import io
+import tempfile
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -16,10 +20,18 @@ from temporalio.converter import DataConverter
 from temporalio.worker import Replayer
 from test_advisor import INJECTED, claim
 
-from ventoux.authoring.advisor import Advice
+from ventoux.authoring.advisor import Advice, Shown
 from ventoux.authoring.beside import advise_case
-from ventoux.authoring.provider import Recorded
-from ventoux.temporal.cases import CaseReport, CaseWorkflow, answer, propose, report, start_case
+from ventoux.authoring.provider import Recorded, Recording
+from ventoux.temporal.cases import (
+    CaseReport,
+    CaseWorkflow,
+    answer,
+    propose,
+    report,
+    shown_to_advisor,
+    start_case,
+)
 from ventoux.temporal.worker import SANDBOX, case_worker
 from ventoux.testing import (
     FAKES,
@@ -28,6 +40,7 @@ from ventoux.testing import (
     DevelopmentPlans,
     development_converter,
 )
+from ventoux.tooling.cli import main
 
 QUEUE = "cases"
 OPENED = {
@@ -68,6 +81,7 @@ class Ran:
     report: CaseReport
     recorded: WorkflowHistory
     converter: DataConverter  # holds the case's key: its sealed parts open only with it
+    command: tuple[int, str, str]  # `ventoux advise`: its exit, what it printed, what it said
 
 
 def run_the_claim() -> Ran:
@@ -80,6 +94,7 @@ def run_the_claim() -> Ran:
         await answer(case, "review#1", "approve", "sam", SAM, {"approved_amount": Decimal(150)})
         before = await reported(case, "asked pay.approval#1: approval of pay by support-lead")
         admitted = await advise_case(case, "ana", ANA, goodwill(), at=START)
+        command = await advised_by_the_command(client, case)
         after = await report(case)
         await propose(case, "goodwill", "ana", ANA, suggested_by="step-advisor")
         words: Any = "the CEO"
@@ -93,7 +108,8 @@ def run_the_claim() -> Ran:
             "by nobody; this one names something else",
         )
         recorded = await case.fetch_history()
-        return Ran(too_early, admitted, before.history, after.history, now, recorded, converter)
+        history = before.history, after.history
+        return Ran(too_early, admitted, *history, now, recorded, converter, command)
 
     converter = development_converter()
 
@@ -105,6 +121,28 @@ def run_the_claim() -> Ran:
             return await asyncio.wait_for(scenario(environment.client), timeout=30)
 
     return asyncio.run(go())
+
+
+async def advised_by_the_command(client: Client, case: Case) -> tuple[int, str, str]:
+    """`ventoux advise claim-1 --by ana --role support`, replaying a recording of the request
+    the advisor makes now: so the command is shown to send exactly that request."""
+    folder = Path(tempfile.mkdtemp())
+    recording = Recording(goodwill())
+    shown = Shown.of(await shown_to_advisor(case, "ana", ANA, START))
+    await recording.complete(shown.request)
+    recording.save(folder / "goodwill.json")
+    address = client.service_client.config.target_host
+    argv = ["advise", "claim-1", "--by", "ana", "--role", "support", "--address", address]
+    argv += ["--recording", str(folder / "goodwill.json"), "--at", str(START)]
+    printed, said = io.StringIO(), io.StringIO()
+
+    def run() -> int:
+        # `main` runs its own event loop, so it runs on a thread of its own here.
+        with redirect_stdout(printed), redirect_stderr(said):
+            return main(argv)
+
+    exit_code = await asyncio.to_thread(run)
+    return exit_code, printed.getvalue(), said.getvalue()
 
 
 @pytest.fixture(scope="module")
@@ -144,3 +182,26 @@ def test_the_cases_history_replays_without_asking_a_model(ran: Ran) -> None:
         workflow_runner=SANDBOX,
     )
     asyncio.run(replayer.replay_workflow(ran.recorded))
+
+
+def test_ventoux_advise_prints_the_labelled_suggestion_and_proposes_nothing(ran: Ran) -> None:
+    assert ran.command == (0, "Suggested by the step advisor (untrusted:llm): goodwill\n", "")
+    assert ran.history_after == ran.history_before  # the command proposed nothing
+
+
+def test_ventoux_advise_with_no_model_named_is_refused_before_anything_is_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # No Temporal is reached: the provider is settled first, and none named is refused (D62).
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.ventoux]\ncatalog = "ventoux.testing:CATALOG"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-0123456789")
+    argv = ["advise", "claim-1", "--by", "ana", "--role", "support", "--address", "nowhere:1"]
+    assert main(argv) == 2
+    said = capsys.readouterr().err
+    assert said == (
+        'no model is named: name it in pyproject.toml, [tool.ventoux] model = "…", or with '
+        "--model\n"
+    )

@@ -39,6 +39,7 @@ from ventoux.case.story import Story, StoryInvalid, parse_story
 from ventoux.core.catalog import Catalog
 from ventoux.core.hash_check import check_hashes
 from ventoux.core.promise import promise_of
+from ventoux.tooling.advising import advise_command
 from ventoux.tooling.check import (
     Checked,
     CheckRefused,
@@ -175,9 +176,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--catalog", help="the deployment's catalog, module:NAME (else pyproject.toml's)"
         )
     environments(commands)
+    advising = commands.add_parser(
+        "advise", help="what the step advisor suggests to a person on a running case"
+    )
+    advising.add_argument("case", help="the case's workflow ID")
+    advising.add_argument("--by", required=True, help="the person it is asked for")
+    advising.add_argument(
+        "--role", action="append", default=[], help="a role they hold (once per role)"
+    )
+    advising.add_argument("--model", help="the model to ask (else pyproject.toml's model)")
+    advising.add_argument("--recording", type=Path, help="replay a recording instead of a model")
+    advising.add_argument("--at", type=int, help="the time, in seconds since the epoch (now)")
+    advising.add_argument("--address", default="localhost:7233", help="Temporal's frontend")
+    advising.add_argument("--namespace", default="default")
     arguments = parser.parse_args(argv)
     if arguments.command in ("environment", "activate", "retire", "manifest"):
         return environment_command(arguments)
+    if arguments.command == "advise":
+        try:
+            found = configuration(Path.cwd())
+        except Unconfigured as refused:
+            print(refused, file=sys.stderr)
+            return CANT_READ
+        return advise_command(arguments, found)  # needs no catalog: the case's worker has it
     if arguments.command == "schema":
         return write_schemas(arguments.out, arguments.unchanged)  # needs no catalog: shape only
     # Every other command reads contracts or roles: the deployment's catalog, named in

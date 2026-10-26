@@ -26,6 +26,9 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    # The live provider's SDK, as the `anthropic` extra pins it: so mypy checks it strictly and
+    # its tests run (with a fake client: no test reaches the network, and CI holds no key).
+    "anthropic>=1.13.0,<2",
     "jsonschema>=4.26.0",
     "mypy>=2.4.0",
     "pytest>=9.1.1",

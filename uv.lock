@@ -1048,6 +1048,7 @@ anthropic = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "anthropic" },
     { name = "jsonschema" },
     { name = "mypy" },
     { name = "pytest" },
@@ -1065,6 +1066,7 @@ provides-extras = ["anthropic"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "anthropic", specifier = ">=1.13.0,<2" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "mypy", specifier = ">=2.4.0" },
     { name = "pytest", specifier = ">=9.1.1" },
