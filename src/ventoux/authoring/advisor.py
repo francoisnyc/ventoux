@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import TypeAdapter, ValidationError
 
-from ventoux.authoring.provider import Message, Provider, Request
+from ventoux.authoring.provider import Message, Provider, ProviderFailed, Request
 from ventoux.case.advising import AdvisorView, advisor_view
 from ventoux.case.definition import CaseDefinition, Name
 from ventoux.case.state import CaseState
@@ -92,7 +92,10 @@ def shown_to_advisor(
 
 async def advise(shown: Shown, provider: Provider, refused: Refused) -> Advice:
     """The step `provider`'s model suggests, once admission has checked it by `refused`."""
-    answer = await provider.complete(shown.request)
+    try:
+        answer = await provider.complete(shown.request)
+    except ProviderFailed as failed:  # no answer is never read as one (brief, D62)
+        return Advice(None, f"the step advisor gave no answer: {failed}", provider.name)
     try:
         step = step_named(answer)
     except NotOneName:

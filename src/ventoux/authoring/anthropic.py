@@ -9,15 +9,9 @@ from collections.abc import Mapping
 
 from anthropic import APIError, AsyncAnthropic
 
-from ventoux.authoring.provider import Request
-
+from ventoux.authoring.provider import ProviderFailed, Request
 
 KEY = "ANTHROPIC_API_KEY"  # the one place the key is read from
-
-
-class ProviderFailed(Exception):
-    """The live provider gave no answer: a setting is missing, or the model or its API failed.
-    The message names the setting or the failure, never a key."""
 
 
 class Anthropic:

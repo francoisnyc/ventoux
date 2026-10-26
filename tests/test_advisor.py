@@ -14,7 +14,14 @@ from typing import Any
 import pytest
 
 from ventoux.authoring.advisor import Advice, advise, shown_to_advisor
-from ventoux.authoring.provider import Message, Recorded, Recording, ReplayRefused, Request
+from ventoux.authoring.provider import (
+    Message,
+    ProviderFailed,
+    Recorded,
+    Recording,
+    ReplayRefused,
+    Request,
+)
 from ventoux.case.admission import ProposalRefused
 from ventoux.case.advising import FieldShown, RunShown, StepShown
 from ventoux.case.answers import AnswerRefused
@@ -303,4 +310,27 @@ def test_every_suggestion_is_said_labelled_untrusted_llm() -> None:
     assert suggested.said() == "Suggested by the step advisor (untrusted:llm): goodwill"
     assert nothing.said() == (
         "The step advisor (untrusted:llm) suggests nothing: the advisor has no step to suggest"
+    )
+
+
+class Failing:
+    """A provider whose model gives no answer, as the live one fails closed (brief, D62)."""
+
+    name = "failing"
+
+    async def complete(self, request: Request) -> str:
+        raise ProviderFailed("the model refused to answer")
+
+
+def test_a_provider_that_gives_no_answer_suggests_nothing_saying_why() -> None:
+    run = reviewed()
+    roles = frozenset(["support"])
+    shown = shown_to_advisor(run.definition, CATALOG, run.state, "ana", roles, START)
+
+    async def refused(step: str) -> str | None:
+        return proposal_refused(run.definition, CATALOG, run.state, step, "ana", roles, START)
+
+    advice = asyncio.run(advise(shown, Failing(), refused))
+    assert advice == Advice(
+        None, "the step advisor gave no answer: the model refused to answer", "failing"
     )

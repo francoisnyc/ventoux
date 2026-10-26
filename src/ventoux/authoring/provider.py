@@ -40,6 +40,11 @@ class Provider(Protocol):
         ...
 
 
+class ProviderFailed(Exception):
+    """A provider gave no answer: a setting is missing, or the model or its API failed. Its
+    message names the setting or the failure, never a key or what was asked (brief, D62)."""
+
+
 class ReplayRefused(Exception):
     """A recording was asked something it didn't record: a request that differs, or one more
     than it holds. Never answered with the nearest answer it has (fail closed)."""
