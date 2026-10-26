@@ -44,10 +44,8 @@ from temporalio.testing import WorkflowEnvironment
 TAKEN = "Failed to bind to address"
 # How many ports a start may try before it fails: a collision is a moment, not a condition.
 PORTS = 3
-# How long after its spawn a server is given to say its port is taken, before a connection that
-# got through is trusted: the loser prints the line within 70 ms; the real server takes longer
-# than this to answer, so a start that isn't a collision waits nothing.
-GRACE = 0.3
+# How long a probe of a port waits for something to accept, before the server is started on it.
+PROBE = 0.5
 SERVER = "the test server"
 
 
@@ -88,6 +86,10 @@ class TimeSkipping(WorkflowEnvironment):
     `shutdown` stops the server."""
 
     process: Process | None = None  # the server, set once the environment is made
+    # What the harness did with each port it was given, in order: `port 51234 is held by another
+    # harness`, `port 51235 answers already`, `started on 51236`. For the harness's tests; set
+    # with `process`, once the environment is made.
+    tried: list[str]
 
     async def shutdown(self) -> None:
         if self.process is not None:
@@ -174,12 +176,14 @@ async def skipping_server(
     output goes to a file, shown if it doesn't start. `ports` gives each port to try."""
     skipping = SkipOnResult()
     with tempfile.TemporaryDirectory() as logs:
+        tried: list[str] = []
         process, client, log, lock = await started(
-            binary, deadline, ports, Path(logs), connecting(skipping, data_converter)
+            binary, deadline, ports, Path(logs), connecting(skipping, data_converter), tried
         )
         try:
             environment = TimeSkipping.from_client(client)
             environment.process = process
+            environment.tried = tried
             skipping.environment = environment
             yield environment
         finally:
@@ -221,6 +225,8 @@ def port_lock(port: int) -> IO[bytes] | None:
     holds it: that port is in use, whatever it printed."""
     folder = cli_folder() / "ports"
     folder.mkdir(parents=True, exist_ok=True)
+    # The file is never removed: unlinking a file another process is about to lock would give
+    # two processes two files, and so one port; a few hundred empty files are the safe choice.
     lock = (folder / f"{port}.lock").open("wb")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -230,28 +236,46 @@ def port_lock(port: int) -> IO[bytes] | None:
     return lock
 
 
+async def answers(port: int) -> bool:
+    """Whether something accepts a connection on `port` now: another process's server, or any
+    listener. Seen before a start, so no server is spawned on a port in use."""
+    try:
+        _, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), PROBE)
+    except (OSError, TimeoutError):
+        return False
+    writer.close()
+    return True
+
+
 async def started(
     binary: Path,
     deadline: float,
     ports: Callable[[], int],
     logs: Path,
     connect: Callable[[int], Awaitable[Client]],
+    tried: list[str],
 ) -> tuple[Process, Client, Path, IO[bytes]]:
     """The server started on the first port `ports` gives that isn't taken, a client connected
-    to it, its log, and the lock held on its port. A port another harness holds is skipped
-    without a start; one taken by anything else is seen in what the server prints, within a
-    moment, and the server is stopped and the next port tried. Fails after `PORTS` ports, saying
-    what the last one printed."""
+    to it, its log, and the lock held on its port. A port another harness holds, or one something
+    answers on, is skipped without a start; one taken in the moment between the probe and the
+    bind is seen in what the server prints, and the server is stopped and the next port tried.
+    Fails after `PORTS` ports, saying what the last one printed. `tried` gets one line per port."""
     command, log = [str(binary)], logs / "server-0.log"
     for attempt in range(1, PORTS + 1):
         port = ports()
+        log = logs / f"server-{attempt}.log"
         lock = port_lock(port)
         if lock is None:
-            log = logs / f"server-{attempt}.log"
-            log.write_text(f"port {port} is held by another harness\n")
+            tried.append(f"port {port} is held by another harness")
+            log.write_text(tried[-1] + "\n")
             continue
+        if await answers(port):
+            lock.close()
+            tried.append(f"port {port} answers already")
+            log.write_text(tried[-1] + "\n")
+            continue
+        tried.append(f"started on {port}")
         command = [str(binary), str(port)]
-        log = logs / f"server-{attempt}.log"
         with log.open("wb") as output:
             process = await asyncio.create_subprocess_exec(
                 *command, stdout=output, stderr=asyncio.subprocess.STDOUT
@@ -280,9 +304,9 @@ async def answering(
     connect: Callable[[int], Awaitable[Client]],
 ) -> Client | None:
     """Wait until a client reaches the server on `port`, or the server says its port is taken
-    (None); fail if it exits first or `deadline` passes. What answered may be another process's
-    server on that port, reached before this one could print its line: so once a client got
-    through, the server is given `GRACE` since its spawn to say so, and the line is read again."""
+    (None); fail if it exits first or `deadline` passes. The port was probed before the start,
+    so what answers is this server, but for a holder that took the port in the moment between:
+    that one is caught on the way out, when the line is read again (`skipping_server`)."""
     began = time.monotonic()
     while time.monotonic() - began < deadline:
         if (code := process.returncode) is not None:
@@ -296,9 +320,6 @@ async def answering(
         except (OSError, RuntimeError, TimeoutError):
             await asyncio.sleep(0.05)  # nothing listens yet, or nothing answered within 2 s
             continue
-        await asyncio.sleep(max(0.0, GRACE - (time.monotonic() - began)))
-        if TAKEN in log.read_text(errors="replace"):
-            return None
         return client
     raise SkippingServerFailed(said(f"didn't answer within {deadline:g} s", command, log, SERVER))
 

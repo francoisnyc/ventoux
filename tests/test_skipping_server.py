@@ -20,7 +20,6 @@ import pytest
 import temporalio.service
 from dev_server import cli_folder, free_port
 from skipping_server import (
-    GRACE,
     PORTS,
     SkippingServerFailed,
     server_binary,
@@ -165,23 +164,28 @@ def test_the_tests_environment_is_the_harness_s() -> None:
 
 
 def test_two_harness_servers_given_one_port_never_share_it() -> None:
-    # The lock: the second start skips the first's port without starting anything on it, and the
-    # second's sleep moves its own clock, never the first's.
+    # The lock: the second start skips the first's port without starting anything on it, by the
+    # lock and not by the probe (the first answers there too), and the second's sleep moves its
+    # own clock, never the first's.
     real = asyncio.run(server_binary(cli_folder()))
     port = free_port()
 
-    async def go() -> tuple[timedelta, str, str]:
+    async def go() -> tuple[timedelta, str, str, list[str]]:
         async with skipping_server(real, ports=lambda: port) as first:
             given = iter([port, free_port()])
             async with skipping_server(real, ports=lambda: next(given)) as second:
                 before = await first.get_current_time()
                 await second.sleep(timedelta(days=1))
                 firsts_clock = await first.get_current_time() - before
-                return firsts_clock, target_of(first), target_of(second)
+                return firsts_clock, target_of(first), target_of(second), second.tried
 
-    firsts_clock, first, second = asyncio.run(go())
+    firsts_clock, first, second, tried = asyncio.run(go())
     assert first.endswith(f":{port}")
     assert not second.endswith(f":{port}")
+    assert tried == [
+        f"port {port} is held by another harness",
+        f"started on {second.rpartition(':')[2]}",
+    ]
     assert firsts_clock < timedelta(minutes=1)
 
 
@@ -205,43 +209,67 @@ def late_line(folder: Path, delay: float) -> Path:
     )
 
 
-def test_a_line_printed_within_the_grace_moves_the_harness_off_a_port_that_answered(
-    tmp_path: Path,
-) -> None:
-    # Another holder answers on the port before the loser prints: the harness reads the line
-    # again after the grace and leaves the port. The stand-in is a loser on every port, so after
+def test_a_port_something_answers_on_is_skipped_before_any_start(tmp_path: Path) -> None:
+    # Another holder answers on the port: the probe sees it, and no server is spawned there.
+    # The stand-in records each port it is spawned with; it is a loser on every port, so after
     # three the start fails saying so, never "after the test began": nothing ran on the other
     # server.
-    loser = late_line(tmp_path, GRACE / 3)
+    spawned = tmp_path / "spawned"
+    loser = stand_in(
+        tmp_path,
+        f"echo $1 >> {spawned}\necho 'Exception: java.io.IOException: Failed to bind to address "
+        "0.0.0.0/0.0.0.0:'$1\nexec sleep 60",
+    )
 
-    async def go() -> str:
-        async with await WorkflowEnvironment.start_time_skipping() as other:
-            given = iter([sdk_port(other), free_port(), free_port()])
+    async def go() -> tuple[int, str]:
+        async with await other_server() as other:
+            held = sdk_port(other)
+            given = iter([held, free_port(), free_port()])
             with pytest.raises(SkippingServerFailed) as failure:
                 async with skipping_server(loser, ports=lambda: next(given)):
                     pass  # never reached
-            return str(failure.value)
+            return held, str(failure.value)
 
-    assert asyncio.run(go()).startswith(
+    held, said = asyncio.run(go())
+    assert said.startswith(
         f"the test server found every port it was given taken, {PORTS} of them: {loser} "
     )
+    assert str(held) not in spawned.read_text().split()
+    assert len(spawned.read_text().split()) == PORTS - 1
 
 
-def test_a_line_printed_after_the_grace_fails_the_test_on_the_way_out(tmp_path: Path) -> None:
-    # The last guard: the body ran on another process's server, which the line says only
-    # afterwards; its results aren't its own, so the test fails, saying so.
-    loser = late_line(tmp_path, GRACE + 1)
+async def other_server() -> WorkflowEnvironment:
+    """The SDK's own test server, a holder the lock doesn't see; its binary from the CLI folder,
+    where CI caches it, never downloaded again."""
+    return await WorkflowEnvironment.start_time_skipping(download_dest_dir=str(cli_folder()))
+
+
+def test_a_line_printed_late_fails_the_test_on_the_way_out(tmp_path: Path) -> None:
+    # The last guard, for a holder that took the port in the moment between the probe and the
+    # bind: the body ran on another process's server, which the line says only afterwards; its
+    # results aren't its own, so the test fails, saying so. The other server starts after the
+    # probe here, to be that holder.
+    loser = late_line(tmp_path, 3)
+
+    async def taking(port: int) -> WorkflowEnvironment:
+        await asyncio.sleep(0.2)  # after the probe, before the loser's line
+        return await WorkflowEnvironment.start_time_skipping(
+            port=port, download_dest_dir=str(cli_folder())
+        )
 
     async def go() -> tuple[str, bool]:
-        async with await WorkflowEnvironment.start_time_skipping() as other:
-            port = sdk_port(other)
-            ran = False
+        port = free_port()
+        other = asyncio.create_task(taking(port))
+        ran = False
+        try:
             with pytest.raises(SkippingServerFailed) as failure:
                 async with skipping_server(loser, ports=lambda: port) as environment:
                     await environment.sleep(timedelta(seconds=1))  # on the other server
-                    await asyncio.sleep(GRACE + 1.5)  # a body long enough for the line to come
+                    await asyncio.sleep(3.5)  # a body long enough for the line to come
                     ran = True
-            return str(failure.value), ran
+        finally:
+            await (await other).shutdown()
+        return str(failure.value), ran
 
     said, ran = asyncio.run(go())
     assert ran
