@@ -1351,6 +1351,256 @@ see its test fail.
 - The JSON Schema (14e).
 - Running `ventoux release` in this repository's CI (choice 46).
 
+## 14e. The JSON Schema, published from Pydantic
+
+Status: choices drafted 2026-10-25, from `main` at `f51a298` (14d merged as #61). The warm-up
+answered and recorded (question 32 closed); choices 48 to 54 answered "all as recommended", the
+same day. D60 and the dated lines on D4 and D20 written before building. Built the same day:
+slices 0 to 5; see "Decided while building (14e)".
+
+### Warm-up: learning question 32, why `now` can't be written
+
+> Why can't `now` be written at all, and what would break on Temporal replay if it could? And the
+> follow-up: a claim must escalate if nobody has assessed it within 5 days. Without `now`, how is
+> that written, and where does the time come from?
+
+Open; the follow-up's *if* ("not yet assessed") has not yet come back in its place. It is 14e's
+question: "can't be written, not refused" is a sentence about the published JSON Schema, which
+this part makes real. Answer from memory first, the three parts of the follow-up: how the rule is
+written (*when*, *if*, *then*), where the time comes from, and why replay decides the same way.
+
+Answered 2026-10-25, after a reminder of what a rule's *when* is: "when 5 days after the claim
+opened, if not assessed, then escalate", then "a Temporal timer fires it, and replay reads
+TimerFired from history". All three parts, the *if* in its place for the first time. Closed.
+
+### What this part is for
+
+A model will draft definitions in layer 15, under this schema (brief, D20, "the published JSON
+Schema constrains what a model can write"), and front ends in another language read the format
+from it (brief, D4). Today the schema exists only as what `model_json_schema()` would print, and
+what it prints is not the JSON as written: a field's type sits under `declared`, the model's
+internal name; the name patterns are checked by validators the schema can't see, so any string is
+a name; a number comes out as "a number, or a string of digits", Pydantic's rendering of `Decimal`.
+Nobody validates against it, so it could say what the format doesn't.
+
+14e makes the models say the JSON as written, writes the two schemas with `ventoux schema`,
+commits them, checks them unchanged in CI as 14d checks the packages, and proves on a corpus that
+the schema and the parser agree: everything committed is accepted by both, and a fixed set of
+wrong shapes is refused by both. The schema checks shape. `ventoux check` stays the check.
+
+### What the code does today
+
+- `parse_case` is `CaseDefinition.model_validate`, `parse_plan` is `Plan.model_validate`
+  (`case/definition.py`, `core/plan.py`). Every part is a `Shape` with `extra="forbid"`, so the
+  generated schema already says `additionalProperties: false` everywhere.
+- An expression is the `Expression` type alias in `core/expressions/model.py`: a `Decimal`, a
+  text, a boolean, or one `Node` per operator, each `{"operator": arguments}` with `extra="forbid"`.
+  The schema already has it as one recursive `$defs/Expression`, and an object with an operator
+  D20 doesn't list matches no branch. But its number is Pydantic's `Decimal`: `number`, or a
+  string matching a digits pattern, which `parse_expression` refuses ("a number is written as a
+  JSON number").
+- `CaseField` gathers `type` and what goes with it under `declared` in a before-validator, so the
+  schema asks for a `declared` object the format never has.
+- Names (`Name`, `CaseName`, `RoleName`, `PlanReference`, `Duration`, …) are `Annotated[str,
+  matching(pattern, message)]`, an after-validator with a readable message: the schema sees `str`.
+  Pydantic writes a constrained dict key as `patternProperties` and nothing else, so a key the
+  pattern refuses is still accepted by the schema.
+- `whole_count` (a before-validator) refuses `"count": "2"`; the schema says `integer`, so the
+  schema refuses it too. `shorthand` turns a bare state name in `on` into one transition; the
+  schema says array only, so a plan the parser accepts the schema would refuse: the first place
+  the corpus test will catch.
+- No JSON Schema validator is installed. Choice 10 agreed `jsonschema` as a dev dependency, for
+  this part; it isn't added yet.
+
+### Choices for 14e
+
+48. **Where the schema lives, and how it names what it describes.** `schema/case.schema.json` and
+    `schema/plan.schema.json`, committed at the repository's root, next to `examples/`. Each is
+    JSON Schema draft 2020-12 (what Pydantic writes), with a `$id` naming the format by the engine
+    version that parses it, `https://ventoux.dev/schema/engine-2/case.schema.json`, and a `title`
+    and `description` in plain words. Why the engine version: it is the only version the format
+    has (brief, D51: a case says its engine version, and a change in what the engine decides bumps
+    it); a reader of a case's history knows which engine decided it, and so which schema its
+    definition met. A format change is a change in what is decided, so it bumps the engine version
+    too, and the `$id` moves with it. *Recommended.* Set aside: the package version (`0.0.0`,
+    says nothing); a commit hash in the file (every commit would change it, so `--unchanged` would
+    fail on every push); a format version of its own (a second number to keep in step with the
+    first, for no reader who needs it).
+
+49. **The models say the JSON as written, with Pydantic's own hooks, no second schema.** Three
+    fixes, each where the thing is declared, so the schema can never drift from the parser:
+    - **Names:** `matching()` returns one annotation that is both the validator and the schema
+      (`__get_pydantic_core_schema__` and `__get_pydantic_json_schema__`, Pydantic's documented
+      protocol): the readable message stays, and the schema gains `"pattern": "^…$"`. For dict
+      keys, Pydantic writes `patternProperties`; a small `GenerateJsonSchema` subclass (Pydantic's
+      extension point for how a schema is rendered) adds `additionalProperties: false` beside it,
+      so a key the pattern refuses is refused by the schema too.
+    - **A field's type:** `CaseField` gets a `json_schema_extra` that writes the schema the format
+      has, one object per declared type with the common keys (`display`, `source`, `visible_to`,
+      `sensitive`) beside `type` and its own (`system`, `outcomes`, `fields`), each
+      `additionalProperties: false`, built from the type models' own schemas, never typed by hand.
+    - **Numbers:** the `Decimal` in `Expression` (and wherever else a definition holds one) is
+      annotated `WithJsonSchema({"type": "number"})`: a number is written as a JSON number, and
+      read as a decimal (brief, D20). The schema can't say "fits decimal128"; see choice 50.
+    - `shorthand`'s bare state name gets `anyOf: [string, array]` the same way.
+    *Recommended.* Set aside: a hand-written schema (it would drift, and nobody would know);
+    restructuring `CaseField` to hold `type` flat (a wide change to the parser for a rendering).
+
+50. **What the schema can't say, and where it says so.** The schema checks shape: keys, types,
+    patterns, the operators. It can't say that a `var` names a declared field of the right type,
+    that a role is registered, that a plan reference exists, that a step can be reached, that an
+    expression nests at most 32 levels or that a number fits decimal128, nor the order of a
+    `sequence`. Said in three places, once each: the root schema's `description` ("shape only; a
+    definition is checked by `ventoux check`"); a "The JSON Schema" section in `docs/guides/cases.md`
+    with the list above; and D60. *Recommended.* Set aside: a `README` in `schema/` (a fourth
+    place to keep in step).
+
+51. **The corpus, and the test both ways.** `tests/test_schema.py` runs every committed definition
+    through both the schema (`jsonschema`'s `Draft202012Validator`) and the parser, and asserts
+    they agree on each: `examples/packages/*/case.json` and `plans/*.json`, the quickstart's
+    package, `examples/refund/*.json`, `examples/claim/claim.json`, `examples/checks/*.json`,
+    `examples/witnesses/*.json`, and the development catalog's own definitions. Then a fixed list
+    of wrong shapes, each refused by both: an operator D20 doesn't list (`{"now": []}`, the
+    curriculum's negative test), an unknown key at the root and inside a step, `"count": "2"`, a
+    field with no `type`, a name the pattern refuses (`"Approved Amount"`), a number written as a
+    string, a plan with `version: 0`. One assertion shape: `accepted_by_schema(doc) ==
+    accepted_by_parser(doc)`, so a schema that is looser *or* stricter than the parser fails the
+    test. `jsonschema` goes into the dev group (choice 10 agreed it; said again here because it is
+    this part that adds it), never into the runtime dependencies: the engine parses with Pydantic
+    and nothing else. *Recommended.* Set aside: a corpus of its own under `tests/` (the committed
+    examples are what people read; if the schema refuses one of them, that is the finding).
+
+52. **The command and CI.** `ventoux schema [--out DIR] [--unchanged]`, in `tooling/schema.py`:
+    writes the two files into `schema/` (or `--out`), byte for byte through 14b's `layout`, so
+    `json.dumps(indent=2)` and a newline at the end; `--unchanged` writes nothing and compares as
+    14d does, naming the file and the first line that differs, "Run `ventoux schema` and commit
+    what it writes." CI's `check` job gets one line after 14d's two, `uv run ventoux schema
+    --unchanged`, so a model changed without the schema regenerated fails CI. 13e's care:
+    `permissions: contents: read` unchanged, `pull_request` and `push` as now, the `changes` job
+    untouched; the test reads the workflow's lines as 14d's does. *Recommended.* Set aside:
+    generating the schema in CI only, never committing it (the brief says *published*: a reader
+    and a front end need a file at a known place, not a job to run).
+
+53. **Never a trust boundary, said where the schema is described.** The guide's section, D60 and
+    the root `description` say the same sentence: output that matches the schema is a draft, read
+    by `parse_case` and checked by `ventoux check` like any definition; the builder never runs on
+    model output (brief, D58). Recorded as **D60**, "The JSON Schema, published from Pydantic:
+    shape only, generated from the parser's models, committed and checked unchanged, never a
+    trust boundary", with dated lines on D4 (the schema is published) and D20 (the schema has
+    D20's operators and nothing else). *Recommended.*
+
+54. **The tutor's two optional points on #61, first.** A slice 0 before the schema: (a)
+    `--unchanged` compares bytes (`read_bytes()`), with `*.json text eol=lf` in a `.gitattributes`
+    so a Windows checkout commits what CI compares; the test rewrites `case.json` with `\r\n` and
+    expects "differs"; (b) a name in `by_hand` with no folder is refused, naming it ("by_hand lists
+    legacy, and packages/legacy/ doesn't exist: a misspelling, or a folder not committed"), with
+    its negative test. Both small, both in 14d's files, and this is the next PR that touches them.
+    *Recommended.* Set aside: a PR of their own (two more rounds for twenty lines), or leaving them
+    (D1 says byte for byte; a misspelled `by_hand` entry would hide a stale folder).
+
+### Slices, in order (14e)
+
+0. The two optional points of #61 (choice 54), each with its negative test first.
+1. `jsonschema` added to the dev group. The corpus test, both ways, on the schema as generated
+   today: it fails on the first definition (the field's `declared`), the right reason.
+2. The three fixes of choice 49, one test each driving them: a field written flat; a name the
+   pattern refuses, as a value and as a key; a number as a string; the bare state name.
+3. The refused shapes of choice 51, the unknown operator first.
+4. `ventoux schema`: writes the two files; `--unchanged` compares, writes nothing; `$id`, `title`,
+   `description` (choices 48, 50, 53).
+5. The CI line, with its test; the guide's section; D60 and the dated lines; the schemas
+   committed.
+
+### Decided while building (14e)
+
+- **The wrong shapes passed before the corpus did.** With today's schema every case was refused
+  (the `declared` key), so the refused-shape tests passed for the wrong reason until the corpus
+  test passed too: a reminder that a negative test proves something only beside its positive.
+- **Two shapes a model holds otherwise than the JSON** can't be said with `WithJsonSchema` where
+  they are declared: a field's `declared` and a plan's `sources` are gathered by before-validators
+  from keys the schema needs flat. Each model carries an `x-written` mark in its config, and
+  `ventoux schema`'s generator (`Published`, a `GenerateJsonSchema` subclass, Pydantic's extension
+  point) renders the mark from the type models' own schemas in `$defs`: no shape is typed by hand.
+  The mark is data on the model, so `core` and `case` import nothing from `tooling`.
+- **Pydantic writes a constrained dict key as `patternProperties` and nothing else,** so a key the
+  pattern refuses was accepted by the schema; the generator closes such a dict
+  (`additionalProperties: false`).
+- **A declared type's `type` is required in the schema and now everywhere in the parser.** The
+  type models keep their default for code that builds them (`NumberType()`), and say `type` is
+  required in their schema. `ListType.fields` was a plain union, which read `{}` as a number; it
+  is a discriminated union now, as `DeclaredType` is, so a type without `type` is refused wherever
+  one is written.
+- **`"1"` as a version was read as 1.** Pydantic's lax mode coerced it; the schema says `integer`.
+  `version` and `count` share one annotation, `Whole`, that is both the check (a whole number as
+  written, D47's rule) and the schema (`integer`, `minimum`), as `Matching` is for names.
+- **The bare state name in `on`** is said as `anyOf` string or list by the same kind of
+  annotation, `Shorthand`, so the parser's reading and the schema's stay one declaration.
+- **`json.dumps`, not the builder's `layout`,** writes a schema: a schema holds `null` (a field's
+  default), which a definition never does and `layout` refuses. Same layout: two spaces, a final
+  newline.
+- **The description reads oddly once:** "A case's `case.json`. A case: its case file's fields…",
+  the model's docstring after the file's name. Kept: the docstring is the model's, written once.
+- **Slice 0, the tutor's two points:** `splitlines()` eats a `\r`, so the comparison splits on
+  `\n` and names the line ending; `.gitattributes` keeps a checkout from committing one.
+- **From the tutor review of #62.** Four readings the parser now refuses, that `main` read, are
+  recorded in the brief as a dated line on D60 (which, why no engine version: refusing a reading
+  changes nothing a readable definition decides; what a case holding one does: waits for code,
+  `StartUnread` on a continued run; why none is expected) and a pointer on D51. Booleans were
+  still lax (`"no"`, `"on"`, `1.0` read as a boolean) while the schema refused them: the four
+  boolean fields are `StrictBool` now, each with a refused shape that is the lax reading of its
+  default, so nothing else refuses it (the first draft used `"no"`, which a task step refuses for
+  another reason: a negative test must fail for its own reason). The list-field fix and
+  `type_written` had no test of their own: a list's field with no `type` and a reference field
+  with no `type` join the refused shapes, and each mutation fails them now. `schema --unchanged`
+  is tested on a missing file alone and on line endings alone.
+- **What a stored record holding a refused reading does, checked rather than guessed.** The first
+  dated line said "a release would be refused on activation"; the tutor ran it: activation reads
+  the record's contracts, never its package, so it goes through; the next `release` of that
+  package is refused ("refund 1's package can't be read again"), and the package is stuck until
+  code that reads the record is deployed; a case opening on it is refused at the opening; a first
+  run replayed by the new code fails with Temporal's non-determinism error, not `StartUnread`.
+  D60's line says these now, and a test reaches the "can't be read again" branch with a record as
+  the earlier tool kept it. The D51 pointer moved to its own "Amended by D60" bullet, as D51's
+  later changes are.
+- **Code ahead of its tests, said plainly:** the refused-shape list (slice 3) was written beside
+  the corpus test (slice 1) before the fixes, since both drive the same code; the generator's two
+  renderings came together. Every guard was broken once: thirteen mutations, each failing its
+  test.
+
+### Promises (14e)
+
+Each claim this part makes about behaviour, and the test that would fail if it weren't true. `S`
+is `tests/test_schema.py` (new), `U` is `tests/test_unchanged.py`, `R` is `tests/test_releases.py`. Checked
+against the tests,
+2026-10-25: every test named here exists, every test in `S` and every test 14e added to `U` is
+named here, and every guard was broken once to see its test fail (the review's additions too:
+the lax booleans, the list field's discriminator and `type_written`, each failing its tests).
+
+| Promise | Test |
+|---|---|
+| The corpus holds every committed definition, at least twenty cases and one plan | S `test_the_corpus_is_not_empty` |
+| Every committed case is accepted by the schema as by the parser: a field's type flat, names, numbers, every key | S `test_every_committed_case_is_accepted_by_the_schema_as_by_the_parser` |
+| Every committed plan is accepted by both: the bare state name, a field's source on the field | S `test_every_committed_plan_is_accepted_by_the_schema_as_by_the_parser` |
+| A wrong case is refused by both: an operator D20 doesn't list, an unknown key, a count or a number as a string, a field with no type or an unknown one, a list's or a reference field with no type, a name the pattern refuses as a value or a key, a step of no kind, no steps, a boolean written as a word or a number | S `test_a_wrong_case_is_refused_by_the_schema_as_by_the_parser` |
+| A boolean written as a word is refused by the parser at its path | S `test_a_boolean_written_as_a_word_is_refused_at_its_path` |
+| A wrong plan is refused by both: version 0, `"1"`, `1.0` or `true`, an unknown key, a `sources` key, a state of no kind, a state name the pattern refuses, an operator D20 doesn't list | S `test_a_wrong_plan_is_refused_by_the_schema_as_by_the_parser` |
+| `ventoux schema` writes both files, draft 2020-12, `$id` by the engine version, title and description first, the description saying shape only and never a trust boundary; `--out` names the folder | S `test_ventoux_schema_writes_both_files_naming_the_format_they_describe` |
+| `--unchanged` fails on a changed schema naming the file and first line, on a missing one, and writes nothing | S `test_unchanged_fails_on_a_changed_or_missing_schema_naming_the_line_and_writes_nothing` |
+| `--unchanged` fails on a missing schema alone, the other said unchanged, writing nothing | S `test_unchanged_fails_on_a_missing_schema_alone` |
+| `--unchanged` fails on other line endings alone, naming the line ending, writing nothing | S `test_unchanged_fails_on_other_line_endings_alone` |
+| The committed schemas are what the models say | S `test_the_committed_schemas_are_what_the_models_say` |
+| CI's `check` job runs `ventoux schema --unchanged`, read-only, the `changes` job untouched | S `test_ci_checks_the_committed_schemas_unchanged` |
+| A record whose package holds a reading now refused refuses the next release of that package, naming it | R `test_a_record_whose_package_no_longer_reads_refuses_the_next_release` |
+| `check --unchanged` compares bytes: other line endings differ, named; `.gitattributes` forces LF on JSON | U `test_a_committed_file_with_other_line_endings_differs` |
+| A `by_hand` name with no folder is refused, naming it, writing or `--unchanged` | U `test_a_by_hand_name_with_no_folder_is_refused` |
+
+### Not in 14e
+
+- Constraining a model's output with the schema: layer 15.
+- A conformance suite for another implementation (brief, D4): the corpus test is its seed, not it.
+- A schema for stories, releases, records or the catalog: not definitions, and nobody reads them
+  from another language yet.
+
 ## Not in layer 14
 
 - Turning a JSON definition into builder code. A model's kept draft (D1) is written as builder

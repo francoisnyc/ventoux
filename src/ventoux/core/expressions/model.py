@@ -1,9 +1,9 @@
 """What an expression is: the operators, numbers and values, the field types, the errors."""
 
 from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow
-from typing import ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
 
 # The fixed list of operators. Adding one is a design decision recorded in the brief, never just a
 # code change (brief, D20).
@@ -61,9 +61,12 @@ def fits_decimal128(number: Decimal) -> bool:
 
 # What an expression gives, and what it is: a literal, a field, or one operator with its arguments.
 # Recursive, so the models below can hold expressions; a `type` alias is resolved when first used.
-type Value = Decimal | str | bool
+# A number is written as a JSON number and read as a decimal (brief, D20): the published schema
+# says `number`, not Pydantic's rendering of `Decimal` (a number or a string of digits).
+type Number = Annotated[Decimal, WithJsonSchema({"type": "number"})]
+type Value = Number | str | bool
 type Expression = (
-    Decimal
+    Number
     | str
     | bool
     | Var
@@ -283,43 +286,57 @@ COMPARISONS: dict[str, type[Eq] | type[Ne] | type[Gt] | type[Ge] | type[Lt] | ty
 type FieldType = NumberType | StringType | BooleanType | OutcomeType | ReferenceType | ListType
 
 
-class NumberType(Node):
+def type_written(schema: dict[str, Any]) -> None:
+    """A declared type is always written with its `type`, so the published schema requires it, as
+    the parser does; the default serves code that builds a type (`NumberType()`), never JSON."""
+    schema["required"] = sorted({*schema.get("required", ()), "type"})
+
+
+class Declared(Node):
+    """A field's declared type, in the shape definitions use: `{"type": "number"}`."""
+
+    # Pydantic: `json_schema_extra` is called on the model's schema once it is generated.
+    model_config = ConfigDict(extra="forbid", frozen=True, json_schema_extra=type_written)
+
+
+class NumberType(Declared):
     """A number: one type, exact decimal (brief, D20)."""
 
     type: Literal["number"] = "number"
 
 
-class StringType(Node):
+class StringType(Declared):
     """A text."""
 
     type: Literal["string"] = "string"
 
 
-class BooleanType(Node):
+class BooleanType(Declared):
     """`true` or `false`."""
 
     type: Literal["boolean"] = "boolean"
 
 
-class OutcomeType(Node):
+class OutcomeType(Declared):
     """A task's answer: a closed list of names (brief, D9)."""
 
     type: Literal["outcome"] = "outcome"
     outcomes: tuple[str, ...] = Field(min_length=1)
 
 
-class ReferenceType(Node):
+class ReferenceType(Declared):
     """The ID of a record kept in another system, typed by that system's name (brief, D16)."""
 
     type: Literal["reference"] = "reference"
     system: str
 
 
-class ListType(Node):
+class ListType(Declared):
     """A list of records, each with the declared fields; read with `count`, `sum` and `item`."""
 
     type: Literal["list"] = "list"
-    fields: dict[str, FieldType]
+    # Pydantic: a discriminated union reads `type` to pick the model, and requires it.
+    fields: dict[str, Annotated[FieldType, Field(discriminator="type")]]
 
 
 class ExpressionInvalid(Exception):

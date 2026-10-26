@@ -36,7 +36,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 29 | Layer 1: why `@1` and not `@1.0` | closed |
 | 30 | Spike: guarantees outside the standard | closed |
 | 31 | Pydantic: when checks run | closed |
-| 32 | Layer 2: why `now` can't be written | open |
+| 32 | Layer 2: why `now` can't be written | closed |
 | 33 | Layer 3: why plans can be checked and code can't | open |
 | 34 | Layer 5: why check input policies twice | closed |
 | 35 | Layer 6: what lives in workflow history | closed |
@@ -974,7 +974,13 @@ and record the key points. A question is closed once you can explain the answer 
     is **not yet assessed**, read on the case file at the firing (D38), over what the assessment
     gives. Without it, every claim escalates on day 5, even one assessed on day 2. "When a claim
     is open" needs no condition: any close ends every timer (D44).
-- Status: open, until the *if* (not yet assessed) comes back in its place.
+- Retrieval (layer 14e warm-up, 2026-10-25): after a reminder of what a rule's *when* is (the
+  moment it fires, not what must be true), "when 5 days after the claim opened, if not assessed,
+  then escalate"; then "a Temporal timer fires it, and replay reads TimerFired from history". The
+  three parts in their places, the *if* for the first time, and the timer and the replay from
+  memory. One sharpening, not asked back: "not assessed" is read over what the assessment gives
+  (its outcome), since a milestone is not a value a condition reads (brief, D35).
+- Status: closed.
 
 
 ## 33. Layer 3: why plans can be checked and code can't

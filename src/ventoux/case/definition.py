@@ -11,10 +11,10 @@ from typing import Annotated, Any, Literal
 from pydantic import (
     AfterValidator,
     BaseModel,
-    BeforeValidator,
     ConfigDict,
     Discriminator,
     Field,
+    StrictBool,
     Tag,
     ValidationError,
     model_validator,
@@ -24,6 +24,7 @@ from ventoux.case.freshness import seconds_in
 from ventoux.core.before_activity import given_as_reference
 from ventoux.core.expressions import FieldType, ListType, ReferenceType
 from ventoux.core.plan import (
+    WRITTEN_FLAT,
     ActivityReference,
     DeclaredType,
     Display,
@@ -31,6 +32,7 @@ from ventoux.core.plan import (
     PlanExpression,
     RoleName,
     Source,
+    Whole,
     matching,
     some_roles,
 )
@@ -76,13 +78,18 @@ class Shape(BaseModel):
 class CaseField(Shape):
     """A field of the case file: its type, what people read, and a declared untrusted source."""
 
+    # The published schema says the type flat, as written (brief, D60). `ventoux schema` reads this.
+    model_config = ConfigDict(extra="forbid", frozen=True, json_schema_extra=WRITTEN_FLAT)
+
     declared: DeclaredType  # its type, written beside `display` (`"type": "number"`)
     display: Display  # what people read
     source: Source | None = None  # `untrusted:<label>`, never trusted (brief, D12)
     # Who may see it, narrowing the default: anyone holding a role the case names (brief, D30).
     visible_to: Roles | None = None
     # Personal data a decision needs: encrypted with the case's key, never written out (brief, D31).
-    sensitive: bool = False
+    # Pydantic: `StrictBool` reads `true` and `false` only, never "no", "on", 1 or 1.0, as the
+    # published schema says (brief, D60).
+    sensitive: StrictBool = False
 
     # Pydantic: a validator with `mode="before"` runs first, on the raw data (here a dict).
     @model_validator(mode="before")
@@ -128,6 +135,8 @@ class SentBy(Shape):
 
 class PayloadField(Shape):
     """One value an event carries: its type, what people read, and a declared untrusted source."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, json_schema_extra=WRITTEN_FLAT)
 
     declared: DeclaredType  # its type, written beside `display` (`"type": "string"`)
     display: Display  # what people read
@@ -188,22 +197,16 @@ class ApprovalDisplay(Shape):
     reason: str = Field(min_length=1)
 
 
-def whole_count(value: object) -> object:
-    """A count of people is a whole number of at least 1, written as one: `"2"`, `2.0` and `true`
-    are refused, never read as a number (brief, D47)."""
-    if type(value) is not int or value < 1:
-        raise ValueError("how many people must approve: a whole number of at least 1, such as 2")
-    return value
-
-
 class Approval(Shape):
     """`count` different people with one of `roles` approve running the step, when `when` holds
     (brief, D11) (brief, D47)."""
 
     when: PlanExpression | None = None  # None: every run needs it
     roles: Roles  # who may approve; every approver holds one of them
-    # Pydantic: a `BeforeValidator` sees the value as written, before Pydantic turns `"2"` into 2.
-    count: Annotated[int, BeforeValidator(whole_count)] = 1  # how many people must approve
+    # A whole number of at least 1, as written: `"2"` is refused, never read as 2 (brief, D47).
+    count: Annotated[
+        int, Whole(1, "how many people must approve: a whole number of at least 1, such as 2")
+    ] = 1  # how many people must approve
     display: ApprovalDisplay
 
 
@@ -227,9 +230,9 @@ class Step(Shape):
     display: Display
     requires: tuple[Name, ...] = ()  # milestones reached, or steps whose latest run is done
     when: PlanExpression | None = None  # read once `requires` are met
-    automatic: bool = True  # starts by itself once admitted, at most once
+    automatic: StrictBool = True  # starts by itself once admitted, at most once
     proposed_by: tuple[RoleName, ...] = ()  # who may propose it
-    repeatable: bool = False  # may run again, when proposed
+    repeatable: StrictBool = False  # may run again, when proposed
     reaches: tuple[Name, ...] = ()  # milestones reached when it completes
 
 
@@ -572,7 +575,7 @@ class CaseDefinition(Shape):
     ] = {}  # what may come from outside, and who sends it (brief, D41)
     close_reasons: dict[Name, CloseReason] = {}  # how a person may close it, and who (brief, D10)
     closes_when: tuple[Name, ...] = ()  # milestones that close it once all are reached
-    stays_open: bool = False  # True: it never closes by itself; a person closes it
+    stays_open: StrictBool = False  # True: it never closes by itself; a person closes it
     # Whether a request may forget it (brief, D32): `allowed` open or closed; `while_open`, refused
     # once it is closed (books and records); `never`, always refused.
     forgetting: Literal["allowed", "while_open", "never"] = "allowed"

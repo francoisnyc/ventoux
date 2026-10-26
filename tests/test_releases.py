@@ -609,3 +609,18 @@ def test_the_guide_says_what_a_revert_with_new_wording_gets() -> None:
         "same behaviour as refund 1, other wording: rewording an older release reaches its open "
         "cases; bring back its wording"
     )
+
+
+def test_a_record_whose_package_no_longer_reads_refuses_the_next_release(tmp_path: Path) -> None:
+    # A record the earlier tool kept with a reading 14e refuses, `"automatic": "yes"`: records
+    # are kept for good, so the package is stuck until code that reads it is deployed (brief,
+    # D60's dated line, from the tutor review of #62).
+    def as_the_earlier_tool_kept_it(data: dict[str, Any]) -> None:
+        data["written"]["case"] = data["written"]["case"].replace(
+            '"kind": "task"', '"kind": "task",\n      "automatic": "yes"', 1
+        )
+
+    folder = kept_as(tmp_path, as_the_earlier_tool_kept_it)
+    said = refusal_of(tmp_path, folder)
+    assert said.startswith("refund 1's package can't be read again: ")
+    assert "steps.review.automatic: Input should be a valid boolean" in said

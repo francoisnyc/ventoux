@@ -1,0 +1,2483 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ventoux.dev/schema/engine-2/case.schema.json",
+  "title": "Ventoux case definition",
+  "description": "A case's `case.json`. A case: its case file's fields, milestones, steps, and a `sequence` shorthand (brief, D2). Shape only: keys, types, name patterns and the expression operators. Whether a field read is declared, a role registered, a plan reference known or a step reachable is checked by `ventoux check`, never by this schema. A model's output may be constrained by it (layer 15) and is still a draft: read by the parser, checked by `ventoux check`, reviewed in a pull request; the builder never runs on model output (brief, D58).",
+  "$defs": {
+    "ActivityStep": {
+      "additionalProperties": false,
+      "description": "One call to an activity from the catalog.",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "requires": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "automatic": {
+          "default": true,
+          "title": "Automatic",
+          "type": "boolean"
+        },
+        "proposed_by": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Proposed By",
+          "type": "array"
+        },
+        "repeatable": {
+          "default": false,
+          "title": "Repeatable",
+          "type": "boolean"
+        },
+        "reaches": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Reaches",
+          "type": "array"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Expression"
+          },
+          "default": {},
+          "title": "Inputs",
+          "type": "object"
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Approval"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_age": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Max Age",
+          "type": "object"
+        },
+        "kind": {
+          "const": "activity",
+          "title": "Kind",
+          "type": "string"
+        },
+        "activity": {
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*@[1-9][0-9]*$",
+          "title": "Activity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "display",
+        "kind",
+        "activity"
+      ],
+      "title": "ActivityStep",
+      "type": "object"
+    },
+    "Add": {
+      "additionalProperties": false,
+      "description": "`{\"+\": [a, b, …]}`: the sum of the arguments.",
+      "properties": {
+        "+": {
+          "items": {
+            "$ref": "#/$defs/Expression"
+          },
+          "minItems": 2,
+          "title": "+",
+          "type": "array"
+        }
+      },
+      "required": [
+        "+"
+      ],
+      "title": "Add",
+      "type": "object"
+    },
+    "After": {
+      "additionalProperties": false,
+      "description": "The moment a timer fires: time passing after another moment, once (brief, D44).",
+      "properties": {
+        "after": {
+          "title": "After",
+          "type": "string"
+        },
+        "since": {
+          "$ref": "#/$defs/Moment"
+        }
+      },
+      "required": [
+        "after",
+        "since"
+      ],
+      "title": "After",
+      "type": "object"
+    },
+    "And": {
+      "additionalProperties": false,
+      "description": "`{\"and\": [a, b, …]}`: every argument is true.",
+      "properties": {
+        "and": {
+          "items": {
+            "$ref": "#/$defs/Expression"
+          },
+          "minItems": 2,
+          "title": "And",
+          "type": "array"
+        }
+      },
+      "required": [
+        "and"
+      ],
+      "title": "And",
+      "type": "object"
+    },
+    "AnsweredTask": {
+      "additionalProperties": false,
+      "description": "The moment a run of a task is answered, whatever the outcome: each answer (brief, D39).",
+      "properties": {
+        "answered": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Answered",
+          "type": "string"
+        }
+      },
+      "required": [
+        "answered"
+      ],
+      "title": "AnsweredTask",
+      "type": "object"
+    },
+    "AnyRule": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Rule"
+        },
+        {
+          "$ref": "#/$defs/SlaRule"
+        },
+        {
+          "$ref": "#/$defs/ReminderRule"
+        }
+      ]
+    },
+    "AnyStep": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TaskStep"
+        },
+        {
+          "$ref": "#/$defs/ActivityStep"
+        },
+        {
+          "$ref": "#/$defs/PlanStep"
+        },
+        {
+          "$ref": "#/$defs/WorkflowStep"
+        },
+        {
+          "$ref": "#/$defs/WaitStep"
+        }
+      ]
+    },
+    "Approval": {
+      "additionalProperties": false,
+      "description": "`count` different people with one of `roles` approve running the step, when `when` holds\n(brief, D11) (brief, D47).",
+      "properties": {
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "roles": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        },
+        "count": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "display": {
+          "$ref": "#/$defs/ApprovalDisplay"
+        }
+      },
+      "required": [
+        "roles",
+        "display"
+      ],
+      "title": "Approval",
+      "type": "object"
+    },
+    "ApprovalDisplay": {
+      "additionalProperties": false,
+      "description": "What an approver reads: why the approval is asked.",
+      "properties": {
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "ApprovalDisplay",
+      "type": "object"
+    },
+    "BooleanType": {
+      "additionalProperties": false,
+      "description": "`true` or `false`.",
+      "properties": {
+        "type": {
+          "const": "boolean",
+          "default": "boolean",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "BooleanType",
+      "type": "object"
+    },
+    "CaseField": {
+      "title": "CaseField",
+      "description": "A field of the case file: its type, what people read, and a declared untrusted source.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A number: one type, exact decimal (brief, D20).",
+          "properties": {
+            "type": {
+              "const": "number",
+              "default": "number",
+              "title": "Type",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "visible_to": {
+              "anyOf": [
+                {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible To"
+            },
+            "sensitive": {
+              "default": false,
+              "title": "Sensitive",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "display",
+            "type"
+          ],
+          "title": "NumberType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A text.",
+          "properties": {
+            "type": {
+              "const": "string",
+              "default": "string",
+              "title": "Type",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "visible_to": {
+              "anyOf": [
+                {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible To"
+            },
+            "sensitive": {
+              "default": false,
+              "title": "Sensitive",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "display",
+            "type"
+          ],
+          "title": "StringType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`true` or `false`.",
+          "properties": {
+            "type": {
+              "const": "boolean",
+              "default": "boolean",
+              "title": "Type",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "visible_to": {
+              "anyOf": [
+                {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible To"
+            },
+            "sensitive": {
+              "default": false,
+              "title": "Sensitive",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "display",
+            "type"
+          ],
+          "title": "BooleanType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A task's answer: a closed list of names (brief, D9).",
+          "properties": {
+            "type": {
+              "const": "outcome",
+              "default": "outcome",
+              "title": "Type",
+              "type": "string"
+            },
+            "outcomes": {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Outcomes",
+              "type": "array"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "visible_to": {
+              "anyOf": [
+                {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible To"
+            },
+            "sensitive": {
+              "default": false,
+              "title": "Sensitive",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "display",
+            "outcomes",
+            "type"
+          ],
+          "title": "OutcomeType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The ID of a record kept in another system, typed by that system's name (brief, D16).",
+          "properties": {
+            "type": {
+              "const": "reference",
+              "default": "reference",
+              "title": "Type",
+              "type": "string"
+            },
+            "system": {
+              "title": "System",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "visible_to": {
+              "anyOf": [
+                {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible To"
+            },
+            "sensitive": {
+              "default": false,
+              "title": "Sensitive",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "display",
+            "system",
+            "type"
+          ],
+          "title": "ReferenceType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A list of records, each with the declared fields; read with `count`, `sum` and `item`.",
+          "properties": {
+            "type": {
+              "const": "list",
+              "default": "list",
+              "title": "Type",
+              "type": "string"
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/FieldType"
+              },
+              "title": "Fields",
+              "type": "object"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "visible_to": {
+              "anyOf": [
+                {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible To"
+            },
+            "sensitive": {
+              "default": false,
+              "title": "Sensitive",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "display",
+            "fields",
+            "type"
+          ],
+          "title": "ListType",
+          "type": "object"
+        }
+      ]
+    },
+    "Cat": {
+      "additionalProperties": false,
+      "description": "`{\"cat\": [a, b, …]}`: the texts joined.",
+      "properties": {
+        "cat": {
+          "items": {
+            "$ref": "#/$defs/Expression"
+          },
+          "minItems": 1,
+          "title": "Cat",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cat"
+      ],
+      "title": "Cat",
+      "type": "object"
+    },
+    "CloseReason": {
+      "additionalProperties": false,
+      "description": "A declared reason a person may close the case with, and who may (brief, D10).",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "roles": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "display",
+        "roles"
+      ],
+      "title": "CloseReason",
+      "type": "object"
+    },
+    "Count": {
+      "additionalProperties": false,
+      "description": "`{\"count\": {\"over\": list, \"where\": condition}}`: how many elements match.",
+      "properties": {
+        "count": {
+          "$ref": "#/$defs/CountOver"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "title": "Count",
+      "type": "object"
+    },
+    "CountOver": {
+      "additionalProperties": false,
+      "description": "What `count` reads: a list field, and which of its elements to count.",
+      "properties": {
+        "over": {
+          "$ref": "#/$defs/Var"
+        },
+        "where": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "over"
+      ],
+      "title": "CountOver",
+      "type": "object"
+    },
+    "DeclaredEvent": {
+      "additionalProperties": false,
+      "description": "An event from outside the case: who may send it, and what it carries (brief, D41).",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "sent_by": {
+          "$ref": "#/$defs/SentBy"
+        },
+        "payload": {
+          "additionalProperties": false,
+          "default": {},
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "$ref": "#/$defs/PayloadField"
+            }
+          },
+          "title": "Payload",
+          "type": "object"
+        }
+      },
+      "required": [
+        "display",
+        "sent_by"
+      ],
+      "title": "DeclaredEvent",
+      "type": "object"
+    },
+    "Display": {
+      "additionalProperties": false,
+      "description": "What people read: presentation, outside the plan's behaviour (brief, D5).",
+      "properties": {
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "title": "Display",
+      "type": "object"
+    },
+    "Div": {
+      "additionalProperties": false,
+      "description": "`{\"/\": [a, b]}`: a divided by b.",
+      "properties": {
+        "/": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": "/",
+          "type": "array"
+        }
+      },
+      "required": [
+        "/"
+      ],
+      "title": "Div",
+      "type": "object"
+    },
+    "Eq": {
+      "additionalProperties": false,
+      "description": "`{\"==\": [a, b]}`: a equals b.",
+      "properties": {
+        "==": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": "==",
+          "type": "array"
+        }
+      },
+      "required": [
+        "=="
+      ],
+      "title": "Eq",
+      "type": "object"
+    },
+    "EventArrived": {
+      "additionalProperties": false,
+      "description": "The moment an event from outside arrives: each arrival (brief, D41).",
+      "properties": {
+        "event": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Event",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event"
+      ],
+      "title": "EventArrived",
+      "type": "object"
+    },
+    "Exists": {
+      "additionalProperties": false,
+      "description": "`{\"exists\": \"approved_amount\"}`: whether the field has a value.",
+      "properties": {
+        "exists": {
+          "title": "Exists",
+          "type": "string"
+        }
+      },
+      "required": [
+        "exists"
+      ],
+      "title": "Exists",
+      "type": "object"
+    },
+    "Expression": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/Var"
+        },
+        {
+          "$ref": "#/$defs/Eq"
+        },
+        {
+          "$ref": "#/$defs/Ne"
+        },
+        {
+          "$ref": "#/$defs/Gt"
+        },
+        {
+          "$ref": "#/$defs/Ge"
+        },
+        {
+          "$ref": "#/$defs/Lt"
+        },
+        {
+          "$ref": "#/$defs/Le"
+        },
+        {
+          "$ref": "#/$defs/And"
+        },
+        {
+          "$ref": "#/$defs/Or"
+        },
+        {
+          "$ref": "#/$defs/Not"
+        },
+        {
+          "$ref": "#/$defs/Add"
+        },
+        {
+          "$ref": "#/$defs/Sub"
+        },
+        {
+          "$ref": "#/$defs/Mul"
+        },
+        {
+          "$ref": "#/$defs/Div"
+        },
+        {
+          "$ref": "#/$defs/If"
+        },
+        {
+          "$ref": "#/$defs/In"
+        },
+        {
+          "$ref": "#/$defs/Cat"
+        },
+        {
+          "$ref": "#/$defs/String"
+        },
+        {
+          "$ref": "#/$defs/Exists"
+        },
+        {
+          "$ref": "#/$defs/Item"
+        },
+        {
+          "$ref": "#/$defs/Count"
+        },
+        {
+          "$ref": "#/$defs/Sum"
+        }
+      ]
+    },
+    "FieldType": {
+      "discriminator": {
+        "mapping": {
+          "boolean": "#/$defs/BooleanType",
+          "list": "#/$defs/ListType",
+          "number": "#/$defs/NumberType",
+          "outcome": "#/$defs/OutcomeType",
+          "reference": "#/$defs/ReferenceType",
+          "string": "#/$defs/StringType"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NumberType"
+        },
+        {
+          "$ref": "#/$defs/StringType"
+        },
+        {
+          "$ref": "#/$defs/BooleanType"
+        },
+        {
+          "$ref": "#/$defs/OutcomeType"
+        },
+        {
+          "$ref": "#/$defs/ReferenceType"
+        },
+        {
+          "$ref": "#/$defs/ListType"
+        }
+      ]
+    },
+    "Ge": {
+      "additionalProperties": false,
+      "description": "`{\">=\": [a, b]}`: a is greater than or equal to b.",
+      "properties": {
+        ">=": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": ">=",
+          "type": "array"
+        }
+      },
+      "required": [
+        ">="
+      ],
+      "title": "Ge",
+      "type": "object"
+    },
+    "Gt": {
+      "additionalProperties": false,
+      "description": "`{\">\": [a, b]}`: a is greater than b.",
+      "properties": {
+        ">": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": ">",
+          "type": "array"
+        }
+      },
+      "required": [
+        ">"
+      ],
+      "title": "Gt",
+      "type": "object"
+    },
+    "If": {
+      "additionalProperties": false,
+      "description": "`{\"if\": [condition, then, else]}`.",
+      "properties": {
+        "if": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": "If",
+          "type": "array"
+        }
+      },
+      "required": [
+        "if"
+      ],
+      "title": "If",
+      "type": "object"
+    },
+    "In": {
+      "additionalProperties": false,
+      "description": "`{\"in\": [a, [x, y, …]]}`: a is one of the listed values.",
+      "properties": {
+        "in": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/Value"
+              },
+              "type": "array"
+            }
+          ],
+          "title": "In",
+          "type": "array"
+        }
+      },
+      "required": [
+        "in"
+      ],
+      "title": "In",
+      "type": "object"
+    },
+    "Item": {
+      "additionalProperties": false,
+      "description": "`{\"item\": \"amount\"}`: a field of the current element, inside `count` and `sum`.",
+      "properties": {
+        "item": {
+          "title": "Item",
+          "type": "string"
+        }
+      },
+      "required": [
+        "item"
+      ],
+      "title": "Item",
+      "type": "object"
+    },
+    "Le": {
+      "additionalProperties": false,
+      "description": "`{\"<=\": [a, b]}`: a is less than or equal to b.",
+      "properties": {
+        "<=": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": "<=",
+          "type": "array"
+        }
+      },
+      "required": [
+        "<="
+      ],
+      "title": "Le",
+      "type": "object"
+    },
+    "ListType": {
+      "additionalProperties": false,
+      "description": "A list of records, each with the declared fields; read with `count`, `sum` and `item`.",
+      "properties": {
+        "type": {
+          "const": "list",
+          "default": "list",
+          "title": "Type",
+          "type": "string"
+        },
+        "fields": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FieldType"
+          },
+          "title": "Fields",
+          "type": "object"
+        }
+      },
+      "required": [
+        "fields",
+        "type"
+      ],
+      "title": "ListType",
+      "type": "object"
+    },
+    "Lt": {
+      "additionalProperties": false,
+      "description": "`{\"<\": [a, b]}`: a is less than b.",
+      "properties": {
+        "<": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": "<",
+          "type": "array"
+        }
+      },
+      "required": [
+        "<"
+      ],
+      "title": "Lt",
+      "type": "object"
+    },
+    "Milestone": {
+      "additionalProperties": false,
+      "description": "A fact the case has reached, such as `paid`: recorded, never undone.",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        }
+      },
+      "required": [
+        "display"
+      ],
+      "title": "Milestone",
+      "type": "object"
+    },
+    "Moment": {
+      "oneOf": [
+        {
+          "const": "opened",
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/Started"
+        },
+        {
+          "$ref": "#/$defs/Reached"
+        },
+        {
+          "$ref": "#/$defs/AnsweredTask"
+        },
+        {
+          "$ref": "#/$defs/EventArrived"
+        }
+      ]
+    },
+    "Mul": {
+      "additionalProperties": false,
+      "description": "`{\"*\": [a, b, …]}`: the product of the arguments.",
+      "properties": {
+        "*": {
+          "items": {
+            "$ref": "#/$defs/Expression"
+          },
+          "minItems": 2,
+          "title": "*",
+          "type": "array"
+        }
+      },
+      "required": [
+        "*"
+      ],
+      "title": "Mul",
+      "type": "object"
+    },
+    "Ne": {
+      "additionalProperties": false,
+      "description": "`{\"!=\": [a, b]}`: a differs from b.",
+      "properties": {
+        "!=": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": "!=",
+          "type": "array"
+        }
+      },
+      "required": [
+        "!="
+      ],
+      "title": "Ne",
+      "type": "object"
+    },
+    "Not": {
+      "additionalProperties": false,
+      "description": "`{\"!\": [a]}`: a is false.",
+      "properties": {
+        "!": {
+          "maxItems": 1,
+          "minItems": 1,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": "!",
+          "type": "array"
+        }
+      },
+      "required": [
+        "!"
+      ],
+      "title": "Not",
+      "type": "object"
+    },
+    "Number": {
+      "type": "number"
+    },
+    "NumberType": {
+      "additionalProperties": false,
+      "description": "A number: one type, exact decimal (brief, D20).",
+      "properties": {
+        "type": {
+          "const": "number",
+          "default": "number",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "NumberType",
+      "type": "object"
+    },
+    "Or": {
+      "additionalProperties": false,
+      "description": "`{\"or\": [a, b, …]}`: at least one argument is true.",
+      "properties": {
+        "or": {
+          "items": {
+            "$ref": "#/$defs/Expression"
+          },
+          "minItems": 2,
+          "title": "Or",
+          "type": "array"
+        }
+      },
+      "required": [
+        "or"
+      ],
+      "title": "Or",
+      "type": "object"
+    },
+    "Outcome": {
+      "additionalProperties": false,
+      "description": "One answer a task offers (brief, D9).",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "sets": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Sets",
+          "type": "array"
+        },
+        "reaches": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Reaches",
+          "type": "array"
+        }
+      },
+      "required": [
+        "display"
+      ],
+      "title": "Outcome",
+      "type": "object"
+    },
+    "OutcomeType": {
+      "additionalProperties": false,
+      "description": "A task's answer: a closed list of names (brief, D9).",
+      "properties": {
+        "type": {
+          "const": "outcome",
+          "default": "outcome",
+          "title": "Type",
+          "type": "string"
+        },
+        "outcomes": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Outcomes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "outcomes",
+        "type"
+      ],
+      "title": "OutcomeType",
+      "type": "object"
+    },
+    "PayloadField": {
+      "title": "PayloadField",
+      "description": "One value an event carries: its type, what people read, and a declared untrusted source.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A number: one type, exact decimal (brief, D20).",
+          "properties": {
+            "type": {
+              "const": "number",
+              "default": "number",
+              "title": "Type",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            }
+          },
+          "required": [
+            "display",
+            "type"
+          ],
+          "title": "NumberType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A text.",
+          "properties": {
+            "type": {
+              "const": "string",
+              "default": "string",
+              "title": "Type",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            }
+          },
+          "required": [
+            "display",
+            "type"
+          ],
+          "title": "StringType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`true` or `false`.",
+          "properties": {
+            "type": {
+              "const": "boolean",
+              "default": "boolean",
+              "title": "Type",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            }
+          },
+          "required": [
+            "display",
+            "type"
+          ],
+          "title": "BooleanType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A task's answer: a closed list of names (brief, D9).",
+          "properties": {
+            "type": {
+              "const": "outcome",
+              "default": "outcome",
+              "title": "Type",
+              "type": "string"
+            },
+            "outcomes": {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Outcomes",
+              "type": "array"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            }
+          },
+          "required": [
+            "display",
+            "outcomes",
+            "type"
+          ],
+          "title": "OutcomeType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The ID of a record kept in another system, typed by that system's name (brief, D16).",
+          "properties": {
+            "type": {
+              "const": "reference",
+              "default": "reference",
+              "title": "Type",
+              "type": "string"
+            },
+            "system": {
+              "title": "System",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            }
+          },
+          "required": [
+            "display",
+            "system",
+            "type"
+          ],
+          "title": "ReferenceType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A list of records, each with the declared fields; read with `count`, `sum` and `item`.",
+          "properties": {
+            "type": {
+              "const": "list",
+              "default": "list",
+              "title": "Type",
+              "type": "string"
+            },
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/FieldType"
+              },
+              "title": "Fields",
+              "type": "object"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            }
+          },
+          "required": [
+            "display",
+            "fields",
+            "type"
+          ],
+          "title": "ListType",
+          "type": "object"
+        }
+      ]
+    },
+    "PlanStep": {
+      "additionalProperties": false,
+      "description": "A plan the deployment supplies, run as one step: its fields given from the case file\n(brief, D28). A case references a plan, never defines one.",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "requires": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "automatic": {
+          "default": true,
+          "title": "Automatic",
+          "type": "boolean"
+        },
+        "proposed_by": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Proposed By",
+          "type": "array"
+        },
+        "repeatable": {
+          "default": false,
+          "title": "Repeatable",
+          "type": "boolean"
+        },
+        "reaches": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Reaches",
+          "type": "array"
+        },
+        "kind": {
+          "const": "plan",
+          "title": "Kind",
+          "type": "string"
+        },
+        "plan": {
+          "pattern": "^[a-z][a-z0-9-]*@[1-9][0-9]*$",
+          "title": "Plan",
+          "type": "string"
+        },
+        "inputs": {
+          "additionalProperties": false,
+          "default": {},
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "$ref": "#/$defs/Expression"
+            }
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "max_age": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Max Age",
+          "type": "object"
+        }
+      },
+      "required": [
+        "display",
+        "kind",
+        "plan"
+      ],
+      "title": "PlanStep",
+      "type": "object"
+    },
+    "Reached": {
+      "additionalProperties": false,
+      "description": "The moment a milestone is reached: once, since it is never undone (brief, D38).",
+      "properties": {
+        "reached": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Reached",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reached"
+      ],
+      "title": "Reached",
+      "type": "object"
+    },
+    "ReferenceType": {
+      "additionalProperties": false,
+      "description": "The ID of a record kept in another system, typed by that system's name (brief, D16).",
+      "properties": {
+        "type": {
+          "const": "reference",
+          "default": "reference",
+          "title": "Type",
+          "type": "string"
+        },
+        "system": {
+          "title": "System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "type"
+      ],
+      "title": "ReferenceType",
+      "type": "object"
+    },
+    "Reminder": {
+      "additionalProperties": false,
+      "description": "What a reminder nudges: a task left open, after each of some ages (brief, D46).",
+      "properties": {
+        "task": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Task",
+          "type": "string"
+        },
+        "after": {
+          "items": {
+            "type": "string"
+          },
+          "title": "After",
+          "type": "array"
+        },
+        "start": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Start",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "after",
+        "start"
+      ],
+      "title": "Reminder",
+      "type": "object"
+    },
+    "ReminderRule": {
+      "additionalProperties": false,
+      "description": "A reminder: while a run of a task is open, start a step after each age. It informs, it\nnever decides: it only starts its step. Expands into one rule per age (brief, D46).",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "reminder": {
+          "$ref": "#/$defs/Reminder"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "display",
+        "reminder"
+      ],
+      "title": "ReminderRule",
+      "type": "object"
+    },
+    "Rule": {
+      "additionalProperties": false,
+      "description": "On a moment, when a condition holds, then act on the case (brief, D38).",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "on": {
+          "$ref": "#/$defs/RuleMoment"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "then": {
+          "$ref": "#/$defs/Then"
+        }
+      },
+      "required": [
+        "display",
+        "on",
+        "then"
+      ],
+      "title": "Rule",
+      "type": "object"
+    },
+    "RuleMoment": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Moment"
+        },
+        {
+          "$ref": "#/$defs/After"
+        }
+      ]
+    },
+    "SentBy": {
+      "additionalProperties": false,
+      "description": "Who may send an event: one sender, a system or people, never both (brief, D41).",
+      "properties": {
+        "system": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System"
+        },
+        "roles": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roles"
+        }
+      },
+      "title": "SentBy",
+      "type": "object"
+    },
+    "Sla": {
+      "additionalProperties": false,
+      "description": "What an sla measures: each run of a step, from its own start (brief, D46).",
+      "properties": {
+        "step": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Step",
+          "type": "string"
+        },
+        "within": {
+          "title": "Within",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step",
+        "within"
+      ],
+      "title": "Sla",
+      "type": "object"
+    },
+    "SlaRule": {
+      "additionalProperties": false,
+      "description": "An sla: when a run of a step isn't done, rejected or stopped within an age of its start,\nact. Expands into one timer set on each run's start, which ends with that run (brief, D44).",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "sla": {
+          "$ref": "#/$defs/Sla"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "then": {
+          "$ref": "#/$defs/Then"
+        }
+      },
+      "required": [
+        "display",
+        "sla",
+        "then"
+      ],
+      "title": "SlaRule",
+      "type": "object"
+    },
+    "Started": {
+      "additionalProperties": false,
+      "description": "The moment a run of a step starts: each run, a refresh included (brief, D38).",
+      "properties": {
+        "started": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Started",
+          "type": "string"
+        }
+      },
+      "required": [
+        "started"
+      ],
+      "title": "Started",
+      "type": "object"
+    },
+    "String": {
+      "additionalProperties": false,
+      "description": "`{\"string\": [a]}`: a number, boolean or reference as text.",
+      "properties": {
+        "string": {
+          "maxItems": 1,
+          "minItems": 1,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": "String",
+          "type": "array"
+        }
+      },
+      "required": [
+        "string"
+      ],
+      "title": "String",
+      "type": "object"
+    },
+    "StringType": {
+      "additionalProperties": false,
+      "description": "A text.",
+      "properties": {
+        "type": {
+          "const": "string",
+          "default": "string",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "StringType",
+      "type": "object"
+    },
+    "Sub": {
+      "additionalProperties": false,
+      "description": "`{\"-\": [a, b]}`: a minus b.",
+      "properties": {
+        "-": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "$ref": "#/$defs/Expression"
+            }
+          ],
+          "title": "-",
+          "type": "array"
+        }
+      },
+      "required": [
+        "-"
+      ],
+      "title": "Sub",
+      "type": "object"
+    },
+    "Sum": {
+      "additionalProperties": false,
+      "description": "`{\"sum\": {\"over\": list, \"where\": condition, \"value\": number}}`: their total.",
+      "properties": {
+        "sum": {
+          "$ref": "#/$defs/SumOver"
+        }
+      },
+      "required": [
+        "sum"
+      ],
+      "title": "Sum",
+      "type": "object"
+    },
+    "SumOver": {
+      "additionalProperties": false,
+      "description": "What `sum` reads: a list field, which of its elements, and the number each one adds.",
+      "properties": {
+        "over": {
+          "$ref": "#/$defs/Var"
+        },
+        "where": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "value": {
+          "$ref": "#/$defs/Expression"
+        }
+      },
+      "required": [
+        "over",
+        "value"
+      ],
+      "title": "SumOver",
+      "type": "object"
+    },
+    "TaskStep": {
+      "additionalProperties": false,
+      "description": "A question to people with one of `roles`, answered with one of its outcomes (brief, D9).",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "requires": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "automatic": {
+          "default": true,
+          "title": "Automatic",
+          "type": "boolean"
+        },
+        "proposed_by": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Proposed By",
+          "type": "array"
+        },
+        "repeatable": {
+          "default": false,
+          "title": "Repeatable",
+          "type": "boolean"
+        },
+        "reaches": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Reaches",
+          "type": "array"
+        },
+        "kind": {
+          "const": "task",
+          "title": "Kind",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        },
+        "outcomes": {
+          "additionalProperties": false,
+          "minProperties": 1,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "$ref": "#/$defs/Outcome"
+            }
+          },
+          "title": "Outcomes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "display",
+        "kind",
+        "roles",
+        "outcomes"
+      ],
+      "title": "TaskStep",
+      "type": "object"
+    },
+    "Then": {
+      "additionalProperties": false,
+      "description": "What a rule does when it fires: stop steps (brief, D40), set fields (brief, D42), reach\nmilestones (brief, D38), start steps (brief, D39). Done in that order.",
+      "properties": {
+        "set": {
+          "additionalProperties": false,
+          "default": {},
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "$ref": "#/$defs/Expression"
+            }
+          },
+          "title": "Set",
+          "type": "object"
+        },
+        "reach": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Reach",
+          "type": "array"
+        },
+        "start": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Start",
+          "type": "array"
+        },
+        "stop": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Stop",
+          "type": "array"
+        }
+      },
+      "title": "Then",
+      "type": "object"
+    },
+    "Value": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
+    "Var": {
+      "additionalProperties": false,
+      "description": "A declared field of the case file: `{\"var\": \"approved_amount\"}`.",
+      "properties": {
+        "var": {
+          "title": "Var",
+          "type": "string"
+        }
+      },
+      "required": [
+        "var"
+      ],
+      "title": "Var",
+      "type": "object"
+    },
+    "WaitStep": {
+      "additionalProperties": false,
+      "description": "A step that waits for an event from outside: its run is open until the event's next\narrival, which makes it done. Pending work, unlike a rule listening for it (brief, D10)\n(brief, D41).",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "requires": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "automatic": {
+          "default": true,
+          "title": "Automatic",
+          "type": "boolean"
+        },
+        "proposed_by": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Proposed By",
+          "type": "array"
+        },
+        "repeatable": {
+          "default": false,
+          "title": "Repeatable",
+          "type": "boolean"
+        },
+        "reaches": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Reaches",
+          "type": "array"
+        },
+        "kind": {
+          "const": "wait",
+          "title": "Kind",
+          "type": "string"
+        },
+        "event": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Event",
+          "type": "string"
+        }
+      },
+      "required": [
+        "display",
+        "kind",
+        "event"
+      ],
+      "title": "WaitStep",
+      "type": "object"
+    },
+    "WorkflowStep": {
+      "additionalProperties": false,
+      "description": "An existing Temporal workflow, run as one step: its contract in the catalog, where it runs\nbound by the deployment (brief, D6).",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "requires": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "automatic": {
+          "default": true,
+          "title": "Automatic",
+          "type": "boolean"
+        },
+        "proposed_by": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Proposed By",
+          "type": "array"
+        },
+        "repeatable": {
+          "default": false,
+          "title": "Repeatable",
+          "type": "boolean"
+        },
+        "reaches": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Reaches",
+          "type": "array"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Expression"
+          },
+          "default": {},
+          "title": "Inputs",
+          "type": "object"
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Approval"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_age": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Max Age",
+          "type": "object"
+        },
+        "kind": {
+          "const": "workflow",
+          "title": "Kind",
+          "type": "string"
+        },
+        "workflow": {
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*@[1-9][0-9]*$",
+          "title": "Workflow",
+          "type": "string"
+        }
+      },
+      "required": [
+        "display",
+        "kind",
+        "workflow"
+      ],
+      "title": "WorkflowStep",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "case": {
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "title": "Case",
+      "type": "string"
+    },
+    "display": {
+      "$ref": "#/$defs/Display"
+    },
+    "fields": {
+      "additionalProperties": false,
+      "default": {},
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "$ref": "#/$defs/CaseField"
+        }
+      },
+      "title": "Fields",
+      "type": "object"
+    },
+    "milestones": {
+      "additionalProperties": false,
+      "default": {},
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "$ref": "#/$defs/Milestone"
+        }
+      },
+      "title": "Milestones",
+      "type": "object"
+    },
+    "steps": {
+      "additionalProperties": false,
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "$ref": "#/$defs/AnyStep"
+        }
+      },
+      "title": "Steps",
+      "type": "object"
+    },
+    "sequence": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "type": "string"
+      },
+      "title": "Sequence",
+      "type": "array"
+    },
+    "rules": {
+      "additionalProperties": false,
+      "default": {},
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "$ref": "#/$defs/AnyRule"
+        }
+      },
+      "title": "Rules",
+      "type": "object"
+    },
+    "events": {
+      "additionalProperties": false,
+      "default": {},
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "$ref": "#/$defs/DeclaredEvent"
+        }
+      },
+      "title": "Events",
+      "type": "object"
+    },
+    "close_reasons": {
+      "additionalProperties": false,
+      "default": {},
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "$ref": "#/$defs/CloseReason"
+        }
+      },
+      "title": "Close Reasons",
+      "type": "object"
+    },
+    "closes_when": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "type": "string"
+      },
+      "title": "Closes When",
+      "type": "array"
+    },
+    "stays_open": {
+      "default": false,
+      "title": "Stays Open",
+      "type": "boolean"
+    },
+    "forgetting": {
+      "default": "allowed",
+      "enum": [
+        "allowed",
+        "while_open",
+        "never"
+      ],
+      "title": "Forgetting",
+      "type": "string"
+    }
+  },
+  "required": [
+    "case",
+    "display",
+    "steps"
+  ],
+  "type": "object"
+}

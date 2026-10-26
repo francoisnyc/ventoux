@@ -215,8 +215,17 @@ def differences(each: Checked, packages: Path) -> list[str]:
         if not committed.is_file():
             # Missing counts as different: a JSON never committed ran nowhere (14a's lesson).
             found.append(f"{shown(committed)} is missing: {each.source} writes it")
-        elif committed.read_text() != text:
-            found.append(differs(shown(committed), each.source, committed.read_text(), text))
+        elif committed.read_bytes() != text.encode():
+            # Bytes, not text: reading as text would turn Windows line endings into the builder's
+            # (from the tutor review of #61); `.gitattributes` keeps a checkout from committing them.
+            found.append(
+                differs(
+                    shown(committed),
+                    f"what {each.source} writes",
+                    committed.read_bytes().decode(),
+                    text,
+                )
+            )
     for old in sorted(folder.rglob("*.json")) if folder.is_dir() else []:
         if str(old.relative_to(folder)) not in each.files:
             found.append(f"{shown(old)}: no builder case writes it any more")
@@ -265,19 +274,24 @@ def file_of(path: str) -> str:
     return "case.json"
 
 
-def differs(path: str, source: str, committed: str, written: str) -> str:
-    """One file's difference, at the first line that differs, both lines shown: they are
-    definition text, which may be shown (brief, D55)."""
-    old, new = committed.splitlines(), written.splitlines()
+def differs(path: str, writer: str, committed: str, written: str) -> str:
+    """One file's difference from `writer` ("what cases/refund.py writes"), at the first line that
+    differs, both lines shown: they are definition text, which may be shown (brief, D55)."""
+    old, new = committed.split("\n"), written.split("\n")  # not `splitlines`: it would eat a `\r`
     for number, (was, now) in enumerate(zip(old, new, strict=False), start=1):
         if was != now:
+            if was.rstrip("\r") == now:
+                return (
+                    f"{path} differs from {writer}, first at line {number}: "
+                    "the committed line ends with \\r\\n"
+                )
             return (
-                f"{path} differs from what {source} writes, first at line {number}:\n"
+                f"{path} differs from {writer}, first at line {number}:\n"
                 f"  committed: {was.strip()}\n  written:   {now.strip()}"
             )
     number = min(len(old), len(new)) + 1
     ends = "committed" if len(old) < len(new) else "written"
-    return f"{path} differs from what {source} writes, first at line {number}: the {ends} file ends"
+    return f"{path} differs from {writer}, first at line {number}: the {ends} file ends"
 
 
 def shown(location: str | Path) -> str:

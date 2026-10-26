@@ -2396,3 +2396,39 @@ in its when
 A step already refused by an error gets none of these, and neither does a value whose step has
 one: one cause, one issue. No message quotes a value from a case file, or a literal of the
 definition.
+
+## The JSON Schema
+
+The format is published as JSON Schema, generated from the models the engine parses with, so a
+front end in another language or a model drafting a definition (layer 15) can read what a case
+and a plan look like without reading Python (brief, D4, D60):
+
+- `schema/case.schema.json`: a `case.json`.
+- `schema/plan.schema.json`: a plan's file under `plans/`.
+
+Both are draft 2020-12. Each names the format it describes in its `$id`, by the engine version
+that parses it (brief, D51): `https://ventoux.dev/schema/engine-2/case.schema.json` is the format
+engine version 2 reads. `ventoux schema` writes them; CI runs `ventoux schema --unchanged`, which
+writes nothing and fails if a committed schema is not what the models say, naming the first line
+that differs. So the schema never lags the parser: a model changed without the schema regenerated
+fails CI.
+
+**The schema checks shape; `ventoux check` stays the check.** It says every key (an unknown one is
+refused), each value's type, the name patterns, and the expression operators, as one recursive
+shape holding exactly D20's list: `{"now": []}` matches nothing, so it can't be written. It can't
+say what needs the catalog or the whole definition:
+
+- that a `var` names a declared field, of the type the operator needs;
+- that a role is registered, or a system, or an activity reference;
+- that a plan a step names exists, with that version;
+- that a step can be reached, or that a rule's step exists;
+- that an expression nests at most 32 levels, or that a number fits decimal128;
+- that a `sequence` names steps in an order that can run.
+
+Every committed example is accepted by the schema and by the parser, and a fixed set of wrong
+shapes is refused by both (`tests/test_schema.py`); if the two ever disagree, that test fails.
+
+**Never a trust boundary.** A model's output can be constrained by the schema, so a draft is at
+least well-formed. Output that matches it is still a draft: read by the parser, checked by
+`ventoux check` against the deployment's catalog, reviewed in a pull request. The builder never
+runs on model output (brief, D58).

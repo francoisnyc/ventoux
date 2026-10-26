@@ -1,0 +1,3 @@
+# Definitions and schemas are compared byte for byte in CI (`ventoux check --unchanged`,
+# `ventoux schema --unchanged`): a checkout keeps their line endings as written (layer 14e).
+*.json text eol=lf

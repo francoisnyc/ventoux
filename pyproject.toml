@@ -21,6 +21,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "jsonschema>=4.26.0",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
@@ -45,6 +46,11 @@ files = ["src", "tests", "examples/builder", "examples/cases"]
 plugins = ["pydantic.mypy"]
 # The quickstart's project, so its tests import `cases.refund` as the quickstart writes it.
 mypy_path = "examples/quickstart"
+
+# `jsonschema` (tests only) ships no type stubs; its two calls are wrapped in typed helpers.
+[[tool.mypy.overrides]]
+module = "jsonschema"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

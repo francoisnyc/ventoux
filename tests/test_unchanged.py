@@ -237,3 +237,40 @@ def test_the_curriculums_negative_test_end_to_end_through_the_ci_step(
     builder.write_text(builder.read_text().replace('title="Customer refund"', 'title="Refund"'))
     assert main(["check", "--unchanged"]) == 1
     assert '  written:   "title": "Refund"' in capsys.readouterr().out
+
+
+# --- From the tutor review of #61 (layer 14e, choice 54) -----------------------------------------
+
+
+def test_a_committed_file_with_other_line_endings_differs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # "Byte for byte" (brief, D1) includes the line endings: a case.json rewritten with Windows
+    # line endings is not what the builder writes, and `.gitattributes` keeps a checkout from
+    # committing one.
+    monkeypatch.chdir(a_project(tmp_path))
+    committed = tmp_path / "packages" / "refund" / "case.json"
+    committed.write_bytes(committed.read_bytes().replace(b"\n", b"\r\n"))
+    before = snapshot(tmp_path)
+    assert main(["check", "--unchanged"]) == 1
+    said = capsys.readouterr().out
+    assert (
+        "packages/refund/case.json differs from what cases/refund.py writes, first at line 1:"
+        in said
+    )
+    assert "the committed line ends with \\r\\n" in said
+    assert snapshot(tmp_path) == before
+    attributes = (ROOT / ".gitattributes").read_text().splitlines()
+    assert "*.json text eol=lf" in attributes
+
+
+def test_a_by_hand_name_with_no_folder_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A misspelled entry would otherwise go unnoticed until the real folder was refused as stale.
+    monkeypatch.chdir(a_project(tmp_path, CONFIGURATION + 'by_hand = ["legcy"]\n'))
+    for flags in ([], ["--unchanged"]):
+        assert main(["check", *flags]) == 2
+        said = capsys.readouterr().err
+        assert "by_hand lists legcy, and packages/legcy/ doesn't exist" in said
+        assert "a misspelling, or a folder not committed" in said
