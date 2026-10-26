@@ -473,6 +473,122 @@ Answer by number. "Recommended" is what I'd do; the options set aside are named.
     its own into a history line. It is `Literal["step-advisor"]` or `None`, and the history reads
     "suggested by the step advisor" from it; any other value is refused with the proposal.
 
+## Choices for 15b: the advisor beside a running case, and the live provider
+
+Written 2026-10-26, after 15a's merge (#63) and the 15b warm-up (learning question 40). It also
+takes in two optional points from the tutor's review of 15a.
+
+20. **What the advisor is shown is computed in the worker, so its pure part moves to `case`.**
+    On Temporal the case's state lives in the worker, and a view is filtered there, so nothing
+    hidden leaves it (brief, D30). The advisor's view must be computed there too. Workflow code
+    may not import `authoring`, and 15b's boundary test says so.
+    - **What moves:** the data part of 15a's `shown_to_advisor` (`FieldShown`, `RunShown`,
+      `StepShown`, and the function that builds them from a state) moves, unchanged, to
+      `src/ventoux/case/advising.py`. It is pure, and it reads no LLM.
+    - **What stays in `authoring`:** the request built from it, reading the answer, and
+      `advise`.
+    - 15a's tests keep passing; only their imports change.
+
+    *Recommended.* Set aside: sending the state to the client to filter there. That would send
+    every value out of the worker, the thing D30 filters to avoid.
+
+21. **The seams.**
+    - **Two new queries on `CaseWorkflow`,** read-only and never recorded in history:
+      - `advisor_view(by, roles, at)`, which gives what the advisor is shown;
+      - `proposal_refused(step, by, roles, at)`, which gives admission's reason or nothing. It is
+        `decide` on a copy of the state, as in 15a.
+    - **The client** (`temporal/cases.py`) gets one function per query. Its `propose` gets an
+      optional `suggested_by`. `CaseRequest` carries it, and the case refuses any other value,
+      as built in 15a.
+    - **`advise_case(handle, by, roles, provider, at) -> Advice`** goes in
+      `src/ventoux/authoring/beside.py`. It reads both queries, asks the model, and checks the
+      answer. It never signals the case.
+
+    *Recommended.*
+
+22. **The label, built where a suggestion is shown.** This is the tutor's second point: the
+    guide's "shown as the step advisor's, `untrusted:llm`" and D61's "labelled so wherever it
+    is shown" aren't built yet.
+    - `Advice` gets `source`, always `"untrusted:llm"`, and `said()`. That reads `Suggested by
+      the step advisor (untrusted:llm): goodwill`, or `The step advisor suggests nothing: <why>`.
+    - Everything that shows a suggestion shows `said()`, so the label can't be left off.
+    - Its first user is choice 23.
+
+    *Recommended.*
+
+23. **`ventoux advise CASE --by ana --role support`** prints one line: `said()`.
+    - It takes the same `--address` and `--namespace` as the other Temporal commands. The
+      person and their roles are stated by whoever runs it, as `activate` states its person,
+      since the trusted caller states them (brief, D22).
+    - It never proposes. Ana, or the inbox on her behalf, proposes with `suggested_by`.
+    - **The provider** is named in configuration, `[tool.ventoux] model` or `--model`, and is
+      refused when none is named (choice 7). `--recording FILE` replays a recording instead, for
+      demonstrations and its own test.
+
+    *Recommended.* Set aside: a command that proposes on Ana's behalf. Proposing is her act,
+    from the inbox (D61).
+
+24. **Replay and the boundary.**
+    - **The replay test:** a case on Temporal's test server, where Ana proposes the advisor's
+      suggestion through the client. Its history is fetched and replayed with Temporal's
+      `Replayer`. The replay passes, and nothing asks a model: the worker has no provider.
+    - **The boundary test** (`tests/test_layers.py`) gains `temporal`. No module of
+      `ventoux.temporal` imports `ventoux.authoring` or an LLM SDK. Until now only `core` and
+      `case` were held to that.
+
+    *Recommended.*
+
+25. **The live provider,** `src/ventoux/authoring/anthropic.py`, behind the `anthropic` extra.
+    - **The model's text is the answer.** It calls the SDK's asynchronous Messages API with the
+      request's system text and messages, and joins the text the model gives. Before writing it
+      I'll check the SDK's current API (the claude-api reference) and pin the extra to a release
+      at least two weeks old.
+    - **Fail closed.** It raises `ProviderFailed`, saying why, when:
+      - the key isn't set: "ANTHROPIC_API_KEY is not set: the live provider reads its key from
+        the environment, never from a file";
+      - no model is named;
+      - the model refuses;
+      - its answer is cut short (`max_tokens`);
+      - the API fails.
+
+      The message names the setting, never its value. `advise_case` turns `ProviderFailed` into
+      "the step advisor gave no answer: …", which suggests nothing.
+    - **Tested without the network,** with a fake of the SDK's client passed to its constructor.
+      No test reaches the API, and CI holds no key.
+    - **CI** installs the extra (`uv sync --locked --extra anthropic`), so mypy checks the file
+      strictly. `uv.lock` records it.
+
+    *Recommended.*
+
+26. **Decisions: one per part from here, renumbered before any is written.** Choice 15 put the
+    providers and the authoring loop together as D62, "before 15b and 15c". But D62 can't be
+    written whole before 15b, and decisions are never rewritten afterwards. So:
+    - **D62:** providers and the live provider (choices 6, 7, 20 to 25), before 15b;
+    - **D63:** the authoring loop (choices 8 to 11), before 15c;
+    - **D64:** "Approve this plan" and drafts (choices 12 to 14), before 15d.
+
+    This changes your answer to choice 15, so it is asked. *Recommended.*
+
+27. **The tests, in order, negative first.**
+    1. The live provider with no key, or no model named, is refused, saying which setting and
+       never a value.
+    2. The model refusing, an answer cut short, and an API error each give `ProviderFailed`.
+       `advise_case` then suggests nothing, saying the advisor gave no answer.
+    3. No module of `ventoux.temporal` imports `authoring` or an LLM SDK.
+    4. On a running case, an answer naming an inadmissible step is refused with admission's
+       reason: the curriculum's negative test, again on Temporal. An admitted one is suggested.
+       Asking changes nothing in the case's history.
+    5. A proposal sent through the client with `suggested_by` writes "suggested by the step
+       advisor". One with another value is refused by the case.
+    6. That case's history replays without asking a model.
+    7. `said()` labels every suggestion `untrusted:llm`, and `ventoux advise` prints it.
+    8. The live provider sends the request's system text and messages, and joins the model's
+       text (with the SDK's client faked).
+    9. From the tutor's review of 15a: an answer with prose around one fenced block suggests
+       nothing (`'Sure:\n```json\n{"step": "goodwill"}\n```'`).
+
+    *Recommended.*
+
 ## Promises
 
 Written as each part is built, as in layers 13 and 14: every claim this note makes about
