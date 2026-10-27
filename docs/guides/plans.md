@@ -510,3 +510,96 @@ when the outcome sets fields (`form={"approved_amount": Decimal("250")}`); the s
 Not yet: an activity's output reaching the case file, and a person's form landing in it rather
 than in the plan's fields (layer 8). A plan run never continues as new: the bound on loops keeps its history far below
 Temporal's limits. A case does, keeping its keys (brief, D27; the cases guide).
+
+## AI-drafted plans
+
+A model can draft a plan from a goal in words: `ventoux draft` asks it, checks what it writes, and
+sends the problems back, for a few rounds. The draft is data from start to end: it is never run,
+not even on fakes, and the builder never runs on it (brief, D58, D63).
+
+```bash
+ventoux draft packages/refund --plan refund-order@1 --by omar \
+  --goal "Refund the order, then draft a letter telling the customer it is on its way."
+```
+
+It drafts only a plan a step of the package names, here `settle`'s. The model is shown the goal;
+the plan's published schema; the step, with each field it gives the plan and where that field's
+value comes from (`note: system:opener, untrusted:customer`); every contract the catalog holds,
+with its input policies; the roles, labels and systems; and the plan as it is now. It is never
+shown a case file, nor any contract's code.
+
+Each answer must be one JSON object, at most inside one fenced block. It is then checked in its
+package by the same check `ventoux release` runs. What is refused goes back to the model in one
+fixed form, the problems written as `ventoux check` writes them:
+
+```text
+The draft was refused. Fix every problem below and answer with the whole plan, as one JSON object.
+```
+
+A draft that sends the letter to the address in the customer's note is refused, since `to_customer`
+takes only trusted data; so is one that branches on the note, or goes back to `pay` without a new
+approval. After the last round (3, or `--rounds` from 1 to 5), a draft still refused is abandoned:
+
+```text
+refund-order@1 abandoned after 3 rounds: the last draft still has 1 problem
+```
+
+A draft that passes is written into the drafts folder the configuration names
+(`[tool.ventoux] drafts = "drafts"`), never into the package, with its record: the goal, who
+asked, the provider, each round's answer and problems, the verdict, and the SHA-256 of the plan
+file as written.
+
+```text
+refund-order@1 drafted in 2 rounds: drafts/refund-order@1.json
+its record: drafts/refund-order@1.record.json
+keep it in a pull request: it runs nowhere until it is reviewed, released and activated
+```
+
+### Approve this plan
+
+Before keeping a draft, read what it does. `ventoux draft-sheet` prints "Approve this plan", in
+Markdown, for the draft and the package it was drafted for (brief, D14, D64):
+
+```bash
+ventoux draft-sheet drafts/refund-order@1.json --package packages/refund
+```
+
+It opens with who drafted it, for whom, and from which goal (here, from a recording):
+
+```text
+# Approve this plan: refund-order@1, for refund
+
+Drafted by `recorded` for omar, in 2 rounds, from the goal:
+```
+
+Then come what the draft changes in the package (the plain diff, as `ventoux diff --plain` says
+it), the whole plan as drafted (as `ventoux map` reads it), what the package will never do with
+the draft in place, its warnings as `ventoux check` writes them, and how it becomes real:
+
+```text
+This is a draft. It runs nowhere until a pull request is reviewed and merged, a release is made, and an environment activates it.
+```
+
+The sheet checks the draft again, in its package, by the check `ventoux release` runs: a draft
+that doesn't pass is never shown for approval, whatever its record says. Nothing the model wrote
+is shown but the plan itself, read as a plan: no round's answer, no problem fed back. Every title
+and literal the draft writes, and the goal, are shown as written, never rendered. A draft edited
+without its record (an accident, a fix by hand, a file copied from elsewhere) is refused:
+
+```text
+drafts/refund-order@1.json was changed after it was drafted: its record holds another digest. A plan edited by hand is reviewed as one: copy it into the package and open a pull request
+```
+
+The record is plain JSON, signed by nobody, so an edit that rewrites the record too isn't told:
+who drafted it, for whom and from which goal is the record's word, as reliable as the drafts
+folder and the pull request that commits them. What stands between a draft and a release is the
+sheet's own check and the reviewed pull request.
+
+It exits 0 when it printed the page, and 2 when it couldn't read, check or show the draft: a
+record that is missing or about another plan or package, a draft that doesn't pass, a package
+that doesn't read.
+
+Keeping a draft is a person's pull request: copy it into the package, or write the builder code
+for it, and CI shows its diff. A draft already in the folder is refused, never overwritten. The
+command exits 0 when it drafted, 1 when it abandoned, and 2 when it couldn't read or ask: a
+setting, the package, or a model that gave no answer.

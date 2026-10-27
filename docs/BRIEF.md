@@ -16,7 +16,7 @@ cases, and safe for an AI to draft.
   no cases, no worklists, no approval rules, no way to change the rules of open work. Teams write
   this themselves, or run a second engine (Camunda, Flowable) next to Temporal.
 - **BPM platforms lose developers.** A separate studio, its own app model and process files nobody
-  can review (an earlier tool failed at the author's company for these reasons).
+  can review: the reasons developers route around such tools.
 - **AI is entering this work.** Models draft workflows and propose next steps. For critical tasks
   (costly, irreversible or regulated actions), a model's mistake or an injected instruction must not
   turn into an action.
@@ -121,6 +121,10 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   generates" is built: `ventoux check --unchanged` runs the builder files, generates every package
   again and compares each file with the committed one byte for byte, writing nothing; a file that
   differs, is missing or is no longer written fails, named with its first differing line.
+- **Amended 2026-10-27, by D64** (the text above stands; this adds to it): "a runtime draft that
+  should be kept becomes a reviewed pull request" is built. `ventoux draft` writes a plan and its
+  record into a drafts folder, never into a package (D63). `ventoux draft-sheet` renders "Approve
+  this plan" for it. Keeping it is a person's commit into a package, in a pull request.
 
 ### D2. One model from structured workflows to case management
 
@@ -447,6 +451,10 @@ be erased on request), has size limits, and a second copy of business records go
   Ventoux checks them. People approve.**
 - To avoid a clash, the AI that suggests a case's next step is the **step advisor**, not a planner.
 - The `chartering` prototype keeps its names (Charter, fragment, planner).
+- **Amended 2026-10-27, by D64** (the text above stands; this adds to it): "Approve this plan" is
+  built, for a plan a model drafted (D63). "A plan's provenance records who drafted it" is the
+  draft's record, kept beside it and never in it. The sheet shows it as "Drafted by `<provider>`
+  for <who asked>, from the goal:", the provider as it names itself, and guessing no pronoun.
 
 ### D15. Forgetting a person: per-case keys
 
@@ -2582,6 +2590,90 @@ Adds to D12, D30, D59 and D61, whose text is kept.*
   suggestion, or nothing and why) and 2 when it couldn't be asked: a setting, a recording, the
   model, or a workflow that doesn't answer its queries (a plan's run, a child's, or a worker that
   predates them), said in the command's own words, since that failure is sealed by the codec.
+
+### D63. The authoring loop: a plan drafted, checked as a release checks it, fed back, or abandoned
+
+*Decided 2026-10-27, in layer 15c (`docs/layers/15-authoring.md`, choices 8 to 11 and 28 to 38).
+Adds to D1, D13, D14, D49, D50, D58, D60 and D62, whose text is kept.*
+
+- **A model drafts a plan, never a case,** for a plan a package's step names (`--plan
+  refund-order@1`): one it has, which the draft replaces, or one a step names and the package
+  lacks. A case drafted at runtime would be a second front door beside the builder (D1, D13).
+- **What the model is shown:** fixed instructions; the published plan schema (D60); the goal, in
+  the person's words; the reference to draft; the step that names it, with each plan field it
+  gives and the kinds of its sources, as case validation computes them (a person said only as
+  `person`); every contract's promise, as `ventoux promises` prints it; the registered roles with
+  the risk each may approve, the source labels and the systems; and the plan as it is now, if
+  the package has one. Never a case file, which the loop is never given, and never an
+  implementation.
+- **Each answer is read as one JSON object,** at most inside one fenced block, as the step
+  advisor's is (D61); anything else, prose around a block included, is a problem fed back, never
+  scraped.
+- **Each draft is checked in its package by the function `ventoux release` checks with**
+  (`issues_of`, moved to `case` so `authoring` can reach it): the plan's own checks and case
+  validation, never a second set of rules (D50). Only errors refuse; warnings are kept.
+- **Problems go back in a fixed form:** a first line asking for the whole plan again, then one
+  line per problem, `path: CODE: message`, as `ventoux check` writes them. A message may quote a
+  literal the draft wrote (D35); it never quotes a case's value, since no case is involved.
+- **Bounded:** at most 3 rounds by default, 1 to 5 with `--rounds`. After the last round with
+  problems, the draft is **abandoned**, saying why, and is never written as a plan file. A
+  provider that gives no answer stops the loop at once (D62).
+- **Nothing from a draft is executed, imported or built:** no dry run, not even on fakes; the
+  builder never runs on it (D58); the draft is JSON, read by Pydantic. The loop's modules can't
+  reach the builder, the interpreter or Temporal, and a test proves it.
+- **`ventoux draft` writes into the drafts folder named in configuration** (`[tool.ventoux]
+  drafts`), never into a package: `<plan>.json` if drafted, and always, once the model was
+  asked, `<plan>.record.json`: the goal, who asked, the provider, each round's answer and
+  problems, the verdict and why. A draft already there is refused, never overwritten. It exits 0
+  drafted, 1 abandoned, 2 when it couldn't ask or read. Keeping a draft is a person's pull
+  request (D1); merging releases it (D50).
+
+### D64. "Approve this plan": a drafted plan, checked again, shown with what it does and will never do
+
+*Decided 2026-10-27, in layer 15d (`docs/layers/15-authoring.md`, choices 12 to 14 and 39 to 47).
+Adds to D1, D14, D50, D55, D56 and D63, whose text is kept.*
+
+- **`ventoux draft-sheet DRAFT --package FOLDER`** prints "Approve this plan", in Markdown, to
+  standard output: never written to a file, never posted. It exits 0 when it rendered, and 2 when
+  it couldn't read, check or render, never with a traceback.
+- **Only a draft that passes is shown, checked again by the sheet itself:** the package with the
+  draft in place, by `issues_of` (D50), never on the record's word. A draft with an error is
+  refused, saying so, and never shown for approval (fail closed).
+- **A draft edited without its record is refused.** `ventoux draft` writes the plan file's
+  SHA-256 into its record (`draft_sha256`). The sheet hashes the file again and refuses on any
+  difference, or on a record without the field: an accident, a fix by hand, a file copied from
+  elsewhere. A plan edited by hand is reviewed as one: copied into a package, in a pull request.
+- **The digest doesn't tell an edit that rewrote the record too.** The record is plain JSON,
+  signed by nobody: whoever edits the draft can edit it as well. Its provenance is its word, as
+  reliable as the drafts folder and the pull request that commits them. That is enough, because
+  the sheet's own check and the reviewed pull request are what stand between a draft and a
+  release. Signing the record would be a decision of its own.
+- **Every link is checked:** the record beside the draft reads, every field required; its verdict
+  is `drafted`; its plan is the draft's own reference; its package is the package given; a plan
+  step of that package names the plan. The record's word, unsigned, is taken only for provenance:
+  who asked, the provider, the goal, and how many rounds.
+- **What it shows, in order:**
+  1. the provenance: "Drafted by `<provider>` for <who asked>, in N rounds, from the goal:", then the
+     goal on one quoted line, escaped. The provider is shown as it names itself
+     (`anthropic:<model>`, `recorded`), and no pronoun is guessed (D14);
+  2. what the draft changes: the plain diff of the package before and after (D55), its verdicts
+     kept;
+  3. the plan as drafted: the case map's reading of every field and state of the plan (D56);
+  4. what it will never do: the sheet of the package with the draft in place (D56), only proven
+     nevers, nothing read from a contract's name;
+  5. the warnings, as `ventoux check` writes them for a package written by hand, or "None.";
+  6. how it becomes real: a pull request reviewed and merged, a release, an activation (D50,
+     D54).
+- **Never the model's own text.** No round's answer, no problem fed back and no reason reach the
+  page. Everything shown is read from the parsed plan, the package or the record's settled
+  fields. Every piece a definition, the catalog or the goal writes is escaped where it is written,
+  as D56's pages are: shown, never rendered.
+- **A drafts folder is never a package.** It holds no `case.json`, so `ventoux release` and the
+  sheet's `--package` refuse it. A draft runs nowhere: it is in no release, and production opens
+  cases only on an active release (D54).
+- **The ad hoc inline plan stays deferred** (D13). A plan drafted for one case and run in it would
+  need a running case to accept unreleased behaviour, and every guarantee since D50 rests on a case
+  running a reviewed release.
 
 ## Concepts
 

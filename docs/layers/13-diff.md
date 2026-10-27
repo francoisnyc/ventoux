@@ -72,11 +72,10 @@ prototype has no diff. What it gives Ventoux:
 - **The task, as stated:** report what changed in effect, not in the JSON text (admission rules,
   approvals, sink policies, the provenance of case-file fields, and what each version will never
   do), from the CLI and in CI, so that the output can be posted on pull requests.
-- **The reason:** "an earlier workflow tool failed at the user's company largely because nobody
-  could tell what had changed between process versions". And the diff is the review step for
-  definitions a builder *generates* (layer 14), so its output must stay readable even when nobody
-  wrote the JSON by hand. This is the curriculum's check-yourself: a JSON diff of generated output
-  is noise.
+- **The reason:** a workflow tool fails when nobody can tell what changed between process
+  versions. And the diff is the review step for definitions a builder *generates* (layer 14), so
+  its output must stay readable even when nobody wrote the JSON by hand. This is the curriculum's
+  check-yourself: a JSON diff of generated output is noise.
 - **Question 7, prior art outside the repository** (`cdk diff`, `pulumi preview`, `terraform plan`,
   `bpmn-js-differ`), was never researched. From what is known of them, not checked again here:
   they compare resources by identity, not by position, and mark each change added, removed or

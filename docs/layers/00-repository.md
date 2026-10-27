@@ -37,7 +37,7 @@ is no `ventoux.testing` yet: the tracer bullet adds it.
   against the installed package rather than the working directory.
 - Runtime: Pydantic v2 (the curriculum's Build line names it; nothing uses it yet).
 - Development: pytest, ruff (lint and format), and mypy in strict mode with Pydantic's mypy plugin.
-  We chose mypy because the team uses it at work.
+  We chose mypy for its strict mode and its Pydantic plugin.
 
 ## Enforcing the boundary
 
