@@ -371,7 +371,9 @@ production UI.
 - [ ] Existing Temporal workflows as case steps, each with a declared contract (inputs, outputs
       and their provenance, risk)
 - [ ] Human tasks: named outcomes whose forms set case-file fields, approval defaults computed from
-      provenance, claiming and reassigning work
+      provenance
+- [ ] Task assignment: a person claims a task from a role's queue, or assigns or reassigns it to
+      someone else; and assignment by rule, written in the definition
 - [ ] Case lifecycle: closing when nothing is left to do, closing by a person with a declared
       reason, required steps, one step per collection item, child cases
 - [ ] Case data: typed references shown through resolvers, sensitive fields encrypted per case,
