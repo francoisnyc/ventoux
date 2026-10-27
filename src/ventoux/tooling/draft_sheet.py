@@ -1,8 +1,9 @@
 """`ventoux draft-sheet DRAFT --package FOLDER`: "Approve this plan" for a draft in the drafts
 folder, to standard output (brief, D64).
 
-The draft must be what `ventoux draft` wrote (its record's digest), and its record must be about
-it and its package; whether it passes is checked again by the sheet, never taken from the record.
+The draft must match its record's digest, and its record must be about it and its package; the
+record is plain JSON, signed by nobody, so its provenance is its word. Whether the draft passes
+is checked again by the sheet, never taken from the record.
 Exit 0 when it rendered, 2 when it couldn't read, check or render, never with a traceback.
 """
 
@@ -77,8 +78,9 @@ def sheet_of(draft: Path, folder: Path, catalog: Catalog) -> str:
             f"{shown(record_file(draft))} says the draft was {record.verdict}: only a draft that "
             "passed is shown for approval"
         )
-    # Only what `ventoux draft` wrote is shown as its draft: an edit makes it a plan written by
-    # hand, reviewed as one (brief, D64).
+    # A draft edited without its record is refused: an edit makes it a plan written by hand,
+    # reviewed as one. The record is signed by nobody, so an edit that rewrites it too isn't
+    # told; the sheet's own check and the reviewed pull request stand there (brief, D64).
     if hashlib.sha256(written).hexdigest() != record.draft_sha256:
         raise SheetRefused(
             f"{shown(draft)} was changed after it was drafted: its record holds another digest. "

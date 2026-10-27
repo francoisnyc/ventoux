@@ -120,7 +120,7 @@ def record_of(
         "reason": authored.reason,
         "warnings": list(authored.warnings),
         # The SHA-256 of the plan file's bytes, as written; None when none was: so a draft edited
-        # after it was drafted is told, and never shown for approval (brief, D64).
+        # without its record is told, and never shown for approval (brief, D64).
         "draft_sha256": digest,
     }
     return json.dumps(kept, indent=2, ensure_ascii=False) + "\n"

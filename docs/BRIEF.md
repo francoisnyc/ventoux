@@ -2639,14 +2639,19 @@ Adds to D1, D14, D50, D55, D56 and D63, whose text is kept.*
 - **Only a draft that passes is shown, checked again by the sheet itself:** the package with the
   draft in place, by `issues_of` (D50), never on the record's word. A draft with an error is
   refused, saying so, and never shown for approval (fail closed).
-- **A draft edited after it was drafted is refused.** `ventoux draft` writes the plan file's
+- **A draft edited without its record is refused.** `ventoux draft` writes the plan file's
   SHA-256 into its record (`draft_sha256`). The sheet hashes the file again and refuses on any
-  difference, or on a record without the field. A plan edited by hand is reviewed as one: copied
-  into a package, in a pull request.
+  difference, or on a record without the field: an accident, a fix by hand, a file copied from
+  elsewhere. A plan edited by hand is reviewed as one: copied into a package, in a pull request.
+- **The digest doesn't tell an edit that rewrote the record too.** The record is plain JSON,
+  signed by nobody: whoever edits the draft can edit it as well. Its provenance is its word, as
+  reliable as the drafts folder and the pull request that commits them. That is enough, because
+  the sheet's own check and the reviewed pull request are what stand between a draft and a
+  release. Signing the record would be a decision of its own.
 - **Every link is checked:** the record beside the draft reads, every field required; its verdict
   is `drafted`; its plan is the draft's own reference; its package is the package given; a plan
-  step of that package names the plan. The record's word is taken only for provenance: who asked,
-  the provider, the goal, and how many rounds.
+  step of that package names the plan. The record's word, unsigned, is taken only for provenance:
+  who asked, the provider, the goal, and how many rounds.
 - **What it shows, in order:**
   1. the provenance: "Drafted by `<provider>` for <who asked>, in N rounds, from the goal:", then the
      goal on one quoted line, escaped. The provider is shown as it names itself

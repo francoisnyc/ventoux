@@ -270,3 +270,25 @@ GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
 def test_the_guide_quotes_what_the_sheet_says(lines: str) -> None:
     # Each is asserted from a run in the tests above; the guide quotes it word for word.
     assert f"```text\n{lines}\n```" in GUIDE.read_text(encoding="utf-8")
+
+
+def test_an_edit_that_rewrites_the_record_too_is_not_told(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The digest tells an edit made without the record; the record is plain JSON, signed by
+    # nobody, so an edit that rewrites it too is shown, its provenance the record's word. What
+    # stands between a draft and a release is the sheet's own check and the reviewed pull request
+    # (brief, D64; the tutor's review of 15d).
+    drafted(tmp_path, monkeypatch, TO_THE_NOTE, TO_THE_EMAIL)
+    edited = tmp_path / DRAFT
+    edited.write_text(edited.read_text().replace("Refund an order", "Refund it, edited", 1))
+    edit_record(
+        tmp_path,
+        draft_sha256=hashlib.sha256(edited.read_bytes()).hexdigest(),
+        asked_by="the-cfo",
+    )
+    capsys.readouterr()
+    assert main(sheet()) == 0
+    page = capsys.readouterr().out
+    assert "Drafted by `recorded` for the-cfo, in 2 rounds, from the goal:" in page
+    assert "Refund it, edited" in page

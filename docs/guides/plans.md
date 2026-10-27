@@ -584,11 +584,16 @@ The sheet checks the draft again, in its package, by the check `ventoux release`
 that doesn't pass is never shown for approval, whatever its record says. Nothing the model wrote
 is shown but the plan itself, read as a plan: no round's answer, no problem fed back. Every title
 and literal the draft writes, and the goal, are shown as written, never rendered. A draft edited
-after it was drafted is refused:
+without its record (an accident, a fix by hand, a file copied from elsewhere) is refused:
 
 ```text
 drafts/refund-order@1.json was changed after it was drafted: its record holds another digest. A plan edited by hand is reviewed as one: copy it into the package and open a pull request
 ```
+
+The record is plain JSON, signed by nobody, so an edit that rewrites the record too isn't told:
+who drafted it, for whom and from which goal is the record's word, as reliable as the drafts
+folder and the pull request that commits them. What stands between a draft and a release is the
+sheet's own check and the reviewed pull request.
 
 It exits 0 when it printed the page, and 2 when it couldn't read, check or show the draft: a
 record that is missing or about another plan or package, a draft that doesn't pass, a package

@@ -1070,7 +1070,7 @@ every file restored).
 | 1 | A draft whose package has an error is refused and never rendered, checked again by the sheet itself with `issues_of`, never on the record's word | `test_a_draft_that_doesnt_pass_is_refused_and_never_rendered` | first: no such module; then a mutation skipping the check |
 | 2 | The same through the command, its record saying `drafted` and its digest matching: exit 2, nothing on standard output | `test_ventoux_draft_sheet_that_cant_read_or_check_exits_2_with_no_traceback` (case "a draft that doesn't pass") | mutation: the check skipped |
 | 3 | `ventoux draft` records the SHA-256 of the plan file as written, and none when it wrote none | `test_a_draft_repaired_is_written_with_its_record_into_the_drafts_folder_only`, `test_a_draft_never_repaired_is_abandoned_its_record_written_and_no_plan` | first: no such field; then a mutation writing another digest |
-| 4 | A draft edited after it was drafted is refused, saying so and what to do | `test_a_draft_edited_after_it_was_drafted_is_refused` | first: no such command; then a mutation leaving the digest unchecked |
+| 4 | A draft edited without its record is refused, saying so and what to do | `test_a_draft_edited_after_it_was_drafted_is_refused` | first: no such command; then a mutation leaving the digest unchecked |
 | 5 | A record missing, not JSON, without `draft_sha256`, `abandoned`, for another plan or another package, or a draft for a plan no step names: each refused, saying which, exit 2 | `test_a_draft_whose_record_or_package_doesnt_match_is_refused` (7 cases) | first: all 7 failed, raising or saying the wrong thing; then a mutation per check |
 | 6 | A drafts folder is never a package: `ventoux release` refuses it and writes no record, and so does the sheet's `--package` | `test_a_drafts_folder_is_never_a_package` | mutation: a folder without `case.json` read as a package |
 | 7 | The page reads, in order: provenance, the plain diff (as `ventoux diff --plain`), the plan as drafted (as `ventoux map`), the sheet one level down, the warnings, how it becomes real | `test_the_page_reads_provenance_changes_the_plan_nevers_warnings_and_how_in_order` | first: an empty page; then mutations leaving the plan out and the sheet's headings at their level |
@@ -1080,6 +1080,7 @@ every file restored).
 | 11 | The sheet can't reach the builder, the interpreter, `ventoux.temporal` or `temporalio`, and runs no text as code | `test_the_sheet_cant_reach_the_builder_the_interpreter_or_temporal` | an `import ventoux.core.interpreter` planted in the sheet |
 | 12 | `ventoux draft-sheet` prints the page and exits 0; a draft or a package that doesn't read, or no catalog named, exits 2 with no traceback | `test_ventoux_draft_sheet_prints_the_page_and_exits_0`, `test_ventoux_draft_sheet_that_cant_read_or_check_exits_2_with_no_traceback` (4 cases) | mutation: `NotApprovable` not caught |
 | 13 | The guide quotes the page's opening, how a draft becomes real, and the edited draft's refusal, word for word | `test_the_guide_quotes_what_the_sheet_says` (3 cases) | mutation: a word of the guide's line changed |
+| 14 | The digest doesn't tell an edit that rewrote the record too: the page is shown, its provenance the record's word (from the tutor's review) | `test_an_edit_that_rewrites_the_record_too_is_not_told` | mutation: the draft also compared with the last round's answer, choice 39's other way |
 
 ### Decided while building (15d)
 
@@ -1096,3 +1097,17 @@ every file restored).
   what is wrong with it, never what it holds, since a record keeps the model's answers.
 - **`plan_read`** is the case map's plan section, taken out so the map and the sheet read a plan
   the same way.
+
+### From the tutor's review of 15d (before merge)
+
+- **"A draft edited after it was drafted is refused" held only when the edit left the record
+  alone.** The record is plain JSON, signed by nobody. The tutor changed a draft's title, put the
+  new file's SHA-256 in the record and its `asked_by` to `the-cfo`, and the sheet rendered "for
+  the-cfo", with the edited title. Nothing unsafe gets through, since the sheet checks the draft
+  again, but the sentence read as a control. D64's line (not yet merged) is corrected in place,
+  as are the guide's sentence and the code comments. The digest tells an edit made without the
+  record (an accident, a fix by hand, a file copied from elsewhere), refused. It doesn't tell an
+  edit that rewrote the record too: provenance is the record's word, as reliable as the drafts
+  folder and the pull request that commits them. That is enough, because the sheet's own check
+  and the reviewed pull request stand between a draft and a release. Promise 14 pins it. Signing
+  the record would be a decision of its own, not now.
