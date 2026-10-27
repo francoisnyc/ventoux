@@ -65,7 +65,8 @@ from ventoux.temporal.forget import (
     opener_refusal,
     propose_forget,
 )
-from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.temporal.sandbox import SANDBOX
+from ventoux.temporal.worker import case_worker
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it
 # uses from the development setup is passed through, imported once and shared (as in 8c's tests).

@@ -52,26 +52,32 @@ Changing only that worker to `SANDBOX` took the builder's runs in the forget tes
   builder is passed through, never run in the sandbox, which keeps D58. Importing it lazily would
   fix this one module and move the development catalog's cases away from the workflows that
   serve them, so it was set aside.
-- **The registry's worker** (`registry_worker`) also keeps the default runner. Probed the same
-  way, it imports nothing of Ventoux afresh but its own module, which passes `case` through by
-  hand. It stays as it is; a test holds it to that.
+- **The registry's worker** (`registry_worker`) used the default runner too. With the default
+  registry it imports nothing of Ventoux afresh but its own module, which passes `case` through by
+  hand. But it takes the registry's class, and the tests pass subclasses defined in a test file.
+  A check after every test of the whole suite found the second door: after
+  `test_the_registry_crosses_continue_as_new`, a second `ventoux.tooling.builder` and
+  `ventoux.tooling.releases` hung on `ventoux.tooling`.
 
 ## Decided
 
-1. **The forget tests' second worker runs on `SANDBOX`**, as every other sandboxed worker in the
-   tests does (one case-release test runs a worker unsandboxed, which imports nothing afresh). A worker serving a module that imports Ventoux outside a passthrough block uses
-   Ventoux's runner (D62).
+1. **Every worker Ventoux builds runs on `SANDBOX`,** and so does any worker serving a module that
+   imports Ventoux outside a passthrough block (D62). The forget tests' second worker and
+   `registry_worker` now do. `SANDBOX` moved to `ventoux.temporal.sandbox`, its own file, since
+   the registry can't import `worker.py`, which imports the registry.
 2. **The re-export stays as 14d wrote it.** A deployment may still run its own worker on the
    default runner beside `ventoux.testing`. Ventoux can't prevent that, so `from ventoux import
    Case` keeps importing the builder by name.
 3. **One small test helper, `tests/one_copy.py`,** lists each loaded Ventoux module whose package
-   holds another copy of it. A test first puts back what earlier tests left, so it sees only its
-   own run.
+   holds another module of that name. A package holding a function of the same name, such as
+   `ventoux.core.expressions.check`, is not a copy. A test first puts back what earlier tests
+   left, so it sees only its own run. Run after every test of the whole suite, it now finds
+   nothing.
 
 ## Promises
 
 | Promise | Test that fails if it isn't true |
 |---|---|
 | The forget tests' workers load no second copy of any Ventoux module | `test_the_workers_here_load_no_second_copy_of_ventoux` (forget); failed on `main` with `ventoux.tooling.builder` |
-| The registry's worker, on the default runner, loads no second copy of any Ventoux module | `test_the_registry_worker_loads_no_second_copy_of_ventoux` (registry); fails, naming six `case` modules, when one of the registry's `case` imports moves out of its passthrough block |
+| A registry defined in a module that imports Ventoux loads no second copy of any Ventoux module | `test_the_registry_worker_loads_no_second_copy_of_ventoux` (registry); failed with `ventoux.tooling.builder` and `ventoux.tooling.releases` before `registry_worker` used `SANDBOX` |
 | `from ventoux import Case` gives the builder's own class, whatever the package's attribute holds | `test_the_re_export_gives_the_builders_own_class_whatever_the_package_attribute_holds` (layers) |

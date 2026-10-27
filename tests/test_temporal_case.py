@@ -54,7 +54,8 @@ from ventoux.temporal.cases import (
     start_case,
 )
 from ventoux.temporal.converter import ExactPayloadConverter
-from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.temporal.sandbox import SANDBOX
+from ventoux.temporal.worker import case_worker
 from ventoux.temporal.workflow import PlanWorkflow, RunReport
 from ventoux.testing import CATALOG, DAY, START
 from ventoux.tooling.keys import KeyRefused

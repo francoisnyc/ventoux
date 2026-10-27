@@ -32,7 +32,8 @@ from ventoux.temporal.cases import (
     start_case,
     view,
 )
-from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.temporal.sandbox import SANDBOX
+from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     FAKES,
     DevelopmentCases,

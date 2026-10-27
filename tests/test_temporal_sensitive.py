@@ -42,7 +42,8 @@ from ventoux.temporal.cases import (
 from ventoux.temporal.client import start_plan
 from ventoux.temporal.converter import ExactPayloadConverter, data_converter
 from ventoux.temporal.logs import TEMPORAL_LOGGERS
-from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.temporal.sandbox import SANDBOX
+from ventoux.temporal.worker import case_worker
 from ventoux.testing import START
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it

@@ -43,7 +43,8 @@ from ventoux.temporal.cases import (
 from ventoux.temporal.contract_check import cancellation_problems, check_workflow_contract
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import answer_forget, forget_report, propose_forget
-from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.temporal.sandbox import SANDBOX
+from ventoux.temporal.worker import case_worker
 
 # Temporal: this module defines workflows, so the workflow sandbox imports it afresh. The
 # development catalog is passed through, imported once and shared (as in 8c's tests).

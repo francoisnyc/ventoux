@@ -31,7 +31,8 @@ from ventoux.core.catalog import NotInCatalog
 from ventoux.core.interpreter import Outcome
 from ventoux.core.provenance import sourced
 from ventoux.temporal.client import answer, report, start_plan
-from ventoux.temporal.worker import SANDBOX, plan_worker
+from ventoux.temporal.sandbox import SANDBOX
+from ventoux.temporal.worker import plan_worker
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 from ventoux.testing import (
     CATALOG,

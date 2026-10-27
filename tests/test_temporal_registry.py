@@ -178,15 +178,16 @@ def test_a_worker_publishes_its_manifest() -> None:
 def test_the_registry_worker_loads_no_second_copy_of_ventoux(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Temporal: the registry's worker keeps Temporal's default runner, which passes nothing of
-    # Ventoux through; its module passes `case` through by hand, so nothing of Ventoux but the
-    # module itself is imported afresh (brief, D62).
+    # Temporal: a registry defined here is imported afresh with this file, which imports the
+    # builder through `ventoux.testing`; only Ventoux's runner passes the builder through, so a
+    # registry worker on Temporal's default runner would hang a second builder on
+    # `ventoux.tooling` (brief, D62).
     put_back(monkeypatch)
 
     async def scenario(client: Client) -> None:
         return None
 
-    in_production(scenario)
+    in_production(scenario, registry=EveryRequestRegistry)
     assert second_copies() == []
 
 

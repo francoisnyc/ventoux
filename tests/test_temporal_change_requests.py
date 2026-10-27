@@ -37,7 +37,7 @@ from ventoux.temporal.cases import (
     start_case,
 )
 from ventoux.temporal.forget import ForgetReport, answer_forget, propose_forget
-from ventoux.temporal.worker import SANDBOX
+from ventoux.temporal.sandbox import SANDBOX
 from ventoux.testing import (
     DevelopmentCases,
     DevelopmentForget,

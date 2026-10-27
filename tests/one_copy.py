@@ -6,6 +6,7 @@ the rest of the process doesn't recognise (docs/layers/fix-sandbox-reimport.md).
 """
 
 import sys
+import types
 
 import pytest
 
@@ -17,7 +18,9 @@ def second_copies() -> list[str]:
         package, _, child = name.rpartition(".")
         if not name.startswith("ventoux.") or package not in sys.modules:
             continue
-        if getattr(sys.modules[package], child, module) is not module:
+        held = getattr(sys.modules[package], child, module)
+        # A package may hold a function of the same name instead (`expressions.check`): not a copy.
+        if isinstance(held, types.ModuleType) and held is not module:
             copies.append(name)
     return sorted(copies)
 
