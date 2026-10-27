@@ -1,20 +1,24 @@
 """The tests' time-skipping test server, started by the harness (fix-flaky-temporal, "The port
 race").
 
-Two pytest processes on one machine can be given the same free port for their test servers; the
-one that loses prints `Failed to bind to address` and stays up on nothing, and sdk-core gives up
-after 5 s. The harness reads that line, stops the server and starts it on another port at once.
+A server whose port is held, by an IPv6 socket the SDK's IPv4 pick didn't see or by another
+process in the moment between pick and bind, prints `Failed to bind to address` and stays up on
+nothing, and sdk-core gives up after 5 s. The harness picks the port as the server binds it,
+reads that line, and stops the server and starts it on another port at once.
 Stand-ins (small shell scripts) play a server whose port is taken, one that exits, one that never
 answers.
 """
 
 import asyncio
+import errno
 import os
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 import temporalio.service
@@ -23,6 +27,7 @@ from skipping_server import (
     PORTS,
     SkippingServerFailed,
     server_binary,
+    server_port,
     skipping_server,
     time_skipping,
 )
@@ -276,3 +281,68 @@ def test_a_line_printed_late_fails_the_test_on_the_way_out(tmp_path: Path) -> No
     assert said.startswith(
         f"the test server said its port was taken after the test began on it: {loser}\n"
     )
+
+
+# --- From fix-test-server-port: the holder found, an IPv6 socket the IPv4 pick doesn't see ---
+
+
+@contextmanager
+def held_where_the_next_pick_lands(count: int = 20) -> Iterator[set[int]]:
+    """The next `count` ports the system would hand out, held by IPv6-only sockets, as long as
+    the block runs: as macOS's daemons hold theirs. macOS hands ports out one after the other, and
+    binding a port by its number doesn't move its counter, so an IPv4 pick lands on the first held
+    port every time. (Linux hands them out at random, so there the stretch is rarely met; a machine
+    without IPv6 holds nothing, and the set is empty.)"""
+    try:
+        with socket.socket(socket.AF_INET6) as probe:
+            probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            probe.bind(("::", 0))  # where the system's counter is now
+            last: int = probe.getsockname()[1]
+    except OSError:
+        yield set()  # no IPv6 here, so no IPv6 socket can hold a port
+        return
+    holders: list[socket.socket] = []
+    try:
+        for port in range(last + 1, min(last + 1 + count, 65536)):
+            holder = socket.socket(socket.AF_INET6)
+            holders.append(holder)
+            holder.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            try:
+                holder.bind(("::", port))
+            except OSError:
+                continue  # something else has it already: held either way
+            holder.listen()
+        yield set(range(last + 1, last + 1 + count))
+    finally:
+        for holder in holders:
+            holder.close()
+
+
+def test_the_first_port_is_never_one_an_ipv6_socket_holds() -> None:
+    # The cause: the IPv4 pick is handed a port an IPv6 socket holds, the server is refused and
+    # the harness has to move. Picked as the server binds, the first port is free on both.
+    async def go() -> list[str]:
+        async with time_skipping() as environment:
+            return environment.tried
+
+    with held_where_the_next_pick_lands() as held:
+        tried = asyncio.run(go())
+    assert len(tried) == 1, f"the harness had to move: {tried}"
+    assert int(tried[0].removeprefix("started on ")) not in held
+
+
+def test_without_ipv6_the_port_is_picked_on_ipv4(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A container without IPv6 (decision 8): `::` raises, and the server binds IPv4 alone there,
+    # which an IPv4 pick sees whole.
+    real = socket.socket
+
+    def without_ipv6(family: int = socket.AF_INET, *args: Any, **kwargs: Any) -> socket.socket:
+        if family == socket.AF_INET6:
+            raise OSError(errno.EAFNOSUPPORT, "Address family not supported by protocol")
+        return real(family, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "socket", without_ipv6)
+    port = server_port()
+    monkeypatch.undo()
+    with socket.socket() as attempt:
+        attempt.bind(("0.0.0.0", port))  # a port the IPv4 server can take
