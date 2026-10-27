@@ -22,6 +22,14 @@ def one_object(answer: str) -> dict[str, Any]:
     except json.JSONDecodeError as error:
         # The decoder's position only: its message never quotes the text.
         raise NotOneObject(f"not JSON: {error.msg} at line {error.lineno}, column {error.colno}")
+    except RecursionError:
+        # Python's reader recurses once per bracket: an answer nested deeper fails closed, as
+        # anything else that isn't one object does (brief, D63).
+        raise NotOneObject("nested too deeply to read") from None
+    except ValueError:
+        # The other ValueError `json.loads` raises: an integer longer than Python converts
+        # (4300 digits). Its message quotes nothing, but ours says it plainly.
+        raise NotOneObject("a number too long to read") from None
     if not isinstance(read, dict):
         raise NotOneObject("JSON, but not one object")
     return read

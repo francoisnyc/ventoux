@@ -835,7 +835,7 @@ In `tests/test_authoring.py` (the loop) and `tests/test_drafting.py` (the comman
 | 3 | A transition reading untrusted data is refused, then repaired (D49) | `test_a_transition_reading_untrusted_data_is_refused_then_repaired` | mutation: `UNTRUSTED_TRIGGER` left out of what refuses |
 | 4 | A loop back to a high-risk activity without a new approval is refused, then repaired (from the warm-up) | `test_a_loop_back_to_a_high_risk_activity_is_refused_then_repaired` | mutation: `APPROVAL_REUSED` left out of what refuses |
 | 5 | The problems go back in the fixed form, after the model's own answer, the first message and the system text unchanged | `test_the_problems_go_back_in_the_fixed_form_after_the_models_own_answer` | mutations: the first line changed; the model's answer left out |
-| 6 | An answer that isn't one JSON object (prose, prose around a fenced block, a list, a key twice) is `NOT_ONE_OBJECT`, never scraped; a shape problem is `SHAPE` at its path; another plan is `WRONG_PLAN` | `test_an_answer_that_isnt_a_draft_of_the_plan_is_a_problem_fed_back` (6 cases) | mutations: `unfenced` taking the first fence anywhere; the shape's path dropped; the reference unchecked |
+| 6 | An answer that isn't one JSON object (prose, prose around a fenced block, a list, a key twice) is `NOT_ONE_OBJECT`, never scraped; a shape problem is `SHAPE` at its path; another plan is `WRONG_PLAN` | `test_an_answer_that_isnt_a_draft_of_the_plan_is_a_problem_fed_back` (6 of its 8 cases; the other 2 are row 21) | mutations: `unfenced` taking the first fence anywhere; the shape's path dropped; the reference unchecked |
 | 7 | A provider that gives no answer stops the loop, saying why | `test_a_provider_that_gives_no_answer_stops_the_loop_saying_why` | mutation: `ProviderFailed` not caught |
 | 8 | The model is shown the goal, the plan to draft, the step with each field's sources (a person as `person`), every contract's promise, roles, labels, systems, the plan as it is and the schema; nothing else | `test_the_model_is_shown_the_step_its_sources_the_catalog_and_the_plan_never_a_case` | mutation: a person's source shown as written |
 | 9 | `--rounds` outside 1 to 5 is refused before anything is asked | `test_rounds_out_of_bounds_are_refused_before_anything_is_asked` | mutation: the bounds widened |
@@ -850,6 +850,11 @@ In `tests/test_authoring.py` (the loop) and `tests/test_drafting.py` (the comman
 | 18 | `--rounds` out of bounds, or `--by` not written as an identifier, exits 2 writing nothing | `test_a_command_that_cant_start_exits_2_writing_nothing` (2 cases) | mutation: the identifier unchecked |
 | 19 | No drafts folder named is refused, never a default folder | `test_no_drafts_folder_named_is_refused` | mutation: `drafts` by default |
 | 20 | The guide quotes the fixed first line and the command's lines word for word | `test_the_guide_quotes_what_the_loop_and_the_command_say` (3 cases) | mutation: a word of the guide's line changed |
+| 21 | An answer nested deeper than Python's reader goes, or holding an integer longer than it converts, is `NOT_ONE_OBJECT` fed back, quoting nothing, and the loop goes on (from the tutor's review) | `test_an_answer_that_isnt_a_draft_of_the_plan_is_a_problem_fed_back` (cases `too-deep`, `too-long`) | first: a `RecursionError` and a `ValueError` escaped the loop (the tutor's run) |
+| 22 | The same answers, from `ventoux draft`: exit 1 after the last round, the record written, no traceback | `test_answers_python_cant_read_are_fed_back_and_abandoned_with_their_record` | first: the `RecursionError` escaped before the record was written |
+| 23 | The same answers to the step advisor suggest nothing, as not one step name | `test_an_answer_that_isnt_one_step_name_suggests_nothing` (cases `too-deep`, `too-long`) | first: both escaped `advise` |
+| 24 | Only errors refuse a draft: a draft whose package only warns is drafted, its warnings kept | `test_a_draft_whose_package_only_warns_is_drafted_its_warnings_kept` | mutation: `is_error` true of every issue (the tutor's) |
+| 25 | `ventoux draft` keeps a drafted plan's warnings in its record | `test_a_drafts_warnings_are_kept_in_its_record` | mutation: the record's warnings left empty |
 
 ### Decided while building (15c)
 
@@ -868,3 +873,21 @@ In `tests/test_authoring.py` (the loop) and `tests/test_drafting.py` (the comman
 - **A key given twice is named** in the problem fed back (`a key is given twice: plan`): it is the
   draft's own text, as D35 allows; the step advisor still quotes nothing of its answer.
 - **`--by` is checked as an identifier** (D22) before anything is asked, as a proposal's is.
+
+### From the tutor's review of 15c (before merge)
+
+- **Two answers raised out of `one_object`, not `NotOneObject`.** Brackets nested 100,000 deep
+  (`RecursionError`) and a 5,000-digit integer (`ValueError`: Python converts at most 4,300
+  digits). `ventoux draft` raised out of `draft_command` with no record written, and the step
+  advisor raised instead of suggesting nothing. Now both are `NotOneObject`, quoting nothing:
+  "nested too deeply to read" and "a number too long to read". The loop feeds them back as
+  `NOT_ONE_OBJECT` and goes on (rows 21 to 23). Nesting inside a field Python reads
+  is a `SHAPE` problem, and an expression nests at most 32 levels (`MAX_DEPTH`, in `core/expressions/parse.py`), so no
+  other path out of the loop was found.
+- **Warnings are pinned** (rows 24 and 25): a package that gives only `WRITER_DECIDES` is
+  drafted, the warning kept in `Authored` and in the record.
+- **No `finally` for the record.** The record holds the rounds, which only `author` has, so a
+  `finally` in `draft_command` could write only a record without them, under a verdict D63
+  doesn't have. D63's "always" rests on `author` returning on every answer, which rows 21 to 23
+  now prove for the two answers that didn't. An exception left would be an engine bug, and
+  a traceback says it better than a half-written record.

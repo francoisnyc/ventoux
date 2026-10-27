@@ -164,6 +164,63 @@ def test_a_loop_back_to_a_high_risk_activity_is_refused_then_repaired() -> None:
     assert [each.problems for each in authored.rounds] == [(APPROVAL_REUSED,), ()]
 
 
+def with_a_remark() -> dict[str, Any]:
+    """The refund case, its plan step also given a remark that one rule takes from the
+    customer's note (untrusted) and another from the team's own note."""
+    case = refund_case()
+    case["fields"] |= {
+        "team_note": {"type": "string", "display": {"title": "What the team wrote"}},
+        "remark": {"type": "string", "display": {"title": "The remark the plan reads"}},
+    }
+    case["rules"] = {
+        "from_customer": {
+            "display": {"title": "Take the customer's note"},
+            "on": "opened",
+            "then": {"set": {"remark": {"var": "note"}}},
+        },
+        "from_team": {
+            "display": {"title": "Take the team's note"},
+            "on": "opened",
+            "then": {"set": {"remark": {"var": "team_note"}}},
+        },
+    }
+    case["steps"]["settle"]["inputs"]["remark"] = {"var": "remark"}
+    return case
+
+
+def branching_on_the_remark() -> dict[str, Any]:
+    """The repaired letter, sent only when the remark says "urgent": untrusted only when the
+    customer's rule set it last, which the package's check warns of and doesn't refuse."""
+    plan = with_letter("customer_email")
+    plan["fields"]["remark"] = {"type": "string"}
+    plan["states"]["pay"]["on"]["done"] = [
+        {"target": "write_letter", "when": {"==": [{"var": "remark"}, "urgent"]}},
+        {"target": "paid"},
+    ]
+    return plan
+
+
+WRITER_DECIDES = (
+    "steps.settle.inputs.remark: WRITER_DECIDES: refund-order@1 branches on remark (in pay, the "
+    "transition to write_letter), and this input reads remark, which comes from "
+    "untrusted:customer when from_customer sets it, and not when from_team does, and untrusted "
+    "data can't choose a plan's path, so whether the plan stops there depends on which rule set "
+    "remark last: set remark only from trusted values"
+)
+
+
+def test_a_draft_whose_package_only_warns_is_drafted_its_warnings_kept() -> None:
+    # Only errors refuse a draft, as only errors refuse a release; a warning is kept with it, for
+    # the person who reviews it (brief, D63).
+    plan = refund_plan() | {"fields": refund_plan()["fields"] | {"remark": {"type": "string"}}}
+    remarked = package(written(with_a_remark()), [written(plan)])
+    provider = Recorded.answering(written(branching_on_the_remark()))
+    authored = asyncio.run(author(GOAL, remarked, "refund-order@1", CATALOG, SCHEMA, provider, 3))
+    assert authored.verdict == "drafted"
+    assert [each.problems for each in authored.rounds] == [()]
+    assert authored.warnings == (WRITER_DECIDES,)
+
+
 class Asked:
     """A provider that keeps every request it is sent, and answers `answers` in order."""
 
@@ -198,10 +255,12 @@ def test_the_problems_go_back_in_the_fixed_form_after_the_models_own_answer() ->
     )
 
 
-NOT_JSON = (
-    "answer: NOT_ONE_OBJECT: the answer is not one JSON object: not JSON: Expecting value at line "
-    "1, column 1"
-)
+# Answers Python's own reader can't read: deeper than it recurses, an integer longer than it
+# converts. Each is a problem fed back, never an exception out of the loop (brief, D63).
+TOO_DEEP = "[" * 100_000 + "]" * 100_000
+TOO_LONG = '{"plan": ' + "9" * 5_000 + "}"
+NOT_ONE_OBJECT = "answer: NOT_ONE_OBJECT: the answer is not one JSON object: "
+NOT_JSON = NOT_ONE_OBJECT + "not JSON: Expecting value at line 1, column 1"
 WRONG_PLAN = (
     "plan: WRONG_PLAN: the draft is evergreen@1, and the package's step names refund-order@1"
 )
@@ -226,6 +285,8 @@ WRONG_PLAN = (
             '{"plan": "refund-order", "plan": "evergreen"}',
             "answer: NOT_ONE_OBJECT: the answer is not one JSON object: a key is given twice: plan",
         ),
+        pytest.param(TOO_DEEP, NOT_ONE_OBJECT + "nested too deeply to read", id="too-deep"),
+        pytest.param(TOO_LONG, NOT_ONE_OBJECT + "a number too long to read", id="too-long"),
         (
             '{"plan": "refund-order", "version": 1}',
             "display: SHAPE: required",

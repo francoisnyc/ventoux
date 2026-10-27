@@ -15,9 +15,14 @@ from test_authoring import (
     SCHEMA,
     TO_THE_EMAIL,
     TO_THE_NOTE,
+    TOO_DEEP,
+    TOO_LONG,
+    WRITER_DECIDES,
+    branching_on_the_remark,
     refund_case,
     refund_plan,
     the_package,
+    with_a_remark,
     written,
 )
 
@@ -25,6 +30,7 @@ from ventoux.authoring.loop import FIXED, author
 from ventoux.authoring.provider import Recorded, Recording
 from ventoux.testing import CATALOG
 from ventoux.tooling.cli import main
+from ventoux.tooling.releases import read_package
 
 PLAN = "refund-order@1"
 
@@ -88,6 +94,24 @@ def test_a_draft_never_repaired_is_abandoned_its_record_written_and_no_plan(
     )
 
 
+def test_answers_python_cant_read_are_fed_back_and_abandoned_with_their_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Anything but a draft of the plan is a problem fed back, and the record is written once the
+    # model was asked, whatever it answered (brief, D63).
+    project(tmp_path)
+    session = recorded(tmp_path, TOO_DEEP, TOO_LONG, TOO_DEEP)
+    monkeypatch.chdir(tmp_path)
+    assert main(draft(tmp_path, "--by", "omar", "--recording", str(session))) == 1
+    kept = record(tmp_path)
+    assert kept["verdict"] == "abandoned"
+    problems = [each["problems"] for each in kept["rounds"]]  # type: ignore[attr-defined]
+    deep = "answer: NOT_ONE_OBJECT: the answer is not one JSON object: nested too deeply to read"
+    long = "answer: NOT_ONE_OBJECT: the answer is not one JSON object: a number too long to read"
+    assert problems == [[deep], [long], [deep]]
+    assert "Traceback" not in capsys.readouterr().err
+
+
 def test_a_draft_repaired_is_written_with_its_record_into_the_drafts_folder_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -137,6 +161,27 @@ def test_a_provider_that_gives_no_answer_exits_2_with_its_record_and_no_tracebac
     )
     assert record(tmp_path)["verdict"] == "no answer"
     assert not (tmp_path / "drafts" / f"{PLAN}.json").exists()
+
+
+def test_a_drafts_warnings_are_kept_in_its_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A warning refuses nothing, and the person reviewing the draft reads it in the record
+    # (brief, D63).
+    package = project(tmp_path)
+    (package / "case.json").write_text(written(with_a_remark()))
+    plan = refund_plan()
+    plan["fields"]["remark"] = {"type": "string"}
+    (package / "plans" / "refund-order.json").write_text(written(plan))
+    recording = Recording(Recorded.answering(written(branching_on_the_remark())))
+    asyncio.run(author(GOAL, read_package(package), PLAN, CATALOG, SCHEMA, recording, 3))
+    session = tmp_path / "session.json"
+    recording.save(session)
+    monkeypatch.chdir(tmp_path)
+    assert main(draft(tmp_path, "--by", "omar", "--recording", str(session))) == 0
+    kept = record(tmp_path)
+    assert kept["verdict"] == "drafted"
+    assert kept["warnings"] == [WRITER_DECIDES]
 
 
 def test_a_draft_already_there_is_refused_and_nothing_is_asked(

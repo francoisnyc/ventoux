@@ -157,6 +157,8 @@ NOT_ONE_NAME = "the advisor's answer is not one step name, so it suggests nothin
         '{"step": "pay", "step": "goodwill"}',  # one key twice: JSON readers keep either
         '["goodwill"]',  # not an object
         'Sure:\n```json\n{"step": "goodwill"}\n```',  # prose around one fenced block
+        pytest.param("[" * 100_000 + "]" * 100_000, id="too-deep"),  # deeper than Python reads
+        pytest.param('{"step": ' + "9" * 5_000 + "}", id="too-long"),  # an integer too long to read
     ],
 )
 def test_an_answer_that_isnt_one_step_name_suggests_nothing(answer: str) -> None:
