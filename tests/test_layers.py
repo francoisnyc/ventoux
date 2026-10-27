@@ -225,6 +225,42 @@ def test_pure_layers_import_nothing_forbidden(layer: str) -> None:
     )
 
 
+# A case's replay must never ask a model: the worker runs `ventoux.temporal`, so it imports no
+# LLM SDK and nothing from `authoring`, where models are asked (brief, D62).
+TEMPORAL_FORBIDDEN = {"ventoux.authoring"} | LLM_SDKS
+
+
+def temporal_imports(source: str) -> list[str]:
+    """The modules `source` imports that `ventoux.temporal` may not."""
+    return [
+        name
+        for name in imported_modules(source)
+        if any(is_under(name, package) for package in TEMPORAL_FORBIDDEN)
+    ]
+
+
+def test_temporal_may_not_import_authoring_or_an_llm_sdk() -> None:
+    assert temporal_imports("from ventoux.authoring.beside import advise_case\n") == [
+        "ventoux.authoring.beside"
+    ]
+    assert temporal_imports("import anthropic\n") == ["anthropic"]
+
+
+def test_temporal_imports_nothing_that_asks_a_model() -> None:
+    files = sorted((SRC / "ventoux" / "temporal").rglob("*.py"))
+    assert files, "no source found for ventoux.temporal"  # never pass by checking nothing
+    violations = [
+        f"{path.relative_to(SRC)} imports {name}"
+        for path in files
+        for name in temporal_imports(path.read_text())
+    ]
+    assert violations == [], (
+        "a case's replay must never ask a model, so ventoux.temporal imports nothing from "
+        f"{sorted(TEMPORAL_FORBIDDEN)}: the step advisor runs beside the case, as a client "
+        "(docs/layers/15-authoring.md, choice 24)"
+    )
+
+
 # Fail closed: a relative import doesn't say which layer it reaches, so it is reported, never skipped.
 def test_relative_imports_are_reported() -> None:
     assert forbidden_imports("core", "from ..temporal import worker\n") == ["..temporal"]

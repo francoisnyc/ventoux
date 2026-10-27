@@ -13,16 +13,18 @@ from typing import Any
 
 import pytest
 
-from ventoux.authoring.advisor import (
-    Advice,
-    FieldShown,
-    RunShown,
-    StepShown,
-    advise,
-    shown_to_advisor,
+from ventoux.authoring.advisor import Advice, advise, shown_to_advisor
+from ventoux.authoring.provider import (
+    Message,
+    Provider,
+    ProviderFailed,
+    Recorded,
+    Recording,
+    ReplayRefused,
+    Request,
 )
-from ventoux.authoring.provider import Message, Recorded, Recording, ReplayRefused, Request
 from ventoux.case.admission import ProposalRefused
+from ventoux.case.advising import FieldShown, RunShown, StepShown
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.memory import CaseRun
 from ventoux.case.runtime import decide, proposal_refused
@@ -95,6 +97,17 @@ def answering(*answers: str) -> Recorded:
     return Recorded.answering(*answers)
 
 
+def asked_by(provider: Provider, run: CaseRun, person: str) -> Advice:
+    """What `provider`'s model suggests to `person` on `run`, checked by admission."""
+    roles = frozenset(PEOPLE[person])
+    shown = shown_to_advisor(run.definition, CATALOG, run.state, person, roles, at=START)
+
+    async def refused(step: str) -> str | None:
+        return proposal_refused(run.definition, CATALOG, run.state, step, person, roles, at=START)
+
+    return asyncio.run(advise(shown, provider, refused))
+
+
 def asked_as(person: str, run: CaseRun, answer: str) -> Advice:
     """What the advisor suggests to `person` on `run`, answering `answer`, checked by admission
     as `person`'s proposal would be."""
@@ -143,6 +156,7 @@ NOT_ONE_NAME = "the advisor's answer is not one step name, so it suggests nothin
         '{"steps": "goodwill"}',  # another key
         '{"step": "pay", "step": "goodwill"}',  # one key twice: JSON readers keep either
         '["goodwill"]',  # not an object
+        'Sure:\n```json\n{"step": "goodwill"}\n```',  # prose around one fenced block
     ],
 )
 def test_an_answer_that_isnt_one_step_name_suggests_nothing(answer: str) -> None:
@@ -286,6 +300,7 @@ GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "cases.md"
         NOT_ONE_NAME,
         "goodwill requires review, which hasn't completed",
         "ana proposed goodwill as support, suggested by the step advisor",
+        "Suggested by the step advisor (untrusted:llm): goodwill",
     ],
 )
 def test_the_guide_quotes_what_the_advisor_and_admission_say(line: str) -> None:
@@ -297,3 +312,45 @@ def test_the_guides_history_line_is_what_a_suggested_proposal_writes() -> None:
     suggested = propose("goodwill", "ana", suggested_by="step-advisor")
     run = run_case(claim(), file=OPENED, answers=[REVIEWED_150, suggested], people=PEOPLE)
     assert "ana proposed goodwill as support, suggested by the step advisor" in run.history
+
+
+def test_every_suggestion_is_said_labelled_untrusted_llm() -> None:
+    # One function says a suggestion wherever it is shown, so the label can't be left off
+    # (brief, D61) (brief, D62).
+    suggested = asked_as("ana", reviewed(), '{"step": "goodwill"}')
+    nothing = asked_as("ana", reviewed(), '{"step": null}')
+    assert suggested.source == nothing.source == "untrusted:llm"
+    assert suggested.said() == "Suggested by the step advisor (untrusted:llm): goodwill"
+    assert nothing.said() == (
+        "The step advisor (untrusted:llm) suggests nothing: the advisor has no step to suggest"
+    )
+
+
+class Failing:
+    """A provider whose model gives no answer, as the live one fails closed (brief, D62)."""
+
+    name = "failing"
+
+    async def complete(self, request: Request) -> str:
+        raise ProviderFailed("the model refused to answer")
+
+
+def test_a_provider_that_gives_no_answer_suggests_nothing_saying_why() -> None:
+    run = reviewed()
+    roles = frozenset(["support"])
+    shown = shown_to_advisor(run.definition, CATALOG, run.state, "ana", roles, START)
+
+    async def refused(step: str) -> str | None:
+        return proposal_refused(run.definition, CATALOG, run.state, step, "ana", roles, START)
+
+    advice = asyncio.run(advise(shown, Failing(), refused))
+    why = "the step advisor gave no answer: the model refused to answer"
+    assert advice == Advice(None, why, "failing", gave_no_answer=True)
+
+
+def test_a_recording_that_cant_answer_is_a_provider_giving_no_answer() -> None:
+    # Asked a request it didn't record, a recording gives no answer, as a live provider can't:
+    # the advisor suggests nothing, saying why (from the tutor's review of 15b).
+    advice = asked_by(Recorded.read(RECORDING), opened(), "ana")
+    why = "the step advisor gave no answer: request 1 differs from the one recorded, at message 1"
+    assert advice == Advice(None, why, "recorded", gave_no_answer=True)

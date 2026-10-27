@@ -167,8 +167,38 @@ it herself:
 goodwill requires review, which hasn't completed
 ```
 
-Whatever it suggests is shown as the step advisor's, `untrusted:llm`. If Ana proposes it, the
-proposal is hers: she can't approve the run, and the history says so:
+Whatever it suggests is shown labelled as the step advisor's, `untrusted:llm`, wherever it is
+shown:
+
+```text
+Suggested by the step advisor (untrusted:llm): goodwill
+```
+
+On a running case, `ventoux advise` asks it for a person and prints that line. It proposes nothing:
+
+```bash
+ventoux advise claim-1 --by ana --role support
+```
+
+The advisor runs beside the case, as a client: what it is shown is computed in the worker, by a
+query, and each answer is checked there by admission, on a copy of the case. Nothing it does is
+recorded in the case's history, and a case's replay never asks a model.
+
+The live model is Anthropic's, installed with the extra `ventoux[anthropic]`. Its key is read
+from `ANTHROPIC_API_KEY`, never from a file. The model is named in `pyproject.toml`, with no
+default:
+
+```toml
+[tool.ventoux]
+model = "<the model's ID, as Anthropic names it>"
+```
+
+or with `--model`. With no model named, or no key, the command refuses before asking anything,
+naming the setting, never its value. A model that refuses, or whose answer is cut short, gives
+no answer, and the advisor suggests nothing, saying why.
+
+If Ana proposes the suggestion, the proposal is hers: she can't approve the run, and the history
+says so:
 
 ```text
 ana proposed goodwill as support, suggested by the step advisor

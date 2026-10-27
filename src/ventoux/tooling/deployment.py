@@ -40,6 +40,7 @@ class Configuration:
     # since stale output of a removed case looks the same on disk (brief, D58).
     by_hand: tuple[str, ...] = ()
     releases: str | None = None  # where `ventoux release` keeps its records (brief, D59)
+    model: str | None = None  # the model the live provider asks; none named is refused (brief, D62)
 
 
 def configuration(start: Path) -> Configuration:
@@ -60,7 +61,7 @@ def read(path: Path) -> Configuration:
         raise Unconfigured(f"{path} isn't TOML: {error}") from None
     said = data.get("tool", {}).get("ventoux", {})
     for key in said:
-        if key not in ("catalog", "cases", "packages", "releases", "by_hand"):
+        if key not in ("catalog", "cases", "packages", "releases", "by_hand", "model"):
             raise Unconfigured(f"{path}: [tool.ventoux] has no setting {key}")
     for key, value in said.items():
         if key == "by_hand":
@@ -76,6 +77,7 @@ def read(path: Path) -> Configuration:
         cases=said.get("cases", "cases"),
         packages=said.get("packages", "packages"),
         releases=said.get("releases"),
+        model=said.get("model"),
         by_hand=tuple(said.get("by_hand", ())),
     )
 

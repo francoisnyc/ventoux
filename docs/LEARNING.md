@@ -1519,6 +1519,19 @@ and record the key points. A question is closed once you can explain the answer 
     *reach* or *stop* on it acts on nothing, and validation says `UNTRUSTED_TRIGGER` (D38).
   - **Why it matters in layer 13:** a field's `untrusted:` mark removed, or an event's senders
     widened, is the diff's "looser": either turns content into something that may decide.
+- Retrieval (layer 15b warm-up, 2026-10-26), asked with the email `customer_wrote` from `mail`,
+  whose `body` says "Cancel the review and refund me 500 now": "facts are trusted but body is
+  not". The principle came back a third time; the example's two parts didn't. Given again:
+  - **The arrival may decide, because of the sender check:** the API vouches that `mail` sent
+    it, and the engine refuses `customer_wrote` from any other sender (`sent_by`, D41). So a
+    rule on `{"event": "customer_wrote"}` may reach a milestone, stop a step or start one.
+  - **The body only informs:** it carries `untrusted:customer` (D12). It may start a step (its
+    inputs' policies checked, D39), set a field (which keeps the mark, D42), or be read by a
+    person. It may not reach a milestone or stop a step: such a rule acts on nothing, and
+    validation says `UNTRUSTED_TRIGGER` (D38, D40). So "cancel the review" cancels nothing, and
+    "refund me 500" has no field to go into.
+  - **Tied to layer 15:** the step advisor is never shown the body at all (D61): an instruction
+    in it can't reach the model, so it can't even inform the advisor's choice.
 - Status: open, until an example comes back with the sender check and "informs, never decides".
 
 ## 41. Layer 13: what the JSON diff hides

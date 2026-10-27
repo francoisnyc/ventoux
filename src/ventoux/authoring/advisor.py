@@ -6,16 +6,14 @@ It is asked on behalf of one person, and suggests to them; they propose it, or d
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import TypeAdapter, ValidationError
 
-from ventoux.authoring.provider import Message, Provider, Request
+from ventoux.authoring.provider import Message, Provider, ProviderFailed, Request
+from ventoux.case.advising import AdvisorView, advisor_view
 from ventoux.case.definition import CaseDefinition, Name
-from ventoux.case.reading import kind_of
-from ventoux.case.runtime import proposal_refused
 from ventoux.case.state import CaseState
-from ventoux.case.visibility import may_see
 from ventoux.core.catalog import Catalog
 
 # Why admission would refuse the person's proposal of a step, or None: `proposal_refused`, in
@@ -24,46 +22,13 @@ Refused = Callable[[str], Awaitable[str | None]]
 
 
 @dataclass(frozen=True)
-class FieldShown:
-    """A field of the case file as the advisor sees it: never its value."""
+class Shown(AdvisorView):
+    """What the advisor is shown of a case, and the request that says it to the model."""
 
-    name: str
-    kind: str  # its declared type, as people read it: `a number`, `a reference to orders`
-    state: str  # `set` or `not set`, with `, sensitive` for a sensitive field; or `hidden`
-    sources: tuple[str, ...]  # where its value came from, a person said only as `person`
-
-
-@dataclass(frozen=True)
-class RunShown:
-    """A step's latest run: its entry, its status and its outcome, if it has one."""
-
-    entry: str  # `review#1`
-    status: str  # `open`, `running`, `done`, `failed`, …
-    outcome: str | None  # one of the outcomes its step or contract declares, never a value
-
-
-@dataclass(frozen=True)
-class StepShown:
-    """A step admission would accept from the person now, as the definition titles it."""
-
-    name: str
-    title: str
-    description: str
-
-
-@dataclass(frozen=True)
-class Shown:
-    """What the advisor is shown of a case, and the request that says it to the model: names,
-    kinds and states, never a case-file value, a person's identifier or a history line
-    (brief, D61)."""
-
-    case: str  # the case definition's name
-    title: str
-    fields: tuple[FieldShown, ...]  # in the definition's order
-    milestones: tuple[str, ...]  # reached, in order
-    runs: tuple[RunShown, ...]  # each step's latest run, in the order the steps are written
-    waiting_for: tuple[str, ...]  # what waits on people, as the inbox says it: roles, never names
-    steps: tuple[StepShown, ...]  # the steps the person's proposal would be admitted for now
+    @classmethod
+    def of(cls, view: AdvisorView) -> "Shown":
+        """`view`, with the request built from it alone."""
+        return cls(**vars(view))
 
     @property
     def request(self) -> Request:
@@ -101,6 +66,18 @@ class Advice:
     step: str | None  # the step to suggest; None: nothing to suggest
     refused: str | None  # why nothing is suggested, or None
     by: str  # the provider that answered
+    # Whether the provider gave no answer at all (a setting, the model or a recording failed):
+    # nothing is suggested, and a command says it couldn't ask (brief, D62).
+    gave_no_answer: bool = False
+    # Where a suggestion comes from: a model's answer, untrusted data, always (brief, D12).
+    source: Literal["untrusted:llm"] = "untrusted:llm"
+
+    def said(self) -> str:
+        """The advice as every caller shows it, labelled with its source, so the label is never
+        left off (brief, D61) (brief, D62)."""
+        if self.step is not None:
+            return f"Suggested by the step advisor ({self.source}): {self.step}"
+        return f"The step advisor ({self.source}) suggests nothing: {self.refused}"
 
 
 def shown_to_advisor(
@@ -113,60 +90,16 @@ def shown_to_advisor(
 ) -> Shown:
     """What the advisor is shown of `state`, asked at `at` on behalf of `by`, who holds
     `roles`: no more than they may see, and no value at all (brief, D61)."""
-    fields = tuple(field_shown(case, catalog, state, name, roles) for name in case.fields)
-    latest = {run.step: run for run in state.runs}  # runs are in order: the last one stays
-    runs = tuple(
-        RunShown(run.entry, run.status, outcome_of(state, step) if run.status == "done" else None)
-        for step in case.steps
-        if (run := latest.get(step)) is not None
-    )
-    steps = tuple(
-        StepShown(name, step.display.title, step.display.description)
-        for name, step in case.steps.items()
-        if proposal_refused(case, catalog, state, name, by, roles, at) is None
-    )
-    return Shown(
-        case.case,
-        case.display.title,
-        fields,
-        tuple(state.milestones),
-        runs,
-        tuple(state.waiting.values()),
-        steps,
-    )
-
-
-def field_shown(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, name: str, roles: frozenset[str]
-) -> FieldShown:
-    """The field `name` as the advisor sees it, for a person holding `roles`: hidden if they
-    may not see it (brief, D30); otherwise whether it is set, and the kinds of its sources."""
-    declared = case.fields[name]
-    kind = kind_of(name, declared.declared)
-    if not may_see(case, name, roles, catalog.roles):
-        return FieldShown(name, kind, "hidden", ())
-    is_set = "set" if name in state.values else "not set"
-    sensitive = ", sensitive" if declared.sensitive else ""
-    sources = tuple(sorted(source_kind(each) for each in state.sources.get(name, ())))
-    return FieldShown(name, kind, is_set + sensitive, sources)
-
-
-def source_kind(source: str) -> str:
-    """A source as the advisor is shown it: a person's answer as `person`, never who gave it;
-    a system or an untrusted label as written (`system:orders`, `untrusted:customer`)."""
-    return "person" if source.startswith("person:") else source
-
-
-def outcome_of(state: CaseState, step: str) -> str | None:
-    """The outcome `step`'s run gave: one of the names its step or contract declares (`approve`,
-    `declined`, `done`), the one value the advisor is shown, since it is the definition's word."""
-    outcome = state.values.get(f"{step}.outcome")
-    return outcome if isinstance(outcome, str) else None
+    return Shown.of(advisor_view(case, catalog, state, by, roles, at))
 
 
 async def advise(shown: Shown, provider: Provider, refused: Refused) -> Advice:
     """The step `provider`'s model suggests, once admission has checked it by `refused`."""
-    answer = await provider.complete(shown.request)
+    try:
+        answer = await provider.complete(shown.request)
+    except ProviderFailed as failed:  # no answer is never read as one (brief, D62)
+        no_answer = f"the step advisor gave no answer: {failed}"
+        return Advice(None, no_answer, provider.name, gave_no_answer=True)
     try:
         step = step_named(answer)
     except NotOneName:
