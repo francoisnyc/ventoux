@@ -9,6 +9,7 @@ ask, never with a traceback.
 
 import argparse
 import asyncio
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -62,10 +63,13 @@ def draft_command(arguments: argparse.Namespace, found: Configuration, catalog: 
         print(refused, file=sys.stderr)
         return CANT
     drafts.mkdir(parents=True, exist_ok=True)
-    record_file.write_text(record_of(arguments, released.name, provider, authored))
-    kept = f"its record: {shown(record_file, found)}"
+    digest = None
     if authored.verdict == "drafted" and authored.plan is not None:
         plan_file.write_text(authored.plan)
+        digest = hashlib.sha256(plan_file.read_bytes()).hexdigest()
+    record_file.write_text(record_of(arguments, released.name, provider, authored, digest))
+    kept = f"its record: {shown(record_file, found)}"
+    if digest is not None:
         print(
             f"{arguments.plan} drafted in {counted(len(authored.rounds))}: {shown(plan_file, found)}"
         )
@@ -95,7 +99,11 @@ def drafts_folder(found: Configuration) -> Path:
 
 
 def record_of(
-    arguments: argparse.Namespace, package: str, provider: Provider, authored: Authored
+    arguments: argparse.Namespace,
+    package: str,
+    provider: Provider,
+    authored: Authored,
+    digest: str | None,
 ) -> str:
     """The draft's provenance, kept beside it, never in it: so a reviewed plan reads the same
     whoever drafted it (brief, D14) (brief, D63)."""
@@ -111,6 +119,9 @@ def record_of(
         "verdict": authored.verdict,
         "reason": authored.reason,
         "warnings": list(authored.warnings),
+        # The SHA-256 of the plan file's bytes, as written; None when none was: so a draft edited
+        # after it was drafted is told, and never shown for approval (brief, D64).
+        "draft_sha256": digest,
     }
     return json.dumps(kept, indent=2, ensure_ascii=False) + "\n"
 

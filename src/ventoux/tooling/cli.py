@@ -58,6 +58,7 @@ from ventoux.tooling.deployment import (
     deployment_catalog,
     read,
 )
+from ventoux.tooling.draft_sheet import draft_sheet_command
 from ventoux.tooling.drafting import draft_command
 from ventoux.tooling.environments import environment_command
 from ventoux.tooling.releases import FolderStore, Run, read_package, release
@@ -191,6 +192,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     drafting.add_argument(
         "--catalog", help="the deployment's catalog, module:NAME (else pyproject.toml's)"
     )
+    sheeting = commands.add_parser(
+        "draft-sheet", help='"Approve this plan" for a drafted plan, checked again'
+    )
+    sheeting.add_argument("draft", type=Path, help="the draft, in the drafts folder")
+    sheeting.add_argument("--package", type=Path, required=True, help="the package it is for")
+    sheeting.add_argument(
+        "--catalog", help="the deployment's catalog, module:NAME (else pyproject.toml's)"
+    )
     advising = commands.add_parser(
         "advise", help="what the step advisor suggests to a person on a running case"
     )
@@ -226,6 +235,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return CANT_READ
     if arguments.command == "draft":
         return draft_command(arguments, found, catalog)
+    if arguments.command == "draft-sheet":
+        return draft_sheet_command(arguments, catalog)
     if arguments.command == "check":
         return check_files(arguments.files, found, catalog, arguments.unchanged)
     if arguments.command in ("release", "notes"):

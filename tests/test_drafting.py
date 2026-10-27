@@ -5,6 +5,7 @@ See docs/layers/15-authoring.md (15c) and brief D63.
 """
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 
@@ -85,6 +86,7 @@ def test_a_draft_never_repaired_is_abandoned_its_record_written_and_no_plan(
     assert kept["verdict"] == "abandoned"
     assert kept["reason"] == "abandoned after 3 rounds: the last draft still has 1 problem"
     assert kept["asked_by"] == "omar"
+    assert kept["draft_sha256"] is None  # nothing was written
     assert kept["rounds"] == [{"answer": TO_THE_NOTE, "problems": [INPUT_POLICY]}] * 3
     assert package_files(package) == before  # never written into the package
     said = capsys.readouterr()
@@ -135,6 +137,10 @@ def test_a_draft_repaired_is_written_with_its_record_into_the_drafts_folder_only
         "verdict": "drafted",
         "reason": None,
         "warnings": kept["warnings"],
+        # What was written, so an edit after drafting is told (brief, D64).
+        "draft_sha256": hashlib.sha256(
+            (tmp_path / "drafts" / f"{PLAN}.json").read_bytes()
+        ).hexdigest(),
     }
     assert package_files(package) == before
     assert capsys.readouterr().out == (
