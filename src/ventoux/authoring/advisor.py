@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import TypeAdapter, ValidationError
 
+from ventoux.authoring.answers import NotOneObject, one_object
 from ventoux.authoring.provider import Message, Provider, ProviderFailed, Request
 from ventoux.case.advising import AdvisorView, advisor_view
 from ventoux.case.definition import CaseDefinition, Name
@@ -129,12 +130,13 @@ NAME = TypeAdapter(Name)
 
 def step_named(answer: str) -> str | None:
     """The step `answer` names, or None for `{"step": null}`; `NotOneName` for anything else:
-    prose, a second key, a value that isn't a name written as the case writes names."""
+    not one JSON object (`one_object`), a second key, a value that isn't a name written as the
+    case writes names."""
     try:
-        read = json.loads(unfenced(answer), object_pairs_hook=no_key_twice)
-    except (ValueError, NotOneName):  # not JSON, or a key given twice
+        read = one_object(answer)
+    except NotOneObject:
         raise NotOneName() from None
-    if not isinstance(read, dict) or list(read) != ["step"]:
+    if list(read) != ["step"]:
         raise NotOneName()
     step = read["step"]
     if step is None:
@@ -143,22 +145,3 @@ def step_named(answer: str) -> str | None:
         return NAME.validate_python(step, strict=True)
     except ValidationError:
         raise NotOneName() from None
-
-
-def unfenced(answer: str) -> str:
-    """`answer` without the one fenced block around it, if it is one: a model often writes
-    ```json on the line before and ``` on the line after."""
-    text = answer.strip()
-    if not (text.startswith("```") and text.endswith("```") and "\n" in text):
-        return text
-    inside = text[: -len("```")]
-    return inside[inside.index("\n") + 1 :]
-
-
-def no_key_twice(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    """An object read from JSON, refusing a key given twice: Python's reader would keep the
-    last one, silently."""
-    keys = [key for key, _ in pairs]
-    if len(set(keys)) != len(keys):
-        raise NotOneName()
-    return dict(pairs)
