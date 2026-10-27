@@ -909,6 +909,8 @@ sheet; your points for 15d settled more:
 
 What follows is what they left open. Answer by number.
 
+**Answered 2026-10-27:** all as recommended. D64 is written before building.
+
 **Warm-up: learning question 41.** Asked for two things the semantic diff shows that the JSON
 diff can't, and why. Answered "tell me briefly"; told: a role added to `review` widens what three
 fields, every outcome and every output show (D30), and an input moved changes who may approve
