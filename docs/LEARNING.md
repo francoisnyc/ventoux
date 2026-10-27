@@ -1648,6 +1648,13 @@ and record the key points. A question is closed once you can explain the answer 
   dropped that starts a step at opening, a count lowered that is looser, a contract's change
   path by path. Each is computed from more than the line that changed (the catalog, the other
   steps, provenance), which is why the JSON can't show it.
+- Retrieval (layer 15d warm-up, 2026-10-27): asked for two things the semantic diff shows that
+  the JSON diff can't, and why. Answered "tell me briefly"; told: one role added to `review`
+  widens what three fields, every outcome and every output show (a role the case names sees
+  every field that doesn't narrow itself, D30); an input moved changes who may approve `pay`
+  (exclusion is computed from provenance, D11). Each is computed from more than the line that
+  changed, which is why the JSON can't show it. 15d puts this diff on "Approve this plan", for
+  the same reason: an approver of a drafted plan reads effects, not lines.
 - Status: open, until two of those come back with why the JSON can't show them.
 
 ## 42. Layer 12: why plans don't migrate

@@ -109,16 +109,19 @@ def case_map(package: Package, catalog: Catalog) -> str:
         [read(f"close_reasons.{name}", package, catalog) for name in case.close_reasons],
     )
     section("Closing", [bullet(read_closing(case))])
-    for reference, plan in package.plans.items():
-        entries = [f"- It starts at {text(plan.initial)}."]
-        entries += [
-            read(f"plans.{reference}.fields.{name}", package, catalog) for name in plan.fields
-        ]
-        entries += [
-            read(f"plans.{reference}.states.{name}", package, catalog) for name in plan.states
-        ]
-        section(f"Plan {text(reference)}", entries)
+    for reference in package.plans:
+        section(f"Plan {text(reference)}", plan_read(reference, package, catalog))
     return "\n".join(lines) + "\n"
+
+
+def plan_read(reference: str, package: Package, catalog: Catalog) -> list[str]:
+    """The plan `reference` of `package`: where it starts, then each field and state read, as
+    the map and "Approve this plan" show it (brief, D56) (brief, D64)."""
+    plan = package.plans[reference]
+    entries = [f"- It starts at {text(plan.initial)}."]
+    entries += [read(f"plans.{reference}.fields.{name}", package, catalog) for name in plan.fields]
+    entries += [read(f"plans.{reference}.states.{name}", package, catalog) for name in plan.states]
+    return entries
 
 
 def read(path: str, package: Package, catalog: Catalog) -> str:
