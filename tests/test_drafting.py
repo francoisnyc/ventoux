@@ -21,7 +21,7 @@ from test_authoring import (
     written,
 )
 
-from ventoux.authoring.loop import author
+from ventoux.authoring.loop import FIXED, author
 from ventoux.authoring.provider import Recorded, Recording
 from ventoux.testing import CATALOG
 from ventoux.tooling.cli import main
@@ -191,3 +191,24 @@ def test_no_drafts_folder_named_is_refused(
     assert capsys.readouterr().err == (
         'no drafts folder is named: name it in pyproject.toml, [tool.ventoux] drafts = "drafts"\n'
     )
+
+
+GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        FIXED,
+        f"{PLAN} abandoned after 3 rounds: the last draft still has 1 problem",
+        (
+            f"{PLAN} drafted in 2 rounds: drafts/{PLAN}.json\n"
+            f"its record: drafts/{PLAN}.record.json\n"
+            "keep it in a pull request: it runs nowhere until it is reviewed, released and "
+            "activated"
+        ),
+    ],
+)
+def test_the_guide_quotes_what_the_loop_and_the_command_say(lines: str) -> None:
+    # Each is asserted from a run in the tests above; the guide quotes it word for word.
+    assert f"```text\n{lines}\n```" in GUIDE.read_text(encoding="utf-8")

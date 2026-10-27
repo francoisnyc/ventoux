@@ -510,3 +510,51 @@ when the outcome sets fields (`form={"approved_amount": Decimal("250")}`); the s
 Not yet: an activity's output reaching the case file, and a person's form landing in it rather
 than in the plan's fields (layer 8). A plan run never continues as new: the bound on loops keeps its history far below
 Temporal's limits. A case does, keeping its keys (brief, D27; the cases guide).
+
+## AI-drafted plans
+
+A model can draft a plan from a goal in words: `ventoux draft` asks it, checks what it writes, and
+sends the problems back, for a few rounds. The draft is data from start to end: it is never run,
+not even on fakes, and the builder never runs on it (brief, D58, D63).
+
+```bash
+ventoux draft packages/refund --plan refund-order@1 --by omar \
+  --goal "Refund the order, then draft a letter telling the customer it is on its way."
+```
+
+It drafts only a plan a step of the package names, here `settle`'s. The model is shown the goal;
+the plan's published schema; the step, with each field it gives the plan and where that field's
+value comes from (`note: system:opener, untrusted:customer`); every contract the catalog holds,
+with its input policies; the roles, labels and systems; and the plan as it is now. It is never
+shown a case file, nor any contract's code.
+
+Each answer must be one JSON object, at most inside one fenced block. It is then checked in its
+package by the same check `ventoux release` runs. What is refused goes back to the model in one
+fixed form, the problems written as `ventoux check` writes them:
+
+```text
+The draft was refused. Fix every problem below and answer with the whole plan, as one JSON object.
+```
+
+A draft that sends the letter to the address in the customer's note is refused, since `to_customer`
+takes only trusted data; so is one that branches on the note, or goes back to `pay` without a new
+approval. After the last round (3, or `--rounds` from 1 to 5), a draft still refused is abandoned:
+
+```text
+refund-order@1 abandoned after 3 rounds: the last draft still has 1 problem
+```
+
+A draft that passes is written into the drafts folder the configuration names
+(`[tool.ventoux] drafts = "drafts"`), never into the package, with its record: the goal, who
+asked, the provider, each round's answer and problems, and the verdict.
+
+```text
+refund-order@1 drafted in 2 rounds: drafts/refund-order@1.json
+its record: drafts/refund-order@1.record.json
+keep it in a pull request: it runs nowhere until it is reviewed, released and activated
+```
+
+Keeping a draft is a person's pull request: copy it into the package, or write the builder code
+for it, and CI shows its diff. A draft already in the folder is refused, never overwritten. The
+command exits 0 when it drafted, 1 when it abandoned, and 2 when it couldn't read or ask: a
+setting, the package, or a model that gave no answer.
