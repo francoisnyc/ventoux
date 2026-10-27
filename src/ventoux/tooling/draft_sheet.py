@@ -101,7 +101,6 @@ def sheet_of(draft: Path, folder: Path, catalog: Catalog) -> str:
     # by `approve_this_plan` (brief, D64).
     drafted = Drafted(
         text,
-        shown(draft),
         asked_by=record.asked_by,
         provider=record.provider,
         goal=record.goal,

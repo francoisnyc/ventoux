@@ -1057,3 +1057,42 @@ and an environment activates it.
     11. **The guide:** its quoted lines match the page word for word.
 
     *Recommended.*
+
+### 15d: "Approve this plan"
+
+In `tests/test_approve.py` (the page) and `tests/test_draft_sheet.py` (the command), with the
+record's digest in `tests/test_drafting.py`. "Shown failing" names how each test was seen to fail:
+first, before the code existed, or by a mutation of the code it guards (17 run, all caught,
+every file restored).
+
+| # | Promise | Test | Shown failing |
+|---|---|---|---|
+| 1 | A draft whose package has an error is refused and never rendered, checked again by the sheet itself with `issues_of`, never on the record's word | `test_a_draft_that_doesnt_pass_is_refused_and_never_rendered` | first: no such module; then a mutation skipping the check |
+| 2 | The same through the command, its record saying `drafted` and its digest matching: exit 2, nothing on standard output | `test_ventoux_draft_sheet_that_cant_read_or_check_exits_2_with_no_traceback` (case "a draft that doesn't pass") | mutation: the check skipped |
+| 3 | `ventoux draft` records the SHA-256 of the plan file as written, and none when it wrote none | `test_a_draft_repaired_is_written_with_its_record_into_the_drafts_folder_only`, `test_a_draft_never_repaired_is_abandoned_its_record_written_and_no_plan` | first: no such field; then a mutation writing another digest |
+| 4 | A draft edited after it was drafted is refused, saying so and what to do | `test_a_draft_edited_after_it_was_drafted_is_refused` | first: no such command; then a mutation leaving the digest unchecked |
+| 5 | A record missing, not JSON, without `draft_sha256`, `abandoned`, for another plan or another package, or a draft for a plan no step names: each refused, saying which, exit 2 | `test_a_draft_whose_record_or_package_doesnt_match_is_refused` (7 cases) | first: all 7 failed, raising or saying the wrong thing; then a mutation per check |
+| 6 | A drafts folder is never a package: `ventoux release` refuses it and writes no record, and so does the sheet's `--package` | `test_a_drafts_folder_is_never_a_package` | mutation: a folder without `case.json` read as a package |
+| 7 | The page reads, in order: provenance, the plain diff (as `ventoux diff --plain`), the plan as drafted (as `ventoux map`), the sheet one level down, the warnings, how it becomes real | `test_the_page_reads_provenance_changes_the_plan_nevers_warnings_and_how_in_order` | first: an empty page; then mutations leaving the plan out and the sheet's headings at their level |
+| 8 | Only errors refuse; a warning is shown as `ventoux check` writes it, and "None." when there is none | `test_warnings_are_said_as_ventoux_check_says_them`, and promise 7's test | mutations: warnings refusing; "None." always |
+| 9 | A title, a literal, the goal, who asked and the provider are shown, never rendered; only the page's own headings start a line with `#` | `test_what_a_draft_or_a_person_writes_is_shown_never_rendered` | mutations: the goal unescaped; the provider in a plain code span |
+| 10 | No round's answer, no problem fed back, no reason and no recorded warning reach the page | `test_the_models_own_text_never_reaches_the_page` | mutation: the goal taken from the record's `reason` |
+| 11 | The sheet can't reach the builder, the interpreter, `ventoux.temporal` or `temporalio`, and runs no text as code | `test_the_sheet_cant_reach_the_builder_the_interpreter_or_temporal` | an `import ventoux.core.interpreter` planted in the sheet |
+| 12 | `ventoux draft-sheet` prints the page and exits 0; a draft or a package that doesn't read, or no catalog named, exits 2 with no traceback | `test_ventoux_draft_sheet_prints_the_page_and_exits_0`, `test_ventoux_draft_sheet_that_cant_read_or_check_exits_2_with_no_traceback` (4 cases) | mutation: `NotApprovable` not caught |
+| 13 | The guide quotes the page's opening, how a draft becomes real, and the edited draft's refusal, word for word | `test_the_guide_quotes_what_the_sheet_says` (3 cases) | mutation: a word of the guide's line changed |
+
+### Decided while building (15d)
+
+- **No "a plan the package lacks".** Choice 47's test 9 couldn't be written. `package()` refuses a
+  package missing a plan its steps name ("refund-order@1 is run by a plan step and isn't in
+  plans/: add it"), so a package that reads holds every plan its steps name, and a draft always
+  replaces one. D63's "or one a step names and the package lacks" can't happen either; D63's text
+  is kept, and this note says so.
+- **Every warning is said at `case.json`.** Choice 43 named three files. A plan's own check gives
+  errors only, and case validation says a plan's issues at the step that runs it
+  (`steps.settle.inputs.remark`), so a warning's path is always the case's. The other two
+  branches would never run, so they aren't written, and `Drafted` holds no path.
+- **The record is read by Pydantic, its problems by `core/plan.py`'s `problem`:** a field and
+  what is wrong with it, never what it holds, since a record keeps the model's answers.
+- **`plan_read`** is the case map's plan section, taken out so the map and the sheet read a plan
+  the same way.

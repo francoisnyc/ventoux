@@ -33,7 +33,6 @@ class Drafted:
     """A drafted plan and its provenance, as its record settled it (brief, D63)."""
 
     text: str  # the draft's JSON text, as the drafts folder holds it
-    path: str  # where the draft is, as a person reads it: `drafts/refund-order@1.json`
     asked_by: str  # who asked for it, an identifier (brief, D22)
     provider: str  # the provider, as it names itself: `anthropic:<model>`, `recorded`
     goal: str  # the goal, in the person's words
@@ -63,7 +62,7 @@ def approve_this_plan(drafted: Drafted, before: Package, folder: str, catalog: C
         plain(found, before, after, catalog),
         as_drafted(reference, after, catalog),
         one_level_down(never_sheet(after, catalog)),
-        warnings_of(issues, reference, drafted.path, folder),
+        warnings_of(issues, folder),
         HOW,
     ]
     return "\n".join(sections)
@@ -91,12 +90,13 @@ def as_drafted(reference: str, after: Package, catalog: Catalog) -> str:
     return "\n".join(lines) + "\n"
 
 
-def warnings_of(issues: list[Issue], reference: str, draft: str, folder: str) -> str:
-    """The warnings, each as `ventoux check` writes one for a package written by hand, at the
-    file the issue is in; "None." when there are none, so the section never reads as unchecked
-    (brief, D59) (brief, D64)."""
+def warnings_of(issues: list[Issue], folder: str) -> str:
+    """The warnings, each as `ventoux check` writes one for a package written by hand, at its
+    file; "None." when there are none, so the section never reads as unchecked (brief, D59)
+    (brief, D64). Every warning is the case's: a plan's own check gives errors only, and case
+    validation says a plan's issues at the step that runs it."""
     lines = [
-        f"- {text(f'{file_of(issue.path, reference, draft, folder)}: {as_checked(issue)}')}"
+        f"- {text(f'{folder}/case.json: {as_checked(issue)}')}"
         for issue in issues
         if not is_error(issue)
     ]
@@ -106,16 +106,6 @@ def warnings_of(issues: list[Issue], reference: str, draft: str, folder: str) ->
 def as_checked(issue: Issue) -> str:
     """A warning after its file, as `ventoux check` writes it: `path CODE (warning): message`."""
     return f"{issue.path} {issue.code} (warning): {issue.message}"
-
-
-def file_of(path: str, reference: str, draft: str, folder: str) -> str:
-    """The file an issue at `path` is in: the draft, for the drafted plan's; the package's plan
-    file, for another plan's (named as `ventoux check` names it); else the case's."""
-    if path.startswith(f"plans.{reference}."):
-        return draft
-    if path.startswith("plans."):
-        return f"{folder}/plans/{path.split('.')[1].partition('@')[0]}.json"
-    return f"{folder}/case.json"
 
 
 def one_level_down(page: str) -> str:

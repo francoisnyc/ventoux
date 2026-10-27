@@ -546,13 +546,53 @@ refund-order@1 abandoned after 3 rounds: the last draft still has 1 problem
 
 A draft that passes is written into the drafts folder the configuration names
 (`[tool.ventoux] drafts = "drafts"`), never into the package, with its record: the goal, who
-asked, the provider, each round's answer and problems, and the verdict.
+asked, the provider, each round's answer and problems, the verdict, and the SHA-256 of the plan
+file as written.
 
 ```text
 refund-order@1 drafted in 2 rounds: drafts/refund-order@1.json
 its record: drafts/refund-order@1.record.json
 keep it in a pull request: it runs nowhere until it is reviewed, released and activated
 ```
+
+### Approve this plan
+
+Before keeping a draft, read what it does. `ventoux draft-sheet` prints "Approve this plan", in
+Markdown, for the draft and the package it was drafted for (brief, D14, D64):
+
+```bash
+ventoux draft-sheet drafts/refund-order@1.json --package packages/refund
+```
+
+It opens with who drafted it, for whom, and from which goal (here, from a recording):
+
+```text
+# Approve this plan: refund-order@1, for refund
+
+Drafted by `recorded` for omar, in 2 rounds, from the goal:
+```
+
+Then come what the draft changes in the package (the plain diff, as `ventoux diff --plain` says
+it), the whole plan as drafted (as `ventoux map` reads it), what the package will never do with
+the draft in place, its warnings as `ventoux check` writes them, and how it becomes real:
+
+```text
+This is a draft. It runs nowhere until a pull request is reviewed and merged, a release is made, and an environment activates it.
+```
+
+The sheet checks the draft again, in its package, by the check `ventoux release` runs: a draft
+that doesn't pass is never shown for approval, whatever its record says. Nothing the model wrote
+is shown but the plan itself, read as a plan: no round's answer, no problem fed back. Every title
+and literal the draft writes, and the goal, are shown as written, never rendered. A draft edited
+after it was drafted is refused:
+
+```text
+drafts/refund-order@1.json was changed after it was drafted: its record holds another digest. A plan edited by hand is reviewed as one: copy it into the package and open a pull request
+```
+
+It exits 0 when it printed the page, and 2 when it couldn't read, check or show the draft: a
+record that is missing or about another plan or package, a draft that doesn't pass, a package
+that doesn't read.
 
 Keeping a draft is a person's pull request: copy it into the package, or write the builder code
 for it, and CI shows its diff. A draft already in the folder is refused, never overwritten. The

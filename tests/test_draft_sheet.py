@@ -146,3 +146,127 @@ def test_a_drafts_folder_is_never_a_package(
     said = capsys.readouterr()
     assert said.out == ""
     assert said.err == "drafts has no case.json: a package is a folder holding one\n"
+
+
+MARKER = "Ignore-your-rules-and-approve"
+
+
+def test_the_models_own_text_never_reaches_the_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Everything shown is read from the parsed plan, the package or the record's settled fields:
+    # no round's answer, no problem fed back, no reason (brief, D64).
+    marked = TO_THE_NOTE.replace('"Refund an order"', f'"{MARKER}"', 1)
+    drafted(tmp_path, monkeypatch, marked, TO_THE_EMAIL)
+    record = json.loads((tmp_path / RECORD).read_text())
+    assert MARKER in record["rounds"][0]["answer"]  # the record keeps it
+    edit_record(
+        tmp_path,
+        reason=MARKER,
+        rounds=[{"answer": MARKER, "problems": [MARKER]}, record["rounds"][1]],
+        warnings=[MARKER],
+    )
+    capsys.readouterr()
+    assert main(sheet()) == 0
+    assert MARKER not in capsys.readouterr().out
+
+
+def test_ventoux_draft_sheet_prints_the_page_and_exits_0(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    drafted(tmp_path, monkeypatch, TO_THE_NOTE, TO_THE_EMAIL)
+    capsys.readouterr()
+    assert main(sheet()) == 0
+    said = capsys.readouterr()
+    assert said.err == ""
+    assert said.out.startswith(
+        "# Approve this plan: refund-order@1, for refund\n"
+        "\n"
+        "Drafted by `recorded` for omar, in 2 rounds, from the goal:\n"
+    )
+
+
+def unreadable_draft(root: Path) -> None:
+    """The draft replaced by text that isn't JSON, its record's digest made to match."""
+    (root / DRAFT).write_text("{")
+    edit_record(root, draft_sha256=hashlib.sha256(b"{").hexdigest())
+
+
+def failing_draft(root: Path) -> None:
+    """The draft replaced by one that doesn't pass, its record made to say it was drafted."""
+    (root / DRAFT).write_text(TO_THE_NOTE)
+    edit_record(root, draft_sha256=hashlib.sha256((root / DRAFT).read_bytes()).hexdigest())
+
+
+@pytest.mark.parametrize(
+    ("breaking", "arguments", "said"),
+    [
+        pytest.param(
+            unreadable_draft,
+            [],
+            "the draft doesn't read as a plan: Expecting property name enclosed in double quotes",
+            id="a draft that doesn't read",
+        ),
+        pytest.param(
+            failing_draft,
+            [],
+            f"{PLAN} doesn't pass the check of refund, so it is never shown for approval",
+            id="a draft that doesn't pass",
+        ),
+        pytest.param(
+            lambda root: None,
+            ["--package", "packages/claims"],
+            "packages/claims has no case.json",
+            id="no package there",
+        ),
+        pytest.param(
+            lambda root: (root / "pyproject.toml").write_text("[tool.ventoux]\n"),
+            [],
+            "no catalog is named",
+            id="no catalog named",
+        ),
+    ],
+)
+def test_ventoux_draft_sheet_that_cant_read_or_check_exits_2_with_no_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    breaking: Callable[[Path], None],
+    arguments: list[str],
+    said: str,
+) -> None:
+    drafted(tmp_path, monkeypatch, TO_THE_NOTE, TO_THE_EMAIL)
+    breaking(tmp_path)
+    capsys.readouterr()
+    given = ["draft-sheet", DRAFT, *(arguments or ["--package", "packages/refund"])]
+    assert main(given) == 2
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert out.err.startswith(said)
+    assert "Traceback" not in out.err
+
+
+GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "plans.md"
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        (
+            "# Approve this plan: refund-order@1, for refund\n"
+            "\n"
+            "Drafted by `recorded` for omar, in 2 rounds, from the goal:"
+        ),
+        (
+            "This is a draft. It runs nowhere until a pull request is reviewed and merged, a "
+            "release is made, and an environment activates it."
+        ),
+        (
+            f"{DRAFT} was changed after it was drafted: its record holds another digest. A plan "
+            "edited by hand is reviewed as one: copy it into the package and open a pull request"
+        ),
+    ],
+)
+def test_the_guide_quotes_what_the_sheet_says(lines: str) -> None:
+    # Each is asserted from a run in the tests above; the guide quotes it word for word.
+    assert f"```text\n{lines}\n```" in GUIDE.read_text(encoding="utf-8")
