@@ -16,7 +16,7 @@ cases, and safe for an AI to draft.
   no cases, no worklists, no approval rules, no way to change the rules of open work. Teams write
   this themselves, or run a second engine (Camunda, Flowable) next to Temporal.
 - **BPM platforms lose developers.** A separate studio, its own app model and process files nobody
-  can review (an earlier tool failed at the author's company for these reasons).
+  can review: the reasons developers route around such tools.
 - **AI is entering this work.** Models draft workflows and propose next steps. For critical tasks
   (costly, irreversible or regulated actions), a model's mistake or an injected instruction must not
   turn into an action.
