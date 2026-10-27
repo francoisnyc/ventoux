@@ -386,11 +386,17 @@ production UI.
       prompt-injection benchmark
 - [ ] A published Python package and a `ventoux` CLI
 
-Beyond v1.0, tracked as issues: stages, timers anchored to a date on the case, absolute and
-recurring timers, suspend and reactivate, declared compensation (sagas), inbound event adapters,
-signed approvals (the production default for high-risk steps), plans drafted by a model for a single
-case at runtime, tamper-evident history, capture of model inputs and outputs, revising drafts in
-conversation, and tool search during authoring.
+Beyond v1.0, tracked as issues: stages, advanced joins (such as an inclusive join, waiting for
+every branch that started), timers anchored to a date on the case, absolute and recurring timers,
+suspend and reactivate, declared compensation (sagas), inbound event adapters, signed approvals (the
+production default for high-risk steps), plans drafted by a model for a single case at runtime,
+tamper-evident history, capture of model inputs and outputs, revising drafts in conversation, and
+tool search during authoring.
+
+Today a step's `requires` is an "all of these" join, and several steps reaching one milestone make
+a "first of these" join. An inclusive join would wait for every branch that started and ignore the
+ones that didn't; its design question is how case validation proves such a join is ever met, since
+a branch that starts and never ends would hold the case open.
 
 Timers anchored to a date on the case would bring a date field type, and a timer before or after
 that date: "3 days before the renewal date", "on the appointment date". Today a timer counts
