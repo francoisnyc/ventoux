@@ -7,13 +7,12 @@ package is checked, and the record is written once (brief, D50). See docs/guides
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from decimal import Decimal
 from pathlib import Path
-from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
 from ventoux.case.changes import Notes
+from ventoux.case.checked import is_error, issues_of, said
 from ventoux.case.notes import notes_for
 from ventoux.case.releases import (
     Hash,
@@ -30,9 +29,8 @@ from ventoux.case.releases import (
     package,
     record,
 )
-from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
-from ventoux.core.validate import Issue, validate
+from ventoux.core.validate import Issue
 
 # Pydantic: a `TypeAdapter` checks and converts plain data against any type, here the record's
 # dataclasses, as a model would; `dump_python(mode="json")` gives it back as plain JSON values.
@@ -175,29 +173,3 @@ def checked(released: Package, catalog: Catalog) -> list[Issue]:
     if errors:
         raise PackageRefused("\n".join(said(issue) for issue in errors))
     return issues
-
-
-def issues_of(released: Package, catalog: Catalog) -> list[Issue]:
-    """Every issue in the package: each plan's (layer 3), then the case's (layer 10), against
-    `catalog`. What `checked` refuses on, and what CI's summary says before merge."""
-    stored: dict[str, Any] = {
-        reference: json.loads(text, parse_float=Decimal)
-        for reference, text in released.written.plans.items()
-    }
-    issues = [
-        Issue(f"plans.{reference}.{issue.path}", issue.code, issue.message, issue.severity)
-        for reference, plan in released.plans.items()
-        for issue in validate(plan, catalog)
-    ]
-    issues += validate_case(released.case, catalog, stored)
-    return issues
-
-
-def is_error(issue: Issue) -> bool:
-    """Whether `issue` refuses the package: anything but a warning (fail closed)."""
-    return issue.severity != "warning"
-
-
-def said(issue: Issue) -> str:
-    """An issue as a line: `steps.pay.when: EXPRESSION_INVALID: …`."""
-    return f"{issue.path}: {issue.code}: {issue.message}"

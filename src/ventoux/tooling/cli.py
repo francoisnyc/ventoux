@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ventoux.case.changes import DiffRefused
+from ventoux.case.checked import said
 from ventoux.case.definition import CaseDefinition, CaseInvalid, parse_case
 from ventoux.case.diff import Diff, diff
 from ventoux.case.notes import NotesRefused, as_diff, told
@@ -58,7 +59,7 @@ from ventoux.tooling.deployment import (
     read,
 )
 from ventoux.tooling.environments import environment_command
-from ventoux.tooling.releases import FolderStore, Run, read_package, release, said
+from ventoux.tooling.releases import FolderStore, Run, read_package, release
 from ventoux.tooling.schema import write_schemas
 from ventoux.tooling.summary import LIMIT, cant_be_read, for_summary_file, summarize
 
