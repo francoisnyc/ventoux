@@ -386,11 +386,18 @@ production UI.
       prompt-injection benchmark
 - [ ] A published Python package and a `ventoux` CLI
 
-Beyond v1.0, tracked as issues: stages, absolute and recurring timers, suspend and reactivate,
-declared compensation (sagas), inbound event adapters, signed approvals (the production default for
-high-risk steps), plans drafted by a model for a single case at runtime, tamper-evident history,
-capture of model inputs and outputs, revising drafts in conversation, and tool search during
-authoring.
+Beyond v1.0, tracked as issues: stages, timers anchored to a date on the case, absolute and
+recurring timers, suspend and reactivate, declared compensation (sagas), inbound event adapters,
+signed approvals (the production default for high-risk steps), plans drafted by a model for a single
+case at runtime, tamper-evident history, capture of model inputs and outputs, revising drafts in
+conversation, and tool search during authoring.
+
+Timers anchored to a date on the case would bring a date field type, and a timer before or after
+that date: "3 days before the renewal date", "on the appointment date". Today a timer counts
+forward from a moment in the case (its opening, a milestone, a run's start, an answer, an event's
+arrival). The design questions: where the date may come from, since a date from untrusted data
+would decide when something happens; what a timer does when its date changes after it is set;
+which time zone a day is read in; and a date already past when the timer would be set.
 
 ## Contributing
 
