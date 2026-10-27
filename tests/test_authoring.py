@@ -6,16 +6,20 @@ See docs/layers/15-authoring.md (15c) and brief D63.
 
 import asyncio
 import json
+import subprocess
+import sys
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
+from test_layers import forbidden_calls
 
 from ventoux.authoring.loop import Authored, DraftRefused, author
 from ventoux.authoring.provider import Message, ProviderFailed, Recorded, Request
-from ventoux.case.releases import Package, package
+from ventoux.case.releases import Package, PackageRefused, package
 from ventoux.testing import CATALOG
+from ventoux.tooling.releases import checked
 
 ROOT = Path(__file__).parent.parent
 SCHEMA: dict[str, Any] = json.loads((ROOT / "schema" / "plan.schema.json").read_text())
@@ -314,3 +318,39 @@ def test_a_plan_no_step_names_is_refused_before_anything_is_asked() -> None:
         "evergreen@1 is run by no plan step of refund: draft a plan one of its steps names"
     )
     assert provider.requests == []
+
+
+OUT_OF_REACH = (
+    "ventoux.tooling.builder",
+    "ventoux.core.interpreter",
+    "ventoux.temporal",
+    "temporalio",
+)
+
+
+def test_the_loop_cant_reach_the_builder_the_interpreter_or_temporal() -> None:
+    # Transitive: a fresh interpreter imports the loop and lists every module it loaded, so a
+    # later import can't sneak one in (brief, D58) (brief, D63).
+    listed = subprocess.run(
+        [sys.executable, "-I", "-c", "import sys, ventoux.authoring.loop; print(*sys.modules)"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    reached = [name for name in listed if name.startswith(OUT_OF_REACH)]
+    assert reached == []
+
+
+def test_the_loop_runs_no_text_as_code() -> None:
+    # Definitions are data: the loop's own source calls nothing that runs text (non-negotiables).
+    source = (ROOT / "src" / "ventoux" / "authoring" / "loop.py").read_text()
+    assert forbidden_calls(source) == []
+
+
+def test_the_loop_refuses_a_draft_for_the_issues_ventoux_release_refuses_on() -> None:
+    # One function, never a copy (brief, D50) (brief, D63).
+    with_the_note = package(written(refund_case()), [TO_THE_NOTE])
+    with pytest.raises(PackageRefused) as refused:
+        checked(with_the_note, CATALOG)
+    authored = drafted_by(TO_THE_NOTE, rounds=1)
+    assert list(authored.rounds[0].problems) == str(refused.value).splitlines()
