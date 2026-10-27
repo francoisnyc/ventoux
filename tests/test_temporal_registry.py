@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from one_copy import put_back, second_copies
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHistory
@@ -172,6 +173,21 @@ def test_a_worker_publishes_its_manifest() -> None:
         "ventoux.case",
         {"kyc.check@1": Bound("KycCheck", "kyc")},
     )
+
+
+def test_the_registry_worker_loads_no_second_copy_of_ventoux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Temporal: the registry's worker keeps Temporal's default runner, which passes nothing of
+    # Ventoux through; its module passes `case` through by hand, so nothing of Ventoux but the
+    # module itself is imported afresh (brief, D62).
+    put_back(monkeypatch)
+
+    async def scenario(client: Client) -> None:
+        return None
+
+    in_production(scenario)
+    assert second_copies() == []
 
 
 def test_a_worker_refuses_to_start_without_its_registry() -> None:

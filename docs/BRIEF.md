@@ -2550,6 +2550,28 @@ to D12, D14, D22, D25 and D43, whose text is kept.*
   imports `authoring` or an LLM SDK. Set aside: a registered activity calling the model, which
   would make the advisor part of each definition and put an LLM SDK on the case worker.
 
+### D62. A worker serving a module that imports Ventoux runs it on Ventoux's runner
+
+*Decided 2026-10-26, in a fix (`docs/layers/fix-sandbox-reimport.md`). Adds to D31 and D58, whose
+text is kept.*
+
+- **Ventoux's runner, not Temporal's default.** A worker whose workflows live in a module that
+  imports `core`, `case` or `tooling` outside an `imports_passed_through()` block runs them on
+  `SANDBOX`, from `ventoux.temporal.worker`, as `case_worker` and `plan_worker` do. Temporal's
+  default runner passes no Ventoux module through: it imports each one afresh, and Python hangs
+  every fresh copy on the shared package it belongs to, so code reaching a module through its
+  package gets classes the rest of the process doesn't recognise. Found with `ventoux.testing`,
+  which imports the builder for the development catalog's cases: a test worker on the default
+  runner hung a second builder on `ventoux.tooling`, and a `Case` built from it failed
+  `ventoux check`.
+- **The registry's worker keeps the default runner.** Its module imports `case` only inside
+  `imports_passed_through()`, so nothing of Ventoux but the module itself is imported afresh.
+- **The re-export keeps reading the builder by name.** `from ventoux import Case` imports
+  `ventoux.tooling.builder` by its module name, never as the package's attribute, so it gives the
+  builder's own class even beside a deployment's worker on the default runner, which Ventoux
+  can't prevent. Set aside: making `ventoux.testing` import the builder lazily, which would move
+  the development catalog's cases out of the module that serves them and fix only that module.
+
 ## Concepts
 
 | Term | Meaning |

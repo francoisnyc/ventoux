@@ -275,10 +275,10 @@ def test_importing_ventoux_brings_no_temporal() -> None:
 def test_the_re_export_gives_the_builders_own_class_whatever_the_package_attribute_holds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Temporal's workflow sandbox imports the builder afresh for every run and hangs its copy on
-    # the shared `ventoux.tooling` package, as its `builder` attribute. `from ventoux import Case`
-    # must still give the class `ventoux check` looks for: the module by name, never the attribute
-    # (found by the whole test suite, layer 14d).
+    # A worker on Temporal's default runner imports the builder afresh for every run and hangs its
+    # copy on the shared `ventoux.tooling` package, as its `builder` attribute. `from ventoux import
+    # Case` must still give the class `ventoux check` looks for: the module by name, never the
+    # attribute (brief, D62).
     import ventoux
     import ventoux.tooling
     from ventoux.tooling.builder.case import Case
