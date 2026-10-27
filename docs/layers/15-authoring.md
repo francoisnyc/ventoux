@@ -823,3 +823,48 @@ one approval. Recorded in the log; the question stays open.
 
 38. **The decision: D63,** recording choices 8 to 11 and 28 to 37, written before building, per
     choice 26. *Recommended.*
+
+### 15c: the authoring loop
+
+In `tests/test_authoring.py` (the loop) and `tests/test_drafting.py` (the command).
+
+| # | Promise | Test | Shown failing |
+|---|---|---|---|
+| 1 | Untrusted data reaching a `trusted_only` input, never repaired, is refused each round and abandoned after the last, saying why, with no plan (the curriculum's negative test) | `test_untrusted_data_reaching_a_trusted_only_input_never_repaired_is_abandoned` | first: the answer was taken unchecked; then a mutation skipping the check |
+| 2 | The same, repaired in round 2, is drafted | `test_untrusted_data_reaching_a_trusted_only_input_repaired_is_drafted` | mutation: one round only |
+| 3 | A transition reading untrusted data is refused, then repaired (D49) | `test_a_transition_reading_untrusted_data_is_refused_then_repaired` | mutation: `UNTRUSTED_TRIGGER` left out of what refuses |
+| 4 | A loop back to a high-risk activity without a new approval is refused, then repaired (from the warm-up) | `test_a_loop_back_to_a_high_risk_activity_is_refused_then_repaired` | mutation: `APPROVAL_REUSED` left out of what refuses |
+| 5 | The problems go back in the fixed form, after the model's own answer, the first message and the system text unchanged | `test_the_problems_go_back_in_the_fixed_form_after_the_models_own_answer` | mutations: the first line changed; the model's answer left out |
+| 6 | An answer that isn't one JSON object (prose, prose around a fenced block, a list, a key twice) is `NOT_ONE_OBJECT`, never scraped; a shape problem is `SHAPE` at its path; another plan is `WRONG_PLAN` | `test_an_answer_that_isnt_a_draft_of_the_plan_is_a_problem_fed_back` (6 cases) | mutations: `unfenced` taking the first fence anywhere; the shape's path dropped; the reference unchecked |
+| 7 | A provider that gives no answer stops the loop, saying why | `test_a_provider_that_gives_no_answer_stops_the_loop_saying_why` | mutation: `ProviderFailed` not caught |
+| 8 | The model is shown the goal, the plan to draft, the step with each field's sources (a person as `person`), every contract's promise, roles, labels, systems, the plan as it is and the schema; nothing else | `test_the_model_is_shown_the_step_its_sources_the_catalog_and_the_plan_never_a_case` | mutation: a person's source shown as written |
+| 9 | `--rounds` outside 1 to 5 is refused before anything is asked | `test_rounds_out_of_bounds_are_refused_before_anything_is_asked` | mutation: the bounds widened |
+| 10 | A plan no step names is refused before anything is asked | `test_a_plan_no_step_names_is_refused_before_anything_is_asked` | mutation: the first plan step taken whatever it runs |
+| 11 | The loop can't reach the builder, the interpreter, `ventoux.temporal` or `temporalio`, transitively | `test_the_loop_cant_reach_the_builder_the_interpreter_or_temporal` | an `import ventoux.core.interpreter` planted in the loop |
+| 12 | The loop runs no text as code | `test_the_loop_runs_no_text_as_code` | an `eval` planted in the loop |
+| 13 | The loop refuses a draft for exactly the issues `ventoux release` refuses the package on | `test_the_loop_refuses_a_draft_for_the_issues_ventoux_release_refuses_on` | mutation: the loop writing its issues its own way |
+| 14 | `ventoux draft` abandoned: exit 1, the record written, no plan, the package untouched | `test_a_draft_never_repaired_is_abandoned_its_record_written_and_no_plan` | first: no such command; then a mutation exiting 0 |
+| 15 | `ventoux draft` drafted: exit 0, the plan and its record in the drafts folder only | `test_a_draft_repaired_is_written_with_its_record_into_the_drafts_folder_only` | mutation: the plan written into the package's folder |
+| 16 | A provider that gives no answer: exit 2, its record, no plan, no traceback | `test_a_provider_that_gives_no_answer_exits_2_with_its_record_and_no_traceback` | mutation: exit 0 on no answer |
+| 17 | A draft already there is refused, never overwritten, and nothing is asked | `test_a_draft_already_there_is_refused_and_nothing_is_asked` | mutation: the check removed |
+| 18 | `--rounds` out of bounds, or `--by` not written as an identifier, exits 2 writing nothing | `test_a_command_that_cant_start_exits_2_writing_nothing` (2 cases) | mutation: the identifier unchecked |
+| 19 | No drafts folder named is refused, never a default folder | `test_no_drafts_folder_named_is_refused` | mutation: `drafts` by default |
+| 20 | The guide quotes the fixed first line and the command's lines word for word | `test_the_guide_quotes_what_the_loop_and_the_command_say` (3 cases) | mutation: a word of the guide's line changed |
+
+### Decided while building (15c)
+
+- **The check has a module of its own, `case/checked.py`,** not `case/releases.py` as choice 28
+  said: case validation already loads `case/releases.py`, so the check importing
+  `validate_case` there made an import cycle. `ventoux release`, CI's summary, `ventoux check`
+  and the loop all import it from there.
+- **No `PACKAGE` line.** Choice 32 listed the package refusing a draft. Once a draft reads as a
+  plan and is the plan asked for, `package()` has nothing left to refuse (its refusals are a plan
+  that doesn't parse and a plan no step names, both caught before), so the branch would never
+  run. It isn't written; the package's own check is what follows.
+- **The draft's text is the JSON as the model wrote it,** inside its fence if it had one, with a
+  final line break, as a file ends.
+- **The schema comes from `schema_files()`,** the bytes `ventoux schema` publishes and CI keeps
+  equal to the committed file, never read from disk at a path that could be stale.
+- **A key given twice is named** in the problem fed back (`a key is given twice: plan`): it is the
+  draft's own text, as D35 allows; the step advisor still quotes nothing of its answer.
+- **`--by` is checked as an identifier** (D22) before anything is asked, as a proposal's is.
