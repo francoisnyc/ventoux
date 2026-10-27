@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ventoux.case.changes import DiffRefused
+from ventoux.case.checked import said
 from ventoux.case.definition import CaseDefinition, CaseInvalid, parse_case
 from ventoux.case.diff import Diff, diff
 from ventoux.case.notes import NotesRefused, as_diff, told
@@ -57,8 +58,9 @@ from ventoux.tooling.deployment import (
     deployment_catalog,
     read,
 )
+from ventoux.tooling.drafting import draft_command
 from ventoux.tooling.environments import environment_command
-from ventoux.tooling.releases import FolderStore, Run, read_package, release, said
+from ventoux.tooling.releases import FolderStore, Run, read_package, release
 from ventoux.tooling.schema import write_schemas
 from ventoux.tooling.summary import LIMIT, cant_be_read, for_summary_file, summarize
 
@@ -176,6 +178,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--catalog", help="the deployment's catalog, module:NAME (else pyproject.toml's)"
         )
     environments(commands)
+    drafting = commands.add_parser(
+        "draft", help="a model drafts a plan of a package, checked, into the drafts folder"
+    )
+    drafting.add_argument("package", type=Path, help="the package's folder")
+    drafting.add_argument("--plan", required=True, help="the plan to draft, as a step names it")
+    drafting.add_argument("--goal", required=True, help="what the plan should do, in words")
+    drafting.add_argument("--by", required=True, help="who asks")
+    drafting.add_argument("--rounds", type=int, default=3, help="at most this many, 1 to 5 (3)")
+    drafting.add_argument("--model", help="the model to ask (else pyproject.toml's model)")
+    drafting.add_argument("--recording", type=Path, help="replay a recording instead of a model")
+    drafting.add_argument(
+        "--catalog", help="the deployment's catalog, module:NAME (else pyproject.toml's)"
+    )
     advising = commands.add_parser(
         "advise", help="what the step advisor suggests to a person on a running case"
     )
@@ -209,6 +224,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Unconfigured as refused:
         print(refused, file=sys.stderr)
         return CANT_READ
+    if arguments.command == "draft":
+        return draft_command(arguments, found, catalog)
     if arguments.command == "check":
         return check_files(arguments.files, found, catalog, arguments.unchanged)
     if arguments.command in ("release", "notes"):

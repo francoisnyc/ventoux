@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from traceback import extract_tb
 
+from ventoux.case.checked import issues_of
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.releases import PackageRefused, PackageUnreadable, read_json
 from ventoux.case.releases import package as read_package
@@ -22,7 +23,6 @@ from ventoux.core.catalog import Catalog
 from ventoux.core.plan import PlanInvalid, parse_plan
 from ventoux.tooling.builder.case import Case
 from ventoux.tooling.builder.written import package
-from ventoux.tooling.releases import issues_of
 from ventoux.tooling.releases import read_package as read_folder
 
 

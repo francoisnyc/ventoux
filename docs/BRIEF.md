@@ -2583,6 +2583,43 @@ Adds to D12, D30, D59 and D61, whose text is kept.*
   model, or a workflow that doesn't answer its queries (a plan's run, a child's, or a worker that
   predates them), said in the command's own words, since that failure is sealed by the codec.
 
+### D63. The authoring loop: a plan drafted, checked as a release checks it, fed back, or abandoned
+
+*Decided 2026-10-27, in layer 15c (`docs/layers/15-authoring.md`, choices 8 to 11 and 28 to 38).
+Adds to D1, D13, D14, D49, D50, D58, D60 and D62, whose text is kept.*
+
+- **A model drafts a plan, never a case,** for a plan a package's step names (`--plan
+  refund-order@1`): one it has, which the draft replaces, or one a step names and the package
+  lacks. A case drafted at runtime would be a second front door beside the builder (D1, D13).
+- **What the model is shown:** fixed instructions; the published plan schema (D60); the goal, in
+  the person's words; the reference to draft; the step that names it, with each plan field it
+  gives and the kinds of its sources, as case validation computes them (a person said only as
+  `person`); every contract's promise, as `ventoux promises` prints it; the registered roles with
+  the risk each may approve, the source labels and the systems; and the plan as it is now, if
+  the package has one. Never a case file, which the loop is never given, and never an
+  implementation.
+- **Each answer is read as one JSON object,** at most inside one fenced block, as the step
+  advisor's is (D61); anything else, prose around a block included, is a problem fed back, never
+  scraped.
+- **Each draft is checked in its package by the function `ventoux release` checks with**
+  (`issues_of`, moved to `case` so `authoring` can reach it): the plan's own checks and case
+  validation, never a second set of rules (D50). Only errors refuse; warnings are kept.
+- **Problems go back in a fixed form:** a first line asking for the whole plan again, then one
+  line per problem, `path: CODE: message`, as `ventoux check` writes them. A message may quote a
+  literal the draft wrote (D35); it never quotes a case's value, since no case is involved.
+- **Bounded:** at most 3 rounds by default, 1 to 5 with `--rounds`. After the last round with
+  problems, the draft is **abandoned**, saying why, and is never written as a plan file. A
+  provider that gives no answer stops the loop at once (D62).
+- **Nothing from a draft is executed, imported or built:** no dry run, not even on fakes; the
+  builder never runs on it (D58); the draft is JSON, read by Pydantic. The loop's modules can't
+  reach the builder, the interpreter or Temporal, and a test proves it.
+- **`ventoux draft` writes into the drafts folder named in configuration** (`[tool.ventoux]
+  drafts`), never into a package: `<plan>.json` if drafted, and always, once the model was
+  asked, `<plan>.record.json`: the goal, who asked, the provider, each round's answer and
+  problems, the verdict and why. A draft already there is refused, never overwritten. It exits 0
+  drafted, 1 abandoned, 2 when it couldn't ask or read. Keeping a draft is a person's pull
+  request (D1); merging releases it (D50).
+
 ## Concepts
 
 | Term | Meaning |
