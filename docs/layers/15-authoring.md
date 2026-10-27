@@ -684,6 +684,18 @@ All in `tests/test_advisor.py`.
 Written 2026-10-27, from `main` at `4d90ae5` (15a and 15b merged). Choices 8 to 11 decided the
 loop. What follows is what they left open. Answer by number.
 
+**Answered 2026-10-27:** all as recommended, with one case added to the curriculum's negative
+test (choice 37): a draft that loops back to a high-risk activity without a new approval
+(`APPROVAL_REUSED`), from the warm-up on learning question 33. D63 is written before building.
+
+**Warm-up: learning question 33's follow-up.** Asked: a model drafts a plan that goes back to
+`pay` on `declined`. Why does `reach` still finish on a cycle, and why is the loop unsafe, not
+just slow? Answered "explain"; explained with a run of the package's `refund-order` plan, its
+`declined` sent back to `pay`: `states.pay APPROVAL_REUSED one approval would unlock two
+high-risk runs`. `reach` keeps a `seen` set over a finite list of states; one approval unlocks
+one run of one step (D11), and the prototype's review found such a loop issuing 997 refunds on
+one approval. Recorded in the log; the question stays open.
+
 28. **The check is `issues_of`, moved to `case`.** `ventoux release` checks a package with
     `issues_of(package, catalog)` (`tooling/releases.py`): each plan's issues (layers 3 and 4),
     then the case's (layer 10). `authoring` sits below `tooling`, so the loop can't import it
