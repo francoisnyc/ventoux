@@ -9,6 +9,7 @@ fixed later: the dev server's cold start".
 
 import asyncio
 import stat
+import sys
 import time
 from pathlib import Path
 
@@ -71,7 +72,10 @@ def test_a_server_that_never_answers_fails_showing_its_output(tmp_path: Path) ->
     said = started(silent, deadline=2)
     assert time.monotonic() - began < 15
     first, second, printed = said.splitlines()
-    assert first.startswith(f"the dev server didn't answer within 2 s: {silent} server start-dev")
+    assert first.startswith(
+        f"the dev server didn't answer within 2 s (nothing accepted a connection): {silent} "
+        "server start-dev"
+    )
     assert (second, printed) == ("it printed:", "warming up, slowly")
     assert not running(int(pid.read_text()))
 
@@ -103,3 +107,56 @@ def running(pid: int) -> bool:
     """Whether the process `pid` is still alive: the stand-in recorded its own, which `exec`
     keeps, so it names the server whatever it runs."""
     return Path(f"/proc/{pid}").exists()
+
+
+def accepting_first(folder: Path, seconds: float, then: str) -> Path:
+    """A stand-in that accepts TCP connections on the server's port for `seconds`, answering
+    nothing, as the dev server does before its frontend is healthy; then runs `then`."""
+    listener = (
+        "import socket, sys, time\n"
+        "s = socket.socket()\n"
+        "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+        "s.bind(('127.0.0.1', int(sys.argv[1])))\n"
+        "s.listen()\n"
+        "s.settimeout(0.05)\n"
+        "began = time.monotonic()\n"
+        f"while time.monotonic() - began < {seconds}:\n"
+        "    try:\n"
+        "        s.accept()[0].close()\n"
+        "    except TimeoutError:\n"
+        "        pass\n"
+        "s.close()\n"
+    )
+    (folder / "listener.py").write_text(listener)
+    # `server start-dev --port N`: the port is the fourth argument. With nothing after it, the
+    # listener takes the stand-in's place (`exec`), so stopping the stand-in stops it.
+    listen = f'"{sys.executable}" "{folder / "listener.py"}" "$4"'
+    return stand_in(folder, f"{listen}\n{then}" if then else f"exec {listen}")
+
+
+def test_a_server_that_accepts_before_it_answers_is_waited_for(tmp_path: Path) -> None:
+    # The race: the dev server accepts TCP before its frontend is healthy, and a client that
+    # connects then is refused ("Frontend is not healthy yet"). Ready is a client answered.
+    real = asyncio.run(cli_binary(cli_folder()))
+    early = accepting_first(tmp_path, 3, f'exec "{real}" "$@"')
+
+    async def go() -> str:
+        async with dev_server(early) as environment:
+            service = environment.client.workflow_service
+            found = await service.describe_namespace(DescribeNamespaceRequest(namespace="default"))
+            return found.namespace_info.name
+
+    assert asyncio.run(go()) == "default"
+
+
+def test_a_server_that_accepts_but_never_answers_fails_saying_why(tmp_path: Path) -> None:
+    pid = tmp_path / "pid"
+    deaf = accepting_first(tmp_path, 60, "")
+    deaf.write_text(deaf.read_text().replace("#!/bin/sh\n", f"#!/bin/sh\necho $$ > {pid}\n", 1))
+    said = started(deaf, deadline=3)
+    first = said.splitlines()[0]
+    assert first.startswith(
+        "the dev server didn't answer within 3 s (it accepted connections, but answered no client: "
+    )
+    assert f": {deaf} server start-dev" in first
+    assert not running(int(pid.read_text()))
