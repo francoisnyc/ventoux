@@ -371,7 +371,9 @@ production UI.
 - [ ] Existing Temporal workflows as case steps, each with a declared contract (inputs, outputs
       and their provenance, risk)
 - [ ] Human tasks: named outcomes whose forms set case-file fields, approval defaults computed from
-      provenance, claiming and reassigning work
+      provenance
+- [ ] Task assignment: a person claims a task from a role's queue, or assigns or reassigns it to
+      someone else; and assignment by rule, written in the definition
 - [ ] Case lifecycle: closing when nothing is left to do, closing by a person with a declared
       reason, required steps, one step per collection item, child cases
 - [ ] Case data: typed references shown through resolvers, sensitive fields encrypted per case,
@@ -384,11 +386,24 @@ production UI.
       prompt-injection benchmark
 - [ ] A published Python package and a `ventoux` CLI
 
-Beyond v1.0, tracked as issues: stages, absolute and recurring timers, suspend and reactivate,
-declared compensation (sagas), inbound event adapters, signed approvals (the production default for
-high-risk steps), plans drafted by a model for a single case at runtime, tamper-evident history,
-capture of model inputs and outputs, revising drafts in conversation, and tool search during
-authoring.
+Beyond v1.0, tracked as issues: stages, advanced joins (such as an inclusive join, waiting for
+every branch that started), timers anchored to a date on the case, absolute and recurring timers,
+suspend and reactivate, declared compensation (sagas), inbound event adapters, signed approvals (the
+production default for high-risk steps), plans drafted by a model for a single case at runtime,
+tamper-evident history, capture of model inputs and outputs, revising drafts in conversation, and
+tool search during authoring.
+
+Today a step's `requires` is an "all of these" join, and several steps reaching one milestone make
+a "first of these" join. An inclusive join would wait for every branch that started and ignore the
+ones that didn't; its design question is how case validation proves such a join is ever met, since
+a branch that starts and never ends would hold the case open.
+
+Timers anchored to a date on the case would bring a date field type, and a timer before or after
+that date: "3 days before the renewal date", "on the appointment date". Today a timer counts
+forward from a moment in the case (its opening, a milestone, a run's start, an answer, an event's
+arrival). The design questions: where the date may come from, since a date from untrusted data
+would decide when something happens; what a timer does when its date changes after it is set;
+which time zone a day is read in; and a date already past when the timer would be set.
 
 ## Contributing
 

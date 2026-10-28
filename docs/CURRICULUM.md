@@ -355,6 +355,7 @@ short note, not a layer.
 ---
 
 After layer 15, still in v1.0: the audit export (sensitive values as ciphertext, decision D15); case
-lifecycle features (required steps, one step per item of a collection, child cases); claiming and
-reassigning tasks; a production key provider adapter (Vault or a cloud KMS); the deployment guide
-and `ventoux doctor` (decision D19); the AgentDojo benchmark; and a published package.
+lifecycle features (required steps, one step per item of a collection, child cases); claiming,
+assigning and reassigning tasks, and assignment by rule; a production key provider adapter (Vault
+or a cloud KMS); the deployment guide and `ventoux doctor` (decision D19); the AgentDojo benchmark;
+and a published package.
