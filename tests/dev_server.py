@@ -5,7 +5,8 @@ after a container is restored reads the server's 156 MB binary from a cold disk,
 longer (the tutor review of #50). So the harness starts the binary itself, with the flags the SDK
 gives it, and waits 30 s for it to answer: a start that misses even that fails, showing the
 server's own output, never skipped and never retried. See docs/layers/12-releases.md, "12e, fixed
-later: the dev server's cold start".
+later: the dev server's cold start". Ready is a client answered, never a port that accepts: the
+server accepts TCP before its frontend is healthy (docs/layers/fix-dev-server-ready.md).
 """
 
 import asyncio
