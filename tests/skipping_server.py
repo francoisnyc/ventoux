@@ -2,17 +2,21 @@
 race").
 
 `WorkflowEnvironment.start_time_skipping` picks a free port, then starts Temporal's Java test
-server on it. Between the two, another process can take the port: in a full run beside another
-pytest process, the other process's own test server. The server then prints `Failed to bind to
-address` and stays up, listening on nothing; sdk-core waits 5 s for an answer and gives up, and
-the test fails before it ran. So the harness starts the binary itself, reads what it prints, and
-on a port taken stops the server and starts it on another at once, three ports at most; it waits
+server on it. The SDK picks with an IPv4 socket, which doesn't see a port an IPv6 socket holds
+(on macOS, hundreds of daemons' connections), and something can take the port between the pick
+and the bind. The server then prints `Failed to bind to address` and stays up, listening on
+nothing; sdk-core waits 5 s for an answer and gives up, and the test fails before it ran. So the
+harness picks the port as the server binds it (`server_port`, fix-test-server-port), starts the
+binary itself, reads what it prints, and on a port taken in the moment between stops the server
+and starts it on another at once, three ports at most; it waits
 30 s for an answer, as `tests/dev_server.py` does for the dev server, and a start that fails says
 why, never skipped. The environment it gives skips time as the SDK's does.
 """
 
 import asyncio
+import errno
 import fcntl
+import socket
 import tempfile
 import time
 from asyncio.subprocess import Process
@@ -23,7 +27,7 @@ from pathlib import Path
 from typing import IO, Any, cast
 
 import temporalio.service
-from dev_server import DEADLINE, cli_folder, free_port, said, stop
+from dev_server import DEADLINE, cli_folder, said, stop
 from google.protobuf.empty_pb2 import Empty
 from temporalio.api.testservice.v1 import (
     LockTimeSkippingRequest,
@@ -78,6 +82,31 @@ async def server_binary(
             "The SDK names it otherwise now: update the name in tests/skipping_server.py"
         )
     return binary
+
+
+def server_port() -> int:
+    """A port nothing holds on either family, picked the way the server binds it: the IPv6
+    wildcard, with IPv4 too (dual-stack). An IPv4 pick doesn't see IPv6 sockets, and on macOS
+    hundreds of daemons' IPv6 connections hold ports the server is then refused
+    (fix-test-server-port, "The cause"). Where the machine has no IPv6, `::` raises and the
+    server binds IPv4 alone, so an IPv4 pick sees it whole (decision 8's containers). Any other
+    failure is raised: never a quiet return to the IPv4 pick (fail closed)."""
+    try:
+        return picked(socket.AF_INET6, "::")
+    except OSError as failed:
+        if failed.errno != errno.EAFNOSUPPORT:
+            raise
+        return picked(socket.AF_INET, "0.0.0.0")  # no IPv6 here: the server binds IPv4 alone
+
+
+def picked(family: socket.AddressFamily, address: str) -> int:
+    """The port the system gives a socket of `family` bound to `address`, port 0, then closed."""
+    with socket.socket(family) as probe:
+        if family == socket.AF_INET6:
+            probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)  # IPv4 too, as the server
+        probe.bind((address, 0))  # port 0: the system picks one nothing holds on what it binds
+        port: int = probe.getsockname()[1]
+        return port
 
 
 class TimeSkipping(WorkflowEnvironment):
@@ -170,7 +199,7 @@ async def skipping_server(
     binary: Path,
     deadline: float = DEADLINE,
     data_converter: DataConverter = DataConverter.default,
-    ports: Callable[[], int] = free_port,
+    ports: Callable[[], int] = server_port,
 ) -> AsyncIterator[TimeSkipping]:
     """The test server `binary` runs, as a time-skipping environment, stopped on the way out. Its
     output goes to a file, shown if it doesn't start. `ports` gives each port to try."""
