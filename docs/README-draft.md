@@ -378,6 +378,9 @@ production UI.
       reason, required steps, one step per collection item, child cases
 - [ ] Case data: typed references shown through resolvers, sensitive fields encrypted per case,
       `ventoux forget`, facts with the time they were obtained and `max_age`
+- [ ] More field types: a date, stored and compared; an option from a system's list, checked
+      against that system when the answer is given; and a file attachment, a reference to a
+      document store, uploaded from the inbox
 - [ ] Failures: retry policies and idempotency in contracts, business failures as outcomes, a
       "needs attention" queue
 - [ ] Audit export: an append-only copy of case and run events, with its own retention and
@@ -398,12 +401,12 @@ a "first of these" join. An inclusive join would wait for every branch that star
 ones that didn't; its design question is how case validation proves such a join is ever met, since
 a branch that starts and never ends would hold the case open.
 
-Timers anchored to a date on the case would bring a date field type, and a timer before or after
-that date: "3 days before the renewal date", "on the appointment date". Today a timer counts
-forward from a moment in the case (its opening, a milestone, a run's start, an answer, an event's
-arrival). The design questions: where the date may come from, since a date from untrusted data
-would decide when something happens; what a timer does when its date changes after it is set;
-which time zone a day is read in; and a date already past when the timer would be set.
+Timers anchored to a date on the case would build on the date field type (in v1.0) with a timer
+before or after that date: "3 days before the renewal date", "on the appointment date". Today a
+timer counts forward from a moment in the case (its opening, a milestone, a run's start, an answer,
+an event's arrival). The design questions: where the date may come from, since a date from
+untrusted data would decide when something happens; what a timer does when its date changes after
+it is set; which time zone a day is read in; and a date already past when the timer would be set.
 
 ## Contributing
 
