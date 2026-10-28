@@ -91,8 +91,10 @@ running. Five starts in a row succeeding alone proves nothing: the chance of tha
 1. **The harness picks the port the way the server binds it.** `server_port` in
    `tests/skipping_server.py` binds an IPv6 socket that takes IPv4 too (dual-stack, as the
    server) to port 0. The kernel then checks both families and hands out a port nothing holds on
-   either. Where the machine has no IPv6, `::` raises and the server binds IPv4 alone, so the
-   pick falls back to IPv4, which sees it whole (the containers of "The port race", decision 8).
+   either. Where the machine has no IPv6, `::` raises "address family not supported"
+   (`EAFNOSUPPORT`) and the server binds IPv4 alone, so the pick falls back to IPv4, which sees it
+   whole (the containers of "The port race", decision 8). Any other failure is raised, never a
+   quiet return to the IPv4 pick (*added 2026-10-28, from the tutor's review*).
    It is the default `ports` of `skipping_server`, so every Temporal test gets it through
    `time_skipping`. Recorded there as decision 10.
 2. **The recovery stays.** The lock (decision 7), the probe (9) and the printed line (1) still
@@ -158,3 +160,20 @@ running. Five starts in a row succeeding alone proves nothing: the chance of tha
 |---|---|
 | The harness's first port is never one an IPv6 socket holds | `test_the_first_port_is_never_one_an_ipv6_socket_holds` (`tests/test_skipping_server.py`). The next twenty ports the system would hand out are held by IPv6-only sockets (binding a port by its number doesn't move macOS's counter), and the harness must start on its first try, on none of them. Seen failing with the old pick. It bites on macOS only, since Linux hands ports out at random. |
 | Where the machine has no IPv6, the port is picked on IPv4 | `test_without_ipv6_the_port_is_picked_on_ipv4`, IPv6 sockets refused for the test. Seen failing without the fallback. |
+| The pick is one IPv6 socket that takes IPv4 too (`IPV6_V6ONLY` set to 0), bound to `("::", 0)`, its port returned: on any machine, IPv6 or not | `test_the_port_is_picked_on_one_dual_stack_ipv6_socket`, `socket.socket` replaced by a stand-in that records what is done to it. Seen failing, on Linux, under two mutations that pass the eleven tests from before: `server_port` picking on IPv4, and the pick IPv6-only (`IPV6_V6ONLY` set to 1). From the tutor's review. |
+| `skipping_server` picks its ports with `server_port` by default | `test_the_harness_picks_its_ports_as_the_server_binds_by_default`. Seen failing, on Linux, with the default back to an IPv4 pick, which passes the eleven tests from before. From the tutor's review. |
+| An IPv6 failure other than "no IPv6 here" is raised, never picked on IPv4 | `test_an_ipv6_failure_but_no_ipv6_is_raised_never_picked_on_ipv4`, IPv6 sockets refused with `EMFILE`. Seen failing ("DID NOT RAISE") while every `OSError` fell back. From the tutor's review. |
+
+## From the tutor's review (2026-10-28)
+
+- **CI couldn't fail the new port test.** `test_the_first_port_is_never_one_an_ipv6_socket_holds`
+  bites on macOS only, where ports are handed out in order, and CI runs Linux. Three mutations
+  passed every test of `tests/test_skipping_server.py` there: the default `ports` back to an IPv4
+  pick, `server_port` picking on IPv4, and the pick IPv6-only. The last would pass on macOS too,
+  since the test's holders are IPv6 sockets, which a v6-only pick also sees. Two tests now check
+  how the pick is made, needing no IPv6: what `server_port` does to the one socket it makes, and
+  `skipping_server`'s default. Each fails, on Linux, under the mutation it pins, which passes
+  the eleven tests from before. The macOS test stays: it is the cause, end to end.
+- **Only "no IPv6 here" falls back.** `server_port` fell back to IPv4 on any `OSError`. It now
+  falls back on `EAFNOSUPPORT` alone, the error decision 8's containers raise, and raises
+  anything else (fail closed).

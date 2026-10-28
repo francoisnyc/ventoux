@@ -14,6 +14,7 @@ why, never skipped. The environment it gives skips time as the SDK's does.
 """
 
 import asyncio
+import errno
 import fcntl
 import socket
 import tempfile
@@ -88,10 +89,13 @@ def server_port() -> int:
     wildcard, with IPv4 too (dual-stack). An IPv4 pick doesn't see IPv6 sockets, and on macOS
     hundreds of daemons' IPv6 connections hold ports the server is then refused
     (fix-test-server-port, "The cause"). Where the machine has no IPv6, `::` raises and the
-    server binds IPv4 alone, so an IPv4 pick sees it whole (decision 8's containers)."""
+    server binds IPv4 alone, so an IPv4 pick sees it whole (decision 8's containers). Any other
+    failure is raised: never a quiet return to the IPv4 pick (fail closed)."""
     try:
         return picked(socket.AF_INET6, "::")
-    except OSError:
+    except OSError as failed:
+        if failed.errno != errno.EAFNOSUPPORT:
+            raise
         return picked(socket.AF_INET, "0.0.0.0")  # no IPv6 here: the server binds IPv4 alone
 
 

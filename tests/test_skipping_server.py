@@ -11,6 +11,7 @@ answers.
 
 import asyncio
 import errno
+import inspect
 import os
 import socket
 import time
@@ -18,7 +19,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, Self
 
 import pytest
 import temporalio.service
@@ -346,3 +347,69 @@ def test_without_ipv6_the_port_is_picked_on_ipv4(monkeypatch: pytest.MonkeyPatch
     monkeypatch.undo()
     with socket.socket() as attempt:
         attempt.bind(("0.0.0.0", port))  # a port the IPv4 server can take
+
+
+class Recorded:
+    """A socket that records how it was made and used, and gives the port `PICKED`; nothing is
+    bound. Each one made is kept in `made`."""
+
+    made: ClassVar[list["Recorded"]] = []
+
+    def __init__(self, family: int = socket.AF_INET, *args: Any, **kwargs: Any) -> None:
+        self.family = family
+        self.options: list[tuple[int, int, int]] = []
+        self.bound: tuple[str, int] | None = None
+        Recorded.made.append(self)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def setsockopt(self, level: int, option: int, value: int) -> None:
+        self.options.append((level, option, value))
+
+    def bind(self, address: tuple[str, int]) -> None:
+        self.bound = address
+
+    def getsockname(self) -> tuple[str, int, int, int]:
+        return ("::", PICKED, 0, 0)
+
+
+PICKED = 54321
+
+
+def test_the_port_is_picked_on_one_dual_stack_ipv6_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    # How the pick is made, on any machine: one IPv6 socket that takes IPv4 too, bound to the
+    # wildcard, port 0, as the server binds. The macOS test above bites only where ports are
+    # handed out in order; this one bites on CI's Linux too (fix-test-server-port).
+    Recorded.made = []
+    monkeypatch.setattr(socket, "socket", Recorded)
+    assert server_port() == PICKED
+    [probe] = Recorded.made
+    assert probe.family == socket.AF_INET6
+    assert probe.options == [(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)]
+    assert probe.bound == ("::", 0)
+
+
+def test_the_harness_picks_its_ports_as_the_server_binds_by_default() -> None:
+    assert inspect.signature(skipping_server).parameters["ports"].default is server_port
+
+
+def test_an_ipv6_failure_but_no_ipv6_is_raised_never_picked_on_ipv4(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Only "no IPv6 here" falls back: anything else is a failure, said, never a quiet return to
+    # the IPv4 pick the fix replaced (fail closed).
+    real = socket.socket
+
+    def refused(family: int = socket.AF_INET, *args: Any, **kwargs: Any) -> socket.socket:
+        if family == socket.AF_INET6:
+            raise OSError(errno.EMFILE, "Too many open files")
+        return real(family, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "socket", refused)
+    with pytest.raises(OSError) as raised:
+        server_port()
+    assert raised.value.errno == errno.EMFILE
