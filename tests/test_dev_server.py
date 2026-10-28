@@ -109,11 +109,14 @@ def running(pid: int) -> bool:
     return Path(f"/proc/{pid}").exists()
 
 
-def accepting_first(folder: Path, seconds: float, then: str) -> Path:
+def accepting_first(folder: Path, seconds: float, then: str, hold: bool = False) -> Path:
     """A stand-in that accepts TCP connections on the server's port for `seconds`, answering
-    nothing, as the dev server does before its frontend is healthy; then runs `then`."""
+    nothing, as the dev server does before its frontend is healthy; then runs `then`. Each
+    connection is closed at once, or, with `hold`, kept open, so a client waits on it."""
+    keep = "held.append(s.accept()[0])" if hold else "s.accept()[0].close()"
     listener = (
         "import socket, sys, time\n"
+        "held = []\n"
         "s = socket.socket()\n"
         "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
         "s.bind(('127.0.0.1', int(sys.argv[1])))\n"
@@ -122,7 +125,7 @@ def accepting_first(folder: Path, seconds: float, then: str) -> Path:
         "began = time.monotonic()\n"
         f"while time.monotonic() - began < {seconds}:\n"
         "    try:\n"
-        "        s.accept()[0].close()\n"
+        f"        {keep}\n"
         "    except TimeoutError:\n"
         "        pass\n"
         "s.close()\n"
@@ -159,4 +162,24 @@ def test_a_server_that_accepts_but_never_answers_fails_saying_why(tmp_path: Path
         "the dev server didn't answer within 3 s (it accepted connections, but answered no client: "
     )
     assert f": {deaf} server start-dev" in first
+    assert not running(int(pid.read_text()))
+
+
+def test_a_server_that_holds_connections_unanswered_fails_within_the_deadline(
+    tmp_path: Path,
+) -> None:
+    # Each connect is bounded at 2 s: a server that accepts and holds every connection, answering
+    # nothing, can't make one connect outlast the deadline (fix-dev-server-ready).
+    pid = tmp_path / "pid"
+    holding = accepting_first(tmp_path, 60, "", hold=True)
+    holding.write_text(
+        holding.read_text().replace("#!/bin/sh\n", f"#!/bin/sh\necho $$ > {pid}\n", 1)
+    )
+    began = time.monotonic()
+    said = started(holding, deadline=3)
+    assert time.monotonic() - began < 8  # the deadline, and one try at most
+    assert said.splitlines()[0].startswith(
+        "the dev server didn't answer within 3 s (it accepted connections, but answered no "
+        "client: TimeoutError): "
+    )
     assert not running(int(pid.read_text()))
