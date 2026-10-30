@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
@@ -126,7 +127,15 @@ def run_the_claim() -> Ran:
     async def go() -> Ran:
         async with (
             time_skipping(converter) as environment,
-            case_worker(environment.client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES),
+            activity_threads() as threads,
+            case_worker(
+                environment.client,
+                QUEUE,
+                DevelopmentCases,
+                DevelopmentPlans,
+                FAKES,
+                activity_executor=threads,
+            ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=30)
 

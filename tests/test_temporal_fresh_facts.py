@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
@@ -91,7 +92,15 @@ def skipping[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            case_worker(environment.client, QUEUE, cases, DevelopmentPlans, served),
+            activity_threads() as threads,
+            case_worker(
+                environment.client,
+                QUEUE,
+                cases,
+                DevelopmentPlans,
+                served,
+                activity_executor=threads,
+            ),
         ):
             return await asyncio.wait_for(scenario(environment), timeout=30)
 

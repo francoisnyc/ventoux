@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.common.v1 import Payload
@@ -102,6 +103,7 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(development_converter()) as environment,
+            activity_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,
@@ -109,6 +111,7 @@ def on_temporal[T](
                 DevelopmentPlans,
                 activities,
                 forget=DevelopmentForget,
+                activity_executor=threads,
             ),
             Worker(environment.client, task_queue="signals", workflows=[SignalsAnEndedCase]),
         ):
@@ -848,16 +851,20 @@ def test_the_guides_forget_example_runs_as_written() -> None:
             "ClaimForget": DevelopmentForget,
             "implementations": FAKES,
         }
-        exec(serving, names)  # noqa: S102
-        async with names["worker"]:  # the guide's own worker, on its queue
-            case = await start_case(
-                client, DevelopmentCases, claim(), as_json(FILE), "claim-7", "claims"
-            )
-            await answer(case, "assess#1", "deny", "ana", ["adjuster"])
-            await case.result()
-            # The guide's lines run inside a function: `await` is written as an API caller would.
-            exec("async def example():\n" + textwrap.indent(forgetting, "    "), names)  # noqa: S102
-            await names["example"]()
+        # The guide's worker uses the executor its cases guide's `with` block opens: here, the
+        # tests' own, shut down once the worker has stopped (fix-worker-executors).
+        async with activity_threads() as names["activity_executor"]:
+            exec(serving, names)  # noqa: S102
+            async with names["worker"]:  # the guide's own worker, on its queue
+                case = await start_case(
+                    client, DevelopmentCases, claim(), as_json(FILE), "claim-7", "claims"
+                )
+                await answer(case, "assess#1", "deny", "ana", ["adjuster"])
+                await case.result()
+                # The guide's lines run inside a function: `await` is written as an API caller
+                # would.
+                exec("async def example():\n" + textwrap.indent(forgetting, "    "), names)  # noqa: S102
+                await names["example"]()
 
     on_temporal(scenario)
 

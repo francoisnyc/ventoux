@@ -8,12 +8,14 @@ See docs/layers/12-releases.md (12e).
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHistory
@@ -140,14 +142,29 @@ def in_production[T](
     return asyncio.run(go())
 
 
+@asynccontextmanager
 async def production_worker(
     client: Client,
     identity: str = "refunds-a",
     build: str = "4f2a9c1",
     cases: type[CaseWorkflow] = ProductionCases,
-) -> Worker:
-    """A case worker in production, on refunds, its manifest published as it starts."""
-    return await environment_worker(client, QUEUE, cases, DevelopmentPlans, FAKES, build, identity)
+    queue: str = QUEUE,
+) -> AsyncIterator[Worker]:
+    """A case worker in production, on `queue`, its manifest published as it starts, running in
+    the block; its activity threads shut down after it stops (fix-worker-executors)."""
+    async with activity_threads() as threads:
+        worker = await environment_worker(
+            client,
+            queue,
+            cases,
+            DevelopmentPlans,
+            FAKES,
+            build,
+            identity,
+            activity_executor=threads,
+        )
+        async with worker:
+            yield worker
 
 
 def hashed(reference: str) -> Hash:
@@ -158,7 +175,7 @@ def test_a_worker_publishes_its_manifest() -> None:
     # Built from its code: each contract it has code for, hashed by its own catalog; its workflow
     # types; its case workflow's bindings; the build and identity it was given.
     async def scenario(client: Client) -> Manifest:
-        async with await production_worker(client):
+        async with production_worker(client):
             return (await registry_of(client, "production")).manifests["refunds-a"]
 
     manifest = in_production(scenario)
@@ -179,9 +196,11 @@ def test_a_worker_refuses_to_start_without_its_registry() -> None:
     # case workflow naming none, never starts polling.
     async def scenario(client: Client) -> tuple[str, str]:
         with pytest.raises(RegistryMissing) as missing:
-            await production_worker(client)
+            async with production_worker(client):
+                pass
         with pytest.raises(ValueError) as nowhere:
-            await environment_worker(client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES, "b")
+            async with production_worker(client, cases=DevelopmentCases, build="b"):
+                pass
         return str(missing.value), str(nowhere.value)
 
     assert in_production(scenario, create=False) == (
@@ -267,16 +286,14 @@ def test_a_case_opens_only_on_its_environments_active_release() -> None:
     # The registry answers as the case opens, through an activity recorded in its history; a
     # replay reads that answer there, with no registry at all.
     async def scenario(client: Client) -> tuple[list[str], CaseReport, list[str], WorkflowHistory]:
-        async with await production_worker(client):
+        async with production_worker(client):
             await activated(client, REFUND_1)
             refused = [
                 await refusal(
                     await start_case(client, ProductionCases, REFUND_2, LARGE, "refund-2", QUEUE)
                 ),
             ]
-            async with await environment_worker(
-                client, "refunds-old", ProductionCases, DevelopmentPlans, FAKES, "4f2a9c1", "old-a"
-            ):
+            async with production_worker(client, "old-a", queue="refunds-old"):
                 old = await start_case(
                     client, ProductionCases, REFUND_1, LARGE, "refund-3", "refunds-old"
                 )
@@ -300,13 +317,13 @@ def test_a_draft_is_refused_in_production() -> None:
     # Refused at its opening in production, nothing decided; it opens in an environment created
     # for development, and with no environment at all, as before 12e (brief, D51).
     async def refused(client: Client) -> str:
-        async with await production_worker(client):
+        async with production_worker(client):
             return await refusal(
                 await start_case(client, ProductionCases, REFUND, LARGE, "refund-1", QUEUE)
             )
 
     async def opened(client: Client) -> str:
-        async with await production_worker(client):
+        async with production_worker(client):
             case = await start_case(client, ProductionCases, REFUND, LARGE, "refund-1", QUEUE)
             return (await reported(case, lambda now: now.waiting_at == ["review#1"])).release
 
@@ -337,7 +354,7 @@ def test_the_registry_knows_each_releases_open_cases() -> None:
                 )
             )
 
-        async with await production_worker(client, cases=EveryEventInProduction):
+        async with production_worker(client, cases=EveryEventInProduction):
             await activated(client, REFUND_1)
             rejected = await start_case(
                 client, EveryEventInProduction, REFUND_1, LARGE, "refund-1", QUEUE
@@ -369,7 +386,7 @@ def test_a_migration_target_is_the_registrys() -> None:
     # When an approval would apply a migration, the case asks its registry first: a target this
     # environment never activated, or retired, is refused, recorded, and the request waits on.
     async def scenario(client: Client) -> tuple[list[str], str, str]:
-        async with await production_worker(client):
+        async with production_worker(client):
             await activated(client, REFUND_1)
             case = await start_case(client, ProductionCases, REFUND_1, LARGE, "refund-1", QUEUE)
             await reported(case, lambda now: now.waiting_at == ["review#1"])
@@ -431,7 +448,7 @@ def test_a_worker_moving_a_workflow_type_under_open_cases_refuses_to_start() -> 
     # Open cases of a release that calls kyc.check@1, bound to KycCheck: a worker binding it to
     # another type never starts; one moving only its task queue does (brief, D29).
     async def scenario(client: Client) -> str:
-        async with await production_worker(client):
+        async with production_worker(client):
             kyc = Activating(
                 Released("kyc", 1, Hash(1, "55" * 32)),
                 {"kyc.check@1": hashed("kyc.check@1")},
@@ -451,14 +468,11 @@ def test_a_worker_moving_a_workflow_type_under_open_cases_refuses_to_start() -> 
             assert (await ask(client, "production", "activate", kyc)).done
             opening = Opening("kyc-7", QUEUE, kyc.released)
             assert (await ask(client, "production", "opened", opening)).done
-        async with await environment_worker(
-            client, QUEUE, MovedQueue, DevelopmentPlans, FAKES, "b2", "refunds-b"
-        ):
+        async with production_worker(client, "refunds-b", "b2", MovedQueue):
             pass
         with pytest.raises(ManifestRefused) as refused:
-            await environment_worker(
-                client, QUEUE, Retyped, DevelopmentPlans, FAKES, "b3", "refunds-c"
-            )
+            async with production_worker(client, "refunds-c", "b3", Retyped):
+                pass
         return str(refused.value)
 
     assert in_production(scenario) == (
@@ -494,7 +508,7 @@ def test_a_case_ended_from_outside_never_blocks_retirement() -> None:
     # asks Temporal through an activity, drops it saying so, and refuses only for the rest
     # (layer 12e, choice 67, as answered).
     async def scenario(client: Client) -> tuple[list[str], list[str]]:
-        async with await production_worker(client):
+        async with production_worker(client):
             await activated(client, REFUND_1)
             cases = [
                 await start_case(client, ProductionCases, REFUND_1, LARGE, id, QUEUE)
@@ -528,7 +542,7 @@ def test_a_cohort_is_the_releases_open_cases() -> None:
     # The registry lists the cases open on a release; each previews the migration for itself
     # (brief, D53). A closed case is no longer in the cohort.
     async def scenario(client: Client) -> dict[str, PreviewAnswer]:
-        async with await production_worker(client):
+        async with production_worker(client):
             await activated(client, REFUND_1)
             for id in ("refund-1", "refund-2", "refund-3"):
                 case = await start_case(client, ProductionCases, REFUND_1, LARGE, id, QUEUE)

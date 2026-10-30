@@ -10,6 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHistory
 from temporalio.testing import WorkflowEnvironment
@@ -225,7 +226,17 @@ def test_a_timer_already_due_and_an_answer_in_one_workflow_task_fire_timer_first
             case = case_handle(client, DevelopmentCases, "refund-1")
             form = {"approved_amount": Decimal(40)}
             await answer(case, "review#1", "approve", "ana", ["support"], form)
-            async with case_worker(client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES):
+            async with (
+                activity_threads() as threads,
+                case_worker(
+                    client,
+                    QUEUE,
+                    DevelopmentCases,
+                    DevelopmentPlans,
+                    FAKES,
+                    activity_executor=threads,
+                ),
+            ):
                 answered = "ana answered review#1 approve as support, setting approved_amount"
                 return await asyncio.wait_for(
                     reported(case, lambda now: answered in now.history), timeout=20

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
@@ -71,6 +72,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentPlans,
         Outcome,
         development_converter,
+        fake_refund,
         fixture_converter,
         load_definition,
         run_case,
@@ -96,7 +98,15 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            case_worker(environment.client, queue, cases, DevelopmentPlans, activities),
+            activity_threads() as threads,
+            case_worker(
+                environment.client,
+                queue,
+                cases,
+                DevelopmentPlans,
+                activities,
+                activity_executor=threads,
+            ),
         ):
             # Bounded: a case that hangs (a workflow task retried forever) fails the test.
             return await asyncio.wait_for(scenario(environment.client), timeout=20)
@@ -149,7 +159,15 @@ def skipping[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            case_worker(environment.client, QUEUE, cases, DevelopmentPlans, activities),
+            activity_threads() as threads,
+            case_worker(
+                environment.client,
+                QUEUE,
+                cases,
+                DevelopmentPlans,
+                activities,
+                activity_executor=threads,
+            ),
         ):
             return await asyncio.wait_for(scenario(environment), timeout=20)
 
@@ -401,6 +419,25 @@ def test_a_declared_outcome_is_never_retried() -> None:
     assert "pay#1 gave declined" in ended.history
     assert "started call_customer#1: waiting for called by support" in ended.history
     assert ended.needs_attention == []
+
+
+def test_the_thread_a_case_activity_ran_on_has_ended_once_its_worker_stops() -> None:
+    # As for a plan worker: the case worker runs its activities on the caller's threads, which
+    # are shut down once it stops (fix-worker-executors, choices 1 and 6). No collection is forced.
+    ran_on: list[threading.Thread] = []
+
+    def refunding_here(inputs: dict[str, Any]) -> dict[str, Any]:
+        ran_on.append(threading.current_thread())
+        return fake_refund(inputs)
+
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(client, DevelopmentCases, REFUND, SMALL, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], SMALL_FORM)
+        return await reported(case, lambda _: bool(ran_on))  # once pay#1 has run
+
+    on_temporal(scenario, {**FAKES, "payments.refund@2": refunding_here})
+    assert ran_on and threading.main_thread() not in ran_on  # a plain function, on a pool thread
+    assert [thread.name for thread in ran_on if thread.is_alive()] == []
 
 
 def test_every_attempt_and_a_retry_send_the_same_key() -> None:
