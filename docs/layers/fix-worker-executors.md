@@ -134,6 +134,7 @@ additions and two corrections, each marked where it applies. What was built is u
   and never explicitly shut down" (its docstring, 1.34.0). The tests build eleven replayers that
   way. Their threads are the only ones still carried from one test to the next after this fix
   (below). They are workflow-task threads, not activity threads, and are left for their own fix.
+  *Fixed 2026-10-30, in `docs/layers/fix-replayer-threads.md`; the text above stands.*
 
 ## Checked, after the fix
 
