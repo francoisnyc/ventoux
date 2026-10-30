@@ -129,6 +129,26 @@ additions and two corrections, each marked where it applies. What was built is u
 
 - **The registry worker** (`registry_worker`, `src/ventoux/temporal/registry.py`) passes no
   executor: its activities are `async`, so it makes no threads.
+- **The replayer's threads.** The SDK's `Replayer`, given no `workflow_task_executor`, makes "a
+  new thread pool executor with no max_workers set that will be shared across all replay calls
+  and never explicitly shut down" (its docstring, 1.34.0). The tests build eleven replayers that
+  way. Their threads are the only ones still carried from one test to the next after this fix
+  (below). They are workflow-task threads, not activity threads, and are left for their own fix.
+
+## Checked, after the fix
+
+The same plugin, over the same four files (108 tests now, the new one included), every test
+passing:
+
+| | Tests ending with threads an earlier test started | Most threads alive after one test | Most of those from earlier tests |
+|---|---|---|---|
+| `main` | 76 of 107 | 7 | 6 |
+| this fix | 17 of 108 | 2 | 2 |
+
+Each of the 17 was a replayer's thread: a second plugin named, for every carried thread, the test
+that started it, and each was a replay test (`test_the_bound_on_a_loop_holds_on_temporal_and_replays`,
+`test_a_case_history_replayed_with_changed_code_fails` and three others). No activity thread was
+carried.
 
 ## Decided
 
