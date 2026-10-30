@@ -64,8 +64,13 @@ async def cli_binary(
     return binary
 
 
+# The SDK version `flags` was read at: the SDK may change how it starts its server in any release,
+# so an upgrade fails a test until they are read again (fix-carried-checks, choice 3).
+FLAGS_READ_AT = "1.34.0"
+
+
 def flags(port: int) -> list[str]:
-    """`server start-dev` as the SDK runs it (read from its running process, temporalio 1.34.0)."""
+    """`server start-dev` as the SDK runs it (read from its running process, at `FLAGS_READ_AT`)."""
     configs = (
         "frontend.enableServerVersionCheck=false",
         "frontend.enableUpdateWorkflowExecution=true",
