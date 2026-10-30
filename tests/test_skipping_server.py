@@ -250,12 +250,18 @@ async def other_server() -> WorkflowEnvironment:
     return await WorkflowEnvironment.start_time_skipping(download_dest_dir=str(cli_folder()))
 
 
+# When the late line comes, in seconds after the loser's spawn: past the most the other server's
+# start can take and succeed (0.2 s, then the SDK's own 5 s wait for its server), so it answers
+# first, cold or warm. A cold read of its binary once took 3.84 s (fix-carried-checks, choice 2).
+LATE = 6
+
+
 def test_a_line_printed_late_fails_the_test_on_the_way_out(tmp_path: Path) -> None:
     # The last guard, for a holder that took the port in the moment between the probe and the
     # bind: the body ran on another process's server, which the line says only afterwards; its
     # results aren't its own, so the test fails, saying so. The other server starts after the
     # probe here, to be that holder.
-    loser = late_line(tmp_path, 3)
+    loser = late_line(tmp_path, LATE)
 
     async def taking(port: int) -> WorkflowEnvironment:
         await asyncio.sleep(0.2)  # after the probe, before the loser's line
@@ -263,22 +269,27 @@ def test_a_line_printed_late_fails_the_test_on_the_way_out(tmp_path: Path) -> No
             port=port, download_dest_dir=str(cli_folder())
         )
 
-    async def go() -> tuple[str, bool]:
+    async def go() -> tuple[str, list[str], int, bool]:
         port = free_port()
         other = asyncio.create_task(taking(port))
+        tried: list[str] = []
         ran = False
         try:
             with pytest.raises(SkippingServerFailed) as failure:
                 async with skipping_server(loser, ports=lambda: port) as environment:
+                    tried = environment.tried
                     await environment.sleep(timedelta(seconds=1))  # on the other server
-                    await asyncio.sleep(3.5)  # a body long enough for the line to come
+                    await asyncio.sleep(LATE + 0.5)  # a body long enough for the line to come
                     ran = True
         finally:
             await (await other).shutdown()
-        return str(failure.value), ran
+        return str(failure.value), tried, port, ran
 
-    said, ran = asyncio.run(go())
+    said, tried, port, ran = asyncio.run(go())
     assert ran
+    # One start, on the first try: a line printed before the other server answered would have the
+    # harness start the loser again, and the test pass without being the case it is about.
+    assert tried == [f"started on {port}"]
     assert said.startswith(
         f"the test server said its port was taken after the test began on it: {loser}\n"
     )
