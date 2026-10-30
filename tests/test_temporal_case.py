@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 from activity_threads import activity_threads
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
@@ -23,7 +24,6 @@ from temporalio.converter import DataConverter
 from temporalio.exceptions import ApplicationError
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Replayer
 from temporalio.workflow import NondeterminismError
 
 from ventoux.case.definition import parse_case
@@ -55,7 +55,7 @@ from ventoux.temporal.cases import (
     start_case,
 )
 from ventoux.temporal.converter import ExactPayloadConverter
-from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.temporal.worker import case_worker
 from ventoux.temporal.workflow import PlanWorkflow, RunReport
 from ventoux.testing import CATALOG, DAY, START
 from ventoux.tooling.keys import KeyRefused
@@ -934,10 +934,7 @@ def replay(
 ) -> None:
     """Replay `history` against `workflow_class`, as a worker would after a restart, with the
     converter that recorded it: its sealed parts open only with their keys (brief, D31)."""
-    replayer = Replayer(
-        workflows=[workflow_class], data_converter=converter, workflow_runner=SANDBOX
-    )
-    asyncio.run(replayer.replay_workflow(history))
+    asyncio.run(replay_history(history, [workflow_class], converter))
 
 
 def test_a_case_history_replayed_with_changed_code_fails() -> None:

@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 from activity_threads import activity_threads
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.common.v1 import Payload
@@ -27,7 +28,7 @@ from temporalio.client import (
 )
 from temporalio.converter import WorkflowSerializationContext
 from temporalio.exceptions import ApplicationError
-from temporalio.worker import Replayer, Worker
+from temporalio.worker import Worker
 from test_temporal_case import LARGE, REVIEW_FORM, CasesWithPlans, refund_with_plan
 from test_temporal_sensitive import (
     TAX_ID,
@@ -65,7 +66,7 @@ from ventoux.temporal.forget import (
     opener_refusal,
     propose_forget,
 )
-from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.temporal.worker import case_worker
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it
 # uses from the development setup is passed through, imported once and shared (as in 8c's tests).
@@ -162,13 +163,10 @@ def test_a_closed_case_read_without_its_key(caplog: pytest.LogCaptureFixture) ->
         other = await closed_claim(client, "claim-8")
         assert (await report(other)).status == "closed"
         # A replay, as CI's replay tests run, fails the same way.
-        replayer = Replayer(
-            workflows=[DevelopmentCases, DevelopmentPlans],
-            data_converter=client.data_converter,
-            workflow_runner=SANDBOX,
-        )
         with pytest.raises(Exception, match="no key for claim-7"):
-            await replayer.replay_workflow(before)
+            await replay_history(
+                before, [DevelopmentCases, DevelopmentPlans], client.data_converter
+            )
 
     on_temporal(scenario)
     logged = [logging.Formatter().format(record) for record in caplog.records]
@@ -648,13 +646,12 @@ def test_reading_a_forgotten_case(caplog: pytest.LogCaptureFixture) -> None:
             await asyncio.wait_for(case.query(CaseWorkflow.report), timeout=10)
         assert str(failed.value) == f"Failed encoding completion: {forgotten}"
         # So does a replay, as CI's replay tests run one.
-        replayer = Replayer(
-            workflows=[DevelopmentCases, DevelopmentPlans],
-            data_converter=client.data_converter,
-            workflow_runner=SANDBOX,
-        )
         with pytest.raises(Exception, match=forgotten):
-            await replayer.replay_workflow(await case.fetch_history())
+            await replay_history(
+                await case.fetch_history(),
+                [DevelopmentCases, DevelopmentPlans],
+                client.data_converter,
+            )
         # The worker carries on: the next case answers.
         other = await open_claim(client, "claim-8")
         assert (await report(other)).waiting_for == ["assess by adjuster"]
@@ -758,12 +755,7 @@ def test_what_the_audit_keeps_after_forgetting() -> None:
         "closed: forgotten",
     ]
     # The request's own history replays with no key at all: none of its payloads is sealed.
-    replayer = Replayer(
-        workflows=[DevelopmentForget],
-        data_converter=development_converter(),
-        workflow_runner=SANDBOX,
-    )
-    asyncio.run(replayer.replay_workflow(forgetting))
+    asyncio.run(replay_history(forgetting, [DevelopmentForget], development_converter()))
 
 
 def await_now[T](awaitable: Awaitable[T]) -> T:
