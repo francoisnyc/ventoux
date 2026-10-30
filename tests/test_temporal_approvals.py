@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 
-from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowHistory
@@ -19,6 +18,7 @@ from temporalio.client import Client, WorkflowHistory
 from test_approvals import FOUR_EYES, PEOPLE
 from test_temporal_case import QUEUE, Case, on_temporal, replay, reported, runs_of
 from test_temporal_timers import HERE
+from worker_threads import worker_threads
 
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow, answer, close, start_case
@@ -142,7 +142,7 @@ def before_the_worker(id: str, signals: Callable[[Case], Awaitable[None]]) -> Ca
             case = await start_case(client, DevelopmentCases, CLOSABLE, LARGE, id, QUEUE)
             await signals(case)
             async with (
-                activity_threads() as threads,
+                worker_threads() as threads,
                 case_worker(
                     client,
                     QUEUE,

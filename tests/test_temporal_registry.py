@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHistory
@@ -35,6 +34,7 @@ from test_temporal_case import (
     skipping,
 )
 from test_temporal_case_release import markers_of
+from worker_threads import worker_threads
 
 from ventoux.case.activation import Bound, Manifest
 from ventoux.case.registry import Activating, Answer, Opening, Released
@@ -152,7 +152,7 @@ async def production_worker(
 ) -> AsyncIterator[Worker]:
     """A case worker in production, on `queue`, its manifest published as it starts, running in
     the block; its activity threads shut down after it stops (fix-worker-executors)."""
-    async with activity_threads() as threads:
+    async with worker_threads() as threads:
         worker = await environment_worker(
             client,
             queue,

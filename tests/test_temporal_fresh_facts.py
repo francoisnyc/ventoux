@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from activity_threads import activity_threads
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
 from temporalio.testing import WorkflowEnvironment
+from worker_threads import worker_threads
 
 from ventoux.case.visibility import SheetRefused
 from ventoux.temporal.cases import (
@@ -92,7 +92,7 @@ def skipping[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,

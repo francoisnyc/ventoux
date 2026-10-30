@@ -1,11 +1,11 @@
-"""The tests' activity threads: shut down off the event loop, within a bound (fix-worker-executors,
-choice 5)."""
+"""The tests' worker threads (`worker_threads`): shut down off the event loop, within a bound
+(fix-worker-executors, choice 5)."""
 
 import asyncio
 import time
 
 import pytest
-from activity_threads import activity_threads
+from worker_threads import worker_threads
 
 
 def test_an_activity_still_running_at_the_end_fails_within_the_bound() -> None:
@@ -14,7 +14,7 @@ def test_an_activity_still_running_at_the_end_fails_within_the_bound() -> None:
     async def go() -> float:
         began = time.monotonic()
         with pytest.raises(TimeoutError):
-            async with activity_threads(ending=0.2) as threads:
+            async with worker_threads(ending=0.2) as threads:
                 threads.submit(time.sleep, 1)  # a pool thread busy past the bound
         return time.monotonic() - began
 
@@ -29,7 +29,7 @@ def test_an_activity_that_ends_in_time_is_waited_for() -> None:
         finished.append("done")
 
     async def go() -> None:
-        async with activity_threads(ending=2) as threads:
+        async with worker_threads(ending=2) as threads:
             threads.submit(slow)
 
     asyncio.run(go())

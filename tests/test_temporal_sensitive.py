@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from activity_threads import activity_threads
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
@@ -27,6 +26,7 @@ from temporalio.converter import (
 )
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
+from worker_threads import worker_threads
 
 from ventoux.case.visibility import CaseView
 from ventoux.temporal.activities import plan_activities
@@ -300,7 +300,7 @@ def on_temporal[T](
         activities = {**FAKES, "orders.lookup@1": quoting}
         async with (
             time_skipping(converter or development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,
@@ -427,7 +427,7 @@ def test_a_client_without_the_codec_is_refused() -> None:
     )
 
     async def go() -> None:
-        async with time_skipping(exact_only) as environment, activity_threads() as threads:
+        async with time_skipping(exact_only) as environment, worker_threads() as threads:
             refused = (
                 "^this client doesn't encrypt sensitive values: connect it with data_converter"
             )
@@ -502,7 +502,7 @@ def test_a_history_from_before_9b_replays() -> None:
     )
 
     async def go() -> WorkflowHistory:
-        async with time_skipping(before_9b) as environment, activity_threads() as threads:
+        async with time_skipping(before_9b) as environment, worker_threads() as threads:
             client = environment.client
             async with Worker(
                 client,
@@ -637,7 +637,7 @@ def test_the_workers_log_keeps_only_an_exceptions_type(caplog: pytest.LogCapture
     async def go() -> None:
         async with (
             time_skipping(development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
         ):
             case_worker(
                 environment.client,
