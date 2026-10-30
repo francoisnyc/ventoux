@@ -256,6 +256,14 @@ The quickstart (`QUICKSTART.md`) is the running test of this principle.
   its hash in the same commit fails. The head's lockfile records only what the base doesn't. The
   `check` job's test and `ventoux hashes` compare with the head's lockfile only: they catch an
   edit whose hash wasn't rewritten, never one whose hash was.
+- **Amended 2026-10-30, by the carried checks fix** (`docs/layers/fix-carried-checks.md`, choice
+  4, from the review of #55; the text above stands, this adds to it): the summary hashes the
+  head's contracts with the code of the merge commit CI checks out, not the base's. A pull request
+  that also edits the hashing code (`core/promise.py`, `core/contract_hash.py`,
+  `core/hash_check.py`) can therefore make its own check agree: a hash that no longer covers what
+  it changed matches the base's recorded hash. The summary can't catch that, and doesn't try.
+  Catching it is code review's job: a pull request that touches those files is read for what its
+  hashes stop covering.
 
 ### D6. Existing Temporal workflows as steps
 
