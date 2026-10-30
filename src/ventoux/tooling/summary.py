@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ventoux.case.changes import DiffRefused
+from ventoux.case.checked import is_error, issues_of
+from ventoux.case.checked import said as as_release_says
 from ventoux.case.diff import diff
 from ventoux.case.markdown import block, code, text
 from ventoux.case.plain import plain
@@ -20,8 +22,7 @@ from ventoux.case.releases import Package, PackageRefused, PackageUnreadable, di
 from ventoux.core.catalog import Catalog
 from ventoux.core.hash_check import check_hashes
 from ventoux.core.validate import Issue
-from ventoux.tooling.releases import is_error, issues_of, read_package
-from ventoux.tooling.releases import said as as_release_says
+from ventoux.tooling.releases import read_package
 
 # How the step ends: as `ventoux diff` does, a looser change fails nothing (brief, D55).
 COMPARED = 0  # every package compared, every contract as the lockfile records

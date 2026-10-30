@@ -14,10 +14,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
-from temporalio.worker import Replayer
 from test_advisor import INJECTED, claim
 
 from ventoux.authoring.advisor import Advice, Shown
@@ -34,7 +35,7 @@ from ventoux.temporal.cases import (
     start_case,
 )
 from ventoux.temporal.client import start_plan
-from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     FAKES,
     START,
@@ -126,7 +127,15 @@ def run_the_claim() -> Ran:
     async def go() -> Ran:
         async with (
             time_skipping(converter) as environment,
-            case_worker(environment.client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES),
+            activity_threads() as threads,
+            case_worker(
+                environment.client,
+                QUEUE,
+                DevelopmentCases,
+                DevelopmentPlans,
+                FAKES,
+                activity_executor=threads,
+            ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=30)
 
@@ -212,12 +221,7 @@ def test_a_suggested_proposal_sent_through_the_client_says_so_and_another_value_
 def test_the_cases_history_replays_without_asking_a_model(ran: Ran) -> None:
     # The replaying worker has no provider at all: the proposal is read from the history, and
     # nothing in the workflow could ask a model (brief, D62).
-    replayer = Replayer(
-        workflows=[DevelopmentCases],
-        data_converter=ran.converter,
-        workflow_runner=SANDBOX,
-    )
-    asyncio.run(replayer.replay_workflow(ran.recorded))
+    asyncio.run(replay_history(ran.recorded, [DevelopmentCases], ran.converter))
 
 
 def test_ventoux_advise_prints_the_labelled_suggestion_and_proposes_nothing(ran: Ran) -> None:

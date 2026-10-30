@@ -246,6 +246,12 @@ not start within 5s". The holder answered nothing: a socket bound or listening o
 with no Temporal behind it. So decision 1's "stopped and started on another port at once" covers
 such a holder, and only such a one; a holder that answers is decision 3's and 7's.
 
+*Found 2026-10-26, in `docs/layers/fix-test-server-port.md`:* the holder that answered nothing
+was an IPv6 connection of one of macOS's own daemons, which the IPv4 pick doesn't see. This Mac
+has about 300 of them, spread across the whole range of ports the system hands out. The harness
+still landed on one in 5 starts of 300, and moved on. It now picks the port the way the server
+binds it (decision 10).
+
 ### Decided
 
 1. **The harness starts the test server, as it starts the dev server** (choice 81 of the cold
@@ -331,6 +337,11 @@ such a holder, and only such a one; a holder that answers is decision 3's and 7'
    The two tests that start "the other server" with the SDK's own start give it the CLI folder
    (`download_dest_dir`), where CI caches the binary, so it is never downloaded into `/tmp` on
    every run.
+10. **The port is picked the way the server binds it** (*added 2026-10-26, in
+   `docs/layers/fix-test-server-port.md`*): `server_port`, an IPv6 socket that also takes IPv4,
+   bound to port 0, so the system skips ports held on either family; IPv4 alone where the machine
+   has no IPv6, as in decision 8. Decisions 1, 7 and 9 stay for a holder that comes in the
+   moment between the pick and the bind.
 
 ### Checked
 

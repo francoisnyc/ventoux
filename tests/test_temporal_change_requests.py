@@ -11,8 +11,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from replaying import replay_history
 from temporalio.client import Client, WorkflowHistory
-from temporalio.worker import Replayer
 from test_sensitive import FILE, NATIONAL_ID, claim
 from test_temporal_approvals import EveryEventCases
 from test_temporal_case import (
@@ -37,7 +37,6 @@ from ventoux.temporal.cases import (
     start_case,
 )
 from ventoux.temporal.forget import ForgetReport, answer_forget, propose_forget
-from ventoux.temporal.worker import SANDBOX
 from ventoux.testing import (
     DevelopmentCases,
     DevelopmentForget,
@@ -66,12 +65,7 @@ def test_histories_from_before_12c_replay() -> None:
     # The request that olu approved, recorded with the case's: its approval stands on replay.
     recorded = HERE / "before_12c_forget_request.json"
     request = WorkflowHistory.from_json("claim-7/forget", recorded.read_text())
-    replayer = Replayer(
-        workflows=[DevelopmentForget],
-        data_converter=fixture_converter(recorded),
-        workflow_runner=SANDBOX,
-    )
-    asyncio.run(replayer.replay_workflow(request))
+    asyncio.run(replay_history(request, [DevelopmentForget], fixture_converter(recorded)))
 
 
 # --- Slice 5: on Temporal ---

@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio.client import Client
 
@@ -192,7 +193,17 @@ def before_the_worker(id: str, signals: Callable[[Case], Awaitable[None]]) -> Ca
             client = environment.client
             case = await opened(client, cancellable(), id)
             await signals(case)
-            async with case_worker(client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES):
+            async with (
+                activity_threads() as threads,
+                case_worker(
+                    client,
+                    QUEUE,
+                    DevelopmentCases,
+                    DevelopmentPlans,
+                    FAKES,
+                    activity_executor=threads,
+                ),
+            ):
                 return await asyncio.wait_for(case.result(), timeout=20)
 
     return asyncio.run(go())

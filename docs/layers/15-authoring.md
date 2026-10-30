@@ -678,3 +678,436 @@ All in `tests/test_advisor.py`.
   constructor, read for this), not only when none is: so the explicit `base_url` keeps the key
   and the prompts at Anthropic's API, and D62's dated line says the custom headers are honoured,
   adding headers only.
+
+## Choices for 15c: the authoring loop
+
+Written 2026-10-27, from `main` at `4d90ae5` (15a and 15b merged). Choices 8 to 11 decided the
+loop. What follows is what they left open. Answer by number.
+
+**Answered 2026-10-27:** all as recommended, with one case added to the curriculum's negative
+test (choice 37): a draft that loops back to a high-risk activity without a new approval
+(`APPROVAL_REUSED`), from the warm-up on learning question 33. D63 is written before building.
+
+**Warm-up: learning question 33's follow-up.** Asked: a model drafts a plan that goes back to
+`pay` on `declined`. Why does `reach` still finish on a cycle, and why is the loop unsafe, not
+just slow? Answered "explain"; explained with a run of the package's `refund-order` plan, its
+`declined` sent back to `pay`: `states.pay APPROVAL_REUSED one approval would unlock two
+high-risk runs`. `reach` keeps a `seen` set over a finite list of states; one approval unlocks
+one run of one step (D11), and the prototype's review found such a loop issuing 997 refunds on
+one approval. Recorded in the log; the question stays open.
+
+28. **The check is `issues_of`, moved to `case`.** `ventoux release` checks a package with
+    `issues_of(package, catalog)` (`tooling/releases.py`): each plan's issues (layers 3 and 4),
+    then the case's (layer 10). `authoring` sits below `tooling`, so the loop can't import it
+    from there.
+    - It moves, unchanged, to `case/releases.py`, which is pure. `ventoux release` imports it
+      from there.
+    - So the loop and the release run one function, never a copy of it.
+    - Importing it pulls in nothing from the interpreter, `tooling` or `temporal`; I checked
+      that with `python -I`.
+
+    *Recommended.*
+
+29. **The seams.**
+    - `author(goal, released, plan, catalog, schema, provider, rounds) -> Authored`, in
+      `authoring/loop.py`.
+      - `released` is the package as `ventoux release` reads it.
+      - `plan` is the reference the draft must be, such as `refund-order@1`.
+      - `schema` is the published plan schema, given as data. The loop reads no file.
+    - `Authored` holds:
+      - the verdict: `drafted`, `abandoned` or `no answer`;
+      - the drafted plan's text, only if drafted;
+      - each round: the answer as text, and its problems;
+      - the reason, if not drafted.
+    - `ventoux draft PACKAGE --plan REF --goal TEXT --by WHO [--rounds N] [--model M]
+      [--recording FILE]`, in `tooling/drafting.py`. It reads the package, the schema and the
+      configuration, calls `author`, and writes into the drafts folder.
+
+    *Recommended.*
+
+30. **What the model is shown, concretely** (choice 8):
+    - **System text, fixed:**
+      - what a plan is: data, checked, never run;
+      - that it may call only the catalog's contracts, and decides no case's values;
+      - that untrusted data must never reach a `trusted_only` input or choose a transition;
+      - that it drafts, never sends;
+      - the answer's form: one JSON object.
+    - **The plan schema** from `schema/plan.schema.json`, given to the provider beside the
+      request.
+    - **The first message, as JSON:**
+      - the goal, as the person wrote it;
+      - the reference to draft (name and version);
+      - the step that names it: its name and title, and each plan field it gives with the kinds
+        of its sources, as case validation computes them (`could_come_from`). A person's answer
+        is said only as `person`, as 15a does. For example `note: system:opener,
+        untrusted:customer`;
+      - every contract in the catalog, as its promise (`promise_of`, what `ventoux promises`
+        prints): inputs with their policies, outputs with their sources, risk, effect,
+        outcomes;
+      - the registered roles, with the highest risk each may approve; the source labels; the
+        systems.
+    - **The plan as it is now,** if the package already has one by that reference: definition
+      text, reviewed, never a case value. So "change the refund plan" can be drafted.
+
+    *Recommended.* Set aside: only the contracts the step's plan already calls. That would make
+    the model guess what else exists.
+
+31. **One conversation, growing.** Round 1 is the first message. Each later round adds the
+    model's answer, then the problems in the fixed form, so the model sees what it wrote and
+    what was refused. At most 5 rounds, so at most 10 messages. *Recommended.*
+
+32. **The fixed form of the problems** (choice 9). A first line, "The draft was refused. Fix
+    every problem below and answer with the whole plan, as one JSON object.", then one line per
+    problem, `path: CODE: message`, as `ventoux check` writes them:
+    - **the answer isn't one JSON object:** `answer: NOT_ONE_OBJECT: …`, with the decoder's
+      position only, never the text;
+    - **the shape** (`parse_plan`'s lines, which have no code): `<path>: SHAPE: <message>`;
+    - **another reference than the one asked:** `plan: WRONG_PLAN: the draft is
+      evergreen@1, and the package's step names refund-order@1`;
+    - **the package refuses it** (`package()`'s lines): `package: PACKAGE: <line>`;
+    - **every error `issues_of` gives,** written as release writes it.
+
+    Warnings aren't fed back, since they refuse nothing. They are kept in the record, and 15d
+    shows them on the sheet. *Recommended.*
+
+33. **The verdicts, the record and the exit codes.**
+    - **`drafted`:** the plan file and its record are written; exit 0.
+    - **`abandoned`:** after the last round, the record only, with the last answer as text,
+      marked abandoned; exit 1, refused, as `ventoux release` uses it.
+    - **`no answer`:** the provider gave none (D62). The record only, saying why; exit 2.
+      The loop stops at once: asking again won't help.
+
+    A record is written whenever the model was asked, so a failure is never silent. Before the
+    model is asked (no catalog, no model, a package that can't be read), nothing is written and
+    the command exits 2. *Recommended.*
+
+34. **A draft already there is refused, never overwritten.** If
+    `drafts/<plan>@<n>.json` or its record exists, `ventoux draft` refuses before asking the
+    model, exit 2: "drafts/refund-order@1.json is there already: move it, or keep it in a pull
+    request". Someone may be reviewing it. *Recommended.* Set aside: numbering drafts (`-2`,
+    `-3`). One draft per reference keeps a review to one file.
+
+35. **One reader for an answer that should be one JSON object.** 15a's strict reading (at most
+    one fenced block, no key twice) moves to `authoring/answers.py` as `one_object(answer)`. The
+    advisor's `step_named` builds on it, and the loop uses it. Prose around a fenced block is a
+    problem fed back, never scraped: the curriculum's test list has it, as 15b's has.
+    *Recommended.*
+
+36. **The import test proves what the loop can reach.** In a fresh interpreter (`python -I`), it
+    imports `ventoux.authoring.loop` and checks that no module of the builder, the interpreter,
+    `ventoux.temporal` or `temporalio` was loaded. It is transitive, so a later import can't
+    sneak one in. A second check reads the loop's source for `eval`, `exec`, `compile` and
+    `import` by name, as the pure layers' test does. *Recommended.*
+
+37. **The tests, in order, negative first.**
+    1. **The curriculum's negative test, first flow:** untrusted data reaching a `trusted_only`
+       input. One recording repairs the draft in round 2, and it is drafted; another never
+       repairs it, and after 3 rounds it is abandoned.
+    2. **The second flow:** a transition reading untrusted data (D49), refused, then repaired.
+    3. An answer that isn't one JSON object, including prose around one fenced block, is fed
+       back as `NOT_ONE_OBJECT`, never scraped.
+    4. A shape problem, another reference, and a package that refuses the draft are each fed
+       back in the fixed form.
+    5. A provider that gives no answer stops the loop, saying why. `ventoux draft` exits 2,
+       with no traceback.
+    6. What the model is shown: the step's inputs and their sources, the catalog's promises,
+       roles, labels and the plan as it is. No case file, no implementation. Checked on the
+       recorded request.
+    7. `--rounds` takes 1 to 5; 0 or 6 is refused before anything is asked.
+    8. `ventoux draft` writes the plan and its record into the drafts folder only, never into
+       the package. A draft already there is refused.
+    9. The import test (choice 36).
+    10. The loop and `ventoux release` refuse a package for the same issues (choice 28).
+
+    *Recommended.*
+
+38. **The decision: D63,** recording choices 8 to 11 and 28 to 37, written before building, per
+    choice 26. *Recommended.*
+
+### 15c: the authoring loop
+
+In `tests/test_authoring.py` (the loop) and `tests/test_drafting.py` (the command).
+
+| # | Promise | Test | Shown failing |
+|---|---|---|---|
+| 1 | Untrusted data reaching a `trusted_only` input, never repaired, is refused each round and abandoned after the last, saying why, with no plan (the curriculum's negative test) | `test_untrusted_data_reaching_a_trusted_only_input_never_repaired_is_abandoned` | first: the answer was taken unchecked; then a mutation skipping the check |
+| 2 | The same, repaired in round 2, is drafted | `test_untrusted_data_reaching_a_trusted_only_input_repaired_is_drafted` | mutation: one round only |
+| 3 | A transition reading untrusted data is refused, then repaired (D49) | `test_a_transition_reading_untrusted_data_is_refused_then_repaired` | mutation: `UNTRUSTED_TRIGGER` left out of what refuses |
+| 4 | A loop back to a high-risk activity without a new approval is refused, then repaired (from the warm-up) | `test_a_loop_back_to_a_high_risk_activity_is_refused_then_repaired` | mutation: `APPROVAL_REUSED` left out of what refuses |
+| 5 | The problems go back in the fixed form, after the model's own answer, the first message and the system text unchanged | `test_the_problems_go_back_in_the_fixed_form_after_the_models_own_answer` | mutations: the first line changed; the model's answer left out |
+| 6 | An answer that isn't one JSON object (prose, prose around a fenced block, a list, a key twice) is `NOT_ONE_OBJECT`, never scraped; a shape problem is `SHAPE` at its path; another plan is `WRONG_PLAN` | `test_an_answer_that_isnt_a_draft_of_the_plan_is_a_problem_fed_back` (6 of its 8 cases; the other 2 are row 21) | mutations: `unfenced` taking the first fence anywhere; the shape's path dropped; the reference unchecked |
+| 7 | A provider that gives no answer stops the loop, saying why | `test_a_provider_that_gives_no_answer_stops_the_loop_saying_why` | mutation: `ProviderFailed` not caught |
+| 8 | The model is shown the goal, the plan to draft, the step with each field's sources (a person as `person`), every contract's promise, roles, labels, systems, the plan as it is and the schema; nothing else | `test_the_model_is_shown_the_step_its_sources_the_catalog_and_the_plan_never_a_case` | mutation: a person's source shown as written |
+| 9 | `--rounds` outside 1 to 5 is refused before anything is asked | `test_rounds_out_of_bounds_are_refused_before_anything_is_asked` | mutation: the bounds widened |
+| 10 | A plan no step names is refused before anything is asked | `test_a_plan_no_step_names_is_refused_before_anything_is_asked` | mutation: the first plan step taken whatever it runs |
+| 11 | The loop can't reach the builder, the interpreter, `ventoux.temporal` or `temporalio`, transitively | `test_the_loop_cant_reach_the_builder_the_interpreter_or_temporal` | an `import ventoux.core.interpreter` planted in the loop |
+| 12 | The loop runs no text as code | `test_the_loop_runs_no_text_as_code` | an `eval` planted in the loop |
+| 13 | The loop refuses a draft for exactly the issues `ventoux release` refuses the package on | `test_the_loop_refuses_a_draft_for_the_issues_ventoux_release_refuses_on` | mutation: the loop writing its issues its own way |
+| 14 | `ventoux draft` abandoned: exit 1, the record written, no plan, the package untouched | `test_a_draft_never_repaired_is_abandoned_its_record_written_and_no_plan` | first: no such command; then a mutation exiting 0 |
+| 15 | `ventoux draft` drafted: exit 0, the plan and its record in the drafts folder only | `test_a_draft_repaired_is_written_with_its_record_into_the_drafts_folder_only` | mutation: the plan written into the package's folder |
+| 16 | A provider that gives no answer: exit 2, its record, no plan, no traceback | `test_a_provider_that_gives_no_answer_exits_2_with_its_record_and_no_traceback` | mutation: exit 0 on no answer |
+| 17 | A draft already there is refused, never overwritten, and nothing is asked | `test_a_draft_already_there_is_refused_and_nothing_is_asked` | mutation: the check removed |
+| 18 | `--rounds` out of bounds, or `--by` not written as an identifier, exits 2 writing nothing | `test_a_command_that_cant_start_exits_2_writing_nothing` (2 cases) | mutation: the identifier unchecked |
+| 19 | No drafts folder named is refused, never a default folder | `test_no_drafts_folder_named_is_refused` | mutation: `drafts` by default |
+| 20 | The guide quotes the fixed first line and the command's lines word for word | `test_the_guide_quotes_what_the_loop_and_the_command_say` (3 cases) | mutation: a word of the guide's line changed |
+| 21 | An answer nested deeper than Python's reader goes, or holding an integer longer than it converts, is `NOT_ONE_OBJECT` fed back, quoting nothing, and the loop goes on (from the tutor's review) | `test_an_answer_that_isnt_a_draft_of_the_plan_is_a_problem_fed_back` (cases `too-deep`, `too-long`) | first: a `RecursionError` and a `ValueError` escaped the loop (the tutor's run) |
+| 22 | The same answers, from `ventoux draft`: exit 1 after the last round, the record written, no traceback | `test_answers_python_cant_read_are_fed_back_and_abandoned_with_their_record` | first: the `RecursionError` escaped before the record was written |
+| 23 | The same answers to the step advisor suggest nothing, as not one step name | `test_an_answer_that_isnt_one_step_name_suggests_nothing` (cases `too-deep`, `too-long`) | first: both escaped `advise` |
+| 24 | Only errors refuse a draft: a draft whose package only warns is drafted, its warnings kept | `test_a_draft_whose_package_only_warns_is_drafted_its_warnings_kept` | mutation: `is_error` true of every issue (the tutor's) |
+| 25 | `ventoux draft` keeps a drafted plan's warnings in its record | `test_a_drafts_warnings_are_kept_in_its_record` | mutation: the record's warnings left empty |
+
+### Decided while building (15c)
+
+- **The check has a module of its own, `case/checked.py`,** not `case/releases.py` as choice 28
+  said: case validation already loads `case/releases.py`, so the check importing
+  `validate_case` there made an import cycle. `ventoux release`, CI's summary, `ventoux check`
+  and the loop all import it from there.
+- **No `PACKAGE` line.** Choice 32 listed the package refusing a draft. Once a draft reads as a
+  plan and is the plan asked for, `package()` has nothing left to refuse (its refusals are a plan
+  that doesn't parse and a plan no step names, both caught before), so the branch would never
+  run. It isn't written; the package's own check is what follows.
+- **The draft's text is the JSON as the model wrote it,** inside its fence if it had one, with a
+  final line break, as a file ends.
+- **The schema comes from `schema_files()`,** the bytes `ventoux schema` publishes and CI keeps
+  equal to the committed file, never read from disk at a path that could be stale.
+- **A key given twice is named** in the problem fed back (`a key is given twice: plan`): it is the
+  draft's own text, as D35 allows; the step advisor still quotes nothing of its answer.
+- **`--by` is checked as an identifier** (D22) before anything is asked, as a proposal's is.
+
+### From the tutor's review of 15c (before merge)
+
+- **Two answers raised out of `one_object`, not `NotOneObject`.** Brackets nested 100,000 deep
+  (`RecursionError`) and a 5,000-digit integer (`ValueError`: Python converts at most 4,300
+  digits). `ventoux draft` raised out of `draft_command` with no record written, and the step
+  advisor raised instead of suggesting nothing. Now both are `NotOneObject`, quoting nothing:
+  "nested too deeply to read" and "a number too long to read". The loop feeds them back as
+  `NOT_ONE_OBJECT` and goes on (rows 21 to 23). Nesting inside a field Python reads
+  is a `SHAPE` problem, and an expression nests at most 32 levels (`MAX_DEPTH`, in `core/expressions/parse.py`), so no
+  other path out of the loop was found.
+- **Warnings are pinned** (rows 24 and 25): a package that gives only `WRITER_DECIDES` is
+  drafted, the warning kept in `Authored` and in the record.
+- **No `finally` for the record.** The record holds the rounds, which only `author` has, so a
+  `finally` in `draft_command` could write only a record without them, under a verdict D63
+  doesn't have. D63's "always" rests on `author` returning on every answer, which rows 21 to 23
+  now prove for the two answers that didn't. An exception left would be an engine bug, and
+  a traceback says it better than a half-written record.
+
+## Choices for 15d: "Approve this plan"
+
+Written 2026-10-27, from `main` at `11c9e8e` (15a to 15c merged). Choices 12 to 14 decided the
+sheet; your points for 15d settled more:
+- it is rendered only for a draft that passes, checked again by the sheet itself with
+  `issues_of`, never on the record's word;
+- a draft edited after drafting, or one that never passed, is refused, never shown;
+- its sections and their order;
+- no round's answer and no prose from the model reach it;
+- everything a draft writes is escaped as D56's pages are;
+- `ventoux release` refuses a drafts folder;
+- `ventoux draft-sheet DRAFT --package FOLDER` exits 0 when it rendered, 2 otherwise, never with
+  a traceback;
+- the plans guide gains the sheet.
+
+What follows is what they left open. Answer by number.
+
+**Answered 2026-10-27:** all as recommended. D64 is written before building.
+
+**Warm-up: learning question 41.** Asked for two things the semantic diff shows that the JSON
+diff can't, and why. Answered "tell me briefly"; told: a role added to `review` widens what three
+fields, every outcome and every output show (D30), and an input moved changes who may approve
+`pay` (D11). Each is computed from more than the line that changed. Recorded in the log; the
+question stays open.
+
+**What the sheet looks like,** for 15c's repaired refund draft (shortened):
+
+```text
+# Approve this plan: refund-order@1, for refund
+
+Drafted by `recorded` for omar, in 2 rounds, from the goal:
+
+> Refund the order, then draft a letter telling the customer it is on its way.
+
+## refund: what changes
+
+2 behaviour changes: 2 may loosen (0 looser, 2 not proven), 0 stricter; no wording change.
+
+### plans.refund-order@1.states.pay
+- Before: pay calls payments.refund@2 (high risk, it writes), … On done, paid; on declined, failed.
+- After: … On done, write\_letter; on declined, failed.
+- **Changed, not proven either way (read it as possibly looser)** (…): …
+
+## Plan refund-order@1, as drafted
+
+- It starts at check\_order.
+- check\_order calls orders.lookup@1 (low risk, it reads), …
+
+## refund will never
+
+### For every case, by Ventoux's engine
+- …
+### For every case of refund, while it runs this release
+- give letters.draft@2 its to\_customer from untrusted data.
+- …
+
+## Warnings
+
+None.
+
+## How it becomes real
+
+This is a draft. It runs nowhere until a pull request is reviewed and merged, a release is made,
+and an environment activates it.
+```
+
+39. **A draft edited after drafting is told by a digest in its record.** 15c's record doesn't say
+    what was written, so nothing can tell an edited draft today. `ventoux draft` adds one field to
+    the record, `draft_sha256`: the SHA-256 of the plan file's bytes, as written. The sheet hashes
+    the file again, and refuses on any difference:
+    `drafts/refund-order@1.json was changed after it was drafted: its record holds another
+    digest. A plan edited by hand is reviewed as one: copy it into the package and open a pull
+    request.`
+    A record from before this field is refused too (a field missing), never read as unchanged.
+    - *The other way:* compare the file with the last round's answer, as 15c wrote it. No new
+      field, but the sheet would read the model's text to decide, and repeat 15c's rule for
+      turning an answer into a file: two places to keep equal.
+
+    *Recommended:* the digest. The record becomes the one place that says what was written.
+
+40. **Which record, which package: every link checked.** The record is the draft's name with
+    `.record.json`, beside it. It is read by a Pydantic model, every field required, nothing
+    extra. Each of these is refused, saying which, and nothing is shown:
+    - no record, or one that doesn't read;
+    - a verdict other than `drafted`;
+    - a `plan` other than the draft's own reference (read from the parsed draft);
+    - a `package` other than the name of the package given with `--package`;
+    - a draft for a plan no plan step of that package names.
+
+    The record's word is taken only for provenance: who asked, the provider, the goal, how many
+    rounds. Whether the draft passes is always checked again. *Recommended.*
+
+41. **The provider is shown as its name says it, with no parsing.** Choice 13 wrote
+    "`<provider>` (`<model>`)". The record already holds `provider` as the provider names itself:
+    `anthropic:<model>` for the live one (15b), `recorded` for a recording. The sheet shows it as
+    written, in a code span: "Drafted by `anthropic:<model>` for omar, in 2 rounds, from the
+    goal:". Splitting it would mean the sheet knowing every provider's naming. The goal follows
+    as one quoted line, escaped, its line breaks shown as `\n` (D56).
+    *Recommended.* This changes choice 13's line, so it is asked.
+
+42. **The sections reuse what exists, headings one level down.** The page's title is the only
+    `#` heading.
+    - **What changes:** `plain()` as `ventoux diff --plain` prints it, against the package
+      as it is (the draft added, or in place of the plan of the same reference).
+    - **The plan as drafted:** the map's section for that plan, all its fields and states,
+      taken out of `case_map` into a function both use. The plain diff shows only what
+      changed, and an approver reads the whole plan.
+    - **Will never:** `never_sheet()` of the package with the draft in place, its headings
+      moved down one level. Every value in it is already escaped, so a line starting with `#`
+      is always a heading.
+    - **Warnings:** see choice 43.
+    - **How it becomes real:** see choice 13.
+
+    *Recommended.*
+
+43. **Warnings, as `ventoux check` says them for a package written by hand:**
+    `<file>: <path> CODE (warning): message`. The file is where the issue is: `case.json` for
+    the case's, the draft's own path for the drafted plan's, the package's plan file for
+    another plan's. Each line is escaped. With none, the section says "None.", so its absence
+    never reads as unchecked. *Recommended.*
+
+44. **The page goes to standard output,** as `ventoux map` and `ventoux diff --plain` print
+    theirs. It is never written to a file, and never posted. The person pastes it into the pull
+    request that keeps the draft. *Recommended.*
+
+45. **Where the code lives.**
+    - **`authoring/approve.py`, pure:** `approve_this_plan(drafted, before, catalog) -> str`.
+      `drafted` holds the draft's text and its provenance. It checks the package with the
+      draft in place by `issues_of`, raising `NotApprovable` on any error, then renders. It
+      imports no provider: it is in `authoring` because an AI draft's provenance is
+      authoring's.
+    - **`tooling/draft_sheet.py`:** the command reads the files, the record (choice 40) and
+      the digest (choice 39).
+    - **`tooling/drafting.py`** writes `draft_sha256`.
+
+    *Recommended.*
+
+46. **D64 is written before building** (choice 26). It adds to D14, D50, D55, D56 and D63, whose
+    text is kept. D14 gets a dated amendment: "Approve this plan" is built, and "a plan's
+    provenance records who drafted it" is the draft's record. So does D1's line on the two kinds
+    of AI: a draft worth keeping becomes a reviewed pull request, as choice 12 built.
+    *Recommended.*
+
+47. **The tests, in order, negative first.**
+    1. **The sheet checks again:** a draft whose package has an error is refused and never
+       rendered. Its record says `drafted` and its digest matches, so only the sheet's own
+       check can catch it. (Your first point.)
+    2. **An edited draft:** one byte changed after drafting is refused, saying so.
+    3. **Each broken link of choice 40 is refused:** no record, `abandoned`, another plan,
+       another package, a record with no `draft_sha256`.
+    4. **A drafts folder isn't a package:** `ventoux release drafts` is refused (no
+       `case.json`). So is `ventoux draft-sheet` given the drafts folder as `--package`.
+    5. **The page for 15c's repaired draft,** whole, its sections in order.
+    6. **Never the model's text:** a marker in round 1's refused answer, and in the record's
+       `reason` and problems, never appears on the page.
+    7. **Escaped:** a draft whose titles hold `<b>`, `# a heading`, a link and a backtick, and a
+       goal with a line break, each shown, never rendered.
+    8. **Warnings:** the 15c fixture that only warns (`WRITER_DECIDES`), as `ventoux check`
+       says it. And "None." when there are none.
+    9. **A plan the package lacks:** the diff says the plan was added, and the page renders.
+    10. **The command:** exit 0 with the page on standard output. Exit 2 with no traceback for a
+        draft that doesn't read, a package that doesn't read, or no catalog named.
+    11. **The guide:** its quoted lines match the page word for word.
+
+    *Recommended.*
+
+### 15d: "Approve this plan"
+
+In `tests/test_approve.py` (the page) and `tests/test_draft_sheet.py` (the command), with the
+record's digest in `tests/test_drafting.py`. "Shown failing" names how each test was seen to fail:
+first, before the code existed, or by a mutation of the code it guards (17 run, all caught,
+every file restored).
+
+| # | Promise | Test | Shown failing |
+|---|---|---|---|
+| 1 | A draft whose package has an error is refused and never rendered, checked again by the sheet itself with `issues_of`, never on the record's word | `test_a_draft_that_doesnt_pass_is_refused_and_never_rendered` | first: no such module; then a mutation skipping the check |
+| 2 | The same through the command, its record saying `drafted` and its digest matching: exit 2, nothing on standard output | `test_ventoux_draft_sheet_that_cant_read_or_check_exits_2_with_no_traceback` (case "a draft that doesn't pass") | mutation: the check skipped |
+| 3 | `ventoux draft` records the SHA-256 of the plan file as written, and none when it wrote none | `test_a_draft_repaired_is_written_with_its_record_into_the_drafts_folder_only`, `test_a_draft_never_repaired_is_abandoned_its_record_written_and_no_plan` | first: no such field; then a mutation writing another digest |
+| 4 | A draft edited without its record is refused, saying so and what to do | `test_a_draft_edited_after_it_was_drafted_is_refused` | first: no such command; then a mutation leaving the digest unchecked |
+| 5 | A record missing, not JSON, without `draft_sha256`, `abandoned`, for another plan or another package, or a draft for a plan no step names: each refused, saying which, exit 2 | `test_a_draft_whose_record_or_package_doesnt_match_is_refused` (7 cases) | first: all 7 failed, raising or saying the wrong thing; then a mutation per check |
+| 6 | A drafts folder is never a package: `ventoux release` refuses it and writes no record, and so does the sheet's `--package` | `test_a_drafts_folder_is_never_a_package` | mutation: a folder without `case.json` read as a package |
+| 7 | The page reads, in order: provenance, the plain diff (as `ventoux diff --plain`), the plan as drafted (as `ventoux map`), the sheet one level down, the warnings, how it becomes real | `test_the_page_reads_provenance_changes_the_plan_nevers_warnings_and_how_in_order` | first: an empty page; then mutations leaving the plan out and the sheet's headings at their level |
+| 8 | Only errors refuse; a warning is shown as `ventoux check` writes it, and "None." when there is none | `test_warnings_are_said_as_ventoux_check_says_them`, and promise 7's test | mutations: warnings refusing; "None." always |
+| 9 | A title, a literal, the goal, who asked and the provider are shown, never rendered; only the page's own headings start a line with `#` | `test_what_a_draft_or_a_person_writes_is_shown_never_rendered` | mutations: the goal unescaped; the provider in a plain code span |
+| 10 | No round's answer, no problem fed back, no reason and no recorded warning reach the page | `test_the_models_own_text_never_reaches_the_page` | mutation: the goal taken from the record's `reason` |
+| 11 | The sheet can't reach the builder, the interpreter, `ventoux.temporal` or `temporalio`, and runs no text as code | `test_the_sheet_cant_reach_the_builder_the_interpreter_or_temporal` | an `import ventoux.core.interpreter` planted in the sheet |
+| 12 | `ventoux draft-sheet` prints the page and exits 0; a draft or a package that doesn't read, or no catalog named, exits 2 with no traceback | `test_ventoux_draft_sheet_prints_the_page_and_exits_0`, `test_ventoux_draft_sheet_that_cant_read_or_check_exits_2_with_no_traceback` (4 cases) | mutation: `NotApprovable` not caught |
+| 13 | The guide quotes the page's opening, how a draft becomes real, and the edited draft's refusal, word for word | `test_the_guide_quotes_what_the_sheet_says` (3 cases) | mutation: a word of the guide's line changed |
+| 14 | The digest doesn't tell an edit that rewrote the record too: the page is shown, its provenance the record's word (from the tutor's review) | `test_an_edit_that_rewrites_the_record_too_is_not_told` | mutation: the draft also compared with the last round's answer, choice 39's other way |
+
+### Decided while building (15d)
+
+- **No "a plan the package lacks".** Choice 47's test 9 couldn't be written. `package()` refuses a
+  package missing a plan its steps name ("refund-order@1 is run by a plan step and isn't in
+  plans/: add it"), so a package that reads holds every plan its steps name, and a draft always
+  replaces one. D63's "or one a step names and the package lacks" can't happen either; D63's text
+  is kept, and this note says so.
+- **Every warning is said at `case.json`.** Choice 43 named three files. A plan's own check gives
+  errors only, and case validation says a plan's issues at the step that runs it
+  (`steps.settle.inputs.remark`), so a warning's path is always the case's. The other two
+  branches would never run, so they aren't written, and `Drafted` holds no path.
+- **The record is read by Pydantic, its problems by `core/plan.py`'s `problem`:** a field and
+  what is wrong with it, never what it holds, since a record keeps the model's answers.
+- **`plan_read`** is the case map's plan section, taken out so the map and the sheet read a plan
+  the same way.
+
+### From the tutor's review of 15d (before merge)
+
+- **"A draft edited after it was drafted is refused" held only when the edit left the record
+  alone.** The record is plain JSON, signed by nobody. The tutor changed a draft's title, put the
+  new file's SHA-256 in the record and its `asked_by` to `the-cfo`, and the sheet rendered "for
+  the-cfo", with the edited title. Nothing unsafe gets through, since the sheet checks the draft
+  again, but the sentence read as a control. D64's line (not yet merged) is corrected in place,
+  as are the guide's sentence and the code comments. The digest tells an edit made without the
+  record (an accident, a fix by hand, a file copied from elsewhere), refused. It doesn't tell an
+  edit that rewrote the record too: provenance is the record's word, as reliable as the drafts
+  folder and the pull request that commits them. That is enough, because the sheet's own check
+  and the reviewed pull request stand between a draft and a release. Promise 14 pins it. Signing
+  the record would be a decision of its own, not now.

@@ -1857,11 +1857,18 @@ A worker serves it, the plan workflow its plan steps run as (`RefundPlans`, from
 guide), and the code behind each contract:
 
 ```python
+from concurrent.futures import ThreadPoolExecutor
+
 from ventoux.temporal.worker import case_worker
 
-worker = case_worker(client, "refunds", RefundCases, RefundPlans, {"payments.refund@2": refund, ...})
-await worker.run()
+with ThreadPoolExecutor() as activity_executor:
+    worker = case_worker(client, "refunds", RefundCases, RefundPlans,
+                         {"payments.refund@2": refund, ...}, activity_executor=activity_executor)
+    await worker.run()
 ```
+
+The executor is yours, as with a plan worker (the plans guide): the `with` block shuts its threads
+down once the worker has stopped.
 
 The client opens a case with its first values, answers it, and reads how it is going. The case's
 ID is the case: `refund-A-1001` names it for as long as it lives, and opening a second case with

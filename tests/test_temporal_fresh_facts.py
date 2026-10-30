@@ -14,12 +14,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Replayer
 
 from ventoux.case.visibility import SheetRefused
 from ventoux.temporal.cases import (
@@ -32,7 +33,7 @@ from ventoux.temporal.cases import (
     start_case,
     view,
 )
-from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     FAKES,
     DevelopmentCases,
@@ -91,7 +92,15 @@ def skipping[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            case_worker(environment.client, QUEUE, cases, DevelopmentPlans, served),
+            activity_threads() as threads,
+            case_worker(
+                environment.client,
+                QUEUE,
+                cases,
+                DevelopmentPlans,
+                served,
+                activity_executor=threads,
+            ),
         ):
             return await asyncio.wait_for(scenario(environment), timeout=30)
 
@@ -153,10 +162,7 @@ def test_a_case_with_a_refresh_replays() -> None:
     # recorded, so the same refresh is asked for at the same point, and nothing differs.
     converter = development_converter()
     history = recorded(DevelopmentCases, converter)
-    replayer = Replayer(
-        workflows=[DevelopmentCases], data_converter=converter, workflow_runner=SANDBOX
-    )
-    asyncio.run(replayer.replay_workflow(history))
+    asyncio.run(replay_history(history, [DevelopmentCases], converter))
 
 
 def test_times_cross_continue_as_new_exactly() -> None:

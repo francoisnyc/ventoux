@@ -313,10 +313,11 @@ class RefundCases(CaseWorkflow):
     workflows = {"kyc.check@1": Binding(workflow="KycCheck", task_queue="kyc")}
     ...
 
-worker = await environment_worker(client, "refunds", RefundCases, RefundPlans,
-                                  {"payments.refund@2": refund, ...}, build="4f2a9c1",
-                                  identity="refunds-a")
-await worker.run()
+with ThreadPoolExecutor() as activity_executor:
+    worker = await environment_worker(client, "refunds", RefundCases, RefundPlans,
+                                      {"payments.refund@2": refund, ...}, build="4f2a9c1",
+                                      identity="refunds-a", activity_executor=activity_executor)
+    await worker.run()
 ```
 
 It publishes its **manifest** to the registry: each contract it has code for, with the hash its own
