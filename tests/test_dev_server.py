@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 import temporalio.service
-from dev_server import DevServerFailed, cli_binary, cli_folder, dev_server
+from dev_server import FLAGS_READ_AT, DevServerFailed, cli_binary, cli_folder, dev_server
 from temporalio.api.workflowservice.v1 import DescribeNamespaceRequest
 from temporalio.testing import WorkflowEnvironment
 
@@ -183,3 +183,15 @@ def test_a_server_that_holds_connections_unanswered_fails_within_the_deadline(
         "client: TimeoutError): "
     )
     assert not running(int(pid.read_text()))
+
+
+def test_the_flags_are_the_pinned_sdks() -> None:
+    # The harness starts the dev server with the flags the SDK used at FLAGS_READ_AT: read from
+    # the SDK's running process, never from a documented interface. Another SDK may start its
+    # server otherwise, so an upgrade fails here until they are read again.
+    assert temporalio.service.__version__ == FLAGS_READ_AT, (
+        f"temporalio is {temporalio.service.__version__}, but flags() in tests/dev_server.py was "
+        f"read from the SDK's own start at {FLAGS_READ_AT}: check the flags again against the new "
+        "SDK's own start (`server start-dev`'s arguments in its running process), then set "
+        "FLAGS_READ_AT to the new version."
+    )
