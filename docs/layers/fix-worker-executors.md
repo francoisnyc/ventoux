@@ -62,6 +62,9 @@ that their end is left to the collector, not that they pile up past every limit.
 Answer by number. Each choice covers all five places that build an executor (the two builders
 and the three tests).
 
+*Answered 2026-10-30, from the tutor's review: 1, 5 and 6 taken, 2, 3 and 4 set aside, with
+additions and two corrections, each marked where it applies. What was built is under "Decided".*
+
 1. **Whoever starts the worker owns its executor.** `plan_worker` and `case_worker` (and
    `environment_worker`, which passes through to `case_worker`) take the executor as an argument
    and no longer make one. The caller opens it with `with ThreadPoolExecutor() as executor:`
@@ -72,6 +75,12 @@ and the three tests).
    its executor together) would keep each to one line. *Recommended:* the function that makes a
    resource is the one that ends it, and the builders, which return a worker they don't run,
    can't know when that is.
+   *Taken, with additions (2026-10-30):* the parameter is named `activity_executor`, as the SDK
+   names it, keyword-only and with no default, so a caller can't forget it. The SDK holds the
+   same rule for the one executor it would otherwise make itself, `workflow_task_executor`: "if
+   one is provided, the caller is responsible for shutting it down after the worker is shut down"
+   (`temporalio/worker/_worker.py`, 1.34.0). The change is public, so the four guides that show
+   the builders show the executor's `with` block (below).
 
 2. **The builders become context managers that own both.** `plan_worker(...)` gives an
    `@asynccontextmanager` that opens the executor, runs the `Worker` inside it, and shuts the
@@ -89,6 +98,9 @@ and the three tests).
    aside: shared state across tests and workers, a size that must cover every worker running at
    once (the SDK warns when `max_workers` is below a worker's `max_concurrent_activities`), and
    threads still never shut down, only fewer.
+   *Corrected 2026-10-30, from the tutor's review; the reason above stands without it:* the SDK
+   warns only when `max_concurrent_activities`, or a tuner, is set. By default it is `None`, and
+   nothing warns (`_warn_if_activity_executor_max_workers_is_inconsistent`).
 
 5. **How the executor is shut down: wait for its activities.** Whichever owner is chosen, the
    shutdown is `shutdown(wait=True)` (what `with` does): a plain-function activity still running
@@ -97,17 +109,62 @@ and the three tests).
    scenarios (`asyncio.wait_for`), and a hang points at the activity, the cause, rather than
    hiding it. *Recommended.* Set aside: `wait=False` or `cancel_futures=True`, which would let a
    stuck activity go unnoticed.
+   *Corrected 2026-10-30, from the tutor's review:* the tests' bounds don't catch it. A plain
+   `with` in async code calls `shutdown(wait=True)` on the event loop's own thread and blocks it,
+   so no `asyncio.wait_for` can fire while it waits. Rerun here: a pool thread busy for 5 s at the
+   block's end, under a 1 s `wait_for`, "finished after 5.0 s", no timeout said; with
+   `await asyncio.to_thread(executor.shutdown, True)`, the `TimeoutError` was raised after 1.0 s.
+   So `wait=True` stays, but the tests shut the executor down off the loop, in a helper, within a
+   bound. The guides keep a plain `with` around `await worker.run()`: a deployment has no bound
+   to keep.
 
 6. **A test pins it.** A test starts a worker built as decided, runs one plain-function activity
    on it, stops the worker, and checks that no thread the worker started is still alive (by
    comparing `threading.enumerate()` before and after, with no garbage collection forced). Seen
    failing on `main`'s builders, where the thread is still alive. *Recommended.*
+   *Taken, with additions (2026-10-30):* through the tests' helper, and also seen failing when a
+   builder ignores the executor it is given and makes its own.
 
 ## Not in this fix
 
 - **The registry worker** (`registry_worker`, `src/ventoux/temporal/registry.py`) passes no
   executor: its activities are `async`, so it makes no threads.
 
+## Decided
+
+1. **The builders take the caller's executor.** `plan_worker`, `case_worker` and
+   `environment_worker` take `activity_executor`, keyword-only and with no default, and pass it to
+   the `Worker`. They make none. A call without it is a `TypeError`, and mypy refuses it.
+2. **The tests' helper shuts it down off the loop, within a bound.** `activity_threads()`
+   (`tests/activity_threads.py`) is an async context manager. It gives a `ThreadPoolExecutor`,
+   then, on the way out, `await asyncio.wait_for(asyncio.to_thread(executor.shutdown, True),
+   ending)`, `ending` 10 s by default. Every activity still running is waited for. One still
+   running after the bound fails the test with a `TimeoutError`, never a hang. It is entered
+   before the worker, so it shuts down after the worker has stopped.
+   The bound is the helper's own, not the scenario's: most scenarios bound only the scenario,
+   inside the worker's block (`asyncio.wait_for(scenario(...), timeout=20)`), so the shutdown
+   comes after that bound has ended. A bound in the helper covers every caller the same way.
+3. **Every test that starts a worker goes through it:** the twenty-two calls of the builders, and
+   the three tests that build a `Worker` with an executor of their own
+   (`tests/test_temporal_workflow_step.py`, `tests/test_temporal_sensitive.py`,
+   `tests/test_temporal_case_release.py`). The activation and registry tests' helpers (`started`,
+   `production_worker`) return a worker their callers entered; each is now an async context
+   manager that opens the threads, starts the worker, and stops both in that order. The registry
+   tests' four direct calls of `environment_worker` go through `production_worker`, which takes
+   the queue now.
+4. **The four guides show the `with` block,** since a deployment following them would otherwise
+   get a `TypeError`:
+   - `docs/guides/plans.md` ("Running a plan on Temporal"): `plan_worker`, and why the block
+     owns the threads;
+   - `docs/guides/cases.md`: `case_worker`;
+   - `docs/guides/case-data.md`: `case_worker` with `forget=`;
+   - `docs/guides/releases.md`: `environment_worker`.
+
 ## Promises
 
-To be filled once the choices are answered and the tests written.
+| Promise | Test that would fail |
+|---|---|
+| A worker's activity threads have ended once its block is over: none is left for the garbage collector | `test_the_thread_an_activity_ran_on_has_ended_once_its_worker_stops` (`tests/test_temporal.py`): a plain-function activity records its thread, and it must not be alive after `on_temporal` returns. Seen failing on `main`'s builders (`ThreadPoolExecutor-0_0` alive), with `plan_worker` ignoring the executor it is given and making its own (`ThreadPoolExecutor-1_0` alive), and with the helper shutting nothing down. |
+| An activity still running when the worker stops is waited for, never abandoned | `test_an_activity_that_ends_in_time_is_waited_for` (`tests/test_activity_threads.py`). Seen failing with `shutdown(wait=False)`. |
+| One still running past the bound fails the test with a `TimeoutError` within the bound, never blocking the loop | `test_an_activity_still_running_at_the_end_fails_within_the_bound`. Seen failing ("DID NOT RAISE") with a plain `shutdown(wait=True)` on the loop's thread, and with `wait=False`. |
+| A builder can't be called without an executor | mypy, strict, on every call site: `Missing named argument "activity_executor"`. Seen on the registry and activation tests' calls before they were changed. |
