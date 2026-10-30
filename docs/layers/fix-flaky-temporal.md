@@ -364,3 +364,35 @@ Each claim this section makes about behaviour, and the test that would fail if i
 | A holder that takes the port between the probe and the bind, whose line comes late, fails the test on the way out, saying its results weren't its own (decision 3) | K `test_a_line_printed_late_fails_the_test_on_the_way_out` |
 | The holder in the reproduction is IPv6 and IPv4 where the machine has IPv6, IPv4 alone where it hasn't; the listener's port is skipped before any start, the real server starts on the next (decisions 8, 9) | K `test_a_port_another_server_holds_is_left_for_the_next` |
 | Time skips while a result is awaited, as in the SDK's environment | every Temporal test that awaits a `result` past a timer, `tests/test_temporal.py` among them: the suite, green on the harness |
+
+## The stop test again: the clock held until the cancellation is recorded
+
+`test_a_stopped_cancellable_workflow_is_cancelled_on_temporal` was reported failing again in a
+full run, on the order of its three lines, and passing alone. The failing output wasn't kept.
+
+**Not reproduced.** 40 runs of the test beside a full suite before the port-race fix, and 40
+after it on main, all green. 40 runs of a probe that freed the server's clock the moment the
+withdrawal was sent, beside a full suite, all green. 9 runs of a probe that freed it the moment
+`kyc#1: stop requested` was readable, all green.
+
+**The one gap left.** Since the payment fix, nothing else is in flight once Ana withdraws: the
+only line that could land among the three is the check's own end. The check sleeps 60 s. The
+test awaited the case's `result` straight after the withdrawal, and awaiting a result frees the
+clock. If the server delivered the cancellation to the check after the case's workflow task
+completed, with no task holding the clock in between, it could skip the 60 s and the check would
+end done, not cancelled. The probes say this gap is small or absent on this server; the test no
+longer depends on it.
+
+**Fixed in the test.** The test now waits, with the clock still held, for the case's report to
+show the flag, the last of the three lines; only then does it await the result. The order is
+still asserted as before: the wait is for the line's presence, and its position is checked on
+the final report. Nothing is skipped or retried.
+
+**Checked.** Five runs of the test alone, then three consecutive full runs, with other sessions'
+suites running on the machine: the test passed in all three. Runs 2 and 3 were fully green
+(3795 passed). Run 1 failed only `test_the_registry_knows_each_releases_open_cases`, at its
+real-time deadline, the flake already noted above for its own fix.
+
+| Promise | Test that would fail |
+|---|---|
+| The three lines of a stop keep their order, read once the flag is recorded and before the clock is freed | `test_a_stopped_cancellable_workflow_is_cancelled_on_temporal`, three consecutive full runs |

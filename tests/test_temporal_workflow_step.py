@@ -744,6 +744,10 @@ def cancel_requests(history: WorkflowHistory) -> list[Any]:
     return [event for event in history.events if event.event_type == asked]
 
 
+# The flag a rule's stop of the check leaves, once the check has ended cancelled.
+FLAGGED = "flagged: kyc#1 cancelled after its stop was requested by withdraw#1"
+
+
 def test_a_stopped_cancellable_workflow_is_cancelled_on_temporal() -> None:
     # The check sleeps when the customer withdraws: the rule's stop cancels it through Temporal,
     # its reason naming the rule's entry only; the case waits for it to end cancelled, flags it,
@@ -758,6 +762,8 @@ def test_a_stopped_cancellable_workflow_is_cancelled_on_temporal() -> None:
         await started(case)
         await reported(case, lambda now: any(line.startswith("pay#1 done") for line in now.history))
         await withdrawn(case)
+        # Waits for the flag: `result` frees the clock, which mustn't skip the check's 60 s sleep.
+        await reported(case, lambda now: FLAGGED in now.history)
         ended = await case.result()
         child = await client.get_workflow_handle("refund-1/kyc#1").fetch_history()
         asked = next(
@@ -772,7 +778,7 @@ def test_a_stopped_cancellable_workflow_is_cancelled_on_temporal() -> None:
     assert ended.history[stopping + 1 : stopping + 4] == [
         "kyc#1: stop requested by withdraw#1",
         "kyc#1 cancelled: stopped by withdraw#1",
-        "flagged: kyc#1 cancelled after its stop was requested by withdraw#1",
+        FLAGGED,
     ]
     assert asked == "stopped by withdraw#1"
     assert len(requests) == 1 and ended.status == "closed"
