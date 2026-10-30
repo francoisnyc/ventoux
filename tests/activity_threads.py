@@ -6,6 +6,12 @@ A plain `with ThreadPoolExecutor()` would do that, but on the event loop's own t
 the loop while it waits, so no `asyncio.wait_for` can fire, and an activity that never returns
 hangs the test with no timeout said. So the threads are shut down off the loop, and waited for
 within a bound (choice 5).
+
+What the bound gives is the failure, decided within the bound and naming the cause. What it can't
+give is a quick end: a thread can't be stopped. The shutdown runs on asyncio's default executor,
+which `asyncio.run` waits for on its way out (up to 300 s), and Python joins pool threads when the
+process exits. So the test is reported only once the activity ends (or after 300 s), and the run
+can't exit while it runs.
 """
 
 import asyncio
@@ -20,8 +26,9 @@ ENDING = 10
 @asynccontextmanager
 async def activity_threads(ending: float = ENDING) -> AsyncIterator[ThreadPoolExecutor]:
     """A thread pool for a worker's `activity_executor`, shut down on the way out: every activity
-    still running is waited for, never abandoned, and one still running after `ending` seconds
-    fails the test (`TimeoutError`)."""
+    still running is waited for, never abandoned. One still running after `ending` seconds fails
+    the test with a `TimeoutError`, raised then; the test is reported once that activity ends, as
+    the module's docstring says."""
     executor = ThreadPoolExecutor()
     try:
         yield executor

@@ -159,7 +159,16 @@ carried.
    (`tests/activity_threads.py`) is an async context manager. It gives a `ThreadPoolExecutor`,
    then, on the way out, `await asyncio.wait_for(asyncio.to_thread(executor.shutdown, True),
    ending)`, `ending` 10 s by default. Every activity still running is waited for. One still
-   running after the bound fails the test with a `TimeoutError`, never a hang. It is entered
+   running after the bound fails the test with a `TimeoutError`, raised within the bound, naming
+   the cause. What the bound can't do is end the activity: a thread can't be stopped. The
+   shutdown runs on asyncio's default executor, and the test's `asyncio.run` waits for that
+   executor's threads on its way out (`shutdown_default_executor`, up to 300 s), while
+   `concurrent.futures` joins its threads when the process exits. So the test is reported only
+   once the activity ends, or after 300 s, and the run can't exit while the activity runs. Rerun
+   here: `activity_threads(ending=0.5)` with an activity sleeping 8 s raised the `TimeoutError` at
+   0.5 s, and `asyncio.run` returned at 8.0 s. *Corrected 2026-10-30, from the tutor's review of
+   #73, where this said "never a hang".* A daemon thread of the helper's own for the shutdown would
+   let `asyncio.run` return at once; that is a choice of its own, not taken here. It is entered
    before the worker, so it shuts down after the worker has stopped.
    The bound is the helper's own, not the scenario's: most scenarios bound only the scenario,
    inside the worker's block (`asyncio.wait_for(scenario(...), timeout=20)`), so the shutdown
@@ -187,7 +196,7 @@ carried.
 
 | Promise | Test that would fail |
 |---|---|
-| A worker's activity threads have ended once its block is over: none is left for the garbage collector | `test_the_thread_an_activity_ran_on_has_ended_once_its_worker_stops` (`tests/test_temporal.py`): a plain-function activity records its thread, and it must not be alive after `on_temporal` returns. Seen failing on `main`'s builders (`ThreadPoolExecutor-0_0` alive), with `plan_worker` ignoring the executor it is given and making its own (`ThreadPoolExecutor-1_0` alive), and with the helper shutting nothing down. |
+| A worker's activity threads have ended once its block is over: none is left for the garbage collector | `test_the_thread_an_activity_ran_on_has_ended_once_its_worker_stops` (`tests/test_temporal.py`): a plain-function activity records its thread, and it must not be alive after `on_temporal` returns. Seen failing on `main`'s builders (`ThreadPoolExecutor-0_0` alive), with `plan_worker` ignoring the executor it is given and making its own (`ThreadPoolExecutor-1_0` alive), and with the helper shutting nothing down. `test_the_thread_a_case_activity_ran_on_has_ended_once_its_worker_stops` (`tests/test_temporal_case.py`), the same through a case worker (*added 2026-10-30, from the tutor's review of #73*): with `case_worker` ignoring the executor it is given and making its own, all 221 Temporal tests passed before it; it fails (`ThreadPoolExecutor-1_0` alive). |
 | An activity still running when the worker stops is waited for, never abandoned | `test_an_activity_that_ends_in_time_is_waited_for` (`tests/test_activity_threads.py`). Seen failing with `shutdown(wait=False)`. |
-| One still running past the bound fails the test with a `TimeoutError` within the bound, never blocking the loop | `test_an_activity_still_running_at_the_end_fails_within_the_bound`. Seen failing ("DID NOT RAISE") with a plain `shutdown(wait=True)` on the loop's thread, and with `wait=False`. |
+| One still running past the bound fails the test with a `TimeoutError` raised within the bound, never blocking the loop. The bound decides the failure; it can't end the activity, so the test is reported once the activity ends (or after 300 s), and the run can't exit while it runs (*corrected 2026-10-30, from the tutor's review of #73*) | `test_an_activity_still_running_at_the_end_fails_within_the_bound`: the `TimeoutError` within 0.9 s, its activity 1 s long. Seen failing ("DID NOT RAISE") with a plain `shutdown(wait=True)` on the loop's thread, and with `wait=False`. That the report waits for the activity is shown by the rerun under decision 2, not by a test. |
 | A builder can't be called without an executor | mypy, strict, on every call site: `Missing named argument "activity_executor"`. Seen on the registry and activation tests' calls before they were changed. |
