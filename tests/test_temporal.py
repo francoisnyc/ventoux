@@ -10,6 +10,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
@@ -39,6 +40,7 @@ from ventoux.testing import (
     Activity,
     DevelopmentPlans,
     development_converter,
+    fake_draft,
     fake_refund,
     run_plan,
 )
@@ -58,7 +60,10 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            plan_worker(environment.client, QUEUE, DevelopmentPlans, activities),
+            activity_threads() as threads,
+            plan_worker(
+                environment.client, QUEUE, DevelopmentPlans, activities, activity_executor=threads
+            ),
         ):
             return await scenario(environment.client)
 
@@ -194,9 +199,11 @@ def test_a_client_without_exact_numbers_is_refused() -> None:
     # would read it back as a number: exact numbers are checked where a client is used, never
     # assumed (brief, D20).
     async def go() -> None:
-        async with time_skipping() as environment:
+        async with time_skipping() as environment, activity_threads() as threads:
             with pytest.raises(ValueError, match="exact numbers"):
-                plan_worker(environment.client, QUEUE, DevelopmentPlans, FAKES)
+                plan_worker(
+                    environment.client, QUEUE, DevelopmentPlans, FAKES, activity_executor=threads
+                )
             with pytest.raises(ValueError, match="exact numbers"):
                 await start_plan(
                     environment.client,
@@ -256,10 +263,17 @@ def test_the_runtime_check_blocks_the_injection_on_temporal() -> None:
 def test_an_implementation_the_catalog_does_not_hold_is_refused() -> None:
     # A typo would register an activity no plan can call, and leave the real one unserved.
     async def go() -> None:
-        async with time_skipping(development_converter()) as environment:
+        async with (
+            time_skipping(development_converter()) as environment,
+            activity_threads() as threads,
+        ):
             with pytest.raises(NotInCatalog, match="payments.refnd@2"):
                 plan_worker(
-                    environment.client, QUEUE, DevelopmentPlans, {"payments.refnd@2": fake_refund}
+                    environment.client,
+                    QUEUE,
+                    DevelopmentPlans,
+                    {"payments.refnd@2": fake_refund},
+                    activity_executor=threads,
                 )
 
     asyncio.run(go())
@@ -299,6 +313,29 @@ def test_a_retried_activity_reuses_the_same_key() -> None:
     )
     assert report.status == "succeeded"
     assert keys == [f"reply-1/{run_id}/draft#1"] * 2
+
+
+def test_the_thread_an_activity_ran_on_has_ended_once_its_worker_stops() -> None:
+    # Whoever starts a worker owns its activity threads, and shuts them down once it stops:
+    # none is left for the garbage collector to end at some later test (fix-worker-executors,
+    # choices 1, 5 and 6). No collection is forced here.
+    ran_on: list[threading.Thread] = []
+
+    def drafting_here(inputs: dict[str, Any]) -> dict[str, Any]:
+        ran_on.append(threading.current_thread())
+        return fake_draft(inputs)
+
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, drafting(), TRUSTED_REPLY, id="reply-1", task_queue=QUEUE
+        )
+        return await run.result()
+
+    assert on_temporal(scenario, activities={"letters.draft@2": drafting_here}).status == (
+        "succeeded"
+    )
+    assert ran_on and threading.main_thread() not in ran_on  # a plain function, on a pool thread
+    assert [thread.name for thread in ran_on if thread.is_alive()] == []
 
 
 def test_an_activity_failing_past_its_retries_stops_the_step() -> None:

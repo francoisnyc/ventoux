@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
@@ -96,7 +97,15 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            case_worker(environment.client, queue, cases, DevelopmentPlans, activities),
+            activity_threads() as threads,
+            case_worker(
+                environment.client,
+                queue,
+                cases,
+                DevelopmentPlans,
+                activities,
+                activity_executor=threads,
+            ),
         ):
             # Bounded: a case that hangs (a workflow task retried forever) fails the test.
             return await asyncio.wait_for(scenario(environment.client), timeout=20)
@@ -149,7 +158,15 @@ def skipping[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            case_worker(environment.client, QUEUE, cases, DevelopmentPlans, activities),
+            activity_threads() as threads,
+            case_worker(
+                environment.client,
+                QUEUE,
+                cases,
+                DevelopmentPlans,
+                activities,
+                activity_executor=threads,
+            ),
         ):
             return await asyncio.wait_for(scenario(environment), timeout=20)
 

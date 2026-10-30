@@ -11,10 +11,12 @@ See docs/layers/12-releases.md (12e).
 import asyncio
 import json
 import shutil
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
+from activity_threads import activity_threads
 from dev_server import cli_binary, cli_folder, dev_server
 from temporalio import workflow
 from temporalio.client import Client
@@ -74,23 +76,29 @@ async def polling(client: Client, queue: str, *identities: str) -> None:
     raise AssertionError(f"{identities} never polled {queue}")
 
 
+@asynccontextmanager
 async def started(
     client: Client,
     identity: str,
     cases: type[CaseWorkflow] = ProductionCases,
     implementations: Mapping[str, Activity] | None = None,
     build: str = "4f2a9c1",
-) -> Worker:
-    """A production case worker on refunds, its manifest published."""
-    return await environment_worker(
-        client,
-        QUEUE,
-        cases,
-        DevelopmentPlans,
-        implementations or FAKES,
-        build,
-        identity,
-    )
+) -> AsyncIterator[Worker]:
+    """A production case worker on refunds, its manifest published, running in the block; its
+    activity threads shut down after it stops (fix-worker-executors)."""
+    async with activity_threads() as threads:
+        worker = await environment_worker(
+            client,
+            QUEUE,
+            cases,
+            DevelopmentPlans,
+            implementations or FAKES,
+            build,
+            identity,
+            activity_executor=threads,
+        )
+        async with worker:
+            yield worker
 
 
 async def second_client(address: str) -> Client:
@@ -119,7 +127,7 @@ def test_activate_refuses_a_release_no_worker_serves(
     # The curriculum's: the only worker on refunds has no code for payments.refund@2.
     async def scenario(client: Client, address: str) -> int:
         without = {ref: code for ref, code in FAKES.items() if ref != "payments.refund@2"}
-        async with await started(client, "refunds-a", implementations=without):
+        async with started(client, "refunds-a", implementations=without):
             await polling(client, QUEUE, "refunds-a")
             return await ventoux(
                 "activate",
@@ -152,8 +160,8 @@ def test_activate_refuses_a_worker_serving_another_hash(
     async def scenario(client: Client, address: str) -> int:
         another = await second_client(address)
         async with (
-            await started(client, "refunds-a"),
-            await started(another, "refunds-b", OtherBuildCases, build="7b0e311"),
+            started(client, "refunds-a"),
+            started(another, "refunds-b", OtherBuildCases, build="7b0e311"),
         ):
             await polling(client, QUEUE, "refunds-a", "refunds-b")
             return await ventoux(
@@ -222,11 +230,11 @@ def test_the_guides_activation_example_runs_as_written(
     async def scenario(client: Client, address: str) -> list[list[str]]:
         seen = [await run(blocks[0][0], address)]
         another = await second_client(address)
-        async with await started(client, "refunds-a"):
-            async with await started(another, "refunds-b", OtherBuildCases, build="7b0e311"):
+        async with started(client, "refunds-a"):
+            async with started(another, "refunds-b", OtherBuildCases, build="7b0e311"):
                 await polling(client, QUEUE, "refunds-a", "refunds-b")
                 seen.append(await run(blocks[1][0], address))
-            async with await started(another, "refunds-b"):
+            async with started(another, "refunds-b"):
                 seen.append(await run(blocks[2][0], address))
                 seen.append(await run(blocks[3][0], address))
                 seen.append(await run(blocks[4][0], address))
@@ -257,7 +265,7 @@ def test_the_environment_check_fails_when_a_contract_has_no_live_worker(
     async def scenario(client: Client, address: str) -> tuple[int, int]:
         another = await second_client(address)
         common = ["--environment", "production", "--releases", str(store), "--by", "pia"]
-        async with await started(client, "refunds-a"):
+        async with started(client, "refunds-a"):
             await polling(client, QUEUE, "refunds-a")
             assert (
                 await ventoux(
@@ -277,9 +285,7 @@ def test_the_environment_check_fails_when_a_contract_has_no_live_worker(
             capsys.readouterr()
             fine = await ventoux("environment", "check", "production", "--address", address)
             without = {ref: code for ref, code in FAKES.items() if ref != "payments.refund@2"}
-            async with await started(
-                another, "refunds-b", implementations=without, build="9e1f0aa"
-            ):
+            async with started(another, "refunds-b", implementations=without, build="9e1f0aa"):
                 await polling(client, QUEUE, "refunds-a", "refunds-b")
                 return fine, await ventoux(
                     "environment", "check", "production", "--address", address

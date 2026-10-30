@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.common.v1 import Payload
@@ -102,6 +103,7 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(development_converter()) as environment,
+            activity_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,
@@ -109,6 +111,7 @@ def on_temporal[T](
                 DevelopmentPlans,
                 activities,
                 forget=DevelopmentForget,
+                activity_executor=threads,
             ),
             Worker(environment.client, task_queue="signals", workflows=[SignalsAnEndedCase]),
         ):

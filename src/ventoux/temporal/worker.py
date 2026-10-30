@@ -1,7 +1,7 @@
 """A worker: serves plan and case workflows and the activities they call (layers 6 and 8c)."""
 
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor
 
 from temporalio.client import Client
 from temporalio.worker import Worker
@@ -33,8 +33,12 @@ def plan_worker(
     task_queue: str,
     workflow: type[PlanWorkflow],
     implementations: Mapping[str, Activity],
+    *,
+    activity_executor: Executor,
 ) -> Worker:
-    """A worker on `task_queue` for `workflow`, and the code behind its catalog's contracts."""
+    """A worker on `task_queue` for `workflow`, and the code behind its catalog's contracts.
+    `activity_executor` runs the activities that are plain functions; the caller owns it, and
+    shuts it down after the worker has stopped."""
     require_ventoux_converter(client)
     keep_only_exception_types()  # a failure's text never reaches the log (brief, D31)
     return Worker(
@@ -42,8 +46,10 @@ def plan_worker(
         task_queue=task_queue,
         workflows=[workflow],
         activities=plan_activities(workflow.catalog, implementations),
-        # Temporal: activities that are plain functions (not `async`) run on these threads.
-        activity_executor=ThreadPoolExecutor(),
+        # Temporal: activities that are plain functions (not `async`) run on these threads. The
+        # worker never shuts them down: whoever made them does, after it stops, as the SDK asks of
+        # a `workflow_task_executor` it is given (fix-worker-executors, choice 1).
+        activity_executor=activity_executor,
         workflow_runner=SANDBOX,
     )
 
@@ -56,11 +62,14 @@ def case_worker(
     implementations: Mapping[str, Activity],
     forget: type[ForgetWorkflow] | None = None,
     identity: str | None = None,
+    *,
+    activity_executor: Executor,
 ) -> Worker:
     """A worker on `task_queue` for `cases`, the plan workflow its plan steps run as, and the code
     behind its catalog's contracts; and, given `forget`, the requests to forget a case
     (brief, D32). A case workflow in an environment also asks its registry, through this worker
-    (brief, D5); `identity` names the worker among a queue's pollers."""
+    (brief, D5); `identity` names the worker among a queue's pollers. `activity_executor` runs the
+    activities that are plain functions; the caller owns it, as with `plan_worker`."""
     require_ventoux_converter(client)
     keep_only_exception_types()  # a failure's text never reaches the log (brief, D31)
     forgetting = [] if forget is None else ForgetActivities(client).all()
@@ -71,7 +80,7 @@ def case_worker(
         identity=identity,
         workflows=[cases, plans] if forget is None else [cases, plans, forget],
         activities=[*plan_activities(cases.catalog, implementations), *forgetting, *registry],
-        # Temporal: activities that are plain functions (not `async`) run on these threads.
-        activity_executor=ThreadPoolExecutor(),
+        # Temporal: plain-function activities run here; the caller shuts it down, as above.
+        activity_executor=activity_executor,
         workflow_runner=SANDBOX,
     )

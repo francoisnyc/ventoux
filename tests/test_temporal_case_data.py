@@ -11,6 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
@@ -64,7 +65,15 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            case_worker(environment.client, QUEUE, DevelopmentCases, DevelopmentPlans, FAKES),
+            activity_threads() as threads,
+            case_worker(
+                environment.client,
+                QUEUE,
+                DevelopmentCases,
+                DevelopmentPlans,
+                FAKES,
+                activity_executor=threads,
+            ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=20)
 

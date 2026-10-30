@@ -7,12 +7,12 @@ import asyncio
 import dataclasses
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.common.v1 import Payload
@@ -299,7 +299,15 @@ def on_temporal[T](
         activities = {**FAKES, "orders.lookup@1": quoting}
         async with (
             time_skipping(converter or development_converter()) as environment,
-            case_worker(environment.client, QUEUE, SensitiveCases, DevelopmentPlans, activities),
+            activity_threads() as threads,
+            case_worker(
+                environment.client,
+                QUEUE,
+                SensitiveCases,
+                DevelopmentPlans,
+                activities,
+                activity_executor=threads,
+            ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=20)
 
@@ -418,12 +426,19 @@ def test_a_client_without_the_codec_is_refused() -> None:
     )
 
     async def go() -> None:
-        async with time_skipping(exact_only) as environment:
+        async with time_skipping(exact_only) as environment, activity_threads() as threads:
             refused = (
                 "^this client doesn't encrypt sensitive values: connect it with data_converter"
             )
             with pytest.raises(ValueError, match=refused):
-                case_worker(environment.client, QUEUE, SensitiveCases, DevelopmentPlans, FAKES)
+                case_worker(
+                    environment.client,
+                    QUEUE,
+                    SensitiveCases,
+                    DevelopmentPlans,
+                    FAKES,
+                    activity_executor=threads,
+                )
             with pytest.raises(ValueError, match=refused):
                 await start_case(environment.client, SensitiveCases, claim(), FILE, "c-1", QUEUE)
             with pytest.raises(ValueError, match=refused):
@@ -491,14 +506,14 @@ def test_a_history_from_before_9b_replays() -> None:
     )
 
     async def go() -> WorkflowHistory:
-        async with time_skipping(before_9b) as environment:
+        async with time_skipping(before_9b) as environment, activity_threads() as threads:
             client = environment.client
             async with Worker(
                 client,
                 task_queue=QUEUE,
                 workflows=[SensitiveCases, DevelopmentPlans],
                 activities=plan_activities(CATALOG, FAKES),
-                activity_executor=ThreadPoolExecutor(),
+                activity_executor=threads,
                 workflow_runner=SANDBOX,
             ):
                 start = CaseStart(claim_without_the_id(), as_json(OPENING))
@@ -624,8 +639,18 @@ def test_the_workers_log_keeps_only_an_exceptions_type(caplog: pytest.LogCapture
     # A failed workflow task is logged as a failed activity is, on another of Temporal's loggers:
     # once a worker is made, each keeps the exception's type and drops its text (brief, D31).
     async def go() -> None:
-        async with time_skipping(development_converter()) as environment:
-            case_worker(environment.client, QUEUE, SensitiveCases, DevelopmentPlans, FAKES)
+        async with (
+            time_skipping(development_converter()) as environment,
+            activity_threads() as threads,
+        ):
+            case_worker(
+                environment.client,
+                QUEUE,
+                SensitiveCases,
+                DevelopmentPlans,
+                FAKES,
+                activity_executor=threads,
+            )
 
     asyncio.run(go())
     caplog.set_level(logging.DEBUG, logger="temporalio")

@@ -9,13 +9,13 @@ import copy
 import functools
 import threading
 from collections.abc import Awaitable, Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import activity, workflow
 from temporalio.api.enums.v1 import EventType
@@ -219,15 +219,23 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
+            activity_threads() as threads,
+            activity_threads() as kyc_threads,
             case_worker(
-                environment.client, CASES, cases, DevelopmentPlans, FAKES, forget=DevelopmentForget
+                environment.client,
+                CASES,
+                cases,
+                DevelopmentPlans,
+                FAKES,
+                forget=DevelopmentForget,
+                activity_executor=threads,
             ),
             Worker(
                 environment.client,
                 task_queue=KYC,
                 workflows=[KycCheck],
                 activities=[read_documents, slow_read],
-                activity_executor=ThreadPoolExecutor(),
+                activity_executor=kyc_threads,
                 # Their workflow lives in this test module, which imports Ventoux: the sandbox
                 # re-imports the module, so it passes Ventoux through as our worker does.
                 workflow_runner=SANDBOX,
