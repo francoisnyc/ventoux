@@ -72,11 +72,10 @@ prototype has no diff. What it gives Ventoux:
 - **The task, as stated:** report what changed in effect, not in the JSON text (admission rules,
   approvals, sink policies, the provenance of case-file fields, and what each version will never
   do), from the CLI and in CI, so that the output can be posted on pull requests.
-- **The reason:** "an earlier workflow tool failed at the user's company largely because nobody
-  could tell what had changed between process versions". And the diff is the review step for
-  definitions a builder *generates* (layer 14), so its output must stay readable even when nobody
-  wrote the JSON by hand. This is the curriculum's check-yourself: a JSON diff of generated output
-  is noise.
+- **The reason:** a workflow tool fails when nobody can tell what changed between process
+  versions. And the diff is the review step for definitions a builder *generates* (layer 14), so
+  its output must stay readable even when nobody wrote the JSON by hand. This is the curriculum's
+  check-yourself: a JSON diff of generated output is noise.
 - **Question 7, prior art outside the repository** (`cdk diff`, `pulumi preview`, `terraform plan`,
   `bpmn-js-differ`), was never researched. From what is known of them, not checked again here:
   they compare resources by identity, not by position, and mark each change added, removed or
@@ -1797,7 +1796,7 @@ here.
 | Two packages of one name in a tree are refused, naming the second folder | Y `test_two_packages_of_one_name_in_a_tree_are_refused` |
 | The existing checks are as they were, the cached CLI included; a push to `main` runs them only | Y `test_the_existing_checks_are_as_they_were` |
 | The releases guide's summary runs as written | Y `test_the_guides_summary_runs_as_written` |
-| Text a definition writes is shown, never rendered: the review's run has no `<` from a definition in the summary, its literal shown escaped and the Looser line visible; a backtick, `*`, `[`, `#` and a line break shown as written (from the review of #52, choice 77) | Y `test_html_a_pull_request_writes_never_reaches_the_summary`, `test_markdown_a_definition_writes_is_shown_as_written` |
+| Text a definition writes is shown, never rendered: the review's run has no `<` from a definition in the summary, its literal shown escaped and the Looser line visible; a backtick, `*`, `[`, `#` and a line break shown as written (from the review of #52, choice 77) | Y `test_html_a_pull_request_writes_never_reaches_the_summary`, `test_markdown_a_definition_writes_is_shown_as_written`. *Amended 2026-10-30, from the review of #72 (fix-carried-checks, choice 1); the text before stands:* the second doesn't pin the line break, since its literal is quoted as JSON before it is escaped and `text()` never sees a raw break. The line break is pinned by `test_why_the_step_fails_is_shown_as_written_in_either_form` (`tests/test_summary.py`) and `test_what_a_draft_or_a_person_writes_is_shown_never_rendered` (`tests/test_approve.py`). |
 | A path's code span and the hash check's block are fenced past any backtick run in them | Y `test_a_path_in_a_code_span_is_fenced_past_its_backticks`, `test_a_backtick_in_a_contract_never_closes_the_hash_checks_block` |
 | The plain form, the map and the sheet escape what they place, and their tests and the guides' examples pin it | 13c's `tests/test_plain.py` and `tests/test_sheet.py`, `test_the_guides_map_runs_as_written`; D `test_the_guides_example_runs_as_written` |
 | `case` reads no clock or I/O and imports no Temporal: the summary is `tooling`'s | `tests/test_layers.py`, unchanged |

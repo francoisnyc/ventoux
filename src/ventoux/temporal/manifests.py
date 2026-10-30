@@ -7,6 +7,7 @@ later (brief, D5). See docs/layers/12-releases.md (12e).
 """
 
 from collections.abc import Mapping
+from concurrent.futures import Executor
 
 from temporalio import workflow
 from temporalio.client import Client
@@ -77,12 +78,24 @@ async def environment_worker(
     build: str,
     identity: str | None = None,
     forget: type[ForgetWorkflow] | None = None,
+    *,
+    activity_executor: Executor,
 ) -> Worker:
     """A case worker for `cases`'s environment, as `case_worker` builds one, once its manifest is
     published: refused (`ManifestRefused`, `RegistryMissing`), it never polls (brief, D54).
     `build` is the deployment's name for this build, given, never read from git; `identity` is
-    the worker's name among a queue's pollers (the client's own by default)."""
+    the worker's name among a queue's pollers (the client's own by default). `activity_executor`
+    is the caller's, as with `case_worker`."""
     identity = identity or client.identity
     manifest = worker_manifest(cases, plans, implementations, task_queue, build, identity)
     await publish_manifest(client, manifest)
-    return case_worker(client, task_queue, cases, plans, implementations, forget, identity)
+    return case_worker(
+        client,
+        task_queue,
+        cases,
+        plans,
+        implementations,
+        forget,
+        identity,
+        activity_executor=activity_executor,
+    )

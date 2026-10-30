@@ -5,7 +5,8 @@ after a container is restored reads the server's 156 MB binary from a cold disk,
 longer (the tutor review of #50). So the harness starts the binary itself, with the flags the SDK
 gives it, and waits 30 s for it to answer: a start that misses even that fails, showing the
 server's own output, never skipped and never retried. See docs/layers/12-releases.md, "12e, fixed
-later: the dev server's cold start".
+later: the dev server's cold start". Ready is a client answered, never a port that accepts: the
+server accepts TCP before its frontend is healthy (docs/layers/fix-dev-server-ready.md).
 """
 
 import asyncio
@@ -63,8 +64,13 @@ async def cli_binary(
     return binary
 
 
+# The SDK version `flags` was read at: the SDK may change how it starts its server in any release,
+# so an upgrade fails a test until they are read again (fix-carried-checks, choice 3).
+FLAGS_READ_AT = "1.34.0"
+
+
 def flags(port: int) -> list[str]:
-    """`server start-dev` as the SDK runs it (read from its running process, temporalio 1.34.0)."""
+    """`server start-dev` as the SDK runs it (read from its running process, at `FLAGS_READ_AT`)."""
     configs = (
         "frontend.enableServerVersionCheck=false",
         "frontend.enableUpdateWorkflowExecution=true",
@@ -102,31 +108,60 @@ async def dev_server(
                 *command, stdout=output, stderr=asyncio.subprocess.STDOUT
             )
         try:
-            await answering(process, port, deadline, command, log)
-            target = f"127.0.0.1:{port}"
-            client = await Client.connect(target, data_converter=data_converter)
+            client = await answering(process, port, deadline, command, log, data_converter)
             yield WorkflowEnvironment.from_client(client)
         finally:
             await stop(process)
 
 
 async def answering(
-    process: Process, port: int, deadline: float, command: list[str], log: Path
-) -> None:
-    """Wait until the server listens on `port`; fail if it exits first or `deadline` passes."""
-    started = time.monotonic()
-    while time.monotonic() - started < deadline:
+    process: Process,
+    port: int,
+    deadline: float,
+    command: list[str],
+    log: Path,
+    data_converter: DataConverter,
+) -> Client:
+    """A client the server on `port` has answered; fail if it exits first or `deadline` passes.
+    Ready is a client answered, never a port that accepts: the dev server accepts TCP before its
+    frontend is healthy, and a client that connects then is refused ("Frontend is not healthy
+    yet"), as `tests/skipping_server.py` waits for its server (fix-dev-server-ready)."""
+    began = time.monotonic()
+    why = "nothing accepted a connection"
+    while time.monotonic() - began < deadline:
         if (code := process.returncode) is not None:
             raise DevServerFailed(said(f"exited with {code} before it answered", command, log))
-        try:
-            _, writer = await asyncio.open_connection("127.0.0.1", port)
-        except OSError:
-            await asyncio.sleep(0.05)
+        if not await accepts(port):
+            why = "nothing accepted a connection"
+            await asyncio.sleep(0.05)  # not listening yet
             continue
-        writer.close()
-        await writer.wait_closed()
-        return
-    raise DevServerFailed(said(f"didn't answer within {deadline:g} s", command, log))
+        try:
+            # Temporal: connecting asks the server for its system info, so a client returned
+            # is one the frontend answered. Within 2 s, so a deaf listener can't hold the wait.
+            return await asyncio.wait_for(
+                Client.connect(f"127.0.0.1:{port}", data_converter=data_converter), timeout=2
+            )
+        except (OSError, RuntimeError, TimeoutError) as error:
+            why = f"it accepted connections, but answered no client: {first_line(error)}"
+            await asyncio.sleep(0.05)  # listening, not healthy yet
+    raise DevServerFailed(said(f"didn't answer within {deadline:g} s ({why})", command, log))
+
+
+async def accepts(port: int) -> bool:
+    """Whether something accepts a TCP connection on `port` now."""
+    try:
+        _, writer = await asyncio.open_connection("127.0.0.1", port)
+    except OSError:
+        return False
+    writer.close()
+    await writer.wait_closed()
+    return True
+
+
+def first_line(error: BaseException) -> str:
+    """What `error` says, on one line: its kind when it says nothing."""
+    lines = str(error).splitlines()
+    return lines[0] if lines else type(error).__name__
 
 
 def said(what: str, command: list[str], log: Path, server: str = "the dev server") -> str:

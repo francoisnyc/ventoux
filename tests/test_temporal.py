@@ -10,11 +10,12 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
-from temporalio.worker import Replayer
 from temporalio.workflow import NondeterminismError
 from test_interpreter import (
     GUIDE_FIELDS,
@@ -31,7 +32,6 @@ from ventoux.core.catalog import NotInCatalog
 from ventoux.core.interpreter import Outcome
 from ventoux.core.provenance import sourced
 from ventoux.temporal.client import answer, report, start_plan
-from ventoux.temporal.sandbox import SANDBOX
 from ventoux.temporal.worker import plan_worker
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 from ventoux.testing import (
@@ -40,6 +40,7 @@ from ventoux.testing import (
     Activity,
     DevelopmentPlans,
     development_converter,
+    fake_draft,
     fake_refund,
     run_plan,
 )
@@ -59,7 +60,10 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            plan_worker(environment.client, QUEUE, DevelopmentPlans, activities),
+            activity_threads() as threads,
+            plan_worker(
+                environment.client, QUEUE, DevelopmentPlans, activities, activity_executor=threads
+            ),
         ):
             return await scenario(environment.client)
 
@@ -195,9 +199,11 @@ def test_a_client_without_exact_numbers_is_refused() -> None:
     # would read it back as a number: exact numbers are checked where a client is used, never
     # assumed (brief, D20).
     async def go() -> None:
-        async with time_skipping() as environment:
+        async with time_skipping() as environment, activity_threads() as threads:
             with pytest.raises(ValueError, match="exact numbers"):
-                plan_worker(environment.client, QUEUE, DevelopmentPlans, FAKES)
+                plan_worker(
+                    environment.client, QUEUE, DevelopmentPlans, FAKES, activity_executor=threads
+                )
             with pytest.raises(ValueError, match="exact numbers"):
                 await start_plan(
                     environment.client,
@@ -257,10 +263,17 @@ def test_the_runtime_check_blocks_the_injection_on_temporal() -> None:
 def test_an_implementation_the_catalog_does_not_hold_is_refused() -> None:
     # A typo would register an activity no plan can call, and leave the real one unserved.
     async def go() -> None:
-        async with time_skipping(development_converter()) as environment:
+        async with (
+            time_skipping(development_converter()) as environment,
+            activity_threads() as threads,
+        ):
             with pytest.raises(NotInCatalog, match="payments.refnd@2"):
                 plan_worker(
-                    environment.client, QUEUE, DevelopmentPlans, {"payments.refnd@2": fake_refund}
+                    environment.client,
+                    QUEUE,
+                    DevelopmentPlans,
+                    {"payments.refnd@2": fake_refund},
+                    activity_executor=threads,
                 )
 
     asyncio.run(go())
@@ -300,6 +313,29 @@ def test_a_retried_activity_reuses_the_same_key() -> None:
     )
     assert report.status == "succeeded"
     assert keys == [f"reply-1/{run_id}/draft#1"] * 2
+
+
+def test_the_thread_an_activity_ran_on_has_ended_once_its_worker_stops() -> None:
+    # Whoever starts a worker owns its activity threads, and shuts them down once it stops:
+    # none is left for the garbage collector to end at some later test (fix-worker-executors,
+    # choices 1, 5 and 6). No collection is forced here.
+    ran_on: list[threading.Thread] = []
+
+    def drafting_here(inputs: dict[str, Any]) -> dict[str, Any]:
+        ran_on.append(threading.current_thread())
+        return fake_draft(inputs)
+
+    async def scenario(client: Client) -> RunReport:
+        run = await start_plan(
+            client, DevelopmentPlans, drafting(), TRUSTED_REPLY, id="reply-1", task_queue=QUEUE
+        )
+        return await run.result()
+
+    assert on_temporal(scenario, activities={"letters.draft@2": drafting_here}).status == (
+        "succeeded"
+    )
+    assert ran_on and threading.main_thread() not in ran_on  # a plain function, on a pool thread
+    assert [thread.name for thread in ran_on if thread.is_alive()] == []
 
 
 def test_an_activity_failing_past_its_retries_stops_the_step() -> None:
@@ -485,10 +521,7 @@ def replay(
 ) -> None:
     """Replay `history` against `workflow_class`, as a worker would after a restart, with the
     converter that recorded it: its sealed parts open only with their keys (brief, D31)."""
-    replayer = Replayer(
-        workflows=[workflow_class], data_converter=converter, workflow_runner=SANDBOX
-    )
-    asyncio.run(replayer.replay_workflow(history))
+    asyncio.run(replay_history(history, [workflow_class], converter))
 
 
 def test_a_history_replayed_with_changed_code_fails() -> None:
@@ -504,6 +537,19 @@ def test_a_history_replays_with_the_same_code() -> None:
     # same order: the recorded results, answer and timer are read back, nothing is called again.
     converter = development_converter()
     replay(finished_history(converter), DevelopmentPlans, converter)
+
+
+def test_the_threads_a_failed_replay_ran_on_have_ended_once_it_raises() -> None:
+    # Whoever makes a replayer owns its workflow-task threads, and shuts them down once the
+    # replay is done, failed or not: none is left for the garbage collector to end at some later
+    # test (fix-replayer-threads). No collection is forced here. A failed replay is the sure
+    # case: its error's traceback keeps the replayer, and any pool it made, alive.
+    converter = development_converter()
+    history = finished_history(converter)
+    before = set(threading.enumerate())
+    with pytest.raises(NondeterminismError):
+        replay(history, ChangedPlans, converter)
+    assert [thread.name for thread in threading.enumerate() if thread not in before] == []
 
 
 def test_the_bound_on_a_loop_holds_on_temporal_and_replays() -> None:

@@ -2,7 +2,7 @@
 
 A fix, not a layer: no warm-up. Found in layer 14d, where the whole test suite made
 `ventoux check` refuse a `Case` built through `from ventoux import Case`. 14d changed the
-re-export to read the builder by name, and left the cause open. Recorded as D62 (brief).
+re-export to read the builder by name, and left the cause open. Recorded as D65 (brief).
 
 ## What was seen
 
@@ -62,7 +62,7 @@ Changing only that worker to `SANDBOX` took the builder's runs in the forget tes
 ## Decided
 
 1. **Every worker Ventoux builds runs on `SANDBOX`,** and so does any worker serving a module that
-   imports Ventoux outside a passthrough block (D62). The forget tests' second worker and
+   imports Ventoux outside a passthrough block (D65). The forget tests' second worker and
    `registry_worker` now do. `SANDBOX` moved to `ventoux.temporal.sandbox`, its own file, since
    the registry can't import `worker.py`, which imports the registry.
 2. **The re-export stays as 14d wrote it.** A deployment may still run its own worker on the

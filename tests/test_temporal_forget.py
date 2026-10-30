@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from activity_threads import activity_threads
 from one_copy import put_back, second_copies
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.common.v1 import Payload
@@ -27,7 +29,7 @@ from temporalio.client import (
 )
 from temporalio.converter import WorkflowSerializationContext
 from temporalio.exceptions import ApplicationError
-from temporalio.worker import Replayer, Worker
+from temporalio.worker import Worker
 from test_temporal_case import LARGE, REVIEW_FORM, CasesWithPlans, refund_with_plan
 from test_temporal_sensitive import (
     TAX_ID,
@@ -104,6 +106,7 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(development_converter()) as environment,
+            activity_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,
@@ -111,6 +114,7 @@ def on_temporal[T](
                 DevelopmentPlans,
                 activities,
                 forget=DevelopmentForget,
+                activity_executor=threads,
             ),
             Worker(
                 environment.client,
@@ -166,13 +170,10 @@ def test_a_closed_case_read_without_its_key(caplog: pytest.LogCaptureFixture) ->
         other = await closed_claim(client, "claim-8")
         assert (await report(other)).status == "closed"
         # A replay, as CI's replay tests run, fails the same way.
-        replayer = Replayer(
-            workflows=[DevelopmentCases, DevelopmentPlans],
-            data_converter=client.data_converter,
-            workflow_runner=SANDBOX,
-        )
         with pytest.raises(Exception, match="no key for claim-7"):
-            await replayer.replay_workflow(before)
+            await replay_history(
+                before, [DevelopmentCases, DevelopmentPlans], client.data_converter
+            )
 
     on_temporal(scenario)
     logged = [logging.Formatter().format(record) for record in caplog.records]
@@ -666,13 +667,12 @@ def test_reading_a_forgotten_case(caplog: pytest.LogCaptureFixture) -> None:
             await asyncio.wait_for(case.query(CaseWorkflow.report), timeout=10)
         assert str(failed.value) == f"Failed encoding completion: {forgotten}"
         # So does a replay, as CI's replay tests run one.
-        replayer = Replayer(
-            workflows=[DevelopmentCases, DevelopmentPlans],
-            data_converter=client.data_converter,
-            workflow_runner=SANDBOX,
-        )
         with pytest.raises(Exception, match=forgotten):
-            await replayer.replay_workflow(await case.fetch_history())
+            await replay_history(
+                await case.fetch_history(),
+                [DevelopmentCases, DevelopmentPlans],
+                client.data_converter,
+            )
         # The worker carries on: the next case answers.
         other = await open_claim(client, "claim-8")
         assert (await report(other)).waiting_for == ["assess by adjuster"]
@@ -776,12 +776,7 @@ def test_what_the_audit_keeps_after_forgetting() -> None:
         "closed: forgotten",
     ]
     # The request's own history replays with no key at all: none of its payloads is sealed.
-    replayer = Replayer(
-        workflows=[DevelopmentForget],
-        data_converter=development_converter(),
-        workflow_runner=SANDBOX,
-    )
-    asyncio.run(replayer.replay_workflow(forgetting))
+    asyncio.run(replay_history(forgetting, [DevelopmentForget], development_converter()))
 
 
 def await_now[T](awaitable: Awaitable[T]) -> T:
@@ -869,16 +864,20 @@ def test_the_guides_forget_example_runs_as_written() -> None:
             "ClaimForget": DevelopmentForget,
             "implementations": FAKES,
         }
-        exec(serving, names)  # noqa: S102
-        async with names["worker"]:  # the guide's own worker, on its queue
-            case = await start_case(
-                client, DevelopmentCases, claim(), as_json(FILE), "claim-7", "claims"
-            )
-            await answer(case, "assess#1", "deny", "ana", ["adjuster"])
-            await case.result()
-            # The guide's lines run inside a function: `await` is written as an API caller would.
-            exec("async def example():\n" + textwrap.indent(forgetting, "    "), names)  # noqa: S102
-            await names["example"]()
+        # The guide's worker uses the executor its cases guide's `with` block opens: here, the
+        # tests' own, shut down once the worker has stopped (fix-worker-executors).
+        async with activity_threads() as names["activity_executor"]:
+            exec(serving, names)  # noqa: S102
+            async with names["worker"]:  # the guide's own worker, on its queue
+                case = await start_case(
+                    client, DevelopmentCases, claim(), as_json(FILE), "claim-7", "claims"
+                )
+                await answer(case, "assess#1", "deny", "ana", ["adjuster"])
+                await case.result()
+                # The guide's lines run inside a function: `await` is written as an API caller
+                # would.
+                exec("async def example():\n" + textwrap.indent(forgetting, "    "), names)  # noqa: S102
+                await names["example"]()
 
     on_temporal(scenario)
 

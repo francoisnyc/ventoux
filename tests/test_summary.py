@@ -240,6 +240,23 @@ def test_a_summary_past_the_limit_says_where_the_whole_text_is(tmp_path: Path) -
     )
 
 
+def test_why_the_step_fails_is_shown_as_written_in_either_form(tmp_path: Path) -> None:
+    # A folder's name reaches the failure as it is, never quoted as JSON first: a `<` shown, never
+    # opening HTML, and a line break shown as \n, never starting a line of its own; in the whole
+    # summary and past the limit alike (fix-carried-checks, choice 1).
+    base = tree(tmp_path / "base")
+    head = tree(tmp_path / "head")
+    (head / PACKAGES / "a<b\nc").mkdir()
+    (head / PACKAGES / "a<b\nc" / "case.json").write_text("{")
+    found = summarized(base, head)
+    shown = (
+        "## Why the step fails\n\n- examples/packages/a&lt;b\\\\nc, in the head: case.json isn't "
+        "JSON: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)\n"
+    )
+    assert found.text.endswith(shown)
+    assert shown in for_summary_file(found, limit=100)
+
+
 # --- Slice 4: the command the workflow calls -----------------------------------------------------
 
 LOCK = ROOT / "contracts.lock.json"

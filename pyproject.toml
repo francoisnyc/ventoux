@@ -11,6 +11,11 @@ dependencies = [
     "temporalio>=1.34.0",
 ]
 
+[project.optional-dependencies]
+# The live model provider (layer 15b): `pip install ventoux[anthropic]`. Imported only by
+# `ventoux.authoring.anthropic`, so nothing else needs it (brief, D62).
+anthropic = ["anthropic>=1.13.0,<2"]
+
 [project.scripts]
 # The `ventoux` command (layer 11g2): `ventoux simulate STORY.json`.
 ventoux = "ventoux.tooling.cli:main"
@@ -21,6 +26,9 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    # The live provider's SDK, as the `anthropic` extra pins it: so mypy checks it strictly and
+    # its tests run (with a fake client: no test reaches the network, and CI holds no key).
+    "anthropic>=1.13.0,<2",
     "jsonschema>=4.26.0",
     "mypy>=2.4.0",
     "pytest>=9.1.1",

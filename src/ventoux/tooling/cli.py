@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ventoux.case.changes import DiffRefused
+from ventoux.case.checked import said
 from ventoux.case.definition import CaseDefinition, CaseInvalid, parse_case
 from ventoux.case.diff import Diff, diff
 from ventoux.case.notes import NotesRefused, as_diff, told
@@ -39,6 +40,7 @@ from ventoux.case.story import Story, StoryInvalid, parse_story
 from ventoux.core.catalog import Catalog
 from ventoux.core.hash_check import check_hashes
 from ventoux.core.promise import promise_of
+from ventoux.tooling.advising import advise_command
 from ventoux.tooling.check import (
     Checked,
     CheckRefused,
@@ -56,8 +58,10 @@ from ventoux.tooling.deployment import (
     deployment_catalog,
     read,
 )
+from ventoux.tooling.draft_sheet import draft_sheet_command
+from ventoux.tooling.drafting import draft_command
 from ventoux.tooling.environments import environment_command
-from ventoux.tooling.releases import FolderStore, Run, read_package, release, said
+from ventoux.tooling.releases import FolderStore, Run, read_package, release
 from ventoux.tooling.schema import write_schemas
 from ventoux.tooling.summary import LIMIT, cant_be_read, for_summary_file, summarize
 
@@ -175,9 +179,50 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--catalog", help="the deployment's catalog, module:NAME (else pyproject.toml's)"
         )
     environments(commands)
+    drafting = commands.add_parser(
+        "draft", help="a model drafts a plan of a package, checked, into the drafts folder"
+    )
+    drafting.add_argument("package", type=Path, help="the package's folder")
+    drafting.add_argument("--plan", required=True, help="the plan to draft, as a step names it")
+    drafting.add_argument("--goal", required=True, help="what the plan should do, in words")
+    drafting.add_argument("--by", required=True, help="who asks")
+    drafting.add_argument("--rounds", type=int, default=3, help="at most this many, 1 to 5 (3)")
+    drafting.add_argument("--model", help="the model to ask (else pyproject.toml's model)")
+    drafting.add_argument("--recording", type=Path, help="replay a recording instead of a model")
+    drafting.add_argument(
+        "--catalog", help="the deployment's catalog, module:NAME (else pyproject.toml's)"
+    )
+    sheeting = commands.add_parser(
+        "draft-sheet", help='"Approve this plan" for a drafted plan, checked again'
+    )
+    sheeting.add_argument("draft", type=Path, help="the draft, in the drafts folder")
+    sheeting.add_argument("--package", type=Path, required=True, help="the package it is for")
+    sheeting.add_argument(
+        "--catalog", help="the deployment's catalog, module:NAME (else pyproject.toml's)"
+    )
+    advising = commands.add_parser(
+        "advise", help="what the step advisor suggests to a person on a running case"
+    )
+    advising.add_argument("case", help="the case's workflow ID")
+    advising.add_argument("--by", required=True, help="the person it is asked for")
+    advising.add_argument(
+        "--role", action="append", default=[], help="a role they hold (once per role)"
+    )
+    advising.add_argument("--model", help="the model to ask (else pyproject.toml's model)")
+    advising.add_argument("--recording", type=Path, help="replay a recording instead of a model")
+    advising.add_argument("--at", type=int, help="the time, in seconds since the epoch (now)")
+    advising.add_argument("--address", default="localhost:7233", help="Temporal's frontend")
+    advising.add_argument("--namespace", default="default")
     arguments = parser.parse_args(argv)
     if arguments.command in ("environment", "activate", "retire", "manifest"):
         return environment_command(arguments)
+    if arguments.command == "advise":
+        try:
+            found = configuration(Path.cwd())
+        except Unconfigured as refused:
+            print(refused, file=sys.stderr)
+            return CANT_READ
+        return advise_command(arguments, found)  # needs no catalog: the case's worker has it
     if arguments.command == "schema":
         return write_schemas(arguments.out, arguments.unchanged)  # needs no catalog: shape only
     # Every other command reads contracts or roles: the deployment's catalog, named in
@@ -188,6 +233,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Unconfigured as refused:
         print(refused, file=sys.stderr)
         return CANT_READ
+    if arguments.command == "draft":
+        return draft_command(arguments, found, catalog)
+    if arguments.command == "draft-sheet":
+        return draft_sheet_command(arguments, catalog)
     if arguments.command == "check":
         return check_files(arguments.files, found, catalog, arguments.unchanged)
     if arguments.command in ("release", "notes"):

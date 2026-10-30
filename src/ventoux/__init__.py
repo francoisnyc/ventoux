@@ -76,7 +76,7 @@ def __getattr__(name: str) -> Any:
         # `builder` attribute of the `ventoux.tooling` package, which a worker on Temporal's
         # default runner overwrites with its own copy of the builder each time it imports
         # `ventoux.testing` afresh. A `Case` from that copy is not the `Case` that `ventoux check`
-        # looks for (brief, D62).
+        # looks for (brief, D65).
         builder = importlib.import_module("ventoux.tooling.builder")
         return getattr(builder, name)
     raise AttributeError(f"module 'ventoux' has no attribute {name!r}")

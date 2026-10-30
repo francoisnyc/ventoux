@@ -313,8 +313,12 @@ class ClaimForget(ForgetWorkflow):
 ```
 
 ```python
-worker = case_worker(client, "claims", ClaimCases, ClaimPlans, implementations, forget=ClaimForget)
+worker = case_worker(client, "claims", ClaimCases, ClaimPlans, implementations,
+                     forget=ClaimForget, activity_executor=activity_executor)
 ```
+
+`activity_executor` is the thread pool the cases guide's `with` block opens, and shuts down once
+the worker has stopped.
 
 Forgetting is proposed by one person with such a role and approved by **another**: erasure can
 conflict with keeping records, so it is a decision, made by two people. The proposer can't approve

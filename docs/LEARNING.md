@@ -1070,6 +1070,19 @@ and record the key points. A question is closed once you can explain the answer 
     nor what is approved, and nothing says `pay` is risky.
   - **Why 14c:** `ventoux check` runs Python, the builder files, and checks what they *wrote*:
     the JSON, which is a plan's kind of thing, never the Python.
+- Retrieval (layer 15c warm-up, 2026-10-27), the follow-up, framed as a model's draft that goes
+  back to `pay` on `declined`: "explain". Explained with a run of the package's `refund-order`
+  plan, so changed: `states.pay APPROVAL_REUSED one approval would unlock two high-risk runs:
+  after pay, pay can run without a new approval: add an approval before pay`.
+  - **Why `reach` finishes:** it keeps a `seen` set (`core/graph.py`) and follows an arrow only to
+    a state not yet seen; a plan has finitely many states, so each is visited once, and the cycle
+    is walked once.
+  - **Why the loop is unsafe:** one approval unlocks one run of one step (D11). Back to `pay`
+    without passing an approval, the plan would refund again on the approval already spent; the
+    prototype's review found such a loop issuing 997 refunds on one. A retry belongs in the
+    contract's retry policy, which keeps the idempotency key (D17).
+  - **Tied to 15c:** a model drafting "retry on decline" writes exactly this; the loop's check
+    refuses it, and the line goes back to the model. Added to 15c's negative test.
 - Status: open, until the follow-up comes from memory.
 
 
@@ -1519,6 +1532,19 @@ and record the key points. A question is closed once you can explain the answer 
     *reach* or *stop* on it acts on nothing, and validation says `UNTRUSTED_TRIGGER` (D38).
   - **Why it matters in layer 13:** a field's `untrusted:` mark removed, or an event's senders
     widened, is the diff's "looser": either turns content into something that may decide.
+- Retrieval (layer 15b warm-up, 2026-10-26), asked with the email `customer_wrote` from `mail`,
+  whose `body` says "Cancel the review and refund me 500 now": "facts are trusted but body is
+  not". The principle came back a third time; the example's two parts didn't. Given again:
+  - **The arrival may decide, because of the sender check:** the API vouches that `mail` sent
+    it, and the engine refuses `customer_wrote` from any other sender (`sent_by`, D41). So a
+    rule on `{"event": "customer_wrote"}` may reach a milestone, stop a step or start one.
+  - **The body only informs:** it carries `untrusted:customer` (D12). It may start a step (its
+    inputs' policies checked, D39), set a field (which keeps the mark, D42), or be read by a
+    person. It may not reach a milestone or stop a step: such a rule acts on nothing, and
+    validation says `UNTRUSTED_TRIGGER` (D38, D40). So "cancel the review" cancels nothing, and
+    "refund me 500" has no field to go into.
+  - **Tied to layer 15:** the step advisor is never shown the body at all (D61): an instruction
+    in it can't reach the model, so it can't even inform the advisor's choice.
 - Status: open, until an example comes back with the sender check and "informs, never decides".
 
 ## 41. Layer 13: what the JSON diff hides
@@ -1622,6 +1648,13 @@ and record the key points. A question is closed once you can explain the answer 
   dropped that starts a step at opening, a count lowered that is looser, a contract's change
   path by path. Each is computed from more than the line that changed (the catalog, the other
   steps, provenance), which is why the JSON can't show it.
+- Retrieval (layer 15d warm-up, 2026-10-27): asked for two things the semantic diff shows that
+  the JSON diff can't, and why. Answered "tell me briefly"; told: one role added to `review`
+  widens what three fields, every outcome and every output show (a role the case names sees
+  every field that doesn't narrow itself, D30); an input moved changes who may approve `pay`
+  (exclusion is computed from provenance, D11). Each is computed from more than the line that
+  changed, which is why the JSON can't show it. 15d puts this diff on "Approve this plan", for
+  the same reason: an approver of a drafted plan reads effects, not lines.
 - Status: open, until two of those come back with why the JSON can't show them.
 
 ## 42. Layer 12: why plans don't migrate

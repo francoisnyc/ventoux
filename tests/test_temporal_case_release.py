@@ -10,12 +10,12 @@ import copy
 import json
 import shutil
 from collections.abc import Awaitable, Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.enums.v1 import EventType
@@ -452,7 +452,10 @@ def test_a_continued_run_whose_digest_changed_waits_for_its_code(tmp_path: Path)
     refund_1 = released(tmp_path, proposed=True)
 
     async def scenario() -> tuple[list[str], bool, CaseReport]:
-        async with time_skipping(development_converter()) as environment:
+        async with (
+            time_skipping(development_converter()) as environment,
+            activity_threads() as threads,
+        ):
             client = environment.client
 
             def serving(cases: type[CaseWorkflow]) -> Worker:
@@ -470,7 +473,7 @@ def test_a_continued_run_whose_digest_changed_waits_for_its_code(tmp_path: Path)
                     task_queue=QUEUE,
                     workflows=[cases, DevelopmentPlans],
                     activities=plan_activities(cases.catalog, FAKES),
-                    activity_executor=ThreadPoolExecutor(),
+                    activity_executor=threads,
                     workflow_runner=UnsandboxedWorkflowRunner(),
                     max_cached_workflows=0,
                 )
