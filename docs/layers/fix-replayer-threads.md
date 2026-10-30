@@ -125,6 +125,32 @@ on it: whatever holds the replayer, the pool it runs on is shut down.
    are unchanged.
 4. **Nothing in `src/` or the guides changes.** Neither builds a replayer.
 
+## The earlier draft, and where this differs
+
+An earlier draft of this note (commit `4d4c4ba`, on this branch, never reviewed) measured the
+same item on `main` before #73 and offered choices instead of deciding. This fix was asked to
+decide, so it decides, and differs from the draft's recommendations in two places:
+
+- **The helper's name.** The draft recommended renaming `activity_threads` to `worker_threads`
+  (its choice 2a), since the name would then say something false at eleven places. Here the
+  eleven places don't open it: only `replay_history` does, once, under a comment saying what the
+  pool is for. Renaming would touch twenty-five call sites for no change in behaviour. If the
+  tutor prefers the rename, it is mechanical and can follow on its own.
+- **A guard over the whole suite** (the draft's choice 3: an `autouse` fixture failing any test
+  that leaves a thread it started alive). Not built here: it would be new test machinery for every
+  test, beyond this item, and its first run would have to say what else it finds. It stays open,
+  under "Not in this fix".
+
+The draft's other choices agree with what was decided (its choice 1 is decisions 1 and 2), or
+were set aside there too (its 4 and 5).
+
+## Not in this fix
+
+- **A guard over the whole suite** (above). Without it, a replayer or worker built later without
+  an owned executor is caught only by running the plugin above.
+- **A daemon thread for the helper's shutdown**, which would let `asyncio.run` return as soon as
+  the bound fails (fix-worker-executors, decision 2). A choice of its own, still open.
+
 ## Checked, after the fix
 
 The same plugin, over the same nine files (158 tests now, the new one included), every test
