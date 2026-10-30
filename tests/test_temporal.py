@@ -11,11 +11,11 @@ from typing import Any
 
 import pytest
 from activity_threads import activity_threads
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
-from temporalio.worker import Replayer
 from temporalio.workflow import NondeterminismError
 from test_interpreter import (
     GUIDE_FIELDS,
@@ -32,7 +32,7 @@ from ventoux.core.catalog import NotInCatalog
 from ventoux.core.interpreter import Outcome
 from ventoux.core.provenance import sourced
 from ventoux.temporal.client import answer, report, start_plan
-from ventoux.temporal.worker import SANDBOX, plan_worker
+from ventoux.temporal.worker import plan_worker
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
 from ventoux.testing import (
     CATALOG,
@@ -521,10 +521,7 @@ def replay(
 ) -> None:
     """Replay `history` against `workflow_class`, as a worker would after a restart, with the
     converter that recorded it: its sealed parts open only with their keys (brief, D31)."""
-    replayer = Replayer(
-        workflows=[workflow_class], data_converter=converter, workflow_runner=SANDBOX
-    )
-    asyncio.run(replayer.replay_workflow(history))
+    asyncio.run(replay_history(history, [workflow_class], converter))
 
 
 def test_a_history_replayed_with_changed_code_fails() -> None:
@@ -540,6 +537,19 @@ def test_a_history_replays_with_the_same_code() -> None:
     # same order: the recorded results, answer and timer are read back, nothing is called again.
     converter = development_converter()
     replay(finished_history(converter), DevelopmentPlans, converter)
+
+
+def test_the_threads_a_failed_replay_ran_on_have_ended_once_it_raises() -> None:
+    # Whoever makes a replayer owns its workflow-task threads, and shuts them down once the
+    # replay is done, failed or not: none is left for the garbage collector to end at some later
+    # test (fix-replayer-threads). No collection is forced here. A failed replay is the sure
+    # case: its error's traceback keeps the replayer, and any pool it made, alive.
+    converter = development_converter()
+    history = finished_history(converter)
+    before = set(threading.enumerate())
+    with pytest.raises(NondeterminismError):
+        replay(history, ChangedPlans, converter)
+    assert [thread.name for thread in threading.enumerate() if thread not in before] == []
 
 
 def test_the_bound_on_a_loop_holds_on_temporal_and_replays() -> None:

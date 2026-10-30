@@ -13,6 +13,7 @@ from typing import Any, ClassVar
 
 import pytest
 from activity_threads import activity_threads
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.common.v1 import Payload
@@ -25,7 +26,7 @@ from temporalio.converter import (
     WorkflowSerializationContext,
 )
 from temporalio.exceptions import ApplicationError
-from temporalio.worker import Replayer, Worker
+from temporalio.worker import Worker
 
 from ventoux.case.visibility import CaseView
 from ventoux.temporal.activities import plan_activities
@@ -481,12 +482,7 @@ def sensitive_history(converter: DataConverter) -> WorkflowHistory:
 
 def replay(history: WorkflowHistory, converter: DataConverter) -> None:
     """Replay `history` as a worker would after a restart, with Ventoux's runner (brief, D31)."""
-    replayer = Replayer(
-        workflows=[SensitiveCases, DevelopmentPlans],
-        data_converter=converter,
-        workflow_runner=SANDBOX,
-    )
-    asyncio.run(replayer.replay_workflow(history))
+    asyncio.run(replay_history(history, [SensitiveCases, DevelopmentPlans], converter))
 
 
 def test_replay_needs_the_key() -> None:

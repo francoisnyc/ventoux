@@ -28,7 +28,8 @@ async def activity_threads(ending: float = ENDING) -> AsyncIterator[ThreadPoolEx
     """A thread pool for a worker's `activity_executor`, shut down on the way out: every activity
     still running is waited for, never abandoned. One still running after `ending` seconds fails
     the test with a `TimeoutError`, raised then; the test is reported once that activity ends, as
-    the module's docstring says."""
+    the module's docstring says. A replayer's `workflow_task_executor` is one too, held the same
+    way (`tests/replaying.py`, fix-replayer-threads)."""
     executor = ThreadPoolExecutor()
     try:
         yield executor

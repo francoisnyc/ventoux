@@ -16,6 +16,7 @@ from typing import Any, ClassVar
 
 import pytest
 from activity_threads import activity_threads
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import activity, workflow
 from temporalio.api.enums.v1 import EventType
@@ -24,7 +25,7 @@ from temporalio.common import RetryPolicy
 from temporalio.converter import DataConverter
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Replayer, Worker
+from temporalio.worker import Worker
 from temporalio.workflow import NondeterminismError
 
 from ventoux.core.workflow_contract import WorkflowContract
@@ -610,10 +611,7 @@ def replay(
 ) -> None:
     """Replay `history` against `workflow_class`, as a worker would after a restart, with the
     converter that recorded it: its sealed parts open only with their keys (brief, D31)."""
-    replayer = Replayer(
-        workflows=[workflow_class], data_converter=converter, workflow_runner=SANDBOX
-    )
-    asyncio.run(replayer.replay_workflow(history))
+    asyncio.run(replay_history(history, [workflow_class], converter))
 
 
 def checked_and_retried(converter: DataConverter) -> WorkflowHistory:

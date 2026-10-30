@@ -12,13 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from activity_threads import activity_threads
+from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHandle, WorkflowHistory
 from temporalio.converter import DataConverter
-from temporalio.worker import Replayer
 
 from ventoux.temporal.cases import CaseReport, CaseWorkflow, answer, report, shown, start_case, view
-from ventoux.temporal.worker import SANDBOX, case_worker
+from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     FAKES,
     DevelopmentCases,
@@ -163,7 +163,4 @@ def test_a_case_history_with_shown_replays() -> None:
 
     converter = development_converter()
     history = on_temporal(scenario, converter)
-    replayer = Replayer(
-        workflows=[DevelopmentCases], data_converter=converter, workflow_runner=SANDBOX
-    )
-    asyncio.run(replayer.replay_workflow(history))
+    asyncio.run(replay_history(history, [DevelopmentCases], converter))
