@@ -851,16 +851,20 @@ def test_the_guides_forget_example_runs_as_written() -> None:
             "ClaimForget": DevelopmentForget,
             "implementations": FAKES,
         }
-        exec(serving, names)  # noqa: S102
-        async with names["worker"]:  # the guide's own worker, on its queue
-            case = await start_case(
-                client, DevelopmentCases, claim(), as_json(FILE), "claim-7", "claims"
-            )
-            await answer(case, "assess#1", "deny", "ana", ["adjuster"])
-            await case.result()
-            # The guide's lines run inside a function: `await` is written as an API caller would.
-            exec("async def example():\n" + textwrap.indent(forgetting, "    "), names)  # noqa: S102
-            await names["example"]()
+        # The guide's worker uses the executor its cases guide's `with` block opens: here, the
+        # tests' own, shut down once the worker has stopped (fix-worker-executors).
+        async with activity_threads() as names["activity_executor"]:
+            exec(serving, names)  # noqa: S102
+            async with names["worker"]:  # the guide's own worker, on its queue
+                case = await start_case(
+                    client, DevelopmentCases, claim(), as_json(FILE), "claim-7", "claims"
+                )
+                await answer(case, "assess#1", "deny", "ana", ["adjuster"])
+                await case.result()
+                # The guide's lines run inside a function: `await` is written as an API caller
+                # would.
+                exec("async def example():\n" + textwrap.indent(forgetting, "    "), names)  # noqa: S102
+                await names["example"]()
 
     on_temporal(scenario)
 

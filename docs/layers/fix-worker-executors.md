@@ -157,7 +157,10 @@ additions and two corrections, each marked where it applies. What was built is u
    - `docs/guides/plans.md` ("Running a plan on Temporal"): `plan_worker`, and why the block
      owns the threads;
    - `docs/guides/cases.md`: `case_worker`;
-   - `docs/guides/case-data.md`: `case_worker` with `forget=`;
+   - `docs/guides/case-data.md`: `case_worker` with `forget=`. This block stays one assignment,
+     using the executor the cases guide's `with` block opens: `test_the_guides_forget_example_runs_as_written`
+     runs it as written, with `exec`, and a `with` block holding `await worker.run()` can't run
+     there. The test gives it the tests' own executor;
    - `docs/guides/releases.md`: `environment_worker`.
 
 ## Promises
