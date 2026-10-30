@@ -450,11 +450,20 @@ activities named by their references (`payments.refund@2`). Code for a reference
 doesn't hold is refused, so a typo can't leave the real activity unserved:
 
 ```python
+from concurrent.futures import ThreadPoolExecutor
+
 from ventoux.temporal.worker import plan_worker
 
-worker = plan_worker(client, "refunds", RefundPlans, {"payments.refund@2": refund, ...})
-await worker.run()
+with ThreadPoolExecutor() as activity_executor:
+    worker = plan_worker(client, "refunds", RefundPlans, {"payments.refund@2": refund, ...},
+                         activity_executor=activity_executor)
+    await worker.run()
 ```
+
+Activities that are plain functions run on the executor's threads. The worker never shuts them
+down: the code that made them does, and the `with` block shuts them down once the worker has
+stopped, waiting for any activity still running. `activity_executor` has no default, so it can't
+be forgotten.
 
 The client starts a run with its fields, each with where it came from, answers its waits, and reads
 how it went:

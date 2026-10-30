@@ -313,7 +313,10 @@ class ClaimForget(ForgetWorkflow):
 ```
 
 ```python
-worker = case_worker(client, "claims", ClaimCases, ClaimPlans, implementations, forget=ClaimForget)
+with ThreadPoolExecutor() as activity_executor:
+    worker = case_worker(client, "claims", ClaimCases, ClaimPlans, implementations,
+                         forget=ClaimForget, activity_executor=activity_executor)
+    await worker.run()
 ```
 
 Forgetting is proposed by one person with such a role and approved by **another**: erasure can
