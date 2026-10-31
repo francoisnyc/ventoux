@@ -10,7 +10,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio.client import Client, WorkflowHistory
 from temporalio.testing import WorkflowEnvironment
@@ -28,6 +27,7 @@ from test_temporal_case import (
 )
 from test_timers import CLOSABLE, PEOPLE, chased
 from test_timers import SMALL as SMALL_IN_MEMORY
+from worker_threads import worker_threads
 
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import (
@@ -227,7 +227,7 @@ def test_a_timer_already_due_and_an_answer_in_one_workflow_task_fire_timer_first
             form = {"approved_amount": Decimal(40)}
             await answer(case, "review#1", "approve", "ana", ["support"], form)
             async with (
-                activity_threads() as threads,
+                worker_threads() as threads,
                 case_worker(
                     client,
                     QUEUE,

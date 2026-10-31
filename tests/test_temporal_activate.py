@@ -16,7 +16,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
-from activity_threads import activity_threads
 from dev_server import cli_binary, cli_folder, dev_server
 from temporalio import workflow
 from temporalio.client import Client
@@ -24,6 +23,7 @@ from temporalio.runtime import Runtime, TelemetryConfig
 from temporalio.worker import Worker
 from test_temporal_case import LARGE, reported
 from test_temporal_registry import ProductionCases, refund_timed
+from worker_threads import worker_threads
 
 from ventoux.case.memory import Activity
 from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow, start_case
@@ -86,7 +86,7 @@ async def started(
 ) -> AsyncIterator[Worker]:
     """A production case worker on refunds, its manifest published, running in the block; its
     activity threads shut down after it stops (fix-worker-executors)."""
-    async with activity_threads() as threads:
+    async with worker_threads() as threads:
         worker = await environment_worker(
             client,
             QUEUE,

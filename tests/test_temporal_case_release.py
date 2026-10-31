@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.api.enums.v1 import EventType
@@ -45,6 +44,7 @@ from test_temporal_case import (
     runs_of,
     unapproved_refund_order,
 )
+from worker_threads import worker_threads
 
 from ventoux.case.releases import Hash, Record
 from ventoux.case.state import CaseState
@@ -454,7 +454,7 @@ def test_a_continued_run_whose_digest_changed_waits_for_its_code(tmp_path: Path)
     async def scenario() -> tuple[list[str], bool, CaseReport]:
         async with (
             time_skipping(development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
         ):
             client = environment.client
 

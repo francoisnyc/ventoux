@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from activity_threads import activity_threads
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
@@ -39,6 +38,7 @@ from test_temporal_sensitive import (
     sensitive_claim,
 )
 from test_temporal_sensitive import reported as reported_case
+from worker_threads import worker_threads
 
 from ventoux.temporal import cases
 from ventoux.temporal.cases import (
@@ -104,7 +104,7 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,
@@ -845,7 +845,7 @@ def test_the_guides_forget_example_runs_as_written() -> None:
         }
         # The guide's worker uses the executor its cases guide's `with` block opens: here, the
         # tests' own, shut down once the worker has stopped (fix-worker-executors).
-        async with activity_threads() as names["activity_executor"]:
+        async with worker_threads() as names["activity_executor"]:
             exec(serving, names)  # noqa: S102
             async with names["worker"]:  # the guide's own worker, on its queue
                 case = await start_case(

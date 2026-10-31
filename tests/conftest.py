@@ -2,6 +2,7 @@
 
 Checked after every decision the in-memory driver (`ventoux.case.memory.Driver`) makes, and every
 decision a test asks of `decide` itself. See docs/layers/fix-retry-rejected.md, "The invariant".
+And around every test: no thread it started outlives it (`thread_guard`).
 """
 
 import pytest
@@ -9,6 +10,9 @@ import pytest
 # pytest puts tests/ on the import path (it has no __init__.py), so a helper there imports by
 # its name.
 from invariants import Silent, unshown
+
+# Around every test, too: no thread it started outlives it (docs/layers/fix-replayer-threads.md).
+from thread_guard import no_thread_outlives_its_test  # noqa: F401  (pytest finds it here)
 
 import ventoux.case.memory
 from ventoux.case.definition import CaseDefinition

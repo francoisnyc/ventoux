@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from activity_threads import activity_threads
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
@@ -25,6 +24,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import WorkflowEnvironment
 from temporalio.workflow import NondeterminismError
+from worker_threads import worker_threads
 
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
@@ -98,7 +98,7 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
             case_worker(
                 environment.client,
                 queue,
@@ -159,7 +159,7 @@ def skipping[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            activity_threads() as threads,
+            worker_threads() as threads,
             case_worker(
                 environment.client,
                 QUEUE,
