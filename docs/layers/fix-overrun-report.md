@@ -65,6 +65,9 @@ workflow tasks end with the replay.
 
 Answer by number.
 
+*Answered 2026-10-31: 1 taken; 2 to 5 set aside, as recommended. What was built is under
+"Decided".*
+
 1. **Leave the helper as it is, and bound the CI job.** The report waits for the task (or 300 s),
    as #73's corrected decision 2 says. That only matters for a test whose task overruns, which none
    has. Each job in `ci.yml` gets `timeout-minutes: 20`, four times the suite's 5 minutes. A hung run
@@ -108,6 +111,24 @@ Answer by number.
 - **What hangs a task.** None has, and this fix is about how the failure is reported, not about
   any task.
 
+## Decided
+
+1. **The helper stays as it is.** A test whose task overruns the bound fails with a
+   `TimeoutError` raised at the bound. The report waits for the task to end (or 300 s), as
+   fix-worker-executors' corrected decision 2 says.
+2. **Each CI job ends within 20 minutes.** `timeout-minutes: 20` under `runs-on` in both jobs of
+   `.github/workflows/ci.yml`, `check` and `changes`, each with a comment saying why. A run that
+   hangs, for this reason or any other, fails in 20 minutes, where GitHub's default would wait 360.
+3. **A test pins it.** `tests/test_ci_workflow.py` reads the workflow as text, as
+   `tests/test_summary.py` does, with no YAML parser. It checks that the jobs are `check` and
+   `changes`, so a job added later shows up there and must be bounded too, and that each has the
+   line.
+
 ## Promises
 
-To be filled once the choices are answered.
+| Promise | Test that would fail |
+|---|---|
+| Every CI job ends within 20 minutes | `test_every_job_ends_within_twenty_minutes` (`tests/test_ci_workflow.py`). Seen failing on `main`'s workflow ("the CI job check has no `timeout-minutes: 20`"), and with either job's line removed, naming that job. |
+| A job added to the workflow is checked too | The same test: the jobs it reads must be exactly `check` and `changes`, so a third fails it until the test, and the bound, take it in. |
+| The reader finds a job's lines, and a job without the bound | `test_a_job_without_a_bound_is_found`, on a two-job workflow, one bounded and one not. |
+| A task that overruns the bound fails its test at the bound, reported once the task ends | Unchanged: `test_an_activity_still_running_at_the_end_fails_within_the_bound` (`tests/test_activity_threads.py`). |
