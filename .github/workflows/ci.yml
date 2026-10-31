@@ -13,6 +13,9 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # A test whose task never ends keeps the run from exiting, and nothing inside can stop it:
+    # the job ends it, four times the suite's 5 minutes in (fix-overrun-report, choice 1).
+    timeout-minutes: 20
     env:
       # Where the activation tests' Temporal dev server is downloaded, and kept between runs
       # (layer 12e): the time-skipping test server doesn't list a queue's pollers.
@@ -46,6 +49,8 @@ jobs:
   changes:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # Bounded as `check` is.
+    timeout-minutes: 20
     steps:
       # GitHub checks out the merge commit it makes: what merging creates. Its first parent is
       # the base it was made on.
