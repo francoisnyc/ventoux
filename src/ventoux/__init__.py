@@ -73,10 +73,10 @@ if TYPE_CHECKING:
 def __getattr__(name: str) -> Any:
     if name in __all__:
         # The module itself, by name, never `from ventoux.tooling import builder`: that reads the
-        # `builder` attribute of the `ventoux.tooling` package, which Temporal's workflow sandbox
-        # overwrites with its own copy of the builder each time it imports `ventoux.testing`
-        # afresh. A `Case` from that copy is not the `Case` that `ventoux check` looks for
-        # (found by the whole test suite, layer 14d).
+        # `builder` attribute of the `ventoux.tooling` package, which a worker on Temporal's
+        # default runner overwrites with its own copy of the builder each time it imports
+        # `ventoux.testing` afresh. A `Case` from that copy is not the `Case` that `ventoux check`
+        # looks for (brief, D65).
         builder = importlib.import_module("ventoux.tooling.builder")
         return getattr(builder, name)
     raise AttributeError(f"module 'ventoux' has no attribute {name!r}")

@@ -14,7 +14,7 @@ from temporalio.client import WorkflowHistory
 from temporalio.converter import DataConverter
 from temporalio.worker import Replayer
 
-from ventoux.temporal.worker import SANDBOX
+from ventoux.temporal.sandbox import SANDBOX
 
 
 async def replay_history(

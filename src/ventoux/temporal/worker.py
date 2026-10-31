@@ -5,7 +5,6 @@ from concurrent.futures import Executor
 
 from temporalio.client import Client
 from temporalio.worker import Worker
-from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 
 from ventoux.case.memory import Activity
 from ventoux.temporal.activities import plan_activities
@@ -14,18 +13,8 @@ from ventoux.temporal.converter import require_ventoux_converter
 from ventoux.temporal.forget import ForgetActivities, ForgetWorkflow
 from ventoux.temporal.logs import keep_only_exception_types
 from ventoux.temporal.registry import RegistryActivities
+from ventoux.temporal.sandbox import SANDBOX
 from ventoux.temporal.workflow import PlanWorkflow
-
-# Temporal: the workflow sandbox imports a workflow's modules afresh for every run; a module passed
-# through is imported once and shared. `core` and `case` are deterministic (the boundary test holds
-# them to that), and passing them through keeps one copy of each class: a `Sensitive` the
-# converter reads back is the class `case` checks for, whichever module first imported it. A
-# replay uses the same runner (brief, D31).
-SANDBOX = SandboxedWorkflowRunner(
-    restrictions=SandboxRestrictions.default.with_passthrough_modules(
-        "ventoux.core", "ventoux.case", "ventoux.tooling", "cryptography"
-    )
-)
 
 
 def plan_worker(
