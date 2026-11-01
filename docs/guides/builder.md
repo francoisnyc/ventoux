@@ -451,6 +451,56 @@ household.closes_when(paid)
 `ventoux check` accepts it, with warnings, such as a value read before it is surely set
 (cases guide, "What `ventoux check` proves about a case").
 
+## Dates
+
+A `date` field holds a day on the calendar (cases guide and case-data guide, "Dates"). In Python,
+a date literal is a `datetime.date`, and it is written as `{"date": "2026-01-01"}`.
+
+`examples/builder/dates.py`:
+
+```python
+from datetime import date
+
+from ventoux import Case, Field, Outcome, and_
+
+claim = Case("claim", title="Insurance claim")
+
+policy_start = claim.field("policy_start", Field.date(), title="Policy start")
+incident = claim.field("incident_date", Field.date(), title="Date of the incident")
+
+assess = claim.task(
+    "assess",
+    title="Assess the claim",
+    roles=["adjuster"],
+    outcomes={
+        "accept": Outcome("Accept the claim", sets=[incident]),
+        "deny": Outcome("Deny the claim"),
+    },
+)
+
+claim.task(
+    "settle",
+    title="Settle the claim",
+    roles=["adjuster"],
+    requires=[assess],
+    # Two dates the case file holds, compared: the same answer on every replay (brief, D20).
+    when=and_(
+        assess.outcome == "accept",
+        incident >= policy_start,
+        incident < date(2027, 1, 1),
+    ),
+    outcomes={"settled": Outcome("Claim settled")},
+)
+```
+
+**The builder runs when you build, not when a case runs.** `date.today()` in a builder file is
+the day you ran it, written into the JSON as a fixed date: the next day, `--unchanged` fails
+(see "In CI: `--unchanged`"). A `datetime`, a moment, is refused: a date is a day, never a time.
+
+```text
+incident < datetime(2027, 1, 1, 0, 0): a date compares with a date, and this is a datetime; write date(2027, 1, 1)
+```
+
 ## Forgetting
 
 Whether a request may forget a case: `allowed`, `while_open` (the household claim) or `never`.

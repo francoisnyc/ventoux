@@ -2,8 +2,8 @@
 
 > **For workflow developers.** This guide describes layer 9 as if it already worked; the code that
 > makes it true is built test-first, in four parts: references and who sees what (9a), sensitive
-> fields (9b), forgetting a person (9c) and fresh facts (9d). The "Design notes" at the end list
-> what writing it revealed.
+> fields (9b), forgetting a person (9c) and fresh facts (9d). Dates are layer 16a's. The "Design
+> notes" at the end list what writing it revealed.
 
 **The rule of thumb:** a case file holds the **facts your rules decide on**, and **references** to
 everything else. Customers, orders, policies and documents stay in the systems that own them.
@@ -182,6 +182,43 @@ person's answer.
 "customer_estimate": {"type": "number", "source": "untrusted:customer",
                       "display": {"title": "Customer's own estimate"}}
 ```
+
+## Dates
+
+A `date` field holds a day on the calendar: when the incident happened, when the policy started.
+It is written as text, `"2026-10-31"` (`YYYY-MM-DD`), and the type makes it a date: a value that
+isn't a real day is refused where it is given, before it reaches the case file.
+
+```json
+"fields": {
+  "policy_start": {"type": "date", "display": {"title": "Policy start"}},
+  "incident_date": {"type": "date", "display": {"title": "Date of the incident"}}
+}
+```
+
+```text
+incident_date should be a date, written YYYY-MM-DD, and "31/10/2026" is not one
+```
+
+A date comes from where every value comes from, and carries its source like any other:
+
+| A date given by… | Example | Its source |
+|---|---|---|
+| the system that opened the case | the policy's start, sent with the claim | trusted, `system:opener` |
+| a person's answer to a task | the adjuster's date of the incident | trusted, the person |
+| a registered system, through an activity | a contract whose output is a date | as its contract says |
+| an event from outside | a payload field declared `date` | as the event declares |
+| a customer's message | the date the customer says it happened | **untrusted**: it can inform people, never decide |
+
+**Ventoux never makes a date up.** No field is filled with today's date, and no expression reads
+it (see the expressions guide). A date is always a fact someone gave, recorded with who gave it.
+
+**A date has no time zone, and Ventoux never converts a moment into one.** "31 October" is a day;
+"23:30 on 31 October in New York" is a moment, and it is already 1 November in Paris. Which day a
+moment falls on depends on where you stand, so that choice belongs to whoever gives the date: the
+adjuster says which day the incident happened, a contract returns the day its system means. If a
+system only has a moment, its activity turns it into the day the business means, and its contract
+says it returns a date.
 
 ## Sensitive data
 
@@ -613,10 +650,15 @@ the warehouse too.
    system="orders")`, which also makes the quickstart teach the rule of thumb from the start.
 8. **No date type yet** (layer 9a). An earlier draft had a sensitive `birth_date` with
    `Field.date()`; expressions have no date type (brief, D20), and adding one is a decision of its
-   own. The sensitive example is a `national_id`, a text.
+   own. The sensitive example is a `national_id`, a text. *Layer 16a adds the date* (see "Dates").
 9. **Hiding and encrypting are different promises** (layer 9a). `visible_to` filters the case view;
    only `sensitive` keeps a value out of Temporal's plain history.
 10. **Sensitive values are encrypted one by one, not whole payloads** (layer 9b). Each travels in
     its own part of a payload, so the rest of the history stays readable (brief, D15). An
     activity's own error message is treated as sensitive whatever the case declares: Ventoux
     can't know what it says.
+11. **A date is a day, and someone always gives it** (layer 16a). Writing "Dates" showed three
+    things to decide: a moment becomes a day only with a time zone, so Ventoux never converts one
+    and whoever gives the date chooses the day; a field filled with today's date would be the
+    clock by another door, so there is none; and a text date is still a text, so a date literal
+    in an expression needs its own form, `{"date": "…"}`.
