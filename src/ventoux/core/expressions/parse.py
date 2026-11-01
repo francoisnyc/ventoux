@@ -1,9 +1,11 @@
 """From JSON to an expression: one clear refusal for anything that isn't one."""
 
+from datetime import date
 from decimal import Decimal
 
 from pydantic import BaseModel
 
+from ventoux.core.dates import HOW_TO_WRITE, calendar_date
 from ventoux.core.expressions.model import (
     COMPARISONS,
     DECIMAL128,
@@ -158,6 +160,8 @@ def parse(data: object) -> Expression:
             return Cat.model_validate({"cat": parsed_arguments("cat", arguments, 1, or_more=True)})
         if operator == "string":
             return String.model_validate({"string": parsed_arguments("string", arguments, 1)})
+        if operator == "date":
+            return a_day(arguments)
         if operator == "exists":
             if not isinstance(arguments, str) or not arguments:
                 raise ExpressionInvalid(
@@ -166,6 +170,17 @@ def parse(data: object) -> Expression:
             return Exists(exists=arguments)
     # Fail closed: whatever isn't recognised above is refused, never passed through.
     raise ExpressionInvalid(f"not an expression: {data!r}")
+
+
+def a_day(arguments: object) -> date:
+    """The day a `date` literal names, or `ExpressionInvalid` saying how to write one
+    (brief, D66)."""
+    if not isinstance(arguments, str):
+        raise ExpressionInvalid('date takes a text, like {"date": "2026-10-31"}')
+    day = calendar_date(arguments)
+    if day is None:
+        raise ExpressionInvalid(f'date: "{arguments}" is not a day on the calendar; {HOW_TO_WRITE}')
+    return day
 
 
 def parsed_arguments(
@@ -224,7 +239,7 @@ def in_list(arguments: object) -> tuple[Expression, tuple[Value, ...]]:
     literals: list[Value] = []
     for option in options:
         literal = parse(option)
-        if not isinstance(literal, bool | str | Decimal):
+        if not isinstance(literal, bool | str | Decimal | date):
             raise ExpressionInvalid(IN_LIST + "; the list holds literal values")
         literals.append(literal)
     kinds = list(dict.fromkeys(kind(literal) for literal in literals))  # in the list's order

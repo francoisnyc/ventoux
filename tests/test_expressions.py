@@ -7,7 +7,7 @@ import decimal
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -17,6 +17,7 @@ from ventoux.core.expressions import (
     BooleanType,
     Cat,
     Count,
+    DateType,
     Div,
     Eq,
     Exists,
@@ -48,7 +49,7 @@ from ventoux.core.expressions import (
 
 NOT_AN_OPERATOR = (
     "`now` is not an operator. The operators are: var, ==, !=, >, >=, <, <=, and, or, !, +, -, *, "
-    "/, if, in, cat, string, exists, count, sum, item. Logic that doesn't fit is a compute "
+    "/, if, in, cat, string, exists, count, sum, item, date. Logic that doesn't fit is a compute "
     "activity."
 )
 
@@ -133,7 +134,7 @@ def test_a_value_an_expression_cannot_read_is_an_error() -> None:
         evaluate(Var(var="approved_amount"), {"approved_amount": 250.0})
     assert str(stopped.value) == (
         "approved_amount holds a binary float, and an expression reads only decimals, "
-        "texts and booleans"
+        "texts, booleans and dates"
     )
 
 
@@ -154,7 +155,9 @@ def test_comparing_a_text_with_a_number_is_an_error() -> None:
     over_100 = parse_expression({">": [{"var": "approved_amount"}, 100]})
     with pytest.raises(ExpressionError) as stopped:
         evaluate(over_100, {"approved_amount": "250"})
-    assert str(stopped.value) == "`>` compares numbers, and it was given a string"
+    assert str(stopped.value) == (
+        "`>` compares two numbers or two dates, and it was given a string"
+    )
 
 
 @pytest.mark.parametrize(
@@ -634,6 +637,7 @@ REFUND: dict[str, FieldType] = {
     "order_id": ReferenceType(system="orders"),
     "review.outcome": OutcomeType(outcomes=("approve", "reject")),
     "items": ListType(fields={"risk": StringType(), "amount": NumberType()}),
+    "incident_date": DateType(),  # the guide's dates (brief, D66)
 }
 
 
@@ -658,7 +662,7 @@ def test_an_undeclared_field_is_rejected() -> None:
     [
         (
             {">": [{"var": "approved_amount"}, "100"]},
-            ">[1]: `>` compares numbers, and this is a string",
+            ">[1]: `>` compares two numbers or two dates, and this is a string",
         ),
         (
             {"==": [{"var": "approved_amount"}, "100"]},
@@ -712,7 +716,10 @@ def test_an_if_is_checked_on_both_branches(data: object, message: str) -> None:
         ),
         (
             {"string": [{"var": "review.outcome"}]},
-            "string[0]: `string` takes a number, a boolean or a reference, and this is an outcome",
+            (
+                "string[0]: `string` takes a number, a boolean, a reference or a date, "
+                "and this is an outcome"
+            ),
         ),
     ],
 )
@@ -736,7 +743,7 @@ def test_logic_arithmetic_and_text_are_checked(data: object, message: str) -> No
         (
             {"in": [{"var": "order_id"}, ["ORD-7"]]},
             (
-                "in[0]: `in` looks for a number, a string, a boolean or an outcome, "
+                "in[0]: `in` looks for a number, a string, a boolean, an outcome or a date, "
                 "and this is a reference to orders"
             ),
         ),
@@ -991,3 +998,57 @@ def test_sum_reads_value_only_for_the_elements_where_chose() -> None:
     # An element `where` leaves out may lack the value: like `if`, only the chosen ones are read.
     items = [{"risk": "high", "amount": Decimal(10)}, {"risk": "low"}]
     assert evaluate(parse_expression(HIGH_TOTAL), {"items": items}) == Decimal(10)
+
+
+# The guide's runtime table, each situation played against the evaluator: until 16a no test read
+# it, and one row promised a message nothing gave (docs/layers/16-field-types.md, step 6).
+def stopped_with(expression: object, values: dict[str, object]) -> str:
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(parse_expression(expression), values)
+    return str(stopped.value)
+
+
+RUNTIME_SITUATIONS: dict[str, Any] = {
+    "`approved_amount` has no value yet": lambda: stopped_with(
+        {">": [{"var": "approved_amount"}, 100]}, {}
+    ),
+    '`{"/": [{"var": "amount"}, {"var": "items"}]}`, with 250 and 0': lambda: stopped_with(
+        {"/": [{"var": "amount"}, {"var": "items"}]}, {"amount": Decimal(250), "items": Decimal(0)}
+    ),
+    "a result beyond what decimal128 can hold": lambda: stopped_with(
+        {"*": [{"var": "amount"}, {"var": "amount"}]}, {"amount": Decimal("1E+5000")}
+    ),
+    'an element of `items` lacks `risk`, in `count(items where item.risk == "high")`': lambda: (
+        stopped_with(
+            {"count": {"over": {"var": "items"}, "where": {"==": [{"item": "risk"}, "high"]}}},
+            {"items": [{"risk": "low"}, {"amount": Decimal(5)}]},
+        )
+    ),
+    "`approved_amount > 100`, with a text in `approved_amount`": lambda: stopped_with(
+        {">": [{"var": "approved_amount"}, 100]}, {"approved_amount": "250"}
+    ),
+    '`incident_date < date("2027-01-01")`, with a text in `incident_date`': lambda: stopped_with(
+        {"<": [{"var": "incident_date"}, {"date": "2027-01-01"}]}, {"incident_date": "2026-10-31"}
+    ),
+}
+
+
+def runtime_rows() -> list[tuple[str, str]]:
+    """The runtime table's rows: each situation as written, prose and code, and its error with its
+    backticks taken off, as `guide_table` takes them off a cell that is all code."""
+    lines = GUIDE.read_text().splitlines()
+    start = lines.index("| Situation | Error |") + 2
+    rows = []
+    for line in lines[start:]:
+        if not line.startswith("|"):
+            break
+        situation, error = (cell.strip() for cell in line.strip("|").split(" | "))
+        rows.append((situation, unquote(error)))
+    return rows
+
+
+def test_the_guides_runtime_errors_are_what_the_evaluator_says() -> None:
+    rows = runtime_rows()
+    assert [situation for situation, _ in rows] == list(RUNTIME_SITUATIONS)
+    for situation, error in rows:
+        assert RUNTIME_SITUATIONS[situation]() == error, situation

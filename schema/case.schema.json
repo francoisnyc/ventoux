@@ -573,6 +573,60 @@
         },
         {
           "additionalProperties": false,
+          "description": "A day on the calendar, with no time and no time zone (brief, D66).",
+          "properties": {
+            "type": {
+              "const": "date",
+              "default": "date",
+              "title": "Type",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "visible_to": {
+              "anyOf": [
+                {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible To"
+            },
+            "sensitive": {
+              "default": false,
+              "title": "Sensitive",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "display",
+            "type"
+          ],
+          "title": "DateType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A list of records, each with the declared fields; read with `count`, `sum` and `item`.",
           "properties": {
             "type": {
@@ -714,6 +768,36 @@
         "over"
       ],
       "title": "CountOver",
+      "type": "object"
+    },
+    "DateType": {
+      "additionalProperties": false,
+      "description": "A day on the calendar, with no time and no time zone (brief, D66).",
+      "properties": {
+        "type": {
+          "const": "date",
+          "default": "date",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "DateType",
+      "type": "object"
+    },
+    "Day": {
+      "additionalProperties": false,
+      "properties": {
+        "date": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "date"
+      ],
       "type": "object"
     },
     "DeclaredEvent": {
@@ -859,6 +943,9 @@
           "type": "boolean"
         },
         {
+          "$ref": "#/$defs/Day"
+        },
+        {
           "$ref": "#/$defs/Var"
         },
         {
@@ -930,6 +1017,7 @@
       "discriminator": {
         "mapping": {
           "boolean": "#/$defs/BooleanType",
+          "date": "#/$defs/DateType",
           "list": "#/$defs/ListType",
           "number": "#/$defs/NumberType",
           "outcome": "#/$defs/OutcomeType",
@@ -953,6 +1041,9 @@
         },
         {
           "$ref": "#/$defs/ReferenceType"
+        },
+        {
+          "$ref": "#/$defs/DateType"
         },
         {
           "$ref": "#/$defs/ListType"
@@ -1533,6 +1624,39 @@
             "type"
           ],
           "title": "ReferenceType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A day on the calendar, with no time and no time zone (brief, D66).",
+          "properties": {
+            "type": {
+              "const": "date",
+              "default": "date",
+              "title": "Type",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            }
+          },
+          "required": [
+            "display",
+            "type"
+          ],
+          "title": "DateType",
           "type": "object"
         },
         {
@@ -2170,6 +2294,9 @@
         },
         {
           "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/Day"
         }
       ]
     },

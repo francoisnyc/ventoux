@@ -5,6 +5,7 @@ See docs/layers/10-case-validation.md (10d) and docs/guides/cases.md, "What the 
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from ventoux.case.definition import (
@@ -246,7 +247,8 @@ def told_apart(expression: Expression, field: str) -> set[str]:
     """The outcomes of `field` that `expression` tells from the others: those it compares the
     field with (`==`, `!=`, `in`). Comparing it with `done` tells every outcome from `done`, and so
     does reading it any other way, since the check never guesses: `done` then stands for all."""
-    if isinstance(expression, Decimal | str | bool | Item | Exists):
+    # A literal, a date one too, reads no field (brief, D66).
+    if isinstance(expression, Decimal | str | bool | date | Item | Exists):
         return set()  # `exists` asks whether the step ended, not how
     if isinstance(expression, Var):
         return {DONE} if expression.var == field else set()  # read as a value: all of them

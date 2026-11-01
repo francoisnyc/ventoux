@@ -2705,6 +2705,60 @@ text is kept.*
   can't prevent. Set aside: making `ventoux.testing` import the builder lazily, which would move
   the development catalog's cases out of the module that serves them and fix only that module.
 
+### D66. A date is a day the case was given; no expression reads today
+
+*Decided 2026-11-01, in layer 16a (`docs/layers/16-field-types.md`, choices 1 to 10). Adds to D9,
+D20, D55, D56, D58 and D60, whose text is kept.*
+
+- **A `date` is a day on the calendar, not a moment:** no time and no time zone, so comparing two
+  dates gives the same answer everywhere and on every replay. Written as text, exactly
+  `YYYY-MM-DD`, a real day, years 0001 to 9999 (`"2026-10-31"`); `"2026-02-30"`, `"2026-1-5"`,
+  `"20261031"`, a week date and a moment (`"2026-10-31T23:30:00Z"`) are refused. In an expression
+  a date literal is `{"date": "2026-10-31"}`, rendered `date("2026-10-31")`; a bare text shaped
+  like a date stays a text.
+- **What it adds to D20's operators:** the `date` literal; `<`, `<=`, `>` and `>=` between two
+  dates as well as two numbers; `string` of a date, giving `YYYY-MM-DD`. `==`, `!=`, `if`, `in`
+  and `exists` take dates as any type. No date arithmetic: a day count or a date plus days would
+  be an operator of its own, decided with a use.
+- **No expression reads today.** No operator reads the calendar, as none reads the clock: `today`
+  has no shape, so it can't be written, by a person or by a model under the JSON Schema. "Within
+  30 days" compares two dates the case holds, or is a timer (D44).
+- **A date comes from a source, never from the engine:** the opener, a person's answer, an
+  activity's output (an output annotated `datetime.date`), an event's payload, or a field declared
+  untrusted, each with that source's provenance. No field is filled with today's date, the
+  opening day included.
+- **Ventoux never turns a moment into a day.** Which day a moment falls on depends on a time zone,
+  so whoever gives the date chooses the day it means: a person, or an activity whose contract says
+  it returns a date.
+- **The engine's time is zone-free, so workers may run anywhere.** The engine keeps time only as
+  seconds since the epoch, from the history (`workflow.now()`), never the machine's local time or
+  zone, and a date compares the same on every machine; a test runs the date tests under two
+  process time zones and gets the same results. An activity that turns a moment into a day names
+  the time zone it means and never reads the machine's: two workers in different zones would
+  otherwise give the same moment different days (activities guide, "Dates in an output").
+- **Inside the engine a date is a `datetime.date`, never a `datetime`** (a subclass in Python, so
+  refused explicitly wherever a date is taken). On a payload it is `YYYY-MM-DD` text, read back
+  into a date by its field's declared type where a value enters a case: the opening, an answer,
+  an event, an activity's output, and a continue-as-new. An output's date is read by this rule
+  before its contract's model reads the rest, never by Pydantic's lax reading, which would pick a
+  day for a timestamp or a moment: an output date that isn't a day fails its step, and nothing it
+  gave lands. This is the one reading a form does (D9): a text that isn't a
+  date is refused, never guessed from its shape. At runtime a date field holding anything but a
+  date is an error, never `false`.
+- **The clock behind `date` stays shut.** `date.today()` is on the class itself, so a pure layer
+  (`core`, `case`) may import exactly `from datetime import date`, not renamed, and nothing else
+  from `datetime`; the boundary test refuses the names that read a clock or the machine's zone
+  (`today`, `now`, `utcnow`, `fromtimestamp`, `astimezone`), as attributes and through `getattr`
+  with the name written out. A moment is refused by its exact type (`type(value) is date`), so the
+  engine never imports `datetime` to refuse one. Set aside: Ventoux's own day type with no clock
+  at all, which would put a Ventoux type in every contract and a conversion at every edge.
+- **Shown as `YYYY-MM-DD`** in the rendering, the plain forms, the case map and the diff, the same
+  in every language; a locale's format is the inbox's, later. The JSON Schema gives the shape
+  only (D60), `YYYY-MM-DD` as a pattern; the calendar check is the engine's. The builder writes `Field.date()` and a
+  `datetime.date` literal, and refuses a `datetime`.
+- **Left out:** times, moments and durations as field types, date arithmetic, timers anchored to a
+  date field, a locale's format.
+
 ## Concepts
 
 | Term | Meaning |
@@ -2719,6 +2773,7 @@ text is kept.*
 | Rule | *When* something happens, *if* a condition holds, *then* act on the case |
 | Case file | The case's decision facts and references to records elsewhere, each with its provenance |
 | Reference | The ID of a record kept in another system, typed by that system's name |
+| Date | A day on the calendar, given to the case by a source; no time, no time zone, never today |
 | Resolver | Shows a person what a reference points to, by asking its system on their behalf; never stored |
 | Task | A step asking people with given roles a question, answered with an outcome |
 | Outcome | A named answer from a task, an approval or an activity (`approve`, `declined`); a task's may set case-file fields |

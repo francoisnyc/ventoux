@@ -2,8 +2,10 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, Overflow
 
+from ventoux.core.dates import is_day
 from ventoux.core.expressions.model import (
     CONTEXT,
     DECIMAL128,
@@ -55,7 +57,11 @@ def evaluate(
     `element` is the record `count` or `sum` is looking at, for `item` to read; it is passed down
     unchanged, and is `None` everywhere else.
     """
-    if isinstance(expression, bool | str | Decimal):
+    if isinstance(expression, date) and not is_day(expression):
+        # Python: a `datetime` is also a `date`, so a moment is refused by its exact type
+        # (brief, D66).
+        raise ExpressionError("a moment is not a date: an expression reads days, never times")
+    if isinstance(expression, bool | str | Decimal | date):
         return expression
     if isinstance(expression, Var):
         return readable(expression.var, values.get(expression.var))
@@ -150,11 +156,13 @@ def readable(name: str, value: object, where: str = "") -> Value:
     if value is None:
         # Fail closed: a missing value is an error that stops the step, never `false` (brief, D20).
         raise ExpressionError(f"{name} has no value{where}")
-    # The case file is data from outside: check what it holds, never assume it.
-    if not isinstance(value, bool | str | Decimal):
+    # The case file is data from outside: check what it holds, never assume it. A `datetime` is a
+    # `date` to Python, and a moment, never a day, to an expression (brief, D66).
+    # `type(...) is date`, as `is_day` reads it, written out so the type checker sees it.
+    if not (isinstance(value, bool | str | Decimal) or type(value) is date):
         raise ExpressionError(
-            f"{name} holds {a_kind(value)}, and an expression reads only decimals, texts and "
-            f"booleans{where}"
+            f"{name} holds {a_kind(value)}, and an expression reads only decimals, texts, "
+            f"booleans and dates{where}"
         )
     if isinstance(value, Decimal) and not value.is_finite():
         raise ExpressionError(
@@ -209,7 +217,21 @@ def compare(operator: str, left: Value, right: Value) -> bool:
             )
         equal = left == right
         return equal if operator == "==" else not equal
-    a, b = number(operator, left), number(operator, right)
+    # Ordered only as two numbers or two days, each its own way (brief, D20) (brief, D66).
+    if isinstance(left, Decimal) and isinstance(right, Decimal):
+        return holds(operator, left, right)
+    if isinstance(left, date) and isinstance(right, date):
+        return holds(operator, left, right)
+    orders = f"`{operator}` compares two numbers or two dates"
+    for value in (left, right):
+        if not isinstance(value, Decimal | date):
+            raise ExpressionError(f"{orders}, and it was given {a_kind(value)}")
+    raise ExpressionError(f"{orders}, and it was given {a_kind(left)} and {a_kind(right)}")
+
+
+def holds[T: (Decimal, date)](operator: str, a: T, b: T) -> bool:
+    """Whether `a operator b` holds, for two values of one kind: both numbers or both days."""
+    # Python 3.12: `T: (Decimal, date)` means T is one of the two, the same for `a` and `b`.
     if operator == ">":
         return a > b
     if operator == ">=":
@@ -218,7 +240,7 @@ def compare(operator: str, left: Value, right: Value) -> bool:
         return a < b
     if operator == "<=":
         return a <= b
-    # Fail closed, though the parser builds only the six above.
+    # Fail closed, though the parser builds only the six comparisons.
     raise ExpressionError(f"`{operator}` is not a comparison")
 
 

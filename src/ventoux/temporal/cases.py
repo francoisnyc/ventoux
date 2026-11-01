@@ -84,6 +84,7 @@ with workflow.unsafe.imports_passed_through():
         WorkflowCancelled,
     )
     from ventoux.case.timers import next_due, set_timers, soonest
+    from ventoux.case.types import case_types
     from ventoux.case.visibility import ApprovalSheet, CaseView, SheetRefused, case_view, sheet_of
     from ventoux.core.catalog import Catalog
     from ventoux.core.sensitive import Sensitive
@@ -581,7 +582,10 @@ class CaseWorkflow:
                 )
                 self.decide(case, opened)
             else:
-                self.state = state_from_data(start.carried)  # a case continued as new
+                # A case continued as new: each value read back by its type, so a date, which
+                # crossed as text, is a day again (brief, D66).
+                types = case_types(case, self.catalog)
+                self.state = state_from_data(start.carried, types)
                 self.registered = start.environment
         except (CaseInvalid, CaseRefused) as refused:
             if start.carried is not None:

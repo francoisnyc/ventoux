@@ -1,6 +1,6 @@
 # Activities: adding a capability to the catalog
 
-> **For the platform team.** This guide describes layers 1, 4, 8d and 9a as if they already worked;
+> **For the platform team.** This guide describes layers 1, 4, 8d, 9a and 16a as if they already worked;
 > the code that makes it true is built test-first in those layers. Case developers rarely need it: they meet
 > contracts only through the activities they call and the errors `ventoux check` gives them.
 
@@ -380,7 +380,7 @@ writes them.
 | `source("untrusted:fax")`, a label nobody registered | `kyc.check@1`: output `analyst_notes` is `untrusted:fax`, and `fax` is not a registered label. Register it first, or use one of: customer, document, email, llm, web. |
 | `source("system:kcy")`, a system nobody registered | `kyc.check@1`: output `status` is `system:kcy`, and `kcy` is not a registered system. Register it first, or use one of: kyc. |
 | An output field named `outcome` | `kyc.check@1`: an output can't be named `outcome`: `<step>.outcome` is the step's outcome. Rename the field. |
-| An output field `score: float` | `kyc.check@1`: output `score` is `float`, which the case file can't hold exactly. An output is a decimal (Decimal), a text (str) or true or false (bool): numbers are exact decimals, never binary floats (brief, D20). |
+| An output field `score: float` | `kyc.check@1`: output `score` is `float`, which the case file can't hold exactly. An output is a decimal (Decimal), a text (str), true or false (bool) or a day (date): numbers are exact decimals, never binary floats (brief, D20). |
 | An input field `amount: float` | `payments.refund@2`: input `amount` is `float`, which no value of a case is. An input is a decimal (Decimal), a text (str), true or false (bool) or one of some texts (a Literal of str), each possibly optional: numbers are exact decimals, never binary floats (brief, D20). |
 | `reference("sail")`, a system nobody registered | `letters.draft@3`: input `customer` is a reference to `sail`, which is not a registered system. Register it first, or use one of: crm, documents, kyc, orders, policies, portal. |
 | `reference("crm")` on a field that isn't a `str` | `letters.draft@3`: input `customer` is a reference, so it is a text (str), and this one is `Decimal`. |
@@ -458,3 +458,37 @@ contracts were written before output sources existed. `orders.lookup@1` stays re
 
 `payments.refund@1` and `letters.draft@1`, without policies, were retired when `@2` added them:
 a version without the policy, left in the catalog, would let a definition step around it.
+
+## Dates in an output: the business's day, never the machine's
+
+An output may be a date (`incident_date: date`, layer 16a). A case reads it as a day on the
+calendar, with no time zone (brief, D66). Ventoux never turns a moment into a day, so when your
+system only has a moment, **your activity chooses the day, and names the time zone it means**:
+
+```python
+from zoneinfo import ZoneInfo
+
+# The business's day, the same on every worker.
+incident_date = reported_at.astimezone(ZoneInfo("America/New_York")).date()
+```
+
+Never the machine's zone. Workers may run in different datacenters, and the same moment is a
+different day in each of them:
+
+```python
+incident_date = reported_at.astimezone().date()  # wrong: the worker's local zone
+incident_date = date.today()                     # wrong: the worker's local day
+```
+
+A report at 23:30 in New York on 31 October:
+
+| Worker | Its local zone | The day it would return |
+|---|---|---|
+| in Virginia | America/New_York | 31 October |
+| in Frankfurt | Europe/Berlin | 1 November |
+
+The case's history records whichever day the activity returned, so a replay stays right. But two
+identical cases would get different days, depending on which worker ran the activity. Ventoux
+can't see that from outside, so the rule is yours: say the zone in the code, and in the contract's
+description ("the day of the report, in New York time"). An output annotated `datetime`, a moment,
+is refused when the contract is registered.

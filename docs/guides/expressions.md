@@ -1,7 +1,7 @@
 # Expressions: conditions and values in a definition
 
-> **For workflow developers.** This guide describes layer 2 as if it already worked; the code that
-> makes it true is built test-first in that layer. You will usually write expressions through the
+> **For workflow developers.** This guide describes layer 2, and dates from layer 16a, as if they
+> already worked; the code that makes it true is built test-first in those layers. You will usually write expressions through the
 > Python builder (`approved_amount > 100`, layer 14). This guide shows what is stored, how it reads
 > back, and what is refused.
 
@@ -13,8 +13,8 @@ That gives you real code, with tests and a review.
 
 ## What is stored, and how it reads
 
-An expression is stored as JSON. It is either a literal (a number, a text or `true`/`false`), a
-field (`{"var": "approved_amount"}`), or one operator with its arguments. Reviewers and diffs
+An expression is stored as JSON. It is either a literal (a number, a text, `true`/`false`, or a
+date, `{"date": "2026-10-31"}`), a field (`{"var": "approved_amount"}`), or one operator with its arguments. Reviewers and diffs
 show it on one line, in the style of FEEL, the expression language of DMN and Camunda 8: `==` reads
 as `=`, and `!` as `not(...)`.
 
@@ -30,6 +30,8 @@ as `=`, and `!` as `not(...)`.
 | `{"cat": ["Refund of ", {"string": [{"var": "approved_amount"}]}]}` | `cat("Refund of ", string(approved_amount))` |
 | `{"count": {"over": {"var": "items"}, "where": {"==": [{"item": "risk"}, "high"]}}}` | `count(items where item.risk = "high")` |
 | `{"sum": {"over": {"var": "items"}, "where": {"==": [{"item": "risk"}, "high"]}, "value": {"item": "amount"}}}` | `sum(item.amount over items where item.risk = "high")` |
+| `{">=": [{"var": "incident_date"}, {"var": "policy_start"}]}` | `incident_date >= policy_start` |
+| `{"<": [{"var": "incident_date"}, {"date": "2026-01-01"}]}` | `incident_date < date("2026-01-01")` |
 
 The one-line form is for reading only. Nothing parses it back: what is stored is the JSON.
 
@@ -42,7 +44,7 @@ change.
 |---|---|---|
 | `var` | a declared field's name | its value |
 | `==`, `!=` | two values of the same type | boolean |
-| `>`, `>=`, `<`, `<=` | two numbers | boolean |
+| `>`, `>=`, `<`, `<=` | two numbers, or two dates | boolean |
 | `and`, `or` | two or more booleans | boolean |
 | `!` | one boolean | boolean |
 | `+`, `*` | two or more numbers | number |
@@ -50,11 +52,12 @@ change.
 | `if` | a boolean, then two values of the same type | that type |
 | `in` | a value, and a list of literal values of its type | boolean |
 | `cat` | one or more texts (an outcome counts as one) | text |
-| `string` | one number, boolean or reference | text |
+| `string` | one number, boolean, reference or date | text (a date as `2026-10-31`) |
 | `exists` | a declared field's name | boolean: whether it has a value |
 | `count` | `over` a list field, optional `where` | number |
 | `sum` | `over` a list field, optional `where`, a numeric `value` | number |
 | `item` | a field of the current element, inside `count` and `sum` | its value |
+| `date` | a calendar date, written `YYYY-MM-DD` | that date, as a literal |
 
 If you know JsonLogic, most names are the same, and ours are stricter. Ours either gives the same
 answer as JsonLogic or refuses. A field can't have a default, `if` takes exactly three arguments,
@@ -75,6 +78,7 @@ those types before the definition is accepted:
 | `boolean` | `true` | |
 | outcome | `review.outcome` | a closed list of names (`approve`, `reject`) |
 | `reference` | `order_id` (system `orders`) | only `==` and `!=` with a reference to the same system, and `string` |
+| `date` | `incident_date`, `{"date": "2026-10-31"}` | a calendar date, no time and no time zone; compared with another date, and `string` |
 | list | `items` | read only by `count` and `sum`; its elements have declared fields, read with `item` |
 
 **Numbers are exact decimals.** `0.1 + 0.2 == 0.3` is `true`, so money adds up the way people
@@ -84,15 +88,33 @@ activity, with the scale and rounding mode written out. A number must be finite:
 are refused, since an infinite amount would pass any threshold. It must also fit decimal128 (34
 digits, exponents within ±6144), so every evaluator holds the same number.
 
+**A date is a day on the calendar, not a moment.** `2026-10-31` is the same day wherever it is
+read: it has no time and no time zone, so comparing two dates gives the same answer everywhere, and
+on every replay. It is written in JSON as text, `"2026-10-31"`, because JSON has no date, and the
+field's type is what makes it a date: in a case file it must be a real day (`2026-02-30` is
+refused), and in an expression it is never a text (`incident_date == "2026-10-31"` is refused:
+write `{"date": "2026-10-31"}`). The case-data guide says where a date may come from.
+
+**No expression asks what day it is.** There is no `today`, as there is no `now`: a condition that
+read the calendar would decide differently on replay (see "Why `now` can't be written" below). To
+ask "was it reported within 30 days?", compare two dates the case file holds, such as
+`incident_date` and `reported_on`, both recorded when they were given. To act when 30 days have
+passed, use a timer (cases guide, "Rules on time"): the time reaches the case as an event its
+history records.
+
 ## What is refused, and what it says
 
 When the definition is checked, before anything runs:
 
 | You wrote | Refused with |
 |---|---|
-| `{"now": []}` | `` `now` is not an operator. The operators are: var, ==, !=, >, >=, <, <=, and, or, !, +, -, *, /, if, in, cat, string, exists, count, sum, item. Logic that doesn't fit is a compute activity. `` |
+| `{"now": []}` | `` `now` is not an operator. The operators are: var, ==, !=, >, >=, <, <=, and, or, !, +, -, *, /, if, in, cat, string, exists, count, sum, item, date. Logic that doesn't fit is a compute activity. `` |
+| `{"today": []}` | `` `today` is not an operator. The operators are: var, ==, !=, >, >=, <, <=, and, or, !, +, -, *, /, if, in, cat, string, exists, count, sum, item, date. Logic that doesn't fit is a compute activity. `` |
 | `{"==": [{"var": "review.outcome"}, "aprove"]}` | `` ==[1]: review.outcome has no outcome "aprove"; its outcomes are approve, reject `` |
-| `{">": [{"var": "approved_amount"}, "100"]}` | `` >[1]: `>` compares numbers, and this is a string `` |
+| `{">": [{"var": "approved_amount"}, "100"]}` | `` >[1]: `>` compares two numbers or two dates, and this is a string `` |
+| `{">": [{"var": "incident_date"}, 30]}` | `` >[1]: `>` compares two numbers or two dates, and this is a number, not a date `` |
+| `{"==": [{"var": "incident_date"}, "2026-10-31"]}` | `` ==[1]: `==` compares values of the same type, and this is a string, not a date `` |
+| `{"date": "2026-02-30"}` | `` date: "2026-02-30" is not a day on the calendar; write a date as YYYY-MM-DD, such as "2026-10-31" `` |
 | `{">": [{"var": "aproved_amount"}, 100]}` | `` >[0]: aproved_amount is not a declared field `` |
 
 **Why `now` can't be written.** A case runs as a Temporal workflow, which can be replayed later
@@ -110,7 +132,8 @@ When the case runs, a value the check couldn't see is an error that stops the st
 | `{"/": [{"var": "amount"}, {"var": "items"}]}`, with 250 and 0 | `division by zero in amount / items` |
 | a result beyond what decimal128 can hold | `` `*` gives a number too large for an expression (decimal128) `` |
 | an element of `items` lacks `risk`, in `count(items where item.risk == "high")` | `item.risk has no value (element 2 of items)` |
-| a field holds a value of the wrong type | `approved_amount should be a number, and it holds a string` |
+| `approved_amount > 100`, with a text in `approved_amount` | `` `>` compares two numbers or two dates, and it was given a string `` |
+| `incident_date < date("2027-01-01")`, with a text in `incident_date` | `` `<` compares two numbers or two dates, and it was given a string `` |
 
 **Why an error and not `false`.** Suppose an approval's condition is `approved_amount > 100` and
 the amount is missing. Reading the condition as `false` would mean "no approval needed", and the

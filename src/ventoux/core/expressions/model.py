@@ -1,9 +1,12 @@
 """What an expression is: the operators, numbers and values, the field types, the errors."""
 
+from datetime import date
 from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow
 from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
+
+from ventoux.core.dates import is_day
 
 # The fixed list of operators. Adding one is a design decision recorded in the brief, never just a
 # code change (brief, D20).
@@ -30,6 +33,7 @@ OPERATORS = (
     "count",
     "sum",
     "item",
+    "date",  # a literal day on the calendar, `{"date": "2026-10-31"}` (brief, D66)
 )
 
 # Arithmetic as IEEE 754 decimal128: 34 significant digits, rounding half to even, exponents
@@ -64,11 +68,29 @@ def fits_decimal128(number: Decimal) -> bool:
 # A number is written as a JSON number and read as a decimal (brief, D20): the published schema
 # says `number`, not Pydantic's rendering of `Decimal` (a number or a string of digits).
 type Number = Annotated[Decimal, WithJsonSchema({"type": "number"})]
-type Value = Number | str | bool
+DATE_SHAPE = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"  # YYYY-MM-DD, ASCII digits only (brief, D66)
+
+# A day on the calendar, written `{"date": "2026-10-31"}` (brief, D66). The schema gives its shape
+# only; the engine checks it is a real day (brief, D60).
+type Day = Annotated[
+    date,
+    WithJsonSchema(
+        {
+            "type": "object",
+            # Four digits, a dash, two digits, a dash, two digits: the shape `written_as_a_date`
+            # reads. Shape only: whether that day exists (30 February) is the engine's check.
+            "properties": {"date": {"type": "string", "pattern": DATE_SHAPE}},
+            "required": ["date"],
+            "additionalProperties": False,
+        }
+    ),
+]
+type Value = Number | str | bool | Day
 type Expression = (
     Number
     | str
     | bool
+    | Day
     | Var
     | Eq
     | Ne
@@ -283,7 +305,9 @@ COMPARISONS: dict[str, type[Eq] | type[Ne] | type[Gt] | type[Ge] | type[Lt] | ty
 
 # The types a field can be declared with, in the shape definitions use: `{"type": "number"}`.
 # Recursive through `ListType`, so the alias comes first, as `Expression` does.
-type FieldType = NumberType | StringType | BooleanType | OutcomeType | ReferenceType | ListType
+type FieldType = (
+    NumberType | StringType | BooleanType | OutcomeType | ReferenceType | DateType | ListType
+)
 
 
 def type_written(schema: dict[str, Any]) -> None:
@@ -331,6 +355,12 @@ class ReferenceType(Declared):
     system: str
 
 
+class DateType(Declared):
+    """A day on the calendar, with no time and no time zone (brief, D66)."""
+
+    type: Literal["date"] = "date"
+
+
 class ListType(Declared):
     """A list of records, each with the declared fields; read with `count`, `sum` and `item`."""
 
@@ -357,6 +387,8 @@ def a_kind(value: object) -> str:
         return "a string"
     if isinstance(value, Decimal):
         return "a number"
+    if is_day(value):  # exactly: a `datetime`, a moment, falls through to its own name
+        return "a date"
     if isinstance(value, float):
         return "a binary float"
     if isinstance(value, int):
@@ -375,4 +407,6 @@ def kind(value: Value) -> str:
         return "boolean"
     if isinstance(value, str):
         return "string"
+    if isinstance(value, date):
+        return "date"
     return "number"

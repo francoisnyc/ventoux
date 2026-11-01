@@ -13,6 +13,7 @@ Python has the name already. See docs/layers/14-builder.md.
 """
 
 from collections.abc import Mapping, Sequence
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, NoReturn, overload
 
@@ -138,6 +139,45 @@ class ReferenceExpr(Expr[str]):
         return BoolExpr({"!=": [self.data, of_kind(other, ReferenceExpr, ReferenceExpr)]})
 
 
+class DateExpr(Expr[date]):
+    """A day each case holds: compared with another day, or a build-time `date` (brief, D66)."""
+
+    def __eq__(self, other: "DateExpr | date") -> BoolExpr:  # type: ignore[override]
+        return BoolExpr({"==": [self.data, a_day(other)]})
+
+    def __ne__(self, other: "DateExpr | date") -> BoolExpr:  # type: ignore[override]
+        return BoolExpr({"!=": [self.data, a_day(other)]})
+
+    def __gt__(self, other: "DateExpr | date") -> BoolExpr:
+        return BoolExpr({">": [self.data, a_day(other)]})
+
+    def __ge__(self, other: "DateExpr | date") -> BoolExpr:
+        return BoolExpr({">=": [self.data, a_day(other)]})
+
+    def __lt__(self, other: "DateExpr | date") -> BoolExpr:
+        return BoolExpr({"<": [self.data, a_day(other)]})
+
+    def __le__(self, other: "DateExpr | date") -> BoolExpr:
+        return BoolExpr({"<=": [self.data, a_day(other)]})
+
+
+def a_day(value: object) -> object:
+    """`value` as a date operand's JSON: a date expression's own, or a build-time day written
+    `{"date": "2026-10-31"}`. A `datetime` is a `date` to Python, so it is refused by its exact
+    type: a moment is never a day (brief, D66)."""
+    if isinstance(value, DateExpr):
+        return value.data
+    if isinstance(value, datetime):
+        day = value.date()
+        raise TypeError(
+            f"{value!r} is a moment, and a date compares with a day: write "
+            f"date({day.year}, {day.month}, {day.day})"
+        )
+    if type(value) is date:
+        return {"date": value.isoformat()}
+    raise TypeError(f"{value!r} can't be compared with DateExpr: write a date, date(2026, 10, 31)")
+
+
 class ListExpr(Expr[list[object]]):
     """A list of records each case holds, read with `count` and `sum`. Each element's field is read
     with an accessor typed as the list declares it: `lines.number("amount")`."""
@@ -188,6 +228,8 @@ def operand(value: object) -> object:
     """`value` as an operand's JSON: an expression's own, or a build-time literal."""
     if isinstance(value, Expr):
         return value.data
+    if isinstance(value, date):  # a `datetime` too, which `a_day` refuses (brief, D66)
+        return a_day(value)
     # `bool` first: in Python `True` is also an `int`, and it is a truth value here, never 1.
     if isinstance(value, bool | str):
         return value
@@ -195,7 +237,7 @@ def operand(value: object) -> object:
         return a_number(value)
     raise TypeError(
         f"{value!r} can't be written into a definition: a literal is a number (int or Decimal), "
-        "a text or True or False"
+        "a text, True or False, or a date"
     )
 
 
@@ -277,7 +319,8 @@ def if_(condition: Expr[bool], then: object, otherwise: object) -> Expr[Any]:
 
 
 def in_(
-    value: NumberExpr | TextExpr | BoolExpr | OutcomeExpr, listed: Sequence[Number | str | bool]
+    value: NumberExpr | TextExpr | BoolExpr | OutcomeExpr | DateExpr,
+    listed: Sequence[Number | str | bool | date],
 ) -> BoolExpr:
     """`value` is one of the `listed` build-time values: `in` (brief, D20)."""
     return BoolExpr({"in": [value.data, [operand(each) for each in listed]]})
@@ -288,8 +331,8 @@ def cat(*texts: TextExpr | OutcomeExpr | str) -> TextExpr:
     return TextExpr({"cat": [operand(text) for text in texts]})
 
 
-def string(value: NumberExpr | BoolExpr | ReferenceExpr) -> TextExpr:
-    """A number, a truth value or a reference as a text: `string` (brief, D20)."""
+def string(value: NumberExpr | BoolExpr | ReferenceExpr | DateExpr) -> TextExpr:
+    """A number, a truth value, a reference or a date as a text: `string` (brief, D20)."""
     return TextExpr({"string": [value.data]})
 
 

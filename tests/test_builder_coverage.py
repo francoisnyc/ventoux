@@ -9,6 +9,7 @@ import inspect
 import json
 import runpy
 from collections.abc import Callable, Iterator
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from types import UnionType
@@ -150,7 +151,8 @@ def given_keys(found: object, keys: set[Key], values: set[tuple[str, str, str]])
     elif isinstance(found, tuple | list):
         for item in found:
             given_keys(item, keys, values)
-    elif not isinstance(found, str | bool | int | Decimal) and found is not None:
+    # A date literal is a leaf, as a number is: it has no keys of its own (brief, D66).
+    elif not isinstance(found, str | bool | int | Decimal | date) and found is not None:
         raise TypeError(f"the coverage test can't read a {type(found).__name__}")
 
 

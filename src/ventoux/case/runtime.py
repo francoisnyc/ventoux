@@ -109,6 +109,7 @@ from ventoux.core.before_activity import (
 )
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract, Contract
+from ventoux.core.dates import date_fields, given_day
 from ventoux.core.expressions import (
     Expression,
     ExpressionError,
@@ -117,8 +118,7 @@ from ventoux.core.expressions import (
     evaluate,
     render,
 )
-from ventoux.core.expressions.check import a_type
-from ventoux.core.form import fits
+from ventoux.core.form import fits, misfit, read_as
 from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
@@ -331,7 +331,8 @@ def arrive(case: CaseDefinition, state: CaseState, event: Sent, role: str | None
     given: list[str] = []
     for field, declared in case.events[name].payload.items():
         value = f"{name}.{field}"
-        state.values[value] = event.payload[field]
+        # A date's text is read into the day it names, by its declared type (brief, D66).
+        state.values[value] = read_as(event.payload[field], declared.declared)
         # A mark adds distrust, never removes it, whoever sends it (brief, D12).
         state.sources[value] = frozenset(
             {sender} | ({declared.source} if declared.source else set())
@@ -394,7 +395,7 @@ def refuse_payload(name: str, declared: DeclaredEvent, payload: Mapping[str, obj
         if given not in declared.payload
     ]
     problems += [
-        f"{name}.{field} is {a_type(kind.declared)}, and the event gives {a_kind(payload[field])}"
+        misfit(f"{name}.{field}", kind.declared, payload[field], "the event")
         for field, kind in declared.payload.items()
         if field in payload and not fits(payload[field], kind.declared)
     ]
@@ -437,7 +438,7 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
         state.history.append(f"opened on {event.release}, engine {state.engine}")
     origin = OPENER if event.by is None else f"person:{event.by}"
     for name, value in event.file.items():
-        state.values[name] = value
+        state.values[name] = kept(case, name, value)
         state.sources[name] = marked(case, name, origin)
         state.obtained[name] = Obtained(event.at, None)  # from the opening, by no step run
     state.history.append(f"opened by {event.by or OPENER}, with {listed(sorted(event.file))}")
@@ -485,7 +486,7 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
             )
         elif not fits(plain(value), declared := case.fields[name].declared):
             # The type, never the value: refusals reach people who may not see it (brief, D30).
-            problems.append(f"{name} is {a_type(declared)}, and the opening gives {a_kind(value)}")
+            problems.append(misfit(name, declared, plain(value), "the opening"))
     if problems:
         raise CaseRefused("\n".join(problems))
 
@@ -508,7 +509,15 @@ def refuse_unless_wrapped(
 def kept(case: CaseDefinition, name: str, value: object) -> object:
     """A form's value as the case file keeps it: wrapped for a sensitive field, plain otherwise.
     The client wraps every value of a form, since it can't tell which are sensitive."""
-    return value if name in case.fields and case.fields[name].sensitive else plain(value)
+    if name not in case.fields:
+        return plain(value)
+    field = case.fields[name]
+    # A date's text is read into the day it names, by the field's type (brief, D66); a sensitive
+    # one inside its wrapper, which holds the plain value of the field's type (brief, D31).
+    read = read_as(plain(value), field.declared)
+    if field.sensitive and isinstance(value, Sensitive):
+        return Sensitive(read)
+    return value if field.sensitive else read
 
 
 def marked(case: CaseDefinition, name: str, origin: str) -> frozenset[str]:
@@ -910,6 +919,15 @@ def outcome_problem(contract: Contract, event: Completed) -> str | None:
             f"{contract.reference} gave the outcome {event.outcome}, which its contract doesn't "
             f"declare: its outcomes are {declared}"
         )
+    # A date is read as a day, by its exact shape, before Pydantic's lax reading, which would pick
+    # a day for a timestamp or a moment: Ventoux never turns a moment into a day (brief, D66).
+    for name in date_fields(contract.output):
+        value = event.output.get(name)
+        if value is not None and given_day(value) is None:
+            return (
+                f"{contract.reference} gave {name} as {a_kind(value)}, which isn't a day: an "
+                f"output date is a date, or a text written YYYY-MM-DD, never a moment (brief, D66)"
+            )
     try:
         # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
         given = contract.output.model_validate(event.output)

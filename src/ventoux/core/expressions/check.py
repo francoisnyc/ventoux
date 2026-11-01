@@ -1,6 +1,7 @@
 """The check: an expression's type against the declared fields, before anything runs."""
 
 from collections.abc import Mapping
+from datetime import date
 from decimal import Decimal
 
 from ventoux.core.expressions.model import (
@@ -10,6 +11,7 @@ from ventoux.core.expressions.model import (
     Cat,
     Comparison,
     Count,
+    DateType,
     Div,
     Exists,
     Expression,
@@ -61,6 +63,8 @@ def type_of(
         return StringType()
     if isinstance(expression, Decimal):
         return NumberType()
+    if isinstance(expression, date):
+        return DateType()
     if isinstance(expression, Var):
         if expression.var not in fields:
             raise refused(path, f"{expression.var} is not a declared field")
@@ -75,10 +79,10 @@ def type_of(
         return BooleanType()
     if isinstance(expression, In):
         found = type_of(expression.args[0], fields, inside(path, "in[0]"), element)
-        if not isinstance(found, NumberType | StringType | BooleanType | OutcomeType):
+        if not isinstance(found, NumberType | StringType | BooleanType | OutcomeType | DateType):
             raise refused(
                 inside(path, "in[0]"),
-                "`in` looks for a number, a string, a boolean or an outcome, "
+                "`in` looks for a number, a string, a boolean, an outcome or a date, "
                 f"and this is {a_type(found)}",
             )
         for position, literal in enumerate(expression.args[1]):
@@ -104,11 +108,7 @@ def type_of(
             for a, step in zip(expression.args, steps, strict=True)
         ]
         if operator not in ("==", "!="):
-            for step, found in zip(steps, types, strict=True):
-                if not isinstance(found, NumberType):
-                    raise refused(
-                        step, f"`{operator}` compares numbers, and this is {a_type(found)}"
-                    )
+            ordering_problem(operator, steps, types)
             return BooleanType()
         for argument, step, other, other_argument in zip(
             expression.args, steps, reversed(types), reversed(expression.args), strict=True
@@ -181,8 +181,8 @@ def type_of(
             fields,
             element,
             path,
-            "takes a number, a boolean or a reference",
-            (NumberType, BooleanType, ReferenceType),
+            "takes a number, a boolean, a reference or a date",
+            (NumberType, BooleanType, ReferenceType, DateType),
         )
         return StringType()
     if isinstance(expression, If):
@@ -234,6 +234,16 @@ def type_of(
         return NumberType()
     # Fail closed: an expression the check doesn't know is refused, never assumed to be fine.
     raise refused(path, f"can't check {expression!r}")
+
+
+def ordering_problem(operator: str, steps: list[str], types: list[FieldType]) -> None:
+    """Refuse an ordering unless it compares two numbers or two dates (brief, D20) (brief, D66)."""
+    orders = f"`{operator}` compares two numbers or two dates"
+    for step, found in zip(steps, types, strict=True):
+        if not isinstance(found, NumberType | DateType):
+            raise refused(step, f"{orders}, and this is {a_type(found)}")
+    if type(types[0]) is not type(types[1]):
+        raise refused(steps[1], f"{orders}, and this is {a_type(types[1])}, not {a_type(types[0])}")
 
 
 def each_argument(

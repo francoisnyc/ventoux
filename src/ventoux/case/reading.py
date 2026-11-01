@@ -731,7 +731,8 @@ def kind_of(name: str, declared: object) -> str:
         return f"a list of {listed_and(list(declared.fields))}"
     if isinstance(declared, OutcomeType):
         return f"one of {' or '.join(declared.outcomes)}"
-    kinds = {"number": "a number", "string": "a text", "boolean": "true or false"}
+    # A date as a day, never a moment or a format of some language (brief, D66).
+    kinds = {"number": "a number", "string": "a text", "boolean": "true or false", "date": "a date"}
     kind = getattr(declared, "type", None)
     if kind not in kinds:
         raise ReadingRefused(f"can't read {name}'s type: {declared!r} isn't a type Ventoux knows")

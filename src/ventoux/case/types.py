@@ -4,6 +4,7 @@ own: the runtime depends on nothing validation did (brief, D34). See
 docs/layers/10-case-validation.md (10b).
 """
 
+from datetime import date
 from decimal import Decimal
 
 from pydantic.fields import FieldInfo
@@ -14,6 +15,7 @@ from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import (
     BooleanType,
+    DateType,
     Expression,
     ExpressionInvalid,
     FieldType,
@@ -67,14 +69,17 @@ def case_types(case: CaseDefinition, catalog: Catalog) -> dict[str, FieldType]:
 
 def output_type(info: FieldInfo, system: str | None) -> FieldType | None:
     """An output's type as an expression reads it: a decimal is a number, a text a string (a
-    reference to `system` if it names one), a bool a boolean. None for any other: registration
-    refuses those (brief, D29), so one that got through is left out, and reading it is an error."""
+    reference to `system` if it names one), a bool a boolean, a date a date (brief, D66). None for
+    any other: registration refuses those (brief, D29), so one that got through is left out, and
+    reading it is an error."""
     if info.annotation is Decimal:
         return NumberType()
     if info.annotation is str:
         return StringType() if system is None else ReferenceType(system=system)
     if info.annotation is bool:
         return BooleanType()
+    if info.annotation is date:  # exactly: a `datetime` output is refused at registration
+        return DateType()
     return None
 
 

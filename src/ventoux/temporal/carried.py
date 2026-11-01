@@ -7,6 +7,7 @@ lists, and are read back as sets.
 """
 
 import dataclasses
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
@@ -25,6 +26,9 @@ from ventoux.case.state import (
     Timer,
 )
 from ventoux.core.before_activity import Steering
+from ventoux.core.dates import given_day
+from ventoux.core.expressions import DateType, FieldType
+from ventoux.core.sensitive import Sensitive, plain
 
 
 def state_as_data(state: CaseState) -> dict[str, Any]:
@@ -183,11 +187,14 @@ def given_from_data(data: dict[str, Any]) -> GivenApproval:
     )
 
 
-def state_from_data(data: dict[str, Any]) -> CaseState:
-    """The state `state_as_data` wrote, read back as it was."""
+def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> CaseState:
+    """The state `state_as_data` wrote, read back as it was; each value by its declared type in
+    `types`, so a date, which crosses as text, is a day again (brief, D66)."""
     return CaseState(
         case=data["case"],
-        values=dict(data["values"]),
+        values={
+            name: read_back(name, value, types.get(name)) for name, value in data["values"].items()
+        },
         sources={name: frozenset(sources) for name, sources in data["sources"].items()},
         # A state carried by a run from before layer 9d has no times: its facts' ages are unknown,
         # so a step needing one fresh stops (docs/layers/09-case-data.md, 9d).
@@ -311,6 +318,18 @@ def firing_from_data(data: dict[str, Any]) -> RuleFiring:
         # None in a state from before the fix of the untrusted moment: nothing steered a moment.
         tuple(steering_from_data(steering) for steering in data.get("steered", [])),
     )
+
+
+def read_back(name: str, value: object, declared: FieldType | None) -> object:
+    """A carried value as the case file held it: a date's text read into its day, inside a
+    sensitive value's wrapper too (brief, D31) (brief, D66). A date that isn't a day is refused,
+    never kept as text or as nothing: the state was damaged on the way."""
+    if not isinstance(declared, DateType):
+        return value
+    day = given_day(plain(value))
+    if day is None:
+        raise ValueError(f"a carried date is written YYYY-MM-DD, and {name} isn't")
+    return Sensitive(day) if isinstance(value, Sensitive) else day
 
 
 def whole(number: object) -> int:
