@@ -2730,6 +2730,12 @@ D20, D55, D56, D58 and D60, whose text is kept.*
 - **Ventoux never turns a moment into a day.** Which day a moment falls on depends on a time zone,
   so whoever gives the date chooses the day it means: a person, or an activity whose contract says
   it returns a date.
+- **The engine's time is zone-free, so workers may run anywhere.** The engine keeps time only as
+  seconds since the epoch, from the history (`workflow.now()`), never the machine's local time or
+  zone, and a date compares the same on every machine; a test runs the date tests under two
+  process time zones and gets the same results. An activity that turns a moment into a day names
+  the time zone it means and never reads the machine's: two workers in different zones would
+  otherwise give the same moment different days (activities guide, "Dates in an output").
 - **Inside the engine a date is a `datetime.date`, never a `datetime`** (a subclass in Python, so
   refused explicitly wherever a date is taken). On a payload it is `YYYY-MM-DD` text, read back
   into a date by its field's declared type where a value enters a case: the opening, an answer,

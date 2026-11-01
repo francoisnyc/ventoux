@@ -178,6 +178,13 @@ C. **No new dependency.** The date is Python's `datetime.date`; the check is a s
 
 ## Seams and tests for 16a (curriculum step 4)
 
+*Asked before the seams were agreed (2026-11-01): "we don't deal with UTC or time zones; what if
+workers run in different datacenters?"* The engine is safe: its time is seconds since the epoch,
+from the history, and a date compares the same anywhere. The gap is an activity turning a moment
+into a day with the machine's zone: two workers would give the same moment different days.
+**Answered:** the activities guide says an activity names its zone; a test runs the date tests
+under two process time zones; D66 gains a bullet (it is unmerged and nothing cites it yet).
+
 11. **The seams the tests use,** all public today; no test reads an internal:
     - **Expressions** (`ventoux.core.expressions`): `parse_expression(data)` refuses a literal
       that isn't a day (`ExpressionInvalid`); `check(expression, types)` with a new `DateType`
@@ -217,6 +224,8 @@ C. **No new dependency.** The date is Python's `datetime.date`; the check is a s
     8. The schema: a date field and literal; no `today` anywhere in it.
     9. The plain diff and the case map name a date field's type; a type changed from text to date
        is reported.
+    10. The date tests, run in a subprocess with `TZ=America/New_York` and again with
+        `TZ=Pacific/Kiritimati` (UTC+14), give the same results: the engine reads no local zone.
 
 ## Sketched, decided when their parts start
 

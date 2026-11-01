@@ -195,6 +195,40 @@ value the case file holds exactly: a `Decimal`, a `str` (a reference is one) or 
 The engine checks every value again when it arrives: one it can't hold fails the step, and nothing
 the step gave lands.
 
+## Dates in an output: the business's day, never the machine's
+
+An output may be a date (`incident_date: date`, layer 16a). A case reads it as a day on the
+calendar, with no time zone (brief, D66). Ventoux never turns a moment into a day, so when your
+system only has a moment, **your activity chooses the day, and names the time zone it means**:
+
+```python
+from zoneinfo import ZoneInfo
+
+# The business's day, the same on every worker.
+incident_date = reported_at.astimezone(ZoneInfo("America/New_York")).date()
+```
+
+Never the machine's zone. Workers may run in different datacenters, and the same moment is a
+different day in each of them:
+
+```python
+incident_date = reported_at.astimezone().date()  # wrong: the worker's local zone
+incident_date = date.today()                     # wrong: the worker's local day
+```
+
+A report at 23:30 in New York on 31 October:
+
+| Worker | Its local zone | The day it would return |
+|---|---|---|
+| in Virginia | America/New_York | 31 October |
+| in Frankfurt | Europe/Berlin | 1 November |
+
+The case's history records whichever day the activity returned, so a replay stays right. But two
+identical cases would get different days, depending on which worker ran the activity. Ventoux
+can't see that from outside, so the rule is yours: say the zone in the code, and in the contract's
+description ("the day of the report, in New York time"). An output annotated `datetime`, a moment,
+is refused when the contract is registered.
+
 ## Workflow contracts: an existing workflow as one step
 
 A team that already has the logic as Temporal code, in any SDK language, offers it to cases as a
