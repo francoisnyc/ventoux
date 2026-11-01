@@ -23,6 +23,8 @@ from test_case import (
 )
 
 from ventoux.case.answers import AnswerRefused
+from ventoux.case.definition import parse_case
+from ventoux.case.validate import validate_case
 from ventoux.core.expressions import (
     BooleanType,
     DateType,
@@ -38,7 +40,7 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.output_sources import source
 from ventoux.core.sensitive import Sensitive
-from ventoux.testing import run_case
+from ventoux.testing import CaseRefused, EventRefused, run_case, send
 from ventoux.tooling.schema import case_schema, schema_files
 
 ROOT = Path(__file__).parent.parent
@@ -201,7 +203,8 @@ def test_the_published_schema_holds_the_date_and_no_today() -> None:
 
 class Reported(BaseModel):
     email: Annotated[str, source("system:crm")]
-    reported_on: date  # the day the customer reported it, as the CRM means it
+    # The day the customer reported it, as the CRM means it, and the CRM's own fact.
+    reported_on: Annotated[date, source("system:crm")]
 
 
 @pytest.mark.parametrize(
@@ -386,3 +389,111 @@ def test_a_sensitive_date_is_kept_wrapped_and_read_into_a_day() -> None:
     assert isinstance(kept, Sensitive)
     assert kept.value == date(2026, 10, 31)
     assert any("settle" in waiting for waiting in run.waiting_for)  # its condition read the day
+
+
+# --- The opening and an event: the same reading (slice 5) ---
+
+
+def reportable() -> dict[str, Any]:
+    """The claim, with an event from the portal saying which day the customer reported it."""
+    definition = claim_case()
+    definition["events"] = {
+        "reported": {
+            "display": {"title": "The customer reports the claim"},
+            "sent_by": {"system": "portal"},
+            "payload": {"on": {"type": "date", "display": {"title": "Reported on"}}},
+        }
+    }
+    return definition
+
+
+NOT_A_DAY = "is a date, written YYYY-MM-DD, and {by} gives a string that isn't one"
+
+
+@pytest.mark.parametrize(
+    ("given", "message"),
+    [
+        ("31/10/2026", f"reported.on {NOT_A_DAY.format(by='the event')}"),
+        (Decimal(20261031), "reported.on is a date, and the event gives a number"),
+    ],
+)
+def test_an_event_carrying_a_date_that_is_not_a_day_is_refused(given: object, message: str) -> None:
+    with pytest.raises(EventRefused, match=f"^{re.escape(message)}$"):
+        run_case(
+            reportable(),
+            file=OPENED,
+            answers=[send("reported", {"on": given}, "system:portal")],
+            people=ADJUSTERS,
+        )
+
+
+@pytest.mark.parametrize(
+    ("given", "message"),
+    [
+        ("31/10/2026", f"policy_start {NOT_A_DAY.format(by='the opening')}"),
+        (
+            datetime(2026, 1, 1, tzinfo=UTC),
+            "policy_start is a date, and the opening gives a datetime",
+        ),
+    ],
+)
+def test_an_opening_giving_a_date_that_is_not_a_day_is_refused(given: object, message: str) -> None:
+    with pytest.raises(CaseRefused, match=f"^{re.escape(message)}$"):
+        run_case(claim_case(), file={"policy_start": given}, answers=[], people=ADJUSTERS)
+
+
+def test_an_events_date_lands_as_a_day() -> None:
+    run = run_case(
+        reportable(),
+        file=OPENED,
+        answers=[send("reported", {"on": "2026-10-31"}, "system:portal")],
+        people=ADJUSTERS,
+    )
+    assert run.state.values["reported.on"] == date(2026, 10, 31)
+    assert type(run.state.values["reported.on"]) is date
+
+
+def reading_the_report(condition: object) -> list[str]:
+    """What validation says of the CRM lookup's date output, read by the notice's condition."""
+    catalog = with_crm()
+    catalog.register(contract("crm.reported", FindInput, Reported))
+    definition = with_customer_steps("find.email", "notices.draft@1", "to")
+    definition["steps"]["find"]["activity"] = "crm.reported@1"
+    definition["steps"]["notify"]["when"] = condition
+    return [
+        f"{issue.path}: {issue.message}"
+        for issue in validate_case(parse_case(definition), catalog)
+        if issue.severity == "error"
+    ]
+
+
+def test_an_outputs_date_is_read_as_a_date_by_validation() -> None:
+    assert reading_the_report({">=": [{"var": "find.reported_on"}, {"date": "2026-01-01"}]}) == []
+    assert reading_the_report({">=": [{"var": "find.reported_on"}, 30]}) == [
+        "steps.notify.when: >=[1]: `>=` compares two numbers or two dates, and this is a number, not a date"
+    ]
+
+
+def test_a_condition_with_a_date_literal_runs_its_activity() -> None:
+    # Run for real: the sources of a condition holding a date literal are read before the
+    # activity is scheduled, and the literal adds none (brief, D21) (brief, D66).
+    catalog = with_crm()
+    catalog.register(contract("crm.reported", FindInput, Reported))
+    definition = with_customer_steps("find.email", "notices.draft@1", "to")
+    definition["steps"]["find"]["activity"] = "crm.reported@1"
+    definition["steps"]["notify"]["when"] = {
+        ">=": [{"var": "find.reported_on"}, {"date": "2026-01-01"}]
+    }
+    drafted: list[str] = []
+    run_case(
+        definition,
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=PEOPLE,
+        activities={
+            "crm.reported@1": lambda inputs: {"email": "c@x.com", "reported_on": "2026-10-31"},
+            "notices.draft@1": lambda inputs: drafted.append(inputs["to"]) or {"notice_id": "n-1"},
+        },
+        catalog=catalog,
+    )
+    assert drafted == ["c@x.com"]

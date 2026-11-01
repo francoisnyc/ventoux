@@ -6,6 +6,7 @@ A source is a text, `origin:name`. See docs/layers/04-provenance.md.
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from ventoux.core.expressions import (
@@ -95,7 +96,8 @@ def provenance(expression: Expression, sources: Mapping[str, frozenset[str]]) ->
 
 def fields_read(expression: Expression) -> list[str]:
     """The fields `expression` reads, in order, conditions included."""
-    if isinstance(expression, Decimal | str | bool):
+    # A literal, a date one too, reads no field (brief, D66).
+    if isinstance(expression, Decimal | str | bool | date):
         return []  # a literal reads nothing
     if isinstance(expression, Var):
         return [expression.var]

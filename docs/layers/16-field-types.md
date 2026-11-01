@@ -259,6 +259,17 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
   `Sensitive("2026-10-31")` and its condition could never read it as a day. Now the day is read
   inside the wrapper, with a test. The opening keeps its values as a form does, through the same
   `kept`, so a date given at the opening is read into a day too.
+- **Four walkers over expressions** (slice 5). Besides the parser, the check, the evaluator and the
+  renderer, four functions walk an expression and fail closed on a node they don't know:
+  `fields_read` (`core/provenance.py`), `given_as_reference` (`core/before_activity.py`), and the
+  readings in `case/warnings.py` and `case/known.py`. Each now takes a date literal as a literal,
+  reading no field, and each has a test that fails without it (one by mutation: the reference
+  input's message said "a computed value" for a date literal, not "a value written in the
+  definition"). Found because `parse_case` raised `TypeError: not an expression: date` on a
+  condition holding a literal. *Worth a later check:* a test that every walker knows every kind
+  of literal, so a fifth kind can't be missed the same way.
+- **An activity's date output is read as a date by validation** (`output_type`, `case/types.py`),
+  so a condition comparing it with a number is refused before anything runs.
 - **A plan's fields take dates too.** A case's and a plan's fields share one list of types
   (`DeclaredType`, `core/plan.py`), so adding the date there gives both, and the plan schema says
   so. Nothing in 16a promises more about plans than that the type parses.

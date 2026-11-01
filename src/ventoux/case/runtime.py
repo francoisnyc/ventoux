@@ -118,7 +118,6 @@ from ventoux.core.expressions import (
     evaluate,
     render,
 )
-from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits, misfit, read_as
 from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
@@ -332,7 +331,8 @@ def arrive(case: CaseDefinition, state: CaseState, event: Sent, role: str | None
     given: list[str] = []
     for field, declared in case.events[name].payload.items():
         value = f"{name}.{field}"
-        state.values[value] = event.payload[field]
+        # A date's text is read into the day it names, by its declared type (brief, D66).
+        state.values[value] = read_as(event.payload[field], declared.declared)
         # A mark adds distrust, never removes it, whoever sends it (brief, D12).
         state.sources[value] = frozenset(
             {sender} | ({declared.source} if declared.source else set())
@@ -395,7 +395,7 @@ def refuse_payload(name: str, declared: DeclaredEvent, payload: Mapping[str, obj
         if given not in declared.payload
     ]
     problems += [
-        f"{name}.{field} is {a_type(kind.declared)}, and the event gives {a_kind(payload[field])}"
+        misfit(f"{name}.{field}", kind.declared, payload[field], "the event")
         for field, kind in declared.payload.items()
         if field in payload and not fits(payload[field], kind.declared)
     ]

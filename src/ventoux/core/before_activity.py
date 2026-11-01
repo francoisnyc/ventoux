@@ -8,6 +8,7 @@ See docs/layers/05-interpreter.md.
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from pydantic import ValidationError
@@ -153,7 +154,8 @@ def given_as_reference(
     says what it gives: `order_id, a reference to orders`, `a computed value`."""
     # Only a field read as it is: a computed value has no system, whatever it looks like.
     if not isinstance(expression, Var):
-        if isinstance(expression, Decimal | str | bool):
+        # A literal, a date one too, reads no field (brief, D66).
+        if isinstance(expression, Decimal | str | bool | date):
             return None, "a value written in the definition"
         return None, "a computed value"
     declared = types.get(expression.var)

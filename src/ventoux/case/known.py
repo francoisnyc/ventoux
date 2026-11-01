@@ -7,6 +7,7 @@ has surely happened by then. See docs/layers/10-case-validation.md (10d).
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 from functools import reduce
 from typing import NamedTuple
@@ -246,7 +247,8 @@ def reads(
     """Each value `expression` reads, with what is known where it reads it: inside an `if`, its
     first branch is read only once its condition held. `and` and `or` read every part
     (brief, D20), so a part guards nothing."""
-    if isinstance(expression, Decimal | str | bool | Item | Exists):
+    # A literal, a date one too, reads no field (brief, D66).
+    if isinstance(expression, Decimal | str | bool | date | Item | Exists):
         return []  # `exists` asks whether a value is set: it never fails for one that isn't
     if isinstance(expression, Var):
         return [Read(expression.var, known, always)]

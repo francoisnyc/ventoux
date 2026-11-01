@@ -71,6 +71,7 @@ def denying_with(customer: object) -> dict[str, Any]:
         ({"var": "assess.outcome"}, "assess.outcome, which is not a reference"),
         ({"cat": [{"string": [{"var": "customer_id"}]}, ""]}, "a computed value"),
         ("cus-7", "a value written in the definition"),
+        ({"date": "2026-10-31"}, "a value written in the definition"),  # a literal (brief, D66)
     ],
 )
 def test_a_reference_goes_only_where_its_system_is_expected(customer: object, given: str) -> None:
