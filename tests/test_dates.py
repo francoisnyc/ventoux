@@ -42,6 +42,7 @@ from ventoux.core.expressions import (
     render,
 )
 from ventoux.core.output_sources import source
+from ventoux.core.plan import parse_plan
 from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
@@ -653,3 +654,52 @@ def test_the_plain_diff_reports_a_text_become_a_date_and_a_date_moved(
     assert 'date("2027-01-01") -&gt; reported.on &lt; date("2027-01-02")' in moved
     # Neither is proven stricter, so each is read as possibly looser, never hidden (brief, D55).
     assert "read it as possibly looser" in retyped and "read it as possibly looser" in moved
+
+
+# --- Promises with no test of their own until step 6 ---
+
+
+def test_every_date_a_case_holds_was_given_never_made_up() -> None:
+    # No field is filled with today's date, the opening day included: each date has the source
+    # of whoever gave it, a person, the opener or the event's sender (brief, D66).
+    run = run_case(
+        reportable(),
+        file=OPENED,
+        answers=[
+            ("assess", "accept", "ana", {"incident_date": "2026-10-31"}),
+            send("reported", {"on": "2026-11-02"}, "system:portal"),
+        ],
+        people=ADJUSTERS,
+    )
+    dates = {name: value for name, value in run.state.values.items() if type(value) is date}
+    assert sorted(dates) == ["incident_date", "policy_start", "reported.on"]
+    assert {name: run.state.sources[name] for name in dates} == {
+        "policy_start": frozenset({"system:opener"}),
+        "incident_date": frozenset({"person:ana"}),
+        "reported.on": frozenset({"system:portal"}),
+    }
+
+
+@pytest.mark.parametrize("edge", ["0001-01-01", "9999-12-31"])
+def test_the_first_and_the_last_day_a_date_can_be(edge: str) -> None:
+    assert parse_expression({"date": edge}) == date.fromisoformat(edge)
+
+
+def test_if_takes_dates_as_any_type() -> None:
+    chosen = {"if": [{"var": "flag"}, {"date": "2026-01-01"}, {"var": "incident_date"}]}
+    types: dict[str, FieldType] = {**CLAIM, "flag": BooleanType()}
+    assert check(parse_expression(chosen), types) == DateType()
+    assert evaluate(
+        parse_expression(chosen), {"flag": False, "incident_date": date(2026, 2, 3)}
+    ) == (date(2026, 2, 3))
+
+
+def test_a_plans_field_may_be_a_date() -> None:
+    # A case's and a plan's fields share one list of types (`DeclaredType`): 16a promises no
+    # more of a plan than that a date field parses.
+    plan = json.loads(
+        (ROOT / "examples" / "packages" / "refund" / "plans" / "refund-order.json").read_text(),
+        parse_float=Decimal,
+    )
+    plan["fields"]["due"] = {"type": "date"}
+    assert parse_plan(plan).fields["due"] == DateType()

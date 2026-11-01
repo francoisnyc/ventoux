@@ -1,6 +1,6 @@
 # Layer 16: More field types: dates, options, attachments
 
-Status: 2026-11-01, agreed. This note starts from `main` at `12f26a7`, with layers
+Status: 2026-11-01, agreed; 16a built, its promises checked. This note starts from `main` at `12f26a7`, with layers
 0 to 15 merged. The warm-up was answered and recorded (learning question 43). The guides were
 written first (curriculum step 2): `docs/guides/expressions.md`, `docs/guides/case-data.md` and
 `docs/guides/builder.md` describe the date as if 16a worked, with the recommendations below. If a
@@ -318,5 +318,47 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
 
 ## Promises
 
-To be written with 16a's tests (curriculum step 6): each claim this note and the guides make
-about the date, and the test that fails if it isn't true.
+Every claim this note, D66 and the guides make about the date, and the test that fails if it
+isn't true. Tests are in `tests/test_dates.py` unless named. "Pinned" means it passed at once, the code
+having been written for an earlier test; "mutation" means it was watched failing with the code
+broken on purpose, then restored.
+
+| # | Promise | Test | Seen failing |
+|---|---|---|---|
+| 1 | **The curriculum's:** a date compared with a number is refused before anything runs | `test_a_date_compared_with_a_number_is_refused_before_anything_runs`; through validation, `test_an_outputs_date_is_read_as_a_date_by_validation` | failed first |
+| 2 | A date is exactly `YYYY-MM-DD`, a real day, years 0001 to 9999: `2026-02-30`, `20261031`, `2026-W44-6`, `2026-1-5`, a moment, year 0 and non-ASCII digits refused | `test_a_date_literal_that_is_not_a_day_is_refused`, `test_only_yyyy_mm_dd_naming_a_real_day_is_a_date`, `test_the_first_and_the_last_day_a_date_can_be` | failed first; the edges pinned |
+| 3 | A literal is `{"date": …}`, read `date("…")`; anything but a text in it is refused | `test_a_date_literal_is_a_day_and_reads_as_feel_writes_it`, `test_a_date_literal_takes_a_text`, `test_the_guide_reads_as_the_renderer_renders` | failed first |
+| 4 | A text shaped like a date stays a text: compared or ordered with a date, refused | `test_a_date_compared_with_a_text_is_refused_write_a_date_literal`, `test_a_date_ordered_against_a_text_is_refused` | pinned (the type rule already refused) |
+| 5 | Two dates order and compare; `in`, `if` and `string` take a date; `string` gives `YYYY-MM-DD` | `test_two_dates_compare`, `test_two_dates_compare_as_days`, `test_if_takes_dates_as_any_type`, `test_string_of_a_date_is_a_text`, `test_string_of_a_date_gives_yyyy_mm_dd` | failed first; `if` pinned |
+| 6 | No expression reads today: `today` has no shape, in the check or the published schema | `test_today_has_no_shape_so_it_cannot_be_written`, `test_the_published_schema_holds_the_date_and_no_today` | pinned (fixed list) |
+| 7 | No date arithmetic: the operator list is D20's and the literal, nothing more | `test_an_unknown_operator_is_refused_with_one_message` (the whole list, word for word) | failed first (it named `date`) |
+| 8 | At runtime a date field holding a text or a moment is an error, never `false` | `test_a_date_field_holding_a_text_is_an_error_never_false`, `test_a_date_field_holding_a_moment_is_an_error` | failed first; the moment by mutation (a `TypeError` without the guard) |
+| 9 | A form giving a text that isn't a day, a number or a moment is refused, naming the kind, never the value (D30) | `test_a_form_giving_a_date_that_is_not_a_day_is_refused` | failed first |
+| 10 | A form's or the opening's `YYYY-MM-DD` is read into a day, and a condition reads it | `test_a_form_date_is_read_into_a_day_and_a_condition_reads_it` | mutation (reading removed) |
+| 11 | A sensitive date stays wrapped, with the day inside | `test_a_sensitive_date_is_kept_wrapped_and_read_into_a_day` | failed first |
+| 12 | The opening and an event refuse a date that isn't a day, saying how one is written; an event's date lands as a day | `test_an_opening_giving_a_date_that_is_not_a_day_is_refused`, `test_an_event_carrying_a_date_that_is_not_a_day_is_refused`, `test_an_events_date_lands_as_a_day` | failed first; the opening by mutation |
+| 13 | **Tutor:** an activity's output date that is a timestamp, a moment's text or a `datetime` fails its step, and nothing it gave lands; `YYYY-MM-DD` and a `date` land | `test_an_output_date_that_is_a_moment_fails_the_step_and_nothing_lands`, `test_an_output_date_lands_as_a_day` | failed first, for the right reason once a date could land |
+| 14 | A contract's output may be a `date`, never a `datetime` | `test_a_contract_whose_output_is_a_day_registers`, `test_a_contract_whose_output_is_a_moment_is_refused_at_registration` | pinned (with 13's change) |
+| 15 | Every walker over expressions takes a date literal as a literal | `test_an_outputs_date_is_read_as_a_date_by_validation` (provenance, warnings, known), `test_a_reference_goes_only_where_its_system_is_expected` (its date row), `test_a_condition_with_a_date_literal_runs_its_activity` | each by mutation |
+| 16 | Ventoux never makes a date up: every date a case holds has the source of whoever gave it | `test_every_date_a_case_holds_was_given_never_made_up` | pinned |
+| 17 | On a payload a date is `YYYY-MM-DD`; a `datetime` never crosses | `test_a_date_crosses_a_payload_as_yyyy_mm_dd`, `test_a_moment_never_crosses_a_payload_as_a_date` | failed first |
+| 18 | A carried state reads each date back as a day, by its type; one that isn't a day is refused | `test_a_carried_state_reads_its_dates_back_as_days`, `test_a_carried_date_that_isnt_a_day_is_refused` | failed first |
+| 19 | On Temporal, after continue-as-new, the case still decides on days; a query gives each date as its text | `test_dates_cross_continue_as_new_and_the_case_still_decides_on_days` (`tests/test_temporal_dates.py`) | mutation (the reading removed: the proposal refused) |
+| 20 | A pure layer imports only `from datetime import date`, and reads no clock through it (`today`, `now`, `utcnow`, `fromtimestamp`, `astimezone`, also by `getattr`) | `test_a_pure_layer_may_import_the_date_alone`, `test_anything_else_from_datetime_is_forbidden`, `test_pure_layers_may_not_reach_a_clock_through_the_date`, `test_a_date_as_a_value_reads_no_clock`, `test_pure_layers_import_nothing_forbidden` (`tests/test_layers.py`) | failed first |
+| 21 | Workers may run in any zone: the date tests give the same results in New York and on Kiritimati | `test_the_date_tests_give_the_same_results_in_any_time_zone` (`tests/test_time_zones.py`) | mutation (a day read through the machine's zone: nine differ) |
+| 22 | **Tutor:** the schema's literal is `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`, shape only | `test_a_wrong_case_is_refused_by_the_schema_as_by_the_parser[a date literal not written YYYY-MM-DD]`, `test_a_date_literal_written_yyyy_mm_dd_is_accepted_by_the_schema` (`tests/test_schema.py`) | failed first, after a control |
+| 23 | The builder: `Field.date()`, a `date` literal, `string` and `in_`; a `datetime` refused when the file runs; the guide's example is checked and quotes the refusal | `test_the_builder_refuses_a_moment_beside_a_date`, `test_the_builder_writes_string_and_in_of_a_date`, `test_the_builder_guide_quotes_the_refusal_of_a_moment`, `test_every_example_is_a_package_the_check_accepts`, `test_the_guides_examples_are_the_files_their_tests_run`, `test_the_builder_writes_every_key_of_the_format` | failed first |
+| 24 | A date and its text digest apart; every package pinned before 16a keeps its digest; the date's shapes are pinned | `test_a_date_and_its_text_digest_apart`, `test_method_1_gives_the_digests_it_pinned`, `test_the_pinned_packages_use_every_shape` | mutation (plain text: one digest) |
+| 25 | No new engine version: the schema's `$id` stays `engine-2` | `test_the_committed_schemas_are_what_the_models_say`, `test_the_published_schema_holds_the_date_and_no_today` | pinned |
+| 26 | The case map and the plain diff read "a date"; a text become a date and a moved literal are reported, read as possibly looser | `test_the_case_map_reads_a_date_field_as_a_date`, `test_the_plain_diff_reports_a_text_become_a_date_and_a_date_moved` | failed first; mutation |
+| 27 | The guides' tables say what the code says: refusals, renderings, runtime errors | `test_the_guide_refuses_as_the_check_refuses`, `test_the_guide_reads_as_the_renderer_renders`, `test_the_guides_runtime_errors_are_what_the_evaluator_says` (`tests/test_expressions.py`) | the runtime one failed first, on the row nothing produced |
+| 28 | A plan's field may be a date (it parses; nothing more is promised for plans) | `test_a_plans_field_may_be_a_date` | pinned |
+
+**Left out, on purpose:** the activities guide's rule that an activity names its zone is the
+platform team's: Ventoux can't see inside an activity, so no test can prove it. Test 21 proves the
+engine's own half.
+
+**Found here, the promise nothing kept:** the expressions guide's runtime row `approved_amount should
+be a number, and it holds a string` was no message the evaluator gives, and no test read the table.
+The row now says what happens (`` `>` compares two numbers or two dates, and it was given a string ``),
+and `test_the_guides_runtime_errors_are_what_the_evaluator_says` runs every row.

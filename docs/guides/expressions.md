@@ -132,7 +132,7 @@ When the case runs, a value the check couldn't see is an error that stops the st
 | `{"/": [{"var": "amount"}, {"var": "items"}]}`, with 250 and 0 | `division by zero in amount / items` |
 | a result beyond what decimal128 can hold | `` `*` gives a number too large for an expression (decimal128) `` |
 | an element of `items` lacks `risk`, in `count(items where item.risk == "high")` | `item.risk has no value (element 2 of items)` |
-| a field holds a value of the wrong type | `approved_amount should be a number, and it holds a string` |
+| `approved_amount > 100`, with a text in `approved_amount` | `` `>` compares two numbers or two dates, and it was given a string `` |
 | `incident_date < date("2027-01-01")`, with a text in `incident_date` | `` `<` compares two numbers or two dates, and it was given a string `` |
 
 **Why an error and not `false`.** Suppose an approval's condition is `approved_amount > 100` and

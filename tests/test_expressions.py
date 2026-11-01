@@ -7,7 +7,7 @@ import decimal
 import json
 from decimal import Decimal
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -998,3 +998,57 @@ def test_sum_reads_value_only_for_the_elements_where_chose() -> None:
     # An element `where` leaves out may lack the value: like `if`, only the chosen ones are read.
     items = [{"risk": "high", "amount": Decimal(10)}, {"risk": "low"}]
     assert evaluate(parse_expression(HIGH_TOTAL), {"items": items}) == Decimal(10)
+
+
+# The guide's runtime table, each situation played against the evaluator: until 16a no test read
+# it, and one row promised a message nothing gave (docs/layers/16-field-types.md, step 6).
+def stopped_with(expression: object, values: dict[str, object]) -> str:
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(parse_expression(expression), values)
+    return str(stopped.value)
+
+
+RUNTIME_SITUATIONS: dict[str, Any] = {
+    "`approved_amount` has no value yet": lambda: stopped_with(
+        {">": [{"var": "approved_amount"}, 100]}, {}
+    ),
+    '`{"/": [{"var": "amount"}, {"var": "items"}]}`, with 250 and 0': lambda: stopped_with(
+        {"/": [{"var": "amount"}, {"var": "items"}]}, {"amount": Decimal(250), "items": Decimal(0)}
+    ),
+    "a result beyond what decimal128 can hold": lambda: stopped_with(
+        {"*": [{"var": "amount"}, {"var": "amount"}]}, {"amount": Decimal("1E+5000")}
+    ),
+    'an element of `items` lacks `risk`, in `count(items where item.risk == "high")`': lambda: (
+        stopped_with(
+            {"count": {"over": {"var": "items"}, "where": {"==": [{"item": "risk"}, "high"]}}},
+            {"items": [{"risk": "low"}, {"amount": Decimal(5)}]},
+        )
+    ),
+    "`approved_amount > 100`, with a text in `approved_amount`": lambda: stopped_with(
+        {">": [{"var": "approved_amount"}, 100]}, {"approved_amount": "250"}
+    ),
+    '`incident_date < date("2027-01-01")`, with a text in `incident_date`': lambda: stopped_with(
+        {"<": [{"var": "incident_date"}, {"date": "2027-01-01"}]}, {"incident_date": "2026-10-31"}
+    ),
+}
+
+
+def runtime_rows() -> list[tuple[str, str]]:
+    """The runtime table's rows: each situation as written, prose and code, and its error with its
+    backticks taken off, as `guide_table` takes them off a cell that is all code."""
+    lines = GUIDE.read_text().splitlines()
+    start = lines.index("| Situation | Error |") + 2
+    rows = []
+    for line in lines[start:]:
+        if not line.startswith("|"):
+            break
+        situation, error = (cell.strip() for cell in line.strip("|").split(" | "))
+        rows.append((situation, unquote(error)))
+    return rows
+
+
+def test_the_guides_runtime_errors_are_what_the_evaluator_says() -> None:
+    rows = runtime_rows()
+    assert [situation for situation, _ in rows] == list(RUNTIME_SITUATIONS)
+    for situation, error in rows:
+        assert RUNTIME_SITUATIONS[situation]() == error, situation
