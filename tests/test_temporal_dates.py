@@ -26,11 +26,14 @@ def proposed() -> dict[str, Any]:
     return definition
 
 
-def test_dates_cross_continue_as_new_and_the_case_still_decides_on_days() -> None:
+def crossed(definition: dict[str, Any]) -> tuple[CaseView, CaseReport, tuple[str, str]]:
+    """The claim `definition` run on the test server: opened, answered and sent a date each,
+    continued as new, then a proposal decided in the new run; its view, its end and its runs."""
+
     async def scenario(client: Client) -> tuple[CaseView, CaseReport, tuple[str, str]]:
         # Given as Python days: the client writes each as its text, the case reads it back.
         opened = {"policy_start": date(2026, 1, 1)}
-        case = await start_case(client, SwitchingCases, proposed(), opened, "claim-1", QUEUE)
+        case = await start_case(client, SwitchingCases, definition, opened, "claim-1", QUEUE)
         accepted = {"incident_date": date(2026, 10, 31)}
         await answer(case, "assess#1", "accept", "ana", ADJUSTERS["ana"], accepted)
         await send_event(case, "reported", {"on": date(2026, 11, 2)}, "system:portal")
@@ -45,10 +48,25 @@ def test_dates_cross_continue_as_new_and_the_case_still_decides_on_days() -> Non
         await close(case, "done", "ana", ADJUSTERS["ana"])
         return seen, await case.result(), await runs_of(client, "claim-1")
 
-    seen, ended, (first, last) = on_temporal(scenario, cases=SwitchingCases)
+    return on_temporal(scenario, cases=SwitchingCases)
+
+
+def test_dates_cross_continue_as_new_and_the_case_still_decides_on_days() -> None:
+    seen, ended, (first, last) = crossed(proposed())
     assert first != last  # it did continue as new
     # A query's answer is a payload: each date as its text, the same in every language.
     assert seen.values["policy_start"] == "2026-01-01"
     assert seen.values["incident_date"] == "2026-10-31"
     assert seen.values["reported.on"] == "2026-11-02"
+    assert ended.status == "closed"
+
+
+def test_a_sensitive_date_crosses_continue_as_new_and_is_still_read_as_a_day() -> None:
+    # Sealed, it crosses in its own encrypted part of the payload; read back, the day is inside its
+    # wrapper again, so admission in the new run still compares two days (brief, D31) (brief, D66).
+    definition = proposed()
+    definition["fields"]["policy_start"] |= {"sensitive": True, "visible_to": ["adjuster"]}
+    seen, ended, (first, last) = crossed(definition)
+    assert first != last
+    assert seen.values["incident_date"] == "2026-10-31"
     assert ended.status == "closed"

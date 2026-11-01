@@ -353,6 +353,7 @@ broken on purpose, then restored.
 | 26 | The case map and the plain diff read "a date"; a text become a date and a moved literal are reported, read as possibly looser | `test_the_case_map_reads_a_date_field_as_a_date`, `test_the_plain_diff_reports_a_text_become_a_date_and_a_date_moved` | failed first; mutation |
 | 27 | The guides' tables say what the code says: refusals, renderings, runtime errors | `test_the_guide_refuses_as_the_check_refuses`, `test_the_guide_reads_as_the_renderer_renders`, `test_the_guides_runtime_errors_are_what_the_evaluator_says` (`tests/test_expressions.py`) | the runtime one failed first, on the row nothing produced |
 | 28 | A plan's field may be a date (it parses; nothing more is promised for plans) | `test_a_plans_field_may_be_a_date` | pinned |
+| 29 | **Tutor:** a sensitive date crosses continue-as-new sealed, and is read back as a day inside its wrapper, so admission in the new run still compares two days | `test_a_sensitive_date_crosses_continue_as_new_and_is_still_read_as_a_day` (`tests/test_temporal_dates.py`) | mutation (`read_back` given the wrapper, not the value inside: the new run's workflow task fails with `ValueError`, its message encrypted (D31), and the case waits; the test without a sensitive date still passes) |
 
 **Left out, on purpose:** the activities guide's rule that an activity names its zone is the
 platform team's: Ventoux can't see inside an activity, so no test can prove it. Test 21 proves the
