@@ -176,6 +176,48 @@ C. **No new dependency.** The date is Python's `datetime.date`; the check is a s
 10. **What 16a leaves out.** Times, moments and durations as field types; date arithmetic (choice
     2); timers anchored to a date field (README draft, "Beyond v1.0"); a locale's formatting.
 
+## Seams and tests for 16a (curriculum step 4)
+
+11. **The seams the tests use,** all public today; no test reads an internal:
+    - **Expressions** (`ventoux.core.expressions`): `parse_expression(data)` refuses a literal
+      that isn't a day (`ExpressionInvalid`); `check(expression, types)` with a new `DateType`
+      (`{"type": "date"}`) in the types; `evaluate(expression, values)` with a `datetime.date`
+      among the values; `render(expression)`.
+    - **A case, in memory** (`ventoux.case`): `parse_case(data)` reading a `{"type": "date"}`
+      field; `run_case_in_memory(case, catalog, implementations, events)` with `Opened(file=…)`,
+      `Answered(form=…)` and an event's arrival giving dates, as text and as `date`; what the run
+      reports (its history, a refusal's message, the view's values).
+    - **Validation:** `ventoux check` on a definition (a date compared with a number refused
+      before anything runs), and the type an activity's output annotated `datetime.date` is read
+      as, through a step's condition reading it.
+    - **On Temporal:** one test on the test server: a case opened with a date, answered with one,
+      continued as new, its view queried; the dates come back as dates (choice 6).
+    - **The builder, the schema, the readings:** `Field.date()` and a `datetime.date` literal
+      producing the JSON; `case_schema()` (a date field and the literal, no `today`); the plain
+      diff and the case map, through `ventoux diff` and `ventoux map` output as the guides show.
+    - **The guides:** the existing guide tests (`test_the_guide_reads_as_the_renderer_renders`,
+      `test_the_guide_refuses_as_the_check_refuses`, `test_the_guides_examples_are_the_files_their_tests_run`)
+      run the new rows, so the docs can't drift; a new one runs the runtime table, which no test
+      read until now.
+
+12. **The tests, in order, negative first,** each watched failing for the right reason:
+    1. `{"date": "2026-02-30"}` is refused (then `"20261031"`, `"2026-W44-6"`, `"2026-1-5"`, a
+       moment, year 0); `{"date": "2026-10-31"}` reads `date("2026-10-31")`.
+    2. **The curriculum's:** a date compared with a number is refused by `check`; then with a text;
+       two dates order; `string` of a date is a text; `{"today": []}` refused with the list.
+    3. `evaluate`: a date field holding a text, or a `datetime`, is an error, never `false`; two
+       dates compare; `string` gives `YYYY-MM-DD`.
+    4. A case: a form giving `"31/10/2026"`, a number or a `datetime` for a date is refused with
+       what to do; `"2026-10-31"` is read into a date by its type, and a condition reads it.
+    5. The opening and an event's payload, the same; an activity's output annotated
+       `datetime.date` is read as a date by a condition, and a contract output that is a
+       `datetime` is refused at registration.
+    6. On Temporal: the round trip, through continue-as-new (choice 6).
+    7. The builder: `Field.date()`, a literal, a `datetime` refused; `examples/builder/dates.py`.
+    8. The schema: a date field and literal; no `today` anywhere in it.
+    9. The plain diff and the case map name a date field's type; a type changed from text to date
+       is reported.
+
 ## Sketched, decided when their parts start
 
 - **16b, the option.** Which activity checks it, and its contract's shape; whether the list is
