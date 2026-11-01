@@ -1,6 +1,6 @@
 # Activities: adding a capability to the catalog
 
-> **For the platform team.** This guide describes layers 1, 4, 8d and 9a as if they already worked;
+> **For the platform team.** This guide describes layers 1, 4, 8d, 9a and 16a as if they already worked;
 > the code that makes it true is built test-first in those layers. Case developers rarely need it: they meet
 > contracts only through the activities they call and the errors `ventoux check` gives them.
 
