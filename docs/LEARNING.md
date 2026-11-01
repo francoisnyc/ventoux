@@ -48,6 +48,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 41 | Layer 13: what the JSON diff hides | open |
 | 42 | Layer 12: why plans don't migrate | closed |
 | 43 | Layer 15: what an injected instruction can still influence | open |
+| 44 | Layer 16: why compare two dates but never ask what day it is | closed |
 
 ---
 
@@ -1783,3 +1784,25 @@ and record the key points. A question is closed once you can explain the answer 
   **execution**; each is held by a check that doesn't read the model's intent: admission, input
   policies, validation in the package, approvals by someone else, and a reviewed release.
 - Status: open, until the authoring-loop half comes back from memory.
+
+## 44. Layer 16: why compare two dates but never ask what day it is
+
+> Why may an expression compare two dates but never ask what day it is?
+
+- Asked at the end of layer 16a's walk-through (2026-11-01).
+- Your answer: "because the clock changes on replay, dates don't." Right, the first half: a date in
+  the case file was recorded when it was given, so `incident_date >= policy_start` is a pure
+  function of the case file, the same on every replay; `today` would be read afresh each time the
+  code runs, and a replay a week later could decide otherwise than the history recorded (question
+  32, for `now`).
+- Follow-up, asked: with no replay at all, would `today` be safe, two workers deciding the same
+  condition at the same instant? Your answer: "no, the day depends on the time zone." Right, the
+  second half: 23:30 on 31 October in New York is 1 November in UTC, so two workers in two zones
+  would give one moment two days. A date has no zone; whoever gives it chooses the day, and the
+  engine never turns a moment into one (brief, D66). Built in 16a as two nets: the boundary test
+  refuses `today`, `now`, `fromtimestamp` and the rest in `core` and `case`, and
+  `tests/test_time_zones.py` runs the date tests in New York and on Kiritimati and requires the
+  same results.
+- In one line: comparing two dates reads only what the case was given; asking what day it is
+  reads a clock and a time zone, neither of which the case holds.
+- Status: closed (both halves from memory, the second after one prompt).
