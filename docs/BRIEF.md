@@ -2745,6 +2745,13 @@ D20, D55, D56, D58 and D60, whose text is kept.*
   gave lands. This is the one reading a form does (D9): a text that isn't a
   date is refused, never guessed from its shape. At runtime a date field holding anything but a
   date is an error, never `false`.
+- **The clock behind `date` stays shut.** `date.today()` is on the class itself, so a pure layer
+  (`core`, `case`) may import exactly `from datetime import date`, not renamed, and nothing else
+  from `datetime`; the boundary test refuses the names that read a clock or the machine's zone
+  (`today`, `now`, `utcnow`, `fromtimestamp`, `astimezone`), as attributes and through `getattr`
+  with the name written out. A moment is refused by its exact type (`type(value) is date`), so the
+  engine never imports `datetime` to refuse one. Set aside: Ventoux's own day type with no clock
+  at all, which would put a Ventoux type in every contract and a conversion at every edge.
 - **Shown as `YYYY-MM-DD`** in the rendering, the plain forms, the case map and the diff, the same
   in every language; a locale's format is the inbox's, later. The JSON Schema gives the shape
   only (D60), `YYYY-MM-DD` as a pattern; the calendar check is the engine's. The builder writes `Field.date()` and a

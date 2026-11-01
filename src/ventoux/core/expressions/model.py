@@ -1,10 +1,12 @@
 """What an expression is: the operators, numbers and values, the field types, the errors."""
 
-from datetime import date, datetime
+from datetime import date
 from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow
 from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
+
+from ventoux.core.dates import is_day
 
 # The fixed list of operators. Adding one is a design decision recorded in the brief, never just a
 # code change (brief, D20).
@@ -385,9 +387,7 @@ def a_kind(value: object) -> str:
         return "a string"
     if isinstance(value, Decimal):
         return "a number"
-    if isinstance(value, datetime):  # before `date`: to Python, a datetime is a date
-        return "a datetime"
-    if isinstance(value, date):
+    if is_day(value):  # exactly: a `datetime`, a moment, falls through to its own name
         return "a date"
     if isinstance(value, float):
         return "a binary float"

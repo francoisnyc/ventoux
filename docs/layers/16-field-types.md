@@ -235,6 +235,26 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
     10. The date tests, run in a subprocess with `TZ=America/New_York` and again with
         `TZ=Pacific/Kiritimati` (UTC+14), give the same results: the engine reads no local zone.
 
+## Decided while building 16a
+
+- **The clock behind `date`** (asked 2026-11-01, answered (a)). The boundary test banned
+  `datetime` in `core` and `case`, and `date.today()` lives on the `date` class. (a): a pure layer
+  imports exactly `from datetime import date`, and the boundary test refuses `today`, `now`,
+  `utcnow`, `fromtimestamp` and `astimezone`, as attributes and through `getattr` with the name
+  written out, each with a negative test; a moment is refused by its exact type, `is_day`. (b),
+  set aside: Ventoux's own day type, with no clock, and a conversion at every edge. D66 says so.
+  *A known limit:* `getattr(date, name)` with a name computed at runtime isn't seen; nothing in
+  `core` or `case` reads an attribute by a name from data on a date.
+- **No new engine version.** Every definition readable before 16a decides as it did; no recorded
+  history holds a message that changed. By D60's dated line the format's `$id` stays `engine-2`.
+- **The guide's runtime table isn't run by any test,** and one row (`approved_amount should be a
+  number, and it holds a string`) is a message nothing produces: the evaluator is untyped and
+  refuses by operator. Raised for the promises (step 6).
+- **Two schema refusals test nothing** (`tests/test_schema.py`, layer 14e): "an operator D20
+  doesn't list" and "a number written as a string" put an approval on `settle`, a plan step,
+  which takes none, so the schema refuses them for that. Left to 14e's owner; 16a's literal test
+  uses `settle`'s own `when`, with a control the schema accepts.
+
 ## Sketched, decided when their parts start
 
 - **16b, the option.** Which activity checks it, and its contract's shape; whether the list is

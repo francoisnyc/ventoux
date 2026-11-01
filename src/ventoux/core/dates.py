@@ -38,11 +38,18 @@ def written_as_a_date(text: str) -> bool:
     )
 
 
+def is_day(value: object) -> bool:
+    """Whether `value` is a day, a `date` exactly. To Python a `datetime` is a `date` too; to
+    Ventoux it is a moment, and refused. The exact type says so without importing `datetime`,
+    which a pure layer may not (brief, D66)."""
+    return type(value) is date
+
+
 def given_day(value: object) -> date | None:
     """The day `value` is, if it is one: a `date` (never a `datetime`, which is a moment, though
     Python counts it a `date`), or a text `calendar_date` reads. Else None: a number, a moment
     and any other text are never turned into a day (brief, D66)."""
-    if type(value) is date:  # the exact type, so a `datetime` is refused
+    if type(value) is date:  # as `is_day` reads it, written out so the type checker sees it
         return value
     if isinstance(value, str):
         return calendar_date(value)
