@@ -1,10 +1,13 @@
 # Layer 16: More field types: dates, options, attachments
 
-Status: 2026-11-01, a draft for agreement. This note starts from `main` at `12f26a7`, with layers
+Status: 2026-11-01, agreed. This note starts from `main` at `12f26a7`, with layers
 0 to 15 merged. The warm-up was answered and recorded (learning question 43). The guides were
 written first (curriculum step 2): `docs/guides/expressions.md`, `docs/guides/case-data.md` and
 `docs/guides/builder.md` describe the date as if 16a worked, with the recommendations below. If a
 choice is answered otherwise, the guides change with it.
+
+**Answered 2026-11-01.** Choices A to C and 1 to 10 as recommended. D66 is written before 16a is
+built.
 
 Prior art: none in the prototype (the curriculum says so). Read for the date: the code a date
 touches today, `src/ventoux/core/expressions/` (the types, the check, the evaluator, the
