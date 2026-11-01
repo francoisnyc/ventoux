@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from activity_threads import activity_threads
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import activity, workflow
@@ -27,6 +26,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from temporalio.workflow import NondeterminismError
+from worker_threads import worker_threads
 
 from ventoux.core.workflow_contract import WorkflowContract
 from ventoux.temporal.bindings import Binding
@@ -221,8 +221,8 @@ def on_temporal[T](
     async def go() -> T:
         async with (
             time_skipping(converter or development_converter()) as environment,
-            activity_threads() as threads,
-            activity_threads() as kyc_threads,
+            worker_threads() as threads,
+            worker_threads() as kyc_threads,
             case_worker(
                 environment.client,
                 CASES,

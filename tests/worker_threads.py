@@ -1,7 +1,9 @@
-"""The threads a test's worker runs its plain-function activities on, shut down when the test is
-done with them (fix-worker-executors).
+"""The threads a test gives the SDK to run on, shut down when the test is done with them: a
+worker's plain-function activities (fix-worker-executors), and the workflow tasks a replayer runs
+(fix-replayer-threads, which renamed this helper from `activity_threads`).
 
-The worker never shuts them down: whoever made them does, after the worker has stopped (choice 1).
+Neither the worker nor the replayer shuts a pool it is given down: whoever made it does, once they
+have stopped (fix-worker-executors, choice 1).
 A plain `with ThreadPoolExecutor()` would do that, but on the event loop's own thread: it blocks
 the loop while it waits, so no `asyncio.wait_for` can fire, and an activity that never returns
 hangs the test with no timeout said. So the threads are shut down off the loop, and waited for
@@ -19,17 +21,16 @@ from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
-# How long the activities still running when the worker stopped may take to end, in seconds.
+# How long the tasks still running when the worker or replayer stopped may take to end, in seconds.
 ENDING = 10
 
 
 @asynccontextmanager
-async def activity_threads(ending: float = ENDING) -> AsyncIterator[ThreadPoolExecutor]:
-    """A thread pool for a worker's `activity_executor`, shut down on the way out: every activity
-    still running is waited for, never abandoned. One still running after `ending` seconds fails
-    the test with a `TimeoutError`, raised then; the test is reported once that activity ends, as
-    the module's docstring says. A replayer's `workflow_task_executor` is one too, held the same
-    way (`tests/replaying.py`, fix-replayer-threads)."""
+async def worker_threads(ending: float = ENDING) -> AsyncIterator[ThreadPoolExecutor]:
+    """A thread pool for a worker's `activity_executor` or a replayer's `workflow_task_executor`,
+    shut down on the way out: every task still running is waited for, never abandoned. One still
+    running after `ending` seconds fails the test with a `TimeoutError`, raised then; the test is
+    reported once that task ends, as the module's docstring says."""
     executor = ThreadPoolExecutor()
     try:
         yield executor

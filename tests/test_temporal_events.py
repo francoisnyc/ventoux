@@ -11,7 +11,6 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from activity_threads import activity_threads
 from skipping_server import time_skipping
 from temporalio.client import Client
 
@@ -27,6 +26,7 @@ from test_temporal_case import (
     reported,
     runs_of,
 )
+from worker_threads import worker_threads
 
 from ventoux.temporal.cases import (
     CaseReport,
@@ -194,7 +194,7 @@ def before_the_worker(id: str, signals: Callable[[Case], Awaitable[None]]) -> Ca
             case = await opened(client, cancellable(), id)
             await signals(case)
             async with (
-                activity_threads() as threads,
+                worker_threads() as threads,
                 case_worker(
                     client,
                     QUEUE,
