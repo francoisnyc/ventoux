@@ -210,7 +210,11 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
       before anything runs), and the type an activity's output annotated `datetime.date` is read
       as, through a step's condition reading it.
     - **On Temporal:** one test on the test server: a case opened with a date, answered with one,
-      continued as new, its view queried; the dates come back as dates (choice 6).
+      sent one by an event, continued as new, then a proposal whose condition reads two dates,
+      decided in the new run; its view queried. *Corrected while building:* this said "the dates
+      come back as dates", but a query's answer is a payload, where a date is its text (D66), so
+      the view gives `"2026-10-31"`; what comes back as a day is the case's own state, which the
+      proposal's admission proves.
     - **The builder, the schema, the readings:** `Field.date()` and a `datetime.date` literal
       producing the JSON; `case_schema()` (a date field and the literal, no `today`); the plain
       diff and the case map, through `ventoux diff` and `ventoux map` output as the guides show.
@@ -270,6 +274,13 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
   of literal, so a fifth kind can't be missed the same way.
 - **An activity's date output is read as a date by validation** (`output_type`, `case/types.py`),
   so a condition comparing it with a number is refused before anything runs.
+- **The Temporal round trip** (slice 6). The converter writes a `date`, matched exactly, as its
+  text, and refuses a `datetime`; `state_from_data` takes the declared types (`case_types`) and
+  reads each date back into a day, a sensitive one inside its wrapper, refusing one that isn't.
+  The types are required, so a caller can't forget them; the tests whose states hold no date pass
+  `{}`. The first version of the Temporal test passed with the reading removed: `settle` was
+  admitted before the crossing, so nothing read a date after it. Now the adjuster proposes it in
+  the new run, and with the reading removed the proposal is refused, failing closed.
 - **A plan's fields take dates too.** A case's and a plan's fields share one list of types
   (`DeclaredType`, `core/plan.py`), so adding the date there gives both, and the plan schema says
   so. Nothing in 16a promises more about plans than that the type parses.

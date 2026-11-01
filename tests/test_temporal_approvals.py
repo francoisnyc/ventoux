@@ -60,14 +60,14 @@ def test_a_state_from_before_11h2_reads_back() -> None:
     # entry with none given yet, of one person, and an approval given by its one person, exactly
     # as it was (brief, D27, D47).
     carried: dict[str, Any] = json.loads(CARRIED_BEFORE.read_text())
-    asked = state_from_data(carried["asked"])
+    asked = state_from_data(carried["asked"], {})
     open_approval = asked.approvals["pay"]
     assert (open_approval.entry, open_approval.count, open_approval.approved) == (
         "pay.approval#1",
         1,
         {},
     )
-    paid = state_from_data(carried["paid"])
+    paid = state_from_data(carried["paid"], {})
     kept = paid.runs[-1].approved
     assert kept is not None and kept.approvers == ("sam",)
     # Written again, it is what main wrote, with the new keys at their defaults.

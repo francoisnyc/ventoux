@@ -24,6 +24,7 @@ from test_case import (
 
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
+from ventoux.case.types import case_types
 from ventoux.case.validate import validate_case
 from ventoux.core.expressions import (
     BooleanType,
@@ -40,7 +41,9 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.output_sources import source
 from ventoux.core.sensitive import Sensitive
-from ventoux.testing import CaseRefused, EventRefused, run_case, send
+from ventoux.temporal.carried import state_as_data, state_from_data
+from ventoux.temporal.converter import ExactPayloadConverter
+from ventoux.testing import CATALOG, CaseRefused, EventRefused, run_case, send
 from ventoux.tooling.schema import case_schema, schema_files
 
 ROOT = Path(__file__).parent.parent
@@ -485,6 +488,11 @@ def test_a_condition_with_a_date_literal_runs_its_activity() -> None:
         ">=": [{"var": "find.reported_on"}, {"date": "2026-01-01"}]
     }
     drafted: list[str] = []
+
+    def drafting(inputs: dict[str, Any]) -> dict[str, Any]:
+        drafted.append(inputs["to"])
+        return {"notice_id": "n-1"}
+
     run_case(
         definition,
         file=SMALL,
@@ -492,8 +500,60 @@ def test_a_condition_with_a_date_literal_runs_its_activity() -> None:
         people=PEOPLE,
         activities={
             "crm.reported@1": lambda inputs: {"email": "c@x.com", "reported_on": "2026-10-31"},
-            "notices.draft@1": lambda inputs: drafted.append(inputs["to"]) or {"notice_id": "n-1"},
+            "notices.draft@1": drafting,
         },
         catalog=catalog,
     )
     assert drafted == ["c@x.com"]
+
+
+# --- On Temporal: a date crosses a payload as YYYY-MM-DD, and is read back by its type (slice 6) ---
+
+
+def test_a_date_crosses_a_payload_as_yyyy_mm_dd() -> None:
+    payload = ExactPayloadConverter().to_payload({"policy_start": date(2026, 1, 5)})
+    assert payload is not None
+    assert payload.data == b'{"policy_start": "2026-01-05"}'
+
+
+def test_a_moment_never_crosses_a_payload_as_a_date() -> None:
+    # Fail closed: a `datetime` is a `date` to Python, never to Ventoux (brief, D66).
+    with pytest.raises(TypeError, match="^datetime can't be written exactly as JSON$"):
+        ExactPayloadConverter().to_payload({"at": datetime(2026, 1, 5, tzinfo=UTC)})
+
+
+def test_a_carried_state_reads_its_dates_back_as_days() -> None:
+    # Continue-as-new carries the state as data, where a day is text; read back by each value's
+    # declared type, every date is a day again, a sensitive one inside its wrapper (brief, D27, D66).
+    definition = reportable()
+    definition["fields"]["policy_start"] |= {"sensitive": True, "visible_to": ["adjuster"]}
+    run = run_case(
+        definition,
+        file={"policy_start": "2026-01-01"},
+        answers=[
+            ("assess", "accept", "ana", {"incident_date": "2026-10-31"}),
+            send("reported", {"on": "2026-11-02"}, "system:portal"),
+        ],
+        people=ADJUSTERS,
+    )
+    converter = ExactPayloadConverter()
+    payload = converter.to_payload(state_as_data(run.state))
+    assert payload is not None
+    case = parse_case(definition)
+    back = state_from_data(converter.from_payload(payload, dict), case_types(case, CATALOG))
+    assert back.values["incident_date"] == date(2026, 10, 31)
+    assert back.values["reported.on"] == date(2026, 11, 2)
+    sealed = back.values["policy_start"]
+    assert isinstance(sealed, Sensitive) and sealed.value == date(2026, 1, 1)
+    assert back == run.state
+
+
+def test_a_carried_date_that_isnt_a_day_is_refused() -> None:
+    # Fail closed: a damaged state is never read as text, or as nothing, the case then decides on.
+    data = state_as_data(run_case(claim_case(), file=OPENED, answers=[], people=ADJUSTERS).state)
+    data["values"]["policy_start"] = "01/01/2026"
+    types = case_types(parse_case(claim_case()), CATALOG)
+    with pytest.raises(
+        ValueError, match="^a carried date is written YYYY-MM-DD, and policy_start isn't$"
+    ):
+        state_from_data(data, types)

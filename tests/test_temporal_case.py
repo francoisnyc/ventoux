@@ -723,7 +723,7 @@ def test_a_carried_state_reads_back_as_it_was() -> None:
     state = case_state(REFUND, LARGE, [("review#1", REVIEW_FORM)])
     payload = ExactPayloadConverter().to_payload(state_as_data(state))
     assert payload is not None
-    back = state_from_data(ExactPayloadConverter().from_payload(payload, dict))
+    back = state_from_data(ExactPayloadConverter().from_payload(payload, dict), {})
     assert back == state
     assert back.values["approved_amount"] == Decimal(250)
     assert isinstance(back.values["approved_amount"], Decimal)
@@ -743,7 +743,7 @@ def test_a_carried_time_that_isnt_whole_is_refused() -> None:
     data = state_as_data(case_state(REFUND, LARGE, [("review#1", REVIEW_FORM)]))
     data["obtained"]["amount"]["at"] = Decimal("1767225600.5")
     with pytest.raises(ValueError, match="a carried time is a whole number of seconds"):
-        state_from_data(data)
+        state_from_data(data, {})
 
 
 def case_state(definition: dict[str, Any], file: dict[str, Any], reviews: list[Any]) -> CaseState:
@@ -1216,7 +1216,7 @@ def test_a_waiting_start_crosses_continue_as_new() -> None:
     kept.started = False  # failed before it started: its retry will be its first start
     payload = ExactPayloadConverter().to_payload(state_as_data(state))
     assert payload is not None
-    assert state_from_data(ExactPayloadConverter().from_payload(payload, dict)) == state
+    assert state_from_data(ExactPayloadConverter().from_payload(payload, dict), {}) == state
 
     # On Temporal the switch waits while the refresh runs (layer 8c), so what crosses a live
     # switch is a rule's record: Sam's answer decided that pay runs, so after the switch he still
@@ -1678,13 +1678,13 @@ def test_a_stop_request_crosses_continue_as_new() -> None:
     [paying] = [run for run in state.runs if run.entry == "pay#1"]
     assert (paying.status, paying.stop_requested) == ("running", "withdraw#1")
     data = state_as_data(state)
-    back = state_from_data(data)
+    back = state_from_data(data, {})
     assert back == state
     # Every field of a run crosses: one added later and forgotten would vanish at every switch.
     assert set(data["runs"][0]) == {field.name for field in dataclasses.fields(StepRun)}
     for run in data["runs"]:
         del run["stop_requested"]
-    assert all(run.stop_requested == "" for run in state_from_data(data).runs)
+    assert all(run.stop_requested == "" for run in state_from_data(data, {}).runs)
 
 
 def test_a_retry_after_a_stop_runs_on_temporal() -> None:

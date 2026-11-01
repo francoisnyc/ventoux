@@ -167,11 +167,11 @@ def test_a_timer_that_fell_due_during_the_switch_fires_at_once_stamped_with_its_
 def test_a_timer_crosses_in_the_carried_state() -> None:
     state = run_in_memory(chased(), file=SMALL_IN_MEMORY, answers=[], people=PEOPLE).state
     assert state.timers  # one is set
-    assert state_from_data(state_as_data(state)) == state
+    assert state_from_data(state_as_data(state), {}) == state
     # A state carried from before 11f has no timers: none could be set then.
     before = state_as_data(state)
     del before["timers"]
-    assert state_from_data(before).timers == []
+    assert state_from_data(before, {}).timers == []
 
 
 def test_a_case_whose_timer_fired_replays() -> None:

@@ -18,7 +18,7 @@ def test_a_state_from_before_12b_is_engine_1() -> None:
     carried = state_as_data(CaseState("refund-1/run-1"))
     assert carried["engine"] == ENGINE == 2
     del carried["engine"]
-    assert state_from_data(carried).engine == 1
+    assert state_from_data(carried, {}).engine == 1
 
 
 def test_an_unknown_engine_version_is_refused() -> None:
@@ -26,7 +26,7 @@ def test_an_unknown_engine_version_is_refused() -> None:
     # the case waits for code that knows it (brief, D17, D51).
     carried = state_as_data(CaseState("refund-1/run-1")) | {"engine": 3}
     with pytest.raises(EngineUnknown) as refusal:
-        state_from_data(carried)
+        state_from_data(carried, {})
     assert str(refusal.value) == (
         "this case decides as engine 3, which this code doesn't know (it knows 2, 1): deploy "
         "code that knows it"
