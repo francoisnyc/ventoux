@@ -91,6 +91,50 @@ What this says:
   the customer has been called about a declined refund. While it waits for the team lead's
   approval, it stays open.
 
+### Where the order system comes in
+
+`system="orders"` is a name, not a connection: a case holds no URL and no password. `orders` is a
+system your platform team registers in the catalog (the development catalog registers it for you),
+and a case naming a system nobody registered is refused when it opens. The case file holds the
+order's ID, `ord-1`; the order stays in your order system. Ventoux reaches it in three ways, each
+set up by the platform team, never by the case:
+
+- **When the case opens,** whoever opens it gives the ID: your order service, the customer portal,
+  or `ventoux start` in step 4. Only the ID enters the case file.
+- **When a step runs,** an activity calls the order system. `pay` gives `ord-1` to
+  `payments.refund@2`, and the worker that runs the activity holds the connection, its address and
+  its credentials. To decide on something about the order, such as whether it was delivered, add a
+  step that fetches it (a lookup activity such as `orders.lookup@2`): its answer becomes a fact in
+  the case file, saying it came from the order system.
+- **When a person looks,** the inbox shows the order through a **resolver** the platform team
+  registers for `orders`. It asks the order system as the person looking, so the order system's
+  own permissions decide what they see:
+
+```python
+from ventoux.tooling.resolvers import Resolvers, Viewer
+
+
+def show_order(reference: str, viewer: Viewer) -> dict[str, object]:
+    # Your order system's client, asked as the person looking.
+    return orders_api.order(reference, on_behalf_of=viewer.person)
+
+
+resolvers = Resolvers(catalog)
+resolvers.register("orders", show_order)
+```
+
+What a resolver returns is shown, never stored: the case history records only
+`ana was shown order_id (orders ord-1)`. If what Ana saw matters to her decision, it belongs in her
+answer (`approved_amount`) or in a step that fetches it. The development catalog registers no
+resolver, so the local inbox shows the ID and says why there is no more:
+`orders has no resolver: register one to show its records`.
+
+A contract can also require a reference to one system. `letters.draft@3` takes its `customer` as
+`Annotated[str, reference("crm")]`, so `ventoux check` refuses a policy ID where a customer is
+expected (the guide "Activities", "Systems and resolvers"). `payments.refund@2` doesn't: it takes
+any order ID a system or a person gave. A production payment contract would declare
+`reference("orders")`.
+
 ## 3. Check it
 
 ```sh
@@ -295,3 +339,8 @@ Writing the page surfaced decisions the brief doesn't make yet:
 7. **Plans never appeared.** A first case needs tasks and activities only. This supports
    presenting plans as an advanced concept (multi-step plans, AI drafting), not a day-one one
    (decided: D13).
+8. **The payment contract doesn't name its system.** `payments.refund@2` takes `order_id` as any
+   trusted text, so the quickstart can describe the check that a reference goes where its system is
+   expected (D30) but not show it on its own case. Showing it needs `payments.refund@3`, declaring
+   `reference("orders")`: a new contract version, never an edit of `@2` (D5). Left for now: a
+   first case meets the idea, and the activities guide shows the refusal.
