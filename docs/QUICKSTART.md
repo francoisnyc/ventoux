@@ -1,7 +1,10 @@
 # Quickstart: your first case in 15 minutes
 
-> **Design draft.** This page describes how Ventoux is meant to work; none of it is built yet. It is
-> written first, on purpose: if a step here is hard to explain, the design changes. The "Design notes"
+> **Partly built.** Steps 2, 3, 5 and 6 work today: the repository's tests run the case, its check
+> and its refusals as this page shows them. Steps 1, 4 and 7 are still design: there is no
+> published package, no `ventoux init`, `ventoux dev` or `ventoux start` yet, and `ventoux diff`
+> compares two package folders, not a package with its last release. The page was written before
+> the code, on purpose: if a step here is hard to explain, the design changes. The "Design notes"
 > at the end list what writing it revealed.
 
 You'll build a refund process: a support agent reviews the request, and the refund is paid. Refunds
