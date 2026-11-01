@@ -911,8 +911,8 @@ def outcome_problem(contract: Contract, event: Completed) -> str | None:
             f"{contract.reference} gave the outcome {event.outcome}, which its contract doesn't "
             f"declare: its outcomes are {declared}"
         )
-    # A date is read by D66's rule before Pydantic's lax reading, which would pick a day for a
-    # timestamp or a moment: Ventoux never turns a moment into a day (brief, D66).
+    # A date is read as a day, by its exact shape, before Pydantic's lax reading, which would pick
+    # a day for a timestamp or a moment: Ventoux never turns a moment into a day (brief, D66).
     for name in date_fields(contract.output):
         value = event.output.get(name)
         if value is not None and given_day(value) is None:
