@@ -31,6 +31,9 @@ def packages() -> dict[str, Package]:
     for folder in (
         ROOT / "examples" / "packages" / "refund",
         ROOT / "tests" / "digests" / "every-shape",
+        # The shapes the date adds, pinned on their own: every-shape's digest stays as it was
+        # pinned (brief, D51) (brief, D66).
+        ROOT / "tests" / "digests" / "dates",
     ):
         plans = [plan.read_text() for plan in sorted((folder / "plans").glob("*.json"))]
         found[str(folder.relative_to(ROOT))] = package((folder / "case.json").read_text(), plans)

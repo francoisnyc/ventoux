@@ -13,6 +13,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 from typing import Any, Literal, get_origin
 
@@ -200,7 +201,7 @@ def canonical(value: object) -> object:
     and nothing else. Objects are dicts, whose keys `json.dumps` sorts; a map (steps, rules,
     fields) keeps its written order, as `{"#map": [[key, value], ...]}`, since the engine reads
     steps and rules in that order (brief, D38). A decimal is `{"#decimal": "100.0"}`, so a number
-    and a text never meet. `#` starts no name in the format, so neither marker meets a field."""
+    and a text never meet; a date is `{"#date": "2026-10-31"}`, for the same reason. `#` starts no name in the format, so neither marker meets a field."""
     if isinstance(value, BaseModel):
         found: dict[str, object] = {}
         for name in type(value).model_fields:
@@ -214,6 +215,11 @@ def canonical(value: object) -> object:
         return [canonical(item) for item in value]
     if isinstance(value, Decimal):
         return {"#decimal": str(value)}
+    if type(value) is date:
+        # A day, as `{"#date": "2026-10-31"}`: never the text "2026-10-31", which it isn't. No
+        # package digested before 16a holds one, so method 1 gives them all the same digest
+        # (brief, D51) (brief, D66).
+        return {"#date": value.isoformat()}
     if value is None or isinstance(value, str | bool | int):
         return value
     # Fail closed: a kind of value this code doesn't know is never left out of the digest.

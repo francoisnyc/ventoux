@@ -281,6 +281,19 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
   `{}`. The first version of the Temporal test passed with the reading removed: `settle` was
   admitted before the crossing, so nothing read a date after it. Now the adjuster proposes it in
   the new run, and with the reading removed the proposal is refused, failing closed.
+- **The builder** (slice 7). `Field.date()` reads as a `DateExpr`, compared with another date or
+  a `datetime.date`, written `{"date": "…"}`; `string` and `in_` take a date. *A limit of the type
+  check:* a `datetime` is a `date` to mypy too, so `incident < datetime(…)` type-checks, and the
+  builder refuses it only when the file runs, by its exact type. The guide quotes that refusal,
+  and a test reads the guide's line.
+- **The release digest couldn't read a date** (slice 7): `canonical` fails closed on a value it
+  doesn't know, so no package with a date literal could have been released. A date now digests as
+  `{"#date": "2026-10-31"}`, as a decimal is `{"#decimal": …}`, so a date and its text digest
+  apart (a test, watched failing with the plain text). No package pinned before 16a holds a date,
+  so method 1 gives each the digest it pinned (brief, D51).
+- **A pinned package of its own for the date** (`tests/digests/dates`), not a date added to
+  `every-shape`: every-shape's digest is pinned for ever, and changing its content would change
+  it. The new package gets its first pin; every existing pin is unchanged.
 - **A plan's fields take dates too.** A case's and a plan's fields share one list of types
   (`DeclaredType`, `core/plan.py`), so adding the date there gives both, and the plan schema says
   so. Nothing in 16a promises more about plans than that the type parses.

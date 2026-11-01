@@ -496,9 +496,10 @@ claim.task(
 **The builder runs when you build, not when a case runs.** `date.today()` in a builder file is
 the day you ran it, written into the JSON as a fixed date: the next day, `--unchanged` fails
 (see "In CI: `--unchanged`"). A `datetime`, a moment, is refused: a date is a day, never a time.
+`incident < datetime(2027, 1, 1)` says:
 
 ```text
-incident < datetime(2027, 1, 1, 0, 0): a date compares with a date, and this is a datetime; write date(2027, 1, 1)
+datetime.datetime(2027, 1, 1, 0, 0) is a moment, and a date compares with a day: write date(2027, 1, 1)
 ```
 
 ## Forgetting

@@ -22,8 +22,10 @@ from test_case import (
     with_customer_steps,
 )
 
+from ventoux import Case, Field, in_, string
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
+from ventoux.case.releases import behaviour_digest
 from ventoux.case.types import case_types
 from ventoux.case.validate import validate_case
 from ventoux.core.expressions import (
@@ -557,3 +559,52 @@ def test_a_carried_date_that_isnt_a_day_is_refused() -> None:
         ValueError, match="^a carried date is written YYYY-MM-DD, and policy_start isn't$"
     ):
         state_from_data(data, types)
+
+
+# --- The builder: Field.date(), a date literal, never a moment (slice 7) ---
+
+
+def test_the_builder_refuses_a_moment_beside_a_date() -> None:
+    # Python: a `datetime` is also a `date`, so the type checker lets it through and the builder
+    # refuses it when the file runs, by its exact type (brief, D66).
+    claim = Case("claim", title="Insurance claim")
+    incident = claim.field("incident_date", Field.date(), title="Date of the incident")
+    with pytest.raises(TypeError) as refused:
+        incident < datetime(2027, 1, 1, tzinfo=UTC)  # noqa: B015
+    assert str(refused.value) == (
+        "datetime.datetime(2027, 1, 1, 0, 0, tzinfo=datetime.timezone.utc) is a moment, and a "
+        "date compares with a day: write date(2027, 1, 1)"
+    )
+
+
+def test_the_builder_guide_quotes_the_refusal_of_a_moment() -> None:
+    guide = (ROOT / "docs" / "guides" / "builder.md").read_text()
+    shown = guide.split("`incident < datetime(2027, 1, 1)` says:\n\n```text\n")[1].split("\n```")[0]
+    incident = Case("claim", title="Insurance claim").field(
+        "incident_date", Field.date(), title="x"
+    )
+    with pytest.raises(TypeError) as refused:
+        incident < datetime(2027, 1, 1)  # noqa: B015, DTZ001
+    assert str(refused.value) == shown
+
+
+def test_a_date_and_its_text_digest_apart() -> None:
+    # Two packages that differ only in a literal's type are two behaviours: two digests
+    # (brief, D50) (brief, D66).
+    def released(literal: object) -> object:
+        definition = claim_case()
+        definition["fields"]["note"] = {"type": "string", "display": {"title": "Note"}}
+        definition["steps"]["settle"]["when"] = {"==": [{"var": "note"}, literal]}
+        return behaviour_digest(parse_case(definition), {})
+
+    assert released({"date": "2026-10-31"}) != released("2026-10-31")
+
+
+def test_the_builder_writes_string_and_in_of_a_date() -> None:
+    claim = Case("claim", title="Insurance claim")
+    incident = claim.field("incident_date", Field.date(), title="Date of the incident")
+    assert string(incident).data == {"string": [{"var": "incident_date"}]}
+    holidays = in_(incident, [date(2026, 12, 25), date(2026, 12, 26)])
+    assert holidays.data == {
+        "in": [{"var": "incident_date"}, [{"date": "2026-12-25"}, {"date": "2026-12-26"}]]
+    }
