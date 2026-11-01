@@ -46,6 +46,7 @@ from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.testing import CATALOG, CaseRefused, EventRefused, run_case, send
+from ventoux.tooling.cli import main
 from ventoux.tooling.schema import case_schema, schema_files
 
 ROOT = Path(__file__).parent.parent
@@ -608,3 +609,47 @@ def test_the_builder_writes_string_and_in_of_a_date() -> None:
     assert holidays.data == {
         "in": [{"var": "incident_date"}, [{"date": "2026-12-25"}, {"date": "2026-12-26"}]]
     }
+
+
+# --- The readings: the case map and the plain diff name a date (slice 9) ---
+
+DATES = ROOT / "tests" / "digests" / "dates"
+
+
+def test_the_case_map_reads_a_date_field_as_a_date(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["map", str(DATES)]) == 0
+    shown = capsys.readouterr().out
+    # Markdown: a name's underscores escaped, as the page writes every name (brief, D56).
+    assert "policy\\_start is a date, seen by adjuster." in shown
+    assert "on (a date)" in shown  # the event's payload field
+    assert 'date("2027-01-01")' in shown  # the literal, as FEEL writes it
+
+
+def a_package(root: Path, name: str, incident: str, before: str) -> Path:
+    """The pinned date package, with incident_date of the type `incident`, settled only when the
+    report came before the date `before`."""
+    definition = json.loads((DATES / "case.json").read_text())
+    definition["fields"]["incident_date"]["type"] = incident
+    definition["steps"]["settle"]["when"] = {"<": [{"var": "reported.on"}, {"date": before}]}
+    folder = root / name
+    folder.mkdir()
+    (folder / "case.json").write_text(json.dumps(definition, indent=2) + "\n")
+    return folder
+
+
+def test_the_plain_diff_reports_a_text_become_a_date_and_a_date_moved(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    text = a_package(tmp_path, "text", "string", "2027-01-01")
+    day = a_package(tmp_path, "day", "date", "2027-01-01")
+    later = a_package(tmp_path, "later", "date", "2027-01-02")
+    main(["diff", "--plain", str(text), str(day)])
+    retyped = capsys.readouterr().out
+    assert "- Before: incident\\_date is a text, seen by adjuster." in retyped
+    assert "- After: incident\\_date is a date, seen by adjuster." in retyped
+    assert "(`fields.incident_date.type`): string -&gt; date." in retyped
+    main(["diff", "--plain", str(day), str(later)])
+    moved = capsys.readouterr().out
+    assert 'date("2027-01-01") -&gt; reported.on &lt; date("2027-01-02")' in moved
+    # Neither is proven stricter, so each is read as possibly looser, never hidden (brief, D55).
+    assert "read it as possibly looser" in retyped and "read it as possibly looser" in moved

@@ -294,6 +294,11 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
 - **A pinned package of its own for the date** (`tests/digests/dates`), not a date added to
   `every-shape`: every-shape's digest is pinned for ever, and changing its content would change
   it. The new package gets its first pin; every existing pin is unchanged.
+- **The case map refused a date field** (slice 9): `kind_of` (`case/reading.py`) fails closed on a
+  type it doesn't know, so `ventoux map` exited 1 on any package with a date. It now reads "a
+  date"; the plain diff, which reads fields through it, then said both changes with no change of
+  its own: a text become a date (`string -> date`), and a date literal moved by a day, each "not
+  proven either way", read as possibly looser (brief, D55).
 - **A plan's fields take dates too.** A case's and a plan's fields share one list of types
   (`DeclaredType`, `core/plan.py`), so adding the date there gives both, and the plan schema says
   so. Nothing in 16a promises more about plans than that the type parses.
