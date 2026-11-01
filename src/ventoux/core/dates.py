@@ -15,7 +15,8 @@ def calendar_date(text: str) -> date | None:
     """The day `text` names, if it is exactly `YYYY-MM-DD` and a real day; else None.
 
     Not `date.fromisoformat`: since Python 3.11 it also reads `20261031` and the week date
-    `2026-W44-6`, which a date never is (brief, D66). So the shape is checked first, character by character.
+    `2026-W44-6`, which a date never is (brief, D66). So the shape is checked first, character
+    by character.
     """
     if not written_as_a_date(text):
         return None
