@@ -9,8 +9,8 @@ apart, and must pass and fail alike, test by test. See docs/layers/16-field-type
 import os
 import subprocess
 import sys
-import xml.etree.ElementTree as ElementTree
 from pathlib import Path
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).parent.parent
 ZONES = ("America/New_York", "Pacific/Kiritimati")
