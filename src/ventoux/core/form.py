@@ -46,9 +46,9 @@ def form_problem(
 
 
 def misfit(field: str, declared: FieldType, value: object, given_by: str) -> str:
-    """Why `value` isn't of the type `declared`, naming its kind, never the value (brief, D30): `amount
-    is a number, and the opening gives a string`. A text that isn't a day says how a date is
-    written (brief, D66)."""
+    """Why `value` isn't of the type `declared`, naming its kind, never the value (brief, D30):
+    `amount is a number, and the opening gives a string`. A text that isn't a day says how a date
+    is written (brief, D66)."""
     if isinstance(declared, DateType) and isinstance(value, str):
         return (
             f"{field} is a date, written YYYY-MM-DD, and {given_by} gives a string that isn't one"

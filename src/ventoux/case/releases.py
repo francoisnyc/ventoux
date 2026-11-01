@@ -197,11 +197,12 @@ ABSENT = object()  # a field the digest leaves out: wording, or a value at its d
 
 
 def canonical(value: object) -> object:
-    """`value`, a parsed definition or a part of one, as plain JSON data that says its behaviour
-    and nothing else. Objects are dicts, whose keys `json.dumps` sorts; a map (steps, rules,
-    fields) keeps its written order, as `{"#map": [[key, value], ...]}`, since the engine reads
-    steps and rules in that order (brief, D38). A decimal is `{"#decimal": "100.0"}`, so a number
-    and a text never meet; a date is `{"#date": "2026-10-31"}`, for the same reason. `#` starts no name in the format, so neither marker meets a field."""
+    """`value`, a parsed definition or a part of one, as plain JSON data that says its behaviour and
+    nothing else. Objects are dicts, whose keys `json.dumps` sorts; a map (steps, rules, fields)
+    keeps its written order, as `{"#map": [[key, value], ...]}`, since the engine reads steps and
+    rules in that order (brief, D38). A decimal is `{"#decimal": "100.0"}`, so a number and a text
+    never meet; a date is `{"#date": "2026-10-31"}`, for the same reason. `#` starts no name in the
+    format, so neither marker meets a field."""
     if isinstance(value, BaseModel):
         found: dict[str, object] = {}
         for name in type(value).model_fields:
