@@ -119,6 +119,7 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
+from ventoux.core.dates import date_fields, given_day
 from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
@@ -910,6 +911,15 @@ def outcome_problem(contract: Contract, event: Completed) -> str | None:
             f"{contract.reference} gave the outcome {event.outcome}, which its contract doesn't "
             f"declare: its outcomes are {declared}"
         )
+    # A date is read by D66's rule before Pydantic's lax reading, which would pick a day for a
+    # timestamp or a moment: Ventoux never turns a moment into a day (brief, D66).
+    for name in date_fields(contract.output):
+        value = event.output.get(name)
+        if value is not None and given_day(value) is None:
+            return (
+                f"{contract.reference} gave {name} as {a_kind(value)}, which isn't a day: an "
+                f"output date is a date, or a text written YYYY-MM-DD, never a moment (brief, D66)"
+            )
     try:
         # Pydantic: `model_validate` checks a dict against the model's fields, or raises.
         given = contract.output.model_validate(event.output)

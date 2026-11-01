@@ -140,8 +140,15 @@ C. **No new dependency.** The date is Python's `datetime.date`; the check is a s
    - **On a payload, a date is text.** Temporal's JSON can't hold a date, and reading it back
      gives a `str`. So the converter writes a `date` as `"YYYY-MM-DD"`, and the engine reads a
      value into a date **by its field's declared type** where a value enters: the opening, an
-     answer, an event, and the state a case continues as new with (D27). An activity's output is
-     already read by its contract's Pydantic model. Nothing is guessed from a text's shape.
+     answer, an event, an activity's output, and the state a case continues as new with (D27).
+     Nothing is guessed from a text's shape. *Corrected in the tutor's review of the design:* this
+     said an output "is already read by its contract's Pydantic model", but outputs are read with
+     lax `model_validate` (`case/runtime.py`), unlike inputs (strict, D36): a timestamp
+     `1793145600` landed as 2026-10-28, a day Pydantic picked in UTC, and `"2026-10-31T00:00:00Z"`
+     and a `datetime` at midnight as 2026-10-31. Strict mode alone would refuse `"2026-10-31"`,
+     which is how a date comes back over Temporal. So an output's date fields are read by
+     `calendar_date`, as the other entry points are, before Pydantic reads the rest: a moment, a
+     number or any other text fails the step, and nothing it gave lands.
      *Recommended.* The alternative, keeping dates as text inside the engine and comparing texts,
      works for `YYYY-MM-DD` by luck of the format, but then a date and a text look the same at
      runtime, and "a field holds a value of the wrong type" can't be told (fail closed lost).
@@ -165,8 +172,9 @@ C. **No new dependency.** The date is Python's `datetime.date`; the check is a s
      changes (a text to a date) is reported by the diff as a change of type, as for any field.
      Formatting a date for a person's locale is the inbox's, later. *Recommended.*
    - **The JSON Schema (D60):** a date field as `{"type": "date"}`, and the literal as an object
-     with one key, `date`, a string of ten characters; the schema stays shape only (D60), and the
-     calendar check is the engine's.
+     with one key, `date`, a string matching `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`; the schema stays
+     shape only (D60), and the calendar check is the engine's. *Corrected in the tutor's review of
+     the design:* "ten characters" let `"31/10/2026"` through, so the pattern says the shape.
 
 9. **The builder (D58).** `Field.date()`, and a `datetime.date` as a literal, written `{"date":
    "…"}`. A `datetime` is refused (choice 6). `date.today()` in a builder file is the build day

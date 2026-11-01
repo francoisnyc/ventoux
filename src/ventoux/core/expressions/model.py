@@ -66,6 +66,8 @@ def fits_decimal128(number: Decimal) -> bool:
 # A number is written as a JSON number and read as a decimal (brief, D20): the published schema
 # says `number`, not Pydantic's rendering of `Decimal` (a number or a string of digits).
 type Number = Annotated[Decimal, WithJsonSchema({"type": "number"})]
+DATE_SHAPE = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"  # YYYY-MM-DD, ASCII digits only (brief, D66)
+
 # A day on the calendar, written `{"date": "2026-10-31"}` (brief, D66). The schema gives its shape
 # only; the engine checks it is a real day (brief, D60).
 type Day = Annotated[
@@ -73,7 +75,9 @@ type Day = Annotated[
     WithJsonSchema(
         {
             "type": "object",
-            "properties": {"date": {"type": "string", "minLength": 10, "maxLength": 10}},
+            # Four digits, a dash, two digits, a dash, two digits: the shape `written_as_a_date`
+            # reads. Shape only: whether that day exists (30 February) is the engine's check.
+            "properties": {"date": {"type": "string", "pattern": DATE_SHAPE}},
             "required": ["date"],
             "additionalProperties": False,
         }

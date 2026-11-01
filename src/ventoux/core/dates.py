@@ -6,6 +6,8 @@ opening, an event) refuses the same texts the same way.
 
 from datetime import date
 
+from pydantic import BaseModel
+
 HOW_TO_WRITE = 'write a date as YYYY-MM-DD, such as "2026-10-31"'
 
 
@@ -34,3 +36,19 @@ def written_as_a_date(text: str) -> bool:
         # ASCII only: `str.isdigit` would also take digits from other scripts, such as "٢".
         and all(character in "0123456789" for character in digits)
     )
+
+
+def given_day(value: object) -> date | None:
+    """The day `value` is, if it is one: a `date` (never a `datetime`, which is a moment, though
+    Python counts it a `date`), or a text `calendar_date` reads. Else None: a number, a moment
+    and any other text are never turned into a day (brief, D66)."""
+    if type(value) is date:  # the exact type, so a `datetime` is refused
+        return value
+    if isinstance(value, str):
+        return calendar_date(value)
+    return None
+
+
+def date_fields(model: type[BaseModel]) -> list[str]:
+    """The fields of `model` declared as a day, `date` exactly, in order."""
+    return [name for name, field in model.model_fields.items() if field.annotation is date]

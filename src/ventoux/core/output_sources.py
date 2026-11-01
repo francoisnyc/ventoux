@@ -5,6 +5,7 @@ policy is written on an input field. See docs/guides/activities.md.
 """
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -24,8 +25,9 @@ UNDECLARED = f"untrusted:{UNDECLARED_LABEL}"
 # What an output field may hold: what the case file holds exactly and expressions read (brief, D20).
 # Numbers are exact decimals, never binary floats; a reference is a text. A nested model would put a
 # Python object in the case file, not data, so it is refused too (tutor review of layer 8d).
-HELD = (Decimal, str, bool)
-HELD_NAMES = "a decimal (Decimal), a text (str) or true or false (bool)"
+# A day is a `date`, matched exactly, so a `datetime`, a moment, is never held (brief, D66).
+HELD = (Decimal, str, bool, date)
+HELD_NAMES = "a decimal (Decimal), a text (str), true or false (bool) or a day (date)"
 
 
 @dataclass(frozen=True)

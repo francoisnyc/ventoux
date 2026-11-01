@@ -113,6 +113,17 @@ def with_step(name: str, **changes: Any) -> dict[str, Any]:
     return case
 
 
+def with_date_literal(written: str) -> dict[str, Any]:
+    """The refund, settled only before the date `written`: the schema reads shapes, not types."""
+    return with_step("settle", when={"<": [{"var": "amount"}, {"date": written}]})
+
+
+def test_a_date_literal_written_yyyy_mm_dd_is_accepted_by_the_schema() -> None:
+    # The control for the refusal below: only the literal's shape differs (brief, D66).
+    assert schema_accepts(case_schema(), with_date_literal("2026-10-31"))
+    assert schema_accepts(case_schema(), with_date_literal("2026-02-30"))  # the engine's check
+
+
 WRONG_CASES: dict[str, dict[str, Any]] = {
     # The curriculum's negative test: an operator D20 doesn't list matches no shape.
     "an operator D20 doesn't list": with_approval(
@@ -159,6 +170,9 @@ WRONG_CASES: dict[str, dict[str, Any]] = {
         "note", {"type": "string", "sensitive": "f", "display": {"title": "x"}}
     ),
     "stays_open written as a word": a_case(stays_open="off"),
+    # From the tutor review of 16a's design: ten characters, but not YYYY-MM-DD. The schema checks
+    # the shape only; the calendar check (30 February) stays the engine's (brief, D60, D66).
+    "a date literal not written YYYY-MM-DD": with_date_literal("31/10/2026"),
 }
 
 

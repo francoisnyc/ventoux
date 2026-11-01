@@ -2739,12 +2739,15 @@ D20, D55, D56, D58 and D60, whose text is kept.*
 - **Inside the engine a date is a `datetime.date`, never a `datetime`** (a subclass in Python, so
   refused explicitly wherever a date is taken). On a payload it is `YYYY-MM-DD` text, read back
   into a date by its field's declared type where a value enters a case: the opening, an answer,
-  an event, and a continue-as-new. This is the one reading a form does (D9): a text that isn't a
+  an event, an activity's output, and a continue-as-new. An output's date is read by this rule
+  before its contract's model reads the rest, never by Pydantic's lax reading, which would pick a
+  day for a timestamp or a moment: an output date that isn't a day fails its step, and nothing it
+  gave lands. This is the one reading a form does (D9): a text that isn't a
   date is refused, never guessed from its shape. At runtime a date field holding anything but a
   date is an error, never `false`.
 - **Shown as `YYYY-MM-DD`** in the rendering, the plain forms, the case map and the diff, the same
   in every language; a locale's format is the inbox's, later. The JSON Schema gives the shape
-  only (D60); the calendar check is the engine's. The builder writes `Field.date()` and a
+  only (D60), `YYYY-MM-DD` as a pattern; the calendar check is the engine's. The builder writes `Field.date()` and a
   `datetime.date` literal, and refuses a `datetime`.
 - **Left out:** times, moments and durations as field types, date arithmetic, timers anchored to a
   date field, a locale's format.

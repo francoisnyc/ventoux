@@ -6,8 +6,19 @@ See docs/layers/16-field-types.md (16a), docs/guides/expressions.md and brief D6
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Annotated
 
 import pytest
+from pydantic import BaseModel, ValidationError
+from test_case import (
+    PEOPLE,
+    SMALL,
+    SMALL_REVIEW,
+    FindInput,
+    contract,
+    with_crm,
+    with_customer_steps,
+)
 
 from ventoux.core.expressions import (
     BooleanType,
@@ -22,6 +33,8 @@ from ventoux.core.expressions import (
     parse_expression,
     render,
 )
+from ventoux.core.output_sources import source
+from ventoux.testing import run_case
 from ventoux.tooling.schema import case_schema, schema_files
 
 ROOT = Path(__file__).parent.parent
@@ -177,3 +190,87 @@ def test_the_published_schema_holds_the_date_and_no_today() -> None:
     # Regenerated with `ventoux schema`; CI's `--unchanged` checks the same bytes.
     for name, text in schema_files().items():
         assert (ROOT / "schema" / name).read_text() == text
+
+
+# --- An activity's output: a date is read as every entry point reads one (tutor review) ---
+
+
+class Reported(BaseModel):
+    email: Annotated[str, source("system:crm")]
+    reported_on: date  # the day the customer reported it, as the CRM means it
+
+
+@pytest.mark.parametrize(
+    ("given", "kind"),
+    [
+        (1793145600, "an int"),  # a Unix timestamp: lax Pydantic would pick 2026-10-28, in UTC
+        ("2026-10-31T00:00:00Z", "a string"),  # a moment, written as text
+        (datetime(2026, 10, 31, tzinfo=UTC), "a datetime"),  # a moment at midnight
+    ],
+)
+def test_an_output_date_that_is_a_moment_fails_the_step_and_nothing_lands(
+    given: object, kind: str
+) -> None:
+    # Ventoux never turns a moment into a day (brief, D66): as "31/10/2026" in a form is refused.
+    catalog = with_crm()
+    found = catalog.get("crm.find@1").model_copy(update={"output": Reported})  # no check runs
+    catalog._contracts["crm.find@1"] = found  # bypassing registration, as test_case does
+    run = run_case(
+        with_customer_steps("find.email", "notices.draft@1", "to"),
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=PEOPLE,
+        activities={
+            "crm.find@1": lambda inputs: {"email": "c@x.com", "reported_on": given},
+            "notices.draft@1": lambda inputs: {"notice_id": "n-1"},
+        },
+        catalog=catalog,
+    )
+    assert run.needs_attention == [
+        f"find#1: crm.find@1 gave reported_on as {kind}, which isn't a day: an output date is a "
+        "date, or a text written YYYY-MM-DD, never a moment (brief, D66)"
+    ]
+    assert not any(line.startswith("find#1 done") for line in run.history)
+    assert "find.reported_on" not in run.state.values  # nothing it gave lands
+    assert "find.email" not in run.state.values
+
+
+@pytest.mark.parametrize("given", ["2026-10-31", date(2026, 10, 31)])
+def test_an_output_date_lands_as_a_day(given: object) -> None:
+    # As text, which is how a date comes back over Temporal, or as a date, in memory.
+    catalog = with_crm()
+    found = catalog.get("crm.find@1").model_copy(update={"output": Reported})
+    catalog._contracts["crm.find@1"] = found
+    run = run_case(
+        with_customer_steps("find.email", "notices.draft@1", "to"),
+        file=SMALL,
+        answers=[SMALL_REVIEW],
+        people=PEOPLE,
+        activities={
+            "crm.find@1": lambda inputs: {"email": "c@x.com", "reported_on": given},
+            "notices.draft@1": lambda inputs: {"notice_id": "n-1"},
+        },
+        catalog=catalog,
+    )
+    assert run.needs_attention == []
+    assert type(run.state.values["find.reported_on"]) is date
+    assert run.state.values["find.reported_on"] == date(2026, 10, 31)
+
+
+class Moment(BaseModel):
+    reported_at: datetime  # a moment: which day it falls on depends on a time zone
+
+
+def test_a_contract_whose_output_is_a_moment_is_refused_at_registration() -> None:
+    with pytest.raises(ValidationError) as refused:
+        contract("crm.reported", FindInput, Moment)
+    assert (
+        "crm.reported@1: output reported_at is datetime, which the case file can't hold exactly. "
+        "An output is a decimal (Decimal), a text (str), true or false (bool) or a day (date)"
+    ) in str(refused.value)
+
+
+def test_a_contract_whose_output_is_a_day_registers() -> None:
+    catalog = with_crm()
+    catalog.register(contract("crm.reported", FindInput, Reported))
+    assert catalog.get("crm.reported@1").output is Reported
