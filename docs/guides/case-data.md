@@ -197,7 +197,7 @@ isn't a real day is refused where it is given, before it reaches the case file.
 ```
 
 ```text
-incident_date should be a date, written YYYY-MM-DD, and "31/10/2026" is not one
+incident_date is a date, written YYYY-MM-DD, and the answer gives a string that isn't one
 ```
 
 A date comes from where every value comes from, and carries its source like any other:

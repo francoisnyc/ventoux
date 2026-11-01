@@ -160,10 +160,14 @@ C. **No new dependency.** The date is Python's `datetime.date`; the check is a s
    - At validation (`ventoux check`, case validation): a date compared with a number or a text;
      an ordering between a date and anything else; a literal that isn't a day; `today`.
    - Where a value is given: a date field given a text that isn't a day, a number, or a moment,
-     each refused with what is wrong, then what to do: `incident_date should be a date, written
-     YYYY-MM-DD, and "31/10/2026" is not one`.
+     each refused with what is wrong, then what to do: `incident_date is a date, written
+     YYYY-MM-DD, and the answer gives a string that isn't one`. *Corrected while building:* this
+     quoted the value, `"31/10/2026"`; a refusal names the kind, never the value, since it reaches
+     people who may not see it (brief, D30).
    - At runtime, failing closed: a date field holding a `str`, a `datetime` or a number is an
-     error (`incident_date should be a date, and it holds a string`), never `false`.
+     error (`` `<` compares two numbers or two dates, and it was given a string ``), never `false`.
+     *Corrected while building:* the evaluator is untyped and refuses by operator, so the message
+     names the operator, not the field.
 
 8. **Shown, and where the type appears.**
    - **The one-line rendering:** a field by its name; a literal as `date("2026-10-31")`.
@@ -250,6 +254,14 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
 - **The guide's runtime table isn't run by any test,** and one row (`approved_amount should be a
   number, and it holds a string`) is a message nothing produces: the evaluator is untyped and
   refuses by operator. Raised for the promises (step 6).
+- **A sensitive date** (slice 4). The wrapper holds "the plain value, of its field's type"
+  (brief, D31), but the reading skipped wrapped values, so a sensitive date was kept as
+  `Sensitive("2026-10-31")` and its condition could never read it as a day. Now the day is read
+  inside the wrapper, with a test. The opening keeps its values as a form does, through the same
+  `kept`, so a date given at the opening is read into a day too.
+- **A plan's fields take dates too.** A case's and a plan's fields share one list of types
+  (`DeclaredType`, `core/plan.py`), so adding the date there gives both, and the plan schema says
+  so. Nothing in 16a promises more about plans than that the type parses.
 - **Two schema refusals test nothing** (`tests/test_schema.py`, layer 14e): "an operator D20
   doesn't list" and "a number written as a string" put an approval on `settle`, a plan step,
   which takes none, so the schema refuses them for that. Left to 14e's owner; 16a's literal test

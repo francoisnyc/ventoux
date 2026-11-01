@@ -29,6 +29,7 @@ from pydantic_core import CoreSchema, core_schema
 from ventoux.core.contract import REFERENCE
 from ventoux.core.expressions import (
     BooleanType,
+    DateType,
     Expression,
     ExpressionInvalid,
     ListType,
@@ -187,7 +188,7 @@ Duration = Annotated[
 PlanExpression = Annotated[Expression, BeforeValidator(expression)]
 Source = Annotated[str, AfterValidator(declared_source)]
 DeclaredType = Annotated[
-    NumberType | StringType | BooleanType | OutcomeType | ReferenceType | ListType,
+    NumberType | StringType | BooleanType | OutcomeType | ReferenceType | DateType | ListType,
     Field(discriminator="type"),
 ]
 

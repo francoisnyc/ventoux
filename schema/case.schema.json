@@ -573,6 +573,60 @@
         },
         {
           "additionalProperties": false,
+          "description": "A day on the calendar, with no time and no time zone (brief, D66).",
+          "properties": {
+            "type": {
+              "const": "date",
+              "default": "date",
+              "title": "Type",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "visible_to": {
+              "anyOf": [
+                {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible To"
+            },
+            "sensitive": {
+              "default": false,
+              "title": "Sensitive",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "display",
+            "type"
+          ],
+          "title": "DateType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A list of records, each with the declared fields; read with `count`, `sum` and `item`.",
           "properties": {
             "type": {
@@ -1570,6 +1624,39 @@
             "type"
           ],
           "title": "ReferenceType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A day on the calendar, with no time and no time zone (brief, D66).",
+          "properties": {
+            "type": {
+              "const": "date",
+              "default": "date",
+              "title": "Type",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            }
+          },
+          "required": [
+            "display",
+            "type"
+          ],
+          "title": "DateType",
           "type": "object"
         },
         {

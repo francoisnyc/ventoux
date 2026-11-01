@@ -7,8 +7,10 @@ converted or left out.
 from collections.abc import Mapping
 from decimal import Decimal
 
+from ventoux.core.dates import given_day
 from ventoux.core.expressions import (
     BooleanType,
+    DateType,
     FieldType,
     NumberType,
     OutcomeType,
@@ -39,9 +41,28 @@ def form_problem(
         value = plain(given[field])
         if not fits(value, types[field]):
             # The type, never the value: it may be hidden from whoever reads the history (brief, D30).
-            given_kind = a_kind(value)
-            return f"{field} is {a_type(types[field])}, and the answer gives {given_kind}"
+            return misfit(field, types[field], value, "the answer")
     return None
+
+
+def misfit(field: str, declared: FieldType, value: object, given_by: str) -> str:
+    """Why `value` isn't of the type `declared`, naming its kind, never the value (brief, D30): `amount
+    is a number, and the opening gives a string`. A text that isn't a day says how a date is
+    written (brief, D66)."""
+    if isinstance(declared, DateType) and isinstance(value, str):
+        return (
+            f"{field} is a date, written YYYY-MM-DD, and {given_by} gives a string that isn't one"
+        )
+    return f"{field} is {a_type(declared)}, and {given_by} gives {a_kind(value)}"
+
+
+def read_as(value: object, declared: FieldType) -> object:
+    """`value` as the case file keeps it, once `fits` accepted it: a date's text read into the day
+    it names, which is how a date crosses a payload (brief, D66); any other value as it is.
+    The one reading a form does: nothing else is converted (brief, D9)."""
+    if isinstance(declared, DateType):
+        return given_day(value)
+    return value
 
 
 def fits(value: object, declared: FieldType) -> bool:
@@ -55,5 +76,8 @@ def fits(value: object, declared: FieldType) -> bool:
         return isinstance(value, bool)
     if isinstance(declared, OutcomeType):
         return isinstance(value, str) and value in declared.outcomes
+    if isinstance(declared, DateType):
+        # A day, or its text exactly YYYY-MM-DD; never a moment or a number (brief, D66).
+        return given_day(value) is not None
     # Fail closed: a type this check doesn't know (a list, for now) fits nothing.
     return False

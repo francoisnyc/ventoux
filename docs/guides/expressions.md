@@ -133,7 +133,7 @@ When the case runs, a value the check couldn't see is an error that stops the st
 | a result beyond what decimal128 can hold | `` `*` gives a number too large for an expression (decimal128) `` |
 | an element of `items` lacks `risk`, in `count(items where item.risk == "high")` | `item.risk has no value (element 2 of items)` |
 | a field holds a value of the wrong type | `approved_amount should be a number, and it holds a string` |
-| a date field holds a text that isn't a day | `incident_date should be a date, and it holds a string` |
+| `incident_date < date("2027-01-01")`, with a text in `incident_date` | `` `<` compares two numbers or two dates, and it was given a string `` |
 
 **Why an error and not `false`.** Suppose an approval's condition is `approved_amount > 100` and
 the amount is missing. Reading the condition as `false` would mean "no approval needed", and the

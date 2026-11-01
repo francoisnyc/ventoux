@@ -119,7 +119,7 @@ from ventoux.core.expressions import (
     render,
 )
 from ventoux.core.expressions.check import a_type
-from ventoux.core.form import fits
+from ventoux.core.form import fits, misfit, read_as
 from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE
@@ -438,7 +438,7 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
         state.history.append(f"opened on {event.release}, engine {state.engine}")
     origin = OPENER if event.by is None else f"person:{event.by}"
     for name, value in event.file.items():
-        state.values[name] = value
+        state.values[name] = kept(case, name, value)
         state.sources[name] = marked(case, name, origin)
         state.obtained[name] = Obtained(event.at, None)  # from the opening, by no step run
     state.history.append(f"opened by {event.by or OPENER}, with {listed(sorted(event.file))}")
@@ -486,7 +486,7 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
             )
         elif not fits(plain(value), declared := case.fields[name].declared):
             # The type, never the value: refusals reach people who may not see it (brief, D30).
-            problems.append(f"{name} is {a_type(declared)}, and the opening gives {a_kind(value)}")
+            problems.append(misfit(name, declared, plain(value), "the opening"))
     if problems:
         raise CaseRefused("\n".join(problems))
 
@@ -509,7 +509,15 @@ def refuse_unless_wrapped(
 def kept(case: CaseDefinition, name: str, value: object) -> object:
     """A form's value as the case file keeps it: wrapped for a sensitive field, plain otherwise.
     The client wraps every value of a form, since it can't tell which are sensitive."""
-    return value if name in case.fields and case.fields[name].sensitive else plain(value)
+    if name not in case.fields:
+        return plain(value)
+    field = case.fields[name]
+    # A date's text is read into the day it names, by the field's type (brief, D66); a sensitive
+    # one inside its wrapper, which holds the plain value of the field's type (brief, D31).
+    read = read_as(plain(value), field.declared)
+    if field.sensitive and isinstance(value, Sensitive):
+        return Sensitive(read)
+    return value if field.sensitive else read
 
 
 def marked(case: CaseDefinition, name: str, origin: str) -> frozenset[str]:

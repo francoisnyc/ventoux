@@ -1224,6 +1224,26 @@
           },
           {
             "additionalProperties": false,
+            "description": "A day on the calendar, with no time and no time zone (brief, D66).",
+            "properties": {
+              "type": {
+                "const": "date",
+                "default": "date",
+                "title": "Type",
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "DateType",
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
             "description": "A list of records, each with the declared fields; read with `count`, `sum` and `item`.",
             "properties": {
               "type": {

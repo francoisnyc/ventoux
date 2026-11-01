@@ -4,9 +4,11 @@ See docs/layers/16-field-types.md (16a), docs/guides/expressions.md and brief D6
 """
 
 import json
+import re
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -20,6 +22,7 @@ from test_case import (
     with_customer_steps,
 )
 
+from ventoux.case.answers import AnswerRefused
 from ventoux.core.expressions import (
     BooleanType,
     DateType,
@@ -34,6 +37,7 @@ from ventoux.core.expressions import (
     render,
 )
 from ventoux.core.output_sources import source
+from ventoux.core.sensitive import Sensitive
 from ventoux.testing import run_case
 from ventoux.tooling.schema import case_schema, schema_files
 
@@ -276,3 +280,109 @@ def test_a_contract_whose_output_is_a_day_registers() -> None:
     catalog = with_crm()
     catalog.register(contract("crm.reported", FindInput, Reported))
     assert catalog.get("crm.reported@1").output is Reported
+
+
+# --- A form: a person gives a date (slice 4) ---
+
+
+def claim_case() -> dict[str, Any]:
+    """A claim: the policy's start from the opener, the incident's day from the adjuster's form,
+    and a settlement only for an incident while the policy was in force."""
+    return {
+        "case": "claim",
+        "display": {"title": "Insurance claim"},
+        "fields": {
+            "policy_start": {"type": "date", "display": {"title": "Policy start"}},
+            "incident_date": {"type": "date", "display": {"title": "Date of the incident"}},
+        },
+        "steps": {
+            "assess": {
+                "kind": "task",
+                "display": {"title": "Assess the claim"},
+                "roles": ["adjuster"],
+                "outcomes": {
+                    "accept": {
+                        "display": {"title": "Accept the claim"},
+                        "sets": ["incident_date"],
+                    },
+                    "deny": {"display": {"title": "Deny the claim"}},
+                },
+            },
+            "settle": {
+                "kind": "task",
+                "display": {"title": "Settle the claim"},
+                "roles": ["adjuster"],
+                "requires": ["assess"],
+                "when": {">=": [{"var": "incident_date"}, {"var": "policy_start"}]},
+                "outcomes": {"settled": {"display": {"title": "Claim settled"}}},
+            },
+        },
+    }
+
+
+ADJUSTERS = {"ana": ["adjuster"]}
+OPENED = {"policy_start": "2026-01-01"}
+
+
+@pytest.mark.parametrize(
+    ("given", "message"),
+    [
+        (
+            "31/10/2026",
+            "incident_date is a date, written YYYY-MM-DD, and the answer gives a string that isn't one",
+        ),
+        (
+            "2026-10-31T23:30:00Z",
+            "incident_date is a date, written YYYY-MM-DD, and the answer gives a string that isn't one",
+        ),
+        (Decimal(20261031), "incident_date is a date, and the answer gives a number"),
+        (
+            datetime(2026, 10, 31, tzinfo=UTC),
+            "incident_date is a date, and the answer gives a datetime",
+        ),
+    ],
+)
+def test_a_form_giving_a_date_that_is_not_a_day_is_refused(given: object, message: str) -> None:
+    # The message names the kind, never the value: it may be hidden from a reader (brief, D30).
+    with pytest.raises(AnswerRefused, match=f"^{re.escape(message)}$"):
+        run_case(
+            claim_case(),
+            file=OPENED,
+            answers=[("assess", "accept", "ana", {"incident_date": given})],
+            people=ADJUSTERS,
+        )
+
+
+@pytest.mark.parametrize(
+    ("incident", "settles"),
+    [("2026-10-31", True), ("2025-12-31", False)],  # during the policy, then the day before it
+)
+def test_a_form_date_is_read_into_a_day_and_a_condition_reads_it(
+    incident: str, settles: bool
+) -> None:
+    run = run_case(
+        claim_case(),
+        file=OPENED,
+        answers=[("assess", "accept", "ana", {"incident_date": incident})],
+        people=ADJUSTERS,
+    )
+    assert type(run.state.values["incident_date"]) is date
+    assert type(run.state.values["policy_start"]) is date  # the opening's, read the same way
+    assert any("settle" in waiting for waiting in run.waiting_for) is settles
+
+
+def test_a_sensitive_date_is_kept_wrapped_and_read_into_a_day() -> None:
+    # `run_case`, as the client, wraps a sensitive value; kept wrapped, with the day inside
+    # (brief, D31) (brief, D66).
+    definition = claim_case()
+    definition["fields"]["incident_date"] |= {"sensitive": True, "visible_to": ["adjuster"]}
+    run = run_case(
+        definition,
+        file=OPENED,
+        answers=[("assess", "accept", "ana", {"incident_date": "2026-10-31"})],
+        people=ADJUSTERS,
+    )
+    kept = run.state.values["incident_date"]
+    assert isinstance(kept, Sensitive)
+    assert kept.value == date(2026, 10, 31)
+    assert any("settle" in waiting for waiting in run.waiting_for)  # its condition read the day
