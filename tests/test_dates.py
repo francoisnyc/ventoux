@@ -227,8 +227,10 @@ def test_an_output_date_that_is_a_moment_fails_the_step_and_nothing_lands(
         catalog=catalog,
     )
     assert run.needs_attention == [
-        f"find#1: crm.find@1 gave reported_on as {kind}, which isn't a day: an output date is a "
-        "date, or a text written YYYY-MM-DD, never a moment (brief, D66)"
+        (
+            f"find#1: crm.find@1 gave reported_on as {kind}, which isn't a day: an output date is "
+            "a date, or a text written YYYY-MM-DD, never a moment (brief, D66)"
+        )
     ]
     assert not any(line.startswith("find#1 done") for line in run.history)
     assert "find.reported_on" not in run.state.values  # nothing it gave lands

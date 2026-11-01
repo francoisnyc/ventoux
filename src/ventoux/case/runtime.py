@@ -109,6 +109,7 @@ from ventoux.core.before_activity import (
 )
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract, Contract
+from ventoux.core.dates import date_fields, given_day
 from ventoux.core.expressions import (
     Expression,
     ExpressionError,
@@ -119,7 +120,6 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits
-from ventoux.core.dates import date_fields, given_day
 from ventoux.core.output_sources import is_held, output_sources
 from ventoux.core.person import identifier_problem
 from ventoux.core.plan import APPROVE

@@ -714,8 +714,10 @@ def test_an_if_is_checked_on_both_branches(data: object, message: str) -> None:
         ),
         (
             {"string": [{"var": "review.outcome"}]},
-            "string[0]: `string` takes a number, a boolean, a reference or a date, "
-            "and this is an outcome",
+            (
+                "string[0]: `string` takes a number, a boolean, a reference or a date, "
+                "and this is an outcome"
+            ),
         ),
     ],
 )

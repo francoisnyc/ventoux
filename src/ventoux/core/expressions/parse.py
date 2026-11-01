@@ -175,7 +175,7 @@ def parse(data: object) -> Expression:
 def a_day(arguments: object) -> date:
     """The day a `date` literal names, or `ExpressionInvalid` saying how to write one (brief, D66)."""
     if not isinstance(arguments, str):
-        raise ExpressionInvalid(f'date takes a text, like {{"date": "2026-10-31"}}')
+        raise ExpressionInvalid('date takes a text, like {"date": "2026-10-31"}')
     day = calendar_date(arguments)
     if day is None:
         raise ExpressionInvalid(f'date: "{arguments}" is not a day on the calendar; {HOW_TO_WRITE}')
