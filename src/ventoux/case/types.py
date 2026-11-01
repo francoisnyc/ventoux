@@ -68,10 +68,10 @@ def case_types(case: CaseDefinition, catalog: Catalog) -> dict[str, FieldType]:
 
 
 def output_type(info: FieldInfo, system: str | None) -> FieldType | None:
-    """An output's type as an expression reads it: a decimal is a number, a text a string (a reference
-    to `system` if it names one), a bool a boolean, a date a date (brief, D66). None for any other:
-    registration refuses those (brief, D29), so one that got through is left out, and reading it is
-    an error."""
+    """An output's type as an expression reads it: a decimal is a number, a text a string (a
+    reference to `system` if it names one), a bool a boolean, a date a date (brief, D66). None for
+    any other: registration refuses those (brief, D29), so one that got through is left out, and
+    reading it is an error."""
     if info.annotation is Decimal:
         return NumberType()
     if info.annotation is str:
