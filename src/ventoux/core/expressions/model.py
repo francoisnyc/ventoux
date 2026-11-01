@@ -1,5 +1,6 @@
 """What an expression is: the operators, numbers and values, the field types, the errors."""
 
+from datetime import date, datetime
 from decimal import ROUND_HALF_EVEN, Context, Decimal, DivisionByZero, InvalidOperation, Overflow
 from typing import Annotated, Any, ClassVar, Literal
 
@@ -30,6 +31,7 @@ OPERATORS = (
     "count",
     "sum",
     "item",
+    "date",  # a literal day on the calendar, `{"date": "2026-10-31"}` (brief, D66)
 )
 
 # Arithmetic as IEEE 754 decimal128: 34 significant digits, rounding half to even, exponents
@@ -64,11 +66,25 @@ def fits_decimal128(number: Decimal) -> bool:
 # A number is written as a JSON number and read as a decimal (brief, D20): the published schema
 # says `number`, not Pydantic's rendering of `Decimal` (a number or a string of digits).
 type Number = Annotated[Decimal, WithJsonSchema({"type": "number"})]
-type Value = Number | str | bool
+# A day on the calendar, written `{"date": "2026-10-31"}` (brief, D66). The schema gives its shape
+# only; the engine checks it is a real day (brief, D60).
+type Day = Annotated[
+    date,
+    WithJsonSchema(
+        {
+            "type": "object",
+            "properties": {"date": {"type": "string", "minLength": 10, "maxLength": 10}},
+            "required": ["date"],
+            "additionalProperties": False,
+        }
+    ),
+]
+type Value = Number | str | bool | Day
 type Expression = (
     Number
     | str
     | bool
+    | Day
     | Var
     | Eq
     | Ne
@@ -283,7 +299,9 @@ COMPARISONS: dict[str, type[Eq] | type[Ne] | type[Gt] | type[Ge] | type[Lt] | ty
 
 # The types a field can be declared with, in the shape definitions use: `{"type": "number"}`.
 # Recursive through `ListType`, so the alias comes first, as `Expression` does.
-type FieldType = NumberType | StringType | BooleanType | OutcomeType | ReferenceType | ListType
+type FieldType = (
+    NumberType | StringType | BooleanType | OutcomeType | ReferenceType | DateType | ListType
+)
 
 
 def type_written(schema: dict[str, Any]) -> None:
@@ -331,6 +349,12 @@ class ReferenceType(Declared):
     system: str
 
 
+class DateType(Declared):
+    """A day on the calendar, with no time and no time zone (brief, D66)."""
+
+    type: Literal["date"] = "date"
+
+
 class ListType(Declared):
     """A list of records, each with the declared fields; read with `count`, `sum` and `item`."""
 
@@ -357,6 +381,10 @@ def a_kind(value: object) -> str:
         return "a string"
     if isinstance(value, Decimal):
         return "a number"
+    if isinstance(value, datetime):  # before `date`: to Python, a datetime is a date
+        return "a datetime"
+    if isinstance(value, date):
+        return "a date"
     if isinstance(value, float):
         return "a binary float"
     if isinstance(value, int):
@@ -375,4 +403,6 @@ def kind(value: Value) -> str:
         return "boolean"
     if isinstance(value, str):
         return "string"
+    if isinstance(value, date):
+        return "date"
     return "number"

@@ -315,7 +315,7 @@ def test_a_condition_is_checked_inside_too() -> None:
         Issue(
             "states.check_order.on.done[0].when",
             "EXPRESSION_INVALID",
-            ">[1]: `>` compares numbers, and this is a string",
+            ">[1]: `>` compares two numbers or two dates, and this is a string",
         )
     ]
 

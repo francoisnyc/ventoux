@@ -77,7 +77,7 @@ def test_a_state_is_exactly_one_kind(state: object, message: str) -> None:
 
 NOT_AN_OPERATOR = (
     "`now` is not an operator. The operators are: var, ==, !=, >, >=, <, <=, and, or, !, +, -, *, "
-    "/, if, in, cat, string, exists, count, sum, item. Logic that doesn't fit is a compute "
+    "/, if, in, cat, string, exists, count, sum, item, date. Logic that doesn't fit is a compute "
     "activity."
 )
 WAIT = {

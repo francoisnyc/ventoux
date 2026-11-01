@@ -1,0 +1,36 @@
+"""A date: a day on the calendar, written exactly `YYYY-MM-DD` (brief, D66).
+
+One function reads the text, so every place a date enters (an expression's literal, a form, the
+opening, an event) refuses the same texts the same way.
+"""
+
+from datetime import date
+
+HOW_TO_WRITE = 'write a date as YYYY-MM-DD, such as "2026-10-31"'
+
+
+def calendar_date(text: str) -> date | None:
+    """The day `text` names, if it is exactly `YYYY-MM-DD` and a real day; else None.
+
+    Not `date.fromisoformat`: since Python 3.11 it also reads `20261031` and the week date
+    `2026-W44-6`, which a date never is (brief, D66). So the shape is checked first, character by character.
+    """
+    if not written_as_a_date(text):
+        return None
+    try:
+        # Year 0, month 13 and 30 February are refused here, as no such day exists.
+        return date(int(text[0:4]), int(text[5:7]), int(text[8:10]))
+    except ValueError:
+        return None
+
+
+def written_as_a_date(text: str) -> bool:
+    """Whether `text` is ten characters: four digits, a dash, two digits, a dash, two digits."""
+    digits = text[0:4] + text[5:7] + text[8:10]
+    return (
+        len(text) == 10
+        and text[4] == "-"
+        and text[7] == "-"
+        # ASCII only: `str.isdigit` would also take digits from other scripts, such as "٢".
+        and all(character in "0123456789" for character in digits)
+    )

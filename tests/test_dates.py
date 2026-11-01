@@ -1,0 +1,179 @@
+"""Dates: a day on the calendar the case was given, compared as a value; nothing reads today.
+
+See docs/layers/16-field-types.md (16a), docs/guides/expressions.md and brief D66.
+"""
+
+import json
+from datetime import UTC, date, datetime
+from pathlib import Path
+
+import pytest
+
+from ventoux.core.expressions import (
+    BooleanType,
+    DateType,
+    ExpressionError,
+    ExpressionInvalid,
+    FieldType,
+    NumberType,
+    StringType,
+    check,
+    evaluate,
+    parse_expression,
+    render,
+)
+from ventoux.tooling.schema import case_schema, schema_files
+
+ROOT = Path(__file__).parent.parent
+
+
+def test_a_date_literal_that_is_not_a_day_is_refused() -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression({"date": "2026-02-30"})
+    assert str(refused.value) == (
+        'date: "2026-02-30" is not a day on the calendar; '
+        'write a date as YYYY-MM-DD, such as "2026-10-31"'
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "20261031",  # Python's `date.fromisoformat` reads this since 3.11; D66 doesn't
+        "2026-W44-6",  # a week date, the same
+        "2026-1-5",  # a day and a month need two digits each
+        "31/10/2026",
+        "2026-10-31T23:30:00Z",  # a moment, not a day
+        "0000-01-01",  # there is no year 0
+        "2026-13-01",
+        "٢٠٢٦-١٠-٣١",  # digits, but not ASCII ones
+    ],
+)
+def test_only_yyyy_mm_dd_naming_a_real_day_is_a_date(text: str) -> None:
+    with pytest.raises(ExpressionInvalid, match="is not a day on the calendar"):
+        parse_expression({"date": text})
+
+
+def test_a_date_literal_takes_a_text() -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        parse_expression({"date": 20261031})
+    assert str(refused.value) == 'date takes a text, like {"date": "2026-10-31"}'
+
+
+def test_a_date_literal_is_a_day_and_reads_as_feel_writes_it() -> None:
+    literal = parse_expression({"date": "2026-10-31"})
+    assert literal == date(2026, 10, 31)
+    assert render(literal) == 'date("2026-10-31")'
+
+
+CLAIM: dict[str, FieldType] = {
+    "incident_date": DateType(),
+    "policy_start": DateType(),
+    "note": StringType(),
+    "amount": NumberType(),
+}
+
+
+def test_a_date_compared_with_a_number_is_refused_before_anything_runs() -> None:
+    compared = parse_expression({">": [{"var": "incident_date"}, 30]})
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(compared, CLAIM)
+    assert str(refused.value) == (
+        ">[1]: `>` compares two numbers or two dates, and this is a number, not a date"
+    )
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        {">=": [{"var": "incident_date"}, {"var": "policy_start"}]},
+        {"<": [{"var": "incident_date"}, {"date": "2027-01-01"}]},
+        {"==": [{"var": "incident_date"}, {"date": "2026-10-31"}]},
+        {"in": [{"var": "incident_date"}, [{"date": "2026-12-25"}, {"date": "2026-12-26"}]]},
+    ],
+)
+def test_two_dates_compare(condition: object) -> None:
+    assert check(parse_expression(condition), CLAIM) == BooleanType()
+
+
+def test_a_date_compared_with_a_text_is_refused_write_a_date_literal() -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(parse_expression({"==": [{"var": "incident_date"}, "2026-10-31"]}), CLAIM)
+    assert str(refused.value) == (
+        "==[1]: `==` compares values of the same type, and this is a string, not a date"
+    )
+
+
+def test_a_date_ordered_against_a_text_is_refused() -> None:
+    with pytest.raises(ExpressionInvalid) as refused:
+        check(parse_expression({"<": [{"var": "note"}, {"var": "incident_date"}]}), CLAIM)
+    assert str(refused.value) == (
+        "<[0]: `<` compares two numbers or two dates, and this is a string"
+    )
+
+
+def test_string_of_a_date_is_a_text() -> None:
+    assert check(parse_expression({"string": [{"var": "incident_date"}]}), CLAIM) == StringType()
+
+
+def test_today_has_no_shape_so_it_cannot_be_written() -> None:
+    # No operator reads the calendar, as none reads the clock (brief, D66).
+    with pytest.raises(ExpressionInvalid, match="^`today` is not an operator"):
+        parse_expression({">": [{"var": "incident_date"}, {"today": []}]})
+
+
+BEFORE_2027 = parse_expression({"<": [{"var": "incident_date"}, {"date": "2027-01-01"}]})
+
+
+def test_a_date_field_holding_a_text_is_an_error_never_false() -> None:
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(BEFORE_2027, {"incident_date": "2026-10-31"})
+    assert str(stopped.value) == (
+        "`<` compares two numbers or two dates, and it was given a string"
+    )
+
+
+def test_a_date_field_holding_a_moment_is_an_error() -> None:
+    # Python: a `datetime` is also a `date`, so it must be refused by name (brief, D66).
+    moment = datetime(2026, 10, 31, 23, 30, tzinfo=UTC)
+    with pytest.raises(ExpressionError) as stopped:
+        evaluate(BEFORE_2027, {"incident_date": moment})
+    assert str(stopped.value) == (
+        "incident_date holds a datetime, and an expression reads only decimals, texts, "
+        "booleans and dates"
+    )
+
+
+@pytest.mark.parametrize(
+    ("condition", "holds"),
+    [
+        ({">=": [{"var": "incident_date"}, {"var": "policy_start"}]}, True),
+        ({"<": [{"var": "incident_date"}, {"var": "policy_start"}]}, False),
+        ({"==": [{"var": "incident_date"}, {"date": "2026-10-31"}]}, True),
+        ({"!=": [{"var": "incident_date"}, {"date": "2026-10-31"}]}, False),
+        ({"in": [{"var": "incident_date"}, [{"date": "2026-10-31"}]]}, True),
+    ],
+)
+def test_two_dates_compare_as_days(condition: object, holds: bool) -> None:
+    file = {"incident_date": date(2026, 10, 31), "policy_start": date(2026, 1, 1)}
+    assert evaluate(parse_expression(condition), file) is holds
+
+
+def test_string_of_a_date_gives_yyyy_mm_dd() -> None:
+    said = evaluate(
+        parse_expression({"string": [{"var": "incident_date"}]}),
+        {"incident_date": date(2026, 1, 5)},
+    )
+    assert said == "2026-01-05"
+
+
+def test_the_published_schema_holds_the_date_and_no_today() -> None:
+    written = json.dumps(case_schema())
+    # A date field, and the literal's shape: the calendar check is the engine's (brief, D60).
+    assert '"const": "date"' in written or '"enum": ["date"]' in written
+    assert '"required": ["date"]' in written
+    # No operator reads the calendar, so the schema has no shape for one (brief, D66).
+    assert "today" not in written
+    # Regenerated with `ventoux schema`; CI's `--unchanged` checks the same bytes.
+    for name, text in schema_files().items():
+        assert (ROOT / "schema" / name).read_text() == text

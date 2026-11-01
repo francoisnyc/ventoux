@@ -114,7 +114,7 @@ When the definition is checked, before anything runs:
 | `{">": [{"var": "approved_amount"}, "100"]}` | `` >[1]: `>` compares two numbers or two dates, and this is a string `` |
 | `{">": [{"var": "incident_date"}, 30]}` | `` >[1]: `>` compares two numbers or two dates, and this is a number, not a date `` |
 | `{"==": [{"var": "incident_date"}, "2026-10-31"]}` | `` ==[1]: `==` compares values of the same type, and this is a string, not a date `` |
-| `{"date": "2026-02-30"}` | `` date: "2026-02-30" is not a day on the calendar; write a date as YYYY-MM-DD, such as "2026-02-28" `` |
+| `{"date": "2026-02-30"}` | `` date: "2026-02-30" is not a day on the calendar; write a date as YYYY-MM-DD, such as "2026-10-31" `` |
 | `{">": [{"var": "aproved_amount"}, 100]}` | `` >[0]: aproved_amount is not a declared field `` |
 
 **Why `now` can't be written.** A case runs as a Temporal workflow, which can be replayed later

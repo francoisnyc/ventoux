@@ -17,6 +17,7 @@ from ventoux.core.expressions import (
     BooleanType,
     Cat,
     Count,
+    DateType,
     Div,
     Eq,
     Exists,
@@ -48,7 +49,7 @@ from ventoux.core.expressions import (
 
 NOT_AN_OPERATOR = (
     "`now` is not an operator. The operators are: var, ==, !=, >, >=, <, <=, and, or, !, +, -, *, "
-    "/, if, in, cat, string, exists, count, sum, item. Logic that doesn't fit is a compute "
+    "/, if, in, cat, string, exists, count, sum, item, date. Logic that doesn't fit is a compute "
     "activity."
 )
 
@@ -634,6 +635,7 @@ REFUND: dict[str, FieldType] = {
     "order_id": ReferenceType(system="orders"),
     "review.outcome": OutcomeType(outcomes=("approve", "reject")),
     "items": ListType(fields={"risk": StringType(), "amount": NumberType()}),
+    "incident_date": DateType(),  # the guide's dates (brief, D66)
 }
 
 
@@ -658,7 +660,7 @@ def test_an_undeclared_field_is_rejected() -> None:
     [
         (
             {">": [{"var": "approved_amount"}, "100"]},
-            ">[1]: `>` compares numbers, and this is a string",
+            ">[1]: `>` compares two numbers or two dates, and this is a string",
         ),
         (
             {"==": [{"var": "approved_amount"}, "100"]},
@@ -712,7 +714,8 @@ def test_an_if_is_checked_on_both_branches(data: object, message: str) -> None:
         ),
         (
             {"string": [{"var": "review.outcome"}]},
-            "string[0]: `string` takes a number, a boolean or a reference, and this is an outcome",
+            "string[0]: `string` takes a number, a boolean, a reference or a date, "
+            "and this is an outcome",
         ),
     ],
 )
@@ -736,7 +739,7 @@ def test_logic_arithmetic_and_text_are_checked(data: object, message: str) -> No
         (
             {"in": [{"var": "order_id"}, ["ORD-7"]]},
             (
-                "in[0]: `in` looks for a number, a string, a boolean or an outcome, "
+                "in[0]: `in` looks for a number, a string, a boolean, an outcome or a date, "
                 "and this is a reference to orders"
             ),
         ),

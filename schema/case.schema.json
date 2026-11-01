@@ -716,6 +716,37 @@
       "title": "CountOver",
       "type": "object"
     },
+    "DateType": {
+      "additionalProperties": false,
+      "description": "A day on the calendar, with no time and no time zone (brief, D66).",
+      "properties": {
+        "type": {
+          "const": "date",
+          "default": "date",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "DateType",
+      "type": "object"
+    },
+    "Day": {
+      "additionalProperties": false,
+      "properties": {
+        "date": {
+          "maxLength": 10,
+          "minLength": 10,
+          "type": "string"
+        }
+      },
+      "required": [
+        "date"
+      ],
+      "type": "object"
+    },
     "DeclaredEvent": {
       "additionalProperties": false,
       "description": "An event from outside the case: who may send it, and what it carries (brief, D41).",
@@ -859,6 +890,9 @@
           "type": "boolean"
         },
         {
+          "$ref": "#/$defs/Day"
+        },
+        {
           "$ref": "#/$defs/Var"
         },
         {
@@ -930,6 +964,7 @@
       "discriminator": {
         "mapping": {
           "boolean": "#/$defs/BooleanType",
+          "date": "#/$defs/DateType",
           "list": "#/$defs/ListType",
           "number": "#/$defs/NumberType",
           "outcome": "#/$defs/OutcomeType",
@@ -953,6 +988,9 @@
         },
         {
           "$ref": "#/$defs/ReferenceType"
+        },
+        {
+          "$ref": "#/$defs/DateType"
         },
         {
           "$ref": "#/$defs/ListType"
@@ -2170,6 +2208,9 @@
         },
         {
           "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/Day"
         }
       ]
     },
