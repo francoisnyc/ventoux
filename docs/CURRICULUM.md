@@ -1,6 +1,8 @@
 # Ventoux — building it layer by layer
 
 Status: draft, 2026-10-04. Order: layer 0, the tracer bullet, layer 1, the spike, layers 2–15.
+Layers 16–21, the rest of v1.0, were added on 2026-10-31, after layer 15. They are drafts: each
+layer's design note may change what they say.
 Each layer is one pull request. Don't start a layer until the previous one is merged and you can
 explain it in your own words.
 
@@ -354,9 +356,93 @@ short note, not a layer.
 
 ---
 
-After layer 15, still in v1.0: the audit export (sensitive values as ciphertext, decision D15); case
-lifecycle features (required steps, one step per item of a collection, child cases); more field
-types (a date, an option from a system's list, a file attachment); claiming, assigning and
-reassigning tasks, and assignment by rule; a production key provider adapter (Vault or a cloud
-KMS); the deployment guide and `ventoux doctor` (decision D19); the AgentDojo benchmark; and a
-published package.
+## 16. More field types: dates, options, attachments
+
+- **Learn:** a field type is a check as much as a shape; a date is a value, not a clock (comparing
+  two dates is pure, asking what day it is isn't); an answer checked against a system at the moment
+  it is given; a document kept as a reference, never its bytes in the history.
+- **Build:** the date first: a `date` field, stored as a calendar date, compared and shown, with no
+  expression reading today (D20 stays free of the clock). Then an option from a registered system's
+  list, checked through an activity when the answer is given; and a file attachment, a reference
+  to a registered document store. Each in the definition format, the JSON Schema, the builder, the
+  diff and the plain forms.
+- **Negative test:** an expression comparing a date with a number is refused before anything runs;
+  an option the system's list doesn't hold is refused, and the refusal recorded; an attachment that
+  names no registered store is refused.
+- **Reference:** none in the prototype. Timers anchored to a date build on this later (the README
+  draft's "Beyond v1.0").
+- **Check yourself:** why may an expression compare two dates but never ask what day it is?
+
+## 17. Task assignment
+
+- **Learn:** who may answer a task (its role) and who is asked to (its assignee); a role's queue;
+  claiming, assigning and reassigning as events in the case's history; assignment by rule, written
+  in the definition and checked like any other rule.
+- **Build:** claiming a task from its role's queue, and giving it back; assigning and reassigning
+  it, by a person whose role allows it; the case report showing who holds each task; assignment
+  rules in the definition, shown in the diff and the plain forms.
+- **Negative test:** a claim by someone without the task's role is refused; a reassignment by
+  someone not allowed to assign is refused; an assignment rule that can only pick people who can't
+  answer the task is refused at validation.
+- **Reference:** `src/case/worklist.ts` (an assignee keeps a task off other people's worklists).
+- **Check yourself:** is an assignment a permission? What changes for the person assigned, and
+  what doesn't?
+
+## 18. Case lifecycle: required steps, repeated steps, child cases
+
+- **Learn:** required work, and what "nothing left to do" means then; a step run once per item of
+  a list; a child case, with its own file, release and lifecycle, and how its parent hears that it
+  ended.
+- **Build:** required steps, without which the case can't close, and validation that each can
+  still be done; one step per item of a list field, each run given its item; child cases started
+  from a step, reporting their end to the parent by a signal (the checkpoint's note carried for
+  D27 and D48).
+- **Negative test:** a required step that no rule or person can ever start is refused at
+  validation; a step repeated over a field that isn't a list is refused; a child case of a
+  definition not active in the environment is refused before it starts.
+- **Reference:** `src/temporal/case-workflow.ts` (fragments run as child workflows, signalled only
+  once started).
+- **Check yourself:** what can a child case never do to its parent, and why?
+
+## 19. Audit export and a production key provider
+
+- **Learn:** an audit trail kept apart from Temporal's history, with its own retention; why
+  sensitive values leave encrypted and stay so (D15); keys held by the platform's key service,
+  never by Ventoux.
+- **Build:** the audit export, an append-only copy of case and run events, sensitive values as
+  ciphertext; a key provider for Vault or a cloud KMS, behind the existing `KeyProvider`.
+- **Negative test:** an exported event holding a sensitive value in clear text fails the export; a
+  key the provider can't give is an error that says so, never an empty value.
+- **Reference:** none in the prototype.
+- **Check yourself:** once a case is forgotten, what does its audit export still say, and what can
+  no one read?
+
+## 20. Deployment and the published package
+
+- **Learn:** what a deployment must lock down (D19, the trusted caller); checking a deployment
+  rather than only describing it; a conformance suite as the contract any other implementation
+  meets.
+- **Build:** the deployment guide; `ventoux doctor`, checking what it can of a deployment; the
+  conformance suite (definitions with their expected validation results), published with the JSON
+  Schema; the published package.
+- **Negative test:** `ventoux doctor` fails on a deployment that breaks a rule it checks, naming the
+  rule; a change to validation that alters a conformance result fails CI.
+- **Reference:** none in the prototype.
+- **Check yourself:** which of a deployment's promises can `ventoux doctor` check, and which can
+  only the guide state?
+
+## 21. The AgentDojo benchmark
+
+- **Learn:** measuring security and utility together; what a prompt-injection benchmark measures,
+  and what it can't.
+- **Build:** AgentDojo's suites run through Ventoux (plans drafted, checked and run), with security
+  and utility results published and reproducible.
+- **Negative test:** an injected task that would send data to an attacker's sink is refused before
+  any activity is scheduled.
+- **Reference:** none in the prototype; [AgentDojo](https://github.com/ethz-spylab/agentdojo).
+- **Check yourself:** what would a perfect security score with a low utility score tell you?
+
+---
+
+After layer 21, v1.0 is built. What comes after it is listed under "Beyond v1.0" in
+`docs/README-draft.md`.

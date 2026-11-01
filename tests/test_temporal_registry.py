@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from one_copy import put_back, second_copies
 from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHistory
@@ -189,6 +190,22 @@ def test_a_worker_publishes_its_manifest() -> None:
         "ventoux.case",
         {"kyc.check@1": Bound("KycCheck", "kyc")},
     )
+
+
+def test_the_registry_worker_loads_no_second_copy_of_ventoux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Temporal: a registry defined here is imported afresh with this file, which imports the
+    # builder through `ventoux.testing`; only Ventoux's runner passes the builder through, so a
+    # registry worker on Temporal's default runner would hang a second builder on
+    # `ventoux.tooling` (brief, D65).
+    put_back(monkeypatch)
+
+    async def scenario(client: Client) -> None:
+        return None
+
+    in_production(scenario, registry=EveryRequestRegistry)
+    assert second_copies() == []
 
 
 def test_a_worker_refuses_to_start_without_its_registry() -> None:

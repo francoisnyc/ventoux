@@ -22,6 +22,8 @@ from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.worker import Worker
 
+from ventoux.temporal.sandbox import SANDBOX
+
 # Temporal: the workflow sandbox imports a workflow's modules afresh; `case` is deterministic and
 # passed through, imported once and shared (as in `cases.py`).
 with workflow.unsafe.imports_passed_through():
@@ -240,6 +242,7 @@ def registry_worker(client: Client, registry: type[RegistryWorkflow] = RegistryW
         task_queue=REGISTRY_QUEUE,
         workflows=[registry],
         activities=[activities.ended],
+        workflow_runner=SANDBOX,  # a registry may be defined in a module that imports Ventoux
     )
 
 

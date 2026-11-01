@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from one_copy import put_back, second_copies
 from replaying import replay_history
 from skipping_server import time_skipping
 from temporalio import workflow
@@ -66,6 +67,7 @@ from ventoux.temporal.forget import (
     opener_refusal,
     propose_forget,
 )
+from ventoux.temporal.sandbox import SANDBOX
 from ventoux.temporal.worker import case_worker
 
 # Temporal: this module defines a workflow, so the workflow sandbox imports it afresh. What it
@@ -114,7 +116,12 @@ def on_temporal[T](
                 forget=DevelopmentForget,
                 activity_executor=threads,
             ),
-            Worker(environment.client, task_queue="signals", workflows=[SignalsAnEndedCase]),
+            Worker(
+                environment.client,
+                task_queue="signals",
+                workflows=[SignalsAnEndedCase],
+                workflow_runner=SANDBOX,  # one builder, shared, as in every worker here
+            ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=30)
 
@@ -199,6 +206,20 @@ def test_a_signal_to_an_ended_case() -> None:
     # ask the key provider which it is (9c, "How it works", step 2).
     not_found = "refused: Unable to signal external workflow because it was not found"
     assert on_temporal(scenario) == [not_found, not_found]
+
+
+def test_the_workers_here_load_no_second_copy_of_ventoux(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Temporal: a workflow defined here is imported afresh with this file, which imports the
+    # builder through `ventoux.testing`; only Ventoux's runner passes the builder through, so a
+    # worker on Temporal's default runner would hang a second builder on `ventoux.tooling`
+    # (docs/layers/fix-sandbox-reimport.md).
+    put_back(monkeypatch)
+
+    async def scenario(client: Client) -> None:
+        return None
+
+    on_temporal(scenario)
+    assert second_copies() == []
 
 
 # --- Slice 4: the request on Temporal ---

@@ -364,30 +364,37 @@ production UI.
 
 ## Roadmap to v1.0
 
+A ticked item is built. An open one says what is built of it so far, if anything.
+
 - [ ] The engine in Python (Temporal Python SDK, Pydantic), with the definition format published as
-      JSON Schema and a conformance suite any implementation must pass
-- [ ] A typed Python builder that produces plans and Cases, so definitions are written as code and
+      JSON Schema and a conformance suite any implementation must pass. Built: the engine and the
+      published schema (`ventoux schema`). Left: the conformance suite.
+- [x] A typed Python builder that produces plans and Cases, so definitions are written as code and
       checked as data
-- [ ] Existing Temporal workflows as case steps, each with a declared contract (inputs, outputs
+- [x] Existing Temporal workflows as case steps, each with a declared contract (inputs, outputs
       and their provenance, risk)
-- [ ] Human tasks: named outcomes whose forms set case-file fields, approval defaults computed from
+- [x] Human tasks: named outcomes whose forms set case-file fields, approval defaults computed from
       provenance
 - [ ] Task assignment: a person claims a task from a role's queue, or assigns or reassigns it to
       someone else; and assignment by rule, written in the definition
 - [ ] Case lifecycle: closing when nothing is left to do, closing by a person with a declared
-      reason, required steps, one step per collection item, child cases
-- [ ] Case data: typed references shown through resolvers, sensitive fields encrypted per case,
-      `ventoux forget`, facts with the time they were obtained and `max_age`
+      reason, required steps, one step per collection item, child cases. Built: both ways of
+      closing. Left: required steps, one step per collection item, child cases.
+- [x] Case data: typed references shown through resolvers, sensitive fields encrypted per case,
+      forgetting a case (a request one person proposes and another approves), facts with the time
+      they were obtained and `max_age`
 - [ ] More field types: a date, stored and compared; an option from a system's list, checked
       against that system when the answer is given; and a file attachment, a reference to a
       document store, uploaded from the inbox
-- [ ] Failures: retry policies and idempotency in contracts, business failures as outcomes, a
+- [x] Failures: retry policies and idempotency in contracts, business failures as outcomes, a
       "needs attention" queue
 - [ ] Audit export: an append-only copy of case and run events, with its own retention and
       sensitive values kept encrypted
+- [ ] A production key provider (Vault or a cloud KMS), a deployment guide, and `ventoux doctor`
+      to check what it can of a deployment
 - [ ] Security and utility results on the [AgentDojo](https://github.com/ethz-spylab/agentdojo)
       prompt-injection benchmark
-- [ ] A published Python package and a `ventoux` CLI
+- [ ] A published Python package and a `ventoux` CLI. Built: the CLI. Left: the published package.
 
 Beyond v1.0, tracked as issues: stages, advanced joins (such as an inclusive join, waiting for
 every branch that started), timers anchored to a date on the case, absolute and recurring timers,

@@ -267,7 +267,7 @@ What to know:
 - **A workflow step can't be given a sensitive value:** its worker belongs to another team and
   doesn't hold the case's key. The step fails before it starts.
 - **Replay needs the key,** so a worker replaying a case uses the same key provider, and
-  Ventoux's workflow runner, `SANDBOX` from `ventoux.temporal.worker`, as `case_worker` does: it
+  Ventoux's workflow runner, `SANDBOX` from `ventoux.temporal.sandbox`, as `case_worker` does: it
   keeps one copy of Ventoux's own code in Temporal's sandbox.
 
 ### What the engine refuses
