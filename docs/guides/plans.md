@@ -278,8 +278,8 @@ stops when:
   tries the next transition to `pay`:
 
   ```
-  stopped at check_order: on done, amount > 100 can't be evaluated: `>` compares numbers, and it
-  was given a string: the step needs attention, and nothing after it runs
+  stopped at check_order: on done, amount > 100 can't be evaluated: `>` compares two numbers or
+  two dates, and it was given a string: the step needs attention, and nothing after it runs
   ```
 
   The same holds for a condition that gives anything but `true` or `false`, for an event the

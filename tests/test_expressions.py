@@ -134,7 +134,7 @@ def test_a_value_an_expression_cannot_read_is_an_error() -> None:
         evaluate(Var(var="approved_amount"), {"approved_amount": 250.0})
     assert str(stopped.value) == (
         "approved_amount holds a binary float, and an expression reads only decimals, "
-        "texts and booleans"
+        "texts, booleans and dates"
     )
 
 
@@ -155,7 +155,9 @@ def test_comparing_a_text_with_a_number_is_an_error() -> None:
     over_100 = parse_expression({">": [{"var": "approved_amount"}, 100]})
     with pytest.raises(ExpressionError) as stopped:
         evaluate(over_100, {"approved_amount": "250"})
-    assert str(stopped.value) == "`>` compares numbers, and it was given a string"
+    assert str(stopped.value) == (
+        "`>` compares two numbers or two dates, and it was given a string"
+    )
 
 
 @pytest.mark.parametrize(
