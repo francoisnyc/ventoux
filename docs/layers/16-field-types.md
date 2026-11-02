@@ -309,9 +309,7 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
 
 ## Sketched, decided when their parts start
 
-- **16b, the option.** Which activity checks it, and its contract's shape; whether the list is
-  read once or at each answer; what is recorded when an answer is refused; whether an expression
-  compares an option as a text or only with `==`.
+- **16b, the option.** Its choices are below, in "16b: the option" (2026-11-02).
 - **16c, the attachment.** How a store is registered (beside resolvers, D16); what an answer gives
   (a reference the store issued, never bytes); what the history and the plain forms show; who may
   open it (the viewer, through the store, as D16's resolvers).
@@ -363,3 +361,112 @@ engine's own half.
 be a number, and it holds a string` was no message the evaluator gives, and no test read the table.
 The row now says what happens (`` `>` compares two numbers or two dates, and it was given a string ``),
 and `test_the_guides_runtime_errors_are_what_the_evaluator_says` runs every row.
+
+
+# 16b: the option
+
+Status: 2026-11-02, a draft for agreement. Branch `layer-16b-options`, from `main` at `0dbf274`,
+with 16a merged (#80). The warm-up was learning question 39, recorded. The guides were written
+first: `docs/guides/case-data.md` ("Options"), `expressions.md` (the type and a refusal),
+`activities.md` ("An option's check") and `builder.md` (`examples/builder/options.py`), with the
+recommendations below.
+
+## What 16b is for
+
+**An answer a system must vouch for, checked when it is given.** An outcome's list is the
+definition's, so validation checks it before anything runs (D9). A branch, a product, a cost
+centre: those lists are a system's, and change on their own. A reference (D16) says "an ID in
+`branches`" and nothing checks it; the resolver only shows the record, later, and keeps nothing.
+An option is checked against the system's list at the one honest moment, when the person gives
+it, through an activity, so the answer the system gave is in the history and replay reads it.
+
+```text
+ana answers assess#1 accept, {"branch": "BR-0142"}
+  -> the answer is held; branches.holds@1 is scheduled with "BR-0142"
+  -> {"held": true}: the answer is taken, `branch` lands, checked by branches.holds@1
+  -> {"held": false}: refused ana's answer accept: branch is not one of the options branches holds
+```
+
+The curriculum's negative test: an option the system's list doesn't hold is refused, and the
+refusal recorded.
+
+**What is new in the engine:** until now an answer is taken, or refused, the moment it arrives.
+An answer holding an option is decided by two events: the answer, then the check's result.
+
+## Choices for 16b
+
+13. **A type of its own: `{"type": "option", "system": "branches"}`.** Beside `reference`, not a
+    reference marked `"checked": true`: an option is checked, a reference never is, and a type
+    that says so can't be half-configured. Where a contract's input wants a reference to
+    `branches`, an option of `branches` fits it (it is one, and a checked one); never the other
+    way. *Recommended.*
+
+14. **One check per system, named by the catalog, never by the definition.** The platform team
+    registers a read-only activity whose contract takes exactly one input, the value (a
+    reference to the system), and gives exactly one output, `held`, a boolean whose source is the
+    system; then `catalog.register_option_check("branches", "branches.holds@1")`. Refused: a check
+    whose effect isn't `read`, another shape, a system nobody registered, a second check for one
+    system. A definition names the system; `ventoux check` refuses an option of a system that has
+    no check (fail closed: nothing could check it). *Recommended.* The alternative, the definition
+    naming its check activity per field, lets two cases ask the same system differently.
+
+15. **The answer is held while the check runs.** The answer's form is checked as today (types,
+    outcome, role, D9, D22); if it sets an option, the engine schedules the check, one run per
+    option field, and holds the answer: nothing it sets lands, its outcome isn't the task's
+    yet, and the task's entry stays open, "being checked". When every check has answered:
+    - all held: the answer is taken as any answer is, its history line saying `checked by
+      branches.holds@1`;
+    - one not held: the answer is refused, the refusal recorded in the history, naming the field
+      and the system, never the value (D30); the task stays open for a corrected answer;
+    - a check fails after its contract's retries, or gives what its contract doesn't describe:
+      the answer is not taken, saying why, and the task stays open. Never taken as held (fail
+      closed); not "needs attention" either, since nothing has failed that a person can't fix by
+      answering again.
+    A second answer to the entry while it is being checked is refused at once ("assess#1 is being
+    checked"). A close waits for the checks, as for any running activity (D10). *Recommended.*
+    The alternatives: checking in the client before the answer is sent (the trusted caller vouches
+    for identity, never for facts, D19, and nothing would be in the history), or a Temporal update
+    running the check (the in-memory engine and the replay would still need the held answer).
+
+16. **Its source: the person, and the system that checked it.** `branch` lands with
+    `{person:ana, system:branches}`: Ana chose it, the system vouched for it. Both are trusted, so
+    nothing a policy allows changes; the history and the case map say both. Only the person counts
+    as "whose answer feeds" a step for approvals (D25). *Recommended.* The alternative, the person
+    alone, hides that a system was asked.
+
+17. **Only a person gives an option.** An option field set at the opening, by an event or by a
+    rule, or an activity's output typed as one, is refused by validation: nothing would check it.
+    A system that already knows the branch gives a `reference`. *Recommended.* The alternative,
+    checking at the opening and on events too, makes the opening and an event wait on an activity,
+    which neither does today; it can come later, with a use.
+
+18. **Checked once, when given; a fact with its time.** "BR-0142 was held when Ana answered" stays
+    true when the branch closes. The check's answer records when it was obtained (D18); a step that
+    needs the option still held uses `max_age`, and a stale option, given by a person, makes the
+    case need attention, as any stale fact from a person does (D18). *Recommended.*
+
+19. **Expressions read it like a reference.** `==` and `!=` with a value of the same system
+    (another option or a reference to it), `exists`, `string`; never a literal, since only the
+    system says which values exist, so `branch == "BR-0142"` is refused before anything runs.
+    *Recommended.* The alternative, comparing with literals, writes the system's list into the
+    definition, which is what an outcome is for.
+
+20. **Replay and the history.** The check is an activity like any other: scheduled, recorded,
+    replayed from its result, never asked again. The held answer crosses continue-as-new in the
+    state; a state carried before 16b holds none. A refusal and an acceptance are history lines,
+    word for word as the guides show.
+
+21. **No new engine version.** A definition readable before 16b holds no option, and the answer
+    path of one without an option is unchanged: it decides as it did (D60's dated line). The JSON
+    Schema's `$id` stays `engine-2`. *Recommended*, to confirm when built.
+
+22. **Shown, and the rest of the format.** The case map: "branch is an option of branches,
+    checked when given"; the plain diff names a type changed to an option; the digest reads it as
+    a type like any other; the builder gives `Field.option("branches")`. The inbox's picker (the
+    list to choose from) is the inbox's, later, through the resolver (D16).
+
+23. **Decision: D67,** recorded in the brief before 16b is built, adding to D9, D16, D18, D19 and
+    D30, whose text is kept.
+
+24. **What 16b leaves out:** checking options at the opening, on events or from rules; an option
+    of several values; listing a system's options for a picker; the attachment (16c).
