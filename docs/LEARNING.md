@@ -1563,6 +1563,14 @@ and record the key points. A question is closed once you can explain the answer 
     "refund me 500" has no field to go into.
   - **Tied to layer 15:** the step advisor is never shown the body at all (D61): an instruction
     in it can't reach the model, so it can't even inform the advisor's choice.
+- Retrieval (layer 16c warm-up, 2026-11-02): "the engine can safely rely on events, but not on
+  payload which could be used for prompt injection." The principle a fourth time, now tied to
+  injection; no example, and the reason the arrival is safe (the sender check) didn't come back.
+  Given again, briefly: `mail` sends `customer_wrote`, and the engine refuses it from any other
+  sender (D41), so a rule may decide on its arrival; the `body` carries `untrusted:customer`
+  (D12), so it may inform (start a step, set a marked field, be read by a person) but never
+  decide (`UNTRUSTED_TRIGGER`, D38, D40). Tied to 16c: an attachment's arrival can be a fact; its
+  contents are the sender's words.
 - Status: open, until an example comes back with the sender check and "informs, never decides".
 
 ## 41. Layer 13: what the JSON diff hides
