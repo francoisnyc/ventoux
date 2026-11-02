@@ -1822,4 +1822,6 @@ and record the key points. A question is closed once you can explain the answer 
   reads a clock and a time zone, neither of which the case holds.
 - Status: closed (both halves from memory, the second after one prompt).
 - Retrieval (end of layer 16b's walk-through, 2026-11-02): "because the clock changes on replay,
-  dates don't." The first half again, word for word; the second half (the time zone) asked again.
+  dates don't." The first half again, word for word; asked again whether `today` would be safe
+  with no replay: "no, the day depends on the time zone." Both halves, the second after the same
+  one prompt as in 16a. Status stays closed.
