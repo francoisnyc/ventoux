@@ -2,8 +2,8 @@
 
 > **For workflow developers.** This guide describes layer 9 as if it already worked; the code that
 > makes it true is built test-first, in four parts: references and who sees what (9a), sensitive
-> fields (9b), forgetting a person (9c) and fresh facts (9d). Dates are layer 16a's. The "Design
-> notes" at the end list what writing it revealed.
+> fields (9b), forgetting a person (9c) and fresh facts (9d). Dates are layer 16a's, options
+> 16b's. The "Design notes" at the end list what writing it revealed.
 
 **The rule of thumb:** a case file holds the **facts your rules decide on**, and **references** to
 everything else. Customers, orders, policies and documents stay in the systems that own them.
@@ -219,6 +219,54 @@ moment falls on depends on where you stand, so that choice belongs to whoever gi
 adjuster says which day the incident happened, a contract returns the day its system means. If a
 system only has a moment, its activity turns it into the day the business means, and its contract
 says it returns a date.
+
+## Options: a value a system's list must hold
+
+Some answers must be one of a list another system keeps: the branch handling a claim, a product, a
+cost centre. The list isn't yours to write, and it changes on its own (a branch closes). An
+**option** is such a value, checked against the system's list **when a person gives it**:
+
+```json
+"fields": {
+  "branch": {"type": "option", "system": "branches", "display": {"title": "Branch handling the claim"}}
+}
+```
+
+When Ana answers with `{"branch": "BR-0142"}`, the case asks the system, through the check activity
+your platform team registered for `branches` (activities guide, "An option's check"), and only then
+takes the answer:
+
+```text
+ana answered assess#1 accept as adjuster, setting branch, checked by branches.holds@1
+```
+
+An option the system's list doesn't hold is refused, and the refusal stays in the case's history;
+the task stays open for a corrected answer. The message names the field and the system, never the
+value, which may be hidden from whoever reads the history:
+
+```text
+refused ana's answer accept: branch is not one of the options branches holds
+```
+
+**It is checked once, when it is given.** "BR-0142 was open when Ana answered" stays true after the
+branch closes; like every fact, it records when it was obtained. If a step needs the branch still
+open where it uses it, say so with `max_age` (see "Fresh facts").
+
+**Nothing is taken on trust.** If the check can't be made (the system is down, or answers
+something the contract doesn't describe), the answer is not taken, and says why; nothing guesses
+that the option is fine.
+
+**Only a person gives an option.** The opening and an event's payload come from systems, and a
+rule decides on its own; an option one of them would set is refused (the opening when it is given,
+the event and the rule by `ventoux check`), since nothing would check it. An activity's output is
+never one: its contract can declare a reference, not an option. Nor is an option edited (cases
+guide, "Changing an open case"): an edit is checked for its type, never by the system, so the
+edit is refused when it is proposed. A system that already knows the branch gives a `reference`
+to `branches`.
+
+An option reads like a reference to its system (see the expressions guide): it is compared only
+with another value of the same system, and a value written in the definition is never one, since
+only the system can say which values exist.
 
 ## Sensitive data
 
@@ -662,3 +710,7 @@ the warehouse too.
     and whoever gives the date chooses the day; a field filled with today's date would be the
     clock by another door, so there is none; and a text date is still a text, so a date literal
     in an expression needs its own form, `{"date": "…"}`.
+12. **An option is a value the system vouches for, when it is given** (layer 16b). Writing
+    "Options" showed what to decide: whether it is a type of its own or a checked reference; which
+    activity checks it, and how the catalog names it; what happens while the check runs; its
+    source (the person, and the system that checked it); and why only a person gives one.

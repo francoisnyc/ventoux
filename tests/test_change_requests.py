@@ -789,6 +789,11 @@ def test_the_guides_change_example_runs_as_written() -> None:
     said = " ".join(SECTION.split())
     for quoted in (
         "pay.outcome is not a field of refund: only a declared field is edited",
+        # Said by tests/test_options.py, with the claim's branch (brief, D67).
+        (
+            "branch is an option of branches, given only by a person's answer, where branches "
+            "checks it: an edit is never checked, so give it in the answer to the task that sets it"
+        ),
         "approved_amount holds no value yet: an edit changes a value, never gives the first",
         "approved_amount is a number, and the edit gives a string",
         "approved_amount already holds that value: an edit changes it",

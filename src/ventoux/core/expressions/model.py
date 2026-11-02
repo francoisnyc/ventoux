@@ -306,7 +306,14 @@ COMPARISONS: dict[str, type[Eq] | type[Ne] | type[Gt] | type[Ge] | type[Lt] | ty
 # The types a field can be declared with, in the shape definitions use: `{"type": "number"}`.
 # Recursive through `ListType`, so the alias comes first, as `Expression` does.
 type FieldType = (
-    NumberType | StringType | BooleanType | OutcomeType | ReferenceType | DateType | ListType
+    NumberType
+    | StringType
+    | BooleanType
+    | OutcomeType
+    | ReferenceType
+    | OptionType
+    | DateType
+    | ListType
 )
 
 
@@ -352,6 +359,14 @@ class ReferenceType(Declared):
     """The ID of a record kept in another system, typed by that system's name (brief, D16)."""
 
     type: Literal["reference"] = "reference"
+    system: str
+
+
+class OptionType(Declared):
+    """One of a system's list, checked through that system's activity when a person gives it
+    (brief, D67)."""
+
+    type: Literal["option"] = "option"
     system: str
 
 

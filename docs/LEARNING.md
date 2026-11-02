@@ -49,6 +49,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 42 | Layer 12: why plans don't migrate | closed |
 | 43 | Layer 15: what an injected instruction can still influence | open |
 | 44 | Layer 16: why compare two dates but never ask what day it is | closed |
+| 45 | Layer 16b: why an option is checked once, through an activity, when given | closed |
 
 ---
 
@@ -1470,7 +1471,22 @@ and record the key points. A question is closed once you can explain the answer 
   - **Why it came up in 11c.** A rule's `stop` only takes paths away, so this set, a "may
     happen", stays sound; what has to be checked again are the claims that something always or
     never happens (11c's audit of the proofs).
-- Status: open.
+- Retrieval (layer 16b warm-up, 2026-11-02), asked with the claim written `pay`, `assess`,
+  `check`, each part after a reminder:
+  - **a), the passes:** "it needs several passes until nothing new is added." Right: pass 1 adds
+    only `check`, pass 2 `assess`, pass 3 `pay`, pass 4 nothing, and that empty pass ends it; the
+    written order changes how many passes, never the answer, since a case has no position.
+  - **a), the start:** reminded with two blank tables (start from everything, start from
+    nothing) for `pay` and `assess` requiring each other: "starting from everything, the
+    deadlock passes." Right: each vouches for the other and nothing comes out; grown from
+    nothing, neither enters, and validation says `DEADLOCK`. In the set means some real order of
+    events reaches it.
+  - **b):** reminded with a table of who writes each value and its stamp, and a rule
+    `set total = amount + fee`: "one look is enough, a computed field brings passes back."
+    Right: each writer stamps its own source, whatever it read, so no field's source depends on
+    another's; a field a rule computes takes the sources of what it read (brief, D42), which may
+    themselves be computed, so the check goes round until nothing changes (brief, D34).
+- Status: open, until it comes back without the reminders (every part came, each after one).
 
 ## 40. Layer 11: arrival is a fact, content is not
 
@@ -1806,3 +1822,27 @@ and record the key points. A question is closed once you can explain the answer 
 - In one line: comparing two dates reads only what the case was given; asking what day it is
   reads a clock and a time zone, neither of which the case holds.
 - Status: closed (both halves from memory, the second after one prompt).
+- Retrieval (end of layer 16b's walk-through, 2026-11-02): "because the clock changes on replay,
+  dates don't." The first half again, word for word; asked again whether `today` would be safe
+  with no replay: "no, the day depends on the time zone." Both halves, the second after the same
+  one prompt as in 16a. Status stays closed.
+
+## 45. Layer 16b: why an option is checked once, through an activity, when given
+
+> Why is an option checked once, through an activity, when the person gives it, rather than each
+> time a condition reads it?
+
+- Asked at the end of layer 16b's walk-through (2026-11-02), beside layer 16's own question.
+- Your answer: "the person chooses it, so it's checked once, when given." Right, the first part:
+  the check vouches for a person's choice at the moment they made it, so the fact it records is
+  "BR-0142 was held when Ana answered", which stays true after the branch closes (brief, D67).
+  A step that needs it still held says so with `max_age` (brief, D18).
+- Follow-up, asked: what would go wrong if a condition asked the branches system each time it read
+  `branch`? Your answer: "the system could answer differently on replay." Right, the second part:
+  a condition is a pure function of the case file (brief, D20) and can reach no system; the only
+  way to ask one is a registered activity, whose answer Temporal records in the history, so a
+  replay reads that answer and never asks again (`tests/test_temporal_options.py`). The same
+  reason as question 44's `today`: a value read afresh each run can decide differently on replay.
+- In one line: the person's choice is checked once, by an activity whose answer the history keeps,
+  so every replay sees the same "held".
+- Status: closed (both parts from memory, the second after one prompt).

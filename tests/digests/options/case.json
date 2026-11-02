@@ -1,0 +1,41 @@
+{
+  "case": "claim",
+  "display": {
+    "title": "Insurance claim"
+  },
+  "fields": {
+    "branch": {
+      "type": "option",
+      "system": "branches",
+      "display": {
+        "title": "Branch handling the claim"
+      }
+    }
+  },
+  "steps": {
+    "assess": {
+      "kind": "task",
+      "display": {
+        "title": "Assess the claim"
+      },
+      "roles": [
+        "adjuster"
+      ],
+      "outcomes": {
+        "accept": {
+          "display": {
+            "title": "Accept the claim"
+          },
+          "sets": [
+            "branch"
+          ]
+        },
+        "deny": {
+          "display": {
+            "title": "Deny the claim"
+          }
+        }
+      }
+    }
+  }
+}

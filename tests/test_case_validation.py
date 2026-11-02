@@ -1007,7 +1007,8 @@ def test_a_system_nobody_registered_is_refused() -> None:
             "fields.order_id",
             "UNKNOWN_SYSTEM",
             "order_id is a reference to ordrs, which is not a registered system: the systems are "
-            "crm, documents, kyc, orders, policies, portal; use one of them, or ask the platform team "
+            "branches, crm, documents, kyc, orders, policies, portal; use one of them, or ask the "
+            "platform team "
             "to register it",
         )
     ]

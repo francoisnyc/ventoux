@@ -309,9 +309,7 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
 
 ## Sketched, decided when their parts start
 
-- **16b, the option.** Which activity checks it, and its contract's shape; whether the list is
-  read once or at each answer; what is recorded when an answer is refused; whether an expression
-  compares an option as a text or only with `==`.
+- **16b, the option.** Its choices are below, in "16b: the option" (2026-11-02).
 - **16c, the attachment.** How a store is registered (beside resolvers, D16); what an answer gives
   (a reference the store issued, never bytes); what the history and the plain forms show; who may
   open it (the viewer, through the store, as D16's resolvers).
@@ -363,3 +361,242 @@ engine's own half.
 be a number, and it holds a string` was no message the evaluator gives, and no test read the table.
 The row now says what happens (`` `>` compares two numbers or two dates, and it was given a string ``),
 and `test_the_guides_runtime_errors_are_what_the_evaluator_says` runs every row.
+
+
+# 16b: the option
+
+Status: 2026-11-02, agreed: choices 13 to 24 as recommended; D67 written before 16b is built.
+Branch `layer-16b-options`, from `main` at `0dbf274`,
+with 16a merged (#80). The warm-up was learning question 39, recorded. The guides were written
+first: `docs/guides/case-data.md` ("Options"), `expressions.md` (the type and a refusal),
+`activities.md` ("An option's check") and `builder.md` (`examples/builder/options.py`), with the
+recommendations below.
+
+## What 16b is for
+
+**An answer a system must vouch for, checked when it is given.** An outcome's list is the
+definition's, so validation checks it before anything runs (D9). A branch, a product, a cost
+centre: those lists are a system's, and change on their own. A reference (D16) says "an ID in
+`branches`" and nothing checks it; the resolver only shows the record, later, and keeps nothing.
+An option is checked against the system's list at the one honest moment, when the person gives
+it, through an activity, so the answer the system gave is in the history and replay reads it.
+
+```text
+ana answers assess#1 accept, {"branch": "BR-0142"}
+  -> the answer is held; branches.holds@1 is scheduled with "BR-0142"
+  -> {"held": true}: the answer is taken, `branch` lands, checked by branches.holds@1
+  -> {"held": false}: refused ana's answer accept: branch is not one of the options branches holds
+```
+
+The curriculum's negative test: an option the system's list doesn't hold is refused, and the
+refusal recorded.
+
+**What is new in the engine:** until now an answer is taken, or refused, the moment it arrives.
+An answer holding an option is decided by two events: the answer, then the check's result.
+
+## Choices for 16b
+
+13. **A type of its own: `{"type": "option", "system": "branches"}`.** Beside `reference`, not a
+    reference marked `"checked": true`: an option is checked, a reference never is, and a type
+    that says so can't be half-configured. Where a contract's input wants a reference to
+    `branches`, an option of `branches` fits it (it is one, and a checked one); never the other
+    way. *Recommended.*
+
+14. **One check per system, named by the catalog, never by the definition.** The platform team
+    registers a read-only activity whose contract takes exactly one input, the value (a
+    reference to the system), and gives exactly one output, `held`, a boolean whose source is the
+    system; then `catalog.register_option_check("branches", "branches.holds@1")`. Refused: a check
+    whose effect isn't `read`, another shape, a system nobody registered, a second check for one
+    system. A definition names the system; `ventoux check` refuses an option of a system that has
+    no check (fail closed: nothing could check it). *Recommended.* The alternative, the definition
+    naming its check activity per field, lets two cases ask the same system differently.
+
+15. **The answer is held while the check runs.** The answer's form is checked as today (types,
+    outcome, role, D9, D22); if it sets an option, the engine schedules the check, one run per
+    option field, and holds the answer: nothing it sets lands, its outcome isn't the task's
+    yet, and the task's entry stays open, "being checked". When every check has answered:
+    - all held: the answer is taken as any answer is, its history line saying `checked by
+      branches.holds@1`;
+    - one not held: the answer is refused, the refusal recorded in the history, naming the field
+      and the system, never the value (D30); the task stays open for a corrected answer;
+    - a check fails after its contract's retries, or gives what its contract doesn't describe:
+      the answer is not taken, saying why, and the task stays open. Never taken as held (fail
+      closed); not "needs attention" either, since nothing has failed that a person can't fix by
+      answering again.
+    A second answer to the entry while it is being checked is refused at once ("assess#1 is being
+    checked"). A close waits for the checks, as for any running activity (D10). *Recommended.*
+    The alternatives: checking in the client before the answer is sent (the trusted caller vouches
+    for identity, never for facts, D19, and nothing would be in the history), or a Temporal update
+    running the check (the in-memory engine and the replay would still need the held answer).
+
+16. **Its source: the person, and the system that checked it.** `branch` lands with
+    `{person:ana, system:branches}`: Ana chose it, the system vouched for it. Both are trusted, so
+    nothing a policy allows changes; the history and the case map say both. Only the person counts
+    as "whose answer feeds" a step for approvals (D25). *Recommended.* The alternative, the person
+    alone, hides that a system was asked.
+
+17. **Only a person gives an option.** An option field set at the opening, by an event or by a
+    rule, or an activity's output typed as one, is refused by validation: nothing would check it.
+    A system that already knows the branch gives a `reference`. *Recommended.* The alternative,
+    checking at the opening and on events too, makes the opening and an event wait on an activity,
+    which neither does today; it can come later, with a use.
+
+18. **Checked once, when given; a fact with its time.** "BR-0142 was held when Ana answered" stays
+    true when the branch closes. The check's answer records when it was obtained (D18); a step that
+    needs the option still held uses `max_age`, and a stale option, given by a person, makes the
+    case need attention, as any stale fact from a person does (D18). *Recommended.*
+
+19. **Expressions read it like a reference.** `==` and `!=` with a value of the same system
+    (another option or a reference to it), `exists`, `string`; never a literal, since only the
+    system says which values exist, so `branch == "BR-0142"` is refused before anything runs.
+    *Recommended.* The alternative, comparing with literals, writes the system's list into the
+    definition, which is what an outcome is for.
+
+20. **Replay and the history.** The check is an activity like any other: scheduled, recorded,
+    replayed from its result, never asked again. The held answer crosses continue-as-new in the
+    state; a state carried before 16b holds none. A refusal and an acceptance are history lines,
+    word for word as the guides show.
+
+21. **No new engine version.** A definition readable before 16b holds no option, and the answer
+    path of one without an option is unchanged: it decides as it did (D60's dated line). The JSON
+    Schema's `$id` stays `engine-2`. *Recommended*, to confirm when built.
+
+22. **Shown, and the rest of the format.** The case map: "branch is an option of branches,
+    checked when given"; the plain diff names a type changed to an option; the digest reads it as
+    a type like any other; the builder gives `Field.option("branches")`. The inbox's picker (the
+    list to choose from) is the inbox's, later, through the resolver (D16).
+
+23. **Decision: D67,** recorded in the brief before 16b is built, adding to D9, D16, D18, D19 and
+    D30, whose text is kept.
+
+24. **What 16b leaves out:** checking options at the opening, on events or from rules; an option
+    of several values; listing a system's options for a picker; the attachment (16c).
+
+## Seams and tests for 16b (curriculum step 4)
+
+*Found while writing the seams (2026-11-02):* a case continues as new only at a quiet point,
+nothing running (`continue_now`, `temporal/cases.py`); an answer is held only while its check runs,
+so **continue-as-new never carries a held answer**. Choice 20's "the held answer crosses
+continue-as-new" needs no carried field: a test pins that the case doesn't switch while a check
+runs.
+
+25. **The seams the tests use,** all public:
+    - **The catalog:** `Catalog.register_option_check(system, contract)` refuses a check of the
+      wrong effect or shape, an unregistered system, a second check (`CatalogRefused`, its
+      message). `catalog.option_check(system)` gives the check's reference, for the engine.
+    - **Validation:** `parse_case` and `validate_case` (`ventoux check`): an option of a system
+      with no check; an option field the opening, an event, a rule or an output would set.
+    - **Expressions:** `check(expression, types)` with an `OptionType(system=…)`: an option
+      against a literal refused; against an option or reference of its system accepted; and the
+      fit of an option where a contract wants a reference (`fits_type`).
+    - **A case, in memory:** `run_case(..., activities={"branches.holds@1": …})`, reading the
+      history, the case file and its sources, `waiting_for` and `needs_attention`. The check's run
+      is named `assess#1.branch` (the entry, then the field), so `held=["assess#1.branch"]` keeps
+      it running while a test sends a second answer or a close.
+    - **On Temporal:** one test on the test server: refused, then taken, both in the history; the
+      recorded history replays without asking the check again; the case doesn't continue as new
+      while a check runs.
+    - **The readings and the format:** `Field.option("branches")`, `case_schema()`, `ventoux map`,
+      `ventoux diff --plain`, the digest (a new pinned package), and the guides' tables and
+      examples, run as in 16a.
+
+26. **The tests, in order, negative first:**
+    1. The catalog refuses an option check: `effect: write`; an input or output of another shape;
+       an unregistered system; a second check for one system.
+    2. Validation refuses an option of a system with no check, and an option field set by the
+       opening, an event, a rule or an output.
+    3. **The curriculum's:** an answer setting an option the system doesn't hold is refused, the
+       refusal in the history, naming the field and the system, never the value; nothing lands;
+       the task stays open; a corrected answer is then taken.
+    4. Held: the answer is taken, `checked by branches.holds@1`, its sources the person and the
+       system.
+    5. The check fails, or gives another shape: the answer is not taken, saying why; the task
+       open; the case not needing attention.
+    6. A second answer while being checked is refused; a close waits for the check.
+    7. Expressions: an option against a literal refused (the guide's row); against an option of
+       its system accepted; an option fits a reference input of its system, never the other way.
+    8. A stale option, by `max_age`, needs attention (D18).
+    9. On Temporal: refused then taken; replayed without asking again; no switch while checking.
+    10. The builder, the schema, the case map, the plain diff, the digest, and the guides' blocks.
+
+## Decided while building 16b
+
+- **The catalog refuses with `ValueError`,** as every catalog rule does, not a `CatalogRefused`
+  class as choice 25 said; the message is the seam.
+- **"A system nobody registered" needs no rule of its own** (slice 1). A check's contract takes a
+  reference to its system and gives a value from it, and the catalog refuses to register a
+  contract whose reference or source names an unregistered system (D30). So no check for an
+  unregistered system can reach `register_option_check`; naming another system's check is refused
+  by its shape (its reference and its source name the other system).
+- **The builder reads an option as a `ReferenceExpr`** (slice 10), not a class of its own: an
+  option compares exactly as a reference does, and neither class knows its system, so a text
+  beside it is refused when the file runs and another system's value by `ventoux check`. A new
+  class would have added nothing a test could tell apart.
+- **The development catalog has `branches` and its check, `branches.holds@1`,** with a fake that
+  holds BR-0142 and BR-0007: so the guide's example passes `ventoux check` and runs on the
+  development worker. Tests that need a system with no check build a small catalog of their own.
+- **The plain diff walks into a declared type** (slice 10). It showed every model under an
+  expression's operator as one expression, and a declared type is one by inheritance, so a
+  reference or an option moved to another system crashed the diff.
+  It now names `fields.branch.system`.
+
+## Promises (16b)
+
+Every claim this part of the note, D67 and the guides make about the option, and the test that
+fails if it isn't true. Tests are in `tests/test_options.py` unless named. "Pinned" and "mutation"
+as in 16a's table.
+
+| # | Promise | Test | Seen failing |
+|---|---|---|---|
+| 1 | **The curriculum's:** an option the system doesn't hold is refused and the refusal recorded, naming the field and the system, never the value; nothing lands; the task stays open; a corrected answer is taken | `test_an_option_the_system_does_not_hold_is_refused_and_the_refusal_recorded` | failed first |
+| 2 | The catalog refuses an option check that writes, takes or gives another shape, or is a system's second; a read-only check of the right shape registers | `test_an_option_check_that_writes_is_refused`, `test_an_option_check_of_another_shape_is_refused` (three shapes), `test_a_second_option_check_for_one_system_is_refused`, `test_a_read_only_check_of_the_right_shape_is_how_its_system_is_asked` | failed first |
+| 3 | A check for a system nobody registered can't be registered | D30's rule: `test_the_guides_refusals_are_what_the_catalog_says` (`tests/test_catalog.py`, its `reference("sail")` row) | pinned (no rule of its own, see "Decided while building 16b") |
+| 4 | `ventoux check` refuses an option of a system with no check, and accepts one with a check | `test_an_option_of_a_system_with_no_check_is_refused`, `test_an_option_a_person_gives_with_its_systems_check_is_accepted` | failed first |
+| 5 | Only a person gives an option: the opening, an event and a rule are refused | `test_an_option_given_at_the_opening_is_refused`, `test_an_event_carrying_an_option_is_refused`, `test_a_rule_setting_an_option_is_refused` | failed first |
+| 6 | Held, the answer is taken, `checked by branches.holds@1`; the value's sources are the person and the system, the outcome's the person alone | `test_an_option_the_system_holds_comes_from_the_person_and_the_system` | failed first |
+| 7 | The check fails, or answers another shape: the answer is not taken, saying why; the task waits; the case doesn't need attention | `test_an_option_whose_check_cannot_be_made_is_not_taken` (both) | failed first (a `StopIteration`, then "not held" for a garbled answer) |
+| 8 | A second answer while checking is refused; a close waits for the check, and the held answer is then not taken | `test_a_second_answer_while_the_first_is_checked_is_refused`, `test_a_close_waits_for_a_running_check_and_the_held_answer_is_not_taken` | failed first |
+| 9 | Expressions read it like a reference: `==`/`!=` with the same system's option or reference; another system's refused; a literal refused; `string` gives a text; it fits a reference input of its system, never the other way | `test_an_option_compares_with_a_value_of_its_system`, `test_an_option_never_compares_with_another_systems_value`, `test_string_of_an_option_is_a_text`, `test_an_option_goes_where_a_reference_to_its_system_is_wanted`, the guide's row in `test_the_guide_refuses_as_the_check_refuses` (`tests/test_expressions.py`) | failed first |
+| 10 | Checked once, when given: a stale option, by `max_age`, makes the case need attention, and can't be fetched again | `test_a_stale_option_needs_attention_where_it_must_be_fresh` | pinned; mutation |
+| 11 | **Found at step 6:** only the person counts as whose answer feeds a step (D25): whoever gave an option a rule's condition read can't approve what it started; the system excludes nobody | `test_whoever_gave_an_option_a_rule_read_cant_approve_what_it_started` | pinned; mutation (the system alone as the source: Ana's approval accepted) |
+| 12 | On Temporal: refused, then taken, both in the history; the check runs once per answer | `test_an_option_not_held_is_refused_on_temporal_and_the_corrected_one_taken` (`tests/test_temporal_options.py`) | pinned (the adapter runs a check as any activity) |
+| 13 | The history replays without asking the check again | `test_a_case_with_a_checked_option_replays_without_asking_the_system_again` (`tests/test_temporal_options.py`) | pinned; a replay runs no activity, so it proves the history replays, not more |
+| 14 | A case never continues as new while an answer is held | `test_a_case_never_continues_as_new_while_an_answer_is_held` (`tests/test_temporal_options.py`) | mutation (the "nothing running" guard removed: the case hangs to its bound) |
+| 15 | **Found at step 6:** carrying a held answer is refused, never dropped | `test_a_held_answer_is_never_carried_to_a_new_run` | mutation |
+| 16 | The builder: `Field.option(system)`; a text beside it refused when the file runs; the guide's example is the file its test runs, and `ventoux check` accepts it | `test_the_builder_refuses_a_text_beside_an_option`, `test_the_guides_examples_are_the_files_their_tests_run`, `test_every_example_is_a_package_the_check_accepts`, `test_the_builder_writes_every_key_of_the_format` | failed first |
+| 17 | The case map reads "an option of branches, checked when given"; the plain diff names a moved system and a reference become an option | `test_the_case_map_reads_an_option_with_its_system`, `test_the_plain_diff_reports_an_option_moved_to_another_system`, `test_the_plain_diff_reports_a_reference_become_an_option` | the map and the moved system failed first (the map refused, the diff crashed); the retyping pinned |
+| 18 | The option's shapes are pinned in a package of their own; every earlier pin keeps its digest | `test_the_pinned_packages_use_every_shape`, `test_method_1_gives_the_digests_it_pinned` (`tests/test_digests.py`) | failed first |
+| 19 | No new engine version: the schema's `$id` stays `engine-2` | `test_the_committed_schemas_are_what_the_models_say` | pinned |
+| 20 | **Found at step 6:** the activities guide's check is the development catalog's, and registers | `test_the_activities_guides_option_check_is_the_development_one` | mutation (a timeout changed in the guide) |
+| 21 | **Found at step 6:** the case-data guide's two history lines are what the case writes | `test_the_case_data_guides_lines_are_what_the_case_writes` | mutation (a word changed in the guide) |
+| 22 | **Tutor:** an edit of an option is refused when it is proposed, so no approved edit sets one to a value its system never vouched for | `test_an_edit_of_an_option_is_refused_when_it_is_proposed`; the cases guide quotes it (`test_the_guides_change_example_runs_as_written`, `tests/test_change_requests.py`) | failed first (the edit was applied: `BR-9999`, from `person:lee` and `person:sam`, no `system:branches`) |
+| 23 | **Tutor:** only `true` is held, and only `true` or `false` is an answer: a check answering `"yes"`, `1` or `"no"` never vouches, nor speaks for the system; the answer is not taken, saying why | `test_a_check_answering_anything_but_true_or_false_never_vouches` | failed first (each recorded as "not one of the options branches holds"); mutation (the exact-type guard removed and `is not True` made a truthiness test: all three fail) |
+
+**Left out, on purpose:** D67's "an activity's output would set" named nothing that can happen: an
+output is typed by its contract, which can declare a reference and never an option, and only a
+rule sets a field. D67, unmerged, now says so in place, as the case-data guide does. Choice 16's "the case map
+says both" sources isn't true: the map reads the definition, never a case's values. The history
+says which check vouched (`checked by`), and the sources hold both (promise 6).
+
+**Found here, a promise nothing kept:** choice 16's approval rule (promise 11) and the carried
+state's refusal (promise 15) were in the code and in no test; the activities guide's block and
+the case-data guide's lines (promises 20 and 21) were run by no test.
+
+## From the tutor's review of 16b
+
+- **An edit never sets an option** (D52, D67). An approved edit set `branch` to `BR-9999`, a value
+  the system doesn't hold: `edit_problem` checked its type only, and the value then read as two
+  people's, with no `system:branches`, and could reach an activity wanting a reference to
+  `branches` as though the system had vouched for it. Choice 17 listed the opening, events, rules
+  and outputs, and missed edits. `edit_problem` now refuses an edit of an option when it is
+  proposed, saying an option is given by a person's answer, where its system checks it; D67 says
+  so in place. Checking an edit the way an answer is checked would be a decision of its own, and
+  isn't built.
+- **A check's answer is read by its exact type** (optional findings 1 and 2). Pydantic's lax
+  reading took `"yes"` and `1` as true and `"no"` as false, so with `is not True` made a
+  truthiness test every option test still passed, and a malformed answer was recorded as the
+  system's "not held". Now anything but `true` or `false` is not taken, saying the check gave
+  what an option's check never answers, D67's own path for an answer its contract doesn't
+  describe. With the guard in place, `is not True` and a truthiness test can't be told apart,
+  so the test pins the pair, not the line.
+

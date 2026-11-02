@@ -502,6 +502,31 @@ the day you ran it, written into the JSON as a fixed date: the next day, `--unch
 datetime.datetime(2027, 1, 1, 0, 0) is a moment, and a date compares with a day: write date(2027, 1, 1)
 ```
 
+## Options
+
+An option is one of a system's list, checked when a person gives it (case-data guide, "Options").
+`Field.option("branches")` declares it; it compares only with a value of the same system.
+
+`examples/builder/options.py`:
+
+```python
+from ventoux import Case, Field, Outcome
+
+claim = Case("claim", title="Insurance claim")
+
+branch = claim.field("branch", Field.option("branches"), title="Branch handling the claim")
+
+claim.task(
+    "assess",
+    title="Assess the claim",
+    roles=["adjuster"],
+    outcomes={
+        "accept": Outcome("Accept the claim", sets=[branch]),
+        "deny": Outcome("Deny the claim"),
+    },
+)
+```
+
 ## Forgetting
 
 Whether a request may forget a case: `allowed`, `while_open` (the household claim) or `never`.

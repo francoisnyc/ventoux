@@ -18,6 +18,7 @@ from ventoux.core.expressions import (
     Expression,
     ExpressionError,
     FieldType,
+    OptionType,
     ReferenceType,
     Var,
     evaluate,
@@ -163,4 +164,5 @@ def given_as_reference(
         # An outcome or an output (`assess.outcome`, `pay.refund_id`): never a reference.
         return None, f"{expression.var}, which is not a reference"
     said = f"{expression.var}, {a_type(declared)}"
-    return (declared.system if isinstance(declared, ReferenceType) else None), said
+    # An option is a reference to its system, and a checked one (brief, D67).
+    return (declared.system if isinstance(declared, ReferenceType | OptionType) else None), said

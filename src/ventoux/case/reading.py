@@ -34,6 +34,7 @@ from ventoux.core.expressions import (
     Expression,
     ExpressionInvalid,
     ListType,
+    OptionType,
     OutcomeType,
     ReferenceType,
     render,
@@ -727,6 +728,8 @@ def kind_of(name: str, declared: object) -> str:
     """A declared type, as people read it: `a number`, `a reference to orders`."""
     if isinstance(declared, ReferenceType):
         return f"a reference to {declared.system}"
+    if isinstance(declared, OptionType):  # one of the system's list, said so (brief, D67)
+        return f"an option of {declared.system}, checked when given"
     if isinstance(declared, ListType):
         return f"a list of {listed_and(list(declared.fields))}"
     if isinstance(declared, OutcomeType):

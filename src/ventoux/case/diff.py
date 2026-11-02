@@ -54,7 +54,7 @@ from ventoux.case.releases import (
 from ventoux.case.visibility import roles_named, seen_by
 from ventoux.core.catalog import Catalog
 from ventoux.core.contract import Contract
-from ventoux.core.expressions.model import Node
+from ventoux.core.expressions.model import Declared, Node
 from ventoux.core.output_sources import output_sources
 from ventoux.core.plan import Plan
 from ventoux.core.policy import Policy, UnknownPolicy, compared
@@ -135,10 +135,12 @@ def leaves(before: object, after: object, path: str) -> list[Leaf]:
     if retyped and isinstance(before, BaseModel) and "type" in type(before).model_fields:
         where = joined(path, "type")  # a field's type, written `"type": "number"`
         return [Leaf(where, cast(Any, before).type, getattr(after, "type", MISSING))]
+    # An expression is shown whole; a declared type, though written like one, is walked into, so
+    # a reference or an option moved to another system names its `system` (brief, D67).
     if (
         isinstance(before, BaseModel)
         and type(before) is type(after)
-        and not isinstance(before, Node)
+        and (not isinstance(before, Node) or isinstance(before, Declared))
     ):
         assert isinstance(after, BaseModel)
         found: list[Leaf] = []

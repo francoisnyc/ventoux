@@ -257,6 +257,9 @@ class CaseState:
     # Each change request proposed and not yet answered, by entry, in the order proposed: not
     # pending work, so it keeps no case open (brief, D52).
     changes: dict[str, ChangeRequest] = field(default_factory=dict[str, ChangeRequest])
+    # Each answer held while its options are checked, by its entry; never carried, since a case
+    # doesn't continue as new while a check runs (brief, D67).
+    checking: dict[str, "HeldAnswer"] = field(default_factory=dict[str, "HeldAnswer"])
     requested: int = (
         0  # how many change requests the case has numbered: the next is `case.change#2`
     )
@@ -278,6 +281,15 @@ class Opened:
     # The release it opens on, as people name it (`refund 1`), once the driver has checked it is
     # that release's package; None: a draft (brief, D51).
     release: str | None = field(kw_only=True, default=None)
+
+
+@dataclass
+class HeldAnswer:
+    """An answer setting an option, held until each option's check has answered (brief, D67)."""
+
+    answered: "Answered"  # the answer, as it was given
+    role: str  # the role it was judged to answer as
+    waiting: list[str]  # the option fields no check has vouched for yet, in the form's order
 
 
 @dataclass(frozen=True)
