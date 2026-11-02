@@ -125,7 +125,7 @@ def type_of(
                     )
                 return BooleanType()
         # Otherwise the same type on both sides: a reference only to the same system (brief, D16).
-        if types[0] != types[1]:
+        if types[0] != types[1] and not same_system(types[0], types[1]):
             raise refused(
                 steps[1],
                 f"`{operator}` compares values of the same type, "
@@ -182,8 +182,8 @@ def type_of(
             fields,
             element,
             path,
-            "takes a number, a boolean, a reference or a date",
-            (NumberType, BooleanType, ReferenceType, DateType),
+            "takes a number, a boolean, a reference, an option or a date",
+            (NumberType, BooleanType, ReferenceType, OptionType, DateType),
         )
         return StringType()
     if isinstance(expression, If):
@@ -235,6 +235,13 @@ def type_of(
         return NumberType()
     # Fail closed: an expression the check doesn't know is refused, never assumed to be fine.
     raise refused(path, f"can't check {expression!r}")
+
+
+def same_system(a: FieldType, b: FieldType) -> bool:
+    """Whether `a` and `b` are an option and a reference of one system, which compare: an option is
+    a reference to its system, and a checked one (brief, D67)."""
+    systems = [t.system for t in (a, b) if isinstance(t, OptionType | ReferenceType)]
+    return len(systems) == 2 and systems[0] == systems[1]
 
 
 def ordering_problem(operator: str, steps: list[str], types: list[FieldType]) -> None:

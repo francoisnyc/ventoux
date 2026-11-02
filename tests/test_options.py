@@ -14,6 +14,16 @@ from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
+from ventoux.core.expressions import (
+    BooleanType,
+    ExpressionInvalid,
+    FieldType,
+    OptionType,
+    ReferenceType,
+    StringType,
+    check,
+    parse_expression,
+)
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
 from ventoux.testing import CATALOG, CaseRefused, close, finish, run_case
@@ -406,3 +416,75 @@ def test_a_close_waits_for_a_running_check_and_the_held_answer_is_not_taken() ->
         "ana's answer accept to assess#1 is not taken: the case closed while it was checked",
         "closed: withdrawn, by ana",
     ]
+
+
+# --- Slice 7: expressions read an option like a reference to its system ---
+
+TYPES: dict[str, FieldType] = {
+    "branch": OptionType(system="branches"),
+    "usual": OptionType(system="branches"),
+    "home": ReferenceType(system="branches"),
+    "customer": ReferenceType(system="crm"),
+    "elsewhere": OptionType(system="crm"),
+}
+
+
+@pytest.mark.parametrize(
+    "other", ["usual", "home"], ids=["an option of its system", "a reference to its system"]
+)
+def test_an_option_compares_with_a_value_of_its_system(other: str) -> None:
+    compared = parse_expression({"==": [{"var": "branch"}, {"var": other}]})
+    assert check(compared, TYPES) == BooleanType()
+
+
+@pytest.mark.parametrize(
+    ("other", "refused"),
+    [
+        (
+            "customer",
+            (
+                "==[1]: `==` compares values of the same type, and this is a reference to "
+                "crm, not an option of branches"
+            ),
+        ),
+        (
+            "elsewhere",
+            (
+                "==[1]: `==` compares values of the same type, and this is an option of "
+                "crm, not an option of branches"
+            ),
+        ),
+    ],
+    ids=["a reference to another system", "an option of another system"],
+)
+def test_an_option_never_compares_with_another_systems_value(other: str, refused: str) -> None:
+    with pytest.raises(ExpressionInvalid) as raised:
+        check(parse_expression({"==": [{"var": "branch"}, {"var": other}]}), TYPES)
+    assert str(raised.value) == refused
+
+
+def test_string_of_an_option_is_a_text() -> None:
+    assert check(parse_expression({"string": [{"var": "branch"}]}), TYPES) == StringType()
+
+
+class Routed(BaseModel):
+    branch: Annotated[str, reference("branches")]  # a reference to the branch to route it to
+
+
+class Routing(BaseModel):
+    routed: bool
+
+
+def test_an_option_goes_where_a_reference_to_its_system_is_wanted() -> None:
+    # An option is a reference to its system, and a checked one (brief, D67).
+    catalog = checked()
+    catalog.register(contract("branches.route", Routed, Routing))
+    definition = claim()
+    definition["steps"]["route"] = {
+        "kind": "activity",
+        "display": {"title": "Route the claim"},
+        "activity": "branches.route@1",
+        "requires": ["assess"],
+        "inputs": {"branch": {"var": "branch"}},
+    }
+    assert errors(definition, catalog) == []
