@@ -1470,7 +1470,22 @@ and record the key points. A question is closed once you can explain the answer 
   - **Why it came up in 11c.** A rule's `stop` only takes paths away, so this set, a "may
     happen", stays sound; what has to be checked again are the claims that something always or
     never happens (11c's audit of the proofs).
-- Status: open.
+- Retrieval (layer 16b warm-up, 2026-11-02), asked with the claim written `pay`, `assess`,
+  `check`, each part after a reminder:
+  - **a), the passes:** "it needs several passes until nothing new is added." Right: pass 1 adds
+    only `check`, pass 2 `assess`, pass 3 `pay`, pass 4 nothing, and that empty pass ends it; the
+    written order changes how many passes, never the answer, since a case has no position.
+  - **a), the start:** reminded with two blank tables (start from everything, start from
+    nothing) for `pay` and `assess` requiring each other: "starting from everything, the
+    deadlock passes." Right: each vouches for the other and nothing comes out; grown from
+    nothing, neither enters, and validation says `DEADLOCK`. In the set means some real order of
+    events reaches it.
+  - **b):** reminded with a table of who writes each value and its stamp, and a rule
+    `set total = amount + fee`: "one look is enough, a computed field brings passes back."
+    Right: each writer stamps its own source, whatever it read, so no field's source depends on
+    another's; a field a rule computes takes the sources of what it read (brief, D42), which may
+    themselves be computed, so the check goes round until nothing changes (brief, D34).
+- Status: open, until it comes back without the reminders (every part came, each after one).
 
 ## 40. Layer 11: arrival is a fact, content is not
 
