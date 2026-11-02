@@ -573,6 +573,65 @@
         },
         {
           "additionalProperties": false,
+          "description": "One of a system's list, checked through that system's activity when a person gives it\n(brief, D67).",
+          "properties": {
+            "type": {
+              "const": "option",
+              "default": "option",
+              "title": "Type",
+              "type": "string"
+            },
+            "system": {
+              "title": "System",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "visible_to": {
+              "anyOf": [
+                {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible To"
+            },
+            "sensitive": {
+              "default": false,
+              "title": "Sensitive",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "display",
+            "system",
+            "type"
+          ],
+          "title": "OptionType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A day on the calendar, with no time and no time zone (brief, D66).",
           "properties": {
             "type": {
@@ -1020,6 +1079,7 @@
           "date": "#/$defs/DateType",
           "list": "#/$defs/ListType",
           "number": "#/$defs/NumberType",
+          "option": "#/$defs/OptionType",
           "outcome": "#/$defs/OutcomeType",
           "reference": "#/$defs/ReferenceType",
           "string": "#/$defs/StringType"
@@ -1041,6 +1101,9 @@
         },
         {
           "$ref": "#/$defs/ReferenceType"
+        },
+        {
+          "$ref": "#/$defs/OptionType"
         },
         {
           "$ref": "#/$defs/DateType"
@@ -1366,6 +1429,28 @@
       "title": "NumberType",
       "type": "object"
     },
+    "OptionType": {
+      "additionalProperties": false,
+      "description": "One of a system's list, checked through that system's activity when a person gives it\n(brief, D67).",
+      "properties": {
+        "type": {
+          "const": "option",
+          "default": "option",
+          "title": "Type",
+          "type": "string"
+        },
+        "system": {
+          "title": "System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "type"
+      ],
+      "title": "OptionType",
+      "type": "object"
+    },
     "Or": {
       "additionalProperties": false,
       "description": "`{\"or\": [a, b, …]}`: at least one argument is true.",
@@ -1624,6 +1709,44 @@
             "type"
           ],
           "title": "ReferenceType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One of a system's list, checked through that system's activity when a person gives it\n(brief, D67).",
+          "properties": {
+            "type": {
+              "const": "option",
+              "default": "option",
+              "title": "Type",
+              "type": "string"
+            },
+            "system": {
+              "title": "System",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            }
+          },
+          "required": [
+            "display",
+            "system",
+            "type"
+          ],
+          "title": "OptionType",
           "type": "object"
         },
         {

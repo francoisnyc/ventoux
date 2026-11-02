@@ -113,6 +113,7 @@ from ventoux.core.dates import date_fields, given_day
 from ventoux.core.expressions import (
     Expression,
     ExpressionError,
+    OptionType,
     ReferenceType,
     a_kind,
     evaluate,
@@ -484,7 +485,13 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
             problems.append(
                 f"{name} is set by rules, in {computed[name]}, never given at the opening"
             )
-        elif not fits(plain(value), declared := case.fields[name].declared):
+        elif isinstance(declared := case.fields[name].declared, OptionType):
+            # Nothing at the opening could check it: only a person's answer gives one (brief, D67).
+            problems.append(
+                f"{name} is an option of {declared.system}, and only a person's answer gives one, "
+                "when it can be checked: leave it out of the opening"
+            )
+        elif not fits(plain(value), declared):
             # The type, never the value: refusals reach people who may not see it (brief, D30).
             problems.append(misfit(name, declared, plain(value), "the opening"))
     if problems:

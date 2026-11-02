@@ -25,6 +25,7 @@ from ventoux.core.expressions.model import (
     Node,
     Not,
     NumberType,
+    OptionType,
     Or,
     OutcomeType,
     ReferenceType,
@@ -278,6 +279,8 @@ def a_type(found: FieldType) -> str:
     """A type as a message says it: `a number`, `an outcome`, `a reference to orders`."""
     if isinstance(found, ReferenceType):
         return f"a reference to {found.system}"
+    if isinstance(found, OptionType):
+        return f"an option of {found.system}"
     article = "an" if found.type[0] in "aeiou" else "a"
     return f"{article} {found.type}"
 
