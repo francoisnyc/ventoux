@@ -775,7 +775,7 @@ def take_answer(
     sets = step.outcomes[event.outcome].sets
     for name in sets:
         state.values[name] = kept(case, name, (event.form or {})[name])
-        state.sources[name] = marked(case, name, who)
+        state.sources[name] = marked(case, name, who) | vouched_for(case, name, checked_by)
         state.obtained[name] = Obtained(event.at, None)
     setting = f", setting {listed(list(sets))}" if sets else ""
     checked = f", checked by {listed(list(checked_by))}" if checked_by else ""
@@ -902,6 +902,17 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     state.history.append(f"{run.entry} done{f', giving {giving}' if giving else ''}")
     reach_unless_steered(state, run, step.reaches)
     flag_if_stopping(state, run)
+
+
+def vouched_for(case: CaseDefinition, name: str, checked_by: tuple[str, ...]) -> frozenset[str]:
+    """The system that vouched for the option `name`, as a source beside the person who chose it;
+    none for any other field (brief, D67)."""
+    declared = case.fields[name].declared
+    if not isinstance(declared, OptionType):
+        return frozenset()
+    # Only an option its check said held is ever taken: one that wasn't checked is a bug.
+    assert checked_by, f"{name} is an option, taken with no check"
+    return frozenset({f"system:{declared.system}"})
 
 
 def checked_answer(state: CaseState, entry: str) -> tuple[str, str] | None:

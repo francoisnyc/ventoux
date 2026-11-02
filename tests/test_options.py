@@ -291,3 +291,22 @@ def test_an_option_the_system_does_not_hold_is_refused_and_the_refusal_recorded(
     ]
     # Nothing the refused answer set landed: the corrected one is what the case holds.
     assert run.state.values["branch"] == "BR-0142"
+
+
+# --- Slice 4: a held option is taken, from the person and the system that vouched ---
+
+
+def test_an_option_the_system_holds_comes_from_the_person_and_the_system() -> None:
+    run = run_case(
+        claim(),
+        file={},
+        answers=[("assess", "accept", "ana", {"branch": "BR-0142"})],
+        people=ADJUSTERS,
+        activities={"branches.holds@1": holds},
+        catalog=checked(),
+    )
+    # Ana chose it, and branches vouched for it: both are where it came from (brief, D67).
+    assert run.state.values["branch"] == "BR-0142"
+    assert run.state.sources["branch"] == frozenset({"person:ana", "system:branches"})
+    # The outcome is Ana's alone: a system vouches for a value, never for an answer.
+    assert run.state.sources["assess.outcome"] == frozenset({"person:ana"})
