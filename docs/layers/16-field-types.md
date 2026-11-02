@@ -570,6 +570,7 @@ as in 16a's table.
 | 20 | **Found at step 6:** the activities guide's check is the development catalog's, and registers | `test_the_activities_guides_option_check_is_the_development_one` | mutation (a timeout changed in the guide) |
 | 21 | **Found at step 6:** the case-data guide's two history lines are what the case writes | `test_the_case_data_guides_lines_are_what_the_case_writes` | mutation (a word changed in the guide) |
 | 22 | **Tutor:** an edit of an option is refused when it is proposed, so no approved edit sets one to a value its system never vouched for | `test_an_edit_of_an_option_is_refused_when_it_is_proposed`; the cases guide quotes it (`test_the_guides_change_example_runs_as_written`, `tests/test_change_requests.py`) | failed first (the edit was applied: `BR-9999`, from `person:lee` and `person:sam`, no `system:branches`) |
+| 23 | **Tutor:** only `true` is held, and only `true` or `false` is an answer: a check answering `"yes"`, `1` or `"no"` never vouches, nor speaks for the system; the answer is not taken, saying why | `test_a_check_answering_anything_but_true_or_false_never_vouches` | failed first (each recorded as "not one of the options branches holds"); mutation (the exact-type guard removed and `is not True` made a truthiness test: all three fail) |
 
 **Left out, on purpose:** D67's "an activity's output would set" named nothing that can happen: an
 output is typed by its contract, which can declare a reference and never an option, and only a
@@ -591,4 +592,11 @@ the case-data guide's lines (promises 20 and 21) were run by no test.
   proposed, saying an option is given by a person's answer, where its system checks it; D67 says
   so in place. Checking an edit the way an answer is checked would be a decision of its own, and
   isn't built.
+- **A check's answer is read by its exact type** (optional findings 1 and 2). Pydantic's lax
+  reading took `"yes"` and `1` as true and `"no"` as false, so with `is not True` made a
+  truthiness test every option test still passed, and a malformed answer was recorded as the
+  system's "not held". Now anything but `true` or `false` is not taken, saying the check gave
+  what an option's check never answers, D67's own path for an answer its contract doesn't
+  describe. With the guard in place, `is not True` and a truthiness test can't be told apart,
+  so the test pins the pair, not the line.
 

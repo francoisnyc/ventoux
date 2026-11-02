@@ -720,3 +720,30 @@ def test_an_edit_of_an_option_is_refused_when_it_is_proposed() -> None:
         "branch is an option of branches, given only by a person's answer, where branches checks "
         "it: an edit is never checked, so give it in the answer to the task that sets it"
     )
+
+
+@pytest.mark.parametrize(
+    ("answered", "kind"),
+    [("yes", "a string"), (1, "an int"), ("no", "a string")],
+    ids=["yes", "one", "no"],
+)
+def test_a_check_answering_anything_but_true_or_false_never_vouches(
+    answered: object, kind: str
+) -> None:
+    # Only `true` is held, and only `true` or `false` is an answer: a text or a number says
+    # nothing the contract describes, so it is neither held nor "not held" (brief, D67). Pydantic
+    # reads a boolean laxly ("yes" and 1 as true), so the check's answer is read by its exact type.
+    run = run_case(
+        claim(),
+        file={},
+        answers=[("assess", "accept", "ana", {"branch": "BR-0142"})],
+        people=ADJUSTERS,
+        activities={"branches.holds@1": lambda _: {"held": answered}},
+        catalog=checked(),
+    )
+    assert run.history[-1] == (
+        f"ana's answer accept to assess#1 is not taken: branches.holds@1 gave held as {kind}, and "
+        "an option's check answers true or false; the task waits for an answer"
+    )
+    assert "branch" not in run.state.values
+    assert list(run.state.waiting) == ["assess#1"]

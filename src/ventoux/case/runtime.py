@@ -982,7 +982,18 @@ def check_answered(
     if (problem := outcome_problem(check, event)) is not None:
         not_taken(state, entry, problem)
         return
-    if event.output.get("held") is not True:
+    # Read by its exact type too: Pydantic reads "yes" and 1 as true, and "no" as false, so a
+    # garbled answer would vouch, or speak for the system. Only `true` or `false` answers.
+    answered = event.output.get("held")
+    if type(answered) is not bool:
+        not_taken(
+            state,
+            entry,
+            f"{check.reference} gave held as {a_kind(answered)}, and an option's check answers "
+            "true or false",
+        )
+        return
+    if answered is not True:
         # Refused, and the refusal recorded: the field and the system, never the value, which may
         # be hidden from whoever reads the history (brief, D30). The task stays open.
         del state.checking[entry]
