@@ -365,7 +365,8 @@ and `test_the_guides_runtime_errors_are_what_the_evaluator_says` runs every row.
 
 # 16b: the option
 
-Status: 2026-11-02, a draft for agreement. Branch `layer-16b-options`, from `main` at `0dbf274`,
+Status: 2026-11-02, agreed: choices 13 to 24 as recommended; D67 written before 16b is built.
+Branch `layer-16b-options`, from `main` at `0dbf274`,
 with 16a merged (#80). The warm-up was learning question 39, recorded. The guides were written
 first: `docs/guides/case-data.md` ("Options"), `expressions.md` (the type and a refusal),
 `activities.md` ("An option's check") and `builder.md` (`examples/builder/options.py`), with the

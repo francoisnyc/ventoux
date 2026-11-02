@@ -2759,6 +2759,46 @@ D20, D55, D56, D58 and D60, whose text is kept.*
 - **Left out:** times, moments and durations as field types, date arithmetic, timers anchored to a
   date field, a locale's format.
 
+### D67. An option: one of a system's list, checked through an activity when a person gives it
+
+*Decided 2026-11-02, in layer 16b (`docs/layers/16-field-types.md`, choices 13 to 24). Adds to
+D9, D16, D18, D19 and D30, whose text is kept.*
+
+- **An option is a field type of its own,** `{"type": "option", "system": "branches"}`: a value a
+  system's list must hold, checked when it is given; a reference (D16) is never checked. An option
+  of a system fits where a contract wants a reference to that system, never the other way.
+- **One check per system, named by the catalog, never by a definition.** The platform team
+  registers a read-only activity taking exactly the value (a reference to the system) and giving
+  exactly `held`, a boolean whose source is the system, and names it with
+  `register_option_check(system, contract)`. The catalog refuses a check that isn't `effect:
+  read`, has another shape, names an unregistered system, or is a second check for one system;
+  validation refuses an option of a system with no check.
+- **An answer setting an option is held while it is checked.** Its form is checked as any form is
+  (D9); then one check runs per option field, and nothing the answer sets lands, nor its outcome,
+  until every check has answered; the task's entry stays open, being checked. All held: the
+  answer is taken, its history line saying which check vouched. One not held: the answer is
+  refused, the refusal recorded, naming the field and the system, never the value (D30); the task
+  stays open. A check that fails after its retries, or gives what its contract doesn't describe,
+  takes nothing: the answer is not taken, saying why, and the task stays open, never read as held
+  (fail closed), and the case doesn't need attention, since answering again fixes it. A second
+  answer to an entry being checked is refused; a close waits for the checks, as for any running
+  activity (D10). Not in the client: the trusted caller vouches for identity, never for facts
+  (D19).
+- **Its sources are the person and the system:** `{person:ana, system:branches}`. Only the person
+  counts as one whose answer feeds a step (D25).
+- **Only a person gives an option.** An option field the opening, an event, a rule or an
+  activity's output would set is refused by validation: nothing would check it.
+- **Checked once, when given:** a fact with the time it was obtained (D18); a step needing it
+  still held uses `max_age`, and a stale option, given by a person, makes the case need attention
+  (D18).
+- **Read like a reference:** `==` and `!=` with a value of the same system, `exists`, `string`;
+  never a literal, since only the system says which values exist.
+- **Replay:** the check is an activity, its answer recorded, never asked again; the held answer
+  crosses continue-as-new in the state. No new engine version: no definition readable before
+  holds an option.
+- **Left out:** options at the opening, on events or from rules; an option of several values;
+  listing a system's options for a picker, which is the inbox's, through the resolver (D16).
+
 ## Concepts
 
 | Term | Meaning |
@@ -2774,6 +2814,7 @@ D20, D55, D56, D58 and D60, whose text is kept.*
 | Case file | The case's decision facts and references to records elsewhere, each with its provenance |
 | Reference | The ID of a record kept in another system, typed by that system's name |
 | Date | A day on the calendar, given to the case by a source; no time, no time zone, never today |
+| Option | One of a system's list, given by a person and checked through that system's activity when given |
 | Resolver | Shows a person what a reference points to, by asking its system on their behalf; never stored |
 | Task | A step asking people with given roles a question, answered with an outcome |
 | Outcome | A named answer from a task, an approval or an activity (`approve`, `declined`); a task's may set case-file fields |
