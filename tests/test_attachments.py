@@ -16,7 +16,7 @@ from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
-from ventoux.testing import CATALOG, CaseRefused, finish, run_case
+from ventoux.testing import CATALOG, CaseRefused, ChangeRefused, edit, finish, run_case
 
 
 def claim(store: str = "documents") -> dict[str, Any]:
@@ -504,3 +504,33 @@ def test_one_check_that_doesnt_vouch_refuses_the_whole_answer() -> None:
     assert "refused ana's answer accept: receipt is not a document documents issued" in run.history
     assert "branch" not in run.state.values and "receipt" not in run.state.values
     assert list(run.state.waiting) == ["assess#1"]
+
+
+# --- Slice 7: an edit never sets an attachment ---
+
+
+def test_an_edit_of_an_attachment_is_refused_when_it_is_proposed() -> None:
+    # An edit is checked for its type, never by the store: an attachment is given only in a
+    # person's answer, where its store vouches for it (brief, D52) (brief, D68).
+    definition = claim() | {
+        "stays_open": True,
+        "close_reasons": {"done": {"display": {"title": "Done"}, "roles": ["adjuster"]}},
+    }
+    both = ["adjuster", "support-lead"]  # each sees the receipt, and may edit or approve
+    with pytest.raises(ChangeRefused) as refused:
+        run_case(
+            definition,
+            file={},
+            answers=[
+                ("assess", "accept", "ana", {"receipt": "doc-7f3a"}),
+                edit("receipt", "doc-0000", "sam"),  # not a document the store issued
+                ("case.change#1", "approve", "lee"),
+            ],
+            people={"ana": ["adjuster"], "sam": both, "lee": both},
+            activities={"documents.issued@1": issued},
+            catalog=stored(),
+        )
+    assert str(refused.value) == (
+        "receipt is an attachment in documents, given only by a person's answer, where documents "
+        "checks it: an edit is never checked, so give it in the answer to the task that sets it"
+    )
