@@ -15,6 +15,7 @@ from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
+from ventoux.core.contract_hash import contract_hash
 from ventoux.core.expressions import (
     BooleanType,
     ExpressionInvalid,
@@ -27,11 +28,13 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
+from ventoux.temporal.carried import state_as_data
 from ventoux.testing import (
     CATALOG,
     BranchAsked,
     BranchHeld,
     CaseRefused,
+    branches_holds,
     close,
     finish,
     later,
@@ -566,3 +569,123 @@ def test_the_plain_diff_reports_an_option_moved_to_another_system(
     assert "- Before: branch is an option of branches, checked when given" in shown
     assert "- After: branch is an option of depots, checked when given" in shown
     assert "(`fields.branch.system`): branches -&gt; depots." in shown
+
+
+# --- Step 6: promises with no test of their own until now ---
+
+
+def looked_up_once_branched() -> dict[str, Any]:
+    """The claim, its order looked up behind a team lead's approval, started by a rule whose
+    condition reads `branch`."""
+    definition = claim()
+    definition["fields"]["order_id"] = {
+        "type": "reference",
+        "system": "orders",
+        "display": {"title": "Order"},
+    }
+    definition["steps"]["look"] = {
+        "kind": "activity",
+        "display": {"title": "Look up the order"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "approval": {"roles": ["support-lead"], "display": {"reason": "A lead looks first"}},
+        "automatic": False,
+    }
+    definition["rules"] = {
+        "start_look": {
+            "display": {"title": "Look up the order once a branch is chosen"},
+            "on": {"answered": "assess"},
+            "when": {"exists": "branch"},
+            "then": {"start": ["look"]},
+        }
+    }
+    return definition
+
+
+def test_whoever_gave_an_option_a_rule_read_cant_approve_what_it_started() -> None:
+    # Ana chose the branch, and the rule's condition read it: her answer decided that the lookup
+    # runs, so she can't approve it. The system that vouched for it is no person, and excludes
+    # nobody; Lee may approve (brief, D11) (brief, D39) (brief, D67).
+    people = {"ana": ["adjuster", "support-lead"], "lee": ["support-lead"]}
+    branched = ("assess", "accept", "ana", {"branch": "BR-0142"})
+
+    def approved_by(who: str) -> Any:
+        return run_case(
+            looked_up_once_branched(),
+            file={"order_id": "ord-1"},
+            answers=[branched, ("look.approval#1", "approve", who)],
+            people=people,
+            activities={"branches.holds@1": holds},
+            catalog=checked(),
+        )
+
+    with pytest.raises(AnswerRefused) as refused:
+        approved_by("ana")
+    assert str(refused.value) == (
+        "ana set branch, which decided that start_look#1 started look, so cannot approve it"
+    )
+    assert "look#1 done" in " ".join(approved_by("lee").history)
+
+
+def test_the_activities_guides_option_check_is_the_development_one() -> None:
+    # The guide's block, run so it can't drift from the code: it registers, and it is the check
+    # the development catalog registers for branches (our own documentation, never a definition).
+    guide = (Path(__file__).parent.parent / "docs" / "guides" / "activities.md").read_text()
+    example = guide.split("## An option's check")[1].split("```python\n")[1].split("```")[0]
+    namespace: dict[str, Any] = {"catalog": with_branches()}
+    exec(example, namespace)  # noqa: S102 -- our guide
+    assert namespace["catalog"].option_check("branches") == "branches.holds@1"
+    assert contract_hash(namespace["holds"]) == contract_hash(branches_holds)
+
+
+def test_a_held_answer_is_never_carried_to_a_new_run() -> None:
+    # A case continues as new only when nothing runs; were it ever asked to carry a held answer,
+    # carrying it is refused, never the answer quietly dropped (brief, D27) (brief, D67).
+    run = run_case(
+        claim(),
+        file={},
+        answers=[("assess", "accept", "ana", {"branch": "BR-0142"})],
+        people=ADJUSTERS,
+        activities={"branches.holds@1": holds},
+        catalog=checked(),
+        held=["assess"],  # its check keeps running
+    )
+    with pytest.raises(ValueError) as refused:
+        state_as_data(run.state)
+    assert str(refused.value) == (
+        "assess#1 is being checked: a case never continues as new while an answer is held"
+    )
+
+
+def test_the_plain_diff_reports_a_reference_become_an_option(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pinned = Path(__file__).parent / "digests" / "options"
+    unchecked = tmp_path / "reference"
+    unchecked.mkdir()
+    text = (pinned / "case.json").read_text()
+    (unchecked / "case.json").write_text(text.replace('"option"', '"reference"'))
+    main(["diff", "--plain", str(unchecked), str(pinned)])
+    shown = capsys.readouterr().out
+    assert "- Before: branch is a reference to branches" in shown
+    assert "- After: branch is an option of branches, checked when given" in shown
+    assert "(`fields.branch.type`): reference -&gt; option." in shown
+
+
+def test_the_case_data_guides_lines_are_what_the_case_writes() -> None:
+    guide = (Path(__file__).parent.parent / "docs" / "guides" / "case-data.md").read_text()
+    section = guide.split("## Options")[1].split("\n## ")[0]
+    shown = [block.split("```")[0].strip() for block in section.split("```text\n")[1:]]
+    run = run_case(
+        claim(),
+        file={},
+        answers=[
+            ("assess", "accept", "ana", {"branch": "BR-9999"}),
+            ("assess", "accept", "ana", {"branch": "BR-0142"}),
+        ],
+        people=ADJUSTERS,
+        activities={"branches.holds@1": holds},
+        catalog=checked(),
+    )
+    assert len(shown) == 2
+    assert all(line in run.history for line in shown), shown

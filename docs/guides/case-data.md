@@ -256,10 +256,11 @@ open where it uses it, say so with `max_age` (see "Fresh facts").
 something the contract doesn't describe), the answer is not taken, and says why; nothing guesses
 that the option is fine.
 
-**Only a person gives an option.** The opening, an event's payload and an activity's output come
-from systems; a field typed `option` that one of them would set is refused by `ventoux check`,
-since nothing would check it. A system that already knows the branch gives a `reference` to
-`branches`.
+**Only a person gives an option.** The opening and an event's payload come from systems, and a
+rule decides on its own; an option one of them would set is refused (the opening when it is given,
+the event and the rule by `ventoux check`), since nothing would check it. An activity's output is
+never one: its contract can declare a reference, not an option. A system that already knows the
+branch gives a `reference` to `branches`.
 
 An option reads like a reference to its system (see the expressions guide): it is compared only
 with another value of the same system, and a value written in the definition is never one, since

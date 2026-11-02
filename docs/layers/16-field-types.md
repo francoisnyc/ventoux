@@ -539,3 +539,43 @@ runs.
   expression's operator as one expression, and a declared type is one by inheritance, so a
   reference or an option moved to another system crashed the diff.
   It now names `fields.branch.system`.
+
+## Promises (16b)
+
+Every claim this part of the note, D67 and the guides make about the option, and the test that
+fails if it isn't true. Tests are in `tests/test_options.py` unless named. "Pinned" and "mutation"
+as in 16a's table.
+
+| # | Promise | Test | Seen failing |
+|---|---|---|---|
+| 1 | **The curriculum's:** an option the system doesn't hold is refused and the refusal recorded, naming the field and the system, never the value; nothing lands; the task stays open; a corrected answer is taken | `test_an_option_the_system_does_not_hold_is_refused_and_the_refusal_recorded` | failed first |
+| 2 | The catalog refuses an option check that writes, takes or gives another shape, or is a system's second; a read-only check of the right shape registers | `test_an_option_check_that_writes_is_refused`, `test_an_option_check_of_another_shape_is_refused` (three shapes), `test_a_second_option_check_for_one_system_is_refused`, `test_a_read_only_check_of_the_right_shape_is_how_its_system_is_asked` | failed first |
+| 3 | A check for a system nobody registered can't be registered | D30's rule: `test_the_guides_refusals_are_what_the_catalog_says` (`tests/test_catalog.py`, its `reference("sail")` row) | pinned (no rule of its own, see "Decided while building 16b") |
+| 4 | `ventoux check` refuses an option of a system with no check, and accepts one with a check | `test_an_option_of_a_system_with_no_check_is_refused`, `test_an_option_a_person_gives_with_its_systems_check_is_accepted` | failed first |
+| 5 | Only a person gives an option: the opening, an event and a rule are refused | `test_an_option_given_at_the_opening_is_refused`, `test_an_event_carrying_an_option_is_refused`, `test_a_rule_setting_an_option_is_refused` | failed first |
+| 6 | Held, the answer is taken, `checked by branches.holds@1`; the value's sources are the person and the system, the outcome's the person alone | `test_an_option_the_system_holds_comes_from_the_person_and_the_system` | failed first |
+| 7 | The check fails, or answers another shape: the answer is not taken, saying why; the task waits; the case doesn't need attention | `test_an_option_whose_check_cannot_be_made_is_not_taken` (both) | failed first (a `StopIteration`, then "not held" for a garbled answer) |
+| 8 | A second answer while checking is refused; a close waits for the check, and the held answer is then not taken | `test_a_second_answer_while_the_first_is_checked_is_refused`, `test_a_close_waits_for_a_running_check_and_the_held_answer_is_not_taken` | failed first |
+| 9 | Expressions read it like a reference: `==`/`!=` with the same system's option or reference; another system's refused; a literal refused; `string` gives a text; it fits a reference input of its system, never the other way | `test_an_option_compares_with_a_value_of_its_system`, `test_an_option_never_compares_with_another_systems_value`, `test_string_of_an_option_is_a_text`, `test_an_option_goes_where_a_reference_to_its_system_is_wanted`, the guide's row in `test_the_guide_refuses_as_the_check_refuses` (`tests/test_expressions.py`) | failed first |
+| 10 | Checked once, when given: a stale option, by `max_age`, makes the case need attention, and can't be fetched again | `test_a_stale_option_needs_attention_where_it_must_be_fresh` | pinned; mutation |
+| 11 | **Found at step 6:** only the person counts as whose answer feeds a step (D25): whoever gave an option a rule's condition read can't approve what it started; the system excludes nobody | `test_whoever_gave_an_option_a_rule_read_cant_approve_what_it_started` | pinned; mutation (the system alone as the source: Ana's approval accepted) |
+| 12 | On Temporal: refused, then taken, both in the history; the check runs once per answer | `test_an_option_not_held_is_refused_on_temporal_and_the_corrected_one_taken` (`tests/test_temporal_options.py`) | pinned (the adapter runs a check as any activity) |
+| 13 | The history replays without asking the check again | `test_a_case_with_a_checked_option_replays_without_asking_the_system_again` (`tests/test_temporal_options.py`) | pinned; a replay runs no activity, so it proves the history replays, not more |
+| 14 | A case never continues as new while an answer is held | `test_a_case_never_continues_as_new_while_an_answer_is_held` (`tests/test_temporal_options.py`) | mutation (the "nothing running" guard removed: the case hangs to its bound) |
+| 15 | **Found at step 6:** carrying a held answer is refused, never dropped | `test_a_held_answer_is_never_carried_to_a_new_run` | mutation |
+| 16 | The builder: `Field.option(system)`; a text beside it refused when the file runs; the guide's example is the file its test runs, and `ventoux check` accepts it | `test_the_builder_refuses_a_text_beside_an_option`, `test_the_guides_examples_are_the_files_their_tests_run`, `test_every_example_is_a_package_the_check_accepts`, `test_the_builder_writes_every_key_of_the_format` | failed first |
+| 17 | The case map reads "an option of branches, checked when given"; the plain diff names a moved system and a reference become an option | `test_the_case_map_reads_an_option_with_its_system`, `test_the_plain_diff_reports_an_option_moved_to_another_system`, `test_the_plain_diff_reports_a_reference_become_an_option` | the map and the moved system failed first (the map refused, the diff crashed); the retyping pinned |
+| 18 | The option's shapes are pinned in a package of their own; every earlier pin keeps its digest | `test_the_pinned_packages_use_every_shape`, `test_method_1_gives_the_digests_it_pinned` (`tests/test_digests.py`) | failed first |
+| 19 | No new engine version: the schema's `$id` stays `engine-2` | `test_the_committed_schemas_are_what_the_models_say` | pinned |
+| 20 | **Found at step 6:** the activities guide's check is the development catalog's, and registers | `test_the_activities_guides_option_check_is_the_development_one` | mutation (a timeout changed in the guide) |
+| 21 | **Found at step 6:** the case-data guide's two history lines are what the case writes | `test_the_case_data_guides_lines_are_what_the_case_writes` | mutation (a word changed in the guide) |
+
+**Left out, on purpose:** D67's "an activity's output would set" names nothing that can happen: an
+output is typed by its contract, which can declare a reference and never an option, and only a
+rule sets a field. The case-data guide now says so; D67 keeps its text. Choice 16's "the case map
+says both" sources isn't true: the map reads the definition, never a case's values. The history
+says which check vouched (`checked by`), and the sources hold both (promise 6).
+
+**Found here, a promise nothing kept:** choice 16's approval rule (promise 11) and the carried
+state's refusal (promise 15) were in the code and in no test; the activities guide's block and
+the case-data guide's lines (promises 20 and 21) were run by no test.

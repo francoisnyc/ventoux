@@ -301,7 +301,7 @@ branches_holds = ActivityContract(
     outcomes=[],
     display=Display(
         title="Check a branch",
-        description="Says whether the branches system holds a branch.",
+        description="Whether the branches system holds a branch, open, now.",
     ),
 )
 
