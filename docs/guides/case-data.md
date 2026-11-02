@@ -268,6 +268,60 @@ An option reads like a reference to its system (see the expressions guide): it i
 with another value of the same system, and a value written in the definition is never one, since
 only the system can say which values exist.
 
+## Attachments: a document kept in a store, never in the case
+
+Some answers come with a file: the receipt for a claim, a photo of the damage, a signed form. The
+file never goes into the case. It lives in a **document store** your platform team registers, and
+the case keeps only the ID the store gave it:
+
+```json
+"fields": {
+  "receipt": {"type": "attachment", "store": "documents", "display": {"title": "The receipt"}}
+}
+```
+
+When Ana attaches the receipt, the inbox uploads the file to the store, as Ana, and the store
+gives it an ID, say `doc-7f3a`. Her answer gives that ID, `{"receipt": "doc-7f3a"}`. The case asks
+the store whether it issued that ID, through the check your platform team registered for the
+store (activities guide, "A document store"), and only then takes the answer:
+
+```text
+ana answered assess#1 accept as adjuster, setting receipt, checked by documents.issued@1
+```
+
+An ID the store didn't issue is refused, and the refusal stays in the case's history; the task
+stays open for a corrected answer. Text pasted where an ID belongs, the document's own words
+included, is not an ID the store issued, so it never lands:
+
+```text
+refused ana's answer accept: receipt is not a document documents issued
+```
+
+**Why never the file itself.** The case's history is kept for ever, replayed, and read by anyone
+with access to Temporal; a file in it could never be forgotten, and a large one would not fit.
+The ID is small, and says only where the file is.
+
+**Opening it.** Whoever may see `receipt` opens it in the inbox, which asks the store **on their
+behalf**, as a reference's record is shown (see "References"): the store's own permissions decide,
+and what it shows never enters the case. Ventoux may hide more than the store, never show more.
+
+**The file's contents are its author's words.** That Ana attached a receipt, and the store issued
+it, is a fact; what the receipt says is whoever wrote it. An activity that reads the document,
+such as a summary a model writes, gives what it read marked untrusted (activities guide, "Output
+sources").
+
+**Only a person attaches a file, in a task's answer,** as with an option: an attachment the
+opening, an event's payload or a rule would set is refused, and so is an edit of one, since
+nothing would check that the store issued it. A system that sends a document it already stored
+gives a `reference` to the store.
+
+**Forgetting.** Forgetting a case makes its sensitive values unreadable (see "Forgetting a
+person"); the store keeps its files under its own rules. Mark an attachment `sensitive` if its ID
+itself says something, and have your store erase the file when the person is forgotten.
+
+An attachment reads like a reference to its store in expressions (see the expressions guide):
+`exists` asks whether one was attached; it is compared only with another value of the same store.
+
 ## Sensitive data
 
 A field marked `"sensitive": true` holds something personal a decision needs, such as a national
@@ -714,3 +768,9 @@ the warehouse too.
     "Options" showed what to decide: whether it is a type of its own or a checked reference; which
     activity checks it, and how the catalog names it; what happens while the check runs; its
     source (the person, and the system that checked it); and why only a person gives one.
+13. **An attachment is a reference the store issued, checked when it is given** (layer 16c).
+    Writing "Attachments" showed what to decide: a type of its own beside `reference`, naming a
+    registered store; how the store says it issued an ID, and how the catalog names that check;
+    how a file is opened (as a reference's record is, on the viewer's behalf); what marks its
+    contents; who may attach one; and what forgetting does, and doesn't, reach.
+

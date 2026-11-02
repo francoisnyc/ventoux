@@ -543,3 +543,70 @@ definition never names the check: it names the system, and the catalog says how 
 
 Your activity answers for the system as it is now. It is asked once, when the person answers, and
 its answer is kept in the case's history, so a replay reads that answer and never asks again.
+
+## A document store: where attachments are kept
+
+A case's `attachment` field (case-data guide, "Attachments") holds the ID a document store gave a
+file, never the file. You register the store as a system, and say two things about it: how a case
+asks whether the store issued an ID, and how a person opens a file.
+
+**Whether it issued an ID** is a read-only activity with the shape of an option's check (above):
+one input, the ID, and one output, whether the store issued it.
+
+```python
+from typing import Annotated
+
+from pydantic import BaseModel
+
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.output_sources import source
+from ventoux.core.references import reference
+
+
+class DocumentAsked(BaseModel):
+    attachment: Annotated[str, reference("documents")]  # the ID a person gave
+
+
+class DocumentIssued(BaseModel):
+    issued: Annotated[bool, source("system:documents")]  # whether the store issued it
+
+
+issued = ActivityContract(
+    name="documents.issued",
+    version=1,
+    risk="low",
+    effect="read",
+    input=DocumentAsked,
+    output=DocumentIssued,
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,  # a read: asking twice changes nothing
+    outcomes=[],
+    display=Display(
+        title="Check a document",
+        description="Whether the documents store issued an ID, for a file it holds.",
+    ),
+)
+catalog.register(issued)
+catalog.register_document_store("documents", "documents.issued@1")
+```
+
+The catalog refuses a store's check that isn't `effect: read`, that takes or gives anything but
+that one ID and that one truth value, or that names a system nobody registered, and a second
+check for one store. A case definition names the store, never the check.
+
+**Opening a file** is a resolver (see "Systems and resolvers"): it asks your store for the file
+on behalf of the person looking, so your store's own permissions decide, and nothing it returns
+enters the case or its history.
+
+```python
+def documents_file(reference: str, viewer: Viewer) -> dict[str, object]:
+    # Your store's client, asked as the person looking: a link to the file, if they may open it.
+    return {"link": store.signed_link(reference, on_behalf_of=viewer.person)}
+
+
+resolvers.register("documents", documents_file)
+```
+
+Your store answers for itself: it keeps the file, its permissions and its erasure. Ventoux keeps
+the ID, the person who attached it, and the store's word that it issued it.
