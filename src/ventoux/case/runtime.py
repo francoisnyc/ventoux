@@ -109,6 +109,7 @@ from ventoux.core.before_activity import (
     one_line,
 )
 from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.checks import checked
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.dates import date_fields, given_day
 from ventoux.core.expressions import (
@@ -486,11 +487,13 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
             problems.append(
                 f"{name} is set by rules, in {computed[name]}, never given at the opening"
             )
-        elif isinstance(declared := case.fields[name].declared, OptionType):
-            # Nothing at the opening could check it: only a person's answer gives one (brief, D67).
+        elif (found := checked(declared := case.fields[name].declared)) is not None:
+            # Nothing at the opening could check it: only a person's answer gives one
+            # (brief, D67) (brief, D68).
+            shape, system = found
             problems.append(
-                f"{name} is an option of {declared.system}, and only a person's answer gives one, "
-                "when it can be checked: leave it out of the opening"
+                f"{name} is {shape.of} {system}, and only a person's answer gives one, when it "
+                "can be checked: leave it out of the opening"
             )
         elif not fits(plain(value), declared):
             # The type, never the value: refusals reach people who may not see it (brief, D30).

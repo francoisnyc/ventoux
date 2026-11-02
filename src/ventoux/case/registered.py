@@ -8,7 +8,8 @@ from collections.abc import Collection
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
 from ventoux.case.reach import can_start
 from ventoux.core.catalog import Catalog
-from ventoux.core.expressions import AttachmentType, OptionType
+from ventoux.core.checks import checked
+from ventoux.core.expressions import AttachmentType, ListType, OptionType
 from ventoux.core.references import unregistered
 from ventoux.core.validate import Issue, role_issues
 
@@ -97,7 +98,8 @@ def system_issues_of(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
         + senders
         + unchecked_options(case, catalog)
         + not_stores(case, catalog)
-        + options_not_given_by_a_person(case)
+        + not_given_by_a_person(case)
+        + checked_in_lists(case)
     )
 
 
@@ -135,34 +137,51 @@ def not_stores(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
     ]
 
 
-NOT_A_PERSON = "OPTION_NOT_GIVEN_BY_A_PERSON"
-
-
-def options_not_given_by_a_person(case: CaseDefinition) -> list[Issue]:
-    """An option an event carries or a rule sets: only a person's answer gives one, when it can be
-    checked, so nothing would vouch for it (brief, D67). The opening is refused when it gives one
-    (the runtime knows what it gives), and the one-source rule keeps a rule off a field a person
-    sets."""
+def not_given_by_a_person(case: CaseDefinition) -> list[Issue]:
+    """An option or an attachment an event carries or a rule sets: only a person's answer gives
+    one, when it can be checked, so nothing would vouch for it (brief, D67) (brief, D68). The
+    opening is refused when it gives one (the runtime knows what it gives), and the one-source
+    rule keeps a rule off a field a person sets."""
     only = "only a person's answer gives one, when it can be checked"
     carried = [
         Issue(
             f"events.{name}.payload.{field}",
-            NOT_A_PERSON,
-            f"{field} is an option of {payload.declared.system}, and {only}: make it a reference "
-            f"to {payload.declared.system}",
+            f"{shape.type.upper()}_NOT_GIVEN_BY_A_PERSON",
+            f"{field} is {shape.of} {system}, and {only}: make it a reference to {system}",
         )
         for name, event in case.events.items()
         for field, payload in event.payload.items()
-        if isinstance(payload.declared, OptionType)
+        if (found := checked(payload.declared)) is not None
+        for shape, system in [found]
     ]
     set_by_rules = [
         Issue(
             f"rules.{name}.then.set.{field}",
-            NOT_A_PERSON,
-            f"{field} is an option of {declared.system}, and {only}: set it in a task's form",
+            f"{shape.type.upper()}_NOT_GIVEN_BY_A_PERSON",
+            f"{field} is {shape.of} {system}, and {only}: set it in a task's form",
         )
         for name, rule in case.rules.items()
         for field in rule.then.set
-        if field in case.fields and isinstance(declared := case.fields[field].declared, OptionType)
+        if field in case.fields and (found := checked(case.fields[field].declared)) is not None
+        for shape, system in [found]
     ]
     return carried + set_by_rules
+
+
+def checked_in_lists(case: CaseDefinition) -> list[Issue]:
+    """A list's field that is an option or an attachment: nothing could fill it (a form and the
+    opening give no list, and a contract declares neither), and nothing would check it
+    (brief, D67) (brief, D68)."""
+    return [
+        Issue(
+            f"fields.{name}",
+            "CHECKED_IN_A_LIST",
+            f"{name}.{inner} is {shape.of} {system}, and a list's fields are never checked: make "
+            f"it a reference to {system}",
+        )
+        for name, field in case.fields.items()
+        if isinstance(field.declared, ListType)
+        for inner, declared in field.declared.fields.items()
+        if (found := checked(declared)) is not None
+        for shape, system in [found]
+    ]

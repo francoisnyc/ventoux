@@ -3,6 +3,7 @@
 See docs/layers/16-field-types.md (16c), docs/guides/case-data.md ("Attachments") and brief D68.
 """
 
+import copy
 from typing import Annotated, Any
 
 import pytest
@@ -14,6 +15,7 @@ from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
+from ventoux.testing import CATALOG, CaseRefused, run_case
 
 
 def claim(store: str = "documents") -> dict[str, Any]:
@@ -194,3 +196,113 @@ def test_a_read_only_check_of_the_right_shape_makes_its_system_a_store() -> None
     )
     assert catalog.document_store("documents") == "documents.issued@1"
     assert errors(claim(), catalog) == []
+
+
+# --- Slice 3: only a person attaches a file, in a task's answer ---
+
+
+def stored() -> Catalog:
+    """The development catalog, with `documents` a store, checked by `documents.issued@1`."""
+    catalog = copy.deepcopy(CATALOG)
+    catalog.register_document_store(
+        "documents", registered(catalog, "documents.issued", DocumentAsked, DocumentIssued)
+    )
+    return catalog
+
+
+def with_photo() -> dict[str, Any]:
+    """The claim, with `photo`, an attachment no task sets: a person's answer sets `receipt`,
+    and the one-source rule already keeps rules and the opening off it."""
+    definition = claim()
+    definition["fields"]["photo"] = {
+        "type": "attachment",
+        "store": "documents",
+        "display": {"title": "A photo of the damage"},
+    }
+    return definition
+
+
+def test_an_event_carrying_an_attachment_is_refused() -> None:
+    # Only a person attaches a file: nothing would check an ID an event carried (brief, D68).
+    definition = claim()
+    definition["events"] = {
+        "uploaded": {
+            "display": {"title": "The customer uploaded a file"},
+            "sent_by": {"system": "portal"},
+            "payload": {
+                "file": {"type": "attachment", "store": "documents", "display": {"title": "File"}}
+            },
+        }
+    }
+    assert errors(definition, stored()) == [
+        (
+            "events.uploaded.payload.file: ATTACHMENT_NOT_GIVEN_BY_A_PERSON: file is an attachment "
+            "in documents, and only a person's answer gives one, when it can be checked: make it a "
+            "reference to documents"
+        )
+    ]
+
+
+def test_a_rule_setting_an_attachment_is_refused() -> None:
+    definition = with_photo()
+    definition["rules"] = {
+        "photo_is_receipt": {
+            "display": {"title": "Use the receipt as the photo"},
+            "on": {"answered": "assess"},
+            "then": {"set": {"photo": {"var": "receipt"}}},
+        }
+    }
+    assert errors(definition, stored()) == [
+        (
+            "rules.photo_is_receipt.then.set.photo: ATTACHMENT_NOT_GIVEN_BY_A_PERSON: photo is an "
+            "attachment in documents, and only a person's answer gives one, when it can be "
+            "checked: set it in a task's form"
+        )
+    ]
+
+
+def test_an_attachment_given_at_the_opening_is_refused() -> None:
+    with pytest.raises(CaseRefused) as refused:
+        run_case(
+            with_photo(),
+            file={"photo": "doc-7f3a"},
+            answers=[],
+            people={"ana": ["adjuster"]},
+            catalog=stored(),
+        )
+    assert str(refused.value) == (
+        "photo is an attachment in documents, and only a person's answer gives one, when it can "
+        "be checked: leave it out of the opening"
+    )
+
+
+@pytest.mark.parametrize(
+    ("declared", "refused"),
+    [
+        (
+            {"type": "attachment", "store": "documents"},
+            (
+                "fields.seen: CHECKED_IN_A_LIST: seen.item is an attachment in documents, and a "
+                "list's fields are never checked: make it a reference to documents"
+            ),
+        ),
+        (
+            {"type": "option", "system": "branches"},
+            (
+                "fields.seen: CHECKED_IN_A_LIST: seen.item is an option of branches, and a list's "
+                "fields are never checked: make it a reference to branches"
+            ),
+        ),
+    ],
+    ids=["an attachment", "an option"],
+)
+def test_a_checked_field_in_a_list_is_refused(declared: dict[str, str], refused: str) -> None:
+    # Nothing could fill it, and nothing would check it: a form and the opening give no list, and
+    # an activity's contract declares neither (brief, D67) (brief, D68).
+    definition = claim()
+    definition["fields"]["seen"] = {
+        "type": "list",
+        "fields": {"item": declared},
+        "display": {"title": "Seen"},
+    }
+    assert errors(definition, stored()) == [refused]

@@ -10,6 +10,7 @@ system. Only the names differ, so each kind is a `Shape`.
 from dataclasses import dataclass
 
 from ventoux.core.contract import Contract
+from ventoux.core.expressions import AttachmentType, OptionType
 from ventoux.core.output_sources import output_sources
 from ventoux.core.references import references
 
@@ -18,14 +19,33 @@ from ventoux.core.references import references
 class Shape:
     """What one kind of check is called, and the names of its one input and its one output."""
 
-    kind: str  # how a message names it: "an option's check"
+    type: str  # the field type it checks, as a definition writes it: "option"
+    of: str  # how a message names a field of that type, before its system: "an option of"
+    kind: str  # how a message names the check: "an option's check"
     asked: str  # its one input: the value a person gave, "option"
     answer: str  # its one output: whether the system vouches for it, "held"
     says: str  # what it says of its system, after "whether documents": "holds a value"
 
 
-OPTION = Shape("an option's check", "option", "held", "holds a value")
-DOCUMENT = Shape("a document store's check", "attachment", "issued", "issued an ID")
+OPTION = Shape("option", "an option of", "an option's check", "option", "held", "holds a value")
+DOCUMENT = Shape(
+    "attachment",
+    "an attachment in",
+    "a document store's check",
+    "attachment",
+    "issued",
+    "issued an ID",
+)
+
+
+def checked(declared: object) -> tuple[Shape, str] | None:
+    """The kind of check a field of the type `declared` waits for, and the system it asks; None
+    for a type nothing checks."""
+    if isinstance(declared, OptionType):
+        return OPTION, declared.system
+    if isinstance(declared, AttachmentType):
+        return DOCUMENT, declared.store
+    return None
 
 
 def check_problem(shape: Shape, system: str, check: Contract) -> str | None:
