@@ -1821,3 +1821,5 @@ and record the key points. A question is closed once you can explain the answer 
 - In one line: comparing two dates reads only what the case was given; asking what day it is
   reads a clock and a time zone, neither of which the case holds.
 - Status: closed (both halves from memory, the second after one prompt).
+- Retrieval (end of layer 16b's walk-through, 2026-11-02): "because the clock changes on replay,
+  dates don't." The first half again, word for word; the second half (the time zone) asked again.
