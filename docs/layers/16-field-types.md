@@ -780,3 +780,8 @@ saying why.
   system; one truth value, from it), so each kind is a `Shape` naming its words, its input and its
   output (`OPTION`: `option`, `held`; `DOCUMENT`: `attachment`, `issued`). 16b's messages are
   unchanged, word for word, and its tests pin them.
+- **A sensitive reference could never be resolved** (found in slice 9). The case view keeps a
+  sensitive value wrapped, and `Resolvers.show` took only a plain text, so it said "receipt is not
+  set: there is no record to show" of a value the viewer may see. This predates 16c: a sensitive
+  reference had the same fault. `show` now takes the ID out of its wrapper. The view is already
+  filtered for the viewer, so a value hidden from them still has nothing to resolve.

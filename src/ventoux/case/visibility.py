@@ -14,7 +14,8 @@ from typing import Any
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep, read_by
 from ventoux.case.freshness import ago, refuse_unless_whole
 from ventoux.case.state import CaseState
-from ventoux.core.expressions import ReferenceType
+from ventoux.core.expressions import AttachmentType, ReferenceType
+from ventoux.core.expressions.check import system_of
 from ventoux.core.provenance import fields_read
 from ventoux.core.sensitive import Sensitive
 
@@ -73,7 +74,7 @@ class CaseView:
     sources: dict[str, tuple[str, ...]]
     hidden: dict[str, tuple[str, ...]]  # each field hidden from them, and the roles that see it
     lines: list[str]  # one per declared field, in the definition's order, as people read it
-    systems: dict[str, str]  # each reference field they may see, and the system it names
+    systems: dict[str, str]  # each reference or attachment they may see, and its system
     # When each of those values was obtained, in seconds since the epoch (brief, D18). A hidden
     # field's time is hidden with it; a sensitive one's isn't sensitive.
     obtained: dict[str, int]
@@ -101,10 +102,14 @@ def case_view(
             )
         else:
             lines.append(f"{title}: not set")
+    # An attachment is opened as a reference's record is shown: through its store's resolver,
+    # as the viewer (brief, D16) (brief, D68).
     systems = {
-        name: declared.declared.system
+        name: system
         for name, declared in case.fields.items()
-        if name in visible and isinstance(declared.declared, ReferenceType)
+        if name in visible
+        and isinstance(declared.declared, ReferenceType | AttachmentType)
+        and (system := system_of(declared.declared)) is not None
     }
     obtained = {name: state.obtained[name].at for name in values if name in state.obtained}
     return CaseView(values, sources, hidden, lines, systems, obtained)

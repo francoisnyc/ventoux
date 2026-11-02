@@ -27,7 +27,9 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
+from ventoux.core.sensitive import Sensitive
 from ventoux.testing import CATALOG, CaseRefused, ChangeRefused, edit, finish, run_case
+from ventoux.tooling.resolvers import Resolvers, ShowRefused, Viewer
 
 
 def claim(store: str = "documents") -> dict[str, Any]:
@@ -620,3 +622,71 @@ def test_an_attachment_goes_where_a_reference_to_its_store_is_wanted() -> None:
         "inputs": {"document": {"var": "receipt"}},
     }
     assert errors(definition, catalog) == []
+
+
+# --- Slice 9: a file is opened through its store's resolver, as the person looking ---
+
+ADJUSTER = Viewer("lee", ("adjuster",))
+
+
+def attached(definition: dict[str, Any] | None = None, people: Any = None) -> Any:
+    """The claim with its receipt attached by Ana, `doc-7f3a`, issued by the store."""
+    return run_case(
+        definition or claim(),
+        file={},
+        answers=[("assess", "accept", "ana", {"receipt": "doc-7f3a"})],
+        people=people or {"ana": ["adjuster"], "lee": ["adjuster"]},
+        activities={"documents.issued@1": issued},
+        catalog=stored(),
+    )
+
+
+def store_resolvers(asked: list[tuple[str, Viewer]]) -> Resolvers:
+    """The documents store's resolver, recording what it is asked: a link, as the viewer."""
+
+    def documents_file(reference: str, viewer: Viewer) -> dict[str, object]:
+        asked.append((reference, viewer))
+        return {"link": f"https://documents.example/{reference}?as={viewer.person}"}
+
+    resolvers = Resolvers(stored())
+    resolvers.register("documents", documents_file)
+    return resolvers
+
+
+def test_an_attachment_is_opened_through_its_store_as_the_viewer() -> None:
+    # The store is asked on the viewer's behalf, so its own permissions decide; what it returns
+    # never enters the case (brief, D16) (brief, D68).
+    asked: list[tuple[str, Viewer]] = []
+    run = attached()
+    shown = store_resolvers(asked).show(run.view(roles=ADJUSTER.roles), "receipt", ADJUSTER)
+    assert shown == {"link": "https://documents.example/doc-7f3a?as=lee"}
+    assert asked == [("doc-7f3a", ADJUSTER)]
+    assert "link" not in " ".join(run.history)
+
+
+def test_a_hidden_attachment_has_nothing_to_open() -> None:
+    # Ventoux may hide more than the store, never show more (brief, D16).
+    definition = claim()
+    definition["fields"]["receipt"]["visible_to"] = ["claims-sensitive"]
+    asked: list[tuple[str, Viewer]] = []
+    run = attached(definition, {"ana": ["adjuster", "claims-sensitive"], "lee": ["adjuster"]})
+    with pytest.raises(ShowRefused) as refused:
+        store_resolvers(asked).show(run.view(roles=ADJUSTER.roles), "receipt", ADJUSTER)
+    assert str(refused.value) == "receipt is hidden from you: it needs claims-sensitive"
+    assert asked == []
+
+
+def test_a_sensitive_attachment_keeps_its_id_wrapped() -> None:
+    # Its ID is sealed as any sensitive value is, so forgetting the case's key forgets it; the
+    # store keeps the file under its own rules (brief, D31) (brief, D68).
+    definition = claim()
+    definition["fields"]["receipt"] |= {"sensitive": True, "visible_to": ["adjuster"]}
+    run = attached(definition)
+    kept = run.state.values["receipt"]
+    assert isinstance(kept, Sensitive)
+    assert kept.value == "doc-7f3a"
+    assert all("doc-7f3a" not in line for line in run.history)
+    # Whoever may see it opens it: the view is filtered for them, so the ID is theirs to resolve.
+    asked: list[tuple[str, Viewer]] = []
+    store_resolvers(asked).show(run.view(roles=ADJUSTER.roles), "receipt", ADJUSTER)
+    assert asked == [("doc-7f3a", ADJUSTER)]
