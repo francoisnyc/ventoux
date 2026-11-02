@@ -26,7 +26,7 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
-from ventoux.testing import CATALOG, CaseRefused, close, finish, run_case
+from ventoux.testing import CATALOG, CaseRefused, close, finish, later, run_case
 
 
 class BranchAsked(BaseModel):
@@ -488,3 +488,43 @@ def test_an_option_goes_where_a_reference_to_its_system_is_wanted() -> None:
         "inputs": {"branch": {"var": "branch"}},
     }
     assert errors(definition, catalog) == []
+
+
+# --- Slice 8: an option is a fact with its time ---
+
+
+def test_a_stale_option_needs_attention_where_it_must_be_fresh() -> None:
+    # "BR-0142 was held when Ana answered" stays true; a step that needs it still held says so with
+    # max_age, and an option given by a person can't be fetched again (brief, D18) (brief, D67).
+    catalog = checked()
+    catalog.register(contract("branches.route", Routed, Routing))
+    definition = claim()
+    definition["steps"]["confirm"] = {
+        "kind": "task",
+        "display": {"title": "Confirm the claim"},
+        "roles": ["adjuster"],
+        "outcomes": {"ok": {"display": {"title": "Confirmed"}}},
+    }
+    definition["steps"]["route"] = {
+        "kind": "activity",
+        "display": {"title": "Route the claim"},
+        "activity": "branches.route@1",
+        "requires": ["assess", "confirm"],
+        "when": {"exists": "branch"},
+        "inputs": {"branch": {"var": "branch"}},
+        "max_age": {"branch": "1d"},
+    }
+    run = run_case(
+        definition,
+        file={},
+        answers=[FIRST, later("3d"), ("confirm", "ok", "ana")],
+        people=ADJUSTERS,
+        activities={"branches.holds@1": holds, "branches.route@1": lambda i: {"routed": True}},
+        catalog=catalog,
+    )
+    assert run.needs_attention == [
+        (
+            "route#1: branch was obtained 3 days ago, and route needs it at most 1 day old: it "
+            "came from a person, so it can't be fetched again"
+        )
+    ]
