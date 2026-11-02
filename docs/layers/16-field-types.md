@@ -794,3 +794,45 @@ saying why.
   checks showed it. The held answer now notes what each check says and is decided once every
   check is back, by the first problem in the answer's own order, so the line never depends on
   which check came back first; until then a second answer is refused as being checked.
+
+## Promises (16c)
+
+Every claim this part of the note, D68 and the guides make about the attachment, and the test
+that fails if it isn't true. Tests are in `tests/test_attachments.py` unless named. "Pinned" and
+"mutation" as in 16a's table.
+
+| # | Promise | Test | Seen failing |
+|---|---|---|---|
+| 1 | **The curriculum's:** an attachment naming no registered store is refused: a system nobody registered (`UNKNOWN_SYSTEM`), and one that isn't a store (`NOT_A_STORE`) | `test_an_attachment_in_a_system_nobody_registered_is_refused`, `test_an_attachment_in_a_system_that_is_not_a_store_is_refused` | failed first |
+| 2 | The catalog refuses a store's check that writes, takes or gives another shape, or is a store's second; a read-only check of the right shape makes its system a store | `test_a_stores_check_that_writes_is_refused`, `test_a_stores_check_of_another_shape_is_refused` (three shapes), `test_a_second_check_for_one_store_is_refused`, `test_a_read_only_check_of_the_right_shape_makes_its_system_a_store` | failed first |
+| 3 | A check for a system nobody registered can't be registered | D30's rule: `test_the_guides_refusals_are_what_the_catalog_says` (`tests/test_catalog.py`, its `reference("sail")` row) | pinned, as 16b's row 3 |
+| 4 | Only a person attaches a file: an event, a rule and the opening are refused | `test_an_event_carrying_an_attachment_is_refused`, `test_a_rule_setting_an_attachment_is_refused`, `test_an_attachment_given_at_the_opening_is_refused` | failed first (the rule first for a wrong reason: an attachment didn't fit an attachment) |
+| 5 | A list's field that is an option or an attachment is refused (`CHECKED_IN_A_LIST`) | `test_a_checked_field_in_a_list_is_refused` (both kinds) | failed first |
+| 6 | An ID the store didn't issue is refused and recorded, naming the field and the store, never the ID; the task stays open; a corrected one is taken, `checked by documents.issued@1`, from the person and the store, its outcome the person's | `test_an_id_the_store_did_not_issue_is_refused_and_the_refusal_recorded`, `test_an_attachment_comes_from_the_person_and_the_store` | failed first |
+| 7 | An ID of more than 200 characters is refused before the store is asked, saying how one is given, never quoting it; 200 is an ID | `test_an_id_longer_than_200_characters_is_refused_before_the_store_is_asked` | failed first |
+| 8 | The check fails, gives another shape, or answers anything but `true` or `false`: not taken, saying why; the task waits; the case doesn't need attention | `test_an_attachment_whose_check_cannot_be_made_is_not_taken` (three ways) | pinned; mutation (the shape's answer not read) |
+| 9 | An answer setting an option and an attachment waits for both; one that doesn't vouch refuses the whole answer | `test_an_answer_with_an_option_and_an_attachment_waits_for_both_checks`, `test_one_check_that_doesnt_vouch_refuses_the_whole_answer` | pinned; mutation (taken after one check; a refusal ignored) |
+| 10 | **Found in slice 10:** an answer is decided once every check is back, by the first problem in its own order; meanwhile a second answer is refused as being checked, so a late check never speaks for a new answer | `test_an_answer_is_held_until_every_check_is_back_even_when_one_refuses` | failed first (on Temporal by a race, then in memory); mutation (decided at the first refusal) |
+| 11 | An edit of an attachment is refused when it is proposed | `test_an_edit_of_an_attachment_is_refused_when_it_is_proposed` | failed first (the edit applied) |
+| 12 | Expressions read it like a reference to its store: `==`/`!=` with an attachment or a reference of its store, `string`, `exists`; another store's attachment, an option of the same system and a literal refused; it fits a reference input of its store | `test_an_attachment_compares_with_a_value_of_its_store`, `test_an_attachment_never_compares_with_another_kind_or_store`, `test_string_and_exists_read_an_attachment`, `test_an_attachment_goes_where_a_reference_to_its_store_is_wanted`, the guide's row in `test_the_guide_refuses_as_the_check_refuses` (`tests/test_expressions.py`) | failed first |
+| 13 | It is opened through its store's resolver, as the viewer; nothing the store returns enters the history | `test_an_attachment_is_opened_through_its_store_as_the_viewer` | failed first |
+| 14 | A hidden attachment has nothing to open | `test_a_hidden_attachment_has_nothing_to_open` | pinned (the view hides it before anything is resolved) |
+| 15 | A sensitive attachment keeps its ID wrapped, never in the history, and whoever may see it opens it | `test_a_sensitive_attachment_keeps_its_id_wrapped` | wrapping pinned; opening failed first (the resolver never unwrapped, "not set") |
+| 16 | Forgetting the case forgets a sensitive attachment's ID with its key | layer 9c's: `tests/test_forget.py`, `tests/test_temporal_forget.py` (a sealed value, whatever its type) | pinned; nothing of 16c's own |
+| 17 | On Temporal: both checks run as activities; the refusal and the taking are kept; the history replays | `test_an_option_and_an_attachment_are_checked_on_temporal_then_taken`, `test_a_case_with_an_attachment_replays_without_asking_the_store_again` (`tests/test_temporal_attachments.py`) | the first failed first, by the race (row 10); the replay is weak, as 16b's row 13 |
+| 18 | The builder: `Field.attachment(store)`; a text beside it refused when the file runs; the guide's example is the file its test runs, and `ventoux check` accepts it | `test_the_builder_refuses_a_text_beside_an_attachment`, `test_the_guides_examples_are_the_files_their_tests_run`, `test_every_example_is_a_package_the_check_accepts`, `test_the_builder_writes_every_key_of_the_format` | failed first |
+| 19 | The case map reads "an attachment in documents, checked when given"; the plain diff names a reference become an attachment, and a moved store | `test_the_case_map_reads_an_attachment_with_its_store`, `test_the_plain_diff_reports_an_attachment_changed` (both) | failed first ("can't read receipt's type") |
+| 20 | The attachment's shapes are pinned in a package of their own; every earlier pin keeps its digest | `test_the_pinned_packages_use_every_shape`, `test_method_1_gives_the_digests_it_pinned` (`tests/test_digests.py`) | failed first |
+| 21 | No new engine version: the schema's `$id` stays `engine-2` | `test_the_committed_schemas_are_what_the_models_say` | pinned |
+| 22 | The development catalog's store is the activities guide's, and registers; its resolver block opens a file as the viewer; the case-data guide's three lines are what the case writes | `test_the_activities_guides_store_is_the_development_one`, `test_the_activities_guides_resolver_opens_the_file_as_the_viewer`, `test_the_case_data_guides_lines_are_what_the_case_writes` | mutation (a timeout, the viewer, a word changed in the guide) |
+| 23 | The development check is recorded in the lock | `test_every_development_contract_matches_its_recorded_hash` (`tests/test_catalog.py`) | failed first |
+
+**Left out, on purpose:** that a file's contents are their author's words (choice 34) builds
+nothing: an activity that reads one marks its output as any activity does (layer 4b, its own
+tests). That the inbox keeps bytes off the wire (choice 32) is the inbox's, not the engine's: the
+case refuses only to keep them (row 7).
+
+**Found here, a promise nothing kept:** the activities guide's resolver block (row 22) was run by
+no test. Two promises were broken while building, each now tested: an answer was decided at its
+first check that didn't vouch, though choice 15 said "when every check has answered" (row 10, a
+16b fault); and a sensitive reference could never be resolved (row 15, older than 16c).

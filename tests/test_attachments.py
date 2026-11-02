@@ -825,3 +825,23 @@ def test_the_case_data_guides_lines_are_what_the_case_writes() -> None:
             catalog=stored(),
         )
     assert str(said.value) == too_long
+
+
+def test_the_activities_guides_resolver_opens_the_file_as_the_viewer() -> None:
+    # The guide's second block, run with a stand-in for the store's own client.
+    guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
+    example = guide.split("## A document store")[1].split("```python\n")[2].split("```")[0]
+
+    class Store:
+        def signed_link(self, reference: str, on_behalf_of: str) -> str:
+            return f"https://documents.example/{reference}?as={on_behalf_of}"
+
+    namespace: dict[str, Any] = {
+        "Viewer": Viewer,
+        "store": Store(),
+        "resolvers": Resolvers(stored()),
+    }
+    exec(example, namespace)  # noqa: S102 -- our guide
+    view = attached().view(roles=ADJUSTER.roles)
+    shown = namespace["resolvers"].show(view, "receipt", ADJUSTER)
+    assert shown == {"link": "https://documents.example/doc-7f3a?as=lee"}
