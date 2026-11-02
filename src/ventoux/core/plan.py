@@ -34,6 +34,7 @@ from ventoux.core.expressions import (
     ExpressionInvalid,
     ListType,
     NumberType,
+    OptionType,
     OutcomeType,
     ReferenceType,
     StringType,
@@ -188,7 +189,14 @@ Duration = Annotated[
 PlanExpression = Annotated[Expression, BeforeValidator(expression)]
 Source = Annotated[str, AfterValidator(declared_source)]
 DeclaredType = Annotated[
-    NumberType | StringType | BooleanType | OutcomeType | ReferenceType | DateType | ListType,
+    NumberType
+    | StringType
+    | BooleanType
+    | OutcomeType
+    | ReferenceType
+    | OptionType
+    | DateType
+    | ListType,
     Field(discriminator="type"),
 ]
 

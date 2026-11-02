@@ -95,7 +95,7 @@ def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
         cancel_changes(state, "nothing left to do")
         say_kept_from_starting(case, catalog, state)
         state.history.append(f"closed: nothing left to do{not_reached(case, state)}")
-    elif state.phase == "closing" and not any(run.status == "running" for run in state.runs):
+    elif state.phase == "closing" and not running(state):
         state.phase = "closed"
         say_kept_from_starting(case, catalog, state)
         state.history.append(f"closed: {state.closed_because}")
@@ -154,6 +154,12 @@ def close_held(case: CaseDefinition, state: CaseState) -> bool:
         and bool(case.closes_when)
         and all(milestone in state.milestones for milestone in case.closes_when)
     )
+
+
+def running(state: CaseState) -> bool:
+    """Whether an activity is running: a step's, or an option's check, which a close waits for as
+    for any activity (brief, D10) (brief, D67)."""
+    return any(run.status == "running" for run in state.runs) or bool(state.checking)
 
 
 def pending(state: CaseState) -> bool:

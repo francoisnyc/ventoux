@@ -62,6 +62,12 @@ class Field:
         return FieldType({"type": "reference", "system": system}, ReferenceExpr)
 
     @staticmethod
+    def option(system: str) -> FieldType[ReferenceExpr]:
+        """One of `system`'s list, checked when a person gives it, and read like a reference to
+        `system`: compared only with one of the same system (brief, D67)."""
+        return FieldType({"type": "option", "system": system}, ReferenceExpr)
+
+    @staticmethod
     def date() -> FieldType[DateExpr]:
         """A day on the calendar, with no time and no time zone (brief, D66)."""
         return FieldType({"type": "date"}, DateExpr)

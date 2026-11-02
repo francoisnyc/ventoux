@@ -8,6 +8,7 @@ from collections.abc import Collection
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
 from ventoux.case.reach import can_start
 from ventoux.core.catalog import Catalog
+from ventoux.core.expressions import OptionType
 from ventoux.core.references import unregistered
 from ventoux.core.validate import Issue, role_issues
 
@@ -82,13 +83,67 @@ def system_issues_of(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
         for name, event in case.events.items()
         if event.sent_by.system is not None and event.sent_by.system not in catalog.systems
     ]
+    return (
+        [
+            Issue(
+                f"fields.{name}",
+                "UNKNOWN_SYSTEM",
+                f"{problem}: the systems are {', '.join(catalog.systems)}; use one of them, or ask the "
+                "platform team to register it",
+            )
+            for name, field in case.fields.items()
+            for problem in unregistered({name: field.declared}, catalog.systems)
+        ]
+        + senders
+        + unchecked_options(case, catalog)
+        + options_not_given_by_a_person(case)
+    )
+
+
+def unchecked_options(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
+    """An option of a system the catalog has no check for: nothing could vouch for the answer, so
+    the definition is refused (fail closed) (brief, D67)."""
     return [
         Issue(
             f"fields.{name}",
-            "UNKNOWN_SYSTEM",
-            f"{problem}: the systems are {', '.join(catalog.systems)}; use one of them, or ask the "
-            "platform team to register it",
+            "UNCHECKED_OPTION",
+            f"{name} is an option of {field.declared.system}, and {field.declared.system} has no "
+            f"option check: ask the platform team to register one, or make {name} a reference",
         )
         for name, field in case.fields.items()
-        for problem in unregistered({name: field.declared}, catalog.systems)
-    ] + senders
+        if isinstance(field.declared, OptionType)
+        and catalog.option_check(field.declared.system) is None
+    ]
+
+
+NOT_A_PERSON = "OPTION_NOT_GIVEN_BY_A_PERSON"
+
+
+def options_not_given_by_a_person(case: CaseDefinition) -> list[Issue]:
+    """An option an event carries or a rule sets: only a person's answer gives one, when it can be
+    checked, so nothing would vouch for it (brief, D67). The opening is refused when it gives one
+    (the runtime knows what it gives), and the one-source rule keeps a rule off a field a person
+    sets."""
+    only = "only a person's answer gives one, when it can be checked"
+    carried = [
+        Issue(
+            f"events.{name}.payload.{field}",
+            NOT_A_PERSON,
+            f"{field} is an option of {payload.declared.system}, and {only}: make it a reference "
+            f"to {payload.declared.system}",
+        )
+        for name, event in case.events.items()
+        for field, payload in event.payload.items()
+        if isinstance(payload.declared, OptionType)
+    ]
+    set_by_rules = [
+        Issue(
+            f"rules.{name}.then.set.{field}",
+            NOT_A_PERSON,
+            f"{field} is an option of {declared.system}, and {only}: set it in a task's form",
+        )
+        for name, rule in case.rules.items()
+        for field in rule.then.set
+        if field in case.fields and isinstance(declared := case.fields[field].declared, OptionType)
+    ]
+    return carried + set_by_rules

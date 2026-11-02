@@ -33,6 +33,7 @@ from ventoux.core.expressions import (
     Mul,
     Not,
     NumberType,
+    OptionType,
     Or,
     OutcomeType,
     ReferenceType,
@@ -638,6 +639,7 @@ REFUND: dict[str, FieldType] = {
     "review.outcome": OutcomeType(outcomes=("approve", "reject")),
     "items": ListType(fields={"risk": StringType(), "amount": NumberType()}),
     "incident_date": DateType(),  # the guide's dates (brief, D66)
+    "branch": OptionType(system="branches"),  # the guide's option (brief, D67)
 }
 
 
@@ -717,7 +719,7 @@ def test_an_if_is_checked_on_both_branches(data: object, message: str) -> None:
         (
             {"string": [{"var": "review.outcome"}]},
             (
-                "string[0]: `string` takes a number, a boolean, a reference or a date, "
+                "string[0]: `string` takes a number, a boolean, a reference, an option or a date, "
                 "and this is an outcome"
             ),
         ),

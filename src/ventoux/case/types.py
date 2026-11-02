@@ -20,6 +20,7 @@ from ventoux.core.expressions import (
     ExpressionInvalid,
     FieldType,
     NumberType,
+    OptionType,
     OutcomeType,
     ReferenceType,
     StringType,
@@ -86,6 +87,12 @@ def output_type(info: FieldInfo, system: str | None) -> FieldType | None:
 def fits_type(given: FieldType, wanted: FieldType) -> bool | None:
     """Whether a value of the type `given` always fits `wanted` (True), never does (False), or
     only depends on the value (None), as the runtime's `fits` and strict validation read it."""
+    if isinstance(wanted, OptionType):
+        # Only another option of the system: a reference was never checked (brief, D67).
+        return isinstance(given, OptionType) and given.system == wanted.system
+    if isinstance(wanted, ReferenceType) and isinstance(given, OptionType):
+        # An option is a reference to its system, and a checked one (brief, D67).
+        return given.system == wanted.system
     if isinstance(wanted, StringType):
         # A string, an outcome and a reference are all texts.
         return isinstance(given, StringType | OutcomeType | ReferenceType)

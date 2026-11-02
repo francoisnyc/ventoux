@@ -118,6 +118,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "release": state.release,  # the release it opened on; None for a draft (brief, D51)
         # Each change request pending, in the order proposed: it crosses as it is, a sensitive
         # field's new value sealed (brief, D31) (brief, D52).
+        "checking": held_answers(state),
         "changes": {
             entry: {
                 "entry": request.entry,
@@ -318,6 +319,17 @@ def firing_from_data(data: dict[str, Any]) -> RuleFiring:
         # None in a state from before the fix of the untrusted moment: nothing steered a moment.
         tuple(steering_from_data(steering) for steering in data.get("steered", [])),
     )
+
+
+def held_answers(state: CaseState) -> dict[str, object]:
+    """No held answer: a case continues as new only when nothing runs, and an answer is held only
+    while its check runs (brief, D67). One here would be lost on the way, so it is refused."""
+    if state.checking:
+        raise ValueError(
+            f"{', '.join(state.checking)} is being checked: a case never continues as new while "
+            "an answer is held"
+        )
+    return {}
 
 
 def read_back(name: str, value: object, declared: FieldType | None) -> object:

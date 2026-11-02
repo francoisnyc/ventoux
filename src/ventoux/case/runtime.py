@@ -9,7 +9,7 @@ See docs/layers/08-case.md.
 import copy
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import ValidationError
 
@@ -75,6 +75,7 @@ from ventoux.case.state import (
     Failed,
     ForgetApproved,
     GivenApproval,
+    HeldAnswer,
     Migration,
     Moment,
     Obtained,
@@ -113,6 +114,7 @@ from ventoux.core.dates import date_fields, given_day
 from ventoux.core.expressions import (
     Expression,
     ExpressionError,
+    OptionType,
     ReferenceType,
     a_kind,
     evaluate,
@@ -178,7 +180,7 @@ def decide(
     elif isinstance(event, Answered):
         if state.phase != "open":
             raise AnswerRefused(f"the case is {state.phase}: nothing waits for an answer")
-        if (moved := answer(case, catalog, state, event)) is not None:
+        if (moved := answer(case, catalog, state, event, commands)) is not None:
             # A migration applied: the rest of this decision, and every one after, is the
             # target's, and the driver is told to use it from now on (brief, D53).
             case = moved.case
@@ -484,7 +486,13 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
             problems.append(
                 f"{name} is set by rules, in {computed[name]}, never given at the opening"
             )
-        elif not fits(plain(value), declared := case.fields[name].declared):
+        elif isinstance(declared := case.fields[name].declared, OptionType):
+            # Nothing at the opening could check it: only a person's answer gives one (brief, D67).
+            problems.append(
+                f"{name} is an option of {declared.system}, and only a person's answer gives one, "
+                "when it can be checked: leave it out of the opening"
+            )
+        elif not fits(plain(value), declared):
             # The type, never the value: refusals reach people who may not see it (brief, D30).
             problems.append(misfit(name, declared, plain(value), "the opening"))
     if problems:
@@ -528,7 +536,11 @@ def marked(case: CaseDefinition, name: str, origin: str) -> frozenset[str]:
 
 
 def answer(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, event: Answered
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    event: Answered,
+    commands: list[Command],
 ) -> Moved | None:
     """Record a person's answer, once judged (brief, D23); or `AnswerRefused`. An approved
     migration gives the release the case moved to (brief, D53)."""
@@ -541,8 +553,21 @@ def answer(
     if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
         # Only its event ends it, sent by its sender: nobody answers it (brief, D41).
         raise AnswerRefused(f"{found.entry} waits for {waits.event}: it is sent, never answered")
+    if isinstance(found, StepRun) and (held := state.checking.get(found.entry)) is not None:
+        # One answer at a time: the held one is taken or refused first (brief, D67).
+        systems = listed(
+            list(
+                dict.fromkeys(
+                    cast(OptionType, case.fields[n].declared).system for n in held.waiting
+                )
+            )
+        )
+        raise AnswerRefused(
+            f"{found.entry} is being checked: its answer is taken, or refused, once {systems} "
+            "answers"
+        )
     if isinstance(found, StepRun):
-        answer_task(case, catalog, state, found, event)
+        answer_task(case, catalog, state, found, event, commands)
     else:
         answer_approval(case, catalog, state, found, event)
     return None
@@ -704,13 +729,54 @@ def held_close_refusal(case: CaseDefinition, state: CaseState) -> str:
 
 
 def answer_task(
-    case: CaseDefinition, catalog: Catalog, state: CaseState, run: StepRun, event: Answered
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    run: StepRun,
+    event: Answered,
+    commands: list[Command],
 ) -> None:
-    """The task run is done; its outcome, and the fields its form sets, land in the case file."""
+    """The task run is done; its outcome, and the fields its form sets, land in the case file. An
+    answer setting an option is held, and its options checked, first (brief, D67)."""
     step = case.steps[run.step]
     assert isinstance(step, TaskStep)  # only a task's run is ever open
     role = judge_task(case, catalog, run.entry, run.step, step, event)
     refuse_unless_wrapped(case, event.form or {}, AnswerRefused)
+    options = options_set(case, step, event)
+    if options:
+        # Nothing it sets lands, nor its outcome, until each option's system has vouched for it.
+        state.checking[run.entry] = HeldAnswer(event, role, list(options))
+        for name, value in options.items():
+            system = cast(OptionType, case.fields[name].declared).system
+            check = catalog.option_check(system)
+            assert check is not None  # validation refuses an option nothing checks (UNCHECKED)
+            commands.append(Schedule(f"{run.entry}.{name}", check, {"option": value}))
+        return
+    take_answer(case, state, run, event, role, ())
+
+
+def options_set(case: CaseDefinition, step: TaskStep, event: Answered) -> dict[str, str]:
+    """Each option the answer's outcome sets, and the value given for it, in the form's order."""
+    sets = step.outcomes[event.outcome].sets
+    form = event.form or {}
+    return {
+        name: str(plain(form[name]))
+        for name in sets
+        if isinstance(case.fields[name].declared, OptionType)
+    }
+
+
+def take_answer(
+    case: CaseDefinition,
+    state: CaseState,
+    run: StepRun,
+    event: Answered,
+    role: str,
+    checked_by: tuple[str, ...],
+) -> None:
+    """The answer, judged and, if it sets an option, vouched for, lands: the run is done."""
+    step = case.steps[run.step]
+    assert isinstance(step, TaskStep)
     worded = as_worded(state, event)
     run.status = "done"
     del state.waiting[run.entry]
@@ -722,11 +788,12 @@ def answer_task(
     sets = step.outcomes[event.outcome].sets
     for name in sets:
         state.values[name] = kept(case, name, (event.form or {})[name])
-        state.sources[name] = marked(case, name, who)
+        state.sources[name] = marked(case, name, who) | vouched_for(case, name, checked_by)
         state.obtained[name] = Obtained(event.at, None)
     setting = f", setting {listed(list(sets))}" if sets else ""
+    checked = f", checked by {listed(list(checked_by))}" if checked_by else ""
     state.history.append(
-        f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}{worded}"
+        f"{event.by} answered {run.entry} {event.outcome} as {role}{setting}{checked}{worded}"
     )
     state.history.append(f"{run.entry} done")
     # Each answer, whatever the outcome (brief, D39).
@@ -813,6 +880,9 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     tagged with the contract (or plan) that declares it, and so does an activity's or a workflow's
     output, each field tagged with its contract's source (brief, D29). A run untrusted data
     steered adds what steered it to each, and reaches nothing (brief, D43)."""
+    if (checking := checked_answer(state, event.entry)) is not None:
+        check_answered(case, catalog, state, checking, event)
+        return
     run = next(run for run in state.runs if run.entry == event.entry)
     step = case.steps[run.step]
     assert isinstance(step, CallStep | PlanStep)  # only an activity, a workflow or a plan completes
@@ -845,6 +915,105 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     state.history.append(f"{run.entry} done{f', giving {giving}' if giving else ''}")
     reach_unless_steered(state, run, step.reaches)
     flag_if_stopping(state, run)
+
+
+def dropped_by_a_close(state: CaseState, entry: str) -> bool:
+    """Whether the held answer at `entry` was for a task the case's close cancelled: then it is
+    dropped, saying so, whatever its check says. The close waited for the check (brief, D10)."""
+    if next(run for run in state.runs if run.entry == entry).status != "cancelled":
+        return False
+    held = state.checking.pop(entry)
+    state.history.append(
+        f"{held.answered.by}'s answer {held.answered.outcome} to {entry} is not taken: the case "
+        "closed while it was checked"
+    )
+    return True
+
+
+def not_taken(state: CaseState, entry: str, why: str) -> None:
+    """The held answer at `entry` is not taken: its check couldn't say whether the system holds
+    the option. Never read as held (fail closed), and the case doesn't need attention: answering
+    again fixes it, so the task waits for an answer (brief, D67)."""
+    held = state.checking.pop(entry)
+    state.history.append(
+        f"{held.answered.by}'s answer {held.answered.outcome} to {entry} is not taken: {why}; "
+        "the task waits for an answer"
+    )
+
+
+def vouched_for(case: CaseDefinition, name: str, checked_by: tuple[str, ...]) -> frozenset[str]:
+    """The system that vouched for the option `name`, as a source beside the person who chose it;
+    none for any other field (brief, D67)."""
+    declared = case.fields[name].declared
+    if not isinstance(declared, OptionType):
+        return frozenset()
+    # Only an option its check said held is ever taken: one that wasn't checked is a bug.
+    assert checked_by, f"{name} is an option, taken with no check"
+    return frozenset({f"system:{declared.system}"})
+
+
+def checked_answer(state: CaseState, entry: str) -> tuple[str, str] | None:
+    """The held answer's entry and the option field `entry` checks, if `entry` is a check's run,
+    `assess#1.branch`; else None."""
+    held, _, name = entry.rpartition(".")
+    if held in state.checking and name in state.checking[held].waiting:
+        return held, name
+    return None
+
+
+def check_answered(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    checking: tuple[str, str],
+    event: Completed,
+) -> None:
+    """An option's check answered: the held answer is refused if its system doesn't hold the
+    option, taken once every option is vouched for, and waits for the other checks meanwhile
+    (brief, D67)."""
+    entry, name = checking
+    if dropped_by_a_close(state, entry):
+        return
+    held = state.checking[entry]
+    system = cast(OptionType, case.fields[name].declared).system
+    check = catalog.get(str(catalog.option_check(system)))
+    # Read by its contract first, as every output is: an answer it doesn't describe says nothing,
+    # neither held nor not held (fail closed) (brief, D67).
+    if (problem := outcome_problem(check, event)) is not None:
+        not_taken(state, entry, problem)
+        return
+    # Read by its exact type too: Pydantic reads "yes" and 1 as true, and "no" as false, so a
+    # garbled answer would vouch, or speak for the system. Only `true` or `false` answers.
+    answered = event.output.get("held")
+    if type(answered) is not bool:
+        not_taken(
+            state,
+            entry,
+            f"{check.reference} gave held as {a_kind(answered)}, and an option's check answers "
+            "true or false",
+        )
+        return
+    if answered is not True:
+        # Refused, and the refusal recorded: the field and the system, never the value, which may
+        # be hidden from whoever reads the history (brief, D30). The task stays open.
+        del state.checking[entry]
+        state.history.append(
+            f"refused {held.answered.by}'s answer {held.answered.outcome}: {name} is not one of "
+            f"the options {system} holds"
+        )
+        return
+    held.waiting.remove(name)
+    if held.waiting:
+        return  # another option's check hasn't answered yet
+    del state.checking[entry]
+    run = next(run for run in state.runs if run.entry == entry)
+    checks = tuple(
+        dict.fromkeys(
+            str(catalog.option_check(cast(OptionType, case.fields[option].declared).system))
+            for option in options_set(case, cast(TaskStep, case.steps[run.step]), held.answered)
+        )
+    )
+    take_answer(case, state, run, held.answered, held.role, checks)
 
 
 def reach_unless_steered(state: CaseState, run: StepRun, milestones: tuple[str, ...]) -> None:
@@ -949,7 +1118,12 @@ def outcome_problem(contract: Contract, event: Completed) -> str | None:
 
 def failed(state: CaseState, event: Failed) -> None:
     """A scheduled activity failed after its retries: its run fails, and waits for a person. While
-    the case is closing, nobody will retry it: it is cancelled, and the case is flagged."""
+    the case is closing, nobody will retry it: it is cancelled, and the case is flagged. An
+    option's check that failed takes nothing, and the task waits for an answer (brief, D67)."""
+    if (checking := checked_answer(state, event.entry)) is not None:
+        if not dropped_by_a_close(state, checking[0]):
+            not_taken(state, checking[0], event.reason)
+        return
     run = next(run for run in state.runs if run.entry == event.entry)
     run.status, run.reason = "failed", event.reason
     # A run that fails after its stop was asked needs attention like any other: nobody knows what

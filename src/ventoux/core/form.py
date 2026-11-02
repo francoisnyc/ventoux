@@ -13,6 +13,7 @@ from ventoux.core.expressions import (
     DateType,
     FieldType,
     NumberType,
+    OptionType,
     OutcomeType,
     ReferenceType,
     StringType,
@@ -79,5 +80,8 @@ def fits(value: object, declared: FieldType) -> bool:
     if isinstance(declared, DateType):
         # A day, or its text exactly YYYY-MM-DD; never a moment or a number (brief, D66).
         return given_day(value) is not None
+    if isinstance(declared, OptionType):
+        # A text; whether it is one of the system's list is its check's to say (brief, D67).
+        return isinstance(value, str) and value != ""
     # Fail closed: a type this check doesn't know (a list, for now) fits nothing.
     return False

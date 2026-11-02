@@ -420,6 +420,7 @@
           "date": "#/$defs/DateType",
           "list": "#/$defs/ListType",
           "number": "#/$defs/NumberType",
+          "option": "#/$defs/OptionType",
           "outcome": "#/$defs/OutcomeType",
           "reference": "#/$defs/ReferenceType",
           "string": "#/$defs/StringType"
@@ -441,6 +442,9 @@
         },
         {
           "$ref": "#/$defs/ReferenceType"
+        },
+        {
+          "$ref": "#/$defs/OptionType"
         },
         {
           "$ref": "#/$defs/DateType"
@@ -745,6 +749,28 @@
         "type"
       ],
       "title": "NumberType",
+      "type": "object"
+    },
+    "OptionType": {
+      "additionalProperties": false,
+      "description": "One of a system's list, checked through that system's activity when a person gives it\n(brief, D67).",
+      "properties": {
+        "type": {
+          "const": "option",
+          "default": "option",
+          "title": "Type",
+          "type": "string"
+        },
+        "system": {
+          "title": "System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "type"
+      ],
+      "title": "OptionType",
       "type": "object"
     },
     "Or": {
@@ -1220,6 +1246,31 @@
               "type"
             ],
             "title": "ReferenceType",
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "One of a system's list, checked through that system's activity when a person gives it\n(brief, D67).",
+            "properties": {
+              "type": {
+                "const": "option",
+                "default": "option",
+                "title": "Type",
+                "type": "string"
+              },
+              "system": {
+                "title": "System",
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "system",
+              "type"
+            ],
+            "title": "OptionType",
             "type": "object"
           },
           {
