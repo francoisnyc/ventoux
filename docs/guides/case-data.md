@@ -299,7 +299,18 @@ refused ana's answer accept: receipt is not a document documents issued
 
 **Why never the file itself.** The case's history is kept for ever, replayed, and read by anyone
 with access to Temporal; a file in it could never be forgotten, and a large one would not fit.
-The ID is small, and says only where the file is.
+The ID is small, and says only where the file is. An answer giving more than 200 characters for
+an attachment is refused before the store is asked, never quoting what it gave:
+
+```text
+receipt is an attachment, the ID a store issued, at most 200 characters: upload the file to documents and give its ID
+```
+
+The case refuses to keep a file; it can't stop a client sending one. On Temporal an answer is a
+message the workflow records as it arrives, refused or not, so the inbox uploads files to the
+store and sends only their IDs.
+
+One field holds one file. A list's fields can't be attachments: `ventoux check` says so.
 
 **Opening it.** Whoever may see `receipt` opens it in the inbox, which asks the store **on their
 behalf**, as a reference's record is shown (see "References"): the store's own permissions decide,
