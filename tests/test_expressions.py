@@ -14,6 +14,7 @@ import pytest
 from ventoux.core.expressions import (
     Add,
     And,
+    AttachmentType,
     BooleanType,
     Cat,
     Count,
@@ -640,6 +641,7 @@ REFUND: dict[str, FieldType] = {
     "items": ListType(fields={"risk": StringType(), "amount": NumberType()}),
     "incident_date": DateType(),  # the guide's dates (brief, D66)
     "branch": OptionType(system="branches"),  # the guide's option (brief, D67)
+    "receipt": AttachmentType(store="documents"),  # the guide's attachment (brief, D68)
 }
 
 
@@ -719,7 +721,8 @@ def test_an_if_is_checked_on_both_branches(data: object, message: str) -> None:
         (
             {"string": [{"var": "review.outcome"}]},
             (
-                "string[0]: `string` takes a number, a boolean, a reference, an option or a date, "
+                "string[0]: `string` takes a number, a boolean, a reference, an option, an "
+                "attachment or a date, "
                 "and this is an outcome"
             ),
         ),

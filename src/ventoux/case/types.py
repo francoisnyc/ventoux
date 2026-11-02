@@ -94,6 +94,9 @@ def fits_type(given: FieldType, wanted: FieldType) -> bool | None:
     if isinstance(wanted, ReferenceType) and isinstance(given, OptionType):
         # An option is a reference to its system, and a checked one (brief, D67).
         return given.system == wanted.system
+    if isinstance(wanted, ReferenceType) and isinstance(given, AttachmentType):
+        # An attachment is a reference to its store, and a checked one (brief, D68).
+        return given.store == wanted.system
     if isinstance(wanted, AttachmentType):
         # Only another attachment in the store: a reference was never checked (brief, D68).
         return isinstance(given, AttachmentType) and given.store == wanted.store

@@ -14,6 +14,17 @@ from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
+from ventoux.core.expressions import (
+    AttachmentType,
+    BooleanType,
+    ExpressionInvalid,
+    FieldType,
+    OptionType,
+    ReferenceType,
+    StringType,
+    check,
+    parse_expression,
+)
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
 from ventoux.testing import CATALOG, CaseRefused, ChangeRefused, edit, finish, run_case
@@ -534,3 +545,78 @@ def test_an_edit_of_an_attachment_is_refused_when_it_is_proposed() -> None:
         "receipt is an attachment in documents, given only by a person's answer, where documents "
         "checks it: an edit is never checked, so give it in the answer to the task that sets it"
     )
+
+
+# --- Slice 8: expressions read an attachment like a reference to its store ---
+
+TYPES: dict[str, FieldType] = {
+    "receipt": AttachmentType(store="documents"),
+    "photo": AttachmentType(store="documents"),
+    "scan": ReferenceType(system="documents"),
+    "kept_as": OptionType(system="documents"),  # an option, naming the same system
+    "elsewhere": AttachmentType(store="crm"),
+}
+
+
+@pytest.mark.parametrize(
+    "other", ["photo", "scan"], ids=["an attachment in its store", "a reference to its store"]
+)
+def test_an_attachment_compares_with_a_value_of_its_store(other: str) -> None:
+    compared = parse_expression({"==": [{"var": "receipt"}, {"var": other}]})
+    assert check(compared, TYPES) == BooleanType()
+
+
+@pytest.mark.parametrize(
+    ("other", "refused"),
+    [
+        (
+            "elsewhere",
+            (
+                "==[1]: `==` compares values of the same type, and this is an attachment in "
+                "crm, not an attachment in documents"
+            ),
+        ),
+        (
+            "kept_as",
+            (
+                "==[1]: `==` compares values of the same type, and this is an option of "
+                "documents, not an attachment in documents"
+            ),
+        ),
+    ],
+    ids=["an attachment in another store", "an option of the same system"],
+)
+def test_an_attachment_never_compares_with_another_kind_or_store(other: str, refused: str) -> None:
+    # An option is checked against a list, an attachment against what a store issued: the same
+    # system's name says nothing of which (brief, D68).
+    with pytest.raises(ExpressionInvalid) as raised:
+        check(parse_expression({"==": [{"var": "receipt"}, {"var": other}]}), TYPES)
+    assert str(raised.value) == refused
+
+
+def test_string_and_exists_read_an_attachment() -> None:
+    assert check(parse_expression({"string": [{"var": "receipt"}]}), TYPES) == StringType()
+    assert check(parse_expression({"exists": "receipt"}), TYPES) == BooleanType()
+
+
+class Filed(BaseModel):
+    document: Annotated[str, reference("documents")]  # a reference to the document to file
+
+
+class Filing(BaseModel):
+    filed: bool
+
+
+def test_an_attachment_goes_where_a_reference_to_its_store_is_wanted() -> None:
+    # An attachment is a reference to its store, and a checked one (brief, D68).
+    catalog = stored()
+    catalog.register(contract("documents.file", Filed, Filing))
+    definition = claim()
+    definition["steps"]["file"] = {
+        "kind": "activity",
+        "display": {"title": "File the receipt"},
+        "activity": "documents.file@1",
+        "requires": ["assess"],
+        "inputs": {"document": {"var": "receipt"}},
+    }
+    assert errors(definition, catalog) == []
