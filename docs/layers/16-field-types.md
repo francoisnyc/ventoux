@@ -718,3 +718,57 @@ check a second kind of field.
     attachments (choice 31); a file's name, media type or size in the case; scanning a file;
     asking the store to erase on forgetting (choice 35).
 
+
+## Seams and tests for 16c (curriculum step 4)
+
+*Found while writing the seams (2026-11-02):* a list's fields may be declared an option since 16b,
+and `ventoux check` accepts it, though nothing can fill one: a form and the opening refuse every
+list ("branches_seen is a list, and the answer gives a list"), and a list comes only from an
+activity's output, whose contract can declare neither an option nor an attachment. Choice 40's
+refusal covers both checked types: a list's field that is an option or an attachment is refused,
+saying why.
+
+41. **The seams the tests use,** all public, as 16b's:
+    - **The catalog:** `Catalog.register_document_store(system, check)` refuses a check of the
+      wrong effect or shape and a second check for one store (`ValueError`, its message);
+      `catalog.document_store(system)` gives the check's reference, or None.
+    - **Validation:** `parse_case` and `validate_case` (`ventoux check`): an attachment naming a
+      system nobody registered (`UNKNOWN_SYSTEM`) or one that isn't a store (`NOT_A_STORE`); an
+      attachment the opening, an event or a rule would set; a list's field that is an option or
+      an attachment.
+    - **Expressions:** `check(expression, types)` with an `AttachmentType(store=…)`: a literal
+      refused (the guide's row); an attachment or reference of its store accepted; an option of
+      the same system refused; `string`; the fit where a contract wants a reference (`fits_type`).
+    - **A case, in memory:** `run_case(..., activities={"documents.issued@1": …})`, reading the
+      history, the case file and its sources, `waiting_for` and `needs_attention`; `edit(...)`
+      for the refused edit; an ID of 201 characters for the bound. The check's run is named
+      `assess#1.receipt`, as 16b's.
+    - **Opening:** `case_view(...)` and `Resolvers.show(view, "receipt", viewer)`: an attachment
+      the viewer may see is opened through the store's resolver; a hidden one is refused.
+    - **On Temporal:** one test on the test server, an answer setting an option and an attachment,
+      taken once both checks vouched; its history replays.
+    - **The readings and the format:** `Field.attachment("documents")`, `case_schema()`,
+      `ventoux map`, `ventoux diff --plain`, the digest (`tests/digests/attachments`), and the
+      guides' tables and blocks, each run by a test.
+
+42. **The tests, in order, negative first:**
+    1. **The curriculum's:** `ventoux check` refuses an attachment naming no registered store: a
+       system nobody registered, and a registered system that isn't a store.
+    2. The catalog refuses a store's check that writes, has another shape, or is a second one;
+       a read-only check of the right shape registers, and an attachment of that store is
+       accepted.
+    3. Validation refuses an attachment the opening, an event or a rule would set, and a list's
+       field that is an option or an attachment.
+    4. An ID the store didn't issue is refused and recorded, naming the field and the store; the
+       task open; a corrected one taken, `checked by documents.issued@1`, its sources the person
+       and `system:documents`.
+    5. An ID longer than 200 characters is refused before the store is asked, never quoted.
+    6. The check fails, or answers anything but `true` or `false`: not taken, saying why. An
+       answer setting an option and an attachment waits for both checks.
+    7. An edit of an attachment is refused when proposed.
+    8. Expressions: a literal refused; its store's values accepted; an option of the same system
+       refused; it fits a reference input of its store, never the other way.
+    9. Opening: shown through the store's resolver; hidden from a viewer who can't see it. A
+       sensitive attachment's ID stays sealed, and is forgotten with the case.
+    10. On Temporal: an option and an attachment checked in one answer, replayed.
+    11. The builder, the schema, the case map, the plain diff, the digest, and the guides' blocks.
