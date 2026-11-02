@@ -23,5 +23,6 @@
   "examples/witnesses/what-a-stop-does.json": "c78fd223ff43976a96782c65989acc90bcdc97a90fb25686e00a7ef233e98b4e",
   "examples/packages/refund": "89420f53b3d33b86f1a43a07d48a8445cff1fde1059d1395f62321548397492b",
   "tests/digests/dates": "8f942aa74f36cebc235deb5e2884b45858e9c18f643799b8b0e43fa143a3a464",
+  "tests/digests/options": "6b6c1a240c490a36b7b2304710ed1bbb60e5d4202bdc0b9911182cee2069984a",
   "tests/digests/every-shape": "8cd44455d571dbafc1910fee3d8ae05cfb51b23e82b328552e453300edab1040"
 }

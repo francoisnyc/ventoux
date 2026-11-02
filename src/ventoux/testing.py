@@ -277,6 +277,34 @@ orders_lookup_2 = ActivityContract(
     ),
 )
 
+
+# The case data guide's claim says which branch handles it, an option of `branches`: this is the
+# branches system's option check, which says whether it holds a branch (brief, D67).
+class BranchAsked(BaseModel):
+    option: Annotated[str, reference("branches")]  # the branch a person gave
+
+
+class BranchHeld(BaseModel):
+    held: Annotated[bool, source("system:branches")]  # whether the branches system holds it
+
+
+branches_holds = ActivityContract(
+    name="branches.holds",
+    version=1,
+    input=BranchAsked,
+    output=BranchHeld,
+    risk="low",
+    effect="read",  # an option's check only reads
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,
+    outcomes=[],
+    display=Display(
+        title="Check a branch",
+        description="Says whether the branches system holds a branch.",
+    ),
+)
+
 # The development catalog: what a case can call in tests and the quickstart.
 CATALOG = Catalog()
 # The labels fields and outputs may be declared untrusted with: `untrusted:llm`. First, since a
@@ -285,7 +313,7 @@ for label in ("customer", "document", "email", "llm", "web"):
     CATALOG.register_label(label)
 # The systems references may name, before the contracts whose inputs name them (brief, D30).
 # `portal`, the customer portal, sends the cases guide's events (brief, D41).
-for system in ("crm", "documents", "kyc", "orders", "policies", "portal"):
+for system in ("branches", "crm", "documents", "kyc", "orders", "policies", "portal"):
     CATALOG.register_system(system)
 for contract in (
     payments_refund,
@@ -294,8 +322,10 @@ for contract in (
     letters_draft,
     letters_draft_3,
     kyc_check,
+    branches_holds,
 ):
     CATALOG.register(contract)
+CATALOG.register_option_check("branches", "branches.holds@1")
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
 CATALOG.register_role("support", edits=True)  # and may edit a case file (brief, D52)
 CATALOG.register_role("support-lead", approves="high", edits=True)
@@ -323,11 +353,17 @@ def fake_draft(inputs: dict[str, Any]) -> dict[str, Any]:
     return {"draft_id": f"draft-{inputs['template']}"}
 
 
+def fake_branches(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The branches system holds two branches."""
+    return {"held": inputs["option"] in {"BR-0142", "BR-0007"}}
+
+
 FAKES: dict[str, Activity] = {
     "payments.refund@2": fake_refund,
     "orders.lookup@1": fake_lookup,
     "letters.draft@2": fake_draft,
     "letters.draft@3": fake_draft,
+    "branches.holds@1": fake_branches,
 }
 
 

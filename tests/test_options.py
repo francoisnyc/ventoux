@@ -4,6 +4,7 @@ See docs/layers/16-field-types.md (16b), docs/guides/case-data.md ("Options") an
 """
 
 import copy
+from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
@@ -26,21 +27,27 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
-from ventoux.testing import CATALOG, CaseRefused, close, finish, later, run_case
-
-
-class BranchAsked(BaseModel):
-    option: Annotated[str, reference("branches")]  # the value a person gave
-
-
-class BranchHeld(BaseModel):
-    held: Annotated[bool, source("system:branches")]  # whether the branches system holds it
+from ventoux.testing import (
+    CATALOG,
+    BranchAsked,
+    BranchHeld,
+    CaseRefused,
+    close,
+    finish,
+    later,
+    run_case,
+)
+from ventoux.tooling.builder import Case, Field
+from ventoux.tooling.cli import main
 
 
 def with_branches() -> Catalog:
-    """The development catalog, with the `branches` system."""
-    catalog = copy.deepcopy(CATALOG)
-    catalog.register_system("branches")
+    """A catalog with the `branches` system and no option check yet: the development catalog
+    registers one, `branches.holds@1`, and a system has one."""
+    catalog = Catalog()
+    for system in ("branches", "crm"):  # crm: a check that answers in another system's name
+        catalog.register_system(system)
+    catalog.register_role("adjuster")
     return catalog
 
 
@@ -192,12 +199,8 @@ def test_an_option_of_a_system_with_no_check_is_refused() -> None:
 
 
 def checked() -> Catalog:
-    """The catalog with `branches` and its option check, `branches.holds@1`."""
-    catalog = with_branches()
-    catalog.register_option_check(
-        "branches", registered(catalog, "branches.holds", BranchAsked, BranchHeld)
-    )
-    return catalog
+    """The development catalog, with `branches` and its option check, `branches.holds@1`."""
+    return copy.deepcopy(CATALOG)
 
 
 def test_an_option_a_person_gives_with_its_systems_check_is_accepted() -> None:
@@ -528,3 +531,38 @@ def test_a_stale_option_needs_attention_where_it_must_be_fresh() -> None:
             "came from a person, so it can't be fetched again"
         )
     ]
+
+
+# --- Slice 10: the builder declares an option, read like a reference to its system ---
+
+
+def test_the_builder_refuses_a_text_beside_an_option() -> None:
+    # A text says nothing about which system holds it: an option compares with an option or a
+    # reference of its system, as the expression check says (brief, D67).
+    claim = Case("claim", title="Insurance claim")
+    branch = claim.field("branch", Field.option("branches"), title="Branch handling the claim")
+    with pytest.raises(TypeError) as refused:
+        branch == "BR-0142"  # noqa: B015
+    assert str(refused.value) == "'BR-0142' can't be compared with ReferenceExpr"
+
+
+def test_the_case_map_reads_an_option_with_its_system(capsys: pytest.CaptureFixture[str]) -> None:
+    # The map says which system's list it is, and that a person's answer is checked against it.
+    assert main(["map", str(Path(__file__).parent / "digests" / "options")]) == 0
+    assert "branch is an option of branches, checked when given" in capsys.readouterr().out
+
+
+def test_the_plain_diff_reports_an_option_moved_to_another_system(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pinned = Path(__file__).parent / "digests" / "options"
+    moved = tmp_path / "moved"
+    moved.mkdir()
+    text = (pinned / "case.json").read_text()
+    (moved / "case.json").write_text(text.replace('"branches"', '"depots"'))
+    main(["diff", "--plain", str(pinned), str(moved)])
+    shown = capsys.readouterr().out
+    # Another system's list is another field: what was checked against branches no longer is.
+    assert "- Before: branch is an option of branches, checked when given" in shown
+    assert "- After: branch is an option of depots, checked when given" in shown
+    assert "(`fields.branch.system`): branches -&gt; depots." in shown

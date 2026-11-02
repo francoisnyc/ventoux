@@ -528,3 +528,14 @@ runs.
   contract whose reference or source names an unregistered system (D30). So no check for an
   unregistered system can reach `register_option_check`; naming another system's check is refused
   by its shape (its reference and its source name the other system).
+- **The builder reads an option as a `ReferenceExpr`** (slice 10), not a class of its own: an
+  option compares exactly as a reference does, and neither class knows its system, so a text
+  beside it is refused when the file runs and another system's value by `ventoux check`. A new
+  class would have added nothing a test could tell apart.
+- **The development catalog has `branches` and its check, `branches.holds@1`,** with a fake that
+  holds BR-0142 and BR-0007: so the guide's example passes `ventoux check` and runs on the
+  development worker. Tests that need a system with no check build a small catalog of their own.
+- **The plain diff walks into a declared type** (slice 10). It showed every model under an
+  expression's operator as one expression, and a declared type is one by inheritance, so a
+  reference or an option moved to another system crashed the diff.
+  It now names `fields.branch.system`.
