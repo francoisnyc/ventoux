@@ -49,6 +49,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 42 | Layer 12: why plans don't migrate | closed |
 | 43 | Layer 15: what an injected instruction can still influence | open |
 | 44 | Layer 16: why compare two dates but never ask what day it is | closed |
+| 45 | Layer 16b: why an option is checked once, through an activity, when given | open |
 
 ---
 
@@ -1825,3 +1826,17 @@ and record the key points. A question is closed once you can explain the answer 
   dates don't." The first half again, word for word; asked again whether `today` would be safe
   with no replay: "no, the day depends on the time zone." Both halves, the second after the same
   one prompt as in 16a. Status stays closed.
+
+## 45. Layer 16b: why an option is checked once, through an activity, when given
+
+> Why is an option checked once, through an activity, when the person gives it, rather than each
+> time a condition reads it?
+
+- Asked at the end of layer 16b's walk-through (2026-11-02), beside layer 16's own question.
+- Your answer: "the person chooses it, so it's checked once, when given." Right, the first part:
+  the check vouches for a person's choice at the moment they made it, so the fact it records is
+  "BR-0142 was held when Ana answered", which stays true after the branch closes (brief, D67).
+  A step that needs it still held says so with `max_age` (brief, D18).
+- Follow-up, asked: what would go wrong if a condition asked the branches system each time it read
+  `branch`?
+- Status: open.
