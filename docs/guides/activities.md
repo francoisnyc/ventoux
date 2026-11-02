@@ -1,6 +1,6 @@
 # Activities: adding a capability to the catalog
 
-> **For the platform team.** This guide describes layers 1, 4, 8d, 9a and 16a as if they already worked;
+> **For the platform team.** This guide describes layers 1, 4, 8d, 9a, 16a and 16b as if they already worked;
 > the code that makes it true is built test-first in those layers. Case developers rarely need it: they meet
 > contracts only through the activities they call and the errors `ventoux check` gives them.
 
@@ -492,3 +492,54 @@ identical cases would get different days, depending on which worker ran the acti
 can't see that from outside, so the rule is yours: say the zone in the code, and in the contract's
 description ("the day of the report, in New York time"). An output annotated `datetime`, a moment,
 is refused when the contract is registered.
+
+## An option's check: a system says which values it holds
+
+A case's `option` field (case-data guide, "Options") holds a value a system's list must hold. You
+say how to ask that system, once, with a read-only activity whose contract has this shape: one
+input, the value, and one output, whether the system holds it.
+
+```python
+from typing import Annotated
+
+from pydantic import BaseModel
+
+from ventoux.core.contract import ActivityContract, Display, RetryPolicy, Timeouts
+from ventoux.core.output_sources import source
+from ventoux.core.references import reference
+
+
+class BranchAsked(BaseModel):
+    option: Annotated[str, reference("branches")]  # the value a person gave
+
+
+class BranchHeld(BaseModel):
+    held: Annotated[bool, source("system:branches")]  # whether the branches system holds it
+
+
+holds = ActivityContract(
+    name="branches.holds",
+    version=1,
+    risk="low",
+    effect="read",
+    input=BranchAsked,
+    output=BranchHeld,
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,  # a read: asking twice changes nothing
+    outcomes=[],
+    display=Display(
+        title="Check a branch",
+        description="Whether the branches system holds a branch, open, now.",
+    ),
+)
+catalog.register(holds)
+catalog.register_option_check("branches", "branches.holds@1")
+```
+
+The catalog refuses an option check that isn't `effect: read`, that takes or gives anything but
+that one value and that one truth value, or that names a system nobody registered. A case
+definition never names the check: it names the system, and the catalog says how to ask it.
+
+Your activity answers for the system as it is now. It is asked once, when the person answers, and
+its answer is kept in the case's history, so a replay reads that answer and never asks again.
