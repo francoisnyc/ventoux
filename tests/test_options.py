@@ -254,3 +254,40 @@ def test_an_option_given_at_the_opening_is_refused() -> None:
         "usual is an option of branches, and only a person's answer gives one, when it can be "
         "checked: leave it out of the opening"
     )
+
+
+# --- Slice 3: the curriculum's negative test, an answer held while it is checked ---
+
+OPEN_BRANCHES = {"BR-0142", "BR-0007"}  # what the branches system holds, in these tests
+ADJUSTERS = {"ana": ["adjuster"]}
+
+
+def holds(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The branches system's answer: whether it holds the option asked about."""
+    return {"held": inputs["option"] in OPEN_BRANCHES}
+
+
+def test_an_option_the_system_does_not_hold_is_refused_and_the_refusal_recorded() -> None:
+    run = run_case(
+        claim(),
+        file={},
+        answers=[
+            ("assess", "accept", "ana", {"branch": "BR-9999"}),  # no such branch
+            ("assess", "accept", "ana", {"branch": "BR-0142"}),  # corrected
+        ],
+        people=ADJUSTERS,
+        activities={"branches.holds@1": holds},
+        catalog=checked(),
+    )
+    # The refusal names the field and the system, never the value (brief, D30) (brief, D67); the
+    # task stays open, and the corrected answer is taken, saying which check vouched for it.
+    assert run.history == [
+        "opened by system:opener, with nothing",
+        "started assess#1: waiting for accept or deny by adjuster",
+        "refused ana's answer accept: branch is not one of the options branches holds",
+        "ana answered assess#1 accept as adjuster, setting branch, checked by branches.holds@1",
+        "assess#1 done",
+        "closed: nothing left to do",
+    ]
+    # Nothing the refused answer set landed: the corrected one is what the case holds.
+    assert run.state.values["branch"] == "BR-0142"
