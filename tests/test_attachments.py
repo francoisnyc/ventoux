@@ -16,7 +16,7 @@ from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
-from ventoux.testing import CATALOG, CaseRefused, run_case
+from ventoux.testing import CATALOG, CaseRefused, finish, run_case
 
 
 def claim(store: str = "documents") -> dict[str, Any]:
@@ -397,3 +397,106 @@ def test_an_id_longer_than_200_characters_is_refused_before_the_store_is_asked()
     )
     assert asked == ["d" * 200]
     assert "refused ana's answer accept: receipt is not a document documents issued" in run.history
+
+
+# --- Slice 6: a check that can't be made takes nothing; one answer may wait for two checks ---
+
+
+def broken(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The documents store is down."""
+    raise RuntimeError("documents is down")
+
+
+@pytest.mark.parametrize(
+    ("check", "why"),
+    [
+        (broken, "documents.issued@1 failed with RuntimeError: ‹sensitive›"),
+        (
+            lambda _: {"yes": True},
+            "documents.issued@1 gave an output its contract doesn't declare: issued: Field "
+            "required",
+        ),
+        (
+            lambda _: {"issued": "yes"},
+            "documents.issued@1 gave issued as a string, and a document store's check answers "
+            "true or false",
+        ),
+    ],
+    ids=["the check fails", "another shape", "not true or false"],
+)
+def test_an_attachment_whose_check_cannot_be_made_is_not_taken(check: Any, why: str) -> None:
+    # Fail closed: never read as issued; and answering again fixes it, so the case doesn't need
+    # attention (brief, D68).
+    run = run_case(
+        claim(),
+        file={},
+        answers=[("assess", "accept", "ana", {"receipt": "doc-7f3a"})],
+        people=ADJUSTERS,
+        activities={"documents.issued@1": check},
+        catalog=stored(),
+    )
+    assert run.history[-1] == (
+        f"ana's answer accept to assess#1 is not taken: {why}; the task waits for an answer"
+    )
+    assert "receipt" not in run.state.values
+    assert list(run.state.waiting) == ["assess#1"]
+    assert run.needs_attention == []
+
+
+def with_branch() -> dict[str, Any]:
+    """The claim, its acceptance also saying which branch handles it, an option of branches."""
+    definition = claim()
+    definition["fields"]["branch"] = {
+        "type": "option",
+        "system": "branches",
+        "display": {"title": "Branch handling the claim"},
+    }
+    definition["steps"]["assess"]["outcomes"]["accept"]["sets"] = ["branch", "receipt"]
+    return definition
+
+
+BOTH = ("assess", "accept", "ana", {"branch": "BR-0142", "receipt": "doc-7f3a"})
+CHECKS = {
+    "branches.holds@1": lambda i: {"held": i["option"] == "BR-0142"},
+    "documents.issued@1": issued,
+}
+
+
+def test_an_answer_with_an_option_and_an_attachment_waits_for_both_checks() -> None:
+    def answered(*more: Any) -> Any:
+        return run_case(
+            with_branch(),
+            file={},
+            answers=[BOTH, *more],
+            people=ADJUSTERS,
+            activities=CHECKS,
+            catalog=stored(),
+            held=["assess"],  # both checks keep running until finished
+        )
+
+    # One check back: the answer still waits for the other, and nothing has landed.
+    one = answered(finish("assess#1.receipt"))
+    assert "receipt" not in one.state.values and "branch" not in one.state.values
+    # Both back: taken, saying both checks, each value from the person and its own system.
+    both = answered(finish("assess#1.receipt"), finish("assess#1.branch"))
+    assert (
+        "ana answered assess#1 accept as adjuster, setting branch and receipt, checked by "
+        "branches.holds@1 and documents.issued@1"
+    ) in both.history
+    assert both.state.sources["branch"] == frozenset({"person:ana", "system:branches"})
+    assert both.state.sources["receipt"] == frozenset({"person:ana", "system:documents"})
+
+
+def test_one_check_that_doesnt_vouch_refuses_the_whole_answer() -> None:
+    run = run_case(
+        with_branch(),
+        file={},
+        answers=[("assess", "accept", "ana", {"branch": "BR-0142", "receipt": "doc-0000"})],
+        people=ADJUSTERS,
+        activities=CHECKS,
+        catalog=stored(),
+    )
+    # The branch was held, the receipt not issued: nothing the answer set lands (brief, D68).
+    assert "refused ana's answer accept: receipt is not a document documents issued" in run.history
+    assert "branch" not in run.state.values and "receipt" not in run.state.values
+    assert list(run.state.waiting) == ["assess#1"]
