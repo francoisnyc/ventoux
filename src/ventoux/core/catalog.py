@@ -33,6 +33,7 @@ class Catalog:
         self._systems: set[str] = set()  # the systems a reference may name (brief, D30)
         # Each system's option check, by its reference: one per system (brief, D67).
         self._option_checks: dict[str, str] = {}
+        self._document_stores: dict[str, str] = {}  # each store, and the check that it issued an ID
 
     def register_label(self, label: str) -> None:
         """Let fields be declared `untrusted:<label>`. Registered by the platform team, like roles,
@@ -89,6 +90,11 @@ class Catalog:
         """The reference of `system`'s option check, or None if it has none: then nothing can
         check an option of it, and a definition holding one is refused (brief, D67)."""
         return self._option_checks.get(system)
+
+    def document_store(self, system: str) -> str | None:
+        """The reference of the check that `system`, a document store, issued an ID; or None if
+        `system` isn't a store: then nothing can check an attachment in it (brief, D68)."""
+        return self._document_stores.get(system)
 
     def register_role(
         self,

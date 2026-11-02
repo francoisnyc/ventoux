@@ -266,6 +266,28 @@
       "title": "ApprovalDisplay",
       "type": "object"
     },
+    "AttachmentType": {
+      "additionalProperties": false,
+      "description": "The ID a document store issued for a file, never the file: checked through the store's\nactivity when a person gives it (brief, D68).",
+      "properties": {
+        "type": {
+          "const": "attachment",
+          "default": "attachment",
+          "title": "Type",
+          "type": "string"
+        },
+        "store": {
+          "title": "Store",
+          "type": "string"
+        }
+      },
+      "required": [
+        "store",
+        "type"
+      ],
+      "title": "AttachmentType",
+      "type": "object"
+    },
     "BooleanType": {
       "additionalProperties": false,
       "description": "`true` or `false`.",
@@ -628,6 +650,65 @@
             "type"
           ],
           "title": "OptionType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The ID a document store issued for a file, never the file: checked through the store's\nactivity when a person gives it (brief, D68).",
+          "properties": {
+            "type": {
+              "const": "attachment",
+              "default": "attachment",
+              "title": "Type",
+              "type": "string"
+            },
+            "store": {
+              "title": "Store",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "visible_to": {
+              "anyOf": [
+                {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Visible To"
+            },
+            "sensitive": {
+              "default": false,
+              "title": "Sensitive",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "display",
+            "store",
+            "type"
+          ],
+          "title": "AttachmentType",
           "type": "object"
         },
         {
@@ -1075,6 +1156,7 @@
     "FieldType": {
       "discriminator": {
         "mapping": {
+          "attachment": "#/$defs/AttachmentType",
           "boolean": "#/$defs/BooleanType",
           "date": "#/$defs/DateType",
           "list": "#/$defs/ListType",
@@ -1104,6 +1186,9 @@
         },
         {
           "$ref": "#/$defs/OptionType"
+        },
+        {
+          "$ref": "#/$defs/AttachmentType"
         },
         {
           "$ref": "#/$defs/DateType"
@@ -1747,6 +1832,44 @@
             "type"
           ],
           "title": "OptionType",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The ID a document store issued for a file, never the file: checked through the store's\nactivity when a person gives it (brief, D68).",
+          "properties": {
+            "type": {
+              "const": "attachment",
+              "default": "attachment",
+              "title": "Type",
+              "type": "string"
+            },
+            "store": {
+              "title": "Store",
+              "type": "string"
+            },
+            "display": {
+              "$ref": "#/$defs/Display"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            }
+          },
+          "required": [
+            "display",
+            "store",
+            "type"
+          ],
+          "title": "AttachmentType",
           "type": "object"
         },
         {

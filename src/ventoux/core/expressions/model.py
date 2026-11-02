@@ -312,6 +312,7 @@ type FieldType = (
     | OutcomeType
     | ReferenceType
     | OptionType
+    | AttachmentType
     | DateType
     | ListType
 )
@@ -368,6 +369,14 @@ class OptionType(Declared):
 
     type: Literal["option"] = "option"
     system: str
+
+
+class AttachmentType(Declared):
+    """The ID a document store issued for a file, never the file: checked through the store's
+    activity when a person gives it (brief, D68)."""
+
+    type: Literal["attachment"] = "attachment"
+    store: str  # the registered system that keeps the file
 
 
 class DateType(Declared):

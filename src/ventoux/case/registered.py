@@ -8,7 +8,7 @@ from collections.abc import Collection
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
 from ventoux.case.reach import can_start
 from ventoux.core.catalog import Catalog
-from ventoux.core.expressions import OptionType
+from ventoux.core.expressions import AttachmentType, OptionType
 from ventoux.core.references import unregistered
 from ventoux.core.validate import Issue, role_issues
 
@@ -96,6 +96,7 @@ def system_issues_of(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
         ]
         + senders
         + unchecked_options(case, catalog)
+        + not_stores(case, catalog)
         + options_not_given_by_a_person(case)
     )
 
@@ -113,6 +114,24 @@ def unchecked_options(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
         for name, field in case.fields.items()
         if isinstance(field.declared, OptionType)
         and catalog.option_check(field.declared.system) is None
+    ]
+
+
+def not_stores(case: CaseDefinition, catalog: Catalog) -> list[Issue]:
+    """An attachment in a registered system that isn't a document store: nothing could say the
+    store issued the ID, nor open the file, so the definition is refused, failing closed
+    (brief, D68). One in a system nobody registered is `UNKNOWN_SYSTEM`'s, said once."""
+    return [
+        Issue(
+            f"fields.{name}",
+            "NOT_A_STORE",
+            f"{store} is not a document store: register it with register_document_store, or "
+            f"make {name} a reference to {store}",
+        )
+        for name, field in case.fields.items()
+        if isinstance(field.declared, AttachmentType)
+        and (store := field.declared.store) in catalog.systems
+        and catalog.document_store(store) is None
     ]
 
 
