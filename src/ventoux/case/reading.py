@@ -31,6 +31,7 @@ from ventoux.case.sequence import requirements
 from ventoux.case.visibility import seen_by
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.expressions import (
+    AttachmentType,
     Expression,
     ExpressionInvalid,
     ListType,
@@ -730,6 +731,8 @@ def kind_of(name: str, declared: object) -> str:
         return f"a reference to {declared.system}"
     if isinstance(declared, OptionType):  # one of the system's list, said so (brief, D67)
         return f"an option of {declared.system}, checked when given"
+    if isinstance(declared, AttachmentType):  # a file its store keeps, said so (brief, D68)
+        return f"an attachment in {declared.store}, checked when given"
     if isinstance(declared, ListType):
         return f"a list of {listed_and(list(declared.fields))}"
     if isinstance(declared, OutcomeType):

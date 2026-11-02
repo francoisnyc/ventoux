@@ -1,0 +1,41 @@
+{
+  "case": "claim",
+  "display": {
+    "title": "Insurance claim"
+  },
+  "fields": {
+    "receipt": {
+      "type": "attachment",
+      "store": "documents",
+      "display": {
+        "title": "The receipt"
+      }
+    }
+  },
+  "steps": {
+    "assess": {
+      "kind": "task",
+      "display": {
+        "title": "Assess the claim"
+      },
+      "roles": [
+        "adjuster"
+      ],
+      "outcomes": {
+        "accept": {
+          "display": {
+            "title": "Accept the claim"
+          },
+          "sets": [
+            "receipt"
+          ]
+        },
+        "deny": {
+          "display": {
+            "title": "Deny the claim"
+          }
+        }
+      }
+    }
+  }
+}

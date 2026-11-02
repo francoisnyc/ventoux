@@ -305,6 +305,34 @@ branches_holds = ActivityContract(
     ),
 )
 
+
+# The case data guide's claim attaches its receipt, kept in the `documents` store: this is the
+# store's check, which says whether it issued an ID (brief, D68).
+class DocumentAsked(BaseModel):
+    attachment: Annotated[str, reference("documents")]  # the ID a person gave
+
+
+class DocumentIssued(BaseModel):
+    issued: Annotated[bool, source("system:documents")]  # whether the store issued it
+
+
+documents_issued = ActivityContract(
+    name="documents.issued",
+    version=1,
+    input=DocumentAsked,
+    output=DocumentIssued,
+    risk="low",
+    effect="read",  # a store's check only reads
+    timeouts=Timeouts(start_to_close=10, schedule_to_start=60),
+    retry=RetryPolicy(maximum_attempts=3, initial_interval=1, backoff_coefficient=2),
+    idempotency_key=None,
+    outcomes=[],
+    display=Display(
+        title="Check a document",
+        description="Whether the documents store issued an ID, for a file it holds.",
+    ),
+)
+
 # The development catalog: what a case can call in tests and the quickstart.
 CATALOG = Catalog()
 # The labels fields and outputs may be declared untrusted with: `untrusted:llm`. First, since a
@@ -323,9 +351,11 @@ for contract in (
     letters_draft_3,
     kyc_check,
     branches_holds,
+    documents_issued,
 ):
     CATALOG.register(contract)
 CATALOG.register_option_check("branches", "branches.holds@1")
+CATALOG.register_document_store("documents", "documents.issued@1")
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
 CATALOG.register_role("support", edits=True)  # and may edit a case file (brief, D52)
 CATALOG.register_role("support-lead", approves="high", edits=True)
@@ -353,6 +383,11 @@ def fake_draft(inputs: dict[str, Any]) -> dict[str, Any]:
     return {"draft_id": f"draft-{inputs['template']}"}
 
 
+def fake_documents(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The documents store issued one file's ID."""
+    return {"issued": inputs["attachment"] == "doc-7f3a"}
+
+
 def fake_branches(inputs: dict[str, Any]) -> dict[str, Any]:
     """The branches system holds two branches."""
     return {"held": inputs["option"] in {"BR-0142", "BR-0007"}}
@@ -364,6 +399,7 @@ FAKES: dict[str, Activity] = {
     "letters.draft@2": fake_draft,
     "letters.draft@3": fake_draft,
     "branches.holds@1": fake_branches,
+    "documents.issued@1": fake_documents,
 }
 
 

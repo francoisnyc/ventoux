@@ -4,6 +4,7 @@ See docs/layers/16-field-types.md (16c), docs/guides/case-data.md ("Attachments"
 """
 
 import copy
+from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
@@ -14,6 +15,7 @@ from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
+from ventoux.core.contract_hash import contract_hash
 from ventoux.core.expressions import (
     AttachmentType,
     BooleanType,
@@ -28,7 +30,19 @@ from ventoux.core.expressions import (
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
 from ventoux.core.sensitive import Sensitive
-from ventoux.testing import CATALOG, CaseRefused, ChangeRefused, edit, finish, run_case
+from ventoux.testing import (
+    CATALOG,
+    CaseRefused,
+    ChangeRefused,
+    DocumentAsked,
+    DocumentIssued,
+    documents_issued,
+    edit,
+    finish,
+    run_case,
+)
+from ventoux.tooling.builder import Case, Field
+from ventoux.tooling.cli import main
 from ventoux.tooling.resolvers import Resolvers, ShowRefused, Viewer
 
 
@@ -98,14 +112,6 @@ def test_an_attachment_in_a_system_that_is_not_a_store_is_refused() -> None:
 
 
 # --- Slice 2: a store is a registered system with a read-only check that it issued an ID ---
-
-
-class DocumentAsked(BaseModel):
-    attachment: Annotated[str, reference("documents")]  # the ID a person gave
-
-
-class DocumentIssued(BaseModel):
-    issued: Annotated[bool, source("system:documents")]  # whether the store issued it
 
 
 class Code(BaseModel):
@@ -217,11 +223,7 @@ def test_a_read_only_check_of_the_right_shape_makes_its_system_a_store() -> None
 
 def stored() -> Catalog:
     """The development catalog, with `documents` a store, checked by `documents.issued@1`."""
-    catalog = copy.deepcopy(CATALOG)
-    catalog.register_document_store(
-        "documents", registered(catalog, "documents.issued", DocumentAsked, DocumentIssued)
-    )
-    return catalog
+    return copy.deepcopy(CATALOG)
 
 
 def with_photo() -> dict[str, Any]:
@@ -726,3 +728,100 @@ def test_an_answer_is_held_until_every_check_is_back_even_when_one_refuses() -> 
         "refused ana's answer accept: receipt is not a document documents issued"
     )
     assert list(run.state.waiting) == ["assess#1"] and not run.state.checking
+
+
+# --- Slice 11: the builder, the development catalog, the readings and the guides ---
+
+
+def test_the_builder_refuses_a_text_beside_an_attachment() -> None:
+    # A text says nothing of which store issued it: an attachment compares with a value of its
+    # store, as the expression check says (brief, D68).
+    claim = Case("claim", title="Insurance claim")
+    receipt = claim.field("receipt", Field.attachment("documents"), title="The receipt")
+    with pytest.raises(TypeError) as refused:
+        receipt == "doc-7f3a"  # noqa: B015
+    assert str(refused.value) == "'doc-7f3a' can't be compared with ReferenceExpr"
+
+
+PINNED = Path(__file__).parent / "digests" / "attachments"
+
+
+def test_the_case_map_reads_an_attachment_with_its_store(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The map says which store keeps the file, and that the person's answer is checked against it.
+    assert main(["map", str(PINNED)]) == 0
+    assert "receipt is an attachment in documents, checked when given" in capsys.readouterr().out
+
+
+AS_A_REFERENCE = (('"attachment"', '"reference"'), ('"store"', '"system"'))
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "changed"),
+    [
+        (AS_A_REFERENCE, (), "(`fields.receipt.type`): reference -&gt; attachment."),
+        ((), (('"documents"', '"ledgers"'),), "(`fields.receipt.store`): documents -&gt; ledgers."),
+    ],
+    ids=["a reference become an attachment", "an attachment moved to another store"],
+)
+def test_the_plain_diff_reports_an_attachment_changed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    before: tuple[tuple[str, str], ...],
+    after: tuple[tuple[str, str], ...],
+    changed: str,
+) -> None:
+    folders = []
+    for name, replaced in (("before", before), ("after", after)):
+        text = (PINNED / "case.json").read_text()
+        for old, new in replaced:
+            text = text.replace(old, new)
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "case.json").write_text(text)
+        folders.append(str(folder))
+    main(["diff", "--plain", *folders])
+    assert changed in capsys.readouterr().out
+
+
+ROOT = Path(__file__).parent.parent
+
+
+def test_the_activities_guides_store_is_the_development_one() -> None:
+    # The guide's block, run so it can't drift from the code: it registers, and it is the check
+    # the development catalog registers for documents (our own documentation, never a definition).
+    guide = (ROOT / "docs" / "guides" / "activities.md").read_text()
+    example = guide.split("## A document store")[1].split("```python\n")[1].split("```")[0]
+    namespace: dict[str, Any] = {"catalog": no_stores()}
+    exec(example, namespace)  # noqa: S102 -- our guide
+    assert namespace["catalog"].document_store("documents") == "documents.issued@1"
+    assert contract_hash(namespace["issued"]) == contract_hash(documents_issued)
+
+
+def test_the_case_data_guides_lines_are_what_the_case_writes() -> None:
+    guide = (ROOT / "docs" / "guides" / "case-data.md").read_text()
+    section = guide.split("## Attachments")[1].split("\n## ")[0]
+    taken, refused, too_long = (
+        block.split("```")[0].strip() for block in section.split("```text\n")[1:]
+    )
+    run = run_case(
+        claim(),
+        file={},
+        answers=[
+            ("assess", "accept", "ana", {"receipt": "doc-0000"}),
+            ("assess", "accept", "ana", {"receipt": "doc-7f3a"}),
+        ],
+        people=ADJUSTERS,
+        catalog=stored(),  # the development fake: it issued doc-7f3a
+    )
+    assert refused in run.history and taken in run.history
+    with pytest.raises(AnswerRefused) as said:
+        run_case(
+            claim(),
+            file={},
+            answers=[("assess", "accept", "ana", {"receipt": "x" * 201})],
+            people=ADJUSTERS,
+            catalog=stored(),
+        )
+    assert str(said.value) == too_long

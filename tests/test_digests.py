@@ -36,6 +36,8 @@ def packages() -> dict[str, Package]:
         ROOT / "tests" / "digests" / "dates",
         # And the option's, the same way (brief, D67).
         ROOT / "tests" / "digests" / "options",
+        # And the attachment's (brief, D68).
+        ROOT / "tests" / "digests" / "attachments",
     ):
         plans = [plan.read_text() for plan in sorted((folder / "plans").glob("*.json"))]
         found[str(folder.relative_to(ROOT))] = package((folder / "case.json").read_text(), plans)
