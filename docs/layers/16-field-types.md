@@ -785,3 +785,12 @@ saying why.
   set: there is no record to show" of a value the viewer may see. This predates 16c: a sensitive
   reference had the same fault. `show` now takes the ID out of its wrapper. The view is already
   filtered for the viewer, so a value hidden from them still has nothing to resolve.
+- **An answer waiting for two checks was decided at the first that didn't vouch** (found in slice
+  10, on Temporal). Choice 15 said "when every check has answered", but the engine refused the
+  answer as soon as one check said no, and forgot it while the other still ran. In memory checks
+  finish in order, so no test saw it; on Temporal they race. The late check then came back to
+  no answer, or, if the person had answered again meanwhile, it counted towards the new answer:
+  a stale "held" could vouch for a value nobody checked. A 16b fault, with two options; 16c's two
+  checks showed it. The held answer now notes what each check says and is decided once every
+  check is back, by the first problem in the answer's own order, so the line never depends on
+  which check came back first; until then a second answer is refused as being checked.

@@ -690,3 +690,39 @@ def test_a_sensitive_attachment_keeps_its_id_wrapped() -> None:
     asked: list[tuple[str, Viewer]] = []
     store_resolvers(asked).show(run.view(roles=ADJUSTER.roles), "receipt", ADJUSTER)
     assert asked == [("doc-7f3a", ADJUSTER)]
+
+
+# --- Slice 10: an answer is decided once every check is back, whichever answers first ---
+
+WRONG_RECEIPT = ("assess", "accept", "ana", {"branch": "BR-0142", "receipt": "doc-0000"})
+
+
+def first_back(*more: Any) -> Any:
+    """The claim, answered with a receipt the store didn't issue; its checks finish as `more`
+    says, the store's first."""
+    return run_case(
+        with_branch(),
+        file={},
+        answers=[WRONG_RECEIPT, finish("assess#1.receipt"), *more],
+        people=ADJUSTERS,
+        activities=CHECKS,
+        catalog=stored(),
+        held=["assess"],
+    )
+
+
+def test_an_answer_is_held_until_every_check_is_back_even_when_one_refuses() -> None:
+    # The store refused first, but the branch's check still runs: the answer is still being
+    # checked, so a second one is refused, and a late check never vouches for a new answer
+    # (brief, D67) (brief, D68).
+    with pytest.raises(AnswerRefused) as refused:
+        first_back(("assess", "accept", "ana", {"branch": "BR-0007", "receipt": "doc-7f3a"}))
+    assert str(refused.value) == (
+        "assess#1 is being checked: its answer is taken, or refused, once branches answers"
+    )
+    # Once both are back, it is refused, saying why, and the task waits for a new answer.
+    run = first_back(finish("assess#1.branch"))
+    assert run.history[-1] == (
+        "refused ana's answer accept: receipt is not a document documents issued"
+    )
+    assert list(run.state.waiting) == ["assess#1"] and not run.state.checking

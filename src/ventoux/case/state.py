@@ -285,11 +285,14 @@ class Opened:
 
 @dataclass
 class HeldAnswer:
-    """An answer setting an option, held until each option's check has answered (brief, D67)."""
+    """An answer setting an option or an attachment, held until every check it waits for is
+    back, whatever each says: only then is it taken or refused (brief, D67) (brief, D68)."""
 
     answered: "Answered"  # the answer, as it was given
     role: str  # the role it was judged to answer as
-    waiting: list[str]  # the option fields no check has vouched for yet, in the form's order
+    waiting: list[str]  # the checked fields whose check isn't back yet, in the form's order
+    # Each checked field whose check came back without vouching, and the history line saying why.
+    problems: dict[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True)
