@@ -2786,8 +2786,11 @@ D9, D16, D18, D19 and D30, whose text is kept.*
   (D19).
 - **Its sources are the person and the system:** `{person:ana, system:branches}`. Only the person
   counts as one whose answer feeds a step (D25).
-- **Only a person gives an option.** An option field the opening, an event, a rule or an
-  activity's output would set is refused by validation: nothing would check it.
+- **Only a person gives an option, in a task's answer.** An option field the opening, an event or
+  a rule would set is refused (the opening when it is given, the event and the rule by
+  validation), and so is an edit of one (D52), when it is proposed: none of them is checked by
+  the system. An activity's output is never one: a contract declares a reference, never an
+  option.
 - **Checked once, when given:** a fact with the time it was obtained (D18); a step needing it
   still held uses `max_age`, and a stale option, given by a person, makes the case need attention
   (D18).

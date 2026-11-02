@@ -34,8 +34,10 @@ from ventoux.testing import (
     BranchAsked,
     BranchHeld,
     CaseRefused,
+    ChangeRefused,
     branches_holds,
     close,
+    edit,
     finish,
     later,
     run_case,
@@ -689,3 +691,32 @@ def test_the_case_data_guides_lines_are_what_the_case_writes() -> None:
     )
     assert len(shown) == 2
     assert all(line in run.history for line in shown), shown
+
+
+# --- The tutor's review: an edit never sets an option ---
+
+
+def test_an_edit_of_an_option_is_refused_when_it_is_proposed() -> None:
+    # An edit is checked for its type, never by the system: an option is given only in a
+    # person's answer, where its system vouches for it (brief, D52) (brief, D67).
+    definition = closable() | {"stays_open": True}
+    both = ["adjuster", "support-lead"]  # each sees the branch, and may edit or approve
+    people = {"ana": ["adjuster"], "sam": both, "lee": both}
+    with pytest.raises(ChangeRefused) as refused:
+        run_case(
+            definition,
+            file={},
+            answers=[
+                ("assess", "accept", "ana", {"branch": "BR-0142"}),
+                edit("branch", "BR-9999", "sam"),  # not a branch the system holds
+                ("case.change#1", "approve", "lee"),
+            ],
+            people=people,
+            activities={"branches.holds@1": holds},
+            catalog=checked(),
+        )
+    # Refused when proposed: Lee's approval is never asked, and nothing is applied.
+    assert str(refused.value) == (
+        "branch is an option of branches, given only by a person's answer, where branches checks "
+        "it: an edit is never checked, so give it in the answer to the task that sets it"
+    )

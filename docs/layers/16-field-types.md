@@ -569,13 +569,26 @@ as in 16a's table.
 | 19 | No new engine version: the schema's `$id` stays `engine-2` | `test_the_committed_schemas_are_what_the_models_say` | pinned |
 | 20 | **Found at step 6:** the activities guide's check is the development catalog's, and registers | `test_the_activities_guides_option_check_is_the_development_one` | mutation (a timeout changed in the guide) |
 | 21 | **Found at step 6:** the case-data guide's two history lines are what the case writes | `test_the_case_data_guides_lines_are_what_the_case_writes` | mutation (a word changed in the guide) |
+| 22 | **Tutor:** an edit of an option is refused when it is proposed, so no approved edit sets one to a value its system never vouched for | `test_an_edit_of_an_option_is_refused_when_it_is_proposed`; the cases guide quotes it (`test_the_guides_change_example_runs_as_written`, `tests/test_change_requests.py`) | failed first (the edit was applied: `BR-9999`, from `person:lee` and `person:sam`, no `system:branches`) |
 
-**Left out, on purpose:** D67's "an activity's output would set" names nothing that can happen: an
+**Left out, on purpose:** D67's "an activity's output would set" named nothing that can happen: an
 output is typed by its contract, which can declare a reference and never an option, and only a
-rule sets a field. The case-data guide now says so; D67 keeps its text. Choice 16's "the case map
+rule sets a field. D67, unmerged, now says so in place, as the case-data guide does. Choice 16's "the case map
 says both" sources isn't true: the map reads the definition, never a case's values. The history
 says which check vouched (`checked by`), and the sources hold both (promise 6).
 
 **Found here, a promise nothing kept:** choice 16's approval rule (promise 11) and the carried
 state's refusal (promise 15) were in the code and in no test; the activities guide's block and
 the case-data guide's lines (promises 20 and 21) were run by no test.
+
+## From the tutor's review of 16b
+
+- **An edit never sets an option** (D52, D67). An approved edit set `branch` to `BR-9999`, a value
+  the system doesn't hold: `edit_problem` checked its type only, and the value then read as two
+  people's, with no `system:branches`, and could reach an activity wanting a reference to
+  `branches` as though the system had vouched for it. Choice 17 listed the opening, events, rules
+  and outputs, and missed edits. `edit_problem` now refuses an edit of an option when it is
+  proposed, saying an option is given by a person's answer, where its system checks it; D67 says
+  so in place. Checking an edit the way an answer is checked would be a decision of its own, and
+  isn't built.
+

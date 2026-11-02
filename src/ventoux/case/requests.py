@@ -23,7 +23,7 @@ from ventoux.case.state import (
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.core.approval import inputs_digest, not_someone_else
 from ventoux.core.catalog import Catalog
-from ventoux.core.expressions import ExpressionError, Var, a_kind
+from ventoux.core.expressions import ExpressionError, OptionType, Var, a_kind
 from ventoux.core.expressions.check import a_type
 from ventoux.core.form import fits, form_problem
 from ventoux.core.person import identifier_problem
@@ -144,6 +144,14 @@ def edit_problem(case: CaseDefinition, state: CaseState, name: str, value: objec
         # An outcome or an output records what happened: it is never edited.
         return f"{name} is not a field of {case.case}: only a declared field is edited"
     declared = case.fields[name]
+    # An edit is checked for its type, never asked of a system: so it never sets an option, which
+    # only a person's answer gives, where its system vouches for it (brief, D52) (brief, D67).
+    if isinstance(declared.declared, OptionType):
+        system = declared.declared.system
+        return (
+            f"{name} is an option of {system}, given only by a person's answer, where {system} "
+            "checks it: an edit is never checked, so give it in the answer to the task that sets it"
+        )
     if name not in state.values:
         return f"{name} holds no value yet: an edit changes a value, never gives the first"
     if declared.sensitive and not isinstance(value, Sensitive):

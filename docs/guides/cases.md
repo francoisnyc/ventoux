@@ -553,6 +553,9 @@ apply; then again when it is approved, against the case as it is then. An edit i
 
 - of a field the case doesn't declare, such as an outcome or a step's output, which record what
   happened: `pay.outcome is not a field of refund: only a declared field is edited`;
+- of an option (case-data guide, "Options"), which only a person's answer gives, where its system
+  checks it: `branch is an option of branches, given only by a person's answer, where branches
+  checks it: an edit is never checked, so give it in the answer to the task that sets it`;
 - of a field that holds no value yet: `approved_amount holds no value yet: an edit changes a
   value, never gives the first`;
 - with a value of another type, as an answer's form is: `approved_amount is a number, and the
