@@ -413,13 +413,17 @@ def broken(inputs: dict[str, Any]) -> dict[str, Any]:
         (broken, "documents.issued@1 failed with RuntimeError: ‹sensitive›"),
         (
             lambda _: {"yes": True},
-            "documents.issued@1 gave an output its contract doesn't declare: issued: Field "
-            "required",
+            (
+                "documents.issued@1 gave an output its contract doesn't declare: issued: Field "
+                "required"
+            ),
         ),
         (
             lambda _: {"issued": "yes"},
-            "documents.issued@1 gave issued as a string, and a document store's check answers "
-            "true or false",
+            (
+                "documents.issued@1 gave issued as a string, and a document store's check "
+                "answers true or false"
+            ),
         ),
     ],
     ids=["the check fails", "another shape", "not true or false"],
