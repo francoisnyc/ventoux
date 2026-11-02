@@ -904,6 +904,17 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     flag_if_stopping(state, run)
 
 
+def not_taken(state: CaseState, entry: str, why: str) -> None:
+    """The held answer at `entry` is not taken: its check couldn't say whether the system holds
+    the option. Never read as held (fail closed), and the case doesn't need attention: answering
+    again fixes it, so the task waits for an answer (brief, D67)."""
+    held = state.checking.pop(entry)
+    state.history.append(
+        f"{held.answered.by}'s answer {held.answered.outcome} to {entry} is not taken: {why}; "
+        "the task waits for an answer"
+    )
+
+
 def vouched_for(case: CaseDefinition, name: str, checked_by: tuple[str, ...]) -> frozenset[str]:
     """The system that vouched for the option `name`, as a source beside the person who chose it;
     none for any other field (brief, D67)."""
@@ -937,6 +948,12 @@ def check_answered(
     entry, name = checking
     held = state.checking[entry]
     system = cast(OptionType, case.fields[name].declared).system
+    check = catalog.get(str(catalog.option_check(system)))
+    # Read by its contract first, as every output is: an answer it doesn't describe says nothing,
+    # neither held nor not held (fail closed) (brief, D67).
+    if (problem := outcome_problem(check, event)) is not None:
+        not_taken(state, entry, problem)
+        return
     if event.output.get("held") is not True:
         # Refused, and the refusal recorded: the field and the system, never the value, which may
         # be hidden from whoever reads the history (brief, D30). The task stays open.
@@ -1062,7 +1079,11 @@ def outcome_problem(contract: Contract, event: Completed) -> str | None:
 
 def failed(state: CaseState, event: Failed) -> None:
     """A scheduled activity failed after its retries: its run fails, and waits for a person. While
-    the case is closing, nobody will retry it: it is cancelled, and the case is flagged."""
+    the case is closing, nobody will retry it: it is cancelled, and the case is flagged. An
+    option's check that failed takes nothing, and the task waits for an answer (brief, D67)."""
+    if (checking := checked_answer(state, event.entry)) is not None:
+        not_taken(state, checking[0], event.reason)
+        return
     run = next(run for run in state.runs if run.entry == event.entry)
     run.status, run.reason = "failed", event.reason
     # A run that fails after its stop was asked needs attention like any other: nobody knows what

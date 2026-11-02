@@ -310,3 +310,46 @@ def test_an_option_the_system_holds_comes_from_the_person_and_the_system() -> No
     assert run.state.sources["branch"] == frozenset({"person:ana", "system:branches"})
     # The outcome is Ana's alone: a system vouches for a value, never for an answer.
     assert run.state.sources["assess.outcome"] == frozenset({"person:ana"})
+
+
+# --- Slice 5: a check that can't be made takes nothing, and the answer can be given again ---
+
+
+def broken(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The branches system is down."""
+    raise RuntimeError("branches is down")
+
+
+def garbled(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The branches system answers something its contract doesn't describe."""
+    return {"yes": True}
+
+
+@pytest.mark.parametrize(
+    ("check", "why"),
+    [
+        (broken, "branches.holds@1 failed with RuntimeError: ‹sensitive›"),
+        (
+            garbled,
+            "branches.holds@1 gave an output its contract doesn't declare: held: Field required",
+        ),
+    ],
+    ids=["the check fails", "the check answers another shape"],
+)
+def test_an_option_whose_check_cannot_be_made_is_not_taken(check: Any, why: str) -> None:
+    # Fail closed: never read as held; and nothing failed that answering again can't fix, so the
+    # case doesn't need attention (brief, D67).
+    run = run_case(
+        claim(),
+        file={},
+        answers=[("assess", "accept", "ana", {"branch": "BR-0142"})],
+        people=ADJUSTERS,
+        activities={"branches.holds@1": check},
+        catalog=checked(),
+    )
+    assert run.history[-1] == (
+        f"ana's answer accept to assess#1 is not taken: {why}; the task waits for an answer"
+    )
+    assert "branch" not in run.state.values
+    assert list(run.state.waiting) == ["assess#1"]  # the task is open for a new answer
+    assert run.needs_attention == []
