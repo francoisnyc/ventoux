@@ -49,7 +49,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 42 | Layer 12: why plans don't migrate | closed |
 | 43 | Layer 15: what an injected instruction can still influence | open |
 | 44 | Layer 16: why compare two dates but never ask what day it is | closed |
-| 45 | Layer 16b: why an option is checked once, through an activity, when given | open |
+| 45 | Layer 16b: why an option is checked once, through an activity, when given | closed |
 
 ---
 
@@ -1838,5 +1838,11 @@ and record the key points. A question is closed once you can explain the answer 
   "BR-0142 was held when Ana answered", which stays true after the branch closes (brief, D67).
   A step that needs it still held says so with `max_age` (brief, D18).
 - Follow-up, asked: what would go wrong if a condition asked the branches system each time it read
-  `branch`?
-- Status: open.
+  `branch`? Your answer: "the system could answer differently on replay." Right, the second part:
+  a condition is a pure function of the case file (brief, D20) and can reach no system; the only
+  way to ask one is a registered activity, whose answer Temporal records in the history, so a
+  replay reads that answer and never asks again (`tests/test_temporal_options.py`). The same
+  reason as question 44's `today`: a value read afresh each run can decide differently on replay.
+- In one line: the person's choice is checked once, by an activity whose answer the history keeps,
+  so every replay sees the same "held".
+- Status: closed (both parts from memory, the second after one prompt).
