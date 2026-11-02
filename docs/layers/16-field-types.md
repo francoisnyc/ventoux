@@ -518,3 +518,13 @@ runs.
     8. A stale option, by `max_age`, needs attention (D18).
     9. On Temporal: refused then taken; replayed without asking again; no switch while checking.
     10. The builder, the schema, the case map, the plain diff, the digest, and the guides' blocks.
+
+## Decided while building 16b
+
+- **The catalog refuses with `ValueError`,** as every catalog rule does, not a `CatalogRefused`
+  class as choice 25 said; the message is the seam.
+- **"A system nobody registered" needs no rule of its own** (slice 1). A check's contract takes a
+  reference to its system and gives a value from it, and the catalog refuses to register a
+  contract whose reference or source names an unregistered system (D30). So no check for an
+  unregistered system can reach `register_option_check`; naming another system's check is refused
+  by its shape (its reference and its source name the other system).
