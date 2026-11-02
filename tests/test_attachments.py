@@ -306,3 +306,53 @@ def test_a_checked_field_in_a_list_is_refused(declared: dict[str, str], refused:
         "display": {"title": "Seen"},
     }
     assert errors(definition, stored()) == [refused]
+
+
+# --- Slice 4: an ID the store didn't issue is refused and recorded; one it issued is taken ---
+
+ISSUED = {"doc-7f3a"}  # what the documents store issued, in these tests
+ADJUSTERS = {"ana": ["adjuster"]}
+
+
+def issued(inputs: dict[str, Any]) -> dict[str, Any]:
+    """The documents store's answer: whether it issued the ID asked about."""
+    return {"issued": inputs["attachment"] in ISSUED}
+
+
+def test_an_id_the_store_did_not_issue_is_refused_and_the_refusal_recorded() -> None:
+    run = run_case(
+        claim(),
+        file={},
+        answers=[
+            ("assess", "accept", "ana", {"receipt": "doc-0000"}),  # no such document
+            ("assess", "accept", "ana", {"receipt": "doc-7f3a"}),  # corrected
+        ],
+        people=ADJUSTERS,
+        activities={"documents.issued@1": issued},
+        catalog=stored(),
+    )
+    # The refusal names the field and the store, never the ID (brief, D30) (brief, D68); the task
+    # stays open, and the corrected answer is taken, saying which check vouched for it.
+    assert run.history == [
+        "opened by system:opener, with nothing",
+        "started assess#1: waiting for accept or deny by adjuster",
+        "refused ana's answer accept: receipt is not a document documents issued",
+        "ana answered assess#1 accept as adjuster, setting receipt, checked by documents.issued@1",
+        "assess#1 done",
+        "closed: nothing left to do",
+    ]
+    assert run.state.values["receipt"] == "doc-7f3a"
+
+
+def test_an_attachment_comes_from_the_person_and_the_store() -> None:
+    run = run_case(
+        claim(),
+        file={},
+        answers=[("assess", "accept", "ana", {"receipt": "doc-7f3a"})],
+        people=ADJUSTERS,
+        activities={"documents.issued@1": issued},
+        catalog=stored(),
+    )
+    # Ana attached it, and the store vouched that it issued it (brief, D68).
+    assert run.state.sources["receipt"] == frozenset({"person:ana", "system:documents"})
+    assert run.state.sources["assess.outcome"] == frozenset({"person:ana"})

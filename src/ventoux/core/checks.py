@@ -25,9 +25,18 @@ class Shape:
     asked: str  # its one input: the value a person gave, "option"
     answer: str  # its one output: whether the system vouches for it, "held"
     says: str  # what it says of its system, after "whether documents": "holds a value"
+    refused: str  # why an answer is refused, after the field's name; `{system}` is filled in
 
 
-OPTION = Shape("option", "an option of", "an option's check", "option", "held", "holds a value")
+OPTION = Shape(
+    "option",
+    "an option of",
+    "an option's check",
+    "option",
+    "held",
+    "holds a value",
+    "is not one of the options {system} holds",
+)
 DOCUMENT = Shape(
     "attachment",
     "an attachment in",
@@ -35,6 +44,7 @@ DOCUMENT = Shape(
     "attachment",
     "issued",
     "issued an ID",
+    "is not a document {system} issued",
 )
 
 

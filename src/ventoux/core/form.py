@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from ventoux.core.dates import given_day
 from ventoux.core.expressions import (
+    AttachmentType,
     BooleanType,
     DateType,
     FieldType,
@@ -82,6 +83,9 @@ def fits(value: object, declared: FieldType) -> bool:
         return given_day(value) is not None
     if isinstance(declared, OptionType):
         # A text; whether it is one of the system's list is its check's to say (brief, D67).
+        return isinstance(value, str) and value != ""
+    if isinstance(declared, AttachmentType):
+        # A text; whether the store issued it is its check's to say (brief, D68).
         return isinstance(value, str) and value != ""
     # Fail closed: a type this check doesn't know (a list, for now) fits nothing.
     return False
