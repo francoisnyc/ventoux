@@ -10,6 +10,7 @@ import pytest
 from pydantic import BaseModel
 from test_case import contract
 
+from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
@@ -356,3 +357,43 @@ def test_an_attachment_comes_from_the_person_and_the_store() -> None:
     # Ana attached it, and the store vouched that it issued it (brief, D68).
     assert run.state.sources["receipt"] == frozenset({"person:ana", "system:documents"})
     assert run.state.sources["assess.outcome"] == frozenset({"person:ana"})
+
+
+# --- Slice 5: never the bytes: an ID of more than 200 characters is refused, never quoted ---
+
+
+def test_an_id_longer_than_200_characters_is_refused_before_the_store_is_asked() -> None:
+    # A file pasted where its ID belongs never lands, and the store is never asked: the refusal
+    # says how an attachment is given, never what was given (brief, D30) (brief, D68).
+    asked: list[str] = []
+
+    def counted(inputs: dict[str, Any]) -> dict[str, Any]:
+        asked.append(inputs["attachment"])
+        return issued(inputs)
+
+    pasted = "%PDF-1.7 " + "x" * 192  # 201 characters
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            claim(),
+            file={},
+            answers=[("assess", "accept", "ana", {"receipt": pasted})],
+            people=ADJUSTERS,
+            activities={"documents.issued@1": counted},
+            catalog=stored(),
+        )
+    assert str(refused.value) == (
+        "receipt is an attachment, the ID a store issued, at most 200 characters: upload the file "
+        "to documents and give its ID"
+    )
+    assert asked == []
+    # 200 is an ID: asked, and refused by the store as any ID it didn't issue.
+    run = run_case(
+        claim(),
+        file={},
+        answers=[("assess", "accept", "ana", {"receipt": "d" * 200})],
+        people=ADJUSTERS,
+        activities={"documents.issued@1": counted},
+        catalog=stored(),
+    )
+    assert asked == ["d" * 200]
+    assert "refused ana's answer accept: receipt is not a document documents issued" in run.history
