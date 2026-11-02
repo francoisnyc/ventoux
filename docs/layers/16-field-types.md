@@ -772,3 +772,11 @@ saying why.
        sensitive attachment's ID stays sealed, and is forgotten with the case.
     10. On Temporal: an option and an attachment checked in one answer, replayed.
     11. The builder, the schema, the case map, the plain diff, the digest, and the guides' blocks.
+
+## Decided while building 16c
+
+- **One module for both checks** (slice 2). `core/options.py` became `core/checks.py`: an
+  option's check and a store's keep the same rules (read only; one input, a reference to the
+  system; one truth value, from it), so each kind is a `Shape` naming its words, its input and its
+  output (`OPTION`: `option`, `held`; `DOCUMENT`: `attachment`, `issued`). 16b's messages are
+  unchanged, word for word, and its tests pin them.
