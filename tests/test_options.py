@@ -10,12 +10,13 @@ import pytest
 from pydantic import BaseModel
 from test_case import contract
 
+from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.validate import validate_case
 from ventoux.core.catalog import Catalog
 from ventoux.core.output_sources import source
 from ventoux.core.references import reference
-from ventoux.testing import CATALOG, CaseRefused, run_case
+from ventoux.testing import CATALOG, CaseRefused, close, finish, run_case
 
 
 class BranchAsked(BaseModel):
@@ -353,3 +354,55 @@ def test_an_option_whose_check_cannot_be_made_is_not_taken(check: Any, why: str)
     assert "branch" not in run.state.values
     assert list(run.state.waiting) == ["assess#1"]  # the task is open for a new answer
     assert run.needs_attention == []
+
+
+# --- Slice 6: an answer being checked takes no second answer, and a close waits for it ---
+
+FIRST = ("assess", "accept", "ana", {"branch": "BR-0142"})
+
+
+def test_a_second_answer_while_the_first_is_checked_is_refused() -> None:
+    with pytest.raises(AnswerRefused) as refused:
+        run_case(
+            claim(),
+            file={},
+            answers=[FIRST, ("assess", "deny", "ana")],
+            people=ADJUSTERS,
+            activities={"branches.holds@1": holds},
+            catalog=checked(),
+            held=["assess"],  # its check keeps running
+        )
+    assert str(refused.value) == (
+        "assess#1 is being checked: its answer is taken, or refused, once branches answers"
+    )
+
+
+def closable() -> dict[str, Any]:
+    definition = claim()
+    definition["close_reasons"] = {
+        "withdrawn": {"display": {"title": "Withdrawn"}, "roles": ["adjuster"]}
+    }
+    return definition
+
+
+def test_a_close_waits_for_a_running_check_and_the_held_answer_is_not_taken() -> None:
+    def closed(*more: Any) -> Any:
+        return run_case(
+            closable(),
+            file={},
+            answers=[FIRST, close("withdrawn", "ana"), *more],
+            people=ADJUSTERS,
+            activities={"branches.holds@1": holds},
+            catalog=checked(),
+            held=["assess"],
+        )
+
+    # Its check runs, as any activity does: the case closes once it finishes (brief, D10).
+    assert closed().status == "closing"
+    run = closed(finish("assess#1.branch"))
+    assert run.status == "closed"
+    assert "branch" not in run.state.values  # its task was cancelled by the close
+    assert run.history[-2:] == [
+        "ana's answer accept to assess#1 is not taken: the case closed while it was checked",
+        "closed: withdrawn, by ana",
+    ]

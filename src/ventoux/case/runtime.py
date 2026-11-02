@@ -553,6 +553,19 @@ def answer(
     if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
         # Only its event ends it, sent by its sender: nobody answers it (brief, D41).
         raise AnswerRefused(f"{found.entry} waits for {waits.event}: it is sent, never answered")
+    if isinstance(found, StepRun) and (held := state.checking.get(found.entry)) is not None:
+        # One answer at a time: the held one is taken or refused first (brief, D67).
+        systems = listed(
+            list(
+                dict.fromkeys(
+                    cast(OptionType, case.fields[n].declared).system for n in held.waiting
+                )
+            )
+        )
+        raise AnswerRefused(
+            f"{found.entry} is being checked: its answer is taken, or refused, once {systems} "
+            "answers"
+        )
     if isinstance(found, StepRun):
         answer_task(case, catalog, state, found, event, commands)
     else:
@@ -904,6 +917,19 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     flag_if_stopping(state, run)
 
 
+def dropped_by_a_close(state: CaseState, entry: str) -> bool:
+    """Whether the held answer at `entry` was for a task the case's close cancelled: then it is
+    dropped, saying so, whatever its check says. The close waited for the check (brief, D10)."""
+    if next(run for run in state.runs if run.entry == entry).status != "cancelled":
+        return False
+    held = state.checking.pop(entry)
+    state.history.append(
+        f"{held.answered.by}'s answer {held.answered.outcome} to {entry} is not taken: the case "
+        "closed while it was checked"
+    )
+    return True
+
+
 def not_taken(state: CaseState, entry: str, why: str) -> None:
     """The held answer at `entry` is not taken: its check couldn't say whether the system holds
     the option. Never read as held (fail closed), and the case doesn't need attention: answering
@@ -946,6 +972,8 @@ def check_answered(
     option, taken once every option is vouched for, and waits for the other checks meanwhile
     (brief, D67)."""
     entry, name = checking
+    if dropped_by_a_close(state, entry):
+        return
     held = state.checking[entry]
     system = cast(OptionType, case.fields[name].declared).system
     check = catalog.get(str(catalog.option_check(system)))
@@ -1082,7 +1110,8 @@ def failed(state: CaseState, event: Failed) -> None:
     the case is closing, nobody will retry it: it is cancelled, and the case is flagged. An
     option's check that failed takes nothing, and the task waits for an answer (brief, D67)."""
     if (checking := checked_answer(state, event.entry)) is not None:
-        not_taken(state, checking[0], event.reason)
+        if not dropped_by_a_close(state, checking[0]):
+            not_taken(state, checking[0], event.reason)
         return
     run = next(run for run in state.runs if run.entry == event.entry)
     run.status, run.reason = "failed", event.reason
