@@ -471,3 +471,50 @@ An answer holding an option is decided by two events: the answer, then the check
 
 24. **What 16b leaves out:** checking options at the opening, on events or from rules; an option
     of several values; listing a system's options for a picker; the attachment (16c).
+
+## Seams and tests for 16b (curriculum step 4)
+
+*Found while writing the seams (2026-11-02):* a case continues as new only at a quiet point,
+nothing running (`continue_now`, `temporal/cases.py`); an answer is held only while its check runs,
+so **continue-as-new never carries a held answer**. Choice 20's "the held answer crosses
+continue-as-new" needs no carried field: a test pins that the case doesn't switch while a check
+runs.
+
+25. **The seams the tests use,** all public:
+    - **The catalog:** `Catalog.register_option_check(system, contract)` refuses a check of the
+      wrong effect or shape, an unregistered system, a second check (`CatalogRefused`, its
+      message). `catalog.option_check(system)` gives the check's reference, for the engine.
+    - **Validation:** `parse_case` and `validate_case` (`ventoux check`): an option of a system
+      with no check; an option field the opening, an event, a rule or an output would set.
+    - **Expressions:** `check(expression, types)` with an `OptionType(system=…)`: an option
+      against a literal refused; against an option or reference of its system accepted; and the
+      fit of an option where a contract wants a reference (`fits_type`).
+    - **A case, in memory:** `run_case(..., activities={"branches.holds@1": …})`, reading the
+      history, the case file and its sources, `waiting_for` and `needs_attention`. The check's run
+      is named `assess#1.branch` (the entry, then the field), so `held=["assess#1.branch"]` keeps
+      it running while a test sends a second answer or a close.
+    - **On Temporal:** one test on the test server: refused, then taken, both in the history; the
+      recorded history replays without asking the check again; the case doesn't continue as new
+      while a check runs.
+    - **The readings and the format:** `Field.option("branches")`, `case_schema()`, `ventoux map`,
+      `ventoux diff --plain`, the digest (a new pinned package), and the guides' tables and
+      examples, run as in 16a.
+
+26. **The tests, in order, negative first:**
+    1. The catalog refuses an option check: `effect: write`; an input or output of another shape;
+       an unregistered system; a second check for one system.
+    2. Validation refuses an option of a system with no check, and an option field set by the
+       opening, an event, a rule or an output.
+    3. **The curriculum's:** an answer setting an option the system doesn't hold is refused, the
+       refusal in the history, naming the field and the system, never the value; nothing lands;
+       the task stays open; a corrected answer is then taken.
+    4. Held: the answer is taken, `checked by branches.holds@1`, its sources the person and the
+       system.
+    5. The check fails, or gives another shape: the answer is not taken, saying why; the task
+       open; the case not needing attention.
+    6. A second answer while being checked is refused; a close waits for the check.
+    7. Expressions: an option against a literal refused (the guide's row); against an option of
+       its system accepted; an option fits a reference input of its system, never the other way.
+    8. A stale option, by `max_age`, needs attention (D18).
+    9. On Temporal: refused then taken; replayed without asking again; no switch while checking.
+    10. The builder, the schema, the case map, the plain diff, the digest, and the guides' blocks.
