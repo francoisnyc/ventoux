@@ -310,9 +310,7 @@ under two process time zones; D66 gains a bullet (it is unmerged and nothing cit
 ## Sketched, decided when their parts start
 
 - **16b, the option.** Its choices are below, in "16b: the option" (2026-11-02).
-- **16c, the attachment.** How a store is registered (beside resolvers, D16); what an answer gives
-  (a reference the store issued, never bytes); what the history and the plain forms show; who may
-  open it (the viewer, through the store, as D16's resolvers).
+- **16c, the attachment.** Its choices are below, in "16c: the attachment" (2026-11-02).
 
 ## Promises
 
@@ -599,4 +597,124 @@ the case-data guide's lines (promises 20 and 21) were run by no test.
   what an option's check never answers, D67's own path for an answer its contract doesn't
   describe. With the guard in place, `is not True` and a truthiness test can't be told apart,
   so the test pins the pair, not the line.
+
+
+# 16c: the attachment
+
+*Warm-up (2026-11-02): learning question 40, "arrival is a fact, content is not", retrieved and
+recorded in `docs/LEARNING.md`; still open.*
+
+## What 16c is for
+
+**A document kept as a reference, never its bytes in the history.** A file can't live in the case:
+the history is kept for ever, replayed, and read by anyone with namespace access (D16), it can't
+be forgotten (layer 9c), and a payload has a size limit. The file lives in a **document store** the
+platform team registers; the case keeps the ID the store issued, checked when a person gives it,
+as 16b checks an option:
+
+```text
+inbox: Ana uploads receipt.pdf to documents, as Ana       -> the store issues "doc-7f3a"
+ana answers assess#1 accept, {"receipt": "doc-7f3a"}
+  -> the answer is held; documents.issued@1 is scheduled with "doc-7f3a"
+  -> {"issued": true}:  taken, `receipt` lands, checked by documents.issued@1
+  -> {"issued": false}: refused ana's answer accept: receipt is not a document documents issued
+inbox, later: Lee opens receipt -> the store's resolver, asked as Lee
+```
+
+The curriculum's negative test: an attachment that names no registered store is refused.
+
+**What is new in the engine:** little. 16b made an answer that waits on a check; 16c gives that
+check a second kind of field.
+
+## Choices for 16c
+
+27. **A type of its own, naming a store: `{"type": "attachment", "store": "documents"}`** (step 1,
+    choice (b)). Beside `reference` and `option`: an attachment is an ID a store issued and
+    vouched for; a reference to `documents` says nothing of the kind, and nothing knows how to open
+    it. The key is `store`, not `system`: the guides say "store", and validation refuses a system
+    that isn't one. An attachment fits where a contract wants a reference to its store (it is one,
+    and a checked one), never the other way. *Recommended.*
+
+28. **A store is a registered system with a check: `catalog.register_document_store(system,
+    check)`.** The check is a read-only activity whose contract takes exactly `attachment`, a
+    reference to the store, and gives exactly `issued`, a boolean whose source is
+    `system:<store>`. Refused, each saying what to do: a check whose effect isn't `read`; another
+    shape; a second check for one store. As in 16b, a check for an unregistered system can't be
+    registered at all (D30). *Recommended.* The alternative, one shape for options and stores
+    (`option` and `held`), saves a few lines and reads wrong in every contract a platform team
+    writes.
+
+29. **The curriculum's: an attachment that names no registered store is refused** by `ventoux
+    check`, in two words: a store nobody registered as a system (`UNKNOWN_SYSTEM`'s wording), and
+    a registered system that isn't a store (`NOT_A_STORE`: "crm is not a document store: register
+    it with register_document_store, or make receipt a reference to crm"). Fail closed: nothing
+    could check the ID, and nothing could open the file. *Recommended.*
+
+30. **Checked when given, by 16b's held answer, unchanged.** The engine holds the answer, schedules
+    the check per checked field (an option's or an attachment's), and takes it once every check
+    has vouched. The same rules as choice 15: issued, taken, `checked by documents.issued@1`, its
+    sources the person and `system:documents` (D67's choice 16); not issued, refused and recorded,
+    naming the field and the store, never the value (D30), the task open; the check failed, or
+    answered anything but `true` or `false`, not taken, saying why; a second answer refused while
+    checking; a close waits. An answer setting an option and an attachment waits for both.
+    *Recommended.* The engine's code generalises from "an option" to "a checked field": its kind
+    says which check, which input, which output, and the refusal's words.
+
+31. **Only a person attaches a file, in a task's answer** (D67's rule, extended): an attachment the
+    opening, an event's payload or a rule would set is refused, and so is an edit of one (the
+    tutor's 16b finding), since nothing would check it. A system that sends a file it stored gives
+    a `reference` to the store. *Recommended.* Events carrying attachments (an email's files) are
+    a real use; they would make an event wait on an activity, which choice 17 left out, and so
+    does this.
+
+32. **Never the bytes, as far as the case can see.** The ID is a text of at most 200 characters;
+    a form giving more is refused before anything is checked, saying how an attachment is given
+    ("receipt is an attachment, the ID a store issued, at most 200 characters: upload the file to
+    documents and give its ID"), never quoting it (D30). A pasted ID the store didn't issue is
+    refused by the check. **What this doesn't do:** an answer reaches a case on Temporal as a
+    signal, recorded before the engine reads it, so a client that pastes a file into an answer
+    puts it in the signal's payload, refused or not. The inbox, which uploads, is what keeps bytes
+    off the wire; the case only refuses to keep them. *Recommended.* The alternative, an update
+    with a validator that refuses before recording, changes how every answer is sent, for one
+    type: a decision of its own.
+
+33. **Opening it is a resolver, as a reference's record is shown (D16).** `resolvers.show(view,
+    "receipt", viewer)` works on an attachment field as on a reference: the case view lists an
+    attachment the viewer may see among its systems, so a hidden attachment has nothing to open,
+    and the store, asked on the viewer's behalf, decides the rest. Nothing it returns enters the
+    case or the history. No new registry: the platform team registers a resolver for the store.
+    *Recommended.*
+
+34. **Its contents are their author's words; nothing new marks them.** The engine never reads a
+    file. An activity that does (a model summarising the receipt) declares its outputs' source as
+    any activity does (layer 4b), `untrusted:document` for what it read. *Recommended*: nothing to
+    build, and no promise beyond the guide's pointer.
+
+35. **Forgetting reaches the ID, not the file.** An attachment may be `sensitive`, as any field: its
+    ID is sealed, and forgetting the case destroys its key (layer 9c). The store keeps the file
+    under its own rules; the guide says so, and that the store erases it. *Recommended.* Asking the
+    store to erase on forgetting would make forgetting an activity: a decision of its own.
+
+36. **Expressions read it like a reference** (D67's choice 19): `exists`, `==`/`!=` with an
+    attachment or a reference of the same store, `string`; never a literal. An attachment is not
+    an option, and the two never compare, even naming one system.
+
+37. **Shown, and the rest of the format.** The case map: "receipt is an attachment in documents,
+    checked when given"; the plain diff names a type changed to an attachment, and a moved store;
+    the digest reads it as a type (a new pinned package, as in 16a and 16b); the builder gives
+    `Field.attachment("documents")`; the JSON Schema. The development catalog gains a
+    `documents.issued@1` check (the `documents` system is already there) and a fake that issued
+    `doc-7f3a`.
+
+38. **No new engine version.** No definition readable before 16c holds an attachment, and the
+    answer path without one is unchanged: `$id` stays `engine-2`. *Recommended*, to confirm when
+    built.
+
+39. **Decision: D68,** recorded in the brief before 16c is built, adding to D16, D30, D52 and D67,
+    whose text is kept.
+
+40. **What 16c leaves out:** uploading (the inbox's); several files in one field, and an
+    attachment in a list's fields (refused, `ventoux check` saying so); events carrying
+    attachments (choice 31); a file's name, media type or size in the case; scanning a file;
+    asking the store to erase on forgetting (choice 35).
 
