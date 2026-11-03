@@ -109,12 +109,12 @@ from ventoux.core.before_activity import (
     one_line,
 )
 from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.checks import OPTION, Shape, checked
 from ventoux.core.contract import ActivityContract, Contract
 from ventoux.core.dates import date_fields, given_day
 from ventoux.core.expressions import (
     Expression,
     ExpressionError,
-    OptionType,
     ReferenceType,
     a_kind,
     evaluate,
@@ -188,7 +188,8 @@ def decide(
     elif isinstance(event, Proposed):
         propose(case, catalog, state, event, commands)
     elif isinstance(event, Failed):
-        failed(state, event)
+        if not check_failed(case, catalog, state, event):
+            failed(state, event)
     elif isinstance(event, PlanCancelled):
         plan_cancelled(state, event)
     elif isinstance(event, WorkflowCancelled):
@@ -486,11 +487,13 @@ def refuse_to_open(case: CaseDefinition, catalog: Catalog, file: Mapping[str, ob
             problems.append(
                 f"{name} is set by rules, in {computed[name]}, never given at the opening"
             )
-        elif isinstance(declared := case.fields[name].declared, OptionType):
-            # Nothing at the opening could check it: only a person's answer gives one (brief, D67).
+        elif (found := checked(declared := case.fields[name].declared)) is not None:
+            # Nothing at the opening could check it: only a person's answer gives one
+            # (brief, D67) (brief, D68).
+            shape, system = found
             problems.append(
-                f"{name} is an option of {declared.system}, and only a person's answer gives one, "
-                "when it can be checked: leave it out of the opening"
+                f"{name} is {shape.of} {system}, and only a person's answer gives one, when it "
+                "can be checked: leave it out of the opening"
             )
         elif not fits(plain(value), declared):
             # The type, never the value: refusals reach people who may not see it (brief, D30).
@@ -555,13 +558,7 @@ def answer(
         raise AnswerRefused(f"{found.entry} waits for {waits.event}: it is sent, never answered")
     if isinstance(found, StepRun) and (held := state.checking.get(found.entry)) is not None:
         # One answer at a time: the held one is taken or refused first (brief, D67).
-        systems = listed(
-            list(
-                dict.fromkeys(
-                    cast(OptionType, case.fields[n].declared).system for n in held.waiting
-                )
-            )
-        )
+        systems = listed(list(dict.fromkeys(checked_by(case, n)[1] for n in held.waiting)))
         raise AnswerRefused(
             f"{found.entry} is being checked: its answer is taken, or refused, once {systems} "
             "answers"
@@ -737,33 +734,51 @@ def answer_task(
     commands: list[Command],
 ) -> None:
     """The task run is done; its outcome, and the fields its form sets, land in the case file. An
-    answer setting an option is held, and its options checked, first (brief, D67)."""
+    answer setting an option or an attachment is held, and each checked first (brief, D67)
+    (brief, D68)."""
     step = case.steps[run.step]
     assert isinstance(step, TaskStep)  # only a task's run is ever open
     role = judge_task(case, catalog, run.entry, run.step, step, event)
     refuse_unless_wrapped(case, event.form or {}, AnswerRefused)
-    options = options_set(case, step, event)
-    if options:
-        # Nothing it sets lands, nor its outcome, until each option's system has vouched for it.
-        state.checking[run.entry] = HeldAnswer(event, role, list(options))
-        for name, value in options.items():
-            system = cast(OptionType, case.fields[name].declared).system
-            check = catalog.option_check(system)
-            assert check is not None  # validation refuses an option nothing checks (UNCHECKED)
-            commands.append(Schedule(f"{run.entry}.{name}", check, {"option": value}))
+    given = checked_set(case, step, event)
+    if given:
+        # Nothing it sets lands, nor its outcome, until each field's system has vouched for it.
+        state.checking[run.entry] = HeldAnswer(event, role, list(given))
+        for name, value in given.items():
+            shape, _ = checked_by(case, name)
+            check = check_of(case, catalog, name)
+            commands.append(Schedule(f"{run.entry}.{name}", check, {shape.asked: value}))
         return
     take_answer(case, state, run, event, role, ())
 
 
-def options_set(case: CaseDefinition, step: TaskStep, event: Answered) -> dict[str, str]:
-    """Each option the answer's outcome sets, and the value given for it, in the form's order."""
+def checked_set(case: CaseDefinition, step: TaskStep, event: Answered) -> dict[str, str]:
+    """Each option or attachment the answer's outcome sets, and the value given for it, in the
+    form's order: each waits for its system's check."""
     sets = step.outcomes[event.outcome].sets
     form = event.form or {}
     return {
         name: str(plain(form[name]))
         for name in sets
-        if isinstance(case.fields[name].declared, OptionType)
+        if checked(case.fields[name].declared) is not None
     }
+
+
+def checked_by(case: CaseDefinition, name: str) -> tuple[Shape, str]:
+    """The kind of check the field `name` waits for, and the system it asks."""
+    found = checked(case.fields[name].declared)
+    assert found is not None, f"{name} is checked by nothing"
+    return found
+
+
+def check_of(case: CaseDefinition, catalog: Catalog, name: str) -> str:
+    """The reference of the check the field `name` waits for: its system's option check, or its
+    store's."""
+    shape, system = checked_by(case, name)
+    check = catalog.option_check(system) if shape is OPTION else catalog.document_store(system)
+    # Validation refuses a field nothing could check (UNCHECKED_OPTION, NOT_A_STORE).
+    assert check is not None, f"{system} has no check for {name}"
+    return check
 
 
 def take_answer(
@@ -917,39 +932,25 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
     flag_if_stopping(state, run)
 
 
-def dropped_by_a_close(state: CaseState, entry: str) -> bool:
-    """Whether the held answer at `entry` was for a task the case's close cancelled: then it is
-    dropped, saying so, whatever its check says. The close waited for the check (brief, D10)."""
-    if next(run for run in state.runs if run.entry == entry).status != "cancelled":
-        return False
-    held = state.checking.pop(entry)
-    state.history.append(
-        f"{held.answered.by}'s answer {held.answered.outcome} to {entry} is not taken: the case "
-        "closed while it was checked"
-    )
-    return True
-
-
-def not_taken(state: CaseState, entry: str, why: str) -> None:
-    """The held answer at `entry` is not taken: its check couldn't say whether the system holds
-    the option. Never read as held (fail closed), and the case doesn't need attention: answering
-    again fixes it, so the task waits for an answer (brief, D67)."""
-    held = state.checking.pop(entry)
-    state.history.append(
+def not_taken(held: HeldAnswer, entry: str, why: str) -> str:
+    """The line saying the held answer at `entry` is not taken: a check couldn't say whether its
+    system vouches for the value. Never read as vouched for (fail closed), and the case doesn't
+    need attention: answering again fixes it, so the task waits for an answer (brief, D67)."""
+    return (
         f"{held.answered.by}'s answer {held.answered.outcome} to {entry} is not taken: {why}; "
         "the task waits for an answer"
     )
 
 
-def vouched_for(case: CaseDefinition, name: str, checked_by: tuple[str, ...]) -> frozenset[str]:
-    """The system that vouched for the option `name`, as a source beside the person who chose it;
-    none for any other field (brief, D67)."""
-    declared = case.fields[name].declared
-    if not isinstance(declared, OptionType):
+def vouched_for(case: CaseDefinition, name: str, checks: tuple[str, ...]) -> frozenset[str]:
+    """The system that vouched for the option or attachment `name`, as a source beside the
+    person who gave it; none for any other field (brief, D67) (brief, D68)."""
+    found = checked(case.fields[name].declared)
+    if found is None:
         return frozenset()
-    # Only an option its check said held is ever taken: one that wasn't checked is a bug.
-    assert checked_by, f"{name} is an option, taken with no check"
-    return frozenset({f"system:{declared.system}"})
+    # Only a value its check vouched for is ever taken: one that wasn't checked is a bug.
+    assert checks, f"{name} is checked, and was taken with no check"
+    return frozenset({f"system:{found[1]}"})
 
 
 def checked_answer(state: CaseState, entry: str) -> tuple[str, str] | None:
@@ -968,51 +969,63 @@ def check_answered(
     checking: tuple[str, str],
     event: Completed,
 ) -> None:
-    """An option's check answered: the held answer is refused if its system doesn't hold the
-    option, taken once every option is vouched for, and waits for the other checks meanwhile
-    (brief, D67)."""
+    """A check answered: what it says of the value is noted, and the held answer is decided once
+    every check it waits for is back (brief, D67) (brief, D68)."""
     entry, name = checking
-    if dropped_by_a_close(state, entry):
-        return
     held = state.checking[entry]
-    system = cast(OptionType, case.fields[name].declared).system
-    check = catalog.get(str(catalog.option_check(system)))
+    shape, system = checked_by(case, name)
+    check = catalog.get(check_of(case, catalog, name))
+    answered = event.output.get(shape.answer)
     # Read by its contract first, as every output is: an answer it doesn't describe says nothing,
-    # neither held nor not held (fail closed) (brief, D67).
+    # neither vouched for nor refused (fail closed) (brief, D67).
     if (problem := outcome_problem(check, event)) is not None:
-        not_taken(state, entry, problem)
-        return
+        held.problems[name] = not_taken(held, entry, problem)
     # Read by its exact type too: Pydantic reads "yes" and 1 as true, and "no" as false, so a
     # garbled answer would vouch, or speak for the system. Only `true` or `false` answers.
-    answered = event.output.get("held")
-    if type(answered) is not bool:
-        not_taken(
-            state,
+    elif type(answered) is not bool:
+        held.problems[name] = not_taken(
+            held,
             entry,
-            f"{check.reference} gave held as {a_kind(answered)}, and an option's check answers "
-            "true or false",
+            f"{check.reference} gave {shape.answer} as {a_kind(answered)}, and {shape.kind} "
+            "answers true or false",
         )
-        return
-    if answered is not True:
+    elif answered is not True:
         # Refused, and the refusal recorded: the field and the system, never the value, which may
-        # be hidden from whoever reads the history (brief, D30). The task stays open.
-        del state.checking[entry]
-        state.history.append(
-            f"refused {held.answered.by}'s answer {held.answered.outcome}: {name} is not one of "
-            f"the options {system} holds"
+        # be hidden from whoever reads the history (brief, D30).
+        refused = shape.refused.format(system=system)
+        held.problems[name] = (
+            f"refused {held.answered.by}'s answer {held.answered.outcome}: {name} {refused}"
         )
-        return
+    check_back(case, catalog, state, entry, name)
+
+
+def check_back(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, entry: str, name: str
+) -> None:
+    """`name`'s check is back. Until every check is, the answer stays held, so a second answer is
+    refused and a late check never speaks for a new one; then it is decided (brief, D67)."""
+    held = state.checking[entry]
     held.waiting.remove(name)
     if held.waiting:
-        return  # another option's check hasn't answered yet
+        return  # another check isn't back yet
     del state.checking[entry]
     run = next(run for run in state.runs if run.entry == entry)
-    checks = tuple(
-        dict.fromkeys(
-            str(catalog.option_check(cast(OptionType, case.fields[option].declared).system))
-            for option in options_set(case, cast(TaskStep, case.steps[run.step]), held.answered)
+    if run.status == "cancelled":
+        # The close waited for the checks (brief, D10); the task it cancelled takes nothing.
+        state.history.append(
+            f"{held.answered.by}'s answer {held.answered.outcome} to {entry} is not taken: the "
+            "case closed while it was checked"
         )
-    )
+        return
+    step = cast(TaskStep, case.steps[run.step])
+    fields = checked_set(case, step, held.answered)
+    # The first problem in the answer's own order, so the line never depends on which check
+    # came back first. The task stays open for a new answer.
+    problems = [held.problems[field] for field in fields if field in held.problems]
+    if problems:
+        state.history.append(problems[0])
+        return
+    checks = tuple(dict.fromkeys(check_of(case, catalog, field) for field in fields))
     take_answer(case, state, run, held.answered, held.role, checks)
 
 
@@ -1118,12 +1131,7 @@ def outcome_problem(contract: Contract, event: Completed) -> str | None:
 
 def failed(state: CaseState, event: Failed) -> None:
     """A scheduled activity failed after its retries: its run fails, and waits for a person. While
-    the case is closing, nobody will retry it: it is cancelled, and the case is flagged. An
-    option's check that failed takes nothing, and the task waits for an answer (brief, D67)."""
-    if (checking := checked_answer(state, event.entry)) is not None:
-        if not dropped_by_a_close(state, checking[0]):
-            not_taken(state, checking[0], event.reason)
-        return
+    the case is closing, nobody will retry it: it is cancelled, and the case is flagged."""
     run = next(run for run in state.runs if run.entry == event.entry)
     run.status, run.reason = "failed", event.reason
     # A run that fails after its stop was asked needs attention like any other: nobody knows what
@@ -1133,6 +1141,19 @@ def failed(state: CaseState, event: Failed) -> None:
     if state.phase == "closing":
         run.status = "cancelled"
         flag(state, f"{run.entry} failed after the close was requested: {event.reason}")
+
+
+def check_failed(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Failed) -> bool:
+    """Whether the failed activity was a check: then nothing it would have said is known, so the
+    held answer won't be taken, once its other checks are back; the task waits for an answer
+    (brief, D67)."""
+    if (checking := checked_answer(state, event.entry)) is None:
+        return False
+    entry, name = checking
+    held = state.checking[entry]
+    held.problems[name] = not_taken(held, entry, event.reason)
+    check_back(case, catalog, state, entry, name)
+    return True
 
 
 def plan_cancelled(state: CaseState, event: PlanCancelled) -> None:

@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from ventoux.core.dates import given_day
 from ventoux.core.expressions import (
+    AttachmentType,
     BooleanType,
     DateType,
     FieldType,
@@ -46,6 +47,10 @@ def form_problem(
     return None
 
 
+# The longest ID an attachment may hold: room for any store's ID, never for a file (brief, D68).
+LONGEST_ID = 200
+
+
 def misfit(field: str, declared: FieldType, value: object, given_by: str) -> str:
     """Why `value` isn't of the type `declared`, naming its kind, never the value (brief, D30):
     `amount is a number, and the opening gives a string`. A text that isn't a day says how a date
@@ -53,6 +58,12 @@ def misfit(field: str, declared: FieldType, value: object, given_by: str) -> str
     if isinstance(declared, DateType) and isinstance(value, str):
         return (
             f"{field} is a date, written YYYY-MM-DD, and {given_by} gives a string that isn't one"
+        )
+    if isinstance(declared, AttachmentType) and isinstance(value, str):
+        # What it gave may be the file itself: say how one is given, never quote it (brief, D30).
+        return (
+            f"{field} is an attachment, the ID a store issued, at most {LONGEST_ID} characters: "
+            f"upload the file to {declared.store} and give its ID"
         )
     return f"{field} is {a_type(declared)}, and {given_by} gives {a_kind(value)}"
 
@@ -83,5 +94,9 @@ def fits(value: object, declared: FieldType) -> bool:
     if isinstance(declared, OptionType):
         # A text; whether it is one of the system's list is its check's to say (brief, D67).
         return isinstance(value, str) and value != ""
+    if isinstance(declared, AttachmentType):
+        # A short text: an ID, never the file. Whether the store issued it is its check's to say
+        # (brief, D68).
+        return isinstance(value, str) and 0 < len(value) <= LONGEST_ID
     # Fail closed: a type this check doesn't know (a list, for now) fits nothing.
     return False

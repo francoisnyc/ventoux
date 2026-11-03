@@ -527,6 +527,32 @@ claim.task(
 )
 ```
 
+## Attachments
+
+An attachment is the ID a document store issued for a file, checked when a person gives it
+(case-data guide, "Attachments"). `Field.attachment("documents")` declares it; like an option, it
+compares only with a value of the same store.
+
+`examples/builder/attachments.py`:
+
+```python
+from ventoux import Case, Field, Outcome
+
+claim = Case("claim", title="Insurance claim")
+
+receipt = claim.field("receipt", Field.attachment("documents"), title="The receipt")
+
+claim.task(
+    "assess",
+    title="Assess the claim",
+    roles=["adjuster"],
+    outcomes={
+        "accept": Outcome("Accept the claim", sets=[receipt]),
+        "deny": Outcome("Deny the claim"),
+    },
+)
+```
+
 ## Forgetting
 
 Whether a request may forget a case: `allowed`, `while_open` (the household claim) or `never`.

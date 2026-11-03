@@ -28,6 +28,7 @@ from pydantic_core import CoreSchema, core_schema
 
 from ventoux.core.contract import REFERENCE
 from ventoux.core.expressions import (
+    AttachmentType,
     BooleanType,
     DateType,
     Expression,
@@ -195,6 +196,7 @@ DeclaredType = Annotated[
     | OutcomeType
     | ReferenceType
     | OptionType
+    | AttachmentType
     | DateType
     | ListType,
     Field(discriminator="type"),

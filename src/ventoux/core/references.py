@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import BaseModel, GetJsonSchemaHandler
 from pydantic_core import CoreSchema
 
-from ventoux.core.expressions import FieldType, ListType, ReferenceType
+from ventoux.core.expressions import AttachmentType, FieldType, ListType, ReferenceType
 
 
 @dataclass(frozen=True)
@@ -56,6 +56,11 @@ def unregistered(fields: Mapping[str, FieldType], systems: Collection[str]) -> l
         if isinstance(declared, ReferenceType) and declared.system not in systems:
             problems.append(
                 f"{name} is a reference to {declared.system}, which is not a registered system"
+            )
+        elif isinstance(declared, AttachmentType) and declared.store not in systems:
+            # A store is a system first: a typo in its name is caught as a reference's is (brief, D68).
+            problems.append(
+                f"{name} is an attachment in {declared.store}, which is not a registered system"
             )
         elif isinstance(declared, ListType):
             # A list's records may hold references too: `documents.document_id`.

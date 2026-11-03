@@ -68,6 +68,12 @@ class Field:
         return FieldType({"type": "option", "system": system}, ReferenceExpr)
 
     @staticmethod
+    def attachment(store: str) -> FieldType[ReferenceExpr]:
+        """The ID `store` issued for a file, never the file, checked when a person gives it, and
+        read like a reference to `store`: compared only with one of the same store (brief, D68)."""
+        return FieldType({"type": "attachment", "store": store}, ReferenceExpr)
+
+    @staticmethod
     def date() -> FieldType[DateExpr]:
         """A day on the calendar, with no time and no time zone (brief, D66)."""
         return FieldType({"type": "date"}, DateExpr)

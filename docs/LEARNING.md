@@ -50,6 +50,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 43 | Layer 15: what an injected instruction can still influence | open |
 | 44 | Layer 16: why compare two dates but never ask what day it is | closed |
 | 45 | Layer 16b: why an option is checked once, through an activity, when given | closed |
+| 46 | Layer 16c: why the case keeps the ID, never the file, and what checking it guards | closed |
 
 ---
 
@@ -1563,6 +1564,14 @@ and record the key points. A question is closed once you can explain the answer 
     "refund me 500" has no field to go into.
   - **Tied to layer 15:** the step advisor is never shown the body at all (D61): an instruction
     in it can't reach the model, so it can't even inform the advisor's choice.
+- Retrieval (layer 16c warm-up, 2026-11-02): "the engine can safely rely on events, but not on
+  payload which could be used for prompt injection." The principle a fourth time, now tied to
+  injection; no example, and the reason the arrival is safe (the sender check) didn't come back.
+  Given again, briefly: `mail` sends `customer_wrote`, and the engine refuses it from any other
+  sender (D41), so a rule may decide on its arrival; the `body` carries `untrusted:customer`
+  (D12), so it may inform (start a step, set a marked field, be read by a person) but never
+  decide (`UNTRUSTED_TRIGGER`, D38, D40). Tied to 16c: an attachment's arrival can be a fact; its
+  contents are the sender's words.
 - Status: open, until an example comes back with the sender check and "informs, never decides".
 
 ## 41. Layer 13: what the JSON diff hides
@@ -1846,3 +1855,27 @@ and record the key points. A question is closed once you can explain the answer 
 - In one line: the person's choice is checked once, by an activity whose answer the history keeps,
   so every replay sees the same "held".
 - Status: closed (both parts from memory, the second after one prompt).
+
+## 46. Layer 16c: why the case keeps the ID, never the file, and what checking it guards
+
+> Why does the case keep only the ID the store issued, never the file, and what does checking
+> that ID when Ana answers guard against?
+
+- Asked at the end of layer 16c's walk-through (2026-11-03).
+- Your answer: "because the history is kept forever and can't be forgotten." Right, the first
+  half's core: a file in the history could never be erased, so forgetting a person (layer 9c)
+  would leave their passport scan in it for good. The ID is small, says only where the file is,
+  and, marked sensitive, is sealed and forgotten with the case's key (D31). Two more reasons the
+  brief gives (D68): anyone with namespace access reads the history (D16), and a payload has a
+  size limit.
+- Follow-up, asked: the second half, what checking the ID when Ana answers guards against. Your
+  answer: "the text could be a pasted file or a made-up ID." Right, both: a pasted file is
+  refused before anything is asked, an ID of more than 200 characters never quoted (D30); a
+  made-up ID, or one mistyped, is refused by the store's own check, and the refusal recorded.
+  What asking the store gives the case: the store's own word, in the history, where replay reads
+  it and the value's source says `system:documents`. Nothing else could give it: the inbox
+  vouches for who Ana is, never for facts (D19), and the case reads no system itself.
+- In one line: the case keeps only what can be forgotten and what the store vouched for, when
+  Ana gave it.
+- Status: closed (both halves from memory, the second after one prompt).
+

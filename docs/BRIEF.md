@@ -2801,6 +2801,60 @@ D9, D16, D18, D19 and D30, whose text is kept.*
   holds an option.
 - **Left out:** options at the opening, on events or from rules; an option of several values;
   listing a system's options for a picker, which is the inbox's, through the resolver (D16).
+- **Amended 2026-11-03, by D68** (the text above stands; this adds to it): a held answer never
+  crosses continue-as-new, as "Replay" said: a case continues as new only when nothing runs, and
+  a check is running work, so an answer is held only inside the run that asked. And a plan never
+  holds an option: a wait's answer sets a plan's fields, and nothing in a plan checks one, so
+  validation refuses an option among a plan's fields (`CHECKED_IN_A_PLAN`); a plan takes a
+  reference, which a case's option fits.
+
+### D68. An attachment: the ID a document store issued, checked when a person gives it
+
+*Decided 2026-11-02, in layer 16c (`docs/layers/16-field-types.md`, choices 27 to 40). Adds to
+D16, D30, D52 and D67, whose text is kept.*
+
+- **An attachment is a field type of its own,** `{"type": "attachment", "store": "documents"}`:
+  the ID a document store issued for a file, never the file. A file can't be in the case: the
+  history is kept for ever, replayed and read by anyone with namespace access (D16), can't be
+  forgotten, and has a size limit. An attachment fits where a contract wants a reference to its
+  store, never the other way, and never compares with an option.
+- **A store is a registered system with a check,** named by the catalog, never by a definition:
+  `register_document_store(system, contract)`, a read-only activity taking exactly `attachment`
+  (a reference to the store) and giving exactly `issued`, a boolean whose source is the store.
+  The catalog refuses a check that isn't `effect: read`, has another shape, or is a second check
+  for one store. Validation refuses an attachment naming no registered store: a system nobody
+  registered, or one that isn't a store (fail closed: nothing could check the ID or open the file).
+- **Checked when given, as D67 checks an option:** the answer is held, the store's check
+  scheduled, and the answer taken once every check has vouched, its history line saying which;
+  refused, and the refusal recorded, naming the field and the store, never the value (D30), if
+  the store didn't issue it; not taken, saying why, if the check fails or answers anything but
+  `true` or `false`. Its sources are the person and the store. Only a person attaches a file, in
+  a task's answer: the opening, an event, a rule and an edit (D52) are refused.
+- **Never the bytes, as far as the case can see:** an ID longer than 200 characters is refused
+  before it is checked, never quoted. An answer reaches a case on Temporal as a signal, recorded
+  before the engine reads it, so a client that pastes a file into an answer puts it in the
+  signal's payload; the inbox, which uploads, keeps bytes off the wire.
+- **Opened through a resolver (D16):** on the viewer's behalf, so the store's permissions decide;
+  a hidden attachment has nothing to open; nothing the store returns enters the case.
+- **Its contents are their author's words:** the engine never reads a file; an activity that does
+  marks what it read as any output is marked (D29).
+- **Forgetting reaches the ID, not the file:** a `sensitive` attachment's ID is sealed and
+  forgotten with the case's key (D31); the store erases the file under its own rules.
+- **A plan never holds an attachment, nor an option:** a wait's answer sets a plan's fields, and
+  nothing in a plan checks one, so validation refuses either among a plan's fields
+  (`CHECKED_IN_A_PLAN`). A plan takes a reference to the store, which a case's attachment fits.
+- **Replay (correcting D67's last point):** a held answer never crosses continue-as-new; a case
+  continues as new only when nothing runs, and a check is running work (layer 16b, found while
+  writing the seams).
+- **No new engine version: `engine-2` stays.** No definition readable before holds an
+  attachment. One shape decides differently from 16b's code: an answer with two or more checked
+  fields, one check refusing before another is back, now refused once every check is back. That
+  shape exists only in code merged on 2026-11-02 and never released (0.0.0), so no history
+  outside the tests holds it. After the first release, a change of this kind takes a new engine
+  version (D60).
+- **Left out:** uploading, which is the inbox's; several files in one field, and an attachment in
+  a list's fields (refused); events carrying attachments; a file's name, media type or size in
+  the case; scanning; asking the store to erase on forgetting.
 
 ## Concepts
 
@@ -2818,6 +2872,7 @@ D9, D16, D18, D19 and D30, whose text is kept.*
 | Reference | The ID of a record kept in another system, typed by that system's name |
 | Date | A day on the calendar, given to the case by a source; no time, no time zone, never today |
 | Option | One of a system's list, given by a person and checked through that system's activity when given |
+| Attachment | The ID a document store issued for a file, given by a person and checked through the store's activity when given; the file stays in the store |
 | Resolver | Shows a person what a reference points to, by asking its system on their behalf; never stored |
 | Task | A step asking people with given roles a question, answered with an outcome |
 | Outcome | A named answer from a task, an approval or an activity (`approve`, `declined`); a task's may set case-file fields |

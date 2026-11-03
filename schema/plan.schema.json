@@ -140,6 +140,28 @@
       "title": "ApprovalState",
       "type": "object"
     },
+    "AttachmentType": {
+      "additionalProperties": false,
+      "description": "The ID a document store issued for a file, never the file: checked through the store's\nactivity when a person gives it (brief, D68).",
+      "properties": {
+        "type": {
+          "const": "attachment",
+          "default": "attachment",
+          "title": "Type",
+          "type": "string"
+        },
+        "store": {
+          "title": "Store",
+          "type": "string"
+        }
+      },
+      "required": [
+        "store",
+        "type"
+      ],
+      "title": "AttachmentType",
+      "type": "object"
+    },
     "BooleanType": {
       "additionalProperties": false,
       "description": "`true` or `false`.",
@@ -416,6 +438,7 @@
     "FieldType": {
       "discriminator": {
         "mapping": {
+          "attachment": "#/$defs/AttachmentType",
           "boolean": "#/$defs/BooleanType",
           "date": "#/$defs/DateType",
           "list": "#/$defs/ListType",
@@ -445,6 +468,9 @@
         },
         {
           "$ref": "#/$defs/OptionType"
+        },
+        {
+          "$ref": "#/$defs/AttachmentType"
         },
         {
           "$ref": "#/$defs/DateType"
@@ -1271,6 +1297,31 @@
               "type"
             ],
             "title": "OptionType",
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "The ID a document store issued for a file, never the file: checked through the store's\nactivity when a person gives it (brief, D68).",
+            "properties": {
+              "type": {
+                "const": "attachment",
+                "default": "attachment",
+                "title": "Type",
+                "type": "string"
+              },
+              "store": {
+                "title": "Store",
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "store",
+              "type"
+            ],
+            "title": "AttachmentType",
             "type": "object"
           },
           {

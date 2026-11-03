@@ -9,6 +9,7 @@ from ventoux.core.expressions.evaluate import evaluate
 from ventoux.core.expressions.model import (
     Add,
     And,
+    AttachmentType,
     BooleanType,
     Cat,
     Count,
@@ -50,6 +51,7 @@ from ventoux.core.expressions.render import render
 __all__ = [
     "Add",
     "And",
+    "AttachmentType",
     "BooleanType",
     "Cat",
     "Count",

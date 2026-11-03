@@ -7,6 +7,7 @@ from decimal import Decimal
 from ventoux.core.expressions.model import (
     Add,
     And,
+    AttachmentType,
     BooleanType,
     Cat,
     Comparison,
@@ -182,8 +183,8 @@ def type_of(
             fields,
             element,
             path,
-            "takes a number, a boolean, a reference, an option or a date",
-            (NumberType, BooleanType, ReferenceType, OptionType, DateType),
+            "takes a number, a boolean, a reference, an option, an attachment or a date",
+            (NumberType, BooleanType, ReferenceType, OptionType, AttachmentType, DateType),
         )
         return StringType()
     if isinstance(expression, If):
@@ -238,10 +239,22 @@ def type_of(
 
 
 def same_system(a: FieldType, b: FieldType) -> bool:
-    """Whether `a` and `b` are an option and a reference of one system, which compare: an option is
-    a reference to its system, and a checked one (brief, D67)."""
-    systems = [t.system for t in (a, b) if isinstance(t, OptionType | ReferenceType)]
-    return len(systems) == 2 and systems[0] == systems[1]
+    """Whether `a` and `b` are a reference and an option, or a reference and an attachment, of one
+    system, which compare: each is a reference to its system, and a checked one (brief, D67)
+    (brief, D68). An option and an attachment never do: one is checked against a list, the other
+    against what a store issued."""
+    references = [t for t in (a, b) if isinstance(t, ReferenceType)]
+    checked = [t for t in (a, b) if isinstance(t, OptionType | AttachmentType)]
+    return len(references) == 1 and len(checked) == 1 and system_of(a) == system_of(b)
+
+
+def system_of(declared: FieldType) -> str | None:
+    """The system a reference, an option or an attachment names; None for any other type."""
+    if isinstance(declared, ReferenceType | OptionType):
+        return declared.system
+    if isinstance(declared, AttachmentType):
+        return declared.store
+    return None
 
 
 def ordering_problem(operator: str, steps: list[str], types: list[FieldType]) -> None:
@@ -288,6 +301,8 @@ def a_type(found: FieldType) -> str:
         return f"a reference to {found.system}"
     if isinstance(found, OptionType):
         return f"an option of {found.system}"
+    if isinstance(found, AttachmentType):
+        return f"an attachment in {found.store}"
     article = "an" if found.type[0] in "aeiou" else "a"
     return f"{article} {found.type}"
 

@@ -14,6 +14,7 @@ from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import (
+    AttachmentType,
     BooleanType,
     DateType,
     Expression,
@@ -93,6 +94,12 @@ def fits_type(given: FieldType, wanted: FieldType) -> bool | None:
     if isinstance(wanted, ReferenceType) and isinstance(given, OptionType):
         # An option is a reference to its system, and a checked one (brief, D67).
         return given.system == wanted.system
+    if isinstance(wanted, ReferenceType) and isinstance(given, AttachmentType):
+        # An attachment is a reference to its store, and a checked one (brief, D68).
+        return given.store == wanted.system
+    if isinstance(wanted, AttachmentType):
+        # Only another attachment in the store: a reference was never checked (brief, D68).
+        return isinstance(given, AttachmentType) and given.store == wanted.store
     if isinstance(wanted, StringType):
         # A string, an outcome and a reference are all texts.
         return isinstance(given, StringType | OutcomeType | ReferenceType)

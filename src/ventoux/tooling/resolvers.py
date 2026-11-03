@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from ventoux.case.visibility import CaseView
 from ventoux.core.catalog import Catalog
+from ventoux.core.sensitive import plain
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,9 @@ class Resolvers:
             raise ShowRefused(f"{field} is hidden from you: it needs {needs}")
         if field not in view.systems:
             raise ShowRefused(f"{field} is not a reference: there is no record to show")
-        reference = view.values.get(field)
+        # A sensitive reference is kept wrapped (brief, D31); the view was filtered for this
+        # viewer, so it is theirs to resolve: the ID inside goes to the system, never elsewhere.
+        reference = plain(view.values.get(field))
         if not isinstance(reference, str):
             raise ShowRefused(f"{field} is not set: there is no record to show")
         system = view.systems[field]

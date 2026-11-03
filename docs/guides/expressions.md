@@ -1,7 +1,7 @@
 # Expressions: conditions and values in a definition
 
-> **For workflow developers.** This guide describes layer 2, dates from layer 16a and options from
-> layer 16b, as if they already worked; the code that makes it true is built test-first in those layers. You will usually write expressions through the
+> **For workflow developers.** This guide describes layer 2, dates from layer 16a, options from
+> layer 16b and attachments from layer 16c, as if they already worked; the code that makes it true is built test-first in those layers. You will usually write expressions through the
 > Python builder (`approved_amount > 100`, layer 14). This guide shows what is stored, how it reads
 > back, and what is refused.
 
@@ -80,6 +80,7 @@ those types before the definition is accepted:
 | `reference` | `order_id` (system `orders`) | only `==` and `!=` with a reference to the same system, and `string` |
 | `date` | `incident_date`, `{"date": "2026-10-31"}` | a calendar date, no time and no time zone; compared with another date, and `string` |
 | `option` | `branch` (system `branches`) | one of a system's list, checked when given; like a reference: `==` and `!=` with a value of the same system, and `string` |
+| `attachment` | `receipt` (store `documents`) | the ID a document store issued, checked when given; like a reference: `exists`, `==` and `!=` with a value of the same store, and `string` |
 | list | `items` | read only by `count` and `sum`; its elements have declared fields, read with `item` |
 
 **Numbers are exact decimals.** `0.1 + 0.2 == 0.3` is `true`, so money adds up the way people
@@ -116,6 +117,7 @@ When the definition is checked, before anything runs:
 | `{">": [{"var": "incident_date"}, 30]}` | `` >[1]: `>` compares two numbers or two dates, and this is a number, not a date `` |
 | `{"==": [{"var": "incident_date"}, "2026-10-31"]}` | `` ==[1]: `==` compares values of the same type, and this is a string, not a date `` |
 | `{"==": [{"var": "branch"}, "BR-0142"]}` | `` ==[1]: `==` compares values of the same type, and this is a string, not an option of branches `` |
+| `{"==": [{"var": "receipt"}, "doc-7f3a"]}` | `` ==[1]: `==` compares values of the same type, and this is a string, not an attachment in documents `` |
 | `{"date": "2026-02-30"}` | `` date: "2026-02-30" is not a day on the calendar; write a date as YYYY-MM-DD, such as "2026-10-31" `` |
 | `{">": [{"var": "aproved_amount"}, 100]}` | `` >[0]: aproved_amount is not a declared field `` |
 
