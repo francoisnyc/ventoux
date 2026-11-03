@@ -418,6 +418,22 @@ and record the key points. A question is closed once you can explain the answer 
   assertions (`waiting_for == ["approval of pay by support-lead"]`, `pay` not reached, the case not
   closed). Why it matters in 13b: the exclusion depends on what `pay` reads, so a step that stops
   reading `approved_amount` lets Ana approve it, a change the JSON diff hides (choice 23).
+- Retrieval (layer 17 warm-up, 2026-11-03): given a hint for each part (why someone is excluded,
+  the waiting line's three words, the test's three checks), then "tell me". Nothing came back this
+  time. Given again in full:
+  - **Who can approve:** a `support-lead` (Sam). **Who can't:** Ana, because her answer set
+    `approved_amount`, the value `pay` sends, and her approval is what lets `pay` run. That is
+    provenance, not position (brief, D11): she would be refused even with the `support-lead` role.
+    Also excluded: the person who opened the case, when a person opened it, and whoever proposed
+    the run (D11, D25). With `count: 2`, anyone who already gave the first approval is excluded
+    too (D47).
+  - **What the case waits for:** `approval of pay by support-lead`. `pay` hasn't run, and the case
+    stays open (D10, D24).
+  - **The test** checks the moment, not an approver: `run.waiting_for == ["approval of pay by
+    support-lead"]`, `not run.reached("pay")`, `not run.closed`.
+  - **Why it matters in layer 17:** the exclusion decides who *may* answer. Assignment decides who
+    is *asked* to. Layer 17's first design question starts here: if someone assigned `pay`'s
+    approval to Ana, what should happen?
 - Status: open, until the opener and the test's three assertions come back with the exclusion.
 
 ## 15. Case data
