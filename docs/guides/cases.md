@@ -453,8 +453,9 @@ ASSIGNS_EXCLUDED  pay's approval is assigned to whoever answered review, whose a
 ```
 
 The case map reads the rule ("assigned to whoever answered the review"), and the semantic diff
-shows an added, changed or removed `assign`. An assignment never changes what may happen, so the
-diff gives it no verdict.
+shows an added, changed or removed `assign`. Since a held entry is answered only by its holder,
+an added `assign` narrows who may answer, so the diff reads it as stricter. A removed one reads
+as looser, and a changed one as a doubt, so looser (D55).
 
 ### What the report shows
 
