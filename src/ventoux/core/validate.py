@@ -11,6 +11,7 @@ from typing import Literal
 
 from ventoux.core.approval import Unapprovable, approved, risk_refusal
 from ventoux.core.catalog import Catalog, NotInCatalog
+from ventoux.core.checks import checked
 from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import (
     BooleanType,
@@ -53,12 +54,31 @@ class Issue:
     severity: Literal["error", "warning"] = "error"
 
 
+def checked_field_issues(plan: Plan) -> list[Issue]:
+    """A plan's field that is an option or an attachment: a wait's answer sets a plan's fields,
+    and nothing in a plan asks a system, so the type would claim a vouch nobody gave. A plan
+    takes a reference, which a case's checked field fits (brief, D67) (brief, D68)."""
+    issues: list[Issue] = []
+    for name, declared in plan.fields.items():
+        if (found := checked(declared)) is not None:
+            shape, system = found
+            issues.append(
+                Issue(
+                    f"fields.{name}",
+                    "CHECKED_IN_A_PLAN",
+                    f"{name} is {shape.of} {system}, and nothing in a plan checks one: make it a "
+                    f"reference to {system}, which a case's {shape.type} fits",
+                )
+            )
+    return issues
+
+
 def validate(plan: Plan, catalog: Catalog) -> list[Issue]:
     """Every problem in `plan`, a parsed plan, read against the activities in `catalog`."""
     # Fail closed: anything but a parsed plan is refused, never read as a plan with no problems.
     if not isinstance(plan, Plan):
         raise TypeError(f"validate takes a parsed plan (see parse_plan), not {type(plan).__name__}")
-    issues: list[Issue] = source_issues(plan, catalog)
+    issues: list[Issue] = source_issues(plan, catalog) + checked_field_issues(plan)
     if plan.initial not in plan.states:
         issues.append(Issue("initial", "UNKNOWN_TARGET", not_a_state(plan.initial, plan)))
     for name, state in plan.states.items():

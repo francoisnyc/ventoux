@@ -4,6 +4,8 @@ See docs/layers/16-field-types.md (16c), docs/guides/case-data.md ("Attachments"
 """
 
 import copy
+import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -28,8 +30,10 @@ from ventoux.core.expressions import (
     parse_expression,
 )
 from ventoux.core.output_sources import source
+from ventoux.core.plan import parse_plan
 from ventoux.core.references import reference
 from ventoux.core.sensitive import Sensitive
+from ventoux.core.validate import validate
 from ventoux.testing import (
     CATALOG,
     CaseRefused,
@@ -845,3 +849,41 @@ def test_the_activities_guides_resolver_opens_the_file_as_the_viewer() -> None:
     view = attached().view(roles=ADJUSTER.roles)
     shown = namespace["resolvers"].show(view, "receipt", ADJUSTER)
     assert shown == {"link": "https://documents.example/doc-7f3a?as=lee"}
+
+
+# --- The tutor's review: a plan never holds an option or an attachment ---
+
+
+@pytest.mark.parametrize(
+    ("declared", "refused"),
+    [
+        (
+            {"type": "option", "system": "branches"},
+            (
+                "fields.chosen: CHECKED_IN_A_PLAN: chosen is an option of branches, and nothing in "
+                "a plan checks one: make it a reference to branches, which a case's option fits"
+            ),
+        ),
+        (
+            {"type": "attachment", "store": "documents"},
+            (
+                "fields.chosen: CHECKED_IN_A_PLAN: chosen is an attachment in documents, and "
+                "nothing in a plan checks one: make it a reference to documents, which a case's "
+                "attachment fits"
+            ),
+        ),
+    ],
+    ids=["an option", "an attachment"],
+)
+def test_a_plans_field_is_never_checked_so_never_an_option_or_an_attachment(
+    declared: dict[str, str], refused: str
+) -> None:
+    # A wait's answer sets a plan's fields, and nothing in a plan asks a system: the type would
+    # claim a system vouched for a value nobody checked (brief, D67) (brief, D68).
+    plan = json.loads(
+        (ROOT / "examples" / "packages" / "refund" / "plans" / "refund-order.json").read_text(),
+        parse_float=Decimal,
+    )
+    plan["fields"]["chosen"] = declared
+    found = validate(parse_plan(plan), stored())
+    assert [f"{i.path}: {i.code}: {i.message}" for i in found if i.severity == "error"] == [refused]

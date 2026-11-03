@@ -2801,6 +2801,12 @@ D9, D16, D18, D19 and D30, whose text is kept.*
   holds an option.
 - **Left out:** options at the opening, on events or from rules; an option of several values;
   listing a system's options for a picker, which is the inbox's, through the resolver (D16).
+- **Amended 2026-11-03, by D68** (the text above stands; this adds to it): a held answer never
+  crosses continue-as-new, as "Replay" said: a case continues as new only when nothing runs, and
+  a check is running work, so an answer is held only inside the run that asked. And a plan never
+  holds an option: a wait's answer sets a plan's fields, and nothing in a plan checks one, so
+  validation refuses an option among a plan's fields (`CHECKED_IN_A_PLAN`); a plan takes a
+  reference, which a case's option fits.
 
 ### D68. An attachment: the ID a document store issued, checked when a person gives it
 
@@ -2834,9 +2840,18 @@ D16, D30, D52 and D67, whose text is kept.*
   marks what it read as any output is marked (D29).
 - **Forgetting reaches the ID, not the file:** a `sensitive` attachment's ID is sealed and
   forgotten with the case's key (D31); the store erases the file under its own rules.
+- **A plan never holds an attachment, nor an option:** a wait's answer sets a plan's fields, and
+  nothing in a plan checks one, so validation refuses either among a plan's fields
+  (`CHECKED_IN_A_PLAN`). A plan takes a reference to the store, which a case's attachment fits.
 - **Replay (correcting D67's last point):** a held answer never crosses continue-as-new; a case
   continues as new only when nothing runs, and a check is running work (layer 16b, found while
-  writing the seams). No new engine version: no definition readable before holds an attachment.
+  writing the seams).
+- **No new engine version: `engine-2` stays.** No definition readable before holds an
+  attachment. One shape decides differently from 16b's code: an answer with two or more checked
+  fields, one check refusing before another is back, now refused once every check is back. That
+  shape exists only in code merged on 2026-11-02 and never released (0.0.0), so no history
+  outside the tests holds it. After the first release, a change of this kind takes a new engine
+  version (D60).
 - **Left out:** uploading, which is the inbox's; several files in one field, and an attachment in
   a list's fields (refused); events carrying attachments; a file's name, media type or size in
   the case; scanning; asking the store to erase on forgetting.

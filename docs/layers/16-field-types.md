@@ -826,6 +826,7 @@ that fails if it isn't true. Tests are in `tests/test_attachments.py` unless nam
 | 21 | No new engine version: the schema's `$id` stays `engine-2` | `test_the_committed_schemas_are_what_the_models_say` | pinned |
 | 22 | The development catalog's store is the activities guide's, and registers; its resolver block opens a file as the viewer; the case-data guide's three lines are what the case writes | `test_the_activities_guides_store_is_the_development_one`, `test_the_activities_guides_resolver_opens_the_file_as_the_viewer`, `test_the_case_data_guides_lines_are_what_the_case_writes` | mutation (a timeout, the viewer, a word changed in the guide) |
 | 23 | The development check is recorded in the lock | `test_every_development_contract_matches_its_recorded_hash` (`tests/test_catalog.py`) | failed first |
+| 24 | **Tutor:** a plan's field is never an option or an attachment (`CHECKED_IN_A_PLAN`): nothing in a plan checks one, and a plan takes a reference instead | `test_a_plans_field_is_never_checked_so_never_an_option_or_an_attachment` (both kinds); the plans guide's row in `tests/test_validate.py`'s table | failed first (the plan accepted) |
 
 **Left out, on purpose:** that a file's contents are their author's words (choice 34) builds
 nothing: an activity that reads one marks its output as any activity does (layer 4b, its own
@@ -836,3 +837,19 @@ case refuses only to keep them (row 7).
 no test. Two promises were broken while building, each now tested: an answer was decided at its
 first check that didn't vouch, though choice 15 said "when every check has answered" (row 10, a
 16b fault); and a sensitive reference could never be resolved (row 15, older than 16c).
+
+## From the tutor's review of 16c
+
+- **A plan never holds an option or an attachment** (D67, amended; D68). A plan's fields share
+  the case's list of types, so since 16b a plan could declare `chosen` an option or an attachment,
+  set by a wait's answer; nothing in a plan checks one, and `run_plan` gave `NOT-IN-THE-SYSTEM` to
+  `branches.holds@1` as though the system had vouched for it. A plan gives no output to the case
+  (D28), so the case file stayed clean, but inside the plan the type claimed a vouch nobody gave.
+  Plan validation now refuses either among a plan's fields, saying a plan takes a reference, which
+  a case's option or attachment fits. Seams step 4 had checked lists and edits, and missed plans.
+- **The engine version** (question 1 of the pull request): `engine-2` stays. The one shape that
+  decides differently from 16b's code, two or more checked fields in one answer with a refusal
+  before another check is back, exists only in code merged on 2026-11-02 and never released
+  (0.0.0), so no history outside the tests holds it. After the first release, a change of this
+  kind takes a new engine version (D60). D68 says so, and D67 is amended for both points.
+
