@@ -1,6 +1,6 @@
 # Layer 17: Task assignment
 
-Status: 2026-11-03, agreed; 17a built, its promises next. This note starts from `main` at `ebf81b8`, with
+Status: 2026-11-03, agreed; 17a built, its promises checked. This note starts from `main` at `ebf81b8`, with
 layers 0 to 16 merged. The warm-up was asked and recorded (learning question 14). The guide was
 written first (curriculum step 2): `docs/guides/cases.md`, "Who is asked: claiming and assigning
 tasks", describes the layer as if it worked, with the recommendations below. If a choice is
@@ -309,6 +309,44 @@ held at the start), a plan (7), continue-as-new (12).
    position; a section in the middle shifted them all. "What a waiting case reports" points to it.
    The section uses the guide's people (Lee leads the team, so Ana claims the review).
 
-## Promises
+## Promises (17a)
 
-Written as each part is built.
+Each claim the note, D69 and the guide's 17a part make about behaviour, and the test that fails if
+it isn't true. Tests in `tests/test_claims.py` unless named otherwise. Four tests passed when
+first written, the code an earlier test drove already covering them; each was checked by switching
+that code off and watching the test fail (marked *mutation-checked*).
+
+| Promise | The test that would fail |
+|---|---|
+| A claim by someone without the task's role is refused, in the answer's words (curriculum) | `test_a_claim_without_the_tasks_role_is_refused` |
+| A claim makes its person the holder; `assignees` says so; `waiting_for` is unchanged and names nobody; the history says `ana claimed review#1 as support` | `test_a_claim_makes_its_person_the_holder`, and the guide's block in `test_case.py::test_the_guides_examples_run_as_written` |
+| While someone holds an entry, only they answer it; anyone else is refused, saying who holds it and how to free it | `test_only_the_holder_answers_a_held_entry` |
+| The holder's answer ends the entry, and the assignment with it | `test_only_the_holder_answers_a_held_entry` |
+| One holder at a time: a claim of a held entry is refused, and so is the holder claiming again | `test_a_held_entry_is_not_claimed_again` |
+| Only the holder gives an entry back; nobody gives back what nobody holds | `test_only_the_holder_gives_an_entry_back` |
+| An entry given back is in its queue: anyone with the role answers it; the history says `ana gave back review#1` | `test_an_entry_given_back_is_in_its_queue_again` |
+| Being asked grants nothing: a claim of an approval is refused to whomever it excludes (the guide's example) | `test_a_claim_of_an_approval_is_refused_to_whom_it_excludes` |
+| A claim of an approval is refused exactly as that person's approval would be: provenance, the opener, sight (D30) | `test_a_claim_of_an_approval_is_refused_as_its_answer_would_be` |
+| Someone who may approve a step may hold its approval | `test_a_claim_of_an_approval_by_who_may_approve_it_is_taken` |
+| An approval with `count` above 1 can't be held | `test_an_approval_needing_several_people_cant_be_held` |
+| What can't be answered can't be claimed, refused in the same words: an entry answered, never opened or unknown; a misspelled identifier; a wait for an event; a plan step's run | `test_what_cant_be_answered_cant_be_claimed` |
+| A change request can't be held | `test_a_change_request_isnt_held` |
+| Nothing is claimed once the case is closed | `test_nothing_is_claimed_once_the_case_is_closed` |
+| An approval withdrawn and asked again keeps its holder if they could still answer it, saying so | `test_an_approval_asked_again_keeps_its_holder` (*mutation-checked*, with the next) |
+| … and goes to its queue, saying why, if the new values exclude them (the guide's example) | `test_an_approval_asked_again_goes_to_its_queue_if_its_holder_cant_approve_it` |
+| An edit (D52) that withdraws a held approval keeps its holder for the new entry | `test_an_edit_that_withdraws_a_held_approval_keeps_its_holder` (*mutation-checked*) |
+| A new run of a task is new work and starts in its queue | `test_a_new_run_of_a_task_starts_in_its_queue` (*mutation-checked*) |
+| A stop ends the assignment; the holder's late answer is refused as closed | `test_a_stop_ends_the_assignment_with_its_entry` (*mutation-checked*) |
+| A close ends the assignment | `test_a_close_ends_the_assignment_with_its_entry` (*mutation-checked*) |
+| A holder who lost the role is refused at their answer, and still holds the entry | `test_a_holder_who_lost_the_role_is_refused_and_still_holds_it` |
+| A held entry crosses a migration (D53) | `test_a_held_entry_crosses_a_migration` |
+| A migration sends an entry to its queue, saying why, if its holder couldn't answer it on the new release | `test_a_migration_sends_an_entry_to_its_queue_if_its_holder_cant_answer_it_there` |
+| A withdrawn approval's holder follows its step's new name | `test_a_withdrawn_approvals_holder_follows_its_steps_new_name` (*mutation-checked*) |
+| Holders, and kept holders, cross continue-as-new as data, and still act after it; a state from before 17a holds nothing | `test_holders_and_kept_holders_cross_as_data_and_a_state_from_before_has_none` (*mutation-checked*), and `test_temporal_case.py::test_a_carried_state_reads_back_as_it_was` (every state field crosses) |
+| On Temporal, claiming and giving back are signals; a refused claim or answer is recorded and the case waits on; `CaseReport.assignees` says who holds what, across a switch | `test_temporal_claims.py::test_claims_are_signals_recorded_and_carried_across_continue_as_new` |
+| No refusal or history line quotes a value | every refusal and history line the tests above check is asserted whole (`match="^…$"` or `==`), and each names people, roles, fields and entries only |
+| No new engine version: every history recorded before replays as it did | the replay tests of earlier layers, unchanged (`test_temporal_approvals.py::test_histories_from_before_11h2_replay` and the other `before_*` histories), all passing |
+
+**Not promised by 17a, and left to its part:** assigning and reassigning, and the `assigns` role
+(17b, D70); assignment rules, `ASSIGNS_EXCLUDED`, the diff and the plain forms (17c, D71). The
+guide already describes them; their tests come with their parts.

@@ -5,6 +5,7 @@ See docs/layers/17-assignment.md (17a) and docs/guides/cases.md, "Who is asked: 
 assigning tasks".
 """
 
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -20,9 +21,12 @@ from test_migrations import REFUND_1, REFUND_2, REFUND_3, RENAMES, refund_2
 from test_plan_step import refund_order, refund_with_plan
 from test_rules import DUPLICATE, WITHDRAWS, withdrawable
 
+from ventoux.case.claims import assignees
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, Claimed
+from ventoux.temporal.carried import state_as_data, state_from_data
+from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.testing import (
     CATALOG,
     START,
@@ -466,3 +470,52 @@ def test_an_edit_that_withdraws_a_held_approval_keeps_its_holder() -> None:
     )
     assert run.assignees == {"pay.approval#2": "lee"}
     assert run.history[-1] == "pay.approval#2 kept for lee"
+
+
+def test_holders_and_kept_holders_cross_as_data_and_a_state_from_before_has_none() -> None:
+    # Lee held pay's approval when the review was sent back, so she is kept for its next entry,
+    # and Sam holds the second review: both cross continue-as-new as data (brief, D27) (brief,
+    # D69). A state carried from before layer 17a has neither key, and holds nothing.
+    run = run_case(
+        guide_refund_with_rework(),
+        file=ORDER,
+        answers=[
+            REVIEWED_BY_ANA,
+            claim("pay.approval#1", "lee"),
+            propose("review", "ana"),
+            claim("review#2", "sam"),
+        ],
+        people=PEOPLE,
+    )
+    converter = ExactPayloadConverter()
+    payload = converter.to_payload(state_as_data(run.state))
+    assert payload is not None
+    back = state_from_data(converter.from_payload(payload, dict), {})
+    assert back == run.state
+    assert assignees(back) == {"review#2": "sam"}
+    before = state_as_data(run.state)
+    del before["holders"], before["kept"]
+    assert assignees(state_from_data(before, {})) == {}
+    # And the kept holder, carried, is still given the next entry.
+    case = parse_case(guide_refund_with_rework())
+    reworked = Answered(
+        "review#2",
+        "approve",
+        "sam",
+        frozenset(PEOPLE["sam"]),
+        {"approved_amount": Decimal(300)},
+        at=START,
+    )
+    after, _ = decide(case, CATALOG, back, reworked)
+    assert assignees(after) == {"pay.approval#2": "lee"}
+
+
+def test_nothing_is_claimed_once_the_case_is_closed() -> None:
+    # A late claim after a close is refused, as a late answer is (brief, D10).
+    with pytest.raises(ClaimRefused, match="^the case is closed: nothing waits for an answer$"):
+        run_case(
+            guide_with_close_reasons(),
+            file=ORDER,
+            answers=[close("duplicate", "ana"), claim("review#1", "ana")],
+            people=PEOPLE,
+        )
