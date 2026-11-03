@@ -24,6 +24,8 @@ def assign(
     """Give `found` to `event.to`, as `event.by` asks; or `ClaimRefused`."""
     role = refuse_unless_assigner(catalog, found.entry, event.by, event.roles)
     before = state.holders.get(found.entry)
+    if before is not None and before.by == event.to:
+        raise ClaimRefused(f"{event.to} already holds {found.entry}")  # it would change nothing
     asked = Holder(event.to, event.to_roles, at=event.at)
     # Being assigned grants nothing: the assignee is judged as their claim would be, with the
     # roles the API states for them (brief, D69) (brief, D70).

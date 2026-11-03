@@ -6,6 +6,8 @@ See docs/layers/17-assignment.md (17b) and docs/guides/cases.md, "Assigning, rea
 returning to the queue".
 """
 
+from typing import Any
+
 import pytest
 from test_case import REFUND
 
@@ -54,3 +56,45 @@ def test_an_assigner_reassigns_a_held_entry_without_its_holder() -> None:
         run_case(REFUND, file=ORDER, answers=[*script, REVIEWED_BY_ANA], people=PEOPLE)
     answered = run_case(REFUND, file=ORDER, answers=[*script, REVIEWED_BY_SAM], people=PEOPLE)
     assert answered.reached("review")
+
+
+def test_an_assigner_assigns_an_entry_nobody_holds_and_may_assign_it_to_themselves() -> None:
+    # In the queue, the review goes to whomever Lee names. Sam may answer it, so assigning it to
+    # himself is taken, as his claim would be (brief, D70).
+    run = run_case(REFUND, file=ORDER, answers=[assign("review#1", "ana", by="lee")], people=PEOPLE)
+    assert run.assignees == {"review#1": "ana"}
+    assert run.history[-1] == "lee assigned review#1 to ana as support-lead"
+    himself = run_case(
+        REFUND, file=ORDER, answers=[assign("review#1", "sam", by="sam")], people=PEOPLE
+    )
+    assert himself.assignees == {"review#1": "sam"}
+    assert himself.history[-1] == "sam assigned review#1 to sam as support-lead"
+
+
+@pytest.mark.parametrize(
+    ("script", "message"),
+    [
+        # Lee can't answer the review, so she can't be asked to, even by herself.
+        (
+            [assign("review#1", "lee", by="lee")],
+            "^lee may not assign review#1 to lee: review#1 is answered by support, and lee has "
+            "support-lead$",
+        ),
+        (
+            [assign("review#1", "omar", by="lee")],
+            "^lee may not assign review#1 to omar: review#1 is answered by support, and omar has "
+            "operations$",
+        ),
+        # An assignment to the holder changes nothing.
+        (
+            [claim("review#1", "ana"), assign("review#1", "ana", by="lee")],
+            "^ana already holds review#1$",
+        ),
+    ],
+)
+def test_an_assignment_is_refused_to_whoever_couldnt_answer_or_already_holds(
+    script: list[Any], message: str
+) -> None:
+    # Being assigned grants nothing: the assignee is judged as their claim would be (brief, D70).
+    with pytest.raises(ClaimRefused, match=message):
+        run_case(REFUND, file=ORDER, answers=script, people=PEOPLE)
