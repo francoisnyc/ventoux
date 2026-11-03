@@ -1919,4 +1919,9 @@ and record the key points. A question is closed once you can explain the answer 
     And `waiting_for` still says `review by support`, the same to everyone, naming nobody (D24).
   - In one line: holding changes whose list an entry sits on, and so who else is refused; never
     who may answer it, nor what the case waits for.
+- Retrieval (later the same day, 2026-11-03): "The narrowing means only Ana can answer; Sam
+  can't." Sam's part came back. Sharpened: only Ana *may* answer, and she still passes every check
+  (the role; for an approval, the exclusions, the risk, sight), so a holder who lost the role is
+  refused too. Not yet back: what changes for Ana herself (the entry is on her list, out of the
+  queue, and only she may give it back).
 - Status: open, until the three parts come back from memory.
