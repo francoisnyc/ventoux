@@ -2598,6 +2598,10 @@ asked pay.approval#2: approval of pay by support-lead
 pay.approval#2 back in its queue: sam set approved_amount, which pay uses, so cannot approve it
 ```
 
+A migration to a new release keeps each holder who could answer their entry there. If the new
+release names other roles, the entry goes back to its queue, saying why: `review#1 back in its
+queue: review#1 is answered by fraud, and ana has support`.
+
 Answering a task again, a stop or a close ends the entry, and with it the assignment. A closed
 case's tasks are cancelled, and their holders see why (D10).
 

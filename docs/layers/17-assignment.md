@@ -1,6 +1,6 @@
 # Layer 17: Task assignment
 
-Status: 2026-11-03, agreed; 17a's seams next. This note starts from `main` at `ebf81b8`, with
+Status: 2026-11-03, agreed; 17a built, its promises next. This note starts from `main` at `ebf81b8`, with
 layers 0 to 16 merged. The warm-up was asked and recorded (learning question 14). The guide was
 written first (curriculum step 2): `docs/guides/cases.md`, "Who is asked: claiming and assigning
 tasks", describes the layer as if it worked, with the recommendations below. If a choice is
@@ -274,9 +274,40 @@ edit withdraws an approval it changes), a migration (13), an event (an event set
 withdraw an approval, 8), a rule (8 through a `set`, 10 through a stop), the opening (2: nothing
 held at the start), a plan (7), continue-as-new (12).
 
-## Decided while building
+## Decided while building 17a
 
-Nothing yet.
+1. **A claim's refusal reuses the answer's words.** For a task, `omar may not claim review#1:
+   review#1 is answered by support, and omar has operations` (the seams table proposed `it needs
+   support, and omar is operations`; `no_role`'s wording is kept, so a claim and an answer can't
+   say it two ways). For an approval, the claim is judged by `judge_approval` itself, as that
+   person's *approve*, so every exclusion an answer meets (provenance, the opener, the proposer,
+   the rule's readers, a retried run's first start, sight, risk) refuses a claim with the same
+   reason. A test checks that the two refusals are the same text.
+2. **What isn't an open task or approval refuses a claim as an answer to it is refused**, in the
+   same words, as a `ClaimRefused`: an entry closed, withdrawn, never opened or unknown; a wait
+   for an event (the wording is now one function for both); a plan step's run; a misspelled
+   identifier; a case no longer open. **A change request** can't be held either (`case.change#1 is
+   a change request: nobody holds one`): it is approved by someone else, whoever they are (D52).
+3. **The holder ends with its entry in one place.** Nine places close an entry. Rather than touch
+   each, a sweep at the end of every decision drops the holder of any entry no longer waiting.
+   Tests 3, 9 and 10 fail with the sweep switched off.
+4. **A holder keeps the roles they claimed with,** and when (`Holder(by, roles, at)`), so a
+   re-asked approval can be judged as their answer would be. The roles are the ones stated then
+   (D22); their answer is checked again with the roles they state then.
+5. **A withdrawn approval's holder is kept for its step** (`kept`, by step) until the step's next
+   entry is asked, since the two can be different decisions (sent back, then reviewed again). A
+   stop or a close doesn't keep it: only `withdraw` does. If the step is never asked again, the
+   kept holder stays in the state, read by nothing.
+6. **A migration re-judges every holder against the new release,** and sends back to its queue,
+   saying why, an entry its holder couldn't answer there (the release names other roles, say).
+   Choice 4 said holders cross with their entries; this is what "cross" means. A kept holder
+   follows a renamed step. Found while writing test 13: without the rename, the holder was lost.
+7. **`assignees` lists every holder,** those of open entries in the order they opened, then any
+   left on an entry no longer open, so a holder left behind would show in the report rather than
+   hide. One function serves the in-memory run and Temporal's report.
+8. **The guide's section is at the end of the cases guide.** Many tests read the guide's blocks by
+   position; a section in the middle shifted them all. "What a waiting case reports" points to it.
+   The section uses the guide's people (Lee leads the team, so Ana claims the review).
 
 ## Promises
 

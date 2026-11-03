@@ -2878,13 +2878,17 @@ D10, D22, D24, D25, D27, D47, D51 and D53, whose text is kept.*
   recorded and names no value (D30).
 - **Not held:** an approval whose `count` is above 1 (D47), since one entry needs several people;
   a claim of one is refused, saying so, and it stays in its queue. A plan's waits (D28), which are
-  not entries of the case.
+  not entries of the case. A change request (D52), approved by someone else, whoever they are.
+  Anything that can't be answered (a wait for an event, an entry not open) refuses a claim in the
+  words an answer to it is refused with.
 - **The holder follows the entry.** Answered, stopped (D40) or cancelled by a close (D10), the
   entry ends and its assignment with it. Withdrawn and asked again (D25), the new entry keeps the
   holder, saying so, if they could still answer it, and goes to its queue, saying why, if not. A
   new run of a task is new work and starts in its queue. The opening, an event, an edit (D52) and
   a rule set no holder (until D71). Holders are part of the case's state, so they cross
-  continue-as-new (D27) and a migration (D53) with their entries; a state from before has none.
+  continue-as-new (D27) with their entries; a state from before has none. A migration (D53) keeps
+  each holder who could answer their entry on the new release, and sends the others' entries back
+  to their queue, saying why; a withdrawn approval's holder follows its step's new name.
 - **The engine can't see a role lost.** It learns roles when a person acts (D22). A holder who lost
   the role is refused at their answer, as anyone is, and the entry stays theirs: a refusal changes
   nothing. Someone who assigns (D70) moves it.
