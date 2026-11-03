@@ -61,6 +61,7 @@ with workflow.unsafe.imports_passed_through():
     )
     from ventoux.case.state import (
         Answered,
+        Assigned,
         CancelWorkflow,
         CaseState,
         ChangeProposed,
@@ -83,6 +84,7 @@ with workflow.unsafe.imports_passed_through():
         StartPlan,
         StartWorkflow,
         StopPlan,
+        Unassigned,
         UseRelease,
         WorkflowCancelled,
     )
@@ -276,6 +278,18 @@ class PreviewAnswer:
 
 
 @dataclass
+class CaseAssignment:
+    """An assignment, as a person whose role assigns sends it: who is asked, and who asks
+    (brief, D70)."""
+
+    entry: str  # the open entry, `review#1`
+    to: str  # who is asked to answer it, as the trusted caller states (brief, D19)
+    to_roles: list[str]  # their roles, as the Ventoux API states them (brief, D22)
+    by: str  # who assigns it
+    roles: list[str]  # the assigner's roles
+
+
+@dataclass
 class CaseRequest:
     """A person's request to a case: propose a step, retry a failed run, close it, or claim or
     give back an open entry."""
@@ -436,6 +450,15 @@ class CaseWorkflow:
     @workflow.signal(name="give_back")
     def give_back(self, sent: CaseRequest) -> None:
         self.inbox.append(GivenBack(sent.what, sent.by, frozenset(sent.roles), at=now()))
+
+    @workflow.signal(name="assign")
+    def assign(self, sent: CaseAssignment) -> None:
+        to_roles, roles = frozenset(sent.to_roles), frozenset(sent.roles)
+        self.inbox.append(Assigned(sent.entry, sent.to, to_roles, sent.by, roles, at=now()))
+
+    @workflow.signal(name="unassign")
+    def unassign(self, sent: CaseRequest) -> None:
+        self.inbox.append(Unassigned(sent.what, sent.by, frozenset(sent.roles), at=now()))
 
     @workflow.signal(name="close")
     def close(self, sent: CaseRequest) -> None:
@@ -1059,6 +1082,10 @@ def asked(event: Event) -> str:
         return f"{event.by}'s claim of {event.entry}"
     if isinstance(event, GivenBack):
         return f"{event.by}'s give-back of {event.entry}"
+    if isinstance(event, Assigned):
+        return f"{event.by}'s assignment of {event.entry}"
+    if isinstance(event, Unassigned):
+        return f"{event.by}'s return of {event.entry}"
     if isinstance(event, CloseAsked):
         return f"{event.by}'s close as {event.reason}"
     if isinstance(event, Shown):
@@ -1198,6 +1225,28 @@ async def claim(
     """Claim the open `entry` (`review#1`) for `by`, who has `roles`: they become the one asked to
     answer it, never more (brief, D69). The caller vouches for who `by` is (brief, D19)."""
     await case.signal(CaseWorkflow.claim, CaseRequest(entry, by, sorted(roles)))
+
+
+async def assign(
+    case: WorkflowHandle[CaseWorkflow, CaseReport],
+    entry: str,
+    to: str,
+    to_roles: list[str],
+    by: str,
+    roles: list[str],
+) -> None:
+    """Give the open `entry` to `to`, who has `to_roles`, as `by`, whose role assigns: whoever
+    holds it now (brief, D70). The caller vouches for both people and their roles (brief, D19)."""
+    sent = CaseAssignment(entry, to, sorted(to_roles), by, sorted(roles))
+    await case.signal(CaseWorkflow.assign, sent)
+
+
+async def unassign(
+    case: WorkflowHandle[CaseWorkflow, CaseReport], entry: str, by: str, roles: list[str]
+) -> None:
+    """Return the held `entry` to its queue, without its holder, as `by`, whose role assigns
+    (brief, D70)."""
+    await case.signal(CaseWorkflow.unassign, CaseRequest(entry, by, sorted(roles)))
 
 
 async def give_back(

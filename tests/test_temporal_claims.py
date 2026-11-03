@@ -17,7 +17,15 @@ from test_temporal_case import (
     runs_of,
 )
 
-from ventoux.temporal.cases import CaseReport, answer, claim, give_back, start_case
+from ventoux.temporal.cases import (
+    CaseReport,
+    answer,
+    assign,
+    claim,
+    give_back,
+    start_case,
+    unassign,
+)
 
 
 def test_claims_are_signals_recorded_and_carried_across_continue_as_new() -> None:
@@ -50,4 +58,32 @@ def test_claims_are_signals_recorded_and_carried_across_continue_as_new() -> Non
         ),
     ]
     assert held.status == "open"
+    assert back.assignees == {}
+
+
+def test_assigning_on_temporal_is_signalled_recorded_and_carried() -> None:
+    # Ana claims the review; Omar's assignment is refused and recorded, and the case waits on;
+    # Lee gives it to Sam, then returns it to its queue. The case continues as new every 2
+    # events, so the assigned holder crosses a switch (brief, D27) (brief, D70).
+    async def scenario(client: Client) -> tuple[CaseReport, CaseReport, tuple[str, str]]:
+        case = await start_case(client, SwitchingCases, REFUND, LARGE, "refund-1", QUEUE)
+        await claim(case, "review#1", "ana", PEOPLE["ana"])
+        await assign(case, "review#1", "sam", PEOPLE["sam"], "omar", ["operations"])
+        await assign(case, "review#1", "sam", PEOPLE["sam"], "lee", PEOPLE["lee"])
+        moved = await reported(case, lambda now: now.assignees == {"review#1": "sam"})
+        await unassign(case, "review#1", "lee", PEOPLE["lee"])
+        back = await reported(case, lambda now: now.history[-1].startswith("lee returned"))
+        return moved, back, await runs_of(client, "refund-1")
+
+    moved, back, (first, last) = on_temporal(scenario, cases=SwitchingCases)
+    assert last != first  # the case continued as new at least once
+    assert moved.history[-2:] == [
+        (
+            "refused omar's assignment of review#1: omar may not assign review#1: assigning is "
+            "done by support-lead, and omar has operations"
+        ),
+        "lee assigned review#1 to sam as support-lead, from ana",
+    ]
+    assert moved.status == "open"
+    assert back.history[-1] == "lee returned review#1 to its queue as support-lead, from sam"
     assert back.assignees == {}

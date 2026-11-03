@@ -2616,7 +2616,7 @@ lee returned review#1 to its queue as support-lead, from ana
 
 **The assigner moves work; they don't answer it.** Lee can't answer the review (it needs
 `support`) and may still give it to Sam. What she needs is a role that assigns. Anyone else is
-refused: `ana may not assign review#1: support doesn't assign; ask someone who does`.
+refused: `ana may not assign review#1: assigning is done by support-lead, and ana has support`.
 
 **The assignee is checked as a claim is.** Being assigned grants nothing, so the person named
 must be able to answer the entry. The Ventoux API states their roles with the assignment, as it

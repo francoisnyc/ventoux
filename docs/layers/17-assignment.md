@@ -520,3 +520,23 @@ checks: they are one power.
 
 **The routes by which a holder is set or changed, after 17b:** 17a's routes, unchanged, plus the
 two new acts (tests 1 to 7); an assigned holder then goes every route a claimed one goes (test 8).
+
+## Decided while building 17b
+
+1. **The curriculum's negative test uses Omar, not Sam.** In the guide's cast Sam has
+   `support-lead`, which assigns, so Omar (`operations`) plays the person not allowed to.
+2. **An approval's exclusions are one function, `why_excluded`** (`src/ventoux/case/answers.py`),
+   lifted out of `judge_approval` with no change in behaviour (its own commit; every test stayed
+   green). An answer runs it with the role, risk and sight checks; an assigner runs it alone
+   (choice 14). So "someone else" is written once, and the two can't drift apart.
+3. **The assignee's identifier is checked too,** where the assigner's is (`entry_to_hold`). Found
+   by test 7: an assignment to `Sam` was taken, and "someone else" compares identifiers exactly.
+4. **One refusal for a missing role, in the house wording:** `ana may not assign review#1:
+   assigning is done by support-lead, and ana has support`, as an edit's or a migration's is.
+   The guide's draft said "support doesn't assign"; it now says this.
+5. **Assigning is its own file,** `src/ventoux/case/assigning.py`, beside `claims.py`, which it
+   uses: one idea per file. An assignment's assignee is judged by 17a's `role_to_hold`.
+6. **One test is not mutation-checked:** "an assigner needs only to be someone else". It guards
+   a design the code never had (judging the assigner by the whole approval). The mutation that
+   would show it failing needs the catalog inside the check, which imports it in a circle; the
+   check calls `why_excluded` and nothing else, which the code shows.
