@@ -447,3 +447,22 @@ def test_a_withdrawn_approvals_holder_follows_its_steps_new_name() -> None:
     )
     assert run.assignees == {"payment.approval#2": "sam"}
     assert run.history[-1] == "payment.approval#2 kept for sam"
+
+
+def test_an_edit_that_withdraws_a_held_approval_keeps_its_holder() -> None:
+    # Ana proposes correcting the amount and Sam approves the edit: pay's open approval saw the
+    # old value, so it is withdrawn and asked again (brief, D52). Lee holds it, and had no hand
+    # in the new value, so the new entry is hers.
+    run = run_case(
+        REFUND,
+        file=ORDER,
+        answers=[
+            REVIEWED_BY_ANA,
+            claim("pay.approval#1", "lee"),
+            edit("approved_amount", 200, "ana"),
+            ("case.change#1", "approve", "sam"),
+        ],
+        people=PEOPLE,
+    )
+    assert run.assignees == {"pay.approval#2": "lee"}
+    assert run.history[-1] == "pay.approval#2 kept for lee"
