@@ -2899,6 +2899,38 @@ D10, D22, D24, D25, D27, D47, D51 and D53, whose text is kept.*
 - **No new engine version (D51):** a history recorded before holds no claim, so it decides as it
   did.
 
+### D70. Assigning a task: an assigner moves work, never answers it, and never chooses their own judge
+
+*Decided 2026-11-03, in layer 17b (`docs/layers/17-assignment.md`, choices 7, 8 and 13 to 20). Adds
+to D11, D22, D26, D52 and D69, whose text is kept.*
+
+- **Assigning is a role the platform team registers,** `register_role(..., assigns=True)`, like
+  operating and editing (D26, D52), so no case names its assigners. A role the catalog doesn't
+  mark as assigning may not assign, whoever states it (fail closed).
+- **Three acts, each a message from the trusted caller** (D19), with the assigner's roles and,
+  for an assignment, the assignee's, as the Ventoux API states them (D22); both recorded. None
+  carries a value, so an assignment changes whose list an entry is on, never what its step does.
+  **Assign** gives an entry nobody holds to someone; the same act **reassigns** a held entry,
+  without its holder; **unassign** returns a held entry to its queue, without its holder. So an
+  entry whose holder never acts can always be freed.
+- **The assigner moves work and needs nothing else on the entry:** not the task's role, not sight
+  of what its step reads.
+- **The assignee is checked as a claim is** (D69), with the roles stated for them: someone who
+  couldn't answer the entry is refused, in the words their answer would be. They become its
+  holder, with those roles. Assigning to yourself is allowed and checked the same way.
+- **Nobody chooses their own judge.** Whoever may not approve a step may not assign, reassign or
+  unassign its approval: an assigner is judged by the exclusions an approver is (D11, D25, D39,
+  D47, D52), never by the approval's role, risk or sight. Handing your own decision to a chosen
+  approver, or taking it from one about to reject, is the influence "someone else" prevents. A
+  task is no one's judgement of a decision, so this applies to approvals only.
+- **Refused too,** each recorded and naming no value (D30): an assignment to the entry's holder,
+  which changes nothing; an unassign of an entry nobody holds; anything D69 says can't be held; a
+  misspelled identifier, the assigner's or the assignee's (D22).
+- **What it shows:** `lee assigned review#1 to sam as support-lead`, adding `, from ana` when
+  someone held it; `lee returned review#1 to its queue as support-lead, from ana`. Who assigned a
+  holder is in the history, not the state.
+- **No new engine version (D51):** a history recorded before holds no assignment.
+
 ## Concepts
 
 | Term | Meaning |
@@ -2922,6 +2954,7 @@ D10, D22, D24, D25, D27, D47, D51 and D53, whose text is kept.*
 | Approval | A task guarding a step: approve or reject, by an eligible person, tied to the values it saw |
 | Holder | The one person an open task or approval is asked of, by a claim or an assignment; it grants nothing, and while someone holds an entry only they answer it |
 | Queue | The open entries nobody holds, seen by everyone with one of their roles |
+| Assigner | Someone whose role assigns: they move an open entry between people, or back to its queue, without its holder; never answering it, and never moving the approval of a step they may not approve |
 | Closing | A case that will start nothing new and closes once its running activities finish |
 | Pending work | What keeps a case open: running steps, open tasks or approvals, timers, explicit waits, failed steps |
 | Needs attention | A case with a step that failed after its retries, waiting for an operator; nothing is skipped automatically |

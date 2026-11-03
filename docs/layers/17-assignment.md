@@ -353,10 +353,13 @@ guide already describes them; their tests come with their parts.
 
 # 17b: assigning
 
-Status: 2026-11-03, proposed; not yet agreed. Starts from `main` at `23ddacc`, with 17a merged
+Status: 2026-11-03, agreed; seams next. Starts from `main` at `23ddacc`, with 17a merged
 (#83). The warm-up was asked and recorded (learning question 36). The guide was written first:
 `docs/guides/cases.md`, "Assigning, reassigning, returning to the queue", with the recommendations
 below.
+
+**Answered 2026-11-03.** Choices 13 to 20 as recommended; 7 and 8 as agreed with 17a. D70 is
+written before 17b is built.
 
 ## What 17b is for
 
