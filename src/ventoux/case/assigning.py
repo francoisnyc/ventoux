@@ -6,9 +6,9 @@ holder (brief, D69). Assigning is a role the catalog registers, so no case names
 (brief, D70). See docs/layers/17-assignment.md (17b).
 """
 
-from ventoux.case.answers import AnswerRefused
+from ventoux.case.answers import AnswerRefused, why_excluded
 from ventoux.case.claims import ClaimRefused, role_to_hold
-from ventoux.case.definition import CaseDefinition
+from ventoux.case.definition import CallStep, CaseDefinition
 from ventoux.case.state import Assigned, CaseState, Holder, OpenApproval, StepRun, Unassigned
 from ventoux.core.catalog import Catalog
 from ventoux.core.roles import role_that_counts
@@ -23,6 +23,7 @@ def assign(
 ) -> None:
     """Give `found` to `event.to`, as `event.by` asks; or `ClaimRefused`."""
     role = refuse_unless_assigner(catalog, found.entry, event.by, event.roles)
+    refuse_if_a_party(case, state, found, event.by)
     before = state.holders.get(found.entry)
     if before is not None and before.by == event.to:
         raise ClaimRefused(f"{event.to} already holds {found.entry}")  # it would change nothing
@@ -54,11 +55,16 @@ def refuse_unless_assigner(catalog: Catalog, entry: str, by: str, roles: frozens
 
 
 def unassign(
-    state: CaseState, catalog: Catalog, found: StepRun | OpenApproval, event: Unassigned
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    found: StepRun | OpenApproval,
+    event: Unassigned,
 ) -> None:
     """Return `found` to its queue, without its holder, as `event.by` asks; or `ClaimRefused`. So
     an entry whose holder never acts can always be freed (brief, D70)."""
     role = refuse_unless_assigner(catalog, found.entry, event.by, event.roles)
+    refuse_if_a_party(case, state, found, event.by)
     before = state.holders.get(found.entry)
     if before is None:
         raise ClaimRefused(f"nobody holds {found.entry}")
@@ -66,3 +72,18 @@ def unassign(
     state.history.append(
         f"{event.by} returned {found.entry} to its queue as {role}, from {before.by}"
     )
+
+
+def refuse_if_a_party(
+    case: CaseDefinition, state: CaseState, found: StepRun | OpenApproval, by: str
+) -> None:
+    """`ClaimRefused` if `found` is an approval `by` may not give: nobody chooses their own judge.
+    Whoever may not approve a step moves none of its approvals, judged by the exclusions alone,
+    never by the approval's role, risk or sight (brief, D11) (brief, D70). A task is no one's
+    judgement of a decision, so its runs are moved by any assigner."""
+    if not isinstance(found, OpenApproval):
+        return
+    step = case.steps[found.step]
+    assert isinstance(step, CallStep)  # only an activity or a workflow is asked for an approval
+    if (why := why_excluded(case, state, found.step, step, by)) is not None:
+        raise ClaimRefused(f"{by} may not assign {found.entry}: {why}")

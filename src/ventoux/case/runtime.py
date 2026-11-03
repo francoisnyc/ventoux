@@ -222,7 +222,7 @@ def decide(
     elif isinstance(event, Assigned):
         assign(case, catalog, state, entry_to_hold(case, state, event), event)
     elif isinstance(event, Unassigned):
-        unassign(state, catalog, entry_to_hold(case, state, event), event)
+        unassign(case, catalog, state, entry_to_hold(case, state, event), event)
     elif isinstance(event, Shown):
         record_shown(case, catalog, state, event)
     elif isinstance(event, Sent):

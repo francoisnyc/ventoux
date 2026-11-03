@@ -9,7 +9,7 @@ returning to the queue".
 from typing import Any
 
 import pytest
-from test_case import REFUND
+from test_case import REFUND, guide_seen_by_support
 
 from ventoux.testing import AnswerRefused, ClaimRefused, assign, claim, run_case, unassign
 
@@ -25,6 +25,7 @@ PEOPLE = {
     "lee": ["support-lead"],
     "omar": ["operations"],
 }
+WITH_PIA = {**PEOPLE, "pia": ["support-lead"]}  # a second team lead, for a reassignment
 
 
 def test_a_reassignment_by_someone_not_allowed_to_assign_is_refused() -> None:
@@ -133,3 +134,62 @@ def test_an_entry_whose_holder_never_acts_is_returned_to_its_queue() -> None:
     assert run.history[-1] == "lee returned review#1 to its queue as support-lead, from ana"
     answered = run_case(REFUND, file=ORDER, answers=[*script, REVIEWED_BY_SAM], people=PEOPLE)
     assert answered.reached("review")
+
+
+# Sam, who leads the team and reviews too, set the amount pay sends.
+SAM_REVIEWED = [REVIEWED_BY_SAM]
+SAM_EXCLUDED = (
+    "^sam may not assign pay.approval#1: sam set approved_amount, which pay uses, so cannot "
+    "approve it$"
+)
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        [*SAM_REVIEWED, assign("pay.approval#1", "lee", by="sam")],  # assign
+        [*SAM_REVIEWED, claim("pay.approval#1", "lee"), assign("pay.approval#1", "pia", by="sam")],
+        [*SAM_REVIEWED, claim("pay.approval#1", "lee"), unassign("pay.approval#1", by="sam")],
+    ],
+)
+def test_nobody_moves_the_approval_of_their_own_decision(script: list[Any]) -> None:
+    # The guide's example: Sam's role assigns, but he set what pay sends, so he can never approve
+    # it, and so may not choose who does, nor take it from whoever holds it (brief, D11) (brief,
+    # D70). He may still assign anything else.
+    with pytest.raises(ClaimRefused, match=SAM_EXCLUDED):
+        run_case(REFUND, file=ORDER, answers=script, people=WITH_PIA)
+
+
+def test_an_excluded_assigner_still_assigns_what_isnt_their_decision() -> None:
+    run = run_case(REFUND, file=ORDER, answers=[assign("review#1", "ana", by="sam")], people=PEOPLE)
+    assert run.assignees == {"review#1": "ana"}
+
+
+def test_the_opener_moves_no_approval_of_the_case() -> None:
+    # Whoever opened the case approves none of its steps, so moves none of their approvals
+    # (brief, D11) (brief, D25) (brief, D70).
+    with pytest.raises(
+        ClaimRefused,
+        match="^lee may not assign pay.approval#1: lee opened the case, so cannot approve its "
+        "steps$",
+    ):
+        run_case(
+            REFUND,
+            file=ORDER,
+            answers=[REVIEWED_BY_ANA, assign("pay.approval#1", "sam", by="lee")],
+            people=PEOPLE,
+            opened_by="lee",
+        )
+
+
+def test_an_assigner_needs_only_to_be_someone_else_not_to_approve_it() -> None:
+    # The approved amount is shown to support only, so Lee, a team lead without support, can't
+    # see it and can't approve pay (brief, D30). She is no party to the decision, so she may
+    # still give its approval to Sam, who sees it: only the exclusions apply (brief, D70).
+    run = run_case(
+        guide_seen_by_support(),
+        file=ORDER,
+        answers=[REVIEWED_BY_ANA, assign("pay.approval#1", "sam", by="lee")],
+        people=PEOPLE,
+    )
+    assert run.assignees == {"pay.approval#1": "sam"}
