@@ -40,6 +40,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.advising import AdvisorView, advisor_view
     from ventoux.case.answers import AnswerRefused
     from ventoux.case.called import unbound
+    from ventoux.case.claims import ClaimRefused, assignees
     from ventoux.case.closing import CloseRefused, needs_attention
     from ventoux.case.definition import CaseInvalid, parse_case
     from ventoux.case.engine import ENGINE, KNOWN, opening_engine
@@ -63,12 +64,14 @@ with workflow.unsafe.imports_passed_through():
         CancelWorkflow,
         CaseState,
         ChangeProposed,
+        Claimed,
         CloseAsked,
         Command,
         Completed,
         Event,
         Failed,
         ForgetApproved,
+        GivenBack,
         Migration,
         Opened,
         PlanCancelled,
@@ -108,6 +111,7 @@ REFUSALS = (
     AnswerRefused,
     ProposalRefused,
     RetryRefused,
+    ClaimRefused,
     CloseRefused,
     ShownRefused,
     ForgetRefused,
@@ -169,6 +173,9 @@ class CaseReport:
     timers: list[str] = field(default_factory=list[str])
     release: str = "draft"  # the release it runs, `refund 1`; a draft's says so (brief, D51)
     engine: int = 1  # the engine version it decides as; 1 from a worker before 12b
+    # Each held open entry and its holder, in the order the entries opened; an entry in its
+    # queue is absent (brief, D69). Empty from a worker before 17a.
+    assignees: dict[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass
@@ -270,9 +277,10 @@ class PreviewAnswer:
 
 @dataclass
 class CaseRequest:
-    """A person's request to a case: propose a step, retry a failed run, or close it."""
+    """A person's request to a case: propose a step, retry a failed run, close it, or claim or
+    give back an open entry."""
 
-    what: str  # the step proposed, the run retried (`pay#1`), or the close reason
+    what: str  # the step proposed, the run retried (`pay#1`), the close reason, or the entry
     by: str  # who asks, as the trusted caller states (brief, D19)
     roles: list[str]  # their roles, stated with the request (brief, D22)
     # Who suggested a proposal: the step advisor, or nobody. Text as it crosses Temporal, so the
@@ -421,6 +429,14 @@ class CaseWorkflow:
     def retry(self, sent: CaseRequest) -> None:
         self.inbox.append(Retried(sent.what, sent.by, frozenset(sent.roles), at=now()))
 
+    @workflow.signal(name="claim")
+    def claim(self, sent: CaseRequest) -> None:
+        self.inbox.append(Claimed(sent.what, sent.by, frozenset(sent.roles), at=now()))
+
+    @workflow.signal(name="give_back")
+    def give_back(self, sent: CaseRequest) -> None:
+        self.inbox.append(GivenBack(sent.what, sent.by, frozenset(sent.roles), at=now()))
+
     @workflow.signal(name="close")
     def close(self, sent: CaseRequest) -> None:
         self.inbox.append(CloseAsked(sent.what, sent.by, frozenset(sent.roles), at=now()))
@@ -478,6 +494,7 @@ class CaseWorkflow:
             set_timers(state),
             state.release or "draft",
             state.engine,
+            assignees(state),
         )
 
     @workflow.query(name="view")
@@ -1038,6 +1055,10 @@ def asked(event: Event) -> str:
         return f"{event.by}'s proposal of {event.step}"
     if isinstance(event, Retried):
         return f"{event.by}'s retry of {event.entry}"
+    if isinstance(event, Claimed):
+        return f"{event.by}'s claim of {event.entry}"
+    if isinstance(event, GivenBack):
+        return f"{event.by}'s give-back of {event.entry}"
     if isinstance(event, CloseAsked):
         return f"{event.by}'s close as {event.reason}"
     if isinstance(event, Shown):
@@ -1169,6 +1190,21 @@ async def refused_proposal(
     nothing (brief, D61)."""
     asked = ProposalAsked(step, by, sorted(roles), at)
     return (await case.query(CaseWorkflow.proposal_refused, asked)).reason
+
+
+async def claim(
+    case: WorkflowHandle[CaseWorkflow, CaseReport], entry: str, by: str, roles: list[str]
+) -> None:
+    """Claim the open `entry` (`review#1`) for `by`, who has `roles`: they become the one asked to
+    answer it, never more (brief, D69). The caller vouches for who `by` is (brief, D19)."""
+    await case.signal(CaseWorkflow.claim, CaseRequest(entry, by, sorted(roles)))
+
+
+async def give_back(
+    case: WorkflowHandle[CaseWorkflow, CaseReport], entry: str, by: str, roles: list[str]
+) -> None:
+    """Give the held `entry` back to its queue, as its holder `by` (brief, D69)."""
+    await case.signal(CaseWorkflow.give_back, CaseRequest(entry, by, sorted(roles)))
 
 
 async def retry(

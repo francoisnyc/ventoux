@@ -35,6 +35,7 @@ from ventoux.testing import (
     Outcome,
     ProposalRefused,
     RetryRefused,
+    claim,
     close,
     finish,
     later,
@@ -693,6 +694,7 @@ def test_the_guides_examples_run_as_written() -> None:
         "refund": guide_json(0),
         "refund_with_rework": guide_refund_with_rework(),
         "retry": retry,
+        "claim": claim,  # "Who is asked", whose other examples test_claims.py checks
         "PEOPLE": OPERATORS,
         "refund_with_plan": guide_refund_with_plan(),
         "refund_order": refund_order(),

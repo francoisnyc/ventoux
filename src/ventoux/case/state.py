@@ -35,6 +35,15 @@ class GivenApproval:
         return (self.by, *self.also)
 
 
+@dataclass(frozen=True)
+class Holder:
+    """Who holds an open entry, as they claimed it: the one asked to answer it (brief, D69)."""
+
+    by: str  # the person
+    roles: frozenset[str]  # their roles, as stated with the claim (brief, D22)
+    at: int = field(kw_only=True)  # when they claimed it, in seconds since the epoch
+
+
 @dataclass
 class StepRun:
     """One run of a step: `review#1`, open while a task waits, running while an activity runs."""
@@ -231,6 +240,12 @@ class CaseState:
     arrived: dict[str, int] = field(default_factory=dict[str, int])
     # What waits on people, in the order it opened: entry, and how it reads (brief, D24).
     waiting: dict[str, str] = field(default_factory=dict[str, str])
+    # Who holds each held open entry, by entry: the one asked to answer it; an entry absent is
+    # in its roles' queue (brief, D69).
+    holders: dict[str, Holder] = field(default_factory=dict[str, Holder])
+    # Who held each step's approval when it was withdrawn, until its next entry is asked, which
+    # keeps them if they could still answer it (brief, D25) (brief, D69).
+    kept: dict[str, Holder] = field(default_factory=dict[str, Holder])
     opened_by: str | None = None  # the person who opened the case, if a person did
     # open; closing: nothing new starts, running activities finish; closed (brief, D10).
     phase: Literal["open", "closing", "closed"] = "open"
@@ -447,6 +462,26 @@ class TimerDue:
     at: int = field(kw_only=True)  # its due time, in seconds since the epoch
 
 
+@dataclass(frozen=True)
+class Claimed:
+    """A person takes an open entry from its queue, to be the one asked to answer it (brief, D69)."""
+
+    entry: str  # the entry claimed: `review#1` or `pay.approval#1`
+    by: str  # who claims it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with the claim (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class GivenBack:
+    """The holder of an open entry gives it back to its queue (brief, D69)."""
+
+    entry: str  # the entry given back
+    by: str  # who gives it back, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with it (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
 type Event = (
     Opened
     | Answered
@@ -462,6 +497,8 @@ type Event = (
     | ChangeProposed
     | Sent
     | TimerDue
+    | Claimed
+    | GivenBack
 )
 
 

@@ -15,6 +15,7 @@ from temporalio.converter import DataConverter
 
 from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
+from ventoux.case.claims import ClaimRefused
 from ventoux.case.closing import CloseRefused
 from ventoux.case.definition import parse_case
 from ventoux.case.engine import ENGINE
@@ -37,11 +38,13 @@ from ventoux.case.runtime import CaseRefused, EventRefused
 from ventoux.case.state import (
     Answered,
     ChangeProposed,
+    Claimed,
     CloseAsked,
     Completed,
     Event,
     Failed,
     ForgetApproved,
+    GivenBack,
     Opened,
     Proposed,
     Retried,
@@ -80,6 +83,7 @@ __all__ = [
     "CaseRefused",
     "Change",
     "ChangeRefused",
+    "ClaimRefused",
     "CloseRefused",
     "DevelopmentCases",
     "DevelopmentPlans",
@@ -91,9 +95,11 @@ __all__ = [
     "StepStopped",
     "as_json",
     "check_workflow_contract",
+    "claim",
     "close",
     "edit",
     "finish",
+    "give_back",
     "load_definition",
     "migrate",
     "propose",
@@ -534,6 +540,14 @@ def run_case(
                 Proposed(item.step, item.by, roles, at=now, suggested_by=item.suggested_by)
             )
             continue
+        if isinstance(item, Claim):
+            events.append(Claimed(item.entry, item.by, frozenset(people.get(item.by, ())), at=now))
+            continue
+        if isinstance(item, GiveBack):
+            events.append(
+                GivenBack(item.entry, item.by, frozenset(people.get(item.by, ())), at=now)
+            )
+            continue
         if isinstance(item, Retry):
             events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ())), at=now))
             continue
@@ -680,6 +694,30 @@ class Retry(NamedTuple):
 def retry(entry: str, who: str) -> Retry:
     """A script's retry by an operator: `retry("pay#1", "omar")` (brief, D26)."""
     return Retry(entry, who)
+
+
+class Claim(NamedTuple):
+    """A scripted claim: `by` takes the open entry `entry` from its queue (brief, D69)."""
+
+    entry: str
+    by: str
+
+
+def claim(entry: str, who: str) -> Claim:
+    """A script's claim of an open entry: `claim("review#1", "lee")` (brief, D69)."""
+    return Claim(entry, who)
+
+
+class GiveBack(NamedTuple):
+    """A scripted give-back: the holder `by` returns `entry` to its queue (brief, D69)."""
+
+    entry: str
+    by: str
+
+
+def give_back(entry: str, who: str) -> GiveBack:
+    """A script's give-back of a held entry: `give_back("review#1", "ana")` (brief, D69)."""
+    return GiveBack(entry, who)
 
 
 class Close(NamedTuple):

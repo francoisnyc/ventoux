@@ -51,6 +51,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 44 | Layer 16: why compare two dates but never ask what day it is | closed |
 | 45 | Layer 16b: why an option is checked once, through an activity, when given | closed |
 | 46 | Layer 16c: why the case keeps the ID, never the file, and what checking it guards | closed |
+| 47 | Layer 17a: is an assignment a permission? | open |
 
 ---
 
@@ -418,6 +419,22 @@ and record the key points. A question is closed once you can explain the answer 
   assertions (`waiting_for == ["approval of pay by support-lead"]`, `pay` not reached, the case not
   closed). Why it matters in 13b: the exclusion depends on what `pay` reads, so a step that stops
   reading `approved_amount` lets Ana approve it, a change the JSON diff hides (choice 23).
+- Retrieval (layer 17 warm-up, 2026-11-03): given a hint for each part (why someone is excluded,
+  the waiting line's three words, the test's three checks), then "tell me". Nothing came back this
+  time. Given again in full:
+  - **Who can approve:** a `support-lead` (Sam). **Who can't:** Ana, because her answer set
+    `approved_amount`, the value `pay` sends, and her approval is what lets `pay` run. That is
+    provenance, not position (brief, D11): she would be refused even with the `support-lead` role.
+    Also excluded: the person who opened the case, when a person opened it, and whoever proposed
+    the run (D11, D25). With `count: 2`, anyone who already gave the first approval is excluded
+    too (D47).
+  - **What the case waits for:** `approval of pay by support-lead`. `pay` hasn't run, and the case
+    stays open (D10, D24).
+  - **The test** checks the moment, not an approver: `run.waiting_for == ["approval of pay by
+    support-lead"]`, `not run.reached("pay")`, `not run.closed`.
+  - **Why it matters in layer 17:** the exclusion decides who *may* answer. Assignment decides who
+    is *asked* to. Layer 17's first design question starts here: if someone assigned `pay`'s
+    approval to Ana, what should happen?
 - Status: open, until the opener and the test's three assertions come back with the exclusion.
 
 ## 15. Case data
@@ -1879,3 +1896,35 @@ and record the key points. A question is closed once you can explain the answer 
   Ana gave it.
 - Status: closed (both halves from memory, the second after one prompt).
 
+## 47. Layer 17a: is an assignment a permission?
+
+> Is an assignment a permission? What changes for the person assigned, and what doesn't?
+
+- Asked at the end of layer 17a's walk-through (2026-11-03).
+- Your answer: "No, it narrows who may answer; nothing else changes." Right on the core: holding
+  grants nothing, and while someone holds an entry only they answer it, so an assignment can only
+  make the set of people who may answer smaller (D69). "Nothing else changes" is too strong:
+  holding changes who is asked, so a follow-up was asked.
+- Follow-up, asked: Ana holds `review#1`; one thing that changes for her, one for Sam (who also
+  has `support`), and one that doesn't change for Ana. Asked to be told, and given:
+  - **For Ana:** the review is on her list and out of the `support` queue; she is the only one who
+    can answer it until she gives it back or someone who assigns moves it; and she alone may give
+    it back.
+  - **For Sam:** it leaves his queue, and his answer is refused although he has `support` (`ana
+    holds review#1: ask ana to give it back, or someone who assigns to reassign it`) — the
+    narrowing, which before the claim would have been taken.
+  - **Unchanged for Ana:** everything about whether she *may* answer. Holding grants nothing, so
+    the role, and for an approval the exclusions, the risk and sight (D11, D30, D47), are checked
+    as before; losing `support` while holding it refuses her answer and leaves the entry hers.
+    And `waiting_for` still says `review by support`, the same to everyone, naming nobody (D24).
+  - In one line: holding changes whose list an entry sits on, and so who else is refused; never
+    who may answer it, nor what the case waits for.
+- Retrieval (later the same day, 2026-11-03): "The narrowing means only Ana can answer; Sam
+  can't." Sam's part came back. Sharpened: only Ana *may* answer, and she still passes every check
+  (the role; for an approval, the exclusions, the risk, sight), so a holder who lost the role is
+  refused too. Not yet back: what changes for Ana herself (the entry is on her list, out of the
+  queue, and only she may give it back).
+- Then, asked what changes for Ana herself: "tell me". Given: the entry is on her list and out of
+  the queue (`assignees`); it waits on her until she gives it back or someone who assigns moves
+  it; and only she may give it back (`sam doesn't hold review#1; ana does`).
+- Status: open, until the three parts come back from memory.

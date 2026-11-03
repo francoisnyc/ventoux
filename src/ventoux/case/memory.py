@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 from ventoux.case.called import unbound
+from ventoux.case.claims import assignees
 from ventoux.case.closing import needs_attention
 from ventoux.case.definition import CaseDefinition, parse_case
 from ventoux.case.runtime import decide
@@ -72,6 +73,11 @@ class CaseRun:
         """The open approval `entry`'s sheet as a person holding `roles` reads it at `at`, with
         the age of each fact it depends on (brief, D18)."""
         return sheet_of(self.definition, self.state, entry, roles, at, self.registered)
+
+    @property
+    def assignees(self) -> dict[str, str]:
+        """Each held open entry and its holder, in the order the entries opened (brief, D69)."""
+        return assignees(self.state)
 
     @property
     def closed(self) -> bool:

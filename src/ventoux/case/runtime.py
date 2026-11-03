@@ -24,7 +24,13 @@ from ventoux.case.admission import (
     proposal_refusal,
     requirements_met,
 )
-from ventoux.case.answers import AnswerRefused, decided_by, judge_approval, judge_task
+from ventoux.case.answers import (
+    AnswerRefused,
+    decided_by,
+    judge_approval,
+    judge_task,
+    refuse_unless,
+)
 from ventoux.case.approvals import (
     ask,
     asked_anyway,
@@ -35,6 +41,14 @@ from ventoux.case.approvals import (
     waiting_line,
 )
 from ventoux.case.called import called
+from ventoux.case.claims import (
+    ClaimRefused,
+    claim,
+    give_back,
+    held_by_another,
+    keep_holder,
+    let_go_of_ended,
+)
 from ventoux.case.closing import (
     begin_closing,
     close_held,
@@ -68,6 +82,7 @@ from ventoux.case.state import (
     Answered,
     CaseState,
     ChangeProposed,
+    Claimed,
     CloseAsked,
     Command,
     Completed,
@@ -75,6 +90,7 @@ from ventoux.case.state import (
     Failed,
     ForgetApproved,
     GivenApproval,
+    GivenBack,
     HeldAnswer,
     Migration,
     Moment,
@@ -196,6 +212,10 @@ def decide(
         workflow_cancelled(state, event)
     elif isinstance(event, Retried):
         retry(case, catalog, state, event, commands)
+    elif isinstance(event, Claimed):
+        claim(case, catalog, state, entry_to_hold(case, state, event), event)
+    elif isinstance(event, GivenBack):
+        give_back(state, entry_to_hold(case, state, event), event)
     elif isinstance(event, Shown):
         record_shown(case, catalog, state, event)
     elif isinstance(event, Sent):
@@ -214,6 +234,7 @@ def decide(
     else:
         complete(case, catalog, state, event)
     decide_again(case, catalog, state, commands, event.at, was_open)
+    let_go_of_ended(state)
     return state, commands
 
 
@@ -553,9 +574,11 @@ def answer(
     if (request := state.changes.get(event.entry)) is not None:
         return answer_change(case, catalog, state, request, event, as_worded(state, event))
     found = open_entry(state, event.entry)
+    # While someone holds an entry, only they answer it (brief, D69).
+    refuse_unless(held_by_another(state, found.entry, event.by))
     if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
         # Only its event ends it, sent by its sender: nobody answers it (brief, D41).
-        raise AnswerRefused(f"{found.entry} waits for {waits.event}: it is sent, never answered")
+        raise AnswerRefused(sent_never_answered(found.entry, waits))
     if isinstance(found, StepRun) and (held := state.checking.get(found.entry)) is not None:
         # One answer at a time: the held one is taken or refused first (brief, D67).
         systems = listed(list(dict.fromkeys(checked_by(case, n)[1] for n in held.waiting)))
@@ -568,6 +591,33 @@ def answer(
     else:
         answer_approval(case, catalog, state, found, event)
     return None
+
+
+def sent_never_answered(entry: str, waits: WaitStep) -> str:
+    """Why nobody answers, or holds, a run waiting for an event: only its sender ends it."""
+    return f"{entry} waits for {waits.event}: it is sent, never answered"
+
+
+def entry_to_hold(
+    case: CaseDefinition, state: CaseState, event: Claimed | GivenBack
+) -> StepRun | OpenApproval:
+    """The open task run or approval a claim or a give-back names; or `ClaimRefused`, saying what
+    an answer to it would be refused with. Fail closed: only a task or an approval is held
+    (brief, D69)."""
+    if state.phase != "open":
+        raise ClaimRefused(f"the case is {state.phase}: nothing waits for an answer")
+    # Who claims is written one way, before anything is checked against it (brief, D22).
+    if (wrong := identifier_problem(event.by)) is not None:
+        raise ClaimRefused(wrong)
+    if event.entry in state.changes:
+        raise ClaimRefused(f"{event.entry} is a change request: nobody holds one")
+    try:
+        found = open_entry(state, event.entry)
+    except AnswerRefused as refused:
+        raise ClaimRefused(str(refused)) from None
+    if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
+        raise ClaimRefused(sent_never_answered(found.entry, waits))
+    return found
 
 
 def open_entry(state: CaseState, entry: str) -> StepRun | OpenApproval:
@@ -1699,6 +1749,7 @@ def start(
         anyway = asked_anyway(case, catalog, state, step)
         if needed or anyway is not None:
             ask(state, name, step, anyway)
+            keep_holder(case, catalog, state, state.approvals[name])
             return
     if given is not None:
         lapsed(state, name, step, given)

@@ -1,0 +1,352 @@
+# Layer 17: Task assignment
+
+Status: 2026-11-03, agreed; 17a built, its promises checked. This note starts from `main` at `ebf81b8`, with
+layers 0 to 16 merged. The warm-up was asked and recorded (learning question 14). The guide was
+written first (curriculum step 2): `docs/guides/cases.md`, "Who is asked: claiming and assigning
+tasks", describes the layer as if it worked, with the recommendations below. If a choice is
+answered otherwise, the guide changes with it.
+
+**Answered 2026-11-03.** Choices A to C and 1 to 12 as recommended. D69 is written before 17a is
+built; D70 and D71 before their parts.
+
+Prior art: `chartering/src/case/worklist.ts`. Its `workFor` hides a `respond` item whose
+`assignee` is someone else, beside the role filter. There the assignee is a fixed string in the
+definition's `work` section, and it only filters the list: nothing refuses another person's answer.
+Ventoux takes the idea of a list derived from the case's state, never stored apart from it. It
+differs on both of those points: an assignee is an event, and (choice 1) a held entry is answered
+only by its holder.
+
+## Warm-up: learning question 14, the quickstart's approvals
+
+Recorded in `docs/LEARNING.md`, entry 14. Nothing came back this time, even after a hint for each
+part, and the answer was given in full. It leads straight into this layer: the exclusions decide
+who *may* answer, and assignment decides who is *asked* to.
+
+## What this layer is for
+
+**Two questions about every open entry.** Who **may** answer it: its roles (D9), plus, for an
+approval, the exclusions (D11, D25, D47) and "sees what they approve" (D30). That is a check,
+made on every answer. Who is **asked** to: its **assignee**, one person or nobody. An entry nobody
+holds is in its roles' **queue**.
+
+**An assignment narrows, never widens.** It follows the brief's rule that policies get stricter
+downstream, never looser. An assignment may make the set of people who may answer smaller (only
+the holder). It never makes it larger: being asked grants nothing. So assigning `pay`'s approval
+to Ana, who set `approved_amount`, can't let her approve it, and is refused on the spot.
+
+**Claiming, giving back, assigning and reassigning are events in the case's history,** sent by the
+trusted caller with the person's roles (D19, D22), like an answer. Replay sees the same
+assignments, and the engine never looks anyone up.
+
+## The split
+
+| PR | What it builds | Its negative test |
+|---|---|---|
+| **17a: claiming** | The holder of an open entry; `claim` and `give_back`, each a message checked and recorded; a held entry answered only by its holder; what happens to the holder when the entry is withdrawn, asked again, answered, stopped or closed; `assignees` in the in-memory run and on Temporal; carried across continue-as-new. | **curriculum:** a claim by someone without the task's role is refused. Also: a claim of an entry someone holds; a claim by someone an approval excludes; an answer by someone other than the holder; a give-back by someone other than the holder. |
+| **17b: assigning** | A role registered to assign (`assigns=True`); `assign(entry, to, by)`, for an entry held or not; refusals for the assigner and the assignee. | **curriculum:** a reassignment by someone not allowed to assign is refused. Also: an assignment to someone an approval excludes. |
+| **17c: assignment rules** | `assign` on a task step in the definition, evaluated when each entry is asked; validation; the case map and rules sheet; the semantic diff; the builder; the JSON Schema. | **curriculum:** an assignment rule that can only pick people who can't answer the task is refused at validation (`ASSIGNS_EXCLUDED`). Also: a rule naming an unknown step, or a step that isn't a task. |
+
+**Why this order.** 17a builds the state and the one rule everything else depends on (only the
+holder answers). 17b adds a second way to set the holder, and the one new kind of role. 17c sets
+it from the definition, which reaches validation, the diff and the plain forms. The choices for
+17b and 17c are sketched here and settled when their parts start, as in layer 16.
+
+### Where each point of the curriculum's layer 17 lands
+
+1. **Who may answer, and who is asked to:** "What this layer is for"; choices 1 and 2.
+2. **A role's queue:** choice 2 (an entry nobody holds).
+3. **Claiming, assigning, reassigning as events in history:** choices 3, 4 and 9.
+4. **Assignment by rule, in the definition, checked like any rule:** 17c, choices 10 to 12.
+5. **The case report showing who holds each task:** choice 9.
+
+## Design questions for you
+
+Each answer becomes a decision in the brief, from D69 on, added and never rewriting an earlier one.
+Where my recommendation is marked, the guide already follows it.
+
+### For the whole layer
+
+A. **The split:** 17a, 17b, 17c, as in the table, one pull request each. The branches are
+   `layer-17a-claims`, `layer-17b-assigning` and `layer-17c-rules`; the warm-up and the guide
+   already sit on `layer-17a-assignment`, which I'd rename to `layer-17a-claims`. *Recommended.*
+
+B. **Decisions: one per part,** D69 (17a), D70 (17b), D71 (17c), each written before its part is
+   built. Each says what it adds to the earlier ones ("Adds to D9, D22, D24, D25, whose text is
+   kept"). *Recommended.*
+
+C. **No new dependency.** *Recommended.*
+
+### For 17a: claiming
+
+1. **Is an assignment a permission?**
+   - (a) **No. It narrows only: a held entry is answered only by its holder.** An answer from
+     anyone else is refused, saying who holds it and how to free it. Two people never work the same
+     task, and "asked" means something. The cost: an away holder blocks the entry until someone
+     gives it back or reassigns it. Nothing is skipped automatically, so that is consistent with the
+     non-negotiables, but it is real.
+   - (b) **No. It is routing only, as in the prototype.** Anyone who may answer still may. It never
+     blocks, but an assignment is then only a hint.
+   - (c) **Yes, it grants.** Ruled out by "stricter downstream, never looser".
+
+   *Recommended: (a).* Either way, being assigned never grants: every check an answer passes, it
+   still passes.
+
+2. **Who may claim, and when.** A claim is checked like an answer to that entry, as far as the
+   engine can tell at the claim: the entry is open; the person is written as an identifier (D22);
+   they have one of its roles; for an approval, the role may approve the risk, they see what the
+   step reads (D30), and no exclusion applies (D11, D25, D47). Refused too: a claim of an entry
+   someone holds, and a claim by the holder, which would change nothing. Each refusal is recorded
+   and names no value (D30). *Recommended.*
+   - **An approval with `count` above 1** needs several people on one entry (D47), so one holder
+     can't answer it all. Options: (i) such an entry can't be held, so it stays in the queue and a
+     claim is refused saying why; (ii) holding is per approver, so up to `count` holders. *Recommended:
+     (i).* It is simpler, and (ii) is a shape of its own.
+   - **A plan's waits** (a plan step's own tasks, D28) are not entries of the case. *Recommended:*
+     they can't be held in layer 17. A claim of one is refused as an unknown entry.
+
+3. **Giving back.** Only the holder may give an entry back, and it returns to the queue.
+   *Recommended.* (17b lets an assigner move it, to someone or back to the queue: choice 7.)
+
+4. **What happens to the holder on every route that touches an open entry.** This is the list I'll
+   check before each pull request:
+   - **Answered** (by the holder): the entry ends, and with it the assignment.
+   - **Withdrawn and asked again** (D25: a value the step reads changed, by an answer, an edit
+     (D52), a rule's `set` or a refresh; the step stopped being admitted): the new entry keeps the
+     old one's holder, saying so, if they could still answer it; otherwise it goes to the queue,
+     saying why (choice 5). *Alternative:* the new entry always starts in the queue. That is
+     simpler, but someone who took the work loses it whenever an amount is corrected.
+   - **A task answered again** (a repeatable task, a new run): a new entry. A new run is new work,
+     so it starts in the queue, unless 17c's rule says otherwise.
+   - **Stopped** by a rule (D40), **cancelled** by a close (D10): the assignment ends with the entry.
+     The holder sees why, as D10 says.
+   - **A lapse** (D11, D23) is of a given approval, not an open entry: nothing is held.
+   - **Continue-as-new** (D27): the holders of open entries are part of the case's state, so they
+     cross it. A state carried from before this layer has no holders.
+   - **A migration** (D53): open entries cross by name, and their holders with them.
+   - **An edit (D52)** can't set a holder: a holder is not a field. A change request of a new kind
+     is not needed, since 17b's assign already moves it.
+   - **The opening** sets no holder (17c's rules may).
+   - **An event from outside** sets no holder.
+   - **Replay of an older history:** it has no claims, so it decides as before. *Recommended:* no
+     new engine version (D51), since nothing recorded decides differently. I'll confirm this with
+     a replay test of a 16c history.
+
+5. **Who loses the entry, and when.** The engine learns roles only when a person acts (D22), so it
+   can't see that a holder lost a role.
+   - **Lost role:** the holder's answer is refused for lack of the role, as anyone's is, and the
+     entry stays theirs. Someone who assigns (17b) reassigns it. *Alternative:* a refused answer
+     from the holder for lack of the role returns the entry to the queue. *Recommended:* stays,
+     since a refusal shouldn't change state, and a typo in a role list shouldn't free work.
+   - **Excluded by an approval's rules:** an open entry's exclusions don't change while it is open,
+     because anything that would change them withdraws it (D25). So exclusion is checked at the
+     claim, and again when a re-asked entry would carry the holder over.
+
+6. **What the report and the history show** (17a's half; 17b adds the assigning lines).
+   - History lines: `lee claimed review#1 as support`, `lee gave back review#1`,
+     `pay.approval#2 kept for sam`, `pay.approval#2 back in its queue: <reason>`. Refusals are
+     recorded as they are today. No line quotes a value (D30).
+   - `assignees`: each held entry and its holder, on `CaseRun` and Temporal's `CaseReport`.
+   - `waiting_for` unchanged (D24, D47: the same to everyone, naming nobody). *Alternative:* add
+     `, held by lee`. *Recommended:* unchanged; `assignees` already says it.
+   - The approval sheet gains nothing in 17a.
+
+### For 17b: assigning (sketched; settled when it starts)
+
+7. **Who may assign.** A role the platform team registers, `register_role(..., assigns=True)`, like
+   `operates` and `edits` (D26, D52), so no case names its assigners. An assigner may give an entry,
+   held or not, to someone, or back to the queue. An assigner may assign to themselves.
+   *Alternative:* each task names its assigning roles in the definition. *Recommended:* the
+   registered role.
+
+8. **What is checked of the assignee.** The engine knows the assigner's roles (stated with their
+   message), not the assignee's.
+   - (a) **The Ventoux API states the assignee's roles with the assignment** (D22 extended),
+     recorded, and the assignee is checked like a claim (choice 2).
+   - (b) **Only what needs no roles is checked** (the exclusions from provenance, the opener, the
+     proposer), and a role is found missing only at the answer.
+
+   *Recommended: (a).* It is the same trusted-caller rule, and it refuses earlier.
+
+### For 17c: assignment rules (sketched; settled when it starts)
+
+9. **Where a rule is written, and when it runs.** `assign` on a task step, evaluated when each
+   entry is asked, on the case as it is then. *Alternative:* a new `then` of the rules (D38).
+   *Recommended:* on the step, since it has no moment of its own: it is part of asking.
+
+10. **What a rule may read, and its provenance.**
+    - (a) **Only people the case already knows:** `{"to": "opener"}`, `{"to": "answered", "step":
+      …}` (who last answered that task). No identifier is typed into a definition, and no field's
+      value picks anyone. The holder's source is the act that made them the pick.
+    - (b) **Also a field** (`account_manager`), with its provenance: an untrusted value picks
+      nobody, as untrusted data never decides (D38).
+
+    *Recommended: (a) for v1.0,* with (b) recorded as a deliberate limit. A field holding a person
+    would need a person type of its own, which is a layer of its own.
+
+11. **What validation refuses.** `ASSIGNS_EXCLUDED`: a rule that can only pick someone who can never
+    answer (whoever answered a task whose answer feeds the step, or the opener, for an approval).
+    Refused too: an unknown step, a step that isn't a task, and an approval with `count` above 1
+    (choice 2). A rule whose pick finds nobody at runtime puts the entry in its queue, saying why,
+    never an error that stops the case.
+
+12. **The diff and the plain forms.** Under choice 1(a), an added `assign` narrows who may answer,
+    so it reads as stricter, a removed one as looser, and a changed one as a doubt, so looser (D55).
+    The case map and the rules sheet read it aloud: "assigned to whoever answered the review".
+
+## Seams and tests for 17a (curriculum step 4)
+
+The tests use only what a caller of the engine uses today: the events `decide` takes, the
+script `run_case` plays, what a run and a report say, and the Temporal signals. No test reads
+how the holder is stored.
+
+### The seams
+
+1. **Two events into `decide`** (`ventoux.case.state`, beside `Answered` and `Retried`):
+   `Claimed(entry, by, roles, at=…)` and `GivenBack(entry, by, roles, at=…)`. A refused one raises
+   **`ClaimRefused`** (`ventoux.case`), with the reason as its message, as `AnswerRefused` is
+   raised for an answer today.
+2. **Two script steps for `run_case`** (`ventoux.testing`, beside `retry` and `finish`):
+   `claim("review#1", "lee")` and `give_back("review#1", "lee")`. The test plays the API: the
+   person's roles come from `people`, as for an answer (D22).
+3. **`run.assignees`** on `CaseRun`, and **`CaseReport.assignees`** on Temporal: a `dict` from each
+   held entry to its holder, in the order the entries opened (`{"review#1": "lee"}`). An entry in
+   its queue is absent.
+4. **The history lines,** asserted as text, as every layer does:
+   - `lee claimed review#1 as support`
+   - `lee gave back review#1`
+   - `pay.approval#2 kept for sam`
+   - `pay.approval#2 back in its queue: <the reason an answer would be refused>`
+   - on Temporal, a refusal: `refused lee's claim of review#1: <reason>`, and
+     `refused lee's give-back of review#1: <reason>`, as `asked()` names other requests.
+5. **Two Temporal signals** on the case workflow, `claim` and `give_back`, each taking the
+   existing `CaseRequest(what=entry, by=…, roles=[…])`, as `retry` does. A refusal is recorded and
+   the case waits on (`REFUSALS` gains `ClaimRefused`).
+
+### The refusals, word for word (proposed)
+
+| Situation | Message |
+|---|---|
+| no role the entry names | `omar may not claim review#1: it needs support, and omar is operations` (the wording `no_role` already gives an answer, with `claim` for `answer`) |
+| someone holds it | `lee holds review#1; ask someone who assigns to reassign it` |
+| the holder claims again | `lee already holds review#1` |
+| an approval excludes them | `ana may not claim pay.approval#1: ` + the exclusion an answer gets (`ana set approved_amount, which pay uses, so cannot approve it`) |
+| they can't see what the step reads | `lee may not claim pay.approval#1: ` + D30's refusal |
+| `count` above 1 | `pay.approval#1 needs 2 people, so nobody can hold it` |
+| an entry that isn't open, or isn't the case's (a plan's wait) | the refusal an answer to it gets today |
+| an identifier spelled otherwise | the refusal an answer gets today (D22) |
+| an answer from someone else | `lee holds review#1: ask lee to give it back, or someone who assigns to reassign it` |
+| a give-back by someone else | `ana doesn't hold review#1; lee does` (or `nobody holds review#1`) |
+
+### The tests, in the order I'd write them
+
+Each one is written failing first and watched failing for the right reason. Each responds to what
+the last one taught, so the list may change on the way.
+
+1. **(negative, curriculum)** A claim by someone without the task's role is refused, and nothing
+   changes: `run.assignees == {}`.
+2. A claim by someone with the role: `assignees == {"review#1": "lee"}`, the history line, and
+   `waiting_for` unchanged (the guide's first example, run as written).
+3. **(negative)** An answer by anyone but the holder is refused, even with the role; the holder's
+   answer is taken, and the assignment ends with the entry.
+4. **(negative)** A claim of an entry someone holds; a claim by the holder.
+5. **(negative)** A give-back by someone else; the holder's give-back returns it to the queue, and
+   then anyone with the role may claim or answer it.
+6. **(negative)** Claims of an approval: by someone it excludes (the person whose answer set a
+   value, the opener, the proposer); by someone who can't see what the step reads; by a role that
+   can't approve the risk; of an approval with `count: 2`.
+7. **(negative)** A claim of an entry not open (answered, withdrawn), of a plan step's wait, of an
+   entry that doesn't exist, and with an identifier spelled otherwise (`Lee`).
+8. Asked again (D25): the holder is kept on the new entry; and the guide's Sam example, where the
+   new values exclude him, sends it back to the queue with the reason.
+9. A new run of a repeatable task starts in its queue.
+10. A stop by a rule and a close end the assignment; the holder's later answer is refused as for
+    any closed entry.
+11. A holder who lost the role: their answer is refused for the role, and they still hold the
+    entry.
+12. **On Temporal:** the `claim` and `give_back` signals; `CaseReport.assignees`; a refused claim
+    recorded and the case waiting on; holders crossing continue-as-new.
+13. A migration (D53) keeps the holder of an entry it carries.
+14. **Replay:** every recorded history in `tests/histories` still replays (the existing replay
+    tests, unchanged), which is what "no new engine version" claims.
+
+**The routes, each handled or refused, with its test:** an answer (3, 10), an edit (8, since an
+edit withdraws an approval it changes), a migration (13), an event (an event sets no holder; it may
+withdraw an approval, 8), a rule (8 through a `set`, 10 through a stop), the opening (2: nothing
+held at the start), a plan (7), continue-as-new (12).
+
+## Decided while building 17a
+
+1. **A claim's refusal reuses the answer's words.** For a task, `omar may not claim review#1:
+   review#1 is answered by support, and omar has operations` (the seams table proposed `it needs
+   support, and omar is operations`; `no_role`'s wording is kept, so a claim and an answer can't
+   say it two ways). For an approval, the claim is judged by `judge_approval` itself, as that
+   person's *approve*, so every exclusion an answer meets (provenance, the opener, the proposer,
+   the rule's readers, a retried run's first start, sight, risk) refuses a claim with the same
+   reason. A test checks that the two refusals are the same text.
+2. **What isn't an open task or approval refuses a claim as an answer to it is refused**, in the
+   same words, as a `ClaimRefused`: an entry closed, withdrawn, never opened or unknown; a wait
+   for an event (the wording is now one function for both); a plan step's run; a misspelled
+   identifier; a case no longer open. **A change request** can't be held either (`case.change#1 is
+   a change request: nobody holds one`): it is approved by someone else, whoever they are (D52).
+3. **The holder ends with its entry in one place.** Nine places close an entry. Rather than touch
+   each, a sweep at the end of every decision drops the holder of any entry no longer waiting.
+   Tests 3, 9 and 10 fail with the sweep switched off.
+4. **A holder keeps the roles they claimed with,** and when (`Holder(by, roles, at)`), so a
+   re-asked approval can be judged as their answer would be. The roles are the ones stated then
+   (D22); their answer is checked again with the roles they state then.
+5. **A withdrawn approval's holder is kept for its step** (`kept`, by step) until the step's next
+   entry is asked, since the two can be different decisions (sent back, then reviewed again). A
+   stop or a close doesn't keep it: only `withdraw` does. If the step is never asked again, the
+   kept holder stays in the state, read by nothing.
+6. **A migration re-judges every holder against the new release,** and sends back to its queue,
+   saying why, an entry its holder couldn't answer there (the release names other roles, say).
+   Choice 4 said holders cross with their entries; this is what "cross" means. A kept holder
+   follows a renamed step. Found while writing test 13: without the rename, the holder was lost.
+7. **`assignees` lists every holder,** those of open entries in the order they opened, then any
+   left on an entry no longer open, so a holder left behind would show in the report rather than
+   hide. One function serves the in-memory run and Temporal's report.
+8. **The guide's section is at the end of the cases guide.** Many tests read the guide's blocks by
+   position; a section in the middle shifted them all. "What a waiting case reports" points to it.
+   The section uses the guide's people (Lee leads the team, so Ana claims the review).
+
+## Promises (17a)
+
+Each claim the note, D69 and the guide's 17a part make about behaviour, and the test that fails if
+it isn't true. Tests in `tests/test_claims.py` unless named otherwise. Four tests passed when
+first written, the code an earlier test drove already covering them; each was checked by switching
+that code off and watching the test fail (marked *mutation-checked*).
+
+| Promise | The test that would fail |
+|---|---|
+| A claim by someone without the task's role is refused, in the answer's words (curriculum) | `test_a_claim_without_the_tasks_role_is_refused` |
+| A claim makes its person the holder; `assignees` says so; `waiting_for` is unchanged and names nobody; the history says `ana claimed review#1 as support` | `test_a_claim_makes_its_person_the_holder`, and the guide's block in `test_case.py::test_the_guides_examples_run_as_written` |
+| While someone holds an entry, only they answer it; anyone else is refused, saying who holds it and how to free it | `test_only_the_holder_answers_a_held_entry` |
+| The holder's answer ends the entry, and the assignment with it | `test_only_the_holder_answers_a_held_entry` |
+| One holder at a time: a claim of a held entry is refused, and so is the holder claiming again | `test_a_held_entry_is_not_claimed_again` |
+| Only the holder gives an entry back; nobody gives back what nobody holds | `test_only_the_holder_gives_an_entry_back` |
+| An entry given back is in its queue: anyone with the role answers it; the history says `ana gave back review#1` | `test_an_entry_given_back_is_in_its_queue_again` |
+| Being asked grants nothing: a claim of an approval is refused to whomever it excludes (the guide's example) | `test_a_claim_of_an_approval_is_refused_to_whom_it_excludes` |
+| A claim of an approval is refused exactly as that person's approval would be: provenance, the opener, sight (D30) | `test_a_claim_of_an_approval_is_refused_as_its_answer_would_be` |
+| Someone who may approve a step may hold its approval | `test_a_claim_of_an_approval_by_who_may_approve_it_is_taken` |
+| An approval with `count` above 1 can't be held | `test_an_approval_needing_several_people_cant_be_held` |
+| What can't be answered can't be claimed, refused in the same words: an entry answered, never opened or unknown; a misspelled identifier; a wait for an event; a plan step's run | `test_what_cant_be_answered_cant_be_claimed` |
+| A change request can't be held | `test_a_change_request_isnt_held` |
+| Nothing is claimed once the case is closed | `test_nothing_is_claimed_once_the_case_is_closed` |
+| An approval withdrawn and asked again keeps its holder if they could still answer it, saying so | `test_an_approval_asked_again_keeps_its_holder` (*mutation-checked*, with the next) |
+| … and goes to its queue, saying why, if the new values exclude them (the guide's example) | `test_an_approval_asked_again_goes_to_its_queue_if_its_holder_cant_approve_it` |
+| An edit (D52) that withdraws a held approval keeps its holder for the new entry | `test_an_edit_that_withdraws_a_held_approval_keeps_its_holder` (*mutation-checked*) |
+| A new run of a task is new work and starts in its queue | `test_a_new_run_of_a_task_starts_in_its_queue` (*mutation-checked*) |
+| A stop ends the assignment; the holder's late answer is refused as closed | `test_a_stop_ends_the_assignment_with_its_entry` (*mutation-checked*) |
+| A close ends the assignment | `test_a_close_ends_the_assignment_with_its_entry` (*mutation-checked*) |
+| A holder who lost the role is refused at their answer, and still holds the entry | `test_a_holder_who_lost_the_role_is_refused_and_still_holds_it` |
+| A held entry crosses a migration (D53) | `test_a_held_entry_crosses_a_migration` |
+| A migration sends an entry to its queue, saying why, if its holder couldn't answer it on the new release | `test_a_migration_sends_an_entry_to_its_queue_if_its_holder_cant_answer_it_there` |
+| A withdrawn approval's holder follows its step's new name | `test_a_withdrawn_approvals_holder_follows_its_steps_new_name` (*mutation-checked*) |
+| Holders, and kept holders, cross continue-as-new as data, and still act after it; a state from before 17a holds nothing | `test_holders_and_kept_holders_cross_as_data_and_a_state_from_before_has_none` (*mutation-checked*), and `test_temporal_case.py::test_a_carried_state_reads_back_as_it_was` (every state field crosses) |
+| On Temporal, claiming and giving back are signals; a refused claim or answer is recorded and the case waits on; `CaseReport.assignees` says who holds what, across a switch | `test_temporal_claims.py::test_claims_are_signals_recorded_and_carried_across_continue_as_new` |
+| No refusal or history line quotes a value | every refusal and history line the tests above check is asserted whole (`match="^…$"` or `==`), and each names people, roles, fields and entries only |
+| No new engine version: every history recorded before replays as it did | the replay tests of earlier layers, unchanged (`test_temporal_approvals.py::test_histories_from_before_11h2_replay` and the other `before_*` histories), all passing |
+
+**Not promised by 17a, and left to its part:** assigning and reassigning, and the `assigns` role
+(17b, D70); assignment rules, `ASSIGNS_EXCLUDED`, the diff and the plain forms (17c, D71). The
+guide already describes them; their tests come with their parts.
