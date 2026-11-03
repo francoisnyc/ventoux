@@ -616,6 +616,9 @@ def entry_to_hold(
     # Who claims is written one way, before anything is checked against it (brief, D22).
     if (wrong := identifier_problem(event.by)) is not None:
         raise ClaimRefused(wrong)
+    # So is whoever an assignment names (brief, D70).
+    if isinstance(event, Assigned) and (wrong := identifier_problem(event.to)) is not None:
+        raise ClaimRefused(wrong)
     if event.entry in state.changes:
         raise ClaimRefused(f"{event.entry} is a change request: nobody holds one")
     try:

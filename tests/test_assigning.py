@@ -9,11 +9,28 @@ returning to the queue".
 from typing import Any
 
 import pytest
+from test_approvals import FOUR_EYES
 from test_case import REFUND, guide_seen_by_support
+from test_events import waiting_for_a_receipt
+from test_plan_step import refund_order, refund_with_plan
 
-from ventoux.testing import AnswerRefused, ClaimRefused, assign, claim, run_case, unassign
+from ventoux.case.definition import parse_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import Answered, Assigned, Claimed
+from ventoux.testing import (
+    CATALOG,
+    START,
+    AnswerRefused,
+    ClaimRefused,
+    assign,
+    claim,
+    edit,
+    run_case,
+    unassign,
+)
 
 ORDER = {"order_id": "ord-1", "amount": 250}
+PLANS = {"refund-order@1": refund_order()}  # the plan the plan step runs
 REVIEWED_BY_ANA = ("review", "approve", "ana", {"approved_amount": 250})
 REVIEWED_BY_SAM = ("review", "approve", "sam", {"approved_amount": 250})
 
@@ -193,3 +210,64 @@ def test_an_assigner_needs_only_to_be_someone_else_not_to_approve_it() -> None:
         people=PEOPLE,
     )
     assert run.assignees == {"pay.approval#1": "sam"}
+
+
+@pytest.mark.parametrize(
+    ("definition", "script", "entry"),
+    [
+        (REFUND, [REVIEWED_BY_ANA], "review#1"),  # answered: closed
+        (REFUND, [], "pay#7"),  # no such run
+        (waiting_for_a_receipt(), [REVIEWED_BY_ANA], "wait_for_receipt#1"),  # sent, never answered
+        (refund_with_plan(), [REVIEWED_BY_ANA], "settle#1"),  # a plan's run (brief, D28)
+        (
+            REFUND,
+            [REVIEWED_BY_ANA, edit("approved_amount", 200, "ana")],
+            "case.change#1",  # a change request (brief, D52)
+        ),
+    ],
+)
+def test_what_cant_be_claimed_cant_be_assigned(
+    definition: dict[str, Any], script: list[Any], entry: str
+) -> None:
+    # Fail closed: an assignment of anything that can't be held is refused as a claim of it is,
+    # in the same words (brief, D69) (brief, D70).
+    case = parse_case(definition)
+    run = run_case(definition, file=ORDER, answers=script, people=PEOPLE, plans=PLANS)
+    with pytest.raises(ClaimRefused) as claiming:
+        decide(case, CATALOG, run.state, Claimed(entry, "sam", frozenset(PEOPLE["sam"]), at=START))
+    lee, sam = frozenset(PEOPLE["lee"]), frozenset(PEOPLE["sam"])
+    with pytest.raises(ClaimRefused) as assigning:
+        decide(case, CATALOG, run.state, Assigned(entry, "sam", sam, "lee", lee, at=START))
+    assert str(assigning.value) == str(claiming.value)
+
+
+def test_an_approval_needing_several_people_cant_be_assigned() -> None:
+    with pytest.raises(
+        ClaimRefused, match="^pay.approval#1 needs 2 people, so nobody can hold it$"
+    ):
+        run_case(
+            FOUR_EYES,
+            file={"order_id": "ord-1", "amount": 12000},
+            answers=[
+                ("review", "approve", "ana", {"approved_amount": 12000}),
+                assign("pay.approval#1", "sam", by="lee"),
+            ],
+            people=PEOPLE,
+        )
+
+
+@pytest.mark.parametrize(("assignee", "assigner"), [("Sam", "lee"), ("sam", "Lee")])
+def test_both_identifiers_are_written_one_way(assignee: str, assigner: str) -> None:
+    # "Someone else" compares identifiers exactly, so `Sam` is refused before anything is checked
+    # against it, the assignee as the assigner (brief, D22).
+    case = parse_case(REFUND)
+    run = run_case(REFUND, file=ORDER, answers=[], people=PEOPLE)
+    lee, sam = frozenset(PEOPLE["lee"]), frozenset(PEOPLE["sam"])
+    wrong = assignee if assignee != "sam" else assigner
+    with pytest.raises(AnswerRefused) as answering:
+        decide(case, CATALOG, run.state, Answered("review#1", "approve", wrong, sam, at=START))
+    with pytest.raises(ClaimRefused) as assigning:
+        decide(
+            case, CATALOG, run.state, Assigned("review#1", assignee, sam, assigner, lee, at=START)
+        )
+    assert str(assigning.value) == str(answering.value)
