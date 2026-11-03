@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 from test_approvals import FOUR_EYES
-from test_case import REFUND, guide_seen_by_support
+from test_case import REFUND, guide_refund_with_rework, guide_seen_by_support
 from test_events import waiting_for_a_receipt
 from test_plan_step import refund_order, refund_with_plan
 
@@ -25,6 +25,7 @@ from ventoux.testing import (
     assign,
     claim,
     edit,
+    propose,
     run_case,
     unassign,
 )
@@ -271,3 +272,22 @@ def test_both_identifiers_are_written_one_way(assignee: str, assigner: str) -> N
             case, CATALOG, run.state, Assigned("review#1", assignee, sam, assigner, lee, at=START)
         )
     assert str(assigning.value) == str(answering.value)
+
+
+def test_an_assigned_holder_is_kept_when_their_approval_is_asked_again() -> None:
+    # Lee gives pay's approval to Pia; the review is sent back and reworked, so it is withdrawn
+    # and asked again (brief, D25). Pia, judged with the roles the API stated for her when she was
+    # assigned, may still approve it, so the new entry is hers (brief, D69) (brief, D70).
+    run = run_case(
+        guide_refund_with_rework(),
+        file=ORDER,
+        answers=[
+            REVIEWED_BY_ANA,
+            assign("pay.approval#1", "pia", by="lee"),
+            propose("review", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 300}),
+        ],
+        people=WITH_PIA,
+    )
+    assert run.assignees == {"pay.approval#2": "pia"}
+    assert run.history[-1] == "pay.approval#2 kept for pia"
