@@ -50,7 +50,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 43 | Layer 15: what an injected instruction can still influence | open |
 | 44 | Layer 16: why compare two dates but never ask what day it is | closed |
 | 45 | Layer 16b: why an option is checked once, through an activity, when given | closed |
-| 46 | Layer 16c: why the case keeps the ID, never the file, and what checking it guards | open |
+| 46 | Layer 16c: why the case keeps the ID, never the file, and what checking it guards | closed |
 
 ---
 
@@ -1868,6 +1868,14 @@ and record the key points. A question is closed once you can explain the answer 
   and, marked sensitive, is sealed and forgotten with the case's key (D31). Two more reasons the
   brief gives (D68): anyone with namespace access reads the history (D16), and a payload has a
   size limit.
-- Follow-up, asked: the second half, what checking the ID when Ana answers guards against.
-- Status: open.
+- Follow-up, asked: the second half, what checking the ID when Ana answers guards against. Your
+  answer: "the text could be a pasted file or a made-up ID." Right, both: a pasted file is
+  refused before anything is asked, an ID of more than 200 characters never quoted (D30); a
+  made-up ID, or one mistyped, is refused by the store's own check, and the refusal recorded.
+  What asking the store gives the case: the store's own word, in the history, where replay reads
+  it and the value's source says `system:documents`. Nothing else could give it: the inbox
+  vouches for who Ana is, never for facts (D19), and the case reads no system itself.
+- In one line: the case keeps only what can be forgotten and what the store vouched for, when
+  Ana gave it.
+- Status: closed (both halves from memory, the second after one prompt).
 
