@@ -44,6 +44,7 @@ from ventoux.case.state import (
     Event,
     Failed,
     ForgetApproved,
+    GivenBack,
     Opened,
     Proposed,
     Retried,
@@ -98,6 +99,7 @@ __all__ = [
     "close",
     "edit",
     "finish",
+    "give_back",
     "load_definition",
     "migrate",
     "propose",
@@ -541,6 +543,11 @@ def run_case(
         if isinstance(item, Claim):
             events.append(Claimed(item.entry, item.by, frozenset(people.get(item.by, ())), at=now))
             continue
+        if isinstance(item, GiveBack):
+            events.append(
+                GivenBack(item.entry, item.by, frozenset(people.get(item.by, ())), at=now)
+            )
+            continue
         if isinstance(item, Retry):
             events.append(Retried(item.entry, item.by, frozenset(people.get(item.by, ())), at=now))
             continue
@@ -699,6 +706,18 @@ class Claim(NamedTuple):
 def claim(entry: str, who: str) -> Claim:
     """A script's claim of an open entry: `claim("review#1", "lee")` (brief, D69)."""
     return Claim(entry, who)
+
+
+class GiveBack(NamedTuple):
+    """A scripted give-back: the holder `by` returns `entry` to its queue (brief, D69)."""
+
+    entry: str
+    by: str
+
+
+def give_back(entry: str, who: str) -> GiveBack:
+    """A script's give-back of a held entry: `give_back("review#1", "ana")` (brief, D69)."""
+    return GiveBack(entry, who)
 
 
 class Close(NamedTuple):

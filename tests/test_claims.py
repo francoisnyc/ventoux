@@ -5,10 +5,12 @@ See docs/layers/17-assignment.md (17a) and docs/guides/cases.md, "Who is asked: 
 assigning tasks".
 """
 
+from typing import Any
+
 import pytest
 from test_case import REFUND
 
-from ventoux.testing import AnswerRefused, ClaimRefused, claim, run_case
+from ventoux.testing import AnswerRefused, ClaimRefused, claim, give_back, run_case
 
 ORDER = {"order_id": "ord-1", "amount": 250}
 
@@ -69,3 +71,61 @@ def test_only_the_holder_answers_a_held_entry() -> None:
     assert run.reached("review")
     assert run.waiting_for == ["approval of pay by support-lead"]
     assert run.assignees == {}
+
+
+@pytest.mark.parametrize(
+    ("who", "message"),
+    [
+        ("sam", "^ana holds review#1; ask someone who assigns to reassign it$"),
+        ("ana", "^ana already holds review#1$"),
+    ],
+)
+def test_a_held_entry_is_not_claimed_again(who: str, message: str) -> None:
+    # One holder at a time: someone else's claim would take the work from Ana, and her own would
+    # change nothing (brief, D69).
+    with pytest.raises(ClaimRefused, match=message):
+        run_case(
+            REFUND,
+            file=ORDER,
+            answers=[claim("review#1", "ana"), claim("review#1", who)],
+            people=PEOPLE,
+        )
+
+
+@pytest.mark.parametrize(
+    ("script", "message"),
+    [
+        (
+            [claim("review#1", "ana"), give_back("review#1", "sam")],
+            "^sam doesn't hold review#1; ana does$",
+        ),
+        ([give_back("review#1", "ana")], "^nobody holds review#1$"),
+    ],
+)
+def test_only_the_holder_gives_an_entry_back(script: list[Any], message: str) -> None:
+    # Giving back is the holder's: anyone else would free work that isn't theirs (brief, D69).
+    with pytest.raises(ClaimRefused, match=message):
+        run_case(REFUND, file=ORDER, answers=script, people=PEOPLE)
+
+
+def test_an_entry_given_back_is_in_its_queue_again() -> None:
+    # Back in the queue, anyone with the role may claim it, or answer it.
+    run = run_case(
+        REFUND,
+        file=ORDER,
+        answers=[claim("review#1", "ana"), give_back("review#1", "ana")],
+        people=PEOPLE,
+    )
+    assert run.assignees == {}
+    assert run.history[-2:] == ["ana claimed review#1 as support", "ana gave back review#1"]
+    again = run_case(
+        REFUND,
+        file=ORDER,
+        answers=[
+            claim("review#1", "ana"),
+            give_back("review#1", "ana"),
+            ("review", "approve", "sam", {"approved_amount": 250}),
+        ],
+        people=PEOPLE,
+    )
+    assert again.reached("review")

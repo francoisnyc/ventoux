@@ -6,7 +6,7 @@ See docs/layers/17-assignment.md (17a).
 """
 
 from ventoux.case.definition import CaseDefinition, TaskStep
-from ventoux.case.state import CaseState, Claimed, OpenApproval, StepRun
+from ventoux.case.state import CaseState, Claimed, GivenBack, OpenApproval, StepRun
 from ventoux.core.catalog import Catalog
 from ventoux.core.roles import no_role, role_that_counts
 
@@ -23,6 +23,12 @@ def claim(
     event: Claimed,
 ) -> None:
     """Make `event.by` the holder of `found`, the open entry they claim; or `ClaimRefused`."""
+    # One holder at a time: a claim never takes the work from someone (brief, D69).
+    holder = state.holders.get(found.entry)
+    if holder == event.by:
+        raise ClaimRefused(f"{event.by} already holds {found.entry}")
+    if holder is not None:
+        raise ClaimRefused(f"{holder} holds {found.entry}; ask someone who assigns to reassign it")
     # Holding grants nothing: a claim is checked as an answer to the entry would be, so nobody is
     # asked what they couldn't answer (brief, D69).
     assert isinstance(found, StepRun)
@@ -34,6 +40,19 @@ def claim(
         raise ClaimRefused(f"{event.by} may not claim {found.entry}: {why}")
     state.holders[found.entry] = event.by
     state.history.append(f"{event.by} claimed {found.entry} as {role}")
+
+
+def give_back(state: CaseState, found: StepRun | OpenApproval, event: GivenBack) -> None:
+    """Return `found` to its queue, given back by its holder; or `ClaimRefused`."""
+    # Only the holder gives an entry back: anyone else would free work that isn't theirs
+    # (brief, D69).
+    holder = state.holders.get(found.entry)
+    if holder is None:
+        raise ClaimRefused(f"nobody holds {found.entry}")
+    if holder != event.by:
+        raise ClaimRefused(f"{event.by} doesn't hold {found.entry}; {holder} does")
+    del state.holders[found.entry]
+    state.history.append(f"{event.by} gave back {found.entry}")
 
 
 def held_by_another(state: CaseState, entry: str, by: str) -> str | None:

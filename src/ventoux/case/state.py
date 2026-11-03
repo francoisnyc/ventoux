@@ -460,6 +460,16 @@ class Claimed:
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
+@dataclass(frozen=True)
+class GivenBack:
+    """The holder of an open entry gives it back to its queue (brief, D69)."""
+
+    entry: str  # the entry given back
+    by: str  # who gives it back, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with it (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
 type Event = (
     Opened
     | Answered
@@ -476,6 +486,7 @@ type Event = (
     | Sent
     | TimerDue
     | Claimed
+    | GivenBack
 )
 
 

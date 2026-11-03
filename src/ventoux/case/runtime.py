@@ -41,7 +41,7 @@ from ventoux.case.approvals import (
     waiting_line,
 )
 from ventoux.case.called import called
-from ventoux.case.claims import claim, held_by_another, let_go_of_ended
+from ventoux.case.claims import claim, give_back, held_by_another, let_go_of_ended
 from ventoux.case.closing import (
     begin_closing,
     close_held,
@@ -83,6 +83,7 @@ from ventoux.case.state import (
     Failed,
     ForgetApproved,
     GivenApproval,
+    GivenBack,
     HeldAnswer,
     Migration,
     Moment,
@@ -206,6 +207,8 @@ def decide(
         retry(case, catalog, state, event, commands)
     elif isinstance(event, Claimed):
         claim(case, catalog, state, open_entry(state, event.entry), event)
+    elif isinstance(event, GivenBack):
+        give_back(state, open_entry(state, event.entry), event)
     elif isinstance(event, Shown):
         record_shown(case, catalog, state, event)
     elif isinstance(event, Sent):
