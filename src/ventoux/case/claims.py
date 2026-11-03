@@ -96,6 +96,31 @@ def keep_holder(
     state.history.append(f"{approval.entry} kept for {holder.by}")
 
 
+def keep_holders_who_can_answer(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
+    """After a migration to `case`, send back to its queue every held entry whose holder couldn't
+    answer it there, saying why: the new release may name other roles (brief, D53) (brief, D69)."""
+    for entry, holder in list(state.holders.items()):
+        found = held_entry(state, entry)
+        if found is None:
+            continue  # no longer open: its holder goes with it once the decision ends
+        try:
+            role_to_hold(case, catalog, state, found, holder)
+        except (AnswerRefused, ClaimRefused) as refused:
+            del state.holders[entry]
+            state.history.append(f"{entry} back in its queue: {refused}")
+
+
+def held_entry(state: CaseState, entry: str) -> StepRun | OpenApproval | None:
+    """The open task run or approval named `entry`, or None if it is no longer open."""
+    for run in state.runs:
+        if run.status == "open" and run.entry == entry:
+            return run
+    for approval in state.approvals.values():
+        if approval.entry == entry:
+            return approval
+    return None
+
+
 def give_back(state: CaseState, found: StepRun | OpenApproval, event: GivenBack) -> None:
     """Return `found` to its queue, given back by its holder; or `ClaimRefused`."""
     # Only the holder gives an entry back: anyone else would free work that isn't theirs

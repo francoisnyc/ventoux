@@ -16,6 +16,7 @@ from test_case import (
     guide_with_close_reasons,
 )
 from test_events import waiting_for_a_receipt
+from test_migrations import REFUND_1, REFUND_2, REFUND_3, RENAMES, refund_2
 from test_plan_step import refund_order, refund_with_plan
 from test_rules import DUPLICATE, WITHDRAWS, withdrawable
 
@@ -31,7 +32,9 @@ from ventoux.testing import (
     close,
     edit,
     give_back,
+    migrate,
     propose,
+    release_of,
     run_case,
 )
 
@@ -388,3 +391,59 @@ def test_a_holder_who_lost_the_role_is_refused_and_still_holds_it() -> None:
     ):
         decide(case, CATALOG, run.state, no_longer)
     assert run.assignees == {"review#1": "ana"}
+
+
+# --- Migrations (brief, D53): holders cross with their entries ---
+
+MIGRATING = {**PEOPLE, "pia": ["platform"], "lee": ["support-lead", "platform"], "fay": ["fraud"]}
+
+
+def on_refund_1(answers: list[Any]) -> Any:
+    """The refund opened on its first release, played with `answers`."""
+    return run_case(REFUND, file=ORDER, answers=answers, people=MIGRATING, release=REFUND_1)
+
+
+def test_a_held_entry_crosses_a_migration() -> None:
+    run = on_refund_1(
+        [
+            claim("review#1", "ana"),
+            migrate(REFUND_2, {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ]
+    )
+    assert run.state.release == "refund 2"
+    assert run.assignees == {"review#1": "ana"}
+
+
+def test_a_migration_sends_an_entry_to_its_queue_if_its_holder_cant_answer_it_there() -> None:
+    # Release 2 has fraud review the refund: Ana, who claimed it as support, can't answer it
+    # there, so it goes back to its queue, saying why (brief, D53) (brief, D69).
+    by_fraud = refund_2()
+    by_fraud["steps"]["review"]["roles"] = ["fraud"]
+    run = on_refund_1(
+        [
+            claim("review#1", "ana"),
+            migrate(release_of(by_fraud, 2), {}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ]
+    )
+    assert run.assignees == {}
+    assert "review#1 back in its queue: review#1 is answered by fraud, and ana has support" in (
+        run.history
+    )
+
+
+def test_a_withdrawn_approvals_holder_follows_its_steps_new_name() -> None:
+    # Release 3 renames pay to payment, and changes it, so its open approval is withdrawn; the
+    # one asked once the fraud check clears is Sam's again, under the step's new name.
+    run = on_refund_1(
+        [
+            REVIEWED_BY_ANA,
+            claim("pay.approval#1", "sam"),
+            migrate(REFUND_3, RENAMES, "pia"),
+            ("case.change#1", "approve", "lee"),
+            ("fraud_check", "clear", "fay"),
+        ]
+    )
+    assert run.assignees == {"payment.approval#2": "sam"}
+    assert run.history[-1] == "payment.approval#2 kept for sam"

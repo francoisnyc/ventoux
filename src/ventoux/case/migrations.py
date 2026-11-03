@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from ventoux.case.approvals import withdraw
+from ventoux.case.claims import keep_holders_who_can_answer
 from ventoux.case.definition import (
     ActivityStep,
     After,
@@ -473,6 +474,7 @@ def apply(
             state.history.append(f"lapsed {run.approved.entry}: {label} changed {run.step}")
             run.approved = None
     rename(case, target, state, migration)
+    keep_holders_who_can_answer(target, catalog, state)
     follow_timers(case, target, state, migration, at)
     state.release = label
     state.engine = migration.engine
@@ -519,6 +521,7 @@ def rename(
     state.given = {step(name): given for name, given in state.given.items()}
     state.asked = {step(name): count for name, count in state.asked.items()}
     state.proposers = {step(name): who for name, who in state.proposers.items()}
+    state.kept = {step(name): holder for name, holder in state.kept.items()}
     state.waiting_to_start = [step(name) for name in state.waiting_to_start]
     state.proposed_by_rules = {
         step(name): dataclasses.replace(
