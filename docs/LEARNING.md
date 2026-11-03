@@ -50,6 +50,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 43 | Layer 15: what an injected instruction can still influence | open |
 | 44 | Layer 16: why compare two dates but never ask what day it is | closed |
 | 45 | Layer 16b: why an option is checked once, through an activity, when given | closed |
+| 46 | Layer 16c: why the case keeps the ID, never the file, and what checking it guards | open |
 
 ---
 
@@ -1854,3 +1855,19 @@ and record the key points. A question is closed once you can explain the answer 
 - In one line: the person's choice is checked once, by an activity whose answer the history keeps,
   so every replay sees the same "held".
 - Status: closed (both parts from memory, the second after one prompt).
+
+## 46. Layer 16c: why the case keeps the ID, never the file, and what checking it guards
+
+> Why does the case keep only the ID the store issued, never the file, and what does checking
+> that ID when Ana answers guard against?
+
+- Asked at the end of layer 16c's walk-through (2026-11-03).
+- Your answer: "because the history is kept forever and can't be forgotten." Right, the first
+  half's core: a file in the history could never be erased, so forgetting a person (layer 9c)
+  would leave their passport scan in it for good. The ID is small, says only where the file is,
+  and, marked sensitive, is sealed and forgotten with the case's key (D31). Two more reasons the
+  brief gives (D68): anyone with namespace access reads the history (D16), and a payload has a
+  size limit.
+- Follow-up, asked: the second half, what checking the ID when Ana answers guards against.
+- Status: open.
+
