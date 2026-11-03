@@ -447,6 +447,16 @@ class TimerDue:
     at: int = field(kw_only=True)  # its due time, in seconds since the epoch
 
 
+@dataclass(frozen=True)
+class Claimed:
+    """A person takes an open entry from its queue, to be the one asked to answer it (brief, D69)."""
+
+    entry: str  # the entry claimed: `review#1` or `pay.approval#1`
+    by: str  # who claims it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with the claim (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
 type Event = (
     Opened
     | Answered
@@ -462,6 +472,7 @@ type Event = (
     | ChangeProposed
     | Sent
     | TimerDue
+    | Claimed
 )
 
 

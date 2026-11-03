@@ -35,6 +35,7 @@ from ventoux.case.approvals import (
     waiting_line,
 )
 from ventoux.case.called import called
+from ventoux.case.claims import claim
 from ventoux.case.closing import (
     begin_closing,
     close_held,
@@ -68,6 +69,7 @@ from ventoux.case.state import (
     Answered,
     CaseState,
     ChangeProposed,
+    Claimed,
     CloseAsked,
     Command,
     Completed,
@@ -196,6 +198,8 @@ def decide(
         workflow_cancelled(state, event)
     elif isinstance(event, Retried):
         retry(case, catalog, state, event, commands)
+    elif isinstance(event, Claimed):
+        claim(case, catalog, state, open_entry(state, event.entry), event)
     elif isinstance(event, Shown):
         record_shown(case, catalog, state, event)
     elif isinstance(event, Sent):
