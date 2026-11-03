@@ -401,6 +401,10 @@ refused, even though she has `support`: `lee holds review#1: ask lee to give it 
 who assigns to reassign it`. This is how an assignment narrows who may answer. It can only
 narrow, never widen.
 
+**An approval needing several people can't be held.** With `count: 2` (D47), one entry needs two
+people, so nobody holds it: it stays in its queue, and a claim is refused saying so: `pay.approval#1
+needs 2 people, so nobody can hold it`.
+
 **The engine never looks a person up** (D22). It learns someone's roles only when they act. If
 Lee loses `support` while he holds the review, the engine doesn't know. His answer is then
 refused for lack of the role, the entry stays his, and the case says so. A support-lead

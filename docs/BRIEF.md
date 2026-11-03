@@ -2856,6 +2856,45 @@ D16, D30, D52 and D67, whose text is kept.*
   a list's fields (refused); events carrying attachments; a file's name, media type or size in
   the case; scanning; asking the store to erase on forgetting.
 
+### D69. Claiming a task: the holder is asked, never allowed; only the holder answers
+
+*Decided 2026-11-03, in layer 17a (`docs/layers/17-assignment.md`, choices A to 6). Adds to D9,
+D10, D22, D24, D25, D27, D47, D51 and D53, whose text is kept.*
+
+- **Who may answer and who is asked are two things.** A task's roles, and for an approval its
+  exclusions (D11, D25, D47) and its sight (D30), say who may answer an entry: a check, on every
+  answer. Its **holder**, one person or nobody, says who is asked. An open entry nobody holds is
+  in its roles' **queue**.
+- **An assignment narrows, never widens.** Being asked grants nothing: every check an answer
+  passes, it still passes. And while someone holds an entry, only they may answer it; anyone
+  else's answer is refused, saying who holds it and how to free it. So two people never work the
+  same entry, as policies are made stricter downstream, never looser.
+- **Claiming and giving back are messages from the trusted caller,** with the person and their
+  roles (D19, D22), recorded in history like an answer, so replay sees them and the engine never
+  looks anyone up. A claim is checked as an answer to the entry would be, as far as the engine can
+  tell then: the person is written as an identifier, the entry is open, nobody holds it, they have
+  one of its roles; for an approval, their role may approve the risk, they see what the step reads,
+  and no exclusion applies. Only the holder gives an entry back, to its queue. Each refusal is
+  recorded and names no value (D30).
+- **Not held:** an approval whose `count` is above 1 (D47), since one entry needs several people;
+  a claim of one is refused, saying so, and it stays in its queue. A plan's waits (D28), which are
+  not entries of the case.
+- **The holder follows the entry.** Answered, stopped (D40) or cancelled by a close (D10), the
+  entry ends and its assignment with it. Withdrawn and asked again (D25), the new entry keeps the
+  holder, saying so, if they could still answer it, and goes to its queue, saying why, if not. A
+  new run of a task is new work and starts in its queue. The opening, an event, an edit (D52) and
+  a rule set no holder (until D71). Holders are part of the case's state, so they cross
+  continue-as-new (D27) and a migration (D53) with their entries; a state from before has none.
+- **The engine can't see a role lost.** It learns roles when a person acts (D22). A holder who lost
+  the role is refused at their answer, as anyone is, and the entry stays theirs: a refusal changes
+  nothing. Someone who assigns (D70) moves it.
+- **What it shows:** history lines for each claim and give-back, and for a holder kept or sent
+  back to the queue on a new entry; `assignees`, each held entry and its holder, in the run and the
+  report. `waiting_for` is unchanged: what the case waits for, the same to everyone, naming nobody
+  (D24, D47).
+- **No new engine version (D51):** a history recorded before holds no claim, so it decides as it
+  did.
+
 ## Concepts
 
 | Term | Meaning |
@@ -2877,6 +2916,8 @@ D16, D30, D52 and D67, whose text is kept.*
 | Task | A step asking people with given roles a question, answered with an outcome |
 | Outcome | A named answer from a task, an approval or an activity (`approve`, `declined`); a task's may set case-file fields |
 | Approval | A task guarding a step: approve or reject, by an eligible person, tied to the values it saw |
+| Holder | The one person an open task or approval is asked of, by a claim or an assignment; it grants nothing, and while someone holds an entry only they answer it |
+| Queue | The open entries nobody holds, seen by everyone with one of their roles |
 | Closing | A case that will start nothing new and closes once its running activities finish |
 | Pending work | What keeps a case open: running steps, open tasks or approvals, timers, explicit waits, failed steps |
 | Needs attention | A case with a step that failed after its retries, waiting for an operator; nothing is skipped automatically |

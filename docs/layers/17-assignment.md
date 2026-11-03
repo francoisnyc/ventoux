@@ -1,10 +1,13 @@
 # Layer 17: Task assignment
 
-Status: 2026-11-03, proposed; not yet agreed. This note starts from `main` at `ebf81b8`, with
+Status: 2026-11-03, agreed; 17a's seams next. This note starts from `main` at `ebf81b8`, with
 layers 0 to 16 merged. The warm-up was asked and recorded (learning question 14). The guide was
 written first (curriculum step 2): `docs/guides/cases.md`, "Who is asked: claiming and assigning
 tasks", describes the layer as if it worked, with the recommendations below. If a choice is
 answered otherwise, the guide changes with it.
+
+**Answered 2026-11-03.** Choices A to C and 1 to 12 as recommended. D69 is written before 17a is
+built; D70 and D71 before their parts.
 
 Prior art: `chartering/src/case/worklist.ts`. Its `workFor` hides a `respond` item whose
 `assignee` is someone else, beside the role filter. There the assignee is a fixed string in the
