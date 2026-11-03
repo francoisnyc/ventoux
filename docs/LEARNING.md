@@ -1906,5 +1906,17 @@ and record the key points. A question is closed once you can explain the answer 
   make the set of people who may answer smaller (D69). "Nothing else changes" is too strong:
   holding changes who is asked, so a follow-up was asked.
 - Follow-up, asked: Ana holds `review#1`; one thing that changes for her, one for Sam (who also
-  has `support`), and one that doesn't change for Ana.
-- Status: open, until the follow-up is answered.
+  has `support`), and one that doesn't change for Ana. Asked to be told, and given:
+  - **For Ana:** the review is on her list and out of the `support` queue; she is the only one who
+    can answer it until she gives it back or someone who assigns moves it; and she alone may give
+    it back.
+  - **For Sam:** it leaves his queue, and his answer is refused although he has `support` (`ana
+    holds review#1: ask ana to give it back, or someone who assigns to reassign it`) — the
+    narrowing, which before the claim would have been taken.
+  - **Unchanged for Ana:** everything about whether she *may* answer. Holding grants nothing, so
+    the role, and for an approval the exclusions, the risk and sight (D11, D30, D47), are checked
+    as before; losing `support` while holding it refuses her answer and leaves the entry hers.
+    And `waiting_for` still says `review by support`, the same to everyone, naming nobody (D24).
+  - In one line: holding changes whose list an entry sits on, and so who else is refused; never
+    who may answer it, nor what the case waits for.
+- Status: open, until the three parts come back from memory.
