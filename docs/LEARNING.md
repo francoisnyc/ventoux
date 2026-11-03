@@ -1309,6 +1309,15 @@ and record the key points. A question is closed once you can explain the answer 
   - who may approve, and where the amount comes from: skipped, not recalled.
   Tied to layer 15: the step advisor's answer is checked by exactly this seam, so the parts
   missed come up again there.
+- Retrieval (layer 17b warm-up, 2026-11-03): asked to be told. Given in four parts: the seam
+  is `decide`, through `Proposed(step, by, roles, at)`, which has no field for a value; the
+  engine checks it as a person's proposal (the step exists, a role in `proposed_by`, the case open,
+  the step not already on its way, `repeatable`, `requires` met, its `when` holds, failing closed);
+  an approval comes from someone else (never the proposer, the opener, or anyone whose answer feeds
+  the step); the values come from the step's `inputs` in the reviewed definition, and an untrusted
+  field is refused at a `trusted_only` input. Tied to 17b: an assignment is the same shape, a
+  person asking, checked by the engine, with no room for a value, so it changes only whose list
+  an entry is on.
 - Status: open, until the proposer's checks and the exclusions come back from memory.
 
 
