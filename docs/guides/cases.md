@@ -2592,6 +2592,16 @@ case, held or not, in one of three ways:
 So an entry whose holder has left can always be freed. Ana claims the review and goes on leave;
 Lee, who leads the team, gives it to Sam:
 
+```python
+run = run_case(
+    refund,
+    file={"order_id": "ord-1", "amount": 250},
+    answers=[claim("review#1", "ana"), assign("review#1", "sam", by="lee")],
+    people=PEOPLE,
+)
+assert run.assignees == {"review#1": "sam"}
+```
+
 ```
 ana claimed review#1 as support
 lee assigned review#1 to sam as support-lead, from ana
