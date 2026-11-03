@@ -482,6 +482,19 @@ class GivenBack:
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
+@dataclass(frozen=True)
+class Assigned:
+    """Someone whose role assigns gives an open entry to a person, whoever holds it now
+    (brief, D70)."""
+
+    entry: str  # the entry assigned
+    to: str  # who is asked to answer it, as the trusted caller states (brief, D19)
+    to_roles: frozenset[str]  # their roles, stated with the assignment (brief, D22)
+    by: str  # who assigns it
+    roles: frozenset[str]  # the assigner's roles, stated with it
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
 type Event = (
     Opened
     | Answered
@@ -499,6 +512,7 @@ type Event = (
     | TimerDue
     | Claimed
     | GivenBack
+    | Assigned
 )
 
 
