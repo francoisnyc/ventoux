@@ -350,3 +350,102 @@ that code off and watching the test fail (marked *mutation-checked*).
 **Not promised by 17a, and left to its part:** assigning and reassigning, and the `assigns` role
 (17b, D70); assignment rules, `ASSIGNS_EXCLUDED`, the diff and the plain forms (17c, D71). The
 guide already describes them; their tests come with their parts.
+
+# 17b: assigning
+
+Status: 2026-11-03, proposed; not yet agreed. Starts from `main` at `23ddacc`, with 17a merged
+(#83). The warm-up was asked and recorded (learning question 36). The guide was written first:
+`docs/guides/cases.md`, "Assigning, reassigning, returning to the queue", with the recommendations
+below.
+
+## What 17b is for
+
+17a lets a person take work (a claim) and let it go (a give-back); only the holder does either. So
+an entry whose holder never acts can't be freed: the tutor's review of 17a, watched for 17b. 17b
+adds the **assigner**: someone whose role assigns moves an entry between people, without its
+holder, and never answers it. Three acts, one of them new in kind:
+
+| Act | Before | After |
+|---|---|---|
+| **assign** | in the queue | held by the person named |
+| **reassign** | held by Ana | held by Sam |
+| **return to the queue** | held by Ana | nobody holds it |
+
+Like a claim, each is a message from the trusted caller (D19, D22) with no field for a value: it
+changes whose list an entry is on, never what its step does (learning question 36).
+
+## Choices for 17b
+
+Choices 7 and 8 were sketched with 17a and agreed then; they are restated here as they stand.
+Each answer goes into **D70**, written before 17b is built.
+
+7. **Who may assign** (agreed). A role the platform team registers, `register_role(...,
+   assigns=True)`, like `operates` and `edits` (D26, D52), so no case names its assigners. A role
+   the catalog doesn't mark as assigning may not assign, whoever states it (fail closed).
+
+8. **What is checked of the assignee** (agreed). The Ventoux API states the assignee's roles with
+   the assignment, as it states the assigner's (D22); both are recorded. The assignee is checked
+   exactly as a claim is (D69): the same `role_to_hold`, so for an approval the same
+   `judge_approval`.
+
+13. **Returning an entry to its queue, without its holder.** This frees the entry the tutor
+    watched. As its own act, `unassign(entry, by)`, an `Unassigned` event; or as `assign(entry,
+    None, by)`. *Recommended:* its own act. "Assign to nobody" reads oddly, and its checks differ
+    (there's no assignee to judge).
+
+14. **Nobody chooses their own judge.** Assigning grants nothing, but an assigner picks *who* is
+    asked. Sam set `approved_amount`, so he may never approve `pay`; handing `pay`'s approval to a
+    colleague he expects to approve it would let him choose who judges his own decision, the
+    influence D11's "someone else" exists to prevent.
+    - (a) **Whoever may not approve a step may not move its approval**: assign, reassign or
+      return it. Judged as their own approval would be (`judge_approval`), so every exclusion
+      applies: provenance, the opener, the proposer, a rule's readers, and so on.
+    - (b) The same, for assigning and reassigning only; returning to the queue picks nobody.
+    - (c) No rule: the approver is still checked at the answer, so a friendly approver is still
+      "someone else".
+
+    *Recommended: (a).* Returning to the queue picks nobody, but it can also take the approval
+    from an approver about to reject, again and again. One rule is easier to explain and to
+    test. **What it doesn't need:** the assigner having the approval's role or the risk or the
+    sight. Lee may assign an approval she couldn't answer herself; only the exclusions that make
+    someone a party to the decision apply. So the check is the exclusions part of
+    `judge_approval`, not all of it. *To decide with it:* tasks are not judgements of anyone's
+    decision, so this applies to approvals only.
+
+15. **What the assigner needs on the entry itself.** Nothing else: not the task's role (Lee
+    moves the review, which needs `support`), not sight of what the step reads (she sees whose
+    list it is on, never a value). *Recommended.*
+
+16. **Assigning to yourself.** Allowed, and checked as a claim: if the assigner could answer
+    the entry, it is the same as claiming it; if not, it is refused as any assignment to someone
+    who couldn't answer. *Recommended:* no rule of its own; its history line says `assigned …
+    to lee`, like any assignment.
+
+17. **What is refused, beside 14:** an assigner without an assigning role; an assignee who
+    couldn't answer the entry; an assignment to the entry's current holder (it changes nothing);
+    a return of an entry nobody holds; anything that can't be held (D69: an approval needing
+    several people, a plan's wait, a change request, an entry not open); a misspelled identifier,
+    the assigner's or the assignee's (D22). *Recommended.* Each refusal names people, roles and
+    entries, never a value (D30).
+
+18. **What the history shows.** `lee assigned review#1 to sam as support-lead`; when someone held
+    it, `…, from ana`; `lee returned review#1 to its queue as support-lead, from ana`. On
+    Temporal, a refusal reads `refused lee's assignment of review#1: …` and `refused lee's return
+    of review#1: …`. *Recommended:* naming the previous holder, since whoever reads the history
+    sees why the work moved and from whom.
+
+19. **What the holder records.** The assignee becomes the holder with the roles the API stated
+    for them, and when, `Holder(sam, {support}, at)`, as a claim records the claimant's. So
+    everything 17a does with a holder (a re-asked approval, a migration, continue-as-new) works
+    unchanged. Who assigned them isn't kept in the state; the history says it. *Recommended.*
+
+20. **Temporal and the engine version.** Two signals, `assign` and `unassign`, beside `claim`
+    and `give_back`; `assign` takes the assignee and their roles too, so a message of its own
+    (`CaseAssignment`). No new engine version: no history recorded before holds an assignment.
+    *Recommended.*
+
+## The split
+
+One pull request, `layer-17b-assigning`. Its negative test, from the curriculum: a reassignment
+by someone not allowed to assign is refused. Also: an assignment to someone who couldn't answer;
+an excluded person moving an approval (choice 14).
