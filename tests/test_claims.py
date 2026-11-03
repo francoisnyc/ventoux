@@ -9,9 +9,15 @@ from typing import Any
 
 import pytest
 from test_approvals import FOUR_EYES
-from test_case import REFUND, guide_refund_with_rework, guide_seen_by_support
+from test_case import (
+    REFUND,
+    guide_refund_with_rework,
+    guide_seen_by_support,
+    guide_with_close_reasons,
+)
 from test_events import waiting_for_a_receipt
 from test_plan_step import refund_order, refund_with_plan
+from test_rules import DUPLICATE, WITHDRAWS, withdrawable
 
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
@@ -22,6 +28,7 @@ from ventoux.testing import (
     AnswerRefused,
     ClaimRefused,
     claim,
+    close,
     edit,
     give_back,
     propose,
@@ -317,3 +324,67 @@ def test_an_approval_asked_again_goes_to_its_queue_if_its_holder_cant_approve_it
         ),
     ]
     assert [line for line in run.history if line in tail] == tail
+
+
+def test_a_new_run_of_a_task_starts_in_its_queue() -> None:
+    # Ana held the first review and answered it. Reviewing again is new work, so nobody holds
+    # the second review until someone claims it (brief, D69).
+    run = run_case(
+        guide_refund_with_rework(),
+        file=ORDER,
+        answers=[claim("review#1", "ana"), REVIEWED_BY_ANA, propose("review", "ana")],
+        people=PEOPLE,
+    )
+    assert run.waiting_for == ["review by support"]
+    assert run.assignees == {}
+
+
+def test_a_stop_ends_the_assignment_with_its_entry() -> None:
+    # The customer withdraws while Ana holds the review: a rule stops it, and Ana holds nothing
+    # (brief, D40) (brief, D69). Her late answer is refused as any answer to a closed entry is.
+    staying = withdrawable() | {"stays_open": True, "close_reasons": {"duplicate": DUPLICATE}}
+    run = run_case(
+        staying, file=ORDER, answers=[claim("review#1", "ana"), *WITHDRAWS], people=PEOPLE
+    )
+    assert "cancelled review#1: stopped by withdraw#1" in run.history
+    assert run.assignees == {}
+    with pytest.raises(AnswerRefused, match="^review#1 is closed$"):
+        run_case(
+            staying,
+            file=ORDER,
+            answers=[
+                claim("review#1", "ana"),
+                *WITHDRAWS,
+                ("review#1", "approve", "ana", {"approved_amount": 250}),
+            ],
+            people=PEOPLE,
+        )
+
+
+def test_a_close_ends_the_assignment_with_its_entry() -> None:
+    # Closed as a duplicate while Ana holds the review: it is cancelled, and her answer refused
+    # (brief, D10) (brief, D69).
+    run = run_case(
+        guide_with_close_reasons(),
+        file=ORDER,
+        answers=[claim("review#1", "ana"), close("duplicate", "ana")],
+        people=PEOPLE,
+    )
+    assert run.closed
+    assert run.assignees == {}
+
+
+def test_a_holder_who_lost_the_role_is_refused_and_still_holds_it() -> None:
+    # The engine learns roles only when a person acts (brief, D22). Ana claimed the review as
+    # support; she answers without it now: refused for the role, as anyone would be, and the
+    # entry stays hers, since a refusal changes nothing (brief, D69).
+    case = parse_case(REFUND)
+    run = run_case(REFUND, file=ORDER, answers=[claim("review#1", "ana")], people=PEOPLE)
+    no_longer = Answered(
+        "review#1", "approve", "ana", frozenset(), {"approved_amount": 250}, at=START
+    )
+    with pytest.raises(
+        AnswerRefused, match="^review#1 is answered by support, and ana has no role$"
+    ):
+        decide(case, CATALOG, run.state, no_longer)
+    assert run.assignees == {"review#1": "ana"}
