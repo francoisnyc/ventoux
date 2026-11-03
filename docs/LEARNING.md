@@ -1924,4 +1924,7 @@ and record the key points. A question is closed once you can explain the answer 
   (the role; for an approval, the exclusions, the risk, sight), so a holder who lost the role is
   refused too. Not yet back: what changes for Ana herself (the entry is on her list, out of the
   queue, and only she may give it back).
+- Then, asked what changes for Ana herself: "tell me". Given: the entry is on her list and out of
+  the queue (`assignees`); it waits on her until she gives it back or someone who assigns moves
+  it; and only she may give it back (`sam doesn't hold review#1; ana does`).
 - Status: open, until the three parts come back from memory.
