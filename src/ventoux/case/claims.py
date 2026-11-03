@@ -28,6 +28,24 @@ def claim(
     assert isinstance(found, StepRun)
     step = case.steps[found.step]
     assert isinstance(step, TaskStep)
-    if role_that_counts(step.roles, event.roles, catalog.roles) is None:
+    role = role_that_counts(step.roles, event.roles, catalog.roles)
+    if role is None:
         why = no_role(found.entry, step.roles, event.by, event.roles, catalog.roles)
         raise ClaimRefused(f"{event.by} may not claim {found.entry}: {why}")
+    state.holders[found.entry] = event.by
+    state.history.append(f"{event.by} claimed {found.entry} as {role}")
+
+
+def held_by_another(state: CaseState, entry: str, by: str) -> str | None:
+    """Why `by` may not answer `entry`, held by someone else; None if nobody else holds it."""
+    holder = state.holders.get(entry)
+    if holder is None or holder == by:
+        return None
+    return f"{holder} holds {entry}: ask {holder} to give it back, or someone who assigns to reassign it"
+
+
+def let_go_of_ended(state: CaseState) -> None:
+    """End the assignment of every entry no longer open: answered, withdrawn, stopped or cancelled,
+    an entry's holder goes with it. Done once, after every decision, so no route that ends an entry
+    can leave its holder behind (brief, D69)."""
+    state.holders = {entry: by for entry, by in state.holders.items() if entry in state.waiting}

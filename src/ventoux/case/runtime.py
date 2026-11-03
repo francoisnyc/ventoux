@@ -24,7 +24,13 @@ from ventoux.case.admission import (
     proposal_refusal,
     requirements_met,
 )
-from ventoux.case.answers import AnswerRefused, decided_by, judge_approval, judge_task
+from ventoux.case.answers import (
+    AnswerRefused,
+    decided_by,
+    judge_approval,
+    judge_task,
+    refuse_unless,
+)
 from ventoux.case.approvals import (
     ask,
     asked_anyway,
@@ -35,7 +41,7 @@ from ventoux.case.approvals import (
     waiting_line,
 )
 from ventoux.case.called import called
-from ventoux.case.claims import claim
+from ventoux.case.claims import claim, held_by_another, let_go_of_ended
 from ventoux.case.closing import (
     begin_closing,
     close_held,
@@ -218,6 +224,7 @@ def decide(
     else:
         complete(case, catalog, state, event)
     decide_again(case, catalog, state, commands, event.at, was_open)
+    let_go_of_ended(state)
     return state, commands
 
 
@@ -557,6 +564,8 @@ def answer(
     if (request := state.changes.get(event.entry)) is not None:
         return answer_change(case, catalog, state, request, event, as_worded(state, event))
     found = open_entry(state, event.entry)
+    # While someone holds an entry, only they answer it (brief, D69).
+    refuse_unless(held_by_another(state, found.entry, event.by))
     if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
         # Only its event ends it, sent by its sender: nobody answers it (brief, D41).
         raise AnswerRefused(f"{found.entry} waits for {waits.event}: it is sent, never answered")

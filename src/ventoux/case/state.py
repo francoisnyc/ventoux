@@ -231,6 +231,9 @@ class CaseState:
     arrived: dict[str, int] = field(default_factory=dict[str, int])
     # What waits on people, in the order it opened: entry, and how it reads (brief, D24).
     waiting: dict[str, str] = field(default_factory=dict[str, str])
+    # Who holds each held open entry, by entry: the one asked to answer it; an entry absent is
+    # in its roles' queue (brief, D69).
+    holders: dict[str, str] = field(default_factory=dict[str, str])
     opened_by: str | None = None  # the person who opened the case, if a person did
     # open; closing: nothing new starts, running activities finish; closed (brief, D10).
     phase: Literal["open", "closing", "closed"] = "open"

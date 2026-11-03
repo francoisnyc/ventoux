@@ -8,15 +8,16 @@ assigning tasks".
 import pytest
 from test_case import REFUND
 
-from ventoux.testing import ClaimRefused, claim, run_case
+from ventoux.testing import AnswerRefused, ClaimRefused, claim, run_case
 
 ORDER = {"order_id": "ord-1", "amount": 250}
 
-# Ana and Lee review refunds, Sam leads the team and reviews too; Omar operates.
+# The guide's people: Ana reviews refunds, Sam reviews and leads the team, Lee leads it; Omar
+# operates.
 PEOPLE = {
     "ana": ["support"],
-    "lee": ["support"],
     "sam": ["support", "support-lead"],
+    "lee": ["support-lead"],
     "omar": ["operations"],
 }
 
@@ -30,3 +31,41 @@ def test_a_claim_without_the_tasks_role_is_refused() -> None:
         "operations$",
     ):
         run_case(REFUND, file=ORDER, answers=[claim("review#1", "omar")], people=PEOPLE)
+
+
+def test_a_claim_makes_its_person_the_holder() -> None:
+    # The guide's first example, as written: Ana holds the review, and the case still waits for
+    # the same thing, naming nobody (brief, D24, D69).
+    run = run_case(REFUND, file=ORDER, answers=[claim("review#1", "ana")], people=PEOPLE)
+    assert run.waiting_for == ["review by support"]
+    assert run.assignees == {"review#1": "ana"}
+    assert run.history[-1] == "ana claimed review#1 as support"
+
+
+def test_only_the_holder_answers_a_held_entry() -> None:
+    # Holding narrows who may answer, never widens: Sam has the review's role, and is still
+    # refused while Ana holds it (brief, D69).
+    with pytest.raises(
+        AnswerRefused,
+        match="^ana holds review#1: ask ana to give it back, or someone who assigns to reassign "
+        "it$",
+    ):
+        run_case(
+            REFUND,
+            file=ORDER,
+            answers=[
+                claim("review#1", "ana"),
+                ("review", "approve", "sam", {"approved_amount": 250}),
+            ],
+            people=PEOPLE,
+        )
+    # The holder's answer is taken, and the assignment ends with the entry.
+    run = run_case(
+        REFUND,
+        file=ORDER,
+        answers=[claim("review#1", "ana"), ("review", "approve", "ana", {"approved_amount": 250})],
+        people=PEOPLE,
+    )
+    assert run.reached("review")
+    assert run.waiting_for == ["approval of pay by support-lead"]
+    assert run.assignees == {}

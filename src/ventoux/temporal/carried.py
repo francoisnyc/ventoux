@@ -72,6 +72,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "given": {step: given_as_data(given) for step, given in state.given.items()},
         "asked": dict(state.asked),
         "withdrawn": dict(state.withdrawn),
+        "holders": dict(state.holders),  # who holds each held open entry (brief, D69)
         "proposers": dict(state.proposers),
         "waiting_to_start": list(state.waiting_to_start),
         "proposed_by_rules": {
@@ -240,6 +241,7 @@ def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Cas
         given={step: given_from_data(given) for step, given in data["given"].items()},
         asked=dict(data["asked"]),
         withdrawn=dict(data["withdrawn"]),
+        holders=dict(data.get("holders", {})),  # none in a state from before layer 17a
         proposers=dict(data["proposers"]),
         # None in a state from before layer 11b: no proposal waited for a fact.
         waiting_to_start=list(data.get("waiting_to_start", [])),

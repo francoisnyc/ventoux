@@ -74,6 +74,16 @@ class CaseRun:
         return sheet_of(self.definition, self.state, entry, roles, at, self.registered)
 
     @property
+    def assignees(self) -> dict[str, str]:
+        """Each held open entry and its holder, in the order the entries opened; an entry in its
+        queue is absent (brief, D69)."""
+        held = self.state.holders
+        opened = [entry for entry in self.state.waiting if entry in held]
+        # Every holder is listed, so one left on an entry no longer open would show.
+        left = [entry for entry in held if entry not in self.state.waiting]
+        return {entry: held[entry] for entry in opened + left}
+
+    @property
     def closed(self) -> bool:
         return self.status == "closed"
 
