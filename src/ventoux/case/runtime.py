@@ -41,7 +41,13 @@ from ventoux.case.approvals import (
     waiting_line,
 )
 from ventoux.case.called import called
-from ventoux.case.claims import claim, give_back, held_by_another, let_go_of_ended
+from ventoux.case.claims import (
+    ClaimRefused,
+    claim,
+    give_back,
+    held_by_another,
+    let_go_of_ended,
+)
 from ventoux.case.closing import (
     begin_closing,
     close_held,
@@ -206,9 +212,9 @@ def decide(
     elif isinstance(event, Retried):
         retry(case, catalog, state, event, commands)
     elif isinstance(event, Claimed):
-        claim(case, catalog, state, open_entry(state, event.entry), event)
+        claim(case, catalog, state, entry_to_hold(case, state, event), event)
     elif isinstance(event, GivenBack):
-        give_back(state, open_entry(state, event.entry), event)
+        give_back(state, entry_to_hold(case, state, event), event)
     elif isinstance(event, Shown):
         record_shown(case, catalog, state, event)
     elif isinstance(event, Sent):
@@ -571,7 +577,7 @@ def answer(
     refuse_unless(held_by_another(state, found.entry, event.by))
     if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
         # Only its event ends it, sent by its sender: nobody answers it (brief, D41).
-        raise AnswerRefused(f"{found.entry} waits for {waits.event}: it is sent, never answered")
+        raise AnswerRefused(sent_never_answered(found.entry, waits))
     if isinstance(found, StepRun) and (held := state.checking.get(found.entry)) is not None:
         # One answer at a time: the held one is taken or refused first (brief, D67).
         systems = listed(list(dict.fromkeys(checked_by(case, n)[1] for n in held.waiting)))
@@ -584,6 +590,33 @@ def answer(
     else:
         answer_approval(case, catalog, state, found, event)
     return None
+
+
+def sent_never_answered(entry: str, waits: WaitStep) -> str:
+    """Why nobody answers, or holds, a run waiting for an event: only its sender ends it."""
+    return f"{entry} waits for {waits.event}: it is sent, never answered"
+
+
+def entry_to_hold(
+    case: CaseDefinition, state: CaseState, event: Claimed | GivenBack
+) -> StepRun | OpenApproval:
+    """The open task run or approval a claim or a give-back names; or `ClaimRefused`, saying what
+    an answer to it would be refused with. Fail closed: only a task or an approval is held
+    (brief, D69)."""
+    if state.phase != "open":
+        raise ClaimRefused(f"the case is {state.phase}: nothing waits for an answer")
+    # Who claims is written one way, before anything is checked against it (brief, D22).
+    if (wrong := identifier_problem(event.by)) is not None:
+        raise ClaimRefused(wrong)
+    if event.entry in state.changes:
+        raise ClaimRefused(f"{event.entry} is a change request: nobody holds one")
+    try:
+        found = open_entry(state, event.entry)
+    except AnswerRefused as refused:
+        raise ClaimRefused(str(refused)) from None
+    if isinstance(found, StepRun) and isinstance(waits := case.steps[found.step], WaitStep):
+        raise ClaimRefused(sent_never_answered(found.entry, waits))
+    return found
 
 
 def open_entry(state: CaseState, entry: str) -> StepRun | OpenApproval:

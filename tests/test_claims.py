@@ -10,13 +10,25 @@ from typing import Any
 import pytest
 from test_approvals import FOUR_EYES
 from test_case import REFUND, guide_seen_by_support
+from test_events import waiting_for_a_receipt
+from test_plan_step import refund_order, refund_with_plan
 
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, Claimed
-from ventoux.testing import CATALOG, START, AnswerRefused, ClaimRefused, claim, give_back, run_case
+from ventoux.testing import (
+    CATALOG,
+    START,
+    AnswerRefused,
+    ClaimRefused,
+    claim,
+    edit,
+    give_back,
+    run_case,
+)
 
 ORDER = {"order_id": "ord-1", "amount": 250}
+PLANS = {"refund-order@1": refund_order()}  # the plan the plan step runs
 
 # The guide's people: Ana reviews refunds, Sam reviews and leads the team, Lee leads it; Omar
 # operates.
@@ -208,3 +220,49 @@ def test_a_claim_of_an_approval_by_who_may_approve_it_is_taken() -> None:
     )
     assert run.assignees == {"pay.approval#1": "lee"}
     assert run.history[-1] == "lee claimed pay.approval#1 as support-lead"
+
+
+REVIEWED_BY_ANA = ("review", "approve", "ana", {"approved_amount": 250})
+
+
+@pytest.mark.parametrize(
+    ("definition", "script", "entry", "who"),
+    [
+        (REFUND, [REVIEWED_BY_ANA], "review#1", "sam"),  # answered: closed
+        (REFUND, [], "review#2", "sam"),  # never opened
+        (REFUND, [], "pay#7", "sam"),  # no such run
+        (REFUND, [], "review#1", "Ana"),  # an identifier is written one way (brief, D22)
+        # A step waiting for an event is sent its event, never answered (brief, D41).
+        (waiting_for_a_receipt(), [REVIEWED_BY_ANA], "wait_for_receipt#1", "sam"),
+        # A plan step's waits are the plan's, never the case's entries (brief, D28).
+        (refund_with_plan(), [REVIEWED_BY_ANA], "settle#1", "sam"),
+    ],
+)
+def test_what_cant_be_answered_cant_be_claimed(
+    definition: dict[str, Any], script: list[Any], entry: str, who: str
+) -> None:
+    # Fail closed: a claim of anything that isn't an open task or approval is refused, as an
+    # answer to it is, saying the same (brief, D69).
+    case = parse_case(definition)
+    run = run_case(definition, file=ORDER, answers=script, people=PEOPLE, plans=PLANS)
+    roles = frozenset(PEOPLE.get(who.lower(), ()))
+    with pytest.raises(AnswerRefused) as answering:
+        decide(case, CATALOG, run.state, Answered(entry, "approve", who, roles, at=START))
+    with pytest.raises(ClaimRefused) as claiming:
+        decide(case, CATALOG, run.state, Claimed(entry, who, roles, at=START))
+    assert str(claiming.value) == str(answering.value)
+
+
+def test_a_change_request_isnt_held() -> None:
+    # A change request is approved by someone else, whoever they are (brief, D52); it is no task.
+    with pytest.raises(ClaimRefused, match="^case.change#1 is a change request: nobody holds one$"):
+        run_case(
+            REFUND,
+            file=ORDER,
+            answers=[
+                REVIEWED_BY_ANA,
+                edit("approved_amount", 200, "ana"),
+                claim("case.change#1", "lee"),
+            ],
+            people=PEOPLE,
+        )
