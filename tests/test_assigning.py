@@ -291,3 +291,32 @@ def test_an_assigned_holder_is_kept_when_their_approval_is_asked_again() -> None
     )
     assert run.assignees == {"pay.approval#2": "pia"}
     assert run.history[-1] == "pay.approval#2 kept for pia"
+
+
+def test_a_role_nobody_registered_assigns_nothing() -> None:
+    # Fail closed: a role the catalog doesn't know counts for nothing, whoever states it, even
+    # one called `assigner` (brief, D22) (brief, D70).
+    with pytest.raises(
+        ClaimRefused,
+        match="^eve may not assign review#1: assigning is done by support-lead, and eve has no "
+        "role$",
+    ):
+        run_case(
+            REFUND,
+            file=ORDER,
+            answers=[assign("review#1", "sam", by="eve")],
+            people={**PEOPLE, "eve": ["assigner"]},
+        )
+
+
+def test_an_approval_is_returned_to_its_queue_by_an_assigner_who_is_someone_else() -> None:
+    # Sam holds pay's approval and doesn't act; Lee, no party to the decision, frees it, and Pia
+    # may then approve it (brief, D70).
+    script = [REVIEWED_BY_ANA, claim("pay.approval#1", "sam"), unassign("pay.approval#1", by="lee")]
+    run = run_case(REFUND, file=ORDER, answers=script, people=WITH_PIA)
+    assert run.assignees == {}
+    assert run.history[-1] == "lee returned pay.approval#1 to its queue as support-lead, from sam"
+    paid = run_case(
+        REFUND, file=ORDER, answers=[*script, ("pay", "approve", "pia")], people=WITH_PIA
+    )
+    assert paid.reached("pay")

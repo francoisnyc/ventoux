@@ -353,7 +353,7 @@ guide already describes them; their tests come with their parts.
 
 # 17b: assigning
 
-Status: 2026-11-03, agreed; seams next. Starts from `main` at `23ddacc`, with 17a merged
+Status: 2026-11-03, agreed; 17b built, its promises checked. Starts from `main` at `23ddacc`, with 17a merged
 (#83). The warm-up was asked and recorded (learning question 36). The guide was written first:
 `docs/guides/cases.md`, "Assigning, reassigning, returning to the queue", with the recommendations
 below.
@@ -540,3 +540,34 @@ two new acts (tests 1 to 7); an assigned holder then goes every route a claimed 
    a design the code never had (judging the assigner by the whole approval). The mutation that
    would show it failing needs the catalog inside the check, which imports it in a circle; the
    check calls `why_excluded` and nothing else, which the code shows.
+
+## Promises (17b)
+
+Each claim D70 and the guide's 17b part make about behaviour, and the test that fails if it isn't
+true. Tests in `tests/test_assigning.py` unless named otherwise. Tests that passed when first
+written were checked by switching off the code they guard and watching them fail
+(*mutation-checked*); two couldn't be, and say why.
+
+| Promise | The test that would fail |
+|---|---|
+| A reassignment by someone not allowed to assign is refused, in the house wording (curriculum) | `test_a_reassignment_by_someone_not_allowed_to_assign_is_refused` |
+| A role nobody registered assigns nothing, whoever states it | `test_a_role_nobody_registered_assigns_nothing` (not mutation-checked: only a registered role can be among the assigners, so there is no separate code to switch off) |
+| An assigner reassigns a held entry without its holder; the history names the previous holder; the old holder's answer is then refused, the new one's taken (the guide's story, run from the guide) | `test_an_assigner_reassigns_a_held_entry_without_its_holder`, and `test_case.py::test_the_guides_examples_run_as_written` |
+| The assigner needs nothing else on the entry: Lee moves a review she can't answer | `test_an_assigner_reassigns_a_held_entry_without_its_holder` |
+| An assigner assigns an entry nobody holds, and may assign to themselves when they could answer | `test_an_assigner_assigns_an_entry_nobody_holds_and_may_assign_it_to_themselves` (*mutation-checked*) |
+| The assignee is checked as a claim is: someone who couldn't answer is refused, in the claim's words, the assigner included | `test_an_assignment_is_refused_to_whoever_couldnt_answer_or_already_holds` |
+| An assignment to the entry's holder is refused | the same test |
+| An unassign is refused without a role that assigns, and of an entry nobody holds | `test_an_unassign_is_refused_to_whoever_cant_assign_and_of_what_nobody_holds` |
+| An entry whose holder never acts can always be freed: returned to its queue without its holder, then answered by anyone with the role (the tutor's case) | `test_an_entry_whose_holder_never_acts_is_returned_to_its_queue` (*mutation-checked*) |
+| … an approval too, by an assigner who is someone else | `test_an_approval_is_returned_to_its_queue_by_an_assigner_who_is_someone_else` (*mutation-checked*) |
+| Nobody chooses their own judge: whoever set what a step reads may not assign, reassign or unassign its approval | `test_nobody_moves_the_approval_of_their_own_decision` |
+| … nor whoever opened the case | `test_the_opener_moves_no_approval_of_the_case` |
+| … and it applies to approvals only: an excluded person still assigns a task | `test_an_excluded_assigner_still_assigns_what_isnt_their_decision` |
+| An assigner is judged by the exclusions alone, never the approval's role, risk or sight | `test_an_assigner_needs_only_to_be_someone_else_not_to_approve_it` (not mutation-checked: see "Decided while building 17b", point 6) |
+| What can't be claimed can't be assigned, refused in the claim's words: an entry closed or unknown, a wait for an event, a plan's run, a change request | `test_what_cant_be_claimed_cant_be_assigned` |
+| An approval needing several people can't be assigned | `test_an_approval_needing_several_people_cant_be_assigned` |
+| Both identifiers are written one way, the assignee's as the assigner's | `test_both_identifiers_are_written_one_way` |
+| An assigned holder is a holder like any other, with the roles the API stated for them: kept when their approval is asked again | `test_an_assigned_holder_is_kept_when_their_approval_is_asked_again` (*mutation-checked*) |
+| On Temporal, `assign` and `unassign` are signals; a refused one is recorded and the case waits on; an assigned holder crosses continue-as-new | `test_temporal_claims.py::test_assigning_on_temporal_is_signalled_recorded_and_carried` |
+| No refusal or history line quotes a value | every refusal and line the tests above check is asserted whole, and each names people, roles and entries only |
+| No new engine version: every history recorded before replays as it did | the replay tests of earlier layers, unchanged, all passing |
