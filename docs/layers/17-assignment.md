@@ -193,9 +193,86 @@ C. **No new dependency.** *Recommended.*
     so it reads as stricter, a removed one as looser, and a changed one as a doubt, so looser (D55).
     The case map and the rules sheet read it aloud: "assigned to whoever answered the review".
 
-## Seams and tests (curriculum step 4)
+## Seams and tests for 17a (curriculum step 4)
 
-To agree after the choices are answered.
+The tests use only what a caller of the engine uses today: the events `decide` takes, the
+script `run_case` plays, what a run and a report say, and the Temporal signals. No test reads
+how the holder is stored.
+
+### The seams
+
+1. **Two events into `decide`** (`ventoux.case.state`, beside `Answered` and `Retried`):
+   `Claimed(entry, by, roles, at=…)` and `GivenBack(entry, by, roles, at=…)`. A refused one raises
+   **`ClaimRefused`** (`ventoux.case`), with the reason as its message, as `AnswerRefused` is
+   raised for an answer today.
+2. **Two script steps for `run_case`** (`ventoux.testing`, beside `retry` and `finish`):
+   `claim("review#1", "lee")` and `give_back("review#1", "lee")`. The test plays the API: the
+   person's roles come from `people`, as for an answer (D22).
+3. **`run.assignees`** on `CaseRun`, and **`CaseReport.assignees`** on Temporal: a `dict` from each
+   held entry to its holder, in the order the entries opened (`{"review#1": "lee"}`). An entry in
+   its queue is absent.
+4. **The history lines,** asserted as text, as every layer does:
+   - `lee claimed review#1 as support`
+   - `lee gave back review#1`
+   - `pay.approval#2 kept for sam`
+   - `pay.approval#2 back in its queue: <the reason an answer would be refused>`
+   - on Temporal, a refusal: `refused lee's claim of review#1: <reason>`, and
+     `refused lee's give-back of review#1: <reason>`, as `asked()` names other requests.
+5. **Two Temporal signals** on the case workflow, `claim` and `give_back`, each taking the
+   existing `CaseRequest(what=entry, by=…, roles=[…])`, as `retry` does. A refusal is recorded and
+   the case waits on (`REFUSALS` gains `ClaimRefused`).
+
+### The refusals, word for word (proposed)
+
+| Situation | Message |
+|---|---|
+| no role the entry names | `omar may not claim review#1: it needs support, and omar is operations` (the wording `no_role` already gives an answer, with `claim` for `answer`) |
+| someone holds it | `lee holds review#1; ask someone who assigns to reassign it` |
+| the holder claims again | `lee already holds review#1` |
+| an approval excludes them | `ana may not claim pay.approval#1: ` + the exclusion an answer gets (`ana set approved_amount, which pay uses, so cannot approve it`) |
+| they can't see what the step reads | `lee may not claim pay.approval#1: ` + D30's refusal |
+| `count` above 1 | `pay.approval#1 needs 2 people, so nobody can hold it` |
+| an entry that isn't open, or isn't the case's (a plan's wait) | the refusal an answer to it gets today |
+| an identifier spelled otherwise | the refusal an answer gets today (D22) |
+| an answer from someone else | `lee holds review#1: ask lee to give it back, or someone who assigns to reassign it` |
+| a give-back by someone else | `ana doesn't hold review#1; lee does` (or `nobody holds review#1`) |
+
+### The tests, in the order I'd write them
+
+Each one is written failing first and watched failing for the right reason. Each responds to what
+the last one taught, so the list may change on the way.
+
+1. **(negative, curriculum)** A claim by someone without the task's role is refused, and nothing
+   changes: `run.assignees == {}`.
+2. A claim by someone with the role: `assignees == {"review#1": "lee"}`, the history line, and
+   `waiting_for` unchanged (the guide's first example, run as written).
+3. **(negative)** An answer by anyone but the holder is refused, even with the role; the holder's
+   answer is taken, and the assignment ends with the entry.
+4. **(negative)** A claim of an entry someone holds; a claim by the holder.
+5. **(negative)** A give-back by someone else; the holder's give-back returns it to the queue, and
+   then anyone with the role may claim or answer it.
+6. **(negative)** Claims of an approval: by someone it excludes (the person whose answer set a
+   value, the opener, the proposer); by someone who can't see what the step reads; by a role that
+   can't approve the risk; of an approval with `count: 2`.
+7. **(negative)** A claim of an entry not open (answered, withdrawn), of a plan step's wait, of an
+   entry that doesn't exist, and with an identifier spelled otherwise (`Lee`).
+8. Asked again (D25): the holder is kept on the new entry; and the guide's Sam example, where the
+   new values exclude him, sends it back to the queue with the reason.
+9. A new run of a repeatable task starts in its queue.
+10. A stop by a rule and a close end the assignment; the holder's later answer is refused as for
+    any closed entry.
+11. A holder who lost the role: their answer is refused for the role, and they still hold the
+    entry.
+12. **On Temporal:** the `claim` and `give_back` signals; `CaseReport.assignees`; a refused claim
+    recorded and the case waiting on; holders crossing continue-as-new.
+13. A migration (D53) keeps the holder of an entry it carries.
+14. **Replay:** every recorded history in `tests/histories` still replays (the existing replay
+    tests, unchanged), which is what "no new engine version" claims.
+
+**The routes, each handled or refused, with its test:** an answer (3, 10), an edit (8, since an
+edit withdraws an approval it changes), a migration (13), an event (an event sets no holder; it may
+withdraw an approval, 8), a rule (8 through a `set`, 10 through a stop), the opening (2: nothing
+held at the start), a plan (7), continue-as-new (12).
 
 ## Decided while building
 
