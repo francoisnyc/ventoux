@@ -120,6 +120,16 @@ def held_by_another(state: CaseState, entry: str, by: str) -> str | None:
     )
 
 
+def assignees(state: CaseState) -> dict[str, str]:
+    """Each held open entry and its holder, in the order the entries opened; an entry in its
+    queue is absent (brief, D69). Every holder is listed, so one left on an entry no longer open
+    would show."""
+    held = state.holders
+    opened = [entry for entry in state.waiting if entry in held]
+    left = [entry for entry in held if entry not in state.waiting]
+    return {entry: held[entry].by for entry in opened + left}
+
+
 def let_go_of_ended(state: CaseState) -> None:
     """End the assignment of every entry no longer open: answered, withdrawn, stopped or cancelled,
     an entry's holder goes with it. Done once, after every decision, so no route that ends an entry
