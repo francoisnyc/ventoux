@@ -40,7 +40,7 @@ from ventoux.case.approvals import (
     tally,
     waiting_line,
 )
-from ventoux.case.assigning import assign
+from ventoux.case.assigning import assign, unassign
 from ventoux.case.called import called
 from ventoux.case.claims import (
     ClaimRefused,
@@ -110,6 +110,7 @@ from ventoux.case.state import (
     StartWorkflow,
     StepRun,
     TimerDue,
+    Unassigned,
     UseRelease,
     WorkflowCancelled,
 )
@@ -220,6 +221,8 @@ def decide(
         give_back(state, entry_to_hold(case, state, event), event)
     elif isinstance(event, Assigned):
         assign(case, catalog, state, entry_to_hold(case, state, event), event)
+    elif isinstance(event, Unassigned):
+        unassign(state, catalog, entry_to_hold(case, state, event), event)
     elif isinstance(event, Shown):
         record_shown(case, catalog, state, event)
     elif isinstance(event, Sent):
@@ -603,7 +606,7 @@ def sent_never_answered(entry: str, waits: WaitStep) -> str:
 
 
 def entry_to_hold(
-    case: CaseDefinition, state: CaseState, event: Claimed | GivenBack | Assigned
+    case: CaseDefinition, state: CaseState, event: Claimed | GivenBack | Assigned | Unassigned
 ) -> StepRun | OpenApproval:
     """The open task run or approval a claim or a give-back names; or `ClaimRefused`, saying what
     an answer to it would be refused with. Fail closed: only a task or an approval is held

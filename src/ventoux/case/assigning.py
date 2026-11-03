@@ -9,7 +9,7 @@ holder (brief, D69). Assigning is a role the catalog registers, so no case names
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.claims import ClaimRefused, role_to_hold
 from ventoux.case.definition import CaseDefinition
-from ventoux.case.state import Assigned, CaseState, Holder, OpenApproval, StepRun
+from ventoux.case.state import Assigned, CaseState, Holder, OpenApproval, StepRun, Unassigned
 from ventoux.core.catalog import Catalog
 from ventoux.core.roles import role_that_counts
 
@@ -51,3 +51,18 @@ def refuse_unless_assigner(catalog: Catalog, entry: str, by: str, roles: frozens
             f"{by} may not assign {entry}: assigning is done by {allowed}, and {by} has {known}"
         )
     return role
+
+
+def unassign(
+    state: CaseState, catalog: Catalog, found: StepRun | OpenApproval, event: Unassigned
+) -> None:
+    """Return `found` to its queue, without its holder, as `event.by` asks; or `ClaimRefused`. So
+    an entry whose holder never acts can always be freed (brief, D70)."""
+    role = refuse_unless_assigner(catalog, found.entry, event.by, event.roles)
+    before = state.holders.get(found.entry)
+    if before is None:
+        raise ClaimRefused(f"nobody holds {found.entry}")
+    del state.holders[found.entry]
+    state.history.append(
+        f"{event.by} returned {found.entry} to its queue as {role}, from {before.by}"
+    )

@@ -495,6 +495,17 @@ class Assigned:
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
+@dataclass(frozen=True)
+class Unassigned:
+    """Someone whose role assigns returns a held entry to its queue, without its holder
+    (brief, D70)."""
+
+    entry: str  # the entry returned
+    by: str  # who returns it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with it (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
 type Event = (
     Opened
     | Answered
@@ -513,6 +524,7 @@ type Event = (
     | Claimed
     | GivenBack
     | Assigned
+    | Unassigned
 )
 
 

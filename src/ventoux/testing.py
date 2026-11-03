@@ -52,6 +52,7 @@ from ventoux.case.state import (
     Sent,
     Shown,
     StartPlan,
+    Unassigned,
 )
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
@@ -112,6 +113,7 @@ __all__ = [
     "send",
     "shown",
     "skip",
+    "unassign",
     "wrapped",
 ]
 
@@ -550,6 +552,11 @@ def run_case(
             roles = frozenset(people.get(item.by, ()))
             events.append(Assigned(item.entry, item.to, to_roles, item.by, roles, at=now))
             continue
+        if isinstance(item, Unassign):
+            events.append(
+                Unassigned(item.entry, item.by, frozenset(people.get(item.by, ())), at=now)
+            )
+            continue
         if isinstance(item, GiveBack):
             events.append(
                 GivenBack(item.entry, item.by, frozenset(people.get(item.by, ())), at=now)
@@ -727,6 +734,19 @@ def assign(entry: str, to: str, by: str) -> Assign:
     """A script's assignment, or reassignment, of an open entry: `assign("review#1", "sam",
     by="lee")`. The test plays the API, stating both people's roles from `people` (brief, D70)."""
     return Assign(entry, to, by)
+
+
+class Unassign(NamedTuple):
+    """A scripted return to the queue: `by`, whose role assigns, frees `entry` (brief, D70)."""
+
+    entry: str
+    by: str
+
+
+def unassign(entry: str, by: str) -> Unassign:
+    """A script's return of a held entry to its queue, without its holder: `unassign("review#1",
+    by="lee")` (brief, D70)."""
+    return Unassign(entry, by)
 
 
 class GiveBack(NamedTuple):

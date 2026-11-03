@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from test_case import REFUND
 
-from ventoux.testing import AnswerRefused, ClaimRefused, assign, claim, run_case
+from ventoux.testing import AnswerRefused, ClaimRefused, assign, claim, run_case, unassign
 
 ORDER = {"order_id": "ord-1", "amount": 250}
 REVIEWED_BY_ANA = ("review", "approve", "ana", {"approved_amount": 250})
@@ -77,13 +77,17 @@ def test_an_assigner_assigns_an_entry_nobody_holds_and_may_assign_it_to_themselv
         # Lee can't answer the review, so she can't be asked to, even by herself.
         (
             [assign("review#1", "lee", by="lee")],
-            "^lee may not assign review#1 to lee: review#1 is answered by support, and lee has "
-            "support-lead$",
+            (
+                "^lee may not assign review#1 to lee: review#1 is answered by support, and lee has "
+                "support-lead$"
+            ),
         ),
         (
             [assign("review#1", "omar", by="lee")],
-            "^lee may not assign review#1 to omar: review#1 is answered by support, and omar has "
-            "operations$",
+            (
+                "^lee may not assign review#1 to omar: review#1 is answered by support, and omar has "
+                "operations$"
+            ),
         ),
         # An assignment to the holder changes nothing.
         (
@@ -98,3 +102,34 @@ def test_an_assignment_is_refused_to_whoever_couldnt_answer_or_already_holds(
     # Being assigned grants nothing: the assignee is judged as their claim would be (brief, D70).
     with pytest.raises(ClaimRefused, match=message):
         run_case(REFUND, file=ORDER, answers=script, people=PEOPLE)
+
+
+@pytest.mark.parametrize(
+    ("script", "message"),
+    [
+        (
+            [claim("review#1", "ana"), unassign("review#1", by="omar")],
+            (
+                "^omar may not assign review#1: assigning is done by support-lead, and omar has "
+                "operations$"
+            ),
+        ),
+        ([unassign("review#1", by="lee")], "^nobody holds review#1$"),
+    ],
+)
+def test_an_unassign_is_refused_to_whoever_cant_assign_and_of_what_nobody_holds(
+    script: list[Any], message: str
+) -> None:
+    with pytest.raises(ClaimRefused, match=message):
+        run_case(REFUND, file=ORDER, answers=script, people=PEOPLE)
+
+
+def test_an_entry_whose_holder_never_acts_is_returned_to_its_queue() -> None:
+    # The tutor's case from 17a: Ana claims the review and never acts. Lee returns it to its
+    # queue without her, and Sam answers it (brief, D70).
+    script = [claim("review#1", "ana"), unassign("review#1", by="lee")]
+    run = run_case(REFUND, file=ORDER, answers=script, people=PEOPLE)
+    assert run.assignees == {}
+    assert run.history[-1] == "lee returned review#1 to its queue as support-lead, from ana"
+    answered = run_case(REFUND, file=ORDER, answers=[*script, REVIEWED_BY_SAM], people=PEOPLE)
+    assert answered.reached("review")
