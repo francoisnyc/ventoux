@@ -7,7 +7,15 @@ See docs/layers/17-assignment.md (17a).
 
 from ventoux.case.answers import AnswerRefused, judge_approval
 from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
-from ventoux.case.state import Answered, CaseState, Claimed, GivenBack, OpenApproval, StepRun
+from ventoux.case.state import (
+    Answered,
+    CaseState,
+    Claimed,
+    GivenBack,
+    Holder,
+    OpenApproval,
+    StepRun,
+)
 from ventoux.core.catalog import Catalog
 from ventoux.core.plan import APPROVE
 from ventoux.core.roles import no_role, role_that_counts
@@ -25,19 +33,22 @@ def claim(
     event: Claimed,
 ) -> None:
     """Make `event.by` the holder of `found`, the open entry they claim; or `ClaimRefused`."""
-    # One entry collecting several people's approvals can't be one person's (brief, D47, D69).
-    if isinstance(found, OpenApproval) and found.count > 1:
-        raise ClaimRefused(f"{found.entry} needs {found.count} people, so nobody can hold it")
     # One holder at a time: a claim never takes the work from someone (brief, D69).
     holder = state.holders.get(found.entry)
-    if holder == event.by:
+    if holder is not None and holder.by == event.by:
         raise ClaimRefused(f"{event.by} already holds {found.entry}")
     if holder is not None:
-        raise ClaimRefused(f"{holder} holds {found.entry}; ask someone who assigns to reassign it")
+        raise ClaimRefused(
+            f"{holder.by} holds {found.entry}; ask someone who assigns to reassign it"
+        )
+    claiming = Holder(event.by, event.roles, at=event.at)
     # Holding grants nothing: a claim is checked as an answer to the entry would be, so nobody is
     # asked what they couldn't answer (brief, D69).
-    role = role_to_hold(case, catalog, state, found, event)
-    state.holders[found.entry] = event.by
+    try:
+        role = role_to_hold(case, catalog, state, found, claiming)
+    except AnswerRefused as refused:
+        raise ClaimRefused(f"{event.by} may not claim {found.entry}: {refused}") from None
+    state.holders[found.entry] = claiming
     state.history.append(f"{event.by} claimed {found.entry} as {role}")
 
 
@@ -46,24 +57,43 @@ def role_to_hold(
     catalog: Catalog,
     state: CaseState,
     found: StepRun | OpenApproval,
-    event: Claimed,
+    holder: Holder,
 ) -> str:
-    """The role that would let `event.by` answer `found`, or `ClaimRefused` saying why not."""
+    """The role that would let `holder` answer `found`; or `AnswerRefused`, saying why their
+    answer would be refused, or `ClaimRefused` if nobody can hold it."""
+    # One entry collecting several people's approvals can't be one person's (brief, D47) (brief, D69).
+    if isinstance(found, OpenApproval) and found.count > 1:
+        raise ClaimRefused(f"{found.entry} needs {found.count} people, so nobody can hold it")
     step = case.steps[found.step]
     if isinstance(found, OpenApproval):
         assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
         # Judged as their approval would be, by the same checks, so the two can't drift apart.
-        approving = Answered(found.entry, APPROVE, event.by, event.roles, at=event.at)
-        try:
-            return judge_approval(case, catalog, state, found.entry, found.step, step, approving)
-        except AnswerRefused as refused:
-            raise ClaimRefused(f"{event.by} may not claim {found.entry}: {refused}") from None
+        approving = Answered(found.entry, APPROVE, holder.by, holder.roles, at=holder.at)
+        return judge_approval(case, catalog, state, found.entry, found.step, step, approving)
     assert isinstance(step, TaskStep)  # only a task's run is answered by a person
-    role = role_that_counts(step.roles, event.roles, catalog.roles)
+    role = role_that_counts(step.roles, holder.roles, catalog.roles)
     if role is None:
-        why = no_role(found.entry, step.roles, event.by, event.roles, catalog.roles)
-        raise ClaimRefused(f"{event.by} may not claim {found.entry}: {why}")
+        raise AnswerRefused(
+            no_role(found.entry, step.roles, holder.by, holder.roles, catalog.roles)
+        )
     return role
+
+
+def keep_holder(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, approval: OpenApproval
+) -> None:
+    """Give the approval just asked to whoever held the one withdrawn before it, if they could
+    still answer it; otherwise leave it in its queue, saying why (brief, D25) (brief, D69)."""
+    holder = state.kept.pop(approval.step, None)
+    if holder is None:
+        return
+    try:
+        role_to_hold(case, catalog, state, approval, holder)
+    except (AnswerRefused, ClaimRefused) as refused:
+        state.history.append(f"{approval.entry} back in its queue: {refused}")
+        return
+    state.holders[approval.entry] = holder
+    state.history.append(f"{approval.entry} kept for {holder.by}")
 
 
 def give_back(state: CaseState, found: StepRun | OpenApproval, event: GivenBack) -> None:
@@ -73,8 +103,8 @@ def give_back(state: CaseState, found: StepRun | OpenApproval, event: GivenBack)
     holder = state.holders.get(found.entry)
     if holder is None:
         raise ClaimRefused(f"nobody holds {found.entry}")
-    if holder != event.by:
-        raise ClaimRefused(f"{event.by} doesn't hold {found.entry}; {holder} does")
+    if holder.by != event.by:
+        raise ClaimRefused(f"{event.by} doesn't hold {found.entry}; {holder.by} does")
     del state.holders[found.entry]
     state.history.append(f"{event.by} gave back {found.entry}")
 
@@ -82,13 +112,17 @@ def give_back(state: CaseState, found: StepRun | OpenApproval, event: GivenBack)
 def held_by_another(state: CaseState, entry: str, by: str) -> str | None:
     """Why `by` may not answer `entry`, held by someone else; None if nobody else holds it."""
     holder = state.holders.get(entry)
-    if holder is None or holder == by:
+    if holder is None or holder.by == by:
         return None
-    return f"{holder} holds {entry}: ask {holder} to give it back, or someone who assigns to reassign it"
+    return (
+        f"{holder.by} holds {entry}: ask {holder.by} to give it back, or someone who assigns to "
+        "reassign it"
+    )
 
 
 def let_go_of_ended(state: CaseState) -> None:
     """End the assignment of every entry no longer open: answered, withdrawn, stopped or cancelled,
     an entry's holder goes with it. Done once, after every decision, so no route that ends an entry
-    can leave its holder behind (brief, D69)."""
-    state.holders = {entry: by for entry, by in state.holders.items() if entry in state.waiting}
+    can leave its holder behind (brief, D69). A withdrawn approval's holder was kept for the step's
+    next entry when it was withdrawn."""
+    state.holders = {entry: held for entry, held in state.holders.items() if entry in state.waiting}

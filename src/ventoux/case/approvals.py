@@ -145,6 +145,10 @@ def withdraw(state: CaseState, approval: OpenApproval, reason: str) -> None:
     del state.approvals[approval.step]
     del state.waiting[approval.entry]
     state.withdrawn[approval.entry] = reason
+    # Its holder is kept for the step's next entry, which keeps them if they may answer it
+    # (brief, D69).
+    if (holder := state.holders.pop(approval.entry, None)) is not None:
+        state.kept[approval.step] = holder
     state.history.append(f"withdrew {approval.entry}: {reason}{with_given(approval)}")
 
 

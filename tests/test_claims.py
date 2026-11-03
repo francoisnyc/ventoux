@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 from test_approvals import FOUR_EYES
-from test_case import REFUND, guide_seen_by_support
+from test_case import REFUND, guide_refund_with_rework, guide_seen_by_support
 from test_events import waiting_for_a_receipt
 from test_plan_step import refund_order, refund_with_plan
 
@@ -24,6 +24,7 @@ from ventoux.testing import (
     claim,
     edit,
     give_back,
+    propose,
     run_case,
 )
 
@@ -53,7 +54,7 @@ def test_a_claim_without_the_tasks_role_is_refused() -> None:
 
 def test_a_claim_makes_its_person_the_holder() -> None:
     # The guide's first example, as written: Ana holds the review, and the case still waits for
-    # the same thing, naming nobody (brief, D24, D69).
+    # the same thing, naming nobody (brief, D24) (brief, D69).
     run = run_case(REFUND, file=ORDER, answers=[claim("review#1", "ana")], people=PEOPLE)
     assert run.waiting_for == ["review by support"]
     assert run.assignees == {"review#1": "ana"}
@@ -153,7 +154,7 @@ REVIEWED_BY_SAM = ("review", "approve", "sam", {"approved_amount": 250})
 
 def test_a_claim_of_an_approval_is_refused_to_whom_it_excludes() -> None:
     # The guide's example: Sam set approved_amount, which pay sends, so he can never approve the
-    # payment; being asked to would grant him nothing (brief, D11, D69).
+    # payment; being asked to would grant him nothing (brief, D11) (brief, D69).
     with pytest.raises(
         ClaimRefused,
         match="^sam may not claim pay.approval#1: sam set approved_amount, which pay uses, so "
@@ -171,7 +172,7 @@ def test_a_claim_of_an_approval_is_refused_to_whom_it_excludes() -> None:
     ("definition", "who", "opened_by"),
     [
         (REFUND, "sam", None),  # whose answer set what pay sends (brief, D11)
-        (REFUND, "lee", "lee"),  # who opened the case (brief, D11, D25)
+        (REFUND, "lee", "lee"),  # who opened the case (brief, D11) (brief, D25)
         (guide_seen_by_support(), "lee", None),  # who can't see what pay reads (brief, D30)
     ],
 )
@@ -266,3 +267,53 @@ def test_a_change_request_isnt_held() -> None:
             ],
             people=PEOPLE,
         )
+
+
+def test_an_approval_asked_again_keeps_its_holder() -> None:
+    # The review is sent back and reworked while Lee holds pay's approval: the old entry is
+    # withdrawn (brief, D25), and the new one is Lee's again, since she may still approve it.
+    run = run_case(
+        guide_refund_with_rework(),
+        file=ORDER,
+        answers=[
+            REVIEWED_BY_ANA,
+            claim("pay.approval#1", "lee"),
+            propose("review", "ana"),
+            ("review", "approve", "ana", {"approved_amount": 300}),
+        ],
+        people=PEOPLE,
+    )
+    assert run.waiting_for == ["approval of pay by support-lead"]
+    assert run.assignees == {"pay.approval#2": "lee"}
+    assert run.history[-2:] == [
+        "asked pay.approval#2: approval of pay by support-lead",
+        "pay.approval#2 kept for lee",
+    ]
+
+
+def test_an_approval_asked_again_goes_to_its_queue_if_its_holder_cant_approve_it() -> None:
+    # The guide's example: Sam holds pay's approval, and this time answers the reworked review
+    # himself, so the new values are his and he can't approve them (brief, D11) (brief, D25) (brief, D69).
+    run = run_case(
+        guide_refund_with_rework(),
+        file=ORDER,
+        answers=[
+            REVIEWED_BY_ANA,
+            claim("pay.approval#1", "sam"),
+            propose("review", "ana"),
+            ("review", "approve", "sam", {"approved_amount": 250}),
+        ],
+        people=PEOPLE,
+    )
+    assert run.assignees == {}
+    tail = [
+        "withdrew pay.approval#1: review started again",
+        "sam answered review#2 approve as support, setting approved_amount",
+        "review#2 done",
+        "asked pay.approval#2: approval of pay by support-lead",
+        (
+            "pay.approval#2 back in its queue: sam set approved_amount, which pay uses, so "
+            "cannot approve it"
+        ),
+    ]
+    assert [line for line in run.history if line in tail] == tail

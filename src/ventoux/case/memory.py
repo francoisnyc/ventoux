@@ -81,7 +81,7 @@ class CaseRun:
         opened = [entry for entry in self.state.waiting if entry in held]
         # Every holder is listed, so one left on an entry no longer open would show.
         left = [entry for entry in held if entry not in self.state.waiting]
-        return {entry: held[entry] for entry in opened + left}
+        return {entry: held[entry].by for entry in opened + left}
 
     @property
     def closed(self) -> bool:

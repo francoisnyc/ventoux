@@ -35,6 +35,15 @@ class GivenApproval:
         return (self.by, *self.also)
 
 
+@dataclass(frozen=True)
+class Holder:
+    """Who holds an open entry, as they claimed it: the one asked to answer it (brief, D69)."""
+
+    by: str  # the person
+    roles: frozenset[str]  # their roles, as stated with the claim (brief, D22)
+    at: int = field(kw_only=True)  # when they claimed it, in seconds since the epoch
+
+
 @dataclass
 class StepRun:
     """One run of a step: `review#1`, open while a task waits, running while an activity runs."""
@@ -233,7 +242,10 @@ class CaseState:
     waiting: dict[str, str] = field(default_factory=dict[str, str])
     # Who holds each held open entry, by entry: the one asked to answer it; an entry absent is
     # in its roles' queue (brief, D69).
-    holders: dict[str, str] = field(default_factory=dict[str, str])
+    holders: dict[str, Holder] = field(default_factory=dict[str, Holder])
+    # Who held each step's approval when it was withdrawn, until its next entry is asked, which
+    # keeps them if they could still answer it (brief, D25) (brief, D69).
+    kept: dict[str, Holder] = field(default_factory=dict[str, Holder])
     opened_by: str | None = None  # the person who opened the case, if a person did
     # open; closing: nothing new starts, running activities finish; closed (brief, D10).
     phase: Literal["open", "closing", "closed"] = "open"

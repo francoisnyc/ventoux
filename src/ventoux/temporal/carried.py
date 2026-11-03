@@ -16,6 +16,7 @@ from ventoux.case.state import (
     CaseState,
     ChangeRequest,
     GivenApproval,
+    Holder,
     Migration,
     Moment,
     Obtained,
@@ -72,7 +73,10 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "given": {step: given_as_data(given) for step, given in state.given.items()},
         "asked": dict(state.asked),
         "withdrawn": dict(state.withdrawn),
-        "holders": dict(state.holders),  # who holds each held open entry (brief, D69)
+        # Who holds each held open entry, and each withdrawn approval's holder kept for its
+        # step's next entry (brief, D69).
+        "holders": {entry: holder_as_data(held) for entry, held in state.holders.items()},
+        "kept": {step: holder_as_data(held) for step, held in state.kept.items()},
         "proposers": dict(state.proposers),
         "waiting_to_start": list(state.waiting_to_start),
         "proposed_by_rules": {
@@ -172,6 +176,15 @@ def steering_from_data(data: dict[str, Any]) -> Steering:
     return Steering(data["said"], frozenset(data["sources"]))
 
 
+def holder_as_data(holder: Holder) -> dict[str, Any]:
+    # Roles in a set have no order: sorted, so the same state is always the same data.
+    return {"by": holder.by, "roles": sorted(holder.roles), "at": holder.at}
+
+
+def holder_from_data(data: dict[str, Any]) -> Holder:
+    return Holder(data["by"], frozenset(data["roles"]), at=whole(data["at"]))
+
+
 def given_as_data(given: GivenApproval) -> dict[str, Any]:
     return {
         "entry": given.entry,
@@ -241,7 +254,9 @@ def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Cas
         given={step: given_from_data(given) for step, given in data["given"].items()},
         asked=dict(data["asked"]),
         withdrawn=dict(data["withdrawn"]),
-        holders=dict(data.get("holders", {})),  # none in a state from before layer 17a
+        # None in a state from before layer 17a.
+        holders={entry: holder_from_data(held) for entry, held in data.get("holders", {}).items()},
+        kept={step: holder_from_data(held) for step, held in data.get("kept", {}).items()},
         proposers=dict(data["proposers"]),
         # None in a state from before layer 11b: no proposal waited for a fact.
         waiting_to_start=list(data.get("waiting_to_start", [])),

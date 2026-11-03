@@ -46,6 +46,7 @@ from ventoux.case.claims import (
     claim,
     give_back,
     held_by_another,
+    keep_holder,
     let_go_of_ended,
 )
 from ventoux.case.closing import (
@@ -1748,6 +1749,7 @@ def start(
         anyway = asked_anyway(case, catalog, state, step)
         if needed or anyway is not None:
             ask(state, name, step, anyway)
+            keep_holder(case, catalog, state, state.approvals[name])
             return
     if given is not None:
         lapsed(state, name, step, given)
