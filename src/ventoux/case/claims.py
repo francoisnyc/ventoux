@@ -5,9 +5,11 @@ asked. Holding grants nothing, and while someone holds an entry only they answer
 See docs/layers/17-assignment.md (17a).
 """
 
-from ventoux.case.definition import CaseDefinition, TaskStep
-from ventoux.case.state import CaseState, Claimed, GivenBack, OpenApproval, StepRun
+from ventoux.case.answers import AnswerRefused, judge_approval
+from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
+from ventoux.case.state import Answered, CaseState, Claimed, GivenBack, OpenApproval, StepRun
 from ventoux.core.catalog import Catalog
+from ventoux.core.plan import APPROVE
 from ventoux.core.roles import no_role, role_that_counts
 
 
@@ -23,6 +25,9 @@ def claim(
     event: Claimed,
 ) -> None:
     """Make `event.by` the holder of `found`, the open entry they claim; or `ClaimRefused`."""
+    # One entry collecting several people's approvals can't be one person's (brief, D47, D69).
+    if isinstance(found, OpenApproval) and found.count > 1:
+        raise ClaimRefused(f"{found.entry} needs {found.count} people, so nobody can hold it")
     # One holder at a time: a claim never takes the work from someone (brief, D69).
     holder = state.holders.get(found.entry)
     if holder == event.by:
@@ -31,15 +36,34 @@ def claim(
         raise ClaimRefused(f"{holder} holds {found.entry}; ask someone who assigns to reassign it")
     # Holding grants nothing: a claim is checked as an answer to the entry would be, so nobody is
     # asked what they couldn't answer (brief, D69).
-    assert isinstance(found, StepRun)
+    role = role_to_hold(case, catalog, state, found, event)
+    state.holders[found.entry] = event.by
+    state.history.append(f"{event.by} claimed {found.entry} as {role}")
+
+
+def role_to_hold(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    found: StepRun | OpenApproval,
+    event: Claimed,
+) -> str:
+    """The role that would let `event.by` answer `found`, or `ClaimRefused` saying why not."""
     step = case.steps[found.step]
-    assert isinstance(step, TaskStep)
+    if isinstance(found, OpenApproval):
+        assert isinstance(step, CallStep)  # only an activity or a workflow is asked for one
+        # Judged as their approval would be, by the same checks, so the two can't drift apart.
+        approving = Answered(found.entry, APPROVE, event.by, event.roles, at=event.at)
+        try:
+            return judge_approval(case, catalog, state, found.entry, found.step, step, approving)
+        except AnswerRefused as refused:
+            raise ClaimRefused(f"{event.by} may not claim {found.entry}: {refused}") from None
+    assert isinstance(step, TaskStep)  # only a task's run is answered by a person
     role = role_that_counts(step.roles, event.roles, catalog.roles)
     if role is None:
         why = no_role(found.entry, step.roles, event.by, event.roles, catalog.roles)
         raise ClaimRefused(f"{event.by} may not claim {found.entry}: {why}")
-    state.holders[found.entry] = event.by
-    state.history.append(f"{event.by} claimed {found.entry} as {role}")
+    return role
 
 
 def give_back(state: CaseState, found: StepRun | OpenApproval, event: GivenBack) -> None:

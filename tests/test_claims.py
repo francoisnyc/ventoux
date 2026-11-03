@@ -8,9 +8,13 @@ assigning tasks".
 from typing import Any
 
 import pytest
-from test_case import REFUND
+from test_approvals import FOUR_EYES
+from test_case import REFUND, guide_seen_by_support
 
-from ventoux.testing import AnswerRefused, ClaimRefused, claim, give_back, run_case
+from ventoux.case.definition import parse_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import Answered, Claimed
+from ventoux.testing import CATALOG, START, AnswerRefused, ClaimRefused, claim, give_back, run_case
 
 ORDER = {"order_id": "ord-1", "amount": 250}
 
@@ -129,3 +133,78 @@ def test_an_entry_given_back_is_in_its_queue_again() -> None:
         people=PEOPLE,
     )
     assert again.reached("review")
+
+
+# What makes `pay`'s approval open: Sam, who leads the team and reviews too, reviewed the refund.
+REVIEWED_BY_SAM = ("review", "approve", "sam", {"approved_amount": 250})
+
+
+def test_a_claim_of_an_approval_is_refused_to_whom_it_excludes() -> None:
+    # The guide's example: Sam set approved_amount, which pay sends, so he can never approve the
+    # payment; being asked to would grant him nothing (brief, D11, D69).
+    with pytest.raises(
+        ClaimRefused,
+        match="^sam may not claim pay.approval#1: sam set approved_amount, which pay uses, so "
+        "cannot approve it$",
+    ):
+        run_case(
+            REFUND,
+            file=ORDER,
+            answers=[REVIEWED_BY_SAM, claim("pay.approval#1", "sam")],
+            people=PEOPLE,
+        )
+
+
+@pytest.mark.parametrize(
+    ("definition", "who", "opened_by"),
+    [
+        (REFUND, "sam", None),  # whose answer set what pay sends (brief, D11)
+        (REFUND, "lee", "lee"),  # who opened the case (brief, D11, D25)
+        (guide_seen_by_support(), "lee", None),  # who can't see what pay reads (brief, D30)
+    ],
+)
+def test_a_claim_of_an_approval_is_refused_as_its_answer_would_be(
+    definition: dict[str, Any], who: str, opened_by: str | None
+) -> None:
+    # A claim is judged as that person's approval would be, by the same checks, so a claim can
+    # never be taken where the answer would be refused (brief, D69).
+    case = parse_case(definition)
+    run = run_case(
+        definition, file=ORDER, answers=[REVIEWED_BY_SAM], people=PEOPLE, opened_by=opened_by
+    )
+    roles = frozenset(PEOPLE[who])
+    with pytest.raises(AnswerRefused) as answering:
+        decide(
+            case, CATALOG, run.state, Answered("pay.approval#1", "approve", who, roles, at=START)
+        )
+    with pytest.raises(ClaimRefused) as claiming:
+        decide(case, CATALOG, run.state, Claimed("pay.approval#1", who, roles, at=START))
+    assert str(claiming.value) == f"{who} may not claim pay.approval#1: {answering.value}"
+
+
+def test_an_approval_needing_several_people_cant_be_held() -> None:
+    # One entry collects several people's approvals (brief, D47), so no one person can hold it.
+    with pytest.raises(
+        ClaimRefused, match="^pay.approval#1 needs 2 people, so nobody can hold it$"
+    ):
+        run_case(
+            FOUR_EYES,
+            file={"order_id": "ord-1", "amount": 12000},
+            answers=[
+                ("review", "approve", "ana", {"approved_amount": 12000}),
+                claim("pay.approval#1", "lee"),
+            ],
+            people=PEOPLE,
+        )
+
+
+def test_a_claim_of_an_approval_by_who_may_approve_it_is_taken() -> None:
+    # Lee leads the team and had no hand in the amount: she may approve it, so she may hold it.
+    run = run_case(
+        REFUND,
+        file=ORDER,
+        answers=[REVIEWED_BY_SAM, claim("pay.approval#1", "lee")],
+        people=PEOPLE,
+    )
+    assert run.assignees == {"pay.approval#1": "lee"}
+    assert run.history[-1] == "lee claimed pay.approval#1 as support-lead"
