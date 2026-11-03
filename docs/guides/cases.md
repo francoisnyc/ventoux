@@ -345,6 +345,124 @@ A step waiting for an event from outside is listed the same way, with who sends 
 A timer that is set keeps the case open too, but waits on nobody: it is listed in `timers`, not
 `waiting_for` ("Rules on time", below).
 
+## Who is asked: claiming and assigning tasks
+
+A task's `roles` say who **may** answer it. Its **assignee** says who is **asked** to. These are
+two separate things. The roles are a check, made on every answer. The assignee only decides
+whose list the task is on. An open task, or an open approval, that nobody holds is in its roles'
+**queue**: everyone with one of its roles sees it. Once someone holds it, it is on that person's
+list and nobody else's.
+
+**An assignment never lets anyone answer what they couldn't answer before.** Being asked grants
+nothing. Every check an answer passes, it still passes (D9, D11, D30, D47). So a claim or an
+assignment is refused at once when the engine can already tell the person couldn't answer the
+entry:
+
+```
+ana may not claim pay.approval#1: ana set approved_amount, which pay uses, so cannot approve it
+```
+
+### Claiming, giving back, assigning
+
+There are three acts. Each is a message from the Ventoux API, carrying the person and their
+roles, like an answer (D22). Each is a line in the case's history:
+
+```python
+run = run_case(
+    refund,
+    file={"order_id": "ord-1", "amount": 250},
+    answers=[claim("review#1", "lee")],
+    people=PEOPLE,
+)
+assert run.waiting_for == ["review by support"]
+assert run.assignees == {"review#1": "lee"}
+```
+
+```
+started review#1: waiting for approve or reject by support
+lee claimed review#1 as support
+```
+
+- **Claim:** a person with one of the entry's roles takes an entry nobody holds. A claim by
+  someone without the role is refused: `omar may not claim review#1: it needs support, and omar
+  is operations`. So is a claim of an entry someone already holds: `lee holds review#1; ask
+  someone who assigns to reassign it`.
+- **Give back:** the holder returns the entry to its queue: `give_back("review#1", "lee")`.
+  Only the holder may give an entry back.
+- **Assign and reassign:** a person whose role the platform team registered to assign
+  (`register_role("support-lead", approves="high", assigns=True)`) gives an entry to someone,
+  whether or not anyone holds it: `assign("review#1", "ana", by="sam")`, recorded as
+  `sam assigned review#1 to ana as support-lead`. Anyone else is refused: `lee may not assign
+  review#1: support doesn't assign; ask a support-lead`. Assigning an entry to the person who
+  holds it already is refused, since it would change nothing.
+
+**A held entry is answered by its holder.** While Lee holds `review#1`, an answer from Ana is
+refused, even though she has `support`: `lee holds review#1: ask lee to give it back, or someone
+who assigns to reassign it`. This is how an assignment narrows who may answer. It can only
+narrow, never widen.
+
+**The engine never looks a person up** (D22). It learns someone's roles only when they act. If
+Lee loses `support` while he holds the review, the engine doesn't know. His answer is then
+refused for lack of the role, the entry stays his, and the case says so. A support-lead
+reassigns it.
+
+### When an entry is asked again
+
+An open approval is withdrawn when a value its step reads changes, and asked again as a new
+entry (D25). The new entry keeps the old one's holder, saying so, as long as the holder could
+still answer it. If the new values exclude them (they set one of them, for example), the new
+entry goes back to its queue, saying why. Say Sam holds `pay.approval#1`, the review is sent
+back, and this time Sam, who has `support` too, answers it:
+
+```
+withdrew pay.approval#1: review started again
+sam answered review#2 approve as support, setting approved_amount
+review#2 done
+asked pay.approval#2: approval of pay by support-lead
+pay.approval#2 back in its queue: sam set approved_amount, which pay uses, so cannot approve it
+```
+
+Answering a task again, a stop or a close ends the entry, and with it the assignment. A closed
+case's tasks are cancelled, and their holders see why (D10).
+
+### Assignment rules
+
+A task can name who is asked when each of its entries opens, with `assign`:
+
+```json
+"follow_up": {
+  "task": {"roles": ["support"], "outcomes": {"done": {}}},
+  "assign": {"to": "answered", "step": "review"},
+  "display": {"title": "Follow up with the customer"}
+}
+```
+
+Read aloud: *each follow-up is assigned to whoever answered the review.* An assignment rule picks
+a person the case already knows. `{"to": "opener"}` picks the person who opened the case.
+`{"to": "answered", "step": …}` picks the person who last answered that task. Nobody's
+identifier is ever typed into a definition, and no field's value picks the person. If the rule
+finds nobody (a system opened the case, say), the entry is in its queue, saying why. If the
+person it picks couldn't answer the entry, the entry is in its queue too, with the reason.
+
+`ventoux check` refuses a rule that can only pick people who can't answer:
+
+```
+ASSIGNS_EXCLUDED  pay's approval is assigned to whoever answered review, whose answer sets
+                  approved_amount, which pay uses, so they can never approve it; assign it to
+                  nobody, so it goes to its queue
+```
+
+The case map reads the rule ("assigned to whoever answered the review"), and the semantic diff
+shows an added, changed or removed `assign`. An assignment never changes what may happen, so the
+diff gives it no verdict.
+
+### What the report shows
+
+`assignees` maps each open entry someone holds to its holder. An entry in its queue is absent.
+`waiting_for` doesn't change: it says *what* the case waits for (`review by support`), the same
+to everyone, naming nobody (D24). The history tells every claim, give-back, assignment and
+reassignment in order, naming people, roles and entries, never a value.
+
 ## When a system says no
 
 A business failure is an answer, not an error (brief, D17). `payments.refund@2` declares the
