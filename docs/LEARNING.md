@@ -51,6 +51,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 44 | Layer 16: why compare two dates but never ask what day it is | closed |
 | 45 | Layer 16b: why an option is checked once, through an activity, when given | closed |
 | 46 | Layer 16c: why the case keeps the ID, never the file, and what checking it guards | closed |
+| 47 | Layer 17a: is an assignment a permission? | open |
 
 ---
 
@@ -1895,3 +1896,15 @@ and record the key points. A question is closed once you can explain the answer 
   Ana gave it.
 - Status: closed (both halves from memory, the second after one prompt).
 
+## 47. Layer 17a: is an assignment a permission?
+
+> Is an assignment a permission? What changes for the person assigned, and what doesn't?
+
+- Asked at the end of layer 17a's walk-through (2026-11-03).
+- Your answer: "No, it narrows who may answer; nothing else changes." Right on the core: holding
+  grants nothing, and while someone holds an entry only they answer it, so an assignment can only
+  make the set of people who may answer smaller (D69). "Nothing else changes" is too strong:
+  holding changes who is asked, so a follow-up was asked.
+- Follow-up, asked: Ana holds `review#1`; one thing that changes for her, one for Sam (who also
+  has `support`), and one that doesn't change for Ana.
+- Status: open, until the follow-up is answered.
