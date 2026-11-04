@@ -8,7 +8,7 @@ clock, randomness or I/O, so replay rebuilds the same case. See docs/layers/08-c
 
 import asyncio
 import json
-from collections.abc import Coroutine, Mapping
+from collections.abc import Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -158,6 +158,9 @@ class CaseStart:
     # The environment whose registry it asked as it opened, and asks as it moves and closes,
     # crossing every continue-as-new; None: none, as every case opened before 12e (brief, D5).
     environment: str | None = None
+    # The opener's roles, as the API states them, so a rule asking the opener judges them; none
+    # for a system, or a start from before 17c (brief, D71).
+    opener_roles: list[str] = field(default_factory=list[str])
 
 
 @dataclass
@@ -618,7 +621,12 @@ class CaseWorkflow:
             if start.carried is None:
                 await self.ask_to_open()
                 opened = Opened(
-                    start.file, start.opened_by, at=now(), engine=engine(), release=named
+                    start.file,
+                    start.opened_by,
+                    at=now(),
+                    engine=engine(),
+                    release=named,
+                    roles=frozenset(start.opener_roles),
                 )
                 self.decide(case, opened)
             else:
@@ -1107,11 +1115,13 @@ async def start_case(
     id: str,
     task_queue: str,
     opened_by: str | None = None,
+    opener_roles: Sequence[str] = (),
 ) -> WorkflowHandle[CaseWorkflow, CaseReport]:
     """Open a case with `file`, as a run of `workflow`, on a release's record, or on a definition,
     which makes it a draft (brief, D51). `id` is the case (`refund-A-1001`): a second case with the
     same ID is refused (brief, D27). The case's key is made first, and never again: if starting
-    then fails, the ID is spent (brief, D31)."""
+    then fails, the ID is spent (brief, D31). `opener_roles` are the opener's roles, as the API
+    states them, so an assignment rule asking the opener can judge them (brief, D71)."""
     keys = keys_of(client)
     # The codec finds a key from the part of a workflow ID before its first `/` (brief, D31).
     if "/" in id:
@@ -1119,7 +1129,7 @@ async def start_case(
     keys.create(id)
     await client.start_workflow(
         workflow.run,
-        opening(opening_on, file, opened_by),
+        opening(opening_on, file, opened_by, opener_roles),
         id=id,
         task_queue=task_queue,
         id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
@@ -1128,7 +1138,10 @@ async def start_case(
 
 
 def opening(
-    opening_on: Record | dict[str, Any], file: Mapping[str, Any], opened_by: str | None = None
+    opening_on: Record | dict[str, Any],
+    file: Mapping[str, Any],
+    opened_by: str | None = None,
+    opener_roles: Sequence[str] = (),
 ) -> CaseStart:
     """What a case opens with: a release's case and plans, read from its record as the engine
     reads a definition, numbers as exact decimals (brief, D20); or a definition, for a draft."""
@@ -1151,7 +1164,9 @@ def opening(
     sealed = {
         name: Sensitive(value) if name in sensitive else value for name, value in file.items()
     }
-    return CaseStart(definition, sealed, opened_by, None, release)
+    start = CaseStart(definition, sealed, opened_by, None, release)
+    start.opener_roles = sorted(opener_roles)
+    return start
 
 
 def wording_of(kept: Record) -> Wording:

@@ -9,11 +9,11 @@ from typing import Any
 
 import pytest
 from test_approvals import FOUR_EYES
-from test_case import REFUND
+from test_case import PEOPLE, REFUND, guide_json
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG
+from ventoux.testing import CATALOG, run_case
 
 
 def with_pay_assigned(rule: dict[str, Any]) -> dict[str, Any]:
@@ -74,8 +74,10 @@ def with_review_assigned(rule: dict[str, Any]) -> dict[str, Any]:
         ),
         (
             {"to": "answered", "step": "pay"},
-            "^steps.review.assign.step: pay is an activity step; only a task is answered by a "
-            "person$",
+            (
+                "^steps.review.assign.step: pay is an activity step; only a task is answered by "
+                "a person$"
+            ),
         ),
         ({"to": "answered", "step": "review", "who": "lee"}, "^steps.review.assign.who: "),
     ],
@@ -98,7 +100,31 @@ def test_an_approval_needing_several_people_has_no_rule() -> None:
         (
             "ASSIGNS_SEVERAL",
             "error",
-            "pay's approval needs 2 people, so nobody holds it and a rule can't ask one; remove "
-            "the rule, or its count",
+            (
+                "pay's approval needs 2 people, so nobody holds it and a rule can't ask one; "
+                "remove the rule, or its count"
+            ),
         )
     ]
+
+
+def guide_follow_up() -> dict[str, Any]:
+    """The quickstart's refund with the guide's follow-up: its last JSON block, "Assignment
+    rules", so the guide can't drift from what runs."""
+    definition = copy.deepcopy(REFUND)
+    definition["steps"].update(guide_json(-1))
+    return definition
+
+
+def test_the_guides_follow_up_is_asked_of_whoever_answered_the_review() -> None:
+    # Ana answers the review; the follow-up opens and its rule asks her, judged as her claim
+    # would be, with the roles she answered with (brief, D69) (brief, D71).
+    run = run_case(
+        guide_follow_up(),
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[("review", "approve", "ana", {"approved_amount": 40})],
+        people=PEOPLE,
+    )
+    assert run.assignees == {"follow_up#1": "ana"}
+    at = run.history.index("started follow_up#1: waiting for done by support")
+    assert run.history[at + 1] == "follow_up#1 assigned to ana by its rule"

@@ -8,7 +8,7 @@ See docs/layers/14-builder.md.
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from ventoux.tooling.builder.expressions import (
     BoolExpr,
@@ -137,6 +137,25 @@ class Outcome:
 
 
 @dataclass(frozen=True)
+class Assign:
+    """Who is asked when each entry opens: the person who opened the case, or whoever gave a
+    task's latest answer. Written `Assign.opener()` or `Assign.answered(review)` (brief, D71)."""
+
+    to: Literal["opener", "answered"]
+    step: Task | None = None  # for `answered`: the task whose latest answerer is asked
+
+    @staticmethod
+    def opener() -> "Assign":
+        """Asked of whoever opened the case."""
+        return Assign("opener")
+
+    @staticmethod
+    def answered(task: Task) -> "Assign":
+        """Asked of whoever gave `task`'s latest answer."""
+        return Assign("answered", task)
+
+
+@dataclass(frozen=True)
 class Approval:
     """A step's approval: who approves, how many, when it is needed, and why (brief, D11)."""
 
@@ -144,6 +163,7 @@ class Approval:
     reason: str  # what an approver reads
     when: Expr[bool] | None = None  # None: every run needs it
     count: int | None = None  # how many distinct people must approve; left out, 1 (brief, D47)
+    assign: Assign | None = None  # who is asked when it is asked; None: its queue (brief, D71)
 
 
 def four_eyes(roles: Sequence[str], reason: str, when: Expr[bool] | None = None) -> Approval:

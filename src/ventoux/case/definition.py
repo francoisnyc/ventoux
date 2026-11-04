@@ -820,10 +820,8 @@ def assign_problems(path: str, rule: Assign, case: CaseDefinition) -> list[str]:
     if named is None:
         return [f"{path}.step: {rule.step} is not a step"]
     if not isinstance(named, TaskStep):
-        return [
-            f"{path}.step: {rule.step} is {an(named.kind)} step; only a task is answered by a "
-            "person"
-        ]
+        kind = an(named.kind)
+        return [f"{path}.step: {rule.step} is {kind} step; only a task is answered by a person"]
     return []
 
 

@@ -41,6 +41,7 @@ from ventoux.case.approvals import (
     waiting_line,
 )
 from ventoux.case.assigning import assign, unassign
+from ventoux.case.assignment_rules import follow_rule
 from ventoux.case.called import called
 from ventoux.case.claims import (
     ClaimRefused,
@@ -94,6 +95,7 @@ from ventoux.case.state import (
     GivenApproval,
     GivenBack,
     HeldAnswer,
+    Holder,
     Migration,
     Moment,
     Obtained,
@@ -463,6 +465,8 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
     refuse_to_open(case, catalog, event.file)
     refuse_unless_wrapped(case, event.file, CaseRefused)
     state.opened_by = event.by
+    if event.by is not None:
+        state.opener = Holder(event.by, event.roles, at=event.at)
     state.engine = known(event.engine)  # set once, here, never by itself after (brief, D51)
     state.release = event.release
     if event.release is not None:  # a draft's history is as it was before releases
@@ -855,6 +859,8 @@ def take_answer(
     worded = as_worded(state, event)
     run.status = "done"
     del state.waiting[run.entry]
+    # Whom a rule asking whoever answered this task asks next, with these roles (brief, D71).
+    state.answerers[run.step] = Holder(event.by, event.roles, at=event.at)
     who = f"person:{event.by}"
     # The latest answer is the outcome (brief, D9), and a form's values replace earlier ones.
     state.values[f"{run.step}.outcome"] = event.outcome
@@ -1747,6 +1753,8 @@ def start(
             f"started {entry}: waiting for {' or '.join(step.outcomes)} by "
             f"{' or '.join(step.roles)}"
         )
+        if step.assign is not None:
+            follow_rule(case, catalog, state, run, step.assign)
         return
     given = state.given.pop(name, None)  # spent, whatever happens next
     latest = latest_run(state, name)

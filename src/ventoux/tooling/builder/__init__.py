@@ -6,6 +6,7 @@ from ventoux.tooling.builder.case import Case
 from ventoux.tooling.builder.entries import (
     OPENED,
     Approval,
+    Assign,
     Outcome,
     Payload,
     SentBy,
@@ -34,6 +35,7 @@ from ventoux.tooling.builder.written import package, written
 __all__ = [
     "OPENED",
     "Approval",
+    "Assign",
     "Case",
     "Expr",
     "Field",

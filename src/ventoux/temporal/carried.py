@@ -77,6 +77,10 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         # step's next entry (brief, D69).
         "holders": {entry: holder_as_data(held) for entry, held in state.holders.items()},
         "kept": {step: holder_as_data(held) for step, held in state.kept.items()},
+        # Whom an assignment rule may ask: each task's latest answerer, and the opener, each with
+        # their stated roles (brief, D71).
+        "answerers": {step: holder_as_data(held) for step, held in state.answerers.items()},
+        "opener": None if state.opener is None else holder_as_data(state.opener),
         "proposers": dict(state.proposers),
         "waiting_to_start": list(state.waiting_to_start),
         "proposed_by_rules": {
@@ -257,6 +261,11 @@ def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Cas
         # None in a state from before layer 17a.
         holders={entry: holder_from_data(held) for entry, held in data.get("holders", {}).items()},
         kept={step: holder_from_data(held) for step, held in data.get("kept", {}).items()},
+        # None in a state from before layer 17c: a rule then finds nobody (brief, D71).
+        answerers={
+            step: holder_from_data(held) for step, held in data.get("answerers", {}).items()
+        },
+        opener=None if data.get("opener") is None else holder_from_data(data["opener"]),
         proposers=dict(data["proposers"]),
         # None in a state from before layer 11b: no proposal waited for a fact.
         waiting_to_start=list(data.get("waiting_to_start", [])),

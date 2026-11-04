@@ -246,6 +246,13 @@ class CaseState:
     # Who held each step's approval when it was withdrawn, until its next entry is asked, which
     # keeps them if they could still answer it (brief, D25) (brief, D69).
     kept: dict[str, Holder] = field(default_factory=dict[str, Holder])
+    # Who gave each task's latest answer, with the roles they answered with, by step: whom a rule
+    # asks with `answered` (brief, D71).
+    answerers: dict[str, Holder] = field(default_factory=dict[str, Holder])
+    # The person who opened the case, with the roles the trusted caller stated with the opening:
+    # whom a rule asking the opener asks, judged with those roles (brief, D71). None: a system
+    # opened it, or it opened before layer 17c.
+    opener: Holder | None = None
     opened_by: str | None = None  # the person who opened the case, if a person did
     # open; closing: nothing new starts, running activities finish; closed (brief, D10).
     phase: Literal["open", "closing", "closed"] = "open"
@@ -296,6 +303,9 @@ class Opened:
     # The release it opens on, as people name it (`refund 1`), once the driver has checked it is
     # that release's package; None: a draft (brief, D51).
     release: str | None = field(kw_only=True, default=None)
+    # The opener's roles, as the trusted caller states them; none for a system, or for a case
+    # opened before layer 17c (brief, D22) (brief, D71).
+    roles: frozenset[str] = field(kw_only=True, default=frozenset())
 
 
 @dataclass
