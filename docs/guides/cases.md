@@ -137,6 +137,122 @@ rework, with two keys added to `review`:
 A step may **reach milestones**: `"reaches": ["reviewed"]` on a step is reached when it completes,
 and on a task's outcome when it is answered with that outcome. A milestone is a fact, never undone.
 
+## Required steps
+
+A case closes by itself when nothing is left to do (brief, D10): no task open, nothing running,
+nothing failed. That says nothing about work that never started. Say every refund ends with
+support confirming the outcome with the customer, whatever the review decided, once they have
+spoken to them. Proposed by a person, the step is not pending work until someone proposes it, so
+a rejected refund would close at once, with nobody told. `closes_when` doesn't help, since it only
+closes a case early, and `stays_open` keeps every refund open until a person closes it by hand.
+
+Mark the step **required**:
+
+```json
+"confirm": {
+  "kind": "task",
+  "display": {"title": "Confirm the outcome with the customer"},
+  "roles": ["support"],
+  "outcomes": {"confirmed": {"display": {"title": "Outcome confirmed"}}},
+  "requires": ["review"],
+  "automatic": false,
+  "proposed_by": ["support"],
+  "required": true
+}
+```
+
+Now **nothing left to do** also means that every required step's latest run is done. Until it
+is, the case stays open, and `waiting_for` says what it still owes, and who may start it:
+
+```python
+rejected = run_case(refund_confirmed, file={"order_id": "ord-1", "amount": 250},
+                    answers=[("review", "reject", "ana")], people=PEOPLE)
+assert rejected.waiting_for == ["confirm, required, proposed by support"]
+assert not rejected.closed
+
+confirmed = run_case(refund_confirmed, file={"order_id": "ord-1", "amount": 250},
+                     answers=[("review", "reject", "ana"), propose("confirm", "ana"),
+                              ("confirm", "confirmed", "ana")], people=PEOPLE)
+assert confirmed.closed
+```
+
+A requirement holds back only the case closing **by itself**:
+
+- **`closes_when` waits for it too.** With every milestone reached and a required step not done,
+  the case doesn't close, as for a failed run (brief, D26); nothing new starts but the required
+  step, and the case closes once it is done.
+- **A person still closes the case** with a declared close reason, as ever: a requirement never
+  traps a case. The last line says what was owed: `closed: duplicate, by ana; confirm not done`.
+- **A run a rule stopped,** or a cancelled run, isn't done (brief, D40): the step is owed still,
+  and the case waits for it to run again.
+- **A failed run** needs attention, as any other (brief, D17): an operator retries it, or closes
+  the case. Skipping a failed run of a required step is refused, since a skip would end the
+  case's obligation without anyone doing it: `confirm is required, so its run is never skipped:
+  retry it, or close the case with a reason`.
+- **A required step has no `when`.** It is owed in every case; a step owed only sometimes is
+  started by a rule, or proposed, and isn't required.
+
+**`ventoux check` proves each required step can still be done** and refuses the definition
+otherwise:
+
+- a required step nothing can ever start (it requires a milestone nothing reaches, say):
+  `steps.confirm: confirm is required, and nothing can ever start it: reach its requirements, or
+  drop required`;
+- a required step a rule can stop, that could then never run again: `steps.confirm: a rule can
+  stop confirm, and it is required, so it must be able to run again: make it repeatable and
+  proposed_by a role, or start it from a rule`.
+
+## Repeated steps: one run per item
+
+A **repeated step** runs once for each item of a list in the case file, each run given its item.
+Here an order is refunded line by line:
+
+```json
+"fields": {
+  "lines": {"type": "list", "display": {"title": "Order lines"},
+            "fields": {"sku": {"type": "string"}, "amount": {"type": "number"}}}
+},
+"steps": {
+  "refund_line": {
+    "kind": "activity",
+    "display": {"title": "Refund one line"},
+    "activity": "payments.refund@2",
+    "for_each": {"over": "lines", "key": "sku"},
+    "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "item.amount"}}
+  }
+}
+```
+
+`item` is the run's own item, read as `item.<field>`, as `sum` and `count` read theirs. Each run
+is named by its item's **key**, the field `key` names: `refund_line[A12]#1`, `refund_line[B7]#1`.
+The name goes into the run's idempotency key (brief, D17), so reordering the list, or adding a
+line in front, never gives a payment another line's key. A list whose items repeat a key, or lack
+one, fails the step, which needs attention: nothing guesses which line is which.
+
+```python
+lines = [{"sku": "A12", "amount": 40}, {"sku": "B7", "amount": 25}]
+run = run_case(order_refund, file={"order_id": "ord-1", "lines": lines}, answers=[],
+               people=PEOPLE)
+assert run.history[:2] == [
+    "started refund_line[A12]#1: payments.refund@2 (amount from system:opener, order_id from system:opener)",
+    "started refund_line[B7]#1: payments.refund@2 (amount from system:opener, order_id from system:opener)",
+]
+```
+
+An item's values come from the list they are in, with its sources: a list a customer typed is
+still untrusted in each run.
+
+- **`requires: ["refund_line"]`** is met once every item's run is done; with no items, at once.
+  `refund_line.outcome` isn't read: with several runs, there is no one outcome.
+- **A required repeated step** owes a done run for each item.
+- **When the list changes,** by an edit (see "Changing an open case"): an added item starts its
+  run; a removed item's open run is stopped, as a rule's stop would stop it, and a running one
+  finishes, flagged; an item whose values changed keeps a done run done, and its open run is
+  stopped and starts again with its new values. A rule never sets a list.
+- `ventoux check` refuses `for_each` over a field that isn't a list: `steps.refund_line.for_each:
+  order_id is a reference, not a list: a step repeats over a list field`, and a key that isn't a
+  text field of the list's items.
+
 ## The step advisor
 
 The **step advisor** is a model that looks at an open case and names the one step it thinks
@@ -345,6 +461,9 @@ A step waiting for an event from outside is listed the same way, with who sends 
 A timer that is set keeps the case open too, but waits on nobody: it is listed in `timers`, not
 `waiting_for` ("Rules on time", below).
 
+A required step that hasn't run is listed too, with who may start it: `confirm, required,
+proposed by support` ("Required steps", above).
+
 Who is asked to answer each open entry, and who holds it, is in "Who is asked: claiming and
 assigning tasks", at the end of this guide.
 
@@ -470,7 +589,8 @@ as a payment, the new run's new key could make them happen twice (brief, D17, D2
 
 ## Closing a case
 
-A case closes by itself when nothing is left to do (brief, D10). If it declares `closes_when`
+A case closes by itself when nothing is left to do (brief, D10), and every required step is done
+("Required steps"). If it declares `closes_when`
 and closes that way without reaching it (a failed payment skipped, say), its last line says
 which it didn't reach: `closed: nothing left to do; paid not reached`. Two definition keys change
 that:
@@ -741,6 +861,55 @@ then `flagged: kyc#1 cancelled after the close was requested`, since what it did
 cancellation stands. A rule's stop does the same to it.
 
 A workflow step never waits for people: put the human work in a task step before or after it.
+
+## Child cases
+
+A **child case** is a whole case started from a step of another: its own case file, release,
+people and lifecycle, and when it ends, a report to its parent. Use one where work has a life of
+its own: a claim sends the vehicle to a garage, whose repair is assigned, chased and closed by
+other people, over weeks.
+
+```json
+"repair": {
+  "kind": "case",
+  "display": {"title": "Repair the vehicle"},
+  "case": "repair",
+  "requires": ["assess"],
+  "inputs": {"vehicle": {"var": "vehicle"}, "budget": {"var": "approved_amount"}}
+}
+```
+
+Its `inputs` are the child's opening, read from the parent's case file with their sources, as a
+plan step's are (brief, D28): a budget a person approved is still that person's in the child. A
+sensitive value is given encrypted under the child's own key, never in plain text, and the child
+lists who may see it as its own definition says.
+
+**Which release.** The child opens on the release of `repair` active in the parent's environment,
+asked of the environment's registry before it starts (the releases guide, "A case in an
+environment"). A definition not active there is refused before anything starts, and the step
+needs attention: `repair#1 failed: repair has no active release in production: activate one, then
+retry repair#1`.
+
+**What the parent hears.** The child runs as its own workflow, `claim-7/repair#1`, and the parent
+waits for it, as for any running step. When it closes, it reports to the parent by a signal: how
+it closed, the milestones it reached, and the fields its definition declares in `reports`, each
+with the sources it had in the child. The step is then done, and the parent reads
+`repair.outcome` (`done`, or the reason a person closed it with) and `repair.cost`:
+
+```
+started repair#1: case repair 3 (budget from person:ana, vehicle from system:opener), run claim-7/repair#1
+repair#1 done: repair closed, nothing left to do, giving cost from person:garage-lee
+```
+
+- **A child that needs attention** is the child's: its operators retry it there. The parent waits.
+- **When the parent closes, or a rule stops the step,** the child is closed too, saying why
+  (`closed by its parent: duplicate, by ana`): its tasks are cancelled, its running activities
+  finish, and the parent closes once the child has ended. A close never waits for a person.
+- **A parent that continues as new** doesn't wait for its children: their report reaches it by
+  its workflow ID.
+- **A parent that migrates** leaves its children on their own release.
+- **Forgetting the parent** forgets each child too, under one request; a child whose definition
+  keeps its records (`"forgetting": "never"`) refuses it.
 
 ## Rules
 
