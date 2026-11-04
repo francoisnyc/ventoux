@@ -574,9 +574,12 @@ written were checked by switching off the code they guard and watching them fail
 
 # 17c: assignment rules
 
-Status: 2026-11-04, proposed; not yet agreed. Starts from `main` at `605f9a3`, with 17a (#83) and
+Status: 2026-11-04, agreed; seams next. Starts from `main` at `605f9a3`, with 17a (#83) and
 17b (#84) merged. The warm-up was asked and recorded (learning question 41). The guide was written
 first: `docs/guides/cases.md`, "Assignment rules", with the recommendations below.
+
+**Answered 2026-11-04.** Choices 9, 11, 12 and 21 to 26 as recommended; 10 as agreed with 17a.
+D71 is written before 17c is built.
 
 ## What 17c is for
 

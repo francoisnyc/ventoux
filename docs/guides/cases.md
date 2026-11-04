@@ -2705,12 +2705,13 @@ have a rule, since nobody holds it: `ventoux check` refuses it (`ASSIGNS_SEVERAL
 **`ventoux check` refuses a rule that can only pick people who can never answer.** On an approval
 this can be proven from the definition: the exclusions come from provenance (D11). `pay`'s
 approval asked of whoever answered the review, whose answer sets what `pay` sends, or of the
-opener, who approves nothing:
+opener, who approves nothing. `pay`'s `when` reads `review.outcome`, so whoever answered the
+review is excluded from approving it in every run:
 
 ```
-ASSIGNS_EXCLUDED  steps.pay.approval.assign: whoever answered review set approved_amount, which
-                  pay uses, so they can never approve it; leave the approval to its queue, or
-                  assign it to someone else's task
+ASSIGNS_EXCLUDED  steps.pay.approval.assign: whoever answered review is excluded from approving
+                  pay in every run, since pay reads review.outcome; leave the approval to its
+                  queue, or ask whoever answered another task
 ```
 
 On a task it can't be: whether the reviewer also has the follow-up's role is a staffing fact the
