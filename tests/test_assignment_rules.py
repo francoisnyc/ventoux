@@ -11,7 +11,9 @@ from typing import Any
 import pytest
 from test_approvals import FOUR_EYES
 from test_case import PEOPLE, REFUND, guide_json, guide_refund_with_rework
+from test_schema import schema_accepts
 
+from ventoux import Assign, Case, Outcome
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.diff import diff
 from ventoux.case.plain import plain
@@ -21,6 +23,8 @@ from ventoux.case.validate import validate_case
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.testing import CATALOG, claim, give_back, propose, run_case
+from ventoux.tooling.builder import package as package_of
+from ventoux.tooling.schema import case_schema
 
 
 def with_pay_assigned(rule: dict[str, Any]) -> dict[str, Any]:
@@ -405,3 +409,26 @@ def test_the_plain_forms_read_a_rule_aloud() -> None:
     assert "Each run is asked of" not in case_map(before, CATALOG)
     shown = plain(diff(before, after, CATALOG), before, after, CATALOG)
     assert "Each run is asked of whoever opened the case." in shown
+
+
+def test_the_builder_writes_the_guides_follow_up_and_the_schema_accepts_it() -> None:
+    # Code that produces data: the builder's follow-up is the guide's JSON block, key for key
+    # (brief, D58); and what it writes matches the published shape (brief, D60) (brief, D71).
+    refund = Case("refund", title="Customer refund")
+    review = refund.task(
+        "review",
+        title="Review the refund request",
+        roles=["support"],
+        outcomes={"approve": Outcome("Approve the refund"), "reject": Outcome("Reject")},
+    )
+    refund.task(
+        "follow_up",
+        title="Follow up with the customer",
+        roles=["support"],
+        requires=[review],
+        outcomes={"done": Outcome("Done")},
+        assign=Assign.answered(review),
+    )
+    written_case = json.loads(package_of(refund)["case.json"])
+    assert written_case["steps"]["follow_up"] == guide_json(-1)["follow_up"]
+    assert schema_accepts(case_schema(), json.loads(json.dumps(guide_follow_up(), default=int)))
