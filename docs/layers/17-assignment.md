@@ -658,3 +658,63 @@ here, 9 changed by what step 1 found. Each answer goes into **D71**, written bef
 
 One pull request, `layer-17c-rules`. Its negative test, from the curriculum: an assignment rule
 that can only pick people who can't answer the task is refused at validation (`ASSIGNS_EXCLUDED`).
+
+## Seams and tests for 17c (curriculum step 4)
+
+17c reaches more of the engine than 17a or 17b, so each place gets the seam its existing tests
+already use. No test reads how a pick is stored.
+
+### The seams
+
+1. **The definition:** `parse_case(definition)`, accepting `assign` on a task step and inside an
+   approval, and raising `CaseInvalid` with its path for a malformed rule (`steps.follow_up.assign:
+   …`), as every read-time refusal does.
+2. **The runtime:** `run_case`, unchanged. The pick shows in `run.assignees` and the history
+   (`follow_up#1 assigned to ana by its rule`, `follow_up#1 in its queue: …`); on Temporal, in
+   `CaseReport`. What the case keeps to pick from (the latest answerer of each task, the opener's
+   roles) is state, crossing continue-as-new; tested through `state_as_data` / `state_from_data`,
+   as 17a's holders are.
+3. **Validation:** `validate_case(case, catalog)` returns `Issue`s; the tests assert `code`, `path`,
+   whether it is an error or a warning, and the message whole: `ASSIGNS_EXCLUDED`,
+   `ASSIGNS_SEVERAL`, `ASSIGNS_MAY_BE_EXCLUDED`, `MAY_ASSIGN_NOBODY`.
+4. **The diff:** `diff(before, after, catalog)` gives `Change`s; the tests assert the path
+   (`steps.follow_up.assign`, `steps.pay.approval.assign`), the verdict and `said`.
+5. **The plain forms:** `case_map(package, catalog)` and `plain(diff, before, after, catalog)`, as
+   text: the step's sentence gains "asked of whoever answered review" / "asked of whoever opened
+   the case".
+6. **The builder:** `Assign.answered(task)`, `Assign.opener()`, `assign=` on `Case.task(...)` and on
+   `Approval`; the test writes the guide's follow-up with the builder and compares the JSON, as
+   the builder's tests do.
+7. **The JSON Schema:** `case_schema()`; `ventoux schema --unchanged` passes once the committed
+   schema is regenerated; a wrong `assign` shape is refused by both the schema and the parser
+   (`tests/test_schema.py`'s fixed set).
+
+### The tests, in the order I'd write them
+
+1. **(negative, curriculum)** `pay`'s approval asked of whoever answered the review is refused at
+   validation: `ASSIGNS_EXCLUDED`, at `steps.pay.approval.assign`, with the guide's message. So is
+   one asking the opener.
+2. **(negative)** Malformed rules are refused when read: an unknown `to`; `answered` with no step,
+   an unknown step, or a step that isn't a task; `opener` with a step.
+3. **(negative)** `ASSIGNS_SEVERAL`: a rule on an approval needing two people.
+4. The guide's follow-up runs: Ana answers the review; `follow_up#1` is hers, `follow_up#1 assigned
+   to ana by its rule`. The guide's JSON block is the definition the test runs.
+5. A rule that finds nobody, or someone who couldn't answer, leaves the entry in its queue, saying
+   why; a rule asking the opener, when a system opened the case, finds nobody.
+6. `answered` picks the latest answer's person, on a repeatable task.
+7. An approval's rule picks someone it doesn't exclude; when the approval is asked again, a kept
+   holder outranks the rule; with nobody kept, the rule picks again.
+8. The warnings: `ASSIGNS_MAY_BE_EXCLUDED` (whoever answered a task whose answer *may* reach what
+   the step reads), and `MAY_ASSIGN_NOBODY` (a task the step doesn't require).
+9. What the case keeps to pick from crosses continue-as-new; a state from before has none, so a
+   rule finds nobody.
+10. The diff: added, stricter; removed, looser; changed, looser.
+11. The plain forms: the case map's sentence, and the plain diff's before and after.
+12. The builder writes the guide's follow-up as its JSON; the JSON Schema accepts it, and refuses a
+    wrong shape, as the parser does.
+13. **Replay:** every history recorded before still replays.
+
+**The routes by which a rule sets a holder:** an entry opening, whatever opened it (the opening's
+rules, a person's proposal, a rule's start, a retry's re-ask of an approval, a re-asked approval);
+each goes through the one place an entry opens, which tests 4, 5 and 7 drive. 17a's and 17b's
+routes are unchanged.
