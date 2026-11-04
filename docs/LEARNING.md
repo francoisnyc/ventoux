@@ -1708,6 +1708,13 @@ and record the key points. A question is closed once you can explain the answer 
   (exclusion is computed from provenance, D11). Each is computed from more than the line that
   changed, which is why the JSON can't show it. 15d puts this diff on "Approve this plan", for
   the same reason: an approver of a drafted plan reads effects, not lines.
+- Retrieval (layer 17c warm-up, 2026-11-04): asked to be told. Given: an effect far from the
+  line (a role added to `review` widens what `support-lead` sees, D30; an input moved changes who
+  may approve `pay`, D11) and which way a change goes (`count` 2 to 1 is looser; a dropped
+  `requires` starts `settle` at opening; what can't be proven reads as looser, D55). Each is
+  computed from more than the line that changed, which is why the JSON can't show it. Tied to 17c:
+  an added `assign` narrows who may answer every entry of its task (D69), so the diff calls it
+  stricter, where the JSON shows only a new key.
 - Status: open, until two of those come back with why the JSON can't show them.
 
 ## 42. Layer 12: why plans don't migrate
