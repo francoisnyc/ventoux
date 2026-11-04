@@ -205,6 +205,12 @@ class Assign(Shape):
     to: Literal["opener", "answered"]  # whom: the opener, or a task's latest answerer
     step: Name | None = None  # for `answered`: the task whose latest answer's person is asked
 
+    def aloud(self) -> str:
+        """The rule as a reader says it: `asked of whoever answered review`."""
+        if self.to == "opener":
+            return "asked of whoever opened the case"
+        return f"asked of whoever answered {self.step}"
+
     @model_validator(mode="after")
     def names_a_step_when_answered(self) -> "Assign":
         """`answered` names its task; `opener` names none."""

@@ -5,6 +5,7 @@ See docs/layers/17-assignment.md (17c) and docs/guides/cases.md, "Assignment rul
 """
 
 import copy
+import json
 from typing import Any
 
 import pytest
@@ -12,6 +13,8 @@ from test_approvals import FOUR_EYES
 from test_case import PEOPLE, REFUND, guide_json, guide_refund_with_rework
 
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.diff import diff
+from ventoux.case.releases import package
 from ventoux.case.validate import validate_case
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
@@ -326,3 +329,61 @@ def test_whom_a_rule_may_ask_crosses_as_data_and_a_state_from_before_has_none() 
     del before["answerers"], before["opener"]
     older = state_from_data(before, {})
     assert older.answerers == {} and older.opener is None
+
+
+def changes_to(rule_before: dict[str, Any] | None, rule_after: dict[str, Any] | None) -> list[Any]:
+    """The diff's changes to the review's rule, from `rule_before` to `rule_after` (None: none)."""
+    versions = []
+    for rule in (rule_before, rule_after):
+        definition = copy.deepcopy(REFUND)
+        if rule is not None:
+            definition["steps"]["review"]["assign"] = rule
+        versions.append(package(json.dumps(definition, default=str), []))
+    found = diff(versions[0], versions[1], CATALOG)
+    return [c for c in found.changes if c.path.startswith("steps.review.assign")]
+
+
+OPENER, ANSWERED = {"to": "opener"}, {"to": "answered", "step": "review"}
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "verdict", "said"),
+    [
+        # Only the holder answers a held entry (brief, D69): a rule narrows who may.
+        (None, OPENER, "stricter", "added: asked of whoever opened the case"),
+        (OPENER, None, "looser", "removed: asked of whoever opened the case"),
+        # Another person asked: a doubt, so read as looser (brief, D55).
+        (
+            OPENER,
+            ANSWERED,
+            "not proven",
+            "asked of whoever opened the case -> asked of whoever answered review",
+        ),
+    ],
+)
+def test_the_diff_judges_a_rule(
+    before: dict[str, Any] | None, after: dict[str, Any] | None, verdict: str, said: str
+) -> None:
+    [change] = changes_to(before, after)
+    assert (change.path, change.verdict, change.said) == ("steps.review.assign", verdict, said)
+    assert change.comparison == ("assignment" if verdict != "not proven" else None)
+
+
+def test_the_diff_judges_an_approvals_rule() -> None:
+    before, after = REFUND, with_triage_rule_only()
+    found = diff(
+        package(json.dumps(before, default=str), []),
+        package(json.dumps(after, default=str), []),
+        CATALOG,
+    )
+    [change] = [c for c in found.changes if c.path == "steps.pay.approval.assign"]
+    assert (change.verdict, change.said, change.comparison) == (
+        "stricter",
+        "added: asked of whoever answered review",
+        "assignment",
+    )
+
+
+def with_triage_rule_only() -> dict[str, Any]:
+    """The refund with only a rule added to `pay`'s approval: one change for the diff to judge."""
+    return with_pay_assigned({"to": "answered", "step": "review"})

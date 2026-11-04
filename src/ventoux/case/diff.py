@@ -25,12 +25,13 @@ from ventoux.case.changes import (
     merged,
     shown,
 )
-from ventoux.case.definition import CallStep, CaseDefinition, TaskStep
+from ventoux.case.definition import Assign, CallStep, CaseDefinition, TaskStep
 from ventoux.case.guards import (
     Versions,
     age_change,
     approval_change,
     approval_condition_change,
+    assign_change,
     close_reason_change,
     count_change,
     forgetting_change,
@@ -141,6 +142,8 @@ def leaves(before: object, after: object, path: str) -> list[Leaf]:
         isinstance(before, BaseModel)
         and type(before) is type(after)
         and (not isinstance(before, Node) or isinstance(before, Declared))
+        # A rule is judged whole: who it asks, before and after (brief, D71).
+        and not isinstance(before, Assign)
     ):
         assert isinstance(after, BaseModel)
         found: list[Leaf] = []
@@ -234,6 +237,8 @@ CONTRACTS = (
 APPROVAL = ("steps", "*", "approval")
 APPROVAL_COUNT = ("steps", "*", "approval", "count")
 APPROVAL_WHEN = ("steps", "*", "approval", "when")
+ASSIGN = ("steps", "*", "assign")
+APPROVAL_ASSIGN = ("steps", "*", "approval", "assign")
 APPROVERS = ("steps", "*", "approval", "roles")
 REQUIRES = ("steps", "*", "requires")
 CLOSE_REASON = ("close_reasons", "*")
@@ -295,6 +300,8 @@ def judged(
         others = found if peers is None else peers
         if under_max_age(leaf.path):
             continue  # said by `step_guards`, which compares each fact's age as a duration
+        elif at(leaf.path, ASSIGN) or at(leaf.path, APPROVAL_ASSIGN):
+            yield assign_change(leaf)  # who is asked, and so who alone may answer
         elif at(leaf.path, CLOSE_REASON) and not renamed(leaf, others):
             yield close_reason_change(leaf)  # a way to close added or removed
         elif leaf.before is MISSING or leaf.after is MISSING:
