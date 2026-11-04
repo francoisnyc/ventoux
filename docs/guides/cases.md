@@ -192,15 +192,13 @@ A requirement holds back only the case closing **by itself**:
 - **A required step has no `when`.** It is owed in every case; a step owed only sometimes is
   started by a rule, or proposed, and isn't required.
 
-**`ventoux check` proves each required step can still be done** and refuses the definition
-otherwise:
-
-- a required step nothing can ever start (it requires a milestone nothing reaches, say):
-  `steps.confirm: confirm is required, and nothing can ever start it: reach its requirements, or
-  drop required`;
-- a required step a rule can stop, that could then never run again: `steps.confirm: a rule can
-  stop confirm, and it is required, so it must be able to run again: make it repeatable and
-  proposed_by a role, or start it from a rule`.
+**`ventoux check` proves each required step can still be done.** It refuses a required step
+nothing can ever start (it requires a milestone nothing reaches, say): `steps.confirm: confirm is
+required, and nothing can ever start it: reach its requirements, or drop required`. It warns
+about a required step a rule may stop, or whose approval may reject, that could then never run
+again, since the rule may never fire: `steps.confirm: a rule may stop confirm, and it is
+required, so it might never run again: make it repeatable and proposed_by a role, or start it
+from a rule`.
 
 ## Repeated steps: one run per item
 

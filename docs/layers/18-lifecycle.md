@@ -1,11 +1,15 @@
 # Layer 18: Case lifecycle: required steps, repeated steps, child cases
 
-Status: 2026-11-04, proposed; nothing answered yet. This note starts from `main` at `f1e8512`, with
+Status: 2026-11-04, choices A to C and 1 to 11 agreed; 18a's seams proposed. This note starts from `main` at `f1e8512`, with
 layers 0 to 17 merged. The warm-up was asked and recorded (learning question 37). The guide was
 written first (curriculum step 2): `docs/guides/cases.md`, "Required steps", "Repeated steps: one
 run per item" and "Child cases", describes the layer as if it worked. Writing it showed four places
 where my first picks were wrong; the recommendations below correct them, and the guide changes
 with the answers (listed at the end).
+
+**Answered 2026-11-04.** Choices A to C and 1 to 11 as recommended. D72 is written before 18a is
+built, with dated amendments under D10, D24 and D52. Choices 12 to 28 stay sketches, settled when
+their parts start; the guide's 18b to 18d sections change with them then.
 
 Prior art: `chartering/src/temporal/case-workflow.ts`. Each admitted fragment runs as a child
 workflow named `<case ID>/<fragment>-<n>`, the counter carried across continue-as-new. A promise
