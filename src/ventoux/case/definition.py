@@ -790,6 +790,10 @@ def step_problems(
         problems += stale_names(path, step)
     if isinstance(step, WaitStep) and step.event not in case.events:
         problems.append(f"{path}.event: {step.event} is not an event")
+    if isinstance(step, TaskStep) and step.assign is not None:
+        problems += assign_problems(f"{path}.assign", step.assign, case)
+    if isinstance(step, CallStep) and step.approval is not None and step.approval.assign:
+        problems += assign_problems(f"{path}.approval.assign", step.approval.assign, case)
     # A step nobody may propose and that doesn't start by itself could never run; and a step starts
     # by itself at most once, so a repeatable one runs again only when proposed. Unless a rule
     # starts it: 11b's one loosening (brief, D39).
@@ -805,6 +809,27 @@ def step_problems(
                 "name proposed_by, who may propose it"
             )
     return problems
+
+
+def assign_problems(path: str, rule: Assign, case: CaseDefinition) -> list[str]:
+    """What an assignment rule names that the case doesn't have: `answered` asks whoever answered
+    a task, so the step it names is one, since only a task is answered by a person (brief, D71)."""
+    if rule.step is None:
+        return []
+    named = case.steps.get(rule.step)
+    if named is None:
+        return [f"{path}.step: {rule.step} is not a step"]
+    if not isinstance(named, TaskStep):
+        return [
+            f"{path}.step: {rule.step} is {an(named.kind)} step; only a task is answered by a "
+            "person"
+        ]
+    return []
+
+
+def an(word: str) -> str:
+    """`an activity`, `a plan`: the article a sentence puts before a step's kind."""
+    return f"an {word}" if word[0] in "aeiou" else f"a {word}"
 
 
 def set_problems(path: str, rule: Rule, case: CaseDefinition) -> list[str]:
