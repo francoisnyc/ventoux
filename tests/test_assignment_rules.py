@@ -128,3 +128,54 @@ def test_the_guides_follow_up_is_asked_of_whoever_answered_the_review() -> None:
     assert run.assignees == {"follow_up#1": "ana"}
     at = run.history.index("started follow_up#1: waiting for done by support")
     assert run.history[at + 1] == "follow_up#1 assigned to ana by its rule"
+
+
+@pytest.mark.parametrize(
+    ("definition", "opened_by", "line"),
+    [
+        # The review asks whoever answered it, but nobody has yet.
+        (
+            with_review_assigned({"to": "answered", "step": "review"}),
+            None,
+            "review#1 in its queue: its rule found nobody: review hasn't been answered",
+        ),
+        # A system opened the case: there is no opener to ask.
+        (
+            with_review_assigned({"to": "opener"}),
+            None,
+            "review#1 in its queue: its rule found nobody: a system opened the case",
+        ),
+        # Lee opened it, but she can't answer the review: she isn't support.
+        (
+            with_review_assigned({"to": "opener"}),
+            "lee",
+            "review#1 in its queue: review#1 is answered by support, and lee has support-lead",
+        ),
+    ],
+)
+def test_a_rule_that_finds_nobody_who_can_answer_leaves_the_entry_in_its_queue(
+    definition: dict[str, Any], opened_by: str | None, line: str
+) -> None:
+    # A rule never stops a case: whom it can't ask, the queue gets, saying why (brief, D71).
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[],
+        people=PEOPLE,
+        opened_by=opened_by,
+    )
+    assert run.assignees == {}
+    assert line in run.history
+    assert run.waiting_for == ["review by support"]
+
+
+def test_a_rule_asks_the_opener_judged_with_the_roles_stated_with_the_opening() -> None:
+    run = run_case(
+        with_review_assigned({"to": "opener"}),
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[],
+        people=PEOPLE,
+        opened_by="ana",
+    )
+    assert run.assignees == {"review#1": "ana"}
+    assert "review#1 assigned to ana by its rule" in run.history
