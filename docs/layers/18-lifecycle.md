@@ -320,3 +320,80 @@ C. **No new dependency.** *Recommended.*
 - "Child cases": `"case": "repair@3"`, pinned (choice 21); the child under its parent's key, and
   forgetting refused for a child alone (choice 23); the report's sources gain `case:repair`
   (choice 24).
+
+## Seams and tests for 18a (curriculum step 4)
+
+The tests use only what a caller of the engine uses today: the definition as JSON, the script
+`run_case` plays, what a run and a report say, `validate_case`, the diff, the case map, the
+builder and the published schema. No test reads how "owed" is worked out.
+
+### The seams
+
+1. **One key in the definition:** `"required": true` on any step, read by `parse_case`. A
+   required step with `when` is refused when read, as any malformed definition is.
+2. **`run_case` and what it reports:** `waiting_for`, `closed`, `status`, `history`. The script
+   steps that exist are enough: `propose`, `retry`, `skip`, `close`, `forget`, `edit`, `migrate`,
+   `send`, `later`, `finish`. **No new event, script step or signal.**
+3. **On Temporal:** `CaseReport.waiting_for` and `CaseReport.closed`, as today.
+4. **`validate_case(case, catalog)`:** the issues it returns, by code and message.
+5. **`diff(before, after, catalog)`:** the change at `steps.<name>.required` and its verdict.
+6. **`case_map(package, catalog)`:** its closing line.
+7. **The builder:** `required=True` on each step method, giving the same JSON as written by hand.
+8. **The published schema** (`ventoux schema`) and **`digest`:** an existing release's digest is
+   unchanged.
+
+**Found while choosing the seams.** The curriculum's negative test ("a required step that no rule
+or person can ever start is refused at validation") is already an error for *every* step:
+`NEVER_RUNS`, from layer 10's fixpoint. So once the key is read, that test passes with no new
+check. I'd keep `NEVER_RUNS` as the one issue, one cause, one issue, and drop the
+`REQUIRED_NEVER_STARTS` code D72 names (D72 is not merged, so it is corrected in this pull
+request, under "Decided while building"). The test is still written first, and it fails today
+for a different reason: `required` is an unknown key (`Extra inputs are not permitted`). I'll
+show that failure, then the one line that reads the key, then the test passing on `NEVER_RUNS`.
+
+### The refusals and lines, word for word (proposed)
+
+| Situation | What is said |
+|---|---|
+| `required` with `when`, when read | `steps.confirm: a required step is owed in every case, so it has no when: start it from a rule, or drop required` |
+| a skip of a required step's failed run, proposed or approved | `confirm is required, so its run is never skipped: retry it, or close the case with a reason` |
+| owed, proposed by a role | `waiting_for`: `confirm, required, proposed by support` |
+| owed, started only by a rule | `waiting_for`: `confirm, required, started by a rule` |
+| owed, its requirements not met, nothing else pending | `waiting_for`: `confirm, required, after review` |
+| a person's close with something owed | last line: `closed: duplicate, by ana; confirm not done` |
+| `closes_when` held by an owed step, a proposal of another | `paid is reached, so the case closes once confirm is done, or a person closes it: nothing new starts but confirm` |
+| the warning `REQUIRED_MAY_STRAND` | `steps.confirm: a rule may stop confirm, and it is required, so it might never run again: make it repeatable and proposed_by a role, or start it from a rule` (and `its approval may be rejected` in place of the rule, for that case) |
+
+### The tests, in the order I'd write them
+
+Each one written failing first, and watched failing for the right reason. Each responds to what
+the last one taught, so the list may change on the way.
+
+1. **(negative, curriculum)** A required step that nothing can ever start is refused at
+   validation, `NEVER_RUNS`. Fails first on the unknown key, as said above.
+2. **(negative)** `required` with `when` is refused when read.
+3. The guide's example, run as written: a rejected refund stays open, `waiting_for ==
+   ["confirm, required, proposed by support"]`; proposed and answered, it closes.
+4. Done with any outcome: a required `pay` that is declined meets its requirement.
+5. **(negative)** A run a rule stopped leaves the step owed; so does a rejected approval.
+6. **(negative)** A skip of a required step's failed run is refused, at the proposal and at the
+   approval; the retry that completes closes the case.
+7. `closes_when` held by an owed step: a proposal of another step refused; the owed step still
+   starts; the case closes once it is done.
+8. A person's close is never held, and names what was owed; a close by forgetting too.
+9. `waiting_for`'s other two forms: started by a rule; after its requirements.
+10. **(warning)** `REQUIRED_MAY_STRAND`, for a stop and for an approval; none when the step is
+    repeatable and proposed.
+11. The diff: on is stricter, off is looser. The case map's line. The builder's JSON. The schema
+    has the key. A recorded release's digest is unchanged.
+12. A migration renaming a required step: still owed under its new name, done if its run was. A
+    migration whose target makes a done step required: nothing owed.
+13. **On Temporal:** `CaseReport.waiting_for` lists the owed step; it crosses continue-as-new.
+14. **Replay:** every recorded history in `tests/histories` still replays, which is what "no new
+    engine version" claims.
+
+**The routes, each handled or refused, with its test:** an answer (3), an edit (6: the skip is a
+change request; an edit of a field changes nothing owed, asserted in 3's variant), a migration
+(12), an event (a required wait step completed by its event, in 9), a rule (5, 9), the opening (1,
+2), a plan (4, with a plan step's `failed`), a close or a stop (5, 8), a retry (6),
+continue-as-new (13).
