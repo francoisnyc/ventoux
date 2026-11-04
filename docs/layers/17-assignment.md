@@ -770,8 +770,11 @@ passed when first written were checked by switching off the code they guard (*mu
 | A person's choice outranks the rule: a kept holder stays; with nobody kept, the rule picks | `test_a_kept_holder_outranks_the_rule_and_the_rule_picks_when_nobody_is_kept` |
 | A kept holder who can no longer answer goes to its queue, saying why, and the rule then picks | `test_a_kept_holder_who_cant_answer_goes_and_the_rule_then_picks` |
 | Warned, never refused: a pick the approval may exclude; a task the step doesn't require | `test_a_pick_the_approval_may_exclude_is_a_warning`, `test_a_task_the_step_doesnt_require_may_find_nobody` |
+| … and a task required through another step gives no warning | `test_a_task_required_through_another_step_gives_no_warning` (*mutation-checked*: with `required_before` not transitive, it fails) |
 | Whom a rule may ask (each task's latest answerer, the opener) crosses continue-as-new; a state from before has none | `test_whom_a_rule_may_ask_crosses_as_data_and_a_state_from_before_has_none` (*mutation-checked*) |
 | … so a case carried from before asks its opener nobody (fail closed) | `test_a_case_carried_from_before_asks_its_opener_nobody` |
+| A migration renames whom a rule may ask with its task, so the rule still finds them (from the tutor's review of #85) | `test_a_migration_renames_whom_a_rule_may_ask_with_its_task` |
+| An approval's pick it excludes goes to its queue, saying why (from the tutor's review of #85) | `test_an_approvals_pick_it_excludes_goes_to_its_queue` (*mutation-checked*: with the pick not judged, it fails) |
 | The diff: added, stricter; removed, looser; another person asked, not proven; for a task's rule and an approval's | `test_the_diff_judges_a_rule`, `test_the_diff_judges_an_approvals_rule` |
 | The `assignment` comparison has its witness: one version refuses what the other takes | `test_diff_people.py::test_each_comparison_has_a_witness[assignment]` |
 | The case map and the plain diff read a rule aloud | `test_the_plain_forms_read_a_rule_aloud` |
@@ -779,3 +782,14 @@ passed when first written were checked by switching off the code they guard (*mu
 | The builder's example, shown in the builder guide, uses every key and value of the rule, and validates with no error | `test_builder_coverage.py`, `test_builder_guide.py` |
 | No earlier digest changes; the new shapes are pinned on their own | `test_digests.py` |
 | No new engine version: every history recorded before replays as it did | the replay tests of earlier layers, unchanged, all passing |
+
+## From the tutor's review of #85
+
+1. **A migration renamed every per-step record but whom a rule may ask.** `rename` renamed
+   `kept`, `asked`, `proposers` and the rest, not `answerers`, so a rule naming a renamed task
+   found nobody, saying "assessment hasn't been answered" of a task Ana had answered under its old
+   name. It failed closed, with a false reason. Fixed beside `kept`; D71 says so; the tutor's run is
+   the test. A migration dropping an answered step is already refused (`depending`).
+2. **No test made an approval's excluded pick go to its queue:** with the pick not judged, only
+   the task-opener test failed. The tutor's run is the test.
+3. *(Optional, done.)* `required_before`'s transitivity is pinned by a test.

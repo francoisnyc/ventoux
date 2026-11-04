@@ -25,7 +25,7 @@ from ventoux.case.state import Answered
 from ventoux.case.validate import validate_case
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
-from ventoux.testing import CATALOG, START, claim, give_back, propose, run_case
+from ventoux.testing import CATALOG, START, claim, give_back, migrate, propose, release_of, run_case
 from ventoux.tooling.builder import package as package_of
 from ventoux.tooling.schema import case_schema
 
@@ -492,3 +492,69 @@ def test_a_case_carried_from_before_asks_its_opener_nobody() -> None:
         "follow_up#1 in its queue: its rule found nobody: the case opened before its opener's "
         "roles were kept"
     ) in after.history
+
+
+# --- From the tutor's review of #85 ---
+
+
+def follow_up_after_pay(renamed_review: bool) -> dict[str, Any]:
+    """The guide's follow-up, opened once the payment is done; with `renamed_review`, release 2's
+    shape, `review` renamed `assessment` everywhere, the rule with it."""
+    definition = guide_follow_up()
+    definition["steps"]["follow_up"]["requires"] = ["pay"]
+    if not renamed_review:
+        return definition
+    text = json.dumps(definition, default=int)
+    text = text.replace('"review"', '"assessment"').replace(
+        '"review.outcome"', '"assessment.outcome"'
+    )
+    renamed: dict[str, Any] = json.loads(text)
+    return renamed
+
+
+def test_a_migration_renames_whom_a_rule_may_ask_with_its_task() -> None:
+    # Ana answered the review on release 1; release 2 calls it assessment. Whoever gave its
+    # latest answer is renamed with it (brief, D53) (brief, D71), so the follow-up, opened after
+    # the migration, is still asked of Ana.
+    release_1 = release_of(follow_up_after_pay(False), 1)
+    release_2 = release_of(follow_up_after_pay(True), 2)
+    run = run_case(
+        follow_up_after_pay(False),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 250}),
+            migrate(release_2, {"steps": {"review": "assessment"}}, "pia"),
+            ("case.change#1", "approve", "lee"),
+            ("pay", "approve", "sam"),
+        ],
+        people={**PEOPLE, "pia": ["platform"], "lee": ["support-lead", "platform"]},
+        release=release_1,
+    )
+    assert run.state.release == "refund 2"
+    assert "follow_up#1 assigned to ana by its rule" in run.history
+
+
+def test_an_approvals_pick_it_excludes_goes_to_its_queue() -> None:
+    # Without its `when`, pay reads review's answer only through approved_amount, so the rule is
+    # only warned about (ASSIGNS_MAY_BE_EXCLUDED); here Sam's answer did set it, so he can't
+    # approve pay, and the approval goes to its queue, saying why: a rule's pick is judged as
+    # their claim would be (brief, D11) (brief, D71).
+    definition = with_pay_assigned({"to": "answered", "step": "review"})
+    del definition["steps"]["pay"]["when"]
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[("review", "approve", "sam", {"approved_amount": 250})],
+        people=PEOPLE,
+    )
+    assert run.assignees == {}
+    assert (
+        "pay.approval#1 in its queue: sam set approved_amount, which pay uses, so cannot approve it"
+    ) in run.history
+
+
+def test_a_task_required_through_another_step_gives_no_warning() -> None:
+    # The follow-up requires pay, which requires the review: by the time it opens, the review has
+    # been answered, so asking its answerer warns of nothing (brief, D71).
+    issues = validate_case(parse_case(follow_up_after_pay(False)), CATALOG)
+    assert not [i for i in issues if i.code == "MAY_ASSIGN_NOBODY"]

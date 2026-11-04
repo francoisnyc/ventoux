@@ -2948,7 +2948,8 @@ Adds to D9, D11, D22, D37, D47, D55, D60, D69 and D70, whose text is kept.*
   assigned to ana by its rule`. A rule never stops a case: one that finds nobody, or someone who
   couldn't answer, leaves the entry in its queue, saying why. The case keeps who gave each
   task's latest answer, and the opener's roles, for this; a state from before has neither, so its
-  rules find nobody (fail closed).
+  rules find nobody (fail closed). A migration renames the answerer with its task (D53), so a
+  rule naming the task's new name still finds them.
 - **A person's choice outranks the definition's default:** on an approval asked again (D25), a
   holder kept from the old entry stays, and the rule picks only when nobody is kept.
 - **Validation refuses only what holds in every case (D37).** `ASSIGNS_EXCLUDED`: an approval's
