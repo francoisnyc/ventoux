@@ -8,6 +8,7 @@ import copy
 from typing import Any
 
 import pytest
+from test_approvals import FOUR_EYES
 from test_case import REFUND
 
 from ventoux.case.definition import CaseInvalid, parse_case
@@ -83,3 +84,21 @@ def test_a_malformed_rule_is_refused_when_read(rule: dict[str, Any], message: st
     # Fail closed: a rule the engine can't read as one of its two picks is no rule (brief, D71).
     with pytest.raises(CaseInvalid, match=message):
         parse_case(with_review_assigned(rule))
+
+
+def test_an_approval_needing_several_people_has_no_rule() -> None:
+    # One entry collects several people's approvals, so nobody holds it (brief, D47) (brief, D69):
+    # a rule naming one person can never be followed. That is the cause, said once: the pick
+    # isn't judged as well (one cause, one issue).
+    definition = copy.deepcopy(FOUR_EYES)
+    definition["steps"]["pay"]["approval"]["assign"] = {"to": "answered", "step": "review"}
+    issues = validate_case(parse_case(definition), CATALOG)
+    found = [i for i in issues if i.path == "steps.pay.approval.assign"]
+    assert [(i.code, i.severity, i.message) for i in found] == [
+        (
+            "ASSIGNS_SEVERAL",
+            "error",
+            "pay's approval needs 2 people, so nobody holds it and a rule can't ask one; remove "
+            "the rule, or its count",
+        )
+    ]

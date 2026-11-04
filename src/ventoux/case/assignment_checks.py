@@ -12,7 +12,8 @@ from ventoux.core.validate import Issue
 
 
 def assignment_issues(case: CaseDefinition) -> list[Issue]:
-    """Every approval's rule that picks someone it excludes in every run."""
+    """Every approval's rule that can never be followed: on an approval needing several people,
+    or picking someone it excludes in every run."""
     issues: list[Issue] = []
     for name, step in case.steps.items():
         if not isinstance(step, CallStep) or step.approval is None:
@@ -21,7 +22,18 @@ def assignment_issues(case: CaseDefinition) -> list[Issue]:
         if rule is None:
             continue
         path = f"steps.{name}.approval.assign"
-        if (why := always_excluded(case, name, step, rule.to, rule.step)) is not None:
+        # Nobody holds an entry collecting several people's approvals (brief, D47) (brief, D69),
+        # so the rule could never be followed: that is the cause, said alone.
+        if (count := step.approval.count) > 1:
+            issues.append(
+                Issue(
+                    path,
+                    "ASSIGNS_SEVERAL",
+                    f"{name}'s approval needs {count} people, so nobody holds it and a rule "
+                    "can't ask one; remove the rule, or its count",
+                )
+            )
+        elif (why := always_excluded(case, name, step, rule.to, rule.step)) is not None:
             issues.append(Issue(path, "ASSIGNS_EXCLUDED", why))
     return issues
 
