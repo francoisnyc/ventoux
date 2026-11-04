@@ -2662,35 +2662,67 @@ case's tasks are cancelled, and their holders see why (D10).
 
 ### Assignment rules
 
-A task can name who is asked when each of its entries opens, with `assign`:
+The definition can name who is asked when each entry opens, with `assign`, on a task step or on
+an approval. A follow-up that goes to whoever did the review:
 
 ```json
 "follow_up": {
-  "task": {"roles": ["support"], "outcomes": {"done": {}}},
-  "assign": {"to": "answered", "step": "review"},
-  "display": {"title": "Follow up with the customer"}
+  "kind": "task",
+  "display": {"title": "Follow up with the customer"},
+  "roles": ["support"],
+  "outcomes": {"done": {"display": {"title": "Done"}}},
+  "requires": ["review"],
+  "assign": {"to": "answered", "step": "review"}
 }
 ```
 
-Read aloud: *each follow-up is assigned to whoever answered the review.* An assignment rule picks
-a person the case already knows. `{"to": "opener"}` picks the person who opened the case.
-`{"to": "answered", "step": …}` picks the person who last answered that task. Nobody's
-identifier is ever typed into a definition, and no field's value picks the person. If the rule
-finds nobody (a system opened the case, say), the entry is in its queue, saying why. If the
-person it picks couldn't answer the entry, the entry is in its queue too, with the reason.
-
-`ventoux check` refuses a rule that can only pick people who can't answer:
+Read aloud: *each follow-up is asked of whoever answered the review.* When `follow_up#1` opens,
+the engine finds that Ana answered the review, checks that Ana could answer the follow-up, as a
+claim is checked (D69), and makes her its holder:
 
 ```
-ASSIGNS_EXCLUDED  pay's approval is assigned to whoever answered review, whose answer sets
-                  approved_amount, which pay uses, so they can never approve it; assign it to
-                  nobody, so it goes to its queue
+started follow_up#1: waiting for done by support
+follow_up#1 assigned to ana by its rule
 ```
 
-The case map reads the rule ("assigned to whoever answered the review"), and the semantic diff
-shows an added, changed or removed `assign`. Since a held entry is answered only by its holder,
-an added `assign` narrows who may answer, so the diff reads it as stricter. A removed one reads
-as looser, and a changed one as a doubt, so looser (D55).
+**A rule picks only people the case already knows,** each named by the trusted caller (D19, D22):
+
+- `{"to": "opener"}`: the person who opened the case;
+- `{"to": "answered", "step": "review"}`: whoever last answered that task.
+
+Nobody's identifier is typed into a definition, and no field's value picks anyone, so untrusted
+data never routes work: a customer's email can't send their refund to a friend.
+
+**A rule never stops a case.** If it finds nobody (a system opened the case, or the review hasn't
+been answered), or the person it finds couldn't answer the entry, the entry is in its queue,
+saying why: `follow_up#1 in its queue: its rule found nobody: review hasn't been answered`.
+
+**An approval's rule** is written inside the approval, `"approval": {"roles": [...], "assign":
+{...}}`. When an approval is asked again (D25), a holder kept from the old entry (D69) stays; the
+rule picks only when nobody is kept. An approval needing several people (`count` above 1) can't
+have a rule, since nobody holds it: `ventoux check` refuses it (`ASSIGNS_SEVERAL`).
+
+**`ventoux check` refuses a rule that can only pick people who can never answer.** On an approval
+this can be proven from the definition: the exclusions come from provenance (D11). `pay`'s
+approval asked of whoever answered the review, whose answer sets what `pay` sends, or of the
+opener, who approves nothing:
+
+```
+ASSIGNS_EXCLUDED  steps.pay.approval.assign: whoever answered review set approved_amount, which
+                  pay uses, so they can never approve it; leave the approval to its queue, or
+                  assign it to someone else's task
+```
+
+On a task it can't be: whether the reviewer also has the follow-up's role is a staffing fact the
+engine never looks up (D22), so a mismatch is found when the entry opens, and it goes to its
+queue. A rule naming a task that may not have been answered when the entry opens is a warning
+(`MAY_ASSIGN_NOBODY`): it can be right, but it may find nobody.
+
+**In the diff and the plain forms.** The case map reads the rule aloud ("asked of whoever
+answered the review"). Since a held entry is answered only by its holder, an added `assign`
+narrows who may answer, so the semantic diff reads it as stricter; a removed one as looser; a
+changed one as a doubt, so looser (D55). The builder writes it `assign=Assign.answered("review")`
+or `Assign.opener()`, and the JSON Schema publishes its shape.
 
 ### What the report shows
 
