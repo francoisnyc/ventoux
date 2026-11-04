@@ -1936,4 +1936,11 @@ and record the key points. A question is closed once you can explain the answer 
 - Then, asked what changes for Ana herself: "tell me". Given: the entry is on her list and out of
   the queue (`assignees`); it waits on her until she gives it back or someone who assigns moves
   it; and only she may give it back (`sam doesn't hold review#1; ana does`).
+- Asked again at the end of layer 17b's walk-through (2026-11-04), with an assigner: Lee assigns
+  `pay.approval#1` to Sam. "Tell me." Given: no permission (the assignment was judged as Sam's
+  claim would be, and Lee had to be no party to the decision, D70); for Sam, the entry is on his
+  list, waits on him, he alone gives it back, and a re-asked entry is kept for him if he may still
+  approve it; for everyone else, Pia's answer is refused while Sam holds it, and an assigner who is
+  no party can still move it; unchanged for Sam, every check his answer faces (role, risk, sight,
+  exclusions), and `waiting_for`, naming nobody.
 - Status: open, until the three parts come back from memory.
