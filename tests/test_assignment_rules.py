@@ -261,3 +261,44 @@ def test_a_kept_holder_outranks_the_rule_and_the_rule_picks_when_nobody_is_kept(
     )
     assert picked.assignees == {"pay.approval#2": "lee"}
     assert "pay.approval#2 assigned to lee by its rule" in picked.history
+
+
+def test_a_pick_the_approval_may_exclude_is_a_warning() -> None:
+    # Without its `when`, pay reads review's answer only through approved_amount, which an edit
+    # or a rule may give instead: whoever answered the review may be excluded, not in every case,
+    # so it is said, never refused (brief, D37) (brief, D71).
+    definition = with_pay_assigned({"to": "answered", "step": "review"})
+    del definition["steps"]["pay"]["when"]
+    issues = validate_case(parse_case(definition), CATALOG)
+    found = [i for i in issues if i.path == "steps.pay.approval.assign"]
+    assert [(i.code, i.severity, i.message) for i in found] == [
+        (
+            "ASSIGNS_MAY_BE_EXCLUDED",
+            "warning",
+            (
+                "whoever answered review may be excluded from approving pay: their answer can "
+                "reach what pay reads; then the approval goes to its queue"
+            ),
+        )
+    ]
+
+
+def test_a_task_the_step_doesnt_require_may_find_nobody() -> None:
+    # The review asks whoever answered it, which no run of it can have done before the first:
+    # said, never refused. A task the step requires has been answered by then: no warning.
+    issues = validate_case(
+        parse_case(with_review_assigned({"to": "answered", "step": "review"})), CATALOG
+    )
+    found = [i for i in issues if i.path == "steps.review.assign"]
+    assert [(i.code, i.severity, i.message) for i in found] == [
+        (
+            "MAY_ASSIGN_NOBODY",
+            "warning",
+            (
+                "review doesn't require review, so it may not have been answered when review "
+                "opens; then review goes to its queue"
+            ),
+        )
+    ]
+    required = validate_case(parse_case(with_triage()), CATALOG)
+    assert not [i for i in required if i.code == "MAY_ASSIGN_NOBODY"]
