@@ -574,7 +574,7 @@ written were checked by switching off the code they guard and watching them fail
 
 # 17c: assignment rules
 
-Status: 2026-11-04, agreed; seams next. Starts from `main` at `605f9a3`, with 17a (#83) and
+Status: 2026-11-04, agreed; 17c built, its promises checked. Starts from `main` at `605f9a3`, with 17a (#83) and
 17b (#84) merged. The warm-up was asked and recorded (learning question 41). The guide was written
 first: `docs/guides/cases.md`, "Assignment rules", with the recommendations below.
 
@@ -749,3 +749,33 @@ routes are unchanged.
    parser's alone. The schema refuses what it can: an unknown `to`, a key of its own.
 8. **A re-asked approval whose kept holder can no longer answer** goes to its queue, saying why,
    and then its rule picks: "nobody kept" includes a holder sent back.
+
+## Promises (17c)
+
+Each claim D71, the note's 17c part and the guides make about behaviour, and the test that fails
+if it isn't true. Tests in `tests/test_assignment_rules.py` unless named otherwise. Tests that
+passed when first written were checked by switching off the code they guard (*mutation-checked*).
+
+| Promise | The test that would fail |
+|---|---|
+| A rule on an approval that can only pick someone it excludes is refused at validation: whoever answered a task the step reads the outcome of, or the opener (curriculum) | `test_an_approval_asked_of_someone_it_always_excludes_is_refused` |
+| A rule on an approval needing several people is refused, as the one cause | `test_an_approval_needing_several_people_has_no_rule` |
+| A malformed rule is refused when read: an unknown `to`, `answered` with no step, `opener` with one, a step that doesn't exist or isn't a task, a key of its own | `test_a_malformed_rule_is_refused_when_read` |
+| … and by the JSON Schema where a shape can say it (an unknown `to`, a key of its own) | `test_schema.py::test_a_wrong_case_is_refused_by_the_schema_as_by_the_parser` |
+| When an entry opens, its rule asks whom it picks, judged as their claim would be, with the roles they stated; the history says so (the guide's example, run from its JSON block) | `test_the_guides_follow_up_is_asked_of_whoever_answered_the_review` |
+| A rule never stops a case: one that finds nobody (not yet answered, a system opened the case) or someone who couldn't answer leaves the entry in its queue, saying why | `test_a_rule_that_finds_nobody_who_can_answer_leaves_the_entry_in_its_queue` |
+| The opener is judged with the roles stated with the opening, in memory and on Temporal | `test_a_rule_asks_the_opener_judged_with_the_roles_stated_with_the_opening` (*mutation-checked*), `test_temporal_claims.py::test_a_rule_asking_the_opener_on_temporal_judges_the_roles_the_start_states` (*mutation-checked*) |
+| `answered` asks whoever gave the latest answer | `test_answered_asks_whoever_gave_the_latest_answer` (*mutation-checked*) |
+| An approval's rule asks whom it picks | `test_an_approvals_rule_asks_whom_it_picks` |
+| A person's choice outranks the rule: a kept holder stays; with nobody kept, the rule picks | `test_a_kept_holder_outranks_the_rule_and_the_rule_picks_when_nobody_is_kept` |
+| A kept holder who can no longer answer goes to its queue, saying why, and the rule then picks | `test_a_kept_holder_who_cant_answer_goes_and_the_rule_then_picks` |
+| Warned, never refused: a pick the approval may exclude; a task the step doesn't require | `test_a_pick_the_approval_may_exclude_is_a_warning`, `test_a_task_the_step_doesnt_require_may_find_nobody` |
+| Whom a rule may ask (each task's latest answerer, the opener) crosses continue-as-new; a state from before has none | `test_whom_a_rule_may_ask_crosses_as_data_and_a_state_from_before_has_none` (*mutation-checked*) |
+| … so a case carried from before asks its opener nobody (fail closed) | `test_a_case_carried_from_before_asks_its_opener_nobody` |
+| The diff: added, stricter; removed, looser; another person asked, not proven; for a task's rule and an approval's | `test_the_diff_judges_a_rule`, `test_the_diff_judges_an_approvals_rule` |
+| The `assignment` comparison has its witness: one version refuses what the other takes | `test_diff_people.py::test_each_comparison_has_a_witness[assignment]` |
+| The case map and the plain diff read a rule aloud | `test_the_plain_forms_read_a_rule_aloud` |
+| The builder writes the guide's follow-up key for key; the schema accepts it | `test_the_builder_writes_the_guides_follow_up_and_the_schema_accepts_it` (*mutation-checked*) |
+| The builder's example, shown in the builder guide, uses every key and value of the rule, and validates with no error | `test_builder_coverage.py`, `test_builder_guide.py` |
+| No earlier digest changes; the new shapes are pinned on their own | `test_digests.py` |
+| No new engine version: every history recorded before replays as it did | the replay tests of earlier layers, unchanged, all passing |

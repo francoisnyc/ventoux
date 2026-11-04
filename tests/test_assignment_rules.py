@@ -6,6 +6,7 @@ See docs/layers/17-assignment.md (17c) and docs/guides/cases.md, "Assignment rul
 
 import copy
 import json
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -18,11 +19,13 @@ from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.diff import diff
 from ventoux.case.plain import plain
 from ventoux.case.releases import package
+from ventoux.case.runtime import decide
 from ventoux.case.sheet import case_map
+from ventoux.case.state import Answered
 from ventoux.case.validate import validate_case
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
-from ventoux.testing import CATALOG, claim, give_back, propose, run_case
+from ventoux.testing import CATALOG, START, claim, give_back, propose, run_case
 from ventoux.tooling.builder import package as package_of
 from ventoux.tooling.schema import case_schema
 
@@ -432,3 +435,60 @@ def test_the_builder_writes_the_guides_follow_up_and_the_schema_accepts_it() -> 
     written_case = json.loads(package_of(refund)["case.json"])
     assert written_case["steps"]["follow_up"] == guide_json(-1)["follow_up"]
     assert schema_accepts(case_schema(), json.loads(json.dumps(guide_follow_up(), default=int)))
+
+
+def test_a_kept_holder_who_cant_answer_goes_and_the_rule_then_picks() -> None:
+    # Sam holds pay's approval, then answers the reworked review himself, so the new values are
+    # his and he can't approve them: the new entry goes to its queue, saying why (brief, D69),
+    # and, nobody being kept, its rule asks whoever took the refund, Lee (brief, D71).
+    run = run_case(
+        with_triage(),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[
+            REVIEWED,
+            TRIAGED,
+            give_back("pay.approval#1", "lee"),
+            claim("pay.approval#1", "sam"),
+            propose("review", "ana"),
+            ("review", "approve", "sam", {"approved_amount": 300}),
+        ],
+        people=PEOPLE,
+    )
+    assert run.assignees == {"pay.approval#2": "lee"}
+    sent_back = (
+        "pay.approval#2 back in its queue: sam set approved_amount, which pay uses, so cannot "
+        "approve it"
+    )
+    picked = "pay.approval#2 assigned to lee by its rule"
+    assert run.history.index(sent_back) < run.history.index(picked)
+
+
+def test_a_case_carried_from_before_asks_its_opener_nobody() -> None:
+    # A case opened before 17c, carried across continue-as-new: it knows who opened it, not their
+    # roles, so a rule asking the opener can't judge them and finds nobody (fail closed).
+    definition = guide_follow_up()
+    definition["steps"]["follow_up"]["assign"] = {"to": "opener"}
+    case = parse_case(definition)
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[],
+        people=PEOPLE,
+        opened_by="ana",
+    )
+    carried = state_as_data(run.state)
+    del carried["answerers"], carried["opener"]
+    older = state_from_data(carried, {})
+    reviewed = Answered(
+        "review#1",
+        "approve",
+        "ana",
+        frozenset(PEOPLE["ana"]),
+        {"approved_amount": Decimal(40)},
+        at=START,
+    )
+    after, _ = decide(case, CATALOG, older, reviewed)
+    assert (
+        "follow_up#1 in its queue: its rule found nobody: the case opened before its opener's "
+        "roles were kept"
+    ) in after.history
