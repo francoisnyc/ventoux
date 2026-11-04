@@ -4,6 +4,8 @@ an answer, and the holders cross continue-as-new with the case's state (brief, D
 See docs/layers/17-assignment.md (17a).
 """
 
+import copy
+
 from temporalio.client import Client
 from test_temporal_case import (
     LARGE,
@@ -87,3 +89,20 @@ def test_assigning_on_temporal_is_signalled_recorded_and_carried() -> None:
     assert moved.status == "open"
     assert back.history[-1] == "lee returned review#1 to its queue as support-lead, from sam"
     assert back.assignees == {}
+
+
+def test_a_rule_asking_the_opener_on_temporal_judges_the_roles_the_start_states() -> None:
+    # The opener's roles cross in the case's start, as the API states them, so the rule can
+    # judge them: Ana, support, is asked the review (brief, D71).
+    assigned = copy.deepcopy(REFUND)
+    assigned["steps"]["review"]["assign"] = {"to": "opener"}
+
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(
+            client, SwitchingCases, assigned, LARGE, "refund-1", QUEUE, "ana", ["support"]
+        )
+        return await reported(case, lambda now: bool(now.waiting_for))
+
+    now = on_temporal(scenario, cases=SwitchingCases)
+    assert now.assignees == {"review#1": "ana"}
+    assert "review#1 assigned to ana by its rule" in now.history

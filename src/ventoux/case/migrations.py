@@ -522,6 +522,9 @@ def rename(
     state.asked = {step(name): count for name, count in state.asked.items()}
     state.proposers = {step(name): who for name, who in state.proposers.items()}
     state.kept = {step(name): holder for name, holder in state.kept.items()}
+    # Whoever gave a task's latest answer is renamed with the task, so a rule asking them under
+    # its new name still finds them (brief, D53) (brief, D71).
+    state.answerers = {step(name): who for name, who in state.answerers.items()}
     state.waiting_to_start = [step(name) for name in state.waiting_to_start]
     state.proposed_by_rules = {
         step(name): dataclasses.replace(

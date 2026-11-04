@@ -571,3 +571,225 @@ written were checked by switching off the code they guard and watching them fail
 | On Temporal, `assign` and `unassign` are signals; a refused one is recorded and the case waits on; an assigned holder crosses continue-as-new | `test_temporal_claims.py::test_assigning_on_temporal_is_signalled_recorded_and_carried` |
 | No refusal or history line quotes a value | every refusal and line the tests above check is asserted whole, and each names people, roles and entries only |
 | No new engine version: every history recorded before replays as it did | the replay tests of earlier layers, unchanged, all passing |
+
+# 17c: assignment rules
+
+Status: 2026-11-04, agreed; 17c built, its promises checked. Starts from `main` at `605f9a3`, with 17a (#83) and
+17b (#84) merged. The warm-up was asked and recorded (learning question 41). The guide was written
+first: `docs/guides/cases.md`, "Assignment rules", with the recommendations below.
+
+**Answered 2026-11-04.** Choices 9, 11, 12 and 21 to 26 as recommended; 10 as agreed with 17a.
+D71 is written before 17c is built.
+
+## What 17c is for
+
+17a and 17b let people set an entry's holder. 17c lets the **definition** set one, when each entry
+opens: `"assign": {"to": "answered", "step": "review"}`, *asked of whoever answered the review*.
+A rule picks only people the case already knows (choice 10, agreed), so every person it can pick
+was named by the trusted caller, and untrusted data never routes work. It narrows who may answer
+(D69), so the semantic diff judges it, and validation refuses one that can only pick someone who
+can never answer.
+
+## Choices for 17c
+
+Choices 9 to 12 were sketched with 17a. 10 was agreed then and stands; 9, 11 and 12 are settled
+here, 9 changed by what step 1 found. Each answer goes into **D71**, written before 17c is built.
+
+9. **Where `assign` is written** (*changed from the sketch*). On a task step, and inside an
+   approval: `"approval": {"roles": [...], "assign": {...}}`. The sketch said a task step only, but
+   an approval isn't a task step, and the curriculum's negative test is about approvals (choice
+   11). Evaluated when each entry opens, on the case as it is then; it has no moment of its own.
+   *Recommended.*
+
+10. **What a rule may read** (agreed). `{"to": "opener"}` and `{"to": "answered", "step": …}`;
+    no identifier typed, no field. A field holding a person stays a deliberate limit.
+
+21. **Which answerer `answered` picks.** The latest answer's person, as `outcome` reads the latest
+    answer (D9). *Recommended.* The alternative, the first, would pick someone whose answer no
+    longer counts.
+
+22. **When the rule finds nobody, or someone who couldn't answer.** The entry is in its queue,
+    saying why (`follow_up#1 in its queue: its rule found nobody: review hasn't been answered`;
+    `…: <the reason their claim would be refused>`). Never an error that stops the case.
+    *Recommended.*
+
+23. **How the pick is judged, and recorded.** As a claim is (17a's `role_to_hold`), with the
+    roles the picked person stated when they acted: the opener's with the opening, the answerer's
+    with their answer. They become the holder with those roles. The history says `follow_up#1
+    assigned to ana by its rule`. *Recommended.* *Needed for it:* the case keeps who answered each
+    task last, with their roles, and the opener's roles. Today it keeps neither: a small addition
+    to the state, carried across continue-as-new, absent from older states (then the rule finds
+    nobody, failing closed).
+
+24. **A re-asked approval with a rule and a kept holder.** The kept holder (D69) stays, and the
+    rule picks only when nobody is kept: a person's claim or an assigner's choice outranks the
+    definition's default. *Recommended.*
+
+11. **What validation refuses and warns about.** Errors only where proven for every case (D37):
+    - `ASSIGNS_EXCLUDED` (error), on an approval only: a rule picking the opener, who approves
+      nothing (D11); or whoever answered a task the step's approval always excludes, as the diff
+      already proves it (`excluded_every_time`: a task, not repeatable, whose outcome the step's
+      inputs or `when` read). The refund's `pay` reads `review.outcome` in its `when`, so `pay`'s
+      approval asked of whoever answered the review is refused. *The curriculum's negative test.*
+    - `ASSIGNS_MAY_BE_EXCLUDED` (warning): whoever answered a task the approval *may* exclude
+      (`excluded`: their answer can reach what the step reads), but not in every case.
+    - `ASSIGNS_SEVERAL` (error): a rule on an approval whose `count` is above 1 (D47).
+    - `MAY_ASSIGN_NOBODY` (warning): `answered` naming a task the step doesn't require, directly or
+      through its requirements, so it may not have been answered when the entry opens.
+    - Refused when the definition is read: an unknown `to`; `answered` without a step, or naming a
+      step that isn't a task, or one that doesn't exist; `opener` with a step.
+    - On a task, a role mismatch can't be proven (D22): never refused, found when the entry opens.
+    *Recommended.*
+
+12. **The diff and the plain forms.** An added `assign` narrows who may answer: stricter. Removed:
+    looser. Changed: a doubt, so looser (D55). The case map and the rules sheet read it aloud:
+    "asked of whoever answered the review", "asked of whoever opened the case". *Recommended.*
+
+25. **The builder and the JSON Schema.** `Assign.answered(review)` and `Assign.opener()`, a small
+    frozen dataclass like `Approval`; `assign=` on `task(...)` and on `Approval`. The JSON Schema
+    is generated from the models, so it publishes the shape (D60), and `ventoux schema` is
+    regenerated. *Recommended.*
+
+26. **The engine version.** No definition readable before holds `assign`, so no history decides
+    differently: no new version (as D66 to D68 did). The key is behaviour, so the digest covers it
+    (D50). *Recommended.*
+
+## The split
+
+One pull request, `layer-17c-rules`. Its negative test, from the curriculum: an assignment rule
+that can only pick people who can't answer the task is refused at validation (`ASSIGNS_EXCLUDED`).
+
+## Seams and tests for 17c (curriculum step 4)
+
+17c reaches more of the engine than 17a or 17b, so each place gets the seam its existing tests
+already use. No test reads how a pick is stored.
+
+### The seams
+
+1. **The definition:** `parse_case(definition)`, accepting `assign` on a task step and inside an
+   approval, and raising `CaseInvalid` with its path for a malformed rule (`steps.follow_up.assign:
+   …`), as every read-time refusal does.
+2. **The runtime:** `run_case`, unchanged. The pick shows in `run.assignees` and the history
+   (`follow_up#1 assigned to ana by its rule`, `follow_up#1 in its queue: …`); on Temporal, in
+   `CaseReport`. What the case keeps to pick from (the latest answerer of each task, the opener's
+   roles) is state, crossing continue-as-new; tested through `state_as_data` / `state_from_data`,
+   as 17a's holders are.
+3. **Validation:** `validate_case(case, catalog)` returns `Issue`s; the tests assert `code`, `path`,
+   whether it is an error or a warning, and the message whole: `ASSIGNS_EXCLUDED`,
+   `ASSIGNS_SEVERAL`, `ASSIGNS_MAY_BE_EXCLUDED`, `MAY_ASSIGN_NOBODY`.
+4. **The diff:** `diff(before, after, catalog)` gives `Change`s; the tests assert the path
+   (`steps.follow_up.assign`, `steps.pay.approval.assign`), the verdict and `said`.
+5. **The plain forms:** `case_map(package, catalog)` and `plain(diff, before, after, catalog)`, as
+   text: the step's sentence gains "asked of whoever answered review" / "asked of whoever opened
+   the case".
+6. **The builder:** `Assign.answered(task)`, `Assign.opener()`, `assign=` on `Case.task(...)` and on
+   `Approval`; the test writes the guide's follow-up with the builder and compares the JSON, as
+   the builder's tests do.
+7. **The JSON Schema:** `case_schema()`; `ventoux schema --unchanged` passes once the committed
+   schema is regenerated; a wrong `assign` shape is refused by both the schema and the parser
+   (`tests/test_schema.py`'s fixed set).
+
+### The tests, in the order I'd write them
+
+1. **(negative, curriculum)** `pay`'s approval asked of whoever answered the review is refused at
+   validation: `ASSIGNS_EXCLUDED`, at `steps.pay.approval.assign`, with the guide's message. So is
+   one asking the opener.
+2. **(negative)** Malformed rules are refused when read: an unknown `to`; `answered` with no step,
+   an unknown step, or a step that isn't a task; `opener` with a step.
+3. **(negative)** `ASSIGNS_SEVERAL`: a rule on an approval needing two people.
+4. The guide's follow-up runs: Ana answers the review; `follow_up#1` is hers, `follow_up#1 assigned
+   to ana by its rule`. The guide's JSON block is the definition the test runs.
+5. A rule that finds nobody, or someone who couldn't answer, leaves the entry in its queue, saying
+   why; a rule asking the opener, when a system opened the case, finds nobody.
+6. `answered` picks the latest answer's person, on a repeatable task.
+7. An approval's rule picks someone it doesn't exclude; when the approval is asked again, a kept
+   holder outranks the rule; with nobody kept, the rule picks again.
+8. The warnings: `ASSIGNS_MAY_BE_EXCLUDED` (whoever answered a task whose answer *may* reach what
+   the step reads), and `MAY_ASSIGN_NOBODY` (a task the step doesn't require).
+9. What the case keeps to pick from crosses continue-as-new; a state from before has none, so a
+   rule finds nobody.
+10. The diff: added, stricter; removed, looser; changed, looser.
+11. The plain forms: the case map's sentence, and the plain diff's before and after.
+12. The builder writes the guide's follow-up as its JSON; the JSON Schema accepts it, and refuses a
+    wrong shape, as the parser does.
+13. **Replay:** every history recorded before still replays.
+
+**The routes by which a rule sets a holder:** an entry opening, whatever opened it (the opening's
+rules, a person's proposal, a rule's start, a retry's re-ask of an approval, a re-asked approval);
+each goes through one of the two places an entry opens: a task's run in `start`, an approval in
+`ask` (`runtime.py`, `approvals.py`). Tests 4 and 5 drive the first, test 7 the second. 17a's and 17b's
+routes are unchanged.
+
+## Decided while building 17c
+
+1. **The opening carries the opener's roles.** D71 judges an opener "with the roles they stated
+   with the opening", but the opening carried none. `Opened` gains `roles` and Temporal's
+   `CaseStart` gains `opener_roles` (both empty by default); `start_case` and `run_case` state
+   them; D71's text says so. A case opened before has none, so a rule asking its opener finds
+   someone with no role, and the entry goes to its queue (fail closed).
+2. **What the case keeps:** `answerers` (each task's latest answerer, as a `Holder`, recorded where
+   an answer is taken, so a held answer counts once its checks are back) and `opener` (a `Holder`,
+   with the opening's time). Both cross continue-as-new; an older state has neither.
+3. **Validation reuses layer 13's proofs:** `ASSIGNS_EXCLUDED` asks `excluded_every_time`, the
+   warning `ASSIGNS_MAY_BE_EXCLUDED` asks `excluded`. Nothing is proven twice. `ASSIGNS_SEVERAL` is
+   checked first, as the one cause. The guide's example message was corrected in step 3: `pay`'s
+   `when` reads `review.outcome`, which is what proves the exclusion, not `approved_amount`.
+4. **The diff judges a rule whole,** as it does an expression: one change, "who is asked", before
+   and after, never one per key. It gives its verdict by a new comparison, `assignment`, added to
+   the closed list with its witness (`test_diff_people.py::assignment_witness`): with the review
+   asked of its opener, Pia's answer is refused; without the rule, taken.
+5. **One wording for a rule,** `Assign.aloud()`: the diff's `said` and the case map's sentence
+   ("Each run is asked of whoever answered review.") read the same.
+6. **The repository's guards brought the builder, the schema and a pinned package forward to
+   test 4:** every key of the format must be written by a builder file (`examples/builder/
+   assigned.py`, shown in the builder guide), the committed schema must be what the models say
+   (regenerated), and every shape must be in a pinned package (`tests/digests/assignments`, its
+   own, so every earlier digest stays as pinned, D50).
+7. **The schema can't say that `answered` names a step:** it is a check across two keys, the
+   parser's alone. The schema refuses what it can: an unknown `to`, a key of its own.
+8. **A re-asked approval whose kept holder can no longer answer** goes to its queue, saying why,
+   and then its rule picks: "nobody kept" includes a holder sent back.
+
+## Promises (17c)
+
+Each claim D71, the note's 17c part and the guides make about behaviour, and the test that fails
+if it isn't true. Tests in `tests/test_assignment_rules.py` unless named otherwise. Tests that
+passed when first written were checked by switching off the code they guard (*mutation-checked*).
+
+| Promise | The test that would fail |
+|---|---|
+| A rule on an approval that can only pick someone it excludes is refused at validation: whoever answered a task the step reads the outcome of, or the opener (curriculum) | `test_an_approval_asked_of_someone_it_always_excludes_is_refused` |
+| A rule on an approval needing several people is refused, as the one cause | `test_an_approval_needing_several_people_has_no_rule` |
+| A malformed rule is refused when read: an unknown `to`, `answered` with no step, `opener` with one, a step that doesn't exist or isn't a task, a key of its own | `test_a_malformed_rule_is_refused_when_read` |
+| … and by the JSON Schema where a shape can say it (an unknown `to`, a key of its own) | `test_schema.py::test_a_wrong_case_is_refused_by_the_schema_as_by_the_parser` |
+| When an entry opens, its rule asks whom it picks, judged as their claim would be, with the roles they stated; the history says so (the guide's example, run from its JSON block) | `test_the_guides_follow_up_is_asked_of_whoever_answered_the_review` |
+| A rule never stops a case: one that finds nobody (not yet answered, a system opened the case) or someone who couldn't answer leaves the entry in its queue, saying why | `test_a_rule_that_finds_nobody_who_can_answer_leaves_the_entry_in_its_queue` |
+| The opener is judged with the roles stated with the opening, in memory and on Temporal | `test_a_rule_asks_the_opener_judged_with_the_roles_stated_with_the_opening` (*mutation-checked*), `test_temporal_claims.py::test_a_rule_asking_the_opener_on_temporal_judges_the_roles_the_start_states` (*mutation-checked*) |
+| `answered` asks whoever gave the latest answer | `test_answered_asks_whoever_gave_the_latest_answer` (*mutation-checked*) |
+| An approval's rule asks whom it picks | `test_an_approvals_rule_asks_whom_it_picks` |
+| A person's choice outranks the rule: a kept holder stays; with nobody kept, the rule picks | `test_a_kept_holder_outranks_the_rule_and_the_rule_picks_when_nobody_is_kept` |
+| A kept holder who can no longer answer goes to its queue, saying why, and the rule then picks | `test_a_kept_holder_who_cant_answer_goes_and_the_rule_then_picks` |
+| Warned, never refused: a pick the approval may exclude; a task the step doesn't require | `test_a_pick_the_approval_may_exclude_is_a_warning`, `test_a_task_the_step_doesnt_require_may_find_nobody` |
+| … and a task required through another step gives no warning | `test_a_task_required_through_another_step_gives_no_warning` (*mutation-checked*: with `required_before` not transitive, it fails) |
+| Whom a rule may ask (each task's latest answerer, the opener) crosses continue-as-new; a state from before has none | `test_whom_a_rule_may_ask_crosses_as_data_and_a_state_from_before_has_none` (*mutation-checked*) |
+| … so a case carried from before asks its opener nobody (fail closed) | `test_a_case_carried_from_before_asks_its_opener_nobody` |
+| A migration renames whom a rule may ask with its task, so the rule still finds them (from the tutor's review of #85) | `test_a_migration_renames_whom_a_rule_may_ask_with_its_task` |
+| An approval's pick it excludes goes to its queue, saying why (from the tutor's review of #85) | `test_an_approvals_pick_it_excludes_goes_to_its_queue` (*mutation-checked*: with the pick not judged, it fails) |
+| The diff: added, stricter; removed, looser; another person asked, not proven; for a task's rule and an approval's | `test_the_diff_judges_a_rule`, `test_the_diff_judges_an_approvals_rule` |
+| The `assignment` comparison has its witness: one version refuses what the other takes | `test_diff_people.py::test_each_comparison_has_a_witness[assignment]` |
+| The case map and the plain diff read a rule aloud | `test_the_plain_forms_read_a_rule_aloud` |
+| The builder writes the guide's follow-up key for key; the schema accepts it | `test_the_builder_writes_the_guides_follow_up_and_the_schema_accepts_it` (*mutation-checked*) |
+| The builder's example, shown in the builder guide, uses every key and value of the rule, and validates with no error | `test_builder_coverage.py`, `test_builder_guide.py` |
+| No earlier digest changes; the new shapes are pinned on their own | `test_digests.py` |
+| No new engine version: every history recorded before replays as it did | the replay tests of earlier layers, unchanged, all passing |
+
+## From the tutor's review of #85
+
+1. **A migration renamed every per-step record but whom a rule may ask.** `rename` renamed
+   `kept`, `asked`, `proposers` and the rest, not `answerers`, so a rule naming a renamed task
+   found nobody, saying "assessment hasn't been answered" of a task Ana had answered under its old
+   name. It failed closed, with a false reason. Fixed beside `kept`; D71 says so; the tutor's run is
+   the test. A migration dropping an answered step is already refused (`depending`).
+2. **No test made an approval's excluded pick go to its queue:** with the pick not judged, only
+   the task-opener test failed. The tutor's run is the test.
+3. *(Optional, done.)* `required_before`'s transitivity is pinned by a test.

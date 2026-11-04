@@ -528,7 +528,15 @@ def run_case(
     # case checks its digest (brief, D51).
     named = None if release is None else f"{release.name} {release.release}"
     events: list[Event | Finish | Advance] = [
-        Opened(wrapped(case, as_json(file)), opened_by, at=now, engine=engine, release=named)
+        Opened(
+            wrapped(case, as_json(file)),
+            opened_by,
+            at=now,
+            engine=engine,
+            release=named,
+            # The test plays the API: it states the opener's roles too (brief, D71).
+            roles=frozenset(people.get(opened_by, ())) if opened_by is not None else frozenset(),
+        )
     ]
     for item in answers:
         if isinstance(item, Later):

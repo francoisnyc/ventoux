@@ -14,6 +14,7 @@ from typing import Any, Literal
 from ventoux.tooling.builder.common import called_from, display, field_name, given
 from ventoux.tooling.builder.entries import (
     Approval,
+    Assign,
     Event,
     Milestone,
     Moment,
@@ -126,11 +127,15 @@ class Case:
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
+        assign: Assign | None = None,
     ) -> Task:
-        """A task for a person holding one of `roles`, answered with one of `outcomes`."""
+        """A task for a person holding one of `roles`, answered with one of `outcomes`; asked of
+        whom `assign` picks when each run opens (brief, D71)."""
         entry: Data = {"kind": "task", "display": display(title, description), "roles": list(roles)}
         entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
         entry["outcomes"] = {key: answer(outcome) for key, outcome in outcomes.items()}
+        if assign is not None:
+            entry["assign"] = assigned(assign)
         self.add(name, entry)
         return Task(name)
 
@@ -424,6 +429,14 @@ def answer(outcome: Outcome) -> Data:
     return data
 
 
+def assigned(rule: Assign) -> Data:
+    """A rule's JSON: `{"to": "opener"}`, or `{"to": "answered", "step": "review"}`."""
+    data: Data = {"to": rule.to}
+    if rule.step is not None:
+        data["step"] = rule.step.name
+    return data
+
+
 def approved_by(approval: Approval) -> Data:
     """An approval's JSON: when, who, how many, and the reason people read."""
     data: Data = {}
@@ -433,6 +446,8 @@ def approved_by(approval: Approval) -> Data:
     if approval.count is not None:
         data["count"] = approval.count  # how many distinct people (brief, D47)
     data["display"] = {"reason": approval.reason}
+    if approval.assign is not None:
+        data["assign"] = assigned(approval.assign)  # who is asked (brief, D71)
     return data
 
 

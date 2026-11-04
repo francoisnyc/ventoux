@@ -25,5 +25,6 @@
   "tests/digests/dates": "8f942aa74f36cebc235deb5e2884b45858e9c18f643799b8b0e43fa143a3a464",
   "tests/digests/options": "6b6c1a240c490a36b7b2304710ed1bbb60e5d4202bdc0b9911182cee2069984a",
   "tests/digests/attachments": "dc5299cf739618daa486bce28e96e7815cf7f3a45dc792b151432846add17089",
-  "tests/digests/every-shape": "8cd44455d571dbafc1910fee3d8ae05cfb51b23e82b328552e453300edab1040"
+  "tests/digests/every-shape": "8cd44455d571dbafc1910fee3d8ae05cfb51b23e82b328552e453300edab1040",
+  "tests/digests/assignments": "a6648b5d7be446b82f175e94aceef58322407db5935b622ab54349e716107b51"
 }

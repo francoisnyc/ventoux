@@ -2931,6 +2931,41 @@ to D11, D22, D26, D52 and D69, whose text is kept.*
   holder is in the history, not the state.
 - **No new engine version (D51):** a history recorded before holds no assignment.
 
+### D71. Assignment rules: the definition asks someone the case already knows, when each entry opens
+
+*Decided 2026-11-04, in layer 17c (`docs/layers/17-assignment.md`, choices 9 to 12 and 21 to 26).
+Adds to D9, D11, D22, D37, D47, D55, D60, D69 and D70, whose text is kept.*
+
+- **`assign` on a task step, or inside an approval,** names who is asked when each entry opens,
+  on the case as it is then: `{"to": "opener"}`, the person who opened the case, or `{"to":
+  "answered", "step": "review"}`, whoever gave that task's latest answer, as `outcome` reads the
+  latest (D9). Nothing else: no identifier is typed into a definition, and no field picks
+  anyone, so everyone a rule can pick was named by the trusted caller (D19, D22), and untrusted
+  data never routes work. A field holding a person is a deliberate limit.
+- **The pick is judged as a claim is** (D69), with the roles that person stated when they acted
+  (with the opening, or with their answer; the opening now carries the opener's roles, as the
+  trusted caller states them, D22), and becomes the holder with them: `follow_up#1
+  assigned to ana by its rule`. A rule never stops a case: one that finds nobody, or someone who
+  couldn't answer, leaves the entry in its queue, saying why. The case keeps who gave each
+  task's latest answer, and the opener's roles, for this; a state from before has neither, so its
+  rules find nobody (fail closed). A migration renames the answerer with its task (D53), so a
+  rule naming the task's new name still finds them.
+- **A person's choice outranks the definition's default:** on an approval asked again (D25), a
+  holder kept from the old entry stays, and the rule picks only when nobody is kept.
+- **Validation refuses only what holds in every case (D37).** `ASSIGNS_EXCLUDED`: an approval's
+  rule picking the opener, who approves nothing (D11), or whoever answered a task that excludes
+  them from it in every run (D55's `excluded_every_time`). `ASSIGNS_SEVERAL`: a rule on an
+  approval needing several people (D47). A rule malformed, or naming a step that isn't a task, is
+  refused when read. Warned: `ASSIGNS_MAY_BE_EXCLUDED`, a pick the approval may exclude;
+  `MAY_ASSIGN_NOBODY`, a task the step doesn't require, so perhaps not yet answered. On a task, a
+  role mismatch is a staffing fact (D22), found when the entry opens, never refused.
+- **The diff judges it:** a held entry is answered only by its holder (D69), so an added rule
+  narrows who may answer, stricter; removed, looser; changed, a doubt, so looser (D55). The case
+  map and the rules sheet read it aloud. The builder writes `Assign.answered(review)` and
+  `Assign.opener()`; the JSON Schema publishes the shape (D60).
+- **No new engine version (D51):** no definition readable before holds `assign`. The key is
+  behaviour, so the digest covers it (D50).
+
 ## Concepts
 
 | Term | Meaning |

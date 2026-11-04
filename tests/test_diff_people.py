@@ -1179,6 +1179,31 @@ def plan_approvers_witness() -> Witness:
     return before, after, with_finance(), refused, plan_done(after, with_finance(), answer)
 
 
+def assignment_witness() -> Witness:
+    """With the review asked of its opener, Ana, Pia's answer is refused: only the holder answers
+    (brief, D69) (brief, D71). With no rule, the same answer is taken."""
+    assigned = refund()
+    assigned["steps"]["review"]["assign"] = {"to": "opener"}
+    reviewers = {"ana": ["support"], "pia": ["support"]}
+    answer = ("review", "approve", "pia", {"approved_amount": 40})
+
+    def reviewed(case: dict[str, Any]) -> CaseRun:
+        return run_case(
+            case,
+            file={"order_id": "ord-1", "amount": 40},
+            answers=[answer],
+            people=reviewers,
+            opened_by="ana",
+        )
+
+    try:
+        reviewed(assigned)
+        refused = False
+    except AnswerRefused:
+        refused = True
+    return assigned, refund(), CATALOG, refused, reviewed(refund()).reached("review")
+
+
 def plan_answerers_witness() -> Witness:
     """A team lead's confirmation is refused while support alone confirms; then taken."""
     before = looking(lookup_plan(False, ["support"]))
@@ -1214,6 +1239,7 @@ WITNESSES: dict[str, Callable[[], Witness]] = {
     "plan approvals": plan_approvals_witness,
     "plan approvers": plan_approvers_witness,
     "plan answerers": plan_answerers_witness,
+    "assignment": assignment_witness,
 }
 
 

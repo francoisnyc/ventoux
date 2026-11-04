@@ -173,6 +173,12 @@ WRONG_CASES: dict[str, dict[str, Any]] = {
     # From the tutor review of 16a's design: ten characters, but not YYYY-MM-DD. The schema checks
     # the shape only; the calendar check (30 February) stays the engine's (brief, D60, D66).
     "a date literal not written YYYY-MM-DD": with_date_literal("31/10/2026"),
+    # A rule picks only the opener or a task's answerer: no one else, and nothing typed (brief,
+    # D71). That `answered` names its step is the parser's alone: a check across two keys.
+    "a rule asking someone named": with_step("review", assign={"to": "lee"}),
+    "a rule with a key of its own": with_step(
+        "review", assign={"to": "answered", "step": "review", "who": "lee"}
+    ),
 }
 
 

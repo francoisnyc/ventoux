@@ -1708,6 +1708,13 @@ and record the key points. A question is closed once you can explain the answer 
   (exclusion is computed from provenance, D11). Each is computed from more than the line that
   changed, which is why the JSON can't show it. 15d puts this diff on "Approve this plan", for
   the same reason: an approver of a drafted plan reads effects, not lines.
+- Retrieval (layer 17c warm-up, 2026-11-04): asked to be told. Given: an effect far from the
+  line (a role added to `review` widens what `support-lead` sees, D30; an input moved changes who
+  may approve `pay`, D11) and which way a change goes (`count` 2 to 1 is looser; a dropped
+  `requires` starts `settle` at opening; what can't be proven reads as looser, D55). Each is
+  computed from more than the line that changed, which is why the JSON can't show it. Tied to 17c:
+  an added `assign` narrows who may answer every entry of its task (D69), so the diff calls it
+  stricter, where the JSON shows only a new key.
 - Status: open, until two of those come back with why the JSON can't show them.
 
 ## 42. Layer 12: why plans don't migrate
@@ -1936,4 +1943,11 @@ and record the key points. A question is closed once you can explain the answer 
 - Then, asked what changes for Ana herself: "tell me". Given: the entry is on her list and out of
   the queue (`assignees`); it waits on her until she gives it back or someone who assigns moves
   it; and only she may give it back (`sam doesn't hold review#1; ana does`).
+- Asked again at the end of layer 17b's walk-through (2026-11-04), with an assigner: Lee assigns
+  `pay.approval#1` to Sam. "Tell me." Given: no permission (the assignment was judged as Sam's
+  claim would be, and Lee had to be no party to the decision, D70); for Sam, the entry is on his
+  list, waits on him, he alone gives it back, and a re-asked entry is kept for him if he may still
+  approve it; for everyone else, Pia's answer is refused while Sam holds it, and an assigner who is
+  no party can still move it; unchanged for Sam, every check his answer faces (role, risk, sight,
+  exclusions), and `waiting_for`, naming nobody.
 - Status: open, until the three parts come back from memory.

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 __all__ = [
     "OPENED",
     "Approval",
+    "Assign",
     "Case",
     "Expr",
     "Field",
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
     from ventoux.tooling.builder import (
         OPENED,
         Approval,
+        Assign,
         Case,
         Expr,
         Field,

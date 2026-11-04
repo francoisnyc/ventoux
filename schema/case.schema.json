@@ -241,6 +241,17 @@
         },
         "display": {
           "$ref": "#/$defs/ApprovalDisplay"
+        },
+        "assign": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Assign"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -264,6 +275,38 @@
         "reason"
       ],
       "title": "ApprovalDisplay",
+      "type": "object"
+    },
+    "Assign": {
+      "additionalProperties": false,
+      "description": "Who is asked when each entry opens: the person who opened the case, or whoever gave a\ntask's latest answer. Only people the case already knows, each named by the trusted caller,\nso untrusted data never routes work (brief, D71).",
+      "properties": {
+        "to": {
+          "enum": [
+            "opener",
+            "answered"
+          ],
+          "title": "To",
+          "type": "string"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        }
+      },
+      "required": [
+        "to"
+      ],
+      "title": "Assign",
       "type": "object"
     },
     "AttachmentType": {
@@ -2473,6 +2516,17 @@
           },
           "title": "Outcomes",
           "type": "object"
+        },
+        "assign": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Assign"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
