@@ -9,11 +9,11 @@ from typing import Any
 
 import pytest
 from test_approvals import FOUR_EYES
-from test_case import PEOPLE, REFUND, guide_json
+from test_case import PEOPLE, REFUND, guide_json, guide_refund_with_rework
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, run_case
+from ventoux.testing import CATALOG, give_back, propose, run_case
 
 
 def with_pay_assigned(rule: dict[str, Any]) -> dict[str, Any]:
@@ -179,3 +179,26 @@ def test_a_rule_asks_the_opener_judged_with_the_roles_stated_with_the_opening() 
     )
     assert run.assignees == {"review#1": "ana"}
     assert "review#1 assigned to ana by its rule" in run.history
+
+
+def test_answered_asks_whoever_gave_the_latest_answer() -> None:
+    # 250 needs a team lead's approval, so the case waits, and the review is sent back each time, and each new review is asked of whoever did the last:
+    # first Ana, then, once Sam has reviewed, Sam. The latest answer is the one that counts, as
+    # its outcome does (brief, D9) (brief, D71).
+    definition = guide_refund_with_rework()
+    definition["steps"]["review"]["assign"] = {"to": "answered", "step": "review"}
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 250}),
+            propose("review", "ana"),
+            give_back("review#2", "ana"),
+            ("review", "approve", "sam", {"approved_amount": 250}),
+            propose("review", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert "review#2 assigned to ana by its rule" in run.history
+    assert run.assignees == {"review#3": "sam"}
+    assert "review#3 assigned to sam by its rule" in run.history
