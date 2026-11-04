@@ -716,5 +716,6 @@ already use. No test reads how a pick is stored.
 
 **The routes by which a rule sets a holder:** an entry opening, whatever opened it (the opening's
 rules, a person's proposal, a rule's start, a retry's re-ask of an approval, a re-asked approval);
-each goes through the one place an entry opens, which tests 4, 5 and 7 drive. 17a's and 17b's
+each goes through one of the two places an entry opens: a task's run in `start`, an approval in
+`ask` (`runtime.py`, `approvals.py`). Tests 4 and 5 drive the first, test 7 the second. 17a's and 17b's
 routes are unchanged.
