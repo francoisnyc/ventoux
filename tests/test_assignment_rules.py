@@ -13,7 +13,7 @@ from test_case import PEOPLE, REFUND, guide_json, guide_refund_with_rework
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, give_back, propose, run_case
+from ventoux.testing import CATALOG, claim, give_back, propose, run_case
 
 
 def with_pay_assigned(rule: dict[str, Any]) -> dict[str, Any]:
@@ -202,3 +202,62 @@ def test_answered_asks_whoever_gave_the_latest_answer() -> None:
     assert "review#2 assigned to ana by its rule" in run.history
     assert run.assignees == {"review#3": "sam"}
     assert "review#3 assigned to sam by its rule" in run.history
+
+
+def with_triage() -> dict[str, Any]:
+    """The reworkable refund, a team lead taking each refund for approval first: `pay`'s
+    approval is asked of whoever took it, whose answer reaches nothing `pay` reads."""
+    definition = guide_refund_with_rework()
+    definition["steps"]["triage"] = {
+        "kind": "task",
+        "display": {"title": "Take the refund for approval"},
+        "roles": ["support-lead"],
+        "requires": ["review"],
+        "outcomes": {"taken": {"display": {"title": "Taken"}}},
+    }
+    definition["steps"]["pay"]["requires"] = ["triage"]
+    definition["steps"]["pay"]["approval"]["assign"] = {"to": "answered", "step": "triage"}
+    return definition
+
+
+REVIEWED = ("review", "approve", "ana", {"approved_amount": 250})
+TRIAGED = ("triage", "taken", "lee")
+REWORKED = [propose("review", "ana"), ("review", "approve", "ana", {"approved_amount": 300})]
+
+
+def test_an_approvals_rule_asks_whom_it_picks() -> None:
+    run = run_case(
+        with_triage(),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[REVIEWED, TRIAGED],
+        people=PEOPLE,
+    )
+    assert run.assignees == {"pay.approval#1": "lee"}
+    assert run.history[-1] == "pay.approval#1 assigned to lee by its rule"
+
+
+def test_a_kept_holder_outranks_the_rule_and_the_rule_picks_when_nobody_is_kept() -> None:
+    # Lee gives the approval back and Sam claims it; the review is reworked, so it is asked again.
+    # Sam, a person's choice, is kept, not the rule's Lee (brief, D69) (brief, D71).
+    kept = run_case(
+        with_triage(),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[
+            REVIEWED,
+            TRIAGED,
+            give_back("pay.approval#1", "lee"),
+            claim("pay.approval#1", "sam"),
+            *REWORKED,
+        ],
+        people=PEOPLE,
+    )
+    assert kept.assignees == {"pay.approval#2": "sam"}
+    # With nobody holding it when it is withdrawn, the new entry is the rule's again.
+    picked = run_case(
+        with_triage(),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[REVIEWED, TRIAGED, give_back("pay.approval#1", "lee"), *REWORKED],
+        people=PEOPLE,
+    )
+    assert picked.assignees == {"pay.approval#2": "lee"}
+    assert "pay.approval#2 assigned to lee by its rule" in picked.history

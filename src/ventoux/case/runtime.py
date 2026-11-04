@@ -1767,7 +1767,13 @@ def start(
         anyway = asked_anyway(case, catalog, state, step)
         if needed or anyway is not None:
             ask(state, name, step, anyway)
-            keep_holder(case, catalog, state, state.approvals[name])
+            asked = state.approvals[name]
+            keep_holder(case, catalog, state, asked)
+            # A person's choice outranks the definition's default: the rule picks only when
+            # nobody was kept (brief, D71).
+            assert step.approval is not None  # it was just asked
+            if asked.entry not in state.holders and step.approval.assign is not None:
+                follow_rule(case, catalog, state, asked, step.approval.assign)
             return
     if given is not None:
         lapsed(state, name, step, given)
