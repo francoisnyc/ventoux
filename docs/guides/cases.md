@@ -2719,11 +2719,11 @@ engine never looks up (D22), so a mismatch is found when the entry opens, and it
 queue. A rule naming a task that may not have been answered when the entry opens is a warning
 (`MAY_ASSIGN_NOBODY`): it can be right, but it may find nobody.
 
-**In the diff and the plain forms.** The case map reads the rule aloud ("asked of whoever
-answered the review"). Since a held entry is answered only by its holder, an added `assign`
+**In the diff and the plain forms.** The case map reads the rule aloud ("Each run is asked of
+whoever answered review."; for an approval, "Each approval is asked of …"). Since a held entry is answered only by its holder, an added `assign`
 narrows who may answer, so the semantic diff reads it as stricter; a removed one as looser; a
-changed one as a doubt, so looser (D55). The builder writes it `assign=Assign.answered("review")`
-or `Assign.opener()`, and the JSON Schema publishes its shape.
+changed one as a doubt, so looser (D55). The builder writes it `assign=Assign.answered(review)`
+or `Assign.opener()` (builder guide, "Who is asked"), and the JSON Schema publishes its shape.
 
 ### What the report shows
 

@@ -2943,7 +2943,8 @@ Adds to D9, D11, D22, D37, D47, D55, D60, D69 and D70, whose text is kept.*
   anyone, so everyone a rule can pick was named by the trusted caller (D19, D22), and untrusted
   data never routes work. A field holding a person is a deliberate limit.
 - **The pick is judged as a claim is** (D69), with the roles that person stated when they acted
-  (with the opening, or with their answer), and becomes the holder with them: `follow_up#1
+  (with the opening, or with their answer; the opening now carries the opener's roles, as the
+  trusted caller states them, D22), and becomes the holder with them: `follow_up#1
   assigned to ana by its rule`. A rule never stops a case: one that finds nobody, or someone who
   couldn't answer, leaves the entry in its queue, saying why. The case keeps who gave each
   task's latest answer, and the opener's roles, for this; a state from before has neither, so its

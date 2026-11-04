@@ -719,3 +719,33 @@ rules, a person's proposal, a rule's start, a retry's re-ask of an approval, a r
 each goes through one of the two places an entry opens: a task's run in `start`, an approval in
 `ask` (`runtime.py`, `approvals.py`). Tests 4 and 5 drive the first, test 7 the second. 17a's and 17b's
 routes are unchanged.
+
+## Decided while building 17c
+
+1. **The opening carries the opener's roles.** D71 judges an opener "with the roles they stated
+   with the opening", but the opening carried none. `Opened` gains `roles` and Temporal's
+   `CaseStart` gains `opener_roles` (both empty by default); `start_case` and `run_case` state
+   them; D71's text says so. A case opened before has none, so a rule asking its opener finds
+   someone with no role, and the entry goes to its queue (fail closed).
+2. **What the case keeps:** `answerers` (each task's latest answerer, as a `Holder`, recorded where
+   an answer is taken, so a held answer counts once its checks are back) and `opener` (a `Holder`,
+   with the opening's time). Both cross continue-as-new; an older state has neither.
+3. **Validation reuses layer 13's proofs:** `ASSIGNS_EXCLUDED` asks `excluded_every_time`, the
+   warning `ASSIGNS_MAY_BE_EXCLUDED` asks `excluded`. Nothing is proven twice. `ASSIGNS_SEVERAL` is
+   checked first, as the one cause. The guide's example message was corrected in step 3: `pay`'s
+   `when` reads `review.outcome`, which is what proves the exclusion, not `approved_amount`.
+4. **The diff judges a rule whole,** as it does an expression: one change, "who is asked", before
+   and after, never one per key. It gives its verdict by a new comparison, `assignment`, added to
+   the closed list with its witness (`test_diff_people.py::assignment_witness`): with the review
+   asked of its opener, Pia's answer is refused; without the rule, taken.
+5. **One wording for a rule,** `Assign.aloud()`: the diff's `said` and the case map's sentence
+   ("Each run is asked of whoever answered review.") read the same.
+6. **The repository's guards brought the builder, the schema and a pinned package forward to
+   test 4:** every key of the format must be written by a builder file (`examples/builder/
+   assigned.py`, shown in the builder guide), the committed schema must be what the models say
+   (regenerated), and every shape must be in a pinned package (`tests/digests/assignments`, its
+   own, so every earlier digest stays as pinned, D50).
+7. **The schema can't say that `answered` names a step:** it is a check across two keys, the
+   parser's alone. The schema refuses what it can: an unknown `to`, a key of its own.
+8. **A re-asked approval whose kept holder can no longer answer** goes to its queue, saying why,
+   and then its rule picks: "nobody kept" includes a holder sent back.
