@@ -345,7 +345,7 @@ builder and the published schema. No test reads how "owed" is worked out.
 **Found while choosing the seams.** The curriculum's negative test ("a required step that no rule
 or person can ever start is refused at validation") is already an error for *every* step:
 `NEVER_RUNS`, from layer 10's fixpoint. So once the key is read, that test passes with no new
-check. I'd keep `NEVER_RUNS` as the one issue, one cause, one issue, and drop the
+check. I'd keep `NEVER_RUNS` as its only issue (one cause, one issue) and drop the
 `REQUIRED_NEVER_STARTS` code D72 names (D72 is not merged, so it is corrected in this pull
 request, under "Decided while building"). The test is still written first, and it fails today
 for a different reason: `required` is an unknown key (`Extra inputs are not permitted`). I'll
