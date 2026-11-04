@@ -40,6 +40,7 @@ from ventoux.case.approvals import (
     tally,
     waiting_line,
 )
+from ventoux.case.assigning import assign, unassign
 from ventoux.case.called import called
 from ventoux.case.claims import (
     ClaimRefused,
@@ -80,6 +81,7 @@ from ventoux.case.sequence import requirements
 from ventoux.case.state import (
     CLOSING,
     Answered,
+    Assigned,
     CaseState,
     ChangeProposed,
     Claimed,
@@ -108,6 +110,7 @@ from ventoux.case.state import (
     StartWorkflow,
     StepRun,
     TimerDue,
+    Unassigned,
     UseRelease,
     WorkflowCancelled,
 )
@@ -216,6 +219,10 @@ def decide(
         claim(case, catalog, state, entry_to_hold(case, state, event), event)
     elif isinstance(event, GivenBack):
         give_back(state, entry_to_hold(case, state, event), event)
+    elif isinstance(event, Assigned):
+        assign(case, catalog, state, entry_to_hold(case, state, event), event)
+    elif isinstance(event, Unassigned):
+        unassign(case, catalog, state, entry_to_hold(case, state, event), event)
     elif isinstance(event, Shown):
         record_shown(case, catalog, state, event)
     elif isinstance(event, Sent):
@@ -599,7 +606,7 @@ def sent_never_answered(entry: str, waits: WaitStep) -> str:
 
 
 def entry_to_hold(
-    case: CaseDefinition, state: CaseState, event: Claimed | GivenBack
+    case: CaseDefinition, state: CaseState, event: Claimed | GivenBack | Assigned | Unassigned
 ) -> StepRun | OpenApproval:
     """The open task run or approval a claim or a give-back names; or `ClaimRefused`, saying what
     an answer to it would be refused with. Fail closed: only a task or an approval is held
@@ -608,6 +615,9 @@ def entry_to_hold(
         raise ClaimRefused(f"the case is {state.phase}: nothing waits for an answer")
     # Who claims is written one way, before anything is checked against it (brief, D22).
     if (wrong := identifier_problem(event.by)) is not None:
+        raise ClaimRefused(wrong)
+    # So is whoever an assignment names (brief, D70).
+    if isinstance(event, Assigned) and (wrong := identifier_problem(event.to)) is not None:
         raise ClaimRefused(wrong)
     if event.entry in state.changes:
         raise ClaimRefused(f"{event.entry} is a change request: nobody holds one")

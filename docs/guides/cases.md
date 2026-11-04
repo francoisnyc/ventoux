@@ -2561,12 +2561,8 @@ ana claimed review#1 as support
   holds review#1; ask someone who assigns to reassign it`.
 - **Give back:** the holder returns the entry to its queue: `give_back("review#1", "ana")`.
   Only the holder may give an entry back.
-- **Assign and reassign:** a person whose role the platform team registered to assign
-  (`register_role("support-lead", approves="high", assigns=True)`) gives an entry to someone,
-  whether or not anyone holds it: `assign("review#1", "sam", by="lee")`, recorded as
-  `lee assigned review#1 to sam as support-lead`. Anyone else is refused: `ana may not assign
-  review#1: support doesn't assign; ask a support-lead`. Assigning an entry to the person who
-  holds it already is refused, since it would change nothing.
+- **Assign, reassign, return to the queue:** someone whose role assigns moves an entry, whoever
+  holds it ("Assigning", below).
 
 **A held entry is answered by its holder.** While Ana holds `review#1`, an answer from Sam is
 refused, even though he has `support`: `ana holds review#1: ask ana to give it back, or someone
@@ -2581,6 +2577,65 @@ needs 2 people, so nobody can hold it`.
 Ana loses `support` while she holds the review, the engine doesn't know. Her answer is then
 refused for lack of the role, the entry stays hers, and the case says so. A support-lead
 reassigns it.
+
+### Assigning, reassigning, returning to the queue
+
+A claim takes work for yourself; an **assigner** moves work between people. Assigning is a role
+the platform team registers, like operating or editing (D26, D52):
+`register_role("support-lead", approves="high", assigns=True)`. No case names its assigners. Someone whose role assigns may move any open task or approval of the
+case, held or not, in one of three ways:
+
+- **assign** an entry nobody holds to someone: `assign("review#1", "sam", by="lee")`;
+- **reassign** a held entry to someone else, without its holder: the same call, while Ana holds it;
+- **return it to its queue**, without its holder: `unassign("review#1", by="lee")`.
+
+So an entry whose holder has left can always be freed. Ana claims the review and goes on leave;
+Lee, who leads the team, gives it to Sam:
+
+```python
+run = run_case(
+    refund,
+    file={"order_id": "ord-1", "amount": 250},
+    answers=[claim("review#1", "ana"), assign("review#1", "sam", by="lee")],
+    people=PEOPLE,
+)
+assert run.assignees == {"review#1": "sam"}
+```
+
+```
+ana claimed review#1 as support
+lee assigned review#1 to sam as support-lead, from ana
+sam answered review#1 approve as support, setting approved_amount
+```
+
+or returns it to its queue for whoever comes first:
+
+```
+lee returned review#1 to its queue as support-lead, from ana
+```
+
+**The assigner moves work; they don't answer it.** Lee can't answer the review (it needs
+`support`) and may still give it to Sam. What she needs is a role that assigns. Anyone else is
+refused: `ana may not assign review#1: assigning is done by support-lead, and ana has support`.
+
+**The assignee is checked as a claim is.** Being assigned grants nothing, so the person named
+must be able to answer the entry. The Ventoux API states their roles with the assignment, as it
+states the assigner's (D22), and the engine records both. An assignment to someone who couldn't
+answer is refused in the words their answer would be: `lee may not assign review#1 to omar:
+review#1 is answered by support, and omar has operations`. So is an assignment to the entry's
+current holder, which would change nothing, and an assignment of an approval needing several
+people, which nobody holds.
+
+**Nobody chooses their own judge.** Whoever may not approve a step may not assign its approval
+either. Sam set `approved_amount`, so he can never approve `pay`; if he could hand `pay`'s
+approval to the colleague he expects to approve it, he would be choosing who judges his own
+decision. So, even though Sam's `support-lead` role assigns:
+
+```
+sam may not assign pay.approval#1: sam set approved_amount, which pay uses, so cannot approve it
+```
+
+He may still assign any other entry, the review included.
 
 ### When an entry is asked again
 

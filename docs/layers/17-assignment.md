@@ -350,3 +350,224 @@ that code off and watching the test fail (marked *mutation-checked*).
 **Not promised by 17a, and left to its part:** assigning and reassigning, and the `assigns` role
 (17b, D70); assignment rules, `ASSIGNS_EXCLUDED`, the diff and the plain forms (17c, D71). The
 guide already describes them; their tests come with their parts.
+
+# 17b: assigning
+
+Status: 2026-11-03, agreed; 17b built, its promises checked. Starts from `main` at `23ddacc`, with 17a merged
+(#83). The warm-up was asked and recorded (learning question 36). The guide was written first:
+`docs/guides/cases.md`, "Assigning, reassigning, returning to the queue", with the recommendations
+below.
+
+**Answered 2026-11-03.** Choices 13 to 20 as recommended; 7 and 8 as agreed with 17a. D70 is
+written before 17b is built.
+
+## What 17b is for
+
+17a lets a person take work (a claim) and let it go (a give-back); only the holder does either. So
+an entry whose holder never acts can't be freed: the tutor's review of 17a, watched for 17b. 17b
+adds the **assigner**: someone whose role assigns moves an entry between people, without its
+holder, and never answers it. Three acts, one of them new in kind:
+
+| Act | Before | After |
+|---|---|---|
+| **assign** | in the queue | held by the person named |
+| **reassign** | held by Ana | held by Sam |
+| **return to the queue** | held by Ana | nobody holds it |
+
+Like a claim, each is a message from the trusted caller (D19, D22) with no field for a value: it
+changes whose list an entry is on, never what its step does (learning question 36).
+
+## Choices for 17b
+
+Choices 7 and 8 were sketched with 17a and agreed then; they are restated here as they stand.
+Each answer goes into **D70**, written before 17b is built.
+
+7. **Who may assign** (agreed). A role the platform team registers, `register_role(...,
+   assigns=True)`, like `operates` and `edits` (D26, D52), so no case names its assigners. A role
+   the catalog doesn't mark as assigning may not assign, whoever states it (fail closed).
+
+8. **What is checked of the assignee** (agreed). The Ventoux API states the assignee's roles with
+   the assignment, as it states the assigner's (D22); both are recorded. The assignee is checked
+   exactly as a claim is (D69): the same `role_to_hold`, so for an approval the same
+   `judge_approval`.
+
+13. **Returning an entry to its queue, without its holder.** This frees the entry the tutor
+    watched. As its own act, `unassign(entry, by)`, an `Unassigned` event; or as `assign(entry,
+    None, by)`. *Recommended:* its own act. "Assign to nobody" reads oddly, and its checks differ
+    (there's no assignee to judge).
+
+14. **Nobody chooses their own judge.** Assigning grants nothing, but an assigner picks *who* is
+    asked. Sam set `approved_amount`, so he may never approve `pay`; handing `pay`'s approval to a
+    colleague he expects to approve it would let him choose who judges his own decision, the
+    influence D11's "someone else" exists to prevent.
+    - (a) **Whoever may not approve a step may not move its approval**: assign, reassign or
+      return it. Judged as their own approval would be (`judge_approval`), so every exclusion
+      applies: provenance, the opener, the proposer, a rule's readers, and so on.
+    - (b) The same, for assigning and reassigning only; returning to the queue picks nobody.
+    - (c) No rule: the approver is still checked at the answer, so a friendly approver is still
+      "someone else".
+
+    *Recommended: (a).* Returning to the queue picks nobody, but it can also take the approval
+    from an approver about to reject, again and again. One rule is easier to explain and to
+    test. **What it doesn't need:** the assigner having the approval's role or the risk or the
+    sight. Lee may assign an approval she couldn't answer herself; only the exclusions that make
+    someone a party to the decision apply. So the check is the exclusions part of
+    `judge_approval`, not all of it. *To decide with it:* tasks are not judgements of anyone's
+    decision, so this applies to approvals only.
+
+15. **What the assigner needs on the entry itself.** Nothing else: not the task's role (Lee
+    moves the review, which needs `support`), not sight of what the step reads (she sees whose
+    list it is on, never a value). *Recommended.*
+
+16. **Assigning to yourself.** Allowed, and checked as a claim: if the assigner could answer
+    the entry, it is the same as claiming it; if not, it is refused as any assignment to someone
+    who couldn't answer. *Recommended:* no rule of its own; its history line says `assigned …
+    to lee`, like any assignment.
+
+17. **What is refused, beside 14:** an assigner without an assigning role; an assignee who
+    couldn't answer the entry; an assignment to the entry's current holder (it changes nothing);
+    a return of an entry nobody holds; anything that can't be held (D69: an approval needing
+    several people, a plan's wait, a change request, an entry not open); a misspelled identifier,
+    the assigner's or the assignee's (D22). *Recommended.* Each refusal names people, roles and
+    entries, never a value (D30).
+
+18. **What the history shows.** `lee assigned review#1 to sam as support-lead`; when someone held
+    it, `…, from ana`; `lee returned review#1 to its queue as support-lead, from ana`. On
+    Temporal, a refusal reads `refused lee's assignment of review#1: …` and `refused lee's return
+    of review#1: …`. *Recommended:* naming the previous holder, since whoever reads the history
+    sees why the work moved and from whom.
+
+19. **What the holder records.** The assignee becomes the holder with the roles the API stated
+    for them, and when, `Holder(sam, {support}, at)`, as a claim records the claimant's. So
+    everything 17a does with a holder (a re-asked approval, a migration, continue-as-new) works
+    unchanged. Who assigned them isn't kept in the state; the history says it. *Recommended.*
+
+20. **Temporal and the engine version.** Two signals, `assign` and `unassign`, beside `claim`
+    and `give_back`; `assign` takes the assignee and their roles too, so a message of its own
+    (`CaseAssignment`). No new engine version: no history recorded before holds an assignment.
+    *Recommended.*
+
+## The split
+
+One pull request, `layer-17b-assigning`. Its negative test, from the curriculum: a reassignment
+by someone not allowed to assign is refused. Also: an assignment to someone who couldn't answer;
+an excluded person moving an approval (choice 14).
+
+## Seams and tests for 17b (curriculum step 4)
+
+As for 17a, the tests use only what a caller of the engine uses: the events `decide` takes, the
+script `run_case` plays, what a run and a report say, and the Temporal signals.
+
+### The seams
+
+1. **The catalog:** `register_role(..., assigns=True)`, and `catalog.assigners`, the roles that
+   assign, in order, beside `editors` and `operators`. The development catalog's `support-lead`
+   assigns.
+2. **Two events into `decide`** (`ventoux.case.state`, beside `Claimed` and `GivenBack`):
+   `Assigned(entry, to, to_roles, by, roles, at=…)` and `Unassigned(entry, by, roles, at=…)`. A
+   refused one raises the existing `ClaimRefused`, as a refused claim or give-back does: one
+   exception for everything about who holds an entry.
+3. **Two script steps for `run_case`** (`ventoux.testing`): `assign("review#1", "sam",
+   by="lee")` and `unassign("review#1", by="lee")`. The test plays the API: both people's roles
+   come from `people` (D22).
+4. **What a run and a report say:** `assignees`, unchanged from 17a; the history lines, asserted
+   as text:
+   - `lee assigned review#1 to sam as support-lead`, and `…, from ana` when Ana held it;
+   - `lee returned review#1 to its queue as support-lead, from ana`;
+   - on Temporal, `refused lee's assignment of review#1: <reason>` and `refused lee's return of
+     review#1: <reason>`.
+5. **Two Temporal signals,** `assign` taking a new `CaseAssignment(entry, to, to_roles, by,
+   roles)`, and `unassign` taking the existing `CaseRequest`; with client functions of the same
+   names, beside `claim` and `give_back`.
+
+### The refusals, word for word (proposed)
+
+| Situation | Message |
+|---|---|
+| no role that assigns | `ana may not assign review#1: assigning is done by support-lead, and ana has support` (the shape every missing role uses, D52's `no_role`) |
+| the assignee couldn't answer | `lee may not assign review#1 to omar: review#1 is answered by support, and omar has operations` (the claim's reason, D69) |
+| the assignee already holds it | `sam already holds review#1` |
+| the assigner can't approve the step (choice 14) | `sam may not assign pay.approval#1: sam set approved_amount, which pay uses, so cannot approve it` (the exclusion an answer gets) |
+| unassign of an entry nobody holds | `nobody holds review#1` |
+| anything that can't be held, a misspelled identifier | the refusal a claim gets today (D69) |
+
+`assign`, `reassign` and `unassign` share the wording `may not assign` for the assigner's own
+checks: they are one power.
+
+### The tests, in the order I'd write them
+
+1. **(negative, curriculum)** A reassignment by someone not allowed to assign is refused: Ana
+   holds the review; Sam, without the role, can't move it; nothing changes.
+2. Lee reassigns it to Sam, without Ana: `assignees == {"review#1": "sam"}`, the history line
+   with `, from ana`; Sam's answer is taken, Ana's refused. The guide's story, run as written.
+3. Lee assigns an entry nobody holds, and assigns one to herself where she could answer it.
+4. **(negative)** An assignment to someone who couldn't answer, with the claim's reason; to the
+   current holder.
+5. **(negative)** An unassign by someone not allowed to assign; of an entry nobody holds. Then
+   the tutor's case: Ana never acts, Lee unassigns, the entry is in its queue, and Sam answers it.
+6. **(negative, choice 14)** Sam, who set `approved_amount` and has `support-lead`, may not
+   assign, reassign or unassign `pay`'s approval; he may assign the review. The check is the
+   exclusions only: Lee may assign an approval of a step whose risk her role couldn't approve,
+   if any such shape exists in the fixtures, else her lack of sight of a field.
+7. **(negative)** What can't be held can't be assigned (an approval needing several people, an
+   entry not open, a change request, a plan's run), and misspelled identifiers, the assigner's
+   and the assignee's, in the claim's words.
+8. An assigned holder is treated as a claimed one: a re-asked approval keeps them, or sends it
+   to its queue (D69); they cross continue-as-new.
+9. **On Temporal:** the `assign` and `unassign` signals; a refused one recorded and the case
+   waiting on.
+10. **Replay:** every history recorded before still replays.
+
+**The routes by which a holder is set or changed, after 17b:** 17a's routes, unchanged, plus the
+two new acts (tests 1 to 7); an assigned holder then goes every route a claimed one goes (test 8).
+
+## Decided while building 17b
+
+1. **The curriculum's negative test uses Omar, not Sam.** In the guide's cast Sam has
+   `support-lead`, which assigns, so Omar (`operations`) plays the person not allowed to.
+2. **An approval's exclusions are one function, `why_excluded`** (`src/ventoux/case/answers.py`),
+   lifted out of `judge_approval` with no change in behaviour (its own commit; every test stayed
+   green). An answer runs it with the role, risk and sight checks; an assigner runs it alone
+   (choice 14). So "someone else" is written once, and the two can't drift apart.
+3. **The assignee's identifier is checked too,** where the assigner's is (`entry_to_hold`). Found
+   by test 7: an assignment to `Sam` was taken, and "someone else" compares identifiers exactly.
+4. **One refusal for a missing role, in the house wording:** `ana may not assign review#1:
+   assigning is done by support-lead, and ana has support`, as an edit's or a migration's is.
+   The guide's draft said "support doesn't assign"; it now says this.
+5. **Assigning is its own file,** `src/ventoux/case/assigning.py`, beside `claims.py`, which it
+   uses: one idea per file. An assignment's assignee is judged by 17a's `role_to_hold`.
+6. **One test is not mutation-checked:** "an assigner needs only to be someone else". It guards
+   a design the code never had (judging the assigner by the whole approval). The mutation that
+   would show it failing needs the catalog inside the check, which imports it in a circle; the
+   check calls `why_excluded` and nothing else, which the code shows.
+
+## Promises (17b)
+
+Each claim D70 and the guide's 17b part make about behaviour, and the test that fails if it isn't
+true. Tests in `tests/test_assigning.py` unless named otherwise. Tests that passed when first
+written were checked by switching off the code they guard and watching them fail
+(*mutation-checked*); two couldn't be, and say why.
+
+| Promise | The test that would fail |
+|---|---|
+| A reassignment by someone not allowed to assign is refused, in the house wording (curriculum) | `test_a_reassignment_by_someone_not_allowed_to_assign_is_refused` |
+| A role nobody registered assigns nothing, whoever states it | `test_a_role_nobody_registered_assigns_nothing` (not mutation-checked: only a registered role can be among the assigners, so there is no separate code to switch off) |
+| An assigner reassigns a held entry without its holder; the history names the previous holder; the old holder's answer is then refused, the new one's taken (the guide's story, run from the guide) | `test_an_assigner_reassigns_a_held_entry_without_its_holder`, and `test_case.py::test_the_guides_examples_run_as_written` |
+| The assigner needs nothing else on the entry: Lee moves a review she can't answer | `test_an_assigner_reassigns_a_held_entry_without_its_holder` |
+| An assigner assigns an entry nobody holds, and may assign to themselves when they could answer | `test_an_assigner_assigns_an_entry_nobody_holds_and_may_assign_it_to_themselves` (*mutation-checked*) |
+| The assignee is checked as a claim is: someone who couldn't answer is refused, in the claim's words, the assigner included | `test_an_assignment_is_refused_to_whoever_couldnt_answer_or_already_holds` |
+| An assignment to the entry's holder is refused | the same test |
+| An unassign is refused without a role that assigns, and of an entry nobody holds | `test_an_unassign_is_refused_to_whoever_cant_assign_and_of_what_nobody_holds` |
+| An entry whose holder never acts can always be freed: returned to its queue without its holder, then answered by anyone with the role (the tutor's case) | `test_an_entry_whose_holder_never_acts_is_returned_to_its_queue` (*mutation-checked*) |
+| … an approval too, by an assigner who is someone else | `test_an_approval_is_returned_to_its_queue_by_an_assigner_who_is_someone_else` (*mutation-checked*) |
+| Nobody chooses their own judge: whoever set what a step reads may not assign, reassign or unassign its approval | `test_nobody_moves_the_approval_of_their_own_decision` |
+| … nor whoever opened the case | `test_the_opener_moves_no_approval_of_the_case` |
+| … and it applies to approvals only: an excluded person still assigns a task | `test_an_excluded_assigner_still_assigns_what_isnt_their_decision` |
+| An assigner is judged by the exclusions alone, never the approval's role, risk or sight | `test_an_assigner_needs_only_to_be_someone_else_not_to_approve_it` (not mutation-checked: see "Decided while building 17b", point 6) |
+| What can't be claimed can't be assigned, refused in the claim's words: an entry closed or unknown, a wait for an event, a plan's run, a change request | `test_what_cant_be_claimed_cant_be_assigned` |
+| An approval needing several people can't be assigned | `test_an_approval_needing_several_people_cant_be_assigned` |
+| Both identifiers are written one way, the assignee's as the assigner's | `test_both_identifiers_are_written_one_way` |
+| An assigned holder is a holder like any other, with the roles the API stated for them: kept when their approval is asked again | `test_an_assigned_holder_is_kept_when_their_approval_is_asked_again` (*mutation-checked*) |
+| On Temporal, `assign` and `unassign` are signals; a refused one is recorded and the case waits on; an assigned holder crosses continue-as-new | `test_temporal_claims.py::test_assigning_on_temporal_is_signalled_recorded_and_carried` |
+| No refusal or history line quotes a value | every refusal and line the tests above check is asserted whole, and each names people, roles and entries only |
+| No new engine version: every history recorded before replays as it did | the replay tests of earlier layers, unchanged, all passing |

@@ -29,6 +29,7 @@ class Catalog:
         self._operators: set[str] = set()  # the roles that may act on a failed step (brief, D26)
         self._forgetters: set[str] = set()  # the roles that may forget a case (brief, D32)
         self._editors: set[str] = set()  # the roles that may edit a case file (brief, D52)
+        self._assigners: set[str] = set()  # the roles that may assign an entry (brief, D70)
         self._migrators: set[str] = set()  # the roles that may migrate a case (brief, D53)
         self._systems: set[str] = set()  # the systems a reference may name (brief, D30)
         # Each system's option check, by its reference: one per system (brief, D67).
@@ -119,12 +120,14 @@ class Catalog:
         forgets: bool = False,
         edits: bool = False,
         migrates: bool = False,
+        assigns: bool = False,
     ) -> None:
         """Let waits and approvals name the role `name`, which may approve activities up to the
         risk `approves` (none by default); if `operates`, act on a case's failed steps, skipping
         one included (brief, D26) (brief, D52); if `forgets`, propose or approve forgetting a case
         (brief, D32); if `edits`, propose or approve an edit of a case file (brief, D52); if
-        `migrates`, propose or approve moving a case to another release (brief, D53). Registered
+        `migrates`, propose or approve moving a case to another release (brief, D53); if `assigns`,
+        give an open entry to someone, or back to its queue (brief, D70). Registered
         by the platform team, like labels, so a typo is caught (brief, D22)."""
         checked_role(name, approves)
         self._roles[name] = approves
@@ -136,6 +139,8 @@ class Catalog:
             self._editors.add(name)
         if migrates:
             self._migrators.add(name)
+        if assigns:
+            self._assigners.add(name)
 
     @property
     def operators(self) -> list[str]:
@@ -158,6 +163,12 @@ class Catalog:
     def migrators(self) -> list[str]:
         """The registered roles that may propose or approve a migration, in order (brief, D53)."""
         return sorted(self._migrators)
+
+    @property
+    def assigners(self) -> list[str]:
+        """The registered roles that may give an open entry to someone, or back to its queue, in
+        order (brief, D70)."""
+        return sorted(self._assigners)
 
     @property
     def roles(self) -> dict[str, str | None]:

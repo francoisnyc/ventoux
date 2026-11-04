@@ -37,6 +37,7 @@ from ventoux.case.requests import ChangeRefused
 from ventoux.case.runtime import CaseRefused, EventRefused
 from ventoux.case.state import (
     Answered,
+    Assigned,
     ChangeProposed,
     Claimed,
     CloseAsked,
@@ -51,6 +52,7 @@ from ventoux.case.state import (
     Sent,
     Shown,
     StartPlan,
+    Unassigned,
 )
 from ventoux.core.before_activity import InputRefused
 from ventoux.core.catalog import Catalog
@@ -94,6 +96,7 @@ __all__ = [
     "RetryRefused",
     "StepStopped",
     "as_json",
+    "assign",
     "check_workflow_contract",
     "claim",
     "close",
@@ -110,6 +113,7 @@ __all__ = [
     "send",
     "shown",
     "skip",
+    "unassign",
     "wrapped",
 ]
 
@@ -364,7 +368,7 @@ CATALOG.register_option_check("branches", "branches.holds@1")
 CATALOG.register_document_store("documents", "documents.issued@1")
 # The roles waits and approvals may name: support answers tasks, a team lead approves refunds.
 CATALOG.register_role("support", edits=True)  # and may edit a case file (brief, D52)
-CATALOG.register_role("support-lead", approves="high", edits=True)
+CATALOG.register_role("support-lead", approves="high", edits=True, assigns=True)
 # The case data guide's claim: an adjuster assesses it, and only fraud sees its fraud score.
 CATALOG.register_role("adjuster")
 CATALOG.register_role("fraud")
@@ -543,6 +547,16 @@ def run_case(
         if isinstance(item, Claim):
             events.append(Claimed(item.entry, item.by, frozenset(people.get(item.by, ())), at=now))
             continue
+        if isinstance(item, Assign):
+            to_roles = frozenset(people.get(item.to, ()))
+            roles = frozenset(people.get(item.by, ()))
+            events.append(Assigned(item.entry, item.to, to_roles, item.by, roles, at=now))
+            continue
+        if isinstance(item, Unassign):
+            events.append(
+                Unassigned(item.entry, item.by, frozenset(people.get(item.by, ())), at=now)
+            )
+            continue
         if isinstance(item, GiveBack):
             events.append(
                 GivenBack(item.entry, item.by, frozenset(people.get(item.by, ())), at=now)
@@ -706,6 +720,33 @@ class Claim(NamedTuple):
 def claim(entry: str, who: str) -> Claim:
     """A script's claim of an open entry: `claim("review#1", "lee")` (brief, D69)."""
     return Claim(entry, who)
+
+
+class Assign(NamedTuple):
+    """A scripted assignment: `by`, whose role assigns, gives `entry` to `to` (brief, D70)."""
+
+    entry: str
+    to: str
+    by: str
+
+
+def assign(entry: str, to: str, by: str) -> Assign:
+    """A script's assignment, or reassignment, of an open entry: `assign("review#1", "sam",
+    by="lee")`. The test plays the API, stating both people's roles from `people` (brief, D70)."""
+    return Assign(entry, to, by)
+
+
+class Unassign(NamedTuple):
+    """A scripted return to the queue: `by`, whose role assigns, frees `entry` (brief, D70)."""
+
+    entry: str
+    by: str
+
+
+def unassign(entry: str, by: str) -> Unassign:
+    """A script's return of a held entry to its queue, without its holder: `unassign("review#1",
+    by="lee")` (brief, D70)."""
+    return Unassign(entry, by)
 
 
 class GiveBack(NamedTuple):
