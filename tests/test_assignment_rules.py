@@ -14,7 +14,9 @@ from test_case import PEOPLE, REFUND, guide_json, guide_refund_with_rework
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.diff import diff
+from ventoux.case.plain import plain
 from ventoux.case.releases import package
+from ventoux.case.sheet import case_map
 from ventoux.case.validate import validate_case
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
@@ -387,3 +389,19 @@ def test_the_diff_judges_an_approvals_rule() -> None:
 def with_triage_rule_only() -> dict[str, Any]:
     """The refund with only a rule added to `pay`'s approval: one change for the diff to judge."""
     return with_pay_assigned({"to": "answered", "step": "review"})
+
+
+def test_the_plain_forms_read_a_rule_aloud() -> None:
+    # The case map says who each run is asked of, for a task and for an approval; the plain diff
+    # reads the step before and after, so the same sentence says what changed (brief, D56)
+    # (brief, D71).
+    before = package(json.dumps(REFUND, default=str), [])
+    after_case = with_review_assigned({"to": "opener"})
+    after_case["steps"]["pay"]["approval"]["assign"] = {"to": "answered", "step": "review"}
+    after = package(json.dumps(after_case, default=str), [])
+    mapped = case_map(after, CATALOG)
+    assert "Each run is asked of whoever opened the case." in mapped
+    assert "Each approval is asked of whoever answered review." in mapped
+    assert "Each run is asked of" not in case_map(before, CATALOG)
+    shown = plain(diff(before, after, CATALOG), before, after, CATALOG)
+    assert "Each run is asked of whoever opened the case." in shown

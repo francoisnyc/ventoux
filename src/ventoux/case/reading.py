@@ -569,8 +569,13 @@ def read_step(name: str, case: CaseDefinition, catalog: Catalog) -> EntryReading
     fine: list[Clause] = []
     if isinstance(step, CallStep) and step.approval is not None:
         sentences.append(who_approves(name, step))
+        if step.approval.assign is not None:
+            # Who is asked, as the rule reads aloud (brief, D71).
+            sentences.append(f"Each approval is {step.approval.assign.aloud()}.")
         fine += approval_print(name, step)
     if isinstance(step, TaskStep):
+        if step.assign is not None:
+            sentences.append(f"Each run is {step.assign.aloud()}.")
         sentences += answered(name, step)
     if step.reaches:
         sentences.append(f"Done, it reaches {listed_and(list(step.reaches))}.")
