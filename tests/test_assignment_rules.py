@@ -13,6 +13,8 @@ from test_case import PEOPLE, REFUND, guide_json, guide_refund_with_rework
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.validate import validate_case
+from ventoux.temporal.carried import state_as_data, state_from_data
+from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.testing import CATALOG, claim, give_back, propose, run_case
 
 
@@ -302,3 +304,25 @@ def test_a_task_the_step_doesnt_require_may_find_nobody() -> None:
     ]
     required = validate_case(parse_case(with_triage()), CATALOG)
     assert not [i for i in required if i.code == "MAY_ASSIGN_NOBODY"]
+
+
+def test_whom_a_rule_may_ask_crosses_as_data_and_a_state_from_before_has_none() -> None:
+    # Ana opened the case and answered the review: both cross continue-as-new, with their roles
+    # (brief, D27) (brief, D71). A state carried from before 17c has neither, so a rule then
+    # finds nobody, and the entry is in its queue (fail closed).
+    run = run_case(
+        guide_follow_up(),
+        file={"order_id": "ord-1", "amount": 250},
+        answers=[("review", "approve", "ana", {"approved_amount": 250})],
+        people=PEOPLE,
+        opened_by="ana",
+    )
+    converter = ExactPayloadConverter()
+    payload = converter.to_payload(state_as_data(run.state))
+    assert payload is not None
+    back = state_from_data(converter.from_payload(payload, dict), {})
+    assert back == run.state
+    before = state_as_data(run.state)
+    del before["answerers"], before["opener"]
+    older = state_from_data(before, {})
+    assert older.answerers == {} and older.opener is None
