@@ -5,6 +5,7 @@ opens (layer 10). See docs/layers/10-case-validation.md and docs/guides/cases.md
 from collections.abc import Mapping
 from typing import Any
 
+from ventoux.case.assignment_checks import assignment_issues
 from ventoux.case.calls import (
     approval_issues,
     called_contracts,
@@ -111,6 +112,7 @@ def validate_case(
     found += plan_transition_issues(case, contracts, supplied)
     found += sensitive_issues(case, contracts, {issue.path for issue in found})
     found += approver_issues(case, catalog, contracts)
+    found += assignment_issues(case)  # who a rule asks, when each entry opens (brief, D71)
     found += trigger_issues(case, contracts)
     found += role_issues_of(case, catalog, can, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)

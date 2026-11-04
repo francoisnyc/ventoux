@@ -197,6 +197,24 @@ class ApprovalDisplay(Shape):
     reason: str = Field(min_length=1)
 
 
+class Assign(Shape):
+    """Who is asked when each entry opens: the person who opened the case, or whoever gave a
+    task's latest answer. Only people the case already knows, each named by the trusted caller,
+    so untrusted data never routes work (brief, D71)."""
+
+    to: Literal["opener", "answered"]  # whom: the opener, or a task's latest answerer
+    step: Name | None = None  # for `answered`: the task whose latest answer's person is asked
+
+    @model_validator(mode="after")
+    def names_a_step_when_answered(self) -> "Assign":
+        """`answered` names its task; `opener` names none."""
+        if self.to == "answered" and self.step is None:
+            raise ValueError('"answered" names the task whose answerer is asked: add "step"')
+        if self.to == "opener" and self.step is not None:
+            raise ValueError('"opener" is the person who opened the case: remove "step"')
+        return self
+
+
 class Approval(Shape):
     """`count` different people with one of `roles` approve running the step, when `when` holds
     (brief, D11) (brief, D47)."""
@@ -208,6 +226,7 @@ class Approval(Shape):
         int, Whole(1, "how many people must approve: a whole number of at least 1, such as 2")
     ] = 1  # how many people must approve
     display: ApprovalDisplay
+    assign: Assign | None = None  # who is asked when it is asked; None: its queue (brief, D71)
 
 
 def sent_by(declared: DeclaredEvent) -> str:
@@ -242,6 +261,7 @@ class TaskStep(Step):
     kind: Literal["task"]
     roles: Roles  # who may answer
     outcomes: Annotated[dict[EventName, Outcome], Field(min_length=1)]
+    assign: Assign | None = None  # who is asked when each run opens; None: its queue (brief, D71)
 
 
 class CallStep(Step):
