@@ -185,6 +185,12 @@ def skip_problem(case: CaseDefinition, state: CaseState, entry: str) -> str | No
         )
     if run.status != "failed":
         return f"{entry} can't be skipped: it hasn't failed"
+    # A required step's obligation ends only by doing it, or by a person's close (brief, D72).
+    if case.steps[run.step].required:
+        return (
+            f"{run.step} is required, so its run is never skipped: retry it, or close the case "
+            "with a reason"
+        )
     return None
 
 

@@ -345,6 +345,9 @@ A step waiting for an event from outside is listed the same way, with who sends 
 A timer that is set keeps the case open too, but waits on nobody: it is listed in `timers`, not
 `waiting_for` ("Rules on time", below).
 
+A required step that hasn't run is listed too, with who may start it: `confirm, required,
+proposed by support` ("Required steps", at the end of this guide).
+
 Who is asked to answer each open entry, and who holds it, is in "Who is asked: claiming and
 assigning tasks", at the end of this guide.
 
@@ -470,7 +473,8 @@ as a payment, the new run's new key could make them happen twice (brief, D17, D2
 
 ## Closing a case
 
-A case closes by itself when nothing is left to do (brief, D10). If it declares `closes_when`
+A case closes by itself when nothing is left to do (brief, D10), and every required step is done
+("Required steps"). If it declares `closes_when`
 and closes that way without reaching it (a failed payment skipped, say), its last line says
 which it didn't reach: `closed: nothing left to do; paid not reached`. Two definition keys change
 that:
@@ -2731,3 +2735,104 @@ or `Assign.opener()` (builder guide, "Who is asked"), and the JSON Schema publis
 `waiting_for` doesn't change: it says *what* the case waits for (`review by support`), the same
 to everyone, naming nobody (D24). The history tells every claim, give-back, assignment and
 reassignment in order, naming people, roles and entries, never a value.
+
+## Required steps
+
+A case closes by itself when nothing is left to do (brief, D10): no task open, nothing running,
+nothing failed. That says nothing about work that never started. Say every refund ends with
+support confirming the outcome with the customer, whatever the review decided, once they have
+spoken to them. Proposed by a person, the step is not pending work until someone proposes it, so
+a rejected refund would close at once, with nobody told. `closes_when` doesn't help, since it only
+closes a case early, and `stays_open` keeps every refund open until a person closes it by hand.
+
+Mark the step **required**:
+
+```json
+"confirm": {
+  "kind": "task",
+  "display": {"title": "Confirm the outcome with the customer"},
+  "roles": ["support"],
+  "outcomes": {"confirmed": {"display": {"title": "Outcome confirmed"}}},
+  "requires": ["review"],
+  "automatic": false,
+  "proposed_by": ["support"],
+  "required": true
+}
+```
+
+Now **nothing left to do** also means that every required step's latest run is done. Until it
+is, the case stays open, and `waiting_for` says what it still owes, and who may start it:
+
+```python
+rejected = run_case(refund_confirmed, file={"order_id": "ord-1", "amount": 250},
+                    answers=[("review", "reject", "ana")], people=PEOPLE)
+assert rejected.waiting_for == ["confirm, required, proposed by support"]
+assert not rejected.closed
+
+confirmed = run_case(refund_confirmed, file={"order_id": "ord-1", "amount": 250},
+                     answers=[("review", "reject", "ana"), propose("confirm", "ana"),
+                              ("confirm", "confirmed", "ana")], people=PEOPLE)
+assert confirmed.closed
+```
+
+A requirement holds back only the case closing **by itself**:
+
+- **`closes_when` waits for it too.** With every milestone reached and a required step not done,
+  the case doesn't close, as for a failed run (brief, D26); nothing new starts but the required
+  step, and the case closes once it is done.
+- **A person still closes the case** with a declared close reason, as ever: a requirement never
+  traps a case. The last line says what was owed: `closed: duplicate, by ana; confirm not done`.
+- **A run a rule stopped,** or a rejected one, isn't done (brief, D40): the step is owed still,
+  and the case waits for it to run again. Until a requirement it waits for is met, and once
+  nothing else is pending, `waiting_for` says so: `confirm, required, after pay`. A step only a
+  rule starts reads `confirm, required, started by a rule`.
+- **An owed step that can no longer start needs attention.** Say `confirm` requires `pay`, and
+  Sam rejects the payment's approval: `pay` isn't repeatable, so it never runs again, and
+  `confirm` can never start. The case doesn't pretend to wait: `needs_attention` says `confirm:
+  required, and it can't start: confirm requires pay, which hasn't completed: close the case
+  with a reason`, and only a person's close ends it. The same holds for an owed step that has run
+  and isn't repeatable, and, while `closes_when` holds the close, for one whose requirement
+  nothing is on its way to meet, since nothing else starts then. A requirement is on its way if
+  its run is under way, if it is a milestone a step under way will reach (an open review that
+  reaches `reviewed`), or if it is owed itself and can still start, since the held close lets an
+  owed step start.
+- **A failed run** needs attention, as any other (brief, D17): an operator retries it, or closes
+  the case. Skipping a failed run of a required step is refused, since a skip would end the
+  case's obligation without anyone doing it: `confirm is required, so its run is never skipped:
+  retry it, or close the case with a reason`.
+- **A required step has no `when`.** It is owed in every case; a step owed only sometimes is
+  started by a rule, or proposed, and isn't required.
+
+**`ventoux check` proves each required step can still be done.** It refuses a required step
+nothing can ever start, as it refuses any step that can never run: `confirm can never run: it
+requires reported, which no step or rule reaches: reach reported from a step or a rule, or remove
+the requirement`.
+
+It warns, with `REQUIRED_MAY_STRAND`, about a required step that may be left owed with nothing
+able to start it: a warning, since the rule may never fire, and the approval may be given. Once
+per step, the first of:
+
+- a rule may stop it, or its approval may be rejected, and it can't run again: `a rule may stop
+  confirm, and it is required, so it might never run again: make it repeatable and proposed_by a
+  role, or start it from a rule`;
+- a step it requires may end that way: `confirm requires pay, whose approval may be rejected, and
+  which might never run again; confirm is required, so it might never start: make pay repeatable
+  and proposed_by a role, or start it from a rule`;
+- a step it requires may not be done when a `closes_when` milestone is reached, after which
+  nothing but the owed step starts: `confirm requires check, which may not be done when logged
+  is reached, and nothing but confirm starts then; confirm is required, so it might never start:
+  make what reaches logged require check, or remove logged from closes_when`. A requirement that
+  is required itself, or that starts by itself at the opening (requiring nothing, with no
+  condition) and can't end undone, is on its way or done by then, and isn't warned about.
+
+The case map says what is owed, on the step (`The case owes it: it doesn't close by itself
+until confirm is done.`) and in how the case closes (`It closes when nothing is left to do and
+confirm is done.`). The diff says a change of `required` and leaves its verdict to a person,
+`not proven` either way, as for `closes_when` and `stays_open`: turned on, the case does more
+before it closes by itself, but it also takes what the other version refuses, such as a proposal
+of the owed step after a rejected review, which a closed case refuses.
+
+"Can run again" is read from the definition: the step is repeatable, and a role proposes it or a
+rule starts it. "Done before the milestone" is proven only when every step that reaches it
+requires the step, directly or through what it requires, and no rule reaches it; anything less
+is warned about.

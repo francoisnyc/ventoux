@@ -12,6 +12,7 @@ from typing import Annotated, Any
 
 import pytest
 from pydantic import BaseModel
+from test_required import refund_confirmed  # the guide's refund with a required step
 
 # pytest puts tests/ on the import path (it has no __init__.py), so a test module imports by name.
 from test_timers import chased
@@ -703,6 +704,7 @@ def test_the_guides_examples_run_as_written() -> None:
         "refund_with_chase": chased(),  # "Rules on time", whose blocks test_timers.py checks
         "read_rules": read_rules,  # "Reading rules", whose readings test_reading.py checks
         "parse_case": parse_case,
+        "refund_confirmed": refund_confirmed(),  # "Required steps", checked in test_required.py
     }
     for code in blocks("python"):
         exec(code, namespace)  # noqa: S102 -- our guide, as in layer 7

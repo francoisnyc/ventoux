@@ -381,6 +381,9 @@ be erased on request), has size limits, and a second copy of business records go
   comes later.
 - The validator warns about cases that can never close (a step that can always be restarted, a
   timer that re-arms itself) and about `closes_when` milestones that can't be reached.
+- **Amended 2026-11-04, by D72** (the text above stands; this adds to it): a required step is
+  owed until its latest run is done, so nothing is left to do only once every required step is
+  done; `closes_when` waits for an owed step, and a person's close never does.
 
 ### D11. Approval defaults
 
@@ -691,6 +694,8 @@ be erased on request), has size limits, and a second copy of business records go
 - **It is the part of pending work (D10) that waits on people.** Running steps, set timers and
   failed steps are pending work too, and keep the case open; they are reported as they arrive
   (failures and closing in layer 8, timers in layer 11), never folded into `waiting_for`.
+- **Amended 2026-11-04, by D72** (the text above stands; this adds to it): `waiting_for` also
+  lists each required step owed and not running, after the open entries, with who can start it.
 
 ### D25. An open approval follows the case file
 
@@ -2085,6 +2090,8 @@ D17, D25, D26 and D32, whose text is kept.*
 - **Amended 2026-10-23, by D53** (the text above stands; this adds to it): a migration is a
   third kind, `migrate`, proposed and approved by roles registered to migrate; a pending edit
   follows its field's new name across one.
+- **Amended 2026-11-04, by D72** (the text above stands; this narrows it): a skip of a required
+  step's failed run is refused; it is retried, or the case is closed with a reason.
 
 ### D53. Migrations: one more change request, by names, refused never terminated, previewed
 
@@ -2965,6 +2972,60 @@ Adds to D9, D11, D22, D37, D47, D55, D60, D69 and D70, whose text is kept.*
   `Assign.opener()`; the JSON Schema publishes the shape (D60).
 - **No new engine version (D51):** no definition readable before holds `assign`. The key is
   behaviour, so the digest covers it (D50).
+
+### D72. Required steps: work the case owes, which only its doing or a person's close ends
+
+*Decided 2026-11-04, in layer 18a (`docs/layers/18-lifecycle.md`, choices A to C and 1 to 12;
+choice 12 on 2026-11-05, from the tutor's review).
+Adds to D10, D17, D24, D26, D34, D37, D40, D50, D51, D52 and D55, whose text is kept.*
+
+- **`"required": true` on a step of any kind** says the case owes it: it may not close by itself
+  until the step's latest run is done. Pending work (D10) is what has started and not ended; a
+  required step is owed even before it starts. So **nothing left to do** means no pending work,
+  and every required step's latest run done. Left out of the digest when false, so every existing
+  release keeps its digest (D50).
+- **Done is done with any outcome,** as `requires` reads it: a declined refund, a task answered
+  `reject`, a plan's `failed`. A business failure is an outcome someone handles (D17), not work
+  left undone. A stricter "done well" is a `closes_when` milestone.
+- **Owed in every case, so no `when`:** a required step with a condition is refused when read. A
+  step owed only sometimes is started by a rule, or proposed, and isn't required.
+- **A run that ended without being done leaves the step owed:** stopped by a rule (D40), or its
+  approval rejected. An automatic step starts itself at most once, so another run comes from a
+  proposal or a rule.
+- **Its obligation ends only by doing it, or by a person's close.** A failed run needs attention
+  (D17): retried, or the case closed with a reason. A skip of a required step's failed run (D52)
+  is refused, saying so: a skip goes on as if the run weren't needed, and a required step is one
+  that is. A person's close, with a declared reason, is never held, nor a close by forgetting
+  (D32); its last line names what was owed (`closed: duplicate, by ana; confirm not done`).
+- **`closes_when` waits for it,** as for a failed run (D26): with every milestone reached and a
+  required step owed, nothing new starts but the owed step, and the case closes once it is done.
+  "Close early" and "not before this" meet, and the stricter wins.
+- **A case that owes says so** (D24): `waiting_for` lists each owed step not running, after the
+  open entries, with who can start it: `confirm, required, proposed by support`; `confirm,
+  required, started by a rule`; `confirm, required, after review`, the last only once nothing
+  else is pending.
+- **An owed step that can no longer start needs attention,** naming why, and only a person's close
+  ends it: nothing can start it again (it can't start itself, nobody may propose it, and no rule
+  in the definition starts it, proven from the definition, never guessed); a step it requires
+  ended without completing and can't run again, by the same test; or, while every `closes_when`
+  milestone is reached, a requirement is unmet with nothing on its way to meet it. It is listed in
+  `needs_attention`, not `waiting_for`, as a failed run is: `confirm: required, and it can't
+  start: confirm requires pay, which hasn't completed: close the case with a reason`. Nothing
+  starts that nobody asked for.
+- **`ventoux check` proves each can be done** (D34, D37). Errors, holding for every case: a required
+  step nothing can ever start, which is `NEVER_RUNS`, as for any step that can never run (the reach
+  fixpoint; one cause, one issue), and `required` with `when`. A warning, since the rule may never
+  fire: a required step a rule may stop, or whose approval may reject, that could then never run
+  again (`REQUIRED_MAY_STRAND`).
+- **The diff reads it as not proven, either way** (D55): turned on, the case takes what the other
+  version refuses (a proposal of the owed step after it would have closed), so neither way is a
+  proof for every case, as for `closes_when` and `stays_open`; the change is said, and a person
+  judges it. The case map's closing line names it; the builder takes `required=True`; the JSON
+  Schema follows (D60).
+- **Owed is worked out, never stored,** from the definition and the step's runs: it crosses
+  continue-as-new (D27) and follows a migration's renames (D53) with the runs, and a migration's
+  target decides what is required.
+- **No new engine version (D51):** no definition readable before holds `required`.
 
 ## Concepts
 

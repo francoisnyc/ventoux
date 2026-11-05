@@ -9,6 +9,7 @@ case is **closed**. Something that completes while closing flags the case for a 
 from ventoux.case.admission import latest_run, requirements_met
 from ventoux.case.approvals import with_given
 from ventoux.case.definition import CaseDefinition
+from ventoux.case.owed import owed
 from ventoux.case.state import CaseState, CloseAsked
 from ventoux.case.timers import cancel_timers
 from ventoux.case.writers import read_sources, untrusted_of
@@ -90,7 +91,13 @@ def cancel_changes(state: CaseState, because: str) -> None:
 def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
     """Close the case if it is done: open with nothing left to do (unless it stays open), or
     closing with nothing still running (brief, D10)."""
-    if state.phase == "open" and not case.stays_open and not pending(state):
+    # Nothing left to do: nothing pending, and no required step owed (brief, D72).
+    if (
+        state.phase == "open"
+        and not case.stays_open
+        and not pending(state)
+        and not owed(case, state)
+    ):
         state.phase = "closed"
         cancel_changes(state, "nothing left to do")
         say_kept_from_starting(case, catalog, state)
@@ -98,7 +105,7 @@ def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
     elif state.phase == "closing" and not running(state):
         state.phase = "closed"
         say_kept_from_starting(case, catalog, state)
-        state.history.append(f"closed: {state.closed_because}")
+        state.history.append(f"closed: {state.closed_because}{not_done(case, state)}")
 
 
 def not_reached(case: CaseDefinition, state: CaseState) -> str:
@@ -106,6 +113,13 @@ def not_reached(case: CaseDefinition, state: CaseState) -> str:
     `; paid not reached`, so the end never reads as done (from #44's review) (brief, D53)."""
     missing = [m for m in case.closes_when if m not in state.milestones]
     return f"; {' and '.join(missing)} not reached" if missing else ""
+
+
+def not_done(case: CaseDefinition, state: CaseState) -> str:
+    """What a close adds when the case still owed a required step: `; confirm not done`, so a
+    person's close never reads as the work being done (brief, D72)."""
+    owing = owed(case, state)
+    return f"; {' and '.join(owing)} not done" if owing else ""
 
 
 def say_kept_from_starting(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
@@ -139,6 +153,8 @@ def close_when_reached(case: CaseDefinition, state: CaseState) -> None:
         return  # nothing is skipped automatically (brief, D17)
     if any(firing.status == "failed" for firing in state.firings):
         return  # nor is a rule that couldn't be read (brief, D38)
+    if owed(case, state):
+        return  # nor is a required step not yet done: the stricter wins (brief, D72)
     if all(milestone in state.milestones for milestone in case.closes_when):
         names = " and ".join(case.closes_when)
         verb = "are" if len(case.closes_when) > 1 else "is"

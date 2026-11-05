@@ -8,6 +8,7 @@ built from it in `ventoux.authoring`, which the worker never imports.
 from dataclasses import dataclass
 
 from ventoux.case.definition import CaseDefinition
+from ventoux.case.owing import waiting_for
 from ventoux.case.reading import kind_of
 from ventoux.case.runtime import proposal_refused
 from ventoux.case.state import CaseState
@@ -85,7 +86,7 @@ def advisor_view(
         fields,
         tuple(state.milestones),
         runs,
-        tuple(state.waiting.values()),
+        tuple(waiting_for(case, state)),  # what it owes included (brief, D72)
         steps,
     )
 

@@ -466,6 +466,20 @@ def switch_change(leaf: Leaf, name: str) -> Change:
     return Change(leaf.path, "stricter", said, name)
 
 
+def required_change(leaf: Leaf) -> Change:
+    """`required`, either way: not proven. Turned on, the case takes what the other version
+    refuses (a proposal of the owed step after it would have closed), so neither way is a proof
+    for every case; as `closes_when` and `stays_open`, it is said, and a person judges it
+    (brief, D55) (brief, D72)."""
+    said = f"{shown(leaf.before)} -> {shown(leaf.after)}"
+    why = (
+        "the case owes it before it closes by itself"
+        if leaf.after is True
+        else "the case may close without it"
+    )
+    return Change(leaf.path, "not proven", f"{said} ({why})")
+
+
 # --- Closing and forgetting ----------------------------------------------------------------------
 
 

@@ -47,6 +47,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.freshness import TimeRefused
     from ventoux.case.migrations import migration_of
+    from ventoux.case.owing import attention, waiting_for
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
     from ventoux.case.registry import Answer, Moving, Opening, Released
     from ventoux.case.releases import Hash, Record, is_release
@@ -169,7 +170,9 @@ class CaseReport:
 
     status: str  # open; closing: nothing new starts; closed (brief, D10)
     waiting_for: list[str]  # open tasks and approvals, in the order they opened (brief, D24)
-    waiting_at: list[str]  # their entries, in the same order, to answer: `review#1`
+    # The open entries' names, in the same order, to answer: `review#1`. An owed step, listed
+    # after them, has none (brief, D72).
+    waiting_at: list[str]
     needs_attention: list[str]  # failed step runs, each with its reason (brief, D17)
     flags: list[str]  # what completed after the close was requested
     history: list[str]  # what happened, one line each
@@ -509,12 +512,16 @@ class CaseWorkflow:
     @workflow.query(name="report")
     def report(self) -> CaseReport:
         state = self.state
-        attention = needs_attention(state)
+        # What waits for an operator, and what is owed and can't start, as in memory
+        # (brief, D72).
+        attention_now = needs_attention(state) if self.case is None else attention(self.case, state)
         return CaseReport(
             state.phase,
-            list(state.waiting.values()),
+            # What it waits for, and what it owes, as in memory (brief, D72); none before the
+            # definition is read.
+            [] if self.case is None else waiting_for(self.case, state),
             list(state.waiting),
-            attention,
+            attention_now,
             list(state.flags),
             list(state.history),
             set_timers(state),

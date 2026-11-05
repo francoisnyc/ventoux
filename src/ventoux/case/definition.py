@@ -259,6 +259,9 @@ class Step(Shape):
     proposed_by: tuple[RoleName, ...] = ()  # who may propose it
     repeatable: StrictBool = False  # may run again, when proposed
     reaches: tuple[Name, ...] = ()  # milestones reached when it completes
+    # Owed by the case: it doesn't close by itself until this step's latest run is done
+    # (brief, D72).
+    required: StrictBool = False
 
 
 class TaskStep(Step):
@@ -783,6 +786,12 @@ def step_problems(
         if name not in case.milestones and name not in case.steps
     ]
     problems += reaching(f"{path}.reaches", step.reaches, case)
+    # A required step is owed in every case, so no condition may excuse it (brief, D72).
+    if step.required and step.when is not None:
+        problems.append(
+            f"{path}: a required step is owed in every case, so it has no when: start it from a "
+            "rule, or drop required"
+        )
     if isinstance(step, TaskStep):
         for outcome_name, outcome in step.outcomes.items():
             where = f"{path}.outcomes.{outcome_name}"

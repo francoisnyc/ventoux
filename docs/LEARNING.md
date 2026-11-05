@@ -1381,6 +1381,24 @@ and record the key points. A question is closed once you can explain the answer 
     definition says `"forgetting": "while_open"` (refused once the case is closed, for books and
     records) or `"never"` (brief, D32), and a request to forget is refused. A business decision
     about a kind of record, so it lives in the definition and changes with a release.
+- Retrieval (layer 18 warm-up, 2026-11-04), the follow-up in three parts (what can be answered,
+  what can't and why, what should have been decided beforehand): asked to be told. Given:
+  - **a) What can be answered:** the decision itself, from Temporal's history and the closing
+    report: under which rule and release (the definition is in history), who decided, in which
+    role, with which outcome and when, which steps ran and which failed, and on which facts *by
+    name and source* (`policy_status` from `system:policies`, `approved_amount` from Ana's
+    review), even where the value is gone. A value that wasn't sensitive stays where it was used
+    (`estimated_damage` in a later step's start).
+  - **b) What can't, and why:** the national ID, the tax ID Ana typed, every value in a form
+    answer (the client seals them all, D31) and the failed lookup's message (a failure's message is
+    always sealed). They were never stored in plain text, only encrypted under the case's own key;
+    forgetting destroys that key and it is never made again, so neither history nor an earlier
+    export (the same ciphertext) can open them.
+  - **c) Decided beforehand:** in the definition, `"forgetting": "while_open"` or `"never"` (brief,
+    D32), so a request to forget is refused. A retention choice about a kind of record, made by its
+    author and changed only by a release.
+  - Why now: layer 18's child cases raise the same question, since a child given a sensitive value
+    must be under a key that forgetting the parent can reach (D15, D32).
 - Status: open, until "the facts by name and source" and the retention choice (D32) come back
   from memory.
 

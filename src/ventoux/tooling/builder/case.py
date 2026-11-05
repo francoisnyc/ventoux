@@ -112,7 +112,7 @@ class Case:
         return Milestone(name)
 
     # Steps. Every kind takes the same keywords for when it may start (`requires`, `when`,
-    # `automatic`, `proposed_by`, `repeatable`) and what it reaches, written after its own keys.
+    # `automatic`, `proposed_by`, `repeatable`, `required`) and what it reaches, written after its own keys.
 
     def task(
         self,
@@ -126,13 +126,14 @@ class Case:
         automatic: bool | None = None,
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
+        required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
         assign: Assign | None = None,
     ) -> Task:
         """A task for a person holding one of `roles`, answered with one of `outcomes`; asked of
         whom `assign` picks when each run opens (brief, D71)."""
         entry: Data = {"kind": "task", "display": display(title, description), "roles": list(roles)}
-        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         entry["outcomes"] = {key: answer(outcome) for key, outcome in outcomes.items()}
         if assign is not None:
             entry["assign"] = assigned(assign)
@@ -151,6 +152,7 @@ class Case:
         automatic: bool | None = None,
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
+        required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
         approval: Approval | None = None,
         max_age: Mapping[str, str] | None = None,
@@ -160,7 +162,7 @@ class Case:
         entry: Data = {"kind": "activity", "display": display(title, description)}
         entry["activity"] = activity
         entry |= calling(inputs)
-        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         entry |= guarded(approval, max_age)
         self.add(name, entry)
         return Step(name)
@@ -177,6 +179,7 @@ class Case:
         automatic: bool | None = None,
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
+        required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
         approval: Approval | None = None,
         max_age: Mapping[str, str] | None = None,
@@ -186,7 +189,7 @@ class Case:
         entry: Data = {"kind": "workflow", "display": display(title, description)}
         entry["workflow"] = workflow
         entry |= calling(inputs)
-        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         entry |= guarded(approval, max_age)
         self.add(name, entry)
         return Step(name)
@@ -202,11 +205,12 @@ class Case:
         automatic: bool | None = None,
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
+        required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
     ) -> Step:
         """A step that waits for `event`'s next arrival (brief, D41)."""
         entry: Data = {"kind": "wait", "display": display(title, description), "event": event.name}
-        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         self.add(name, entry)
         return Step(name)
 
@@ -222,6 +226,7 @@ class Case:
         automatic: bool | None = None,
         proposed_by: Sequence[str] | None = None,
         repeatable: bool | None = None,
+        required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
         max_age: Mapping[str, str] | None = None,
     ) -> Step:
@@ -230,7 +235,7 @@ class Case:
         entry: Data = {"kind": "plan", "display": display(title, description)}
         entry["plan"] = plan.reference
         entry |= calling(inputs)
-        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         entry |= guarded(None, max_age)
         self.add(name, entry)
         self.plans[plan.reference] = plan
@@ -384,6 +389,7 @@ def starting(
     proposed_by: Sequence[str] | None,
     repeatable: bool | None,
     reaches: Sequence[Milestone] | None,
+    required: bool | None = None,
 ) -> Data:
     """When a step may start, and what it reaches when it completes."""
     data: Data = {}
@@ -399,6 +405,9 @@ def starting(
         data["repeatable"] = repeatable
     if reaches is not None:
         data["reaches"] = [milestone.name for milestone in reaches]
+    if required is not None:
+        # True: the case owes it before closing by itself (brief, D72).
+        data["required"] = required
     return data
 
 
