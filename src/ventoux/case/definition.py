@@ -821,6 +821,29 @@ def repeated_step_problems(
     if isinstance(step, ActivityStep) and step.approval is not None:
         # Open approvals are kept one per step, never per run: a deliberate limit (brief, D48).
         problems.append(f"{path}.approval: a repeated step has no approval yet")
+    return problems + one_run_shapes(path, name, step)
+
+
+def one_run_shapes(path: str, name: str, step: TaskStep | ActivityStep) -> list[str]:
+    """What assumes one run per step, refused on a repeated one for now: a milestone it reaches,
+    a field its answer sets, a fact it needs fresh, whom a rule asks. Each a deliberate limit, a
+    door for later (brief, D48) (brief, D73)."""
+    reach = f"a repeated step reaches no milestone yet: reach it from a step that requires {name}"
+    problems = [f"{path}.reaches: {reach}"] if step.reaches else []
+    if isinstance(step, TaskStep):
+        for outcome_name, outcome in step.outcomes.items():
+            where = f"{path}.outcomes.{outcome_name}"
+            if outcome.reaches:
+                problems.append(f"{where}.reaches: {reach}")
+            if outcome.sets:
+                problems.append(
+                    f"{where}.sets: a repeated task's answer sets no field yet: each answer would "
+                    "overwrite the last"
+                )
+        if step.assign is not None:
+            problems.append(f"{path}.assign: a repeated task is asked of its queue yet")
+    if isinstance(step, ActivityStep) and step.max_age:
+        problems.append(f"{path}.max_age: a repeated step needs no fact fresh yet")
     return problems
 
 

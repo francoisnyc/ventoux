@@ -223,3 +223,48 @@ def test_a_plan_workflow_or_wait_step_has_no_for_each() -> None:
     }
     with pytest.raises(CaseInvalid, match="^steps.settle.for_each: not a field here$"):
         parse_case(changed(lambda d: d["steps"].update(settle=plan_step)))
+
+
+@pytest.mark.parametrize(
+    ("step", "keys", "refusal"),
+    [
+        (
+            "draft_line",
+            {"reaches": ["drafted"]},
+            "steps.draft_line.reaches: a repeated step reaches no milestone yet: reach it from a "
+            "step that requires draft_line",
+        ),
+        (
+            "inspect_line",
+            {"outcomes": {"received": {"display": {"title": "Received"}, "reaches": ["drafted"]}}},
+            "steps.inspect_line.outcomes.received.reaches: a repeated step reaches no milestone "
+            "yet: reach it from a step that requires inspect_line",
+        ),
+        (
+            "inspect_line",
+            {"outcomes": {"received": {"display": {"title": "Received"}, "sets": ["email"]}}},
+            "steps.inspect_line.outcomes.received.sets: a repeated task's answer sets no field "
+            "yet: each answer would overwrite the last",
+        ),
+        (
+            "draft_line",
+            {"max_age": {"email": "1d"}},
+            "steps.draft_line.max_age: a repeated step needs no fact fresh yet",
+        ),
+        (
+            "inspect_line",
+            {"assign": {"to": "opener"}},
+            "steps.inspect_line.assign: a repeated task is asked of its queue yet",
+        ),
+    ],
+)
+def test_what_a_repeated_step_cant_do_yet_is_refused(
+    step: str, keys: dict[str, Any], refusal: str
+) -> None:
+    # Each assumes one run per step; each a deliberate limit, a door for later (brief, D48, D73).
+    definition = order_return()
+    definition["milestones"] = {"drafted": {"display": {"title": "Drafted"}}}
+    definition["steps"][step].update(keys)
+    with pytest.raises(CaseInvalid) as refused:
+        parse_case(definition)
+    assert str(refused.value) == refusal
