@@ -95,3 +95,131 @@ def test_a_list_that_doesnt_fit_is_refused_at_the_opening(lines: object, refusal
     with pytest.raises(CaseRefused) as refused:
         opened(lines)
     assert str(refused.value) == refusal
+
+
+# --- Slice 2: what can't be repeated, refused when the definition is read (brief, D73) ---
+
+
+def changed(change: Any) -> dict[str, Any]:
+    """The returned order, changed by `change`, a function of its definition."""
+    definition = order_return()
+    change(definition)
+    return definition
+
+
+def notify(**step: Any) -> dict[str, Any]:
+    """A letter drafted once, not repeated, with `step`'s keys."""
+    return {
+        "kind": "activity",
+        "display": {"title": "Draft one letter"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "email"}, "template": "returned"},
+        **step,
+    }
+
+
+def key(name: str) -> Any:
+    return lambda d: d["steps"]["draft_line"]["for_each"].update(key=name)
+
+
+def set_step(name: str, **keys: Any) -> Any:
+    return lambda d: d["steps"][name].update(keys)
+
+
+REPEATED = "steps.draft_line: a repeated step starts by itself, a run per item"
+
+
+@pytest.mark.parametrize(
+    ("change", "refusal"),
+    [
+        (
+            key("amount"),
+            (
+                "steps.draft_line.for_each: amount is not a text field of lines: a key is a text "
+                "field every item has"
+            ),
+        ),
+        (
+            key("colour"),
+            (
+                "steps.draft_line.for_each: colour is not a text field of lines: a key is a text "
+                "field every item has"
+            ),
+        ),
+        (set_step("draft_line", proposed_by=["support"]), f"{REPEATED}: drop proposed_by"),
+        (
+            set_step("draft_line", proposed_by=["support"], repeatable=True),
+            f"{REPEATED}: drop proposed_by and repeatable",
+        ),
+        (
+            lambda d: d.setdefault("rules", {}).update(
+                start_letters={
+                    "display": {"title": "Draft again"},
+                    "on": "opened",
+                    "then": {"start": ["draft_line"]},
+                }
+            ),
+            f"{REPEATED}: no rule starts it, and start_letters does",
+        ),
+        (
+            set_step(
+                "draft_line",
+                approval={"roles": ["support-lead"], "display": {"reason": "Why"}},
+            ),
+            "steps.draft_line.approval: a repeated step has no approval yet",
+        ),
+        (
+            lambda d: d["steps"].update(
+                notify=notify(
+                    inputs={"to_customer": {"var": "email"}, "template": {"var": "each.sku"}}
+                )
+            ),
+            "steps.notify.inputs.template: each is read only in a repeated step",
+        ),
+        (
+            lambda d: d["fields"].update(each={"type": "string", "display": {"title": "Each"}}),
+            "fields.each: each is the name a repeated step reads its item by: name it otherwise",
+        ),
+        (
+            lambda d: d["steps"].update(
+                notify=notify(when={"==": [{"var": "inspect_line.outcome"}, "received"]})
+            ),
+            "steps.notify.when: inspect_line.outcome: a repeated step has no one outcome",
+        ),
+        (
+            lambda d: d["steps"].update(
+                review={
+                    "kind": "task",
+                    "display": {"title": "Review"},
+                    "roles": ["support"],
+                    "outcomes": {"redo": {"display": {"title": "Redo"}, "sets": ["lines"]}},
+                }
+            ),
+            (
+                "steps.review.outcomes.redo.sets: lines is a list, and a form never gives a list "
+                "yet: a list is given at the opening"
+            ),
+        ),
+        (
+            lambda d: d["fields"]["lines"].update(sensitive=True, visible_to=["support"]),
+            "fields.lines: a list is never sensitive yet: keep the personal data out of it",
+        ),
+    ],
+)
+def test_what_cant_be_repeated_is_refused_when_read(change: Any, refusal: str) -> None:
+    with pytest.raises(CaseInvalid) as refused:
+        parse_case(changed(change))
+    assert str(refused.value) == refusal
+
+
+def test_a_plan_workflow_or_wait_step_has_no_for_each() -> None:
+    # Only a task or an activity repeats: the others refuse the key, as the format refuses any key
+    # a kind of step doesn't have.
+    plan_step = {
+        "kind": "plan",
+        "display": {"title": "Settle"},
+        "plan": "refund-order@1",
+        "for_each": {"over": "lines", "key": "sku"},
+    }
+    with pytest.raises(CaseInvalid, match="^steps.settle.for_each: not a field here$"):
+        parse_case(changed(lambda d: d["steps"].update(settle=plan_step)))
