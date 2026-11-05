@@ -13,6 +13,7 @@ from ventoux.core.expressions import (
     BooleanType,
     DateType,
     FieldType,
+    ListType,
     NumberType,
     OptionType,
     OutcomeType,
@@ -49,12 +50,20 @@ def form_problem(
 
 # The longest ID an attachment may hold: room for any store's ID, never for a file (brief, D68).
 LONGEST_ID = 200
+# The most items a list holds: so one decision starts at most this many runs of a step that
+# repeats over it (brief, D39) (brief, D73). A deliberate limit (brief, D48).
+MOST_ITEMS = 100
 
 
 def misfit(field: str, declared: FieldType, value: object, given_by: str) -> str:
     """Why `value` isn't of the type `declared`, naming its kind, never the value (brief, D30):
     `amount is a number, and the opening gives a string`. A text that isn't a day says how a date
     is written (brief, D66)."""
+    if isinstance(declared, ListType):
+        if isinstance(value, list) and len(value) > MOST_ITEMS:
+            return f"{field} holds at most {MOST_ITEMS} items, and {given_by} gives {len(value)}"
+        wrong = list_misfit(field, value, declared)
+        return f"{field} is {a_list(declared)}, and {given_by} gives {wrong}"
     if isinstance(declared, DateType) and isinstance(value, str):
         return (
             f"{field} is a date, written YYYY-MM-DD, and {given_by} gives a string that isn't one"
@@ -98,5 +107,48 @@ def fits(value: object, declared: FieldType) -> bool:
         # A short text: an ID, never the file. Whether the store issued it is its check's to say
         # (brief, D68).
         return isinstance(value, str) and 0 < len(value) <= LONGEST_ID
-    # Fail closed: a type this check doesn't know (a list, for now) fits nothing.
+    if isinstance(declared, ListType):
+        # At most MOST_ITEMS records, each with exactly the declared fields, each of its type
+        # (brief, D73).
+        return (
+            isinstance(value, list)
+            and len(value) <= MOST_ITEMS
+            and all(item_misfit("the list", item, declared) is None for item in value)
+        )
+    # Fail closed: a type this check doesn't know fits nothing.
     return False
+
+
+def a_list(declared: ListType) -> str:
+    """A list's shape as a message says it: `a list of records with sku (a string) and amount (a
+    number)`."""
+    fields = [f"{name} ({a_type(kind)})" for name, kind in declared.fields.items()]
+    shown = ", ".join(fields[:-1]) + f" and {fields[-1]}" if len(fields) > 1 else fields[0]
+    return f"a list of records with {shown}"
+
+
+def list_misfit(field: str, value: object, declared: ListType) -> str:
+    """What a value that isn't the list gives, naming kinds and declared names, never a value nor a
+    name the value brings (brief, D30)."""
+    if not isinstance(value, list):
+        return a_kind(value)
+    for item in value:
+        if (wrong := item_misfit(field, item, declared)) is not None:
+            return wrong
+    raise ValueError("list_misfit is asked only of a value that doesn't fit")  # never reached
+
+
+def item_misfit(field: str, item: object, declared: ListType) -> str | None:
+    """What is wrong with one item of the list `field`, said as what the value gives; None if it
+    fits."""
+    if not isinstance(item, dict):
+        return f"an item that is {a_kind(item)}"
+    for name in declared.fields:
+        if name not in item:
+            return f"an item without {name}"
+    if any(name not in declared.fields for name in item):
+        return f"an item with a field {field} doesn't declare"
+    for name, kind in declared.fields.items():
+        if not fits(item[name], kind):
+            return f"an item whose {name} is {a_kind(item[name])}"
+    return None

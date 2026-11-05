@@ -23,6 +23,7 @@ from pydantic import (
 from ventoux.case.freshness import seconds_in
 from ventoux.core.before_activity import given_as_reference
 from ventoux.core.expressions import FieldType, ListType, ReferenceType
+from ventoux.core.expressions.check import a_type
 from ventoux.core.plan import (
     WRITTEN_FLAT,
     ActivityReference,
@@ -197,6 +198,14 @@ class ApprovalDisplay(Shape):
     reason: str = Field(min_length=1)
 
 
+class ForEach(Shape):
+    """A step run once per item of a list field, each run named by a number the engine gives its
+    item's key the first time it sees it (brief, D73)."""
+
+    over: Name  # the list field whose items it runs for
+    key: Name  # the text field of each item that tells one item from another
+
+
 class Assign(Shape):
     """Who is asked when each entry opens: the person who opened the case, or whoever gave a
     task's latest answer. Only people the case already knows, each named by the trusted caller,
@@ -271,6 +280,7 @@ class TaskStep(Step):
     roles: Roles  # who may answer
     outcomes: Annotated[dict[EventName, Outcome], Field(min_length=1)]
     assign: Assign | None = None  # who is asked when each run opens; None: its queue (brief, D71)
+    for_each: ForEach | None = None  # one run per item of a list field (brief, D73)
 
 
 class CallStep(Step):
@@ -292,6 +302,7 @@ class ActivityStep(CallStep):
 
     kind: Literal["activity"]
     activity: ActivityReference
+    for_each: ForEach | None = None  # one run per item of a list field (brief, D73)
 
     @property
     def called(self) -> str:
@@ -772,6 +783,19 @@ def moment_problems(path: str, moment: object, case: CaseDefinition) -> list[str
     return []
 
 
+def for_each_problems(path: str, for_each: ForEach, case: CaseDefinition) -> list[str]:
+    """What keeps a step from repeating over `for_each.over`: it is a list field (brief, D73)."""
+    field = case.fields.get(for_each.over)
+    if field is None:
+        return [f"{path}: {for_each.over} is not a field"]
+    if not isinstance(field.declared, ListType):
+        declared = a_type(field.declared)
+        return [
+            f"{path}: {for_each.over} is {declared}, not a list: a step repeats over a list field"
+        ]
+    return []
+
+
 def step_problems(
     path: str,
     step: TaskStep | CallStep | PlanStep | WaitStep,
@@ -792,6 +816,8 @@ def step_problems(
             f"{path}: a required step is owed in every case, so it has no when: start it from a "
             "rule, or drop required"
         )
+    if isinstance(step, TaskStep | ActivityStep) and step.for_each is not None:
+        problems += for_each_problems(f"{path}.for_each", step.for_each, case)
     if isinstance(step, TaskStep):
         for outcome_name, outcome in step.outcomes.items():
             where = f"{path}.outcomes.{outcome_name}"

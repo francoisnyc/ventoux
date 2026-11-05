@@ -241,10 +241,19 @@ def as_json(values: Mapping[str, Any]) -> dict[str, Any]:
     """`values` as the API would pass them on from JSON, whose numbers are exact decimals
     (brief, D20): a whole number in a test is one. A float is passed on as it is, and refused by
     the type check, since it may already have lost its exact value."""
-    return {
-        name: Decimal(value) if isinstance(value, int) and not isinstance(value, bool) else value
-        for name, value in values.items()
-    }
+    return {name: exact(value) for name, value in values.items()}
+
+
+def exact(value: Any) -> Any:
+    """`value` as JSON gives it: a whole number an exact decimal, inside a list's records too
+    (brief, D73); anything else as it is."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return Decimal(value)
+    if isinstance(value, list):
+        return [exact(item) for item in value]
+    if isinstance(value, dict):
+        return {name: exact(item) for name, item in value.items()}
+    return value
 
 
 def wrapped(case: CaseDefinition, file: Mapping[str, Any]) -> dict[str, Any]:
