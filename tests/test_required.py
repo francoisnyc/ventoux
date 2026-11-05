@@ -599,3 +599,84 @@ def test_under_a_held_close_an_owed_step_whose_requirement_cant_start_needs_atte
             "close the case with a reason"
         )
     ]
+
+
+# --- Slice 5: REQUIRED_MAY_STRAND, a warning: what may strand an owed step (brief, D72) ---
+
+
+def strand_warnings(definition: dict[str, Any]) -> list[tuple[str, str]]:
+    """Each REQUIRED_MAY_STRAND `ventoux check` gives `definition`: its path and message."""
+    found = validate_case(parse_case(definition), CATALOG)
+    assert all(i.severity == "warning" for i in found if i.code == "REQUIRED_MAY_STRAND")
+    return [(i.path, i.message) for i in found if i.code == "REQUIRED_MAY_STRAND"]
+
+
+def test_a_required_step_a_rule_may_stop_and_that_cant_run_again_is_warned() -> None:
+    # A warning, never an error: the rule may never fire, so it doesn't hold for every case
+    # (brief, D37).
+    definition = refund_confirmed_withdrawable()
+    definition["steps"]["confirm"]["repeatable"] = False
+    assert strand_warnings(definition) == [
+        (
+            "steps.confirm",
+            (
+                "a rule may stop confirm, and it is required, so it might never run again: make "
+                "it repeatable and proposed_by a role, or start it from a rule"
+            ),
+        )
+    ]
+
+
+def test_a_required_step_whose_approval_may_be_rejected_and_that_cant_run_again_is_warned() -> None:
+    definition = refund_paying_required()
+    del definition["steps"]["pay"]["repeatable"]
+    del definition["steps"]["pay"]["proposed_by"]
+    assert strand_warnings(definition) == [
+        (
+            "steps.pay",
+            (
+                "its approval may be rejected, and it is required, so it might never run again: "
+                "make it repeatable and proposed_by a role, or start it from a rule"
+            ),
+        )
+    ]
+
+
+def test_a_required_step_that_can_run_again_is_not_warned() -> None:
+    # Repeatable and proposed: a stop or a rejection leaves it able to run again.
+    assert strand_warnings(refund_confirmed_withdrawable()) == []
+    assert strand_warnings(refund_paying_required()) == []
+    assert strand_warnings(refund_confirmed()) == []  # the guide's example warns about nothing
+
+
+def test_a_required_step_whose_requirement_may_end_and_cant_run_again_is_warned() -> None:
+    # The tutor's run, read from the definition: pay's approval may be rejected, and pay can't run
+    # again, so confirm might never start.
+    assert strand_warnings(confirming_after_pay()) == [
+        (
+            "steps.confirm",
+            (
+                "confirm requires pay, whose approval may be rejected, and which might never run "
+                "again; confirm is required, so it might never start: make pay repeatable and "
+                "proposed_by a role, or start it from a rule"
+            ),
+        )
+    ]
+    assert strand_warnings(confirming_after_pay(pay_runs_again=True)) == []
+
+
+def test_a_required_step_whose_requirement_may_be_unmet_once_the_case_may_close_is_warned() -> None:
+    # logged is reached by a step that doesn't require the review, so it may be reached with the
+    # review not done; then nothing new starts but confirm, which requires it.
+    assert strand_warnings(logged_first()) == [
+        (
+            "steps.confirm",
+            (
+                "confirm requires review, which may not be done when logged is reached, and "
+                "nothing but confirm starts then; confirm is required, so it might never start: "
+                "make what reaches logged require review, or remove logged from closes_when"
+            ),
+        )
+    ]
+    # paid is reached only by pay, which requires the review: done before, proven.
+    assert strand_warnings(refund_confirmed_closing_when_paid()) == []

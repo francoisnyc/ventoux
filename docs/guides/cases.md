@@ -2803,8 +2803,24 @@ A requirement holds back only the case closing **by itself**:
 **`ventoux check` proves each required step can still be done.** It refuses a required step
 nothing can ever start, as it refuses any step that can never run: `confirm can never run: it
 requires reported, which no step or rule reaches: reach reported from a step or a rule, or remove
-the requirement`. It warns
-about a required step a rule may stop, or whose approval may reject, that could then never run
-again, since the rule may never fire: `steps.confirm: a rule may stop confirm, and it is
-required, so it might never run again: make it repeatable and proposed_by a role, or start it
-from a rule`.
+the requirement`.
+
+It warns, with `REQUIRED_MAY_STRAND`, about a required step that may be left owed with nothing
+able to start it: a warning, since the rule may never fire, and the approval may be given. Once
+per step, the first of:
+
+- a rule may stop it, or its approval may be rejected, and it can't run again: `a rule may stop
+  confirm, and it is required, so it might never run again: make it repeatable and proposed_by a
+  role, or start it from a rule`;
+- a step it requires may end that way: `confirm requires pay, whose approval may be rejected, and
+  which might never run again; confirm is required, so it might never start: make pay repeatable
+  and proposed_by a role, or start it from a rule`;
+- a step it requires may not be done when a `closes_when` milestone is reached, after which
+  nothing but the owed step starts: `confirm requires review, which may not be done when logged
+  is reached, and nothing but confirm starts then; confirm is required, so it might never start:
+  make what reaches logged require review, or remove logged from closes_when`.
+
+"Can run again" is read from the definition: the step is repeatable, and a role proposes it or a
+rule starts it. "Done before the milestone" is proven only when every step that reaches it
+requires the step, directly or through what it requires, and no rule reaches it; anything less
+is warned about.

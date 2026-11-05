@@ -487,6 +487,13 @@ continue-as-new (13).
 - **A close names what was owed** for every close by a reason, forgetting included: `closed:
   forgotten; confirm not done`.
 
+- **`REQUIRED_MAY_STRAND`, as built** (`case/stranding.py`), one issue per step, the first of: the
+  step may end (a rule's stop, its approval) and can't run again; a step it requires may; a step
+  it requires may not be done when a `closes_when` milestone is reached. "Done before" is proven
+  only when no rule reaches the milestone and every step reaching it requires the step, directly
+  or through its requirements: doubt warns. A milestone requirement is not followed, so it warns
+  too, the safe side for a warning.
+
 ## Guide drafts for 18b and 18c, kept here until their parts are built
 
 Written in step 2 as if they worked. The guide's examples are run by its tests, so these sections

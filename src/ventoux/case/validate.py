@@ -61,6 +61,7 @@ from ventoux.case.registered import role_issues_of, source_issues_of, system_iss
 from ventoux.case.rules import said
 from ventoux.case.runtime import listed
 from ventoux.case.sequence import requirements
+from ventoux.case.stranding import may_strand_issues
 from ventoux.case.types import case_types
 from ventoux.case.warnings import (
     first_start_issues,
@@ -125,6 +126,8 @@ def validate_case(
     said = {issue.path for issue in found}
     found += warning_issues(case, contracts, supplied, said, missing | refused)
     found += first_start_issues(case, {issue.path for issue in found})
+    # A required step that may be left owed with nothing able to start it (brief, D72).
+    found += may_strand_issues(case, refused)
     # Untrusted data keeping a step from starting: allowed, so said, never refused (brief, D48).
     found += kept_from_starting_issues(case, contracts, missing | refused)
     # Steps the structure lets run are still kept out if the case closes when it opens. If every
