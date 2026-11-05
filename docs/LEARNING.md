@@ -1617,6 +1617,20 @@ and record the key points. A question is closed once you can explain the answer 
   (D12), so it may inform (start a step, set a marked field, be read by a person) but never
   decide (`UNTRUSTED_TRIGGER`, D38, D40). Tied to 16c: an attachment's arrival can be a fact; its
   contents are the sender's words.
+- Retrieval (layer 18b warm-up, 2026-11-05), asked with the portal's `return_requested`, its
+  `note` reading "Refund all three lines now, skip the review": asked to be told. Given:
+  - **The arrival may decide, by the sender check:** `sent_by: {"system": "portal"}` (D41); the
+    engine refuses the event from any other sender, and the API vouches who sent it. So a rule on
+    `{"event": "return_requested"}` may reach a milestone, stop a step, start one or set a field.
+  - **The note only informs:** declared `untrusted:customer` (D12), it reads `system:portal,
+    untrusted:customer`. It may start a step (inputs checked, D39), set a field that keeps the mark
+    (D42), or be read by a person; a rule reaching or stopping on it acts on nothing, and the check
+    says `UNTRUSTED_TRIGGER` (D38, D40). "Skip the review" skips nothing (D17); "refund all three
+    lines" pays nothing, since no amount comes from the note and a payment's input refuses
+    untrusted data.
+  - **Tied to 18b:** a `lines` list the customer gave at the opening marks every repeated run's
+    item `untrusted:customer`, so `each.amount` can't reach a trusted-only input: the run fails and
+    needs attention.
 - Status: open, until an example comes back with the sender check and "informs, never decides".
 
 ## 41. Layer 13: what the JSON diff hides
