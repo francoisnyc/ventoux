@@ -328,6 +328,57 @@ is given, and keeps a repeated step simple: it starts by itself, a run per item,
 validation; the runs, named and given their items; reading from outside and required; the routes
 (edit refused, migration, stop, retry, continue-as-new); the diff, the case map, the builder.
 
+### Seams and tests for 18b (curriculum step 4, proposed)
+
+The tests use only what a caller uses today; no test reads how the item numbers are stored.
+
+1. **The definition:** `for_each` on a task or activity step, read by `parse_case`; what can't
+   be repeated is refused when read (`CaseInvalid`).
+2. **The opening:** `run_case(..., file={..., "lines": [...]})`, a list given as data; a list
+   that doesn't fit is refused (`CaseRefused`).
+3. **The runs, in what a run reports:** `history` (`scheduled draft_line.1#1: …, key
+   memory/draft_line.1#1`), `waiting_for` (an open repeated task reads `inspect_line.1 by
+   support`: its number, never its value), `needs_attention`, `closed`. An answer names its entry:
+   `("inspect_line.1#1", "received", "ana")`; a retry, `retry("draft_line.1#1", "omar")`.
+4. **`validate_case`:** the issues, by code and message.
+5. **An edit:** `edit("lines", …)` refused with `ChangeRefused`.
+6. **On Temporal:** `CaseReport`, and a case continuing as new with repeated runs open.
+7. **The diff, the case map, the builder, the schema,** as in 18a.
+
+**The refusals and lines, word for word:**
+
+| Situation | What is said |
+|---|---|
+| `for_each` over a field that isn't a list | `steps.draft_line.for_each: order_id is a reference, not a list: a step repeats over a list field` |
+| a key that isn't a text field of the items | `steps.draft_line.for_each: amount is not a text field of lines: a key is a text field every item has` |
+| a repeated plan, workflow or wait step | `steps.settle: a plan step is never repeated: repeat a task or an activity` |
+| a repeated step proposed, repeatable, or started by a rule | `steps.draft_line: a repeated step starts by itself, a run per item: drop proposed_by` (`repeatable`; `the rule start_letters starts it`) |
+| an approval on a repeated step | `steps.draft_line.approval: a repeated step has no approval yet` |
+| a high-risk contract repeated (`ventoux check`, error) | `payments.refund@2 is high risk, and refund_line is repeated, so it can have no approval: repeat a low-risk step, or pay once` |
+| `each` read outside a repeated step | `steps.notify.inputs.amount: each is read only in a repeated step` |
+| `each` as a name | `fields.each: each is the name a repeated step reads its item by: name it otherwise` |
+| a repeated step's outcome or output read elsewhere | `steps.notify.when: inspect_line.outcome: a repeated step has no one outcome` |
+| the opening gives a list that doesn't fit | `lines is a list of records with sku (a text) and amount (a number), and the opening gives …` (the type, never the value), and `lines holds at most 100 items, and the opening gives 101` |
+| items repeat a key, or lack one (the step fails) | `draft_line can't run: two items of lines have the same sku: each item's key is its own` (`an item of lines has no sku`) |
+| an edit of a list a step repeats over | `lines is the list draft_line repeats over, so it is never edited: close the case and open it again with the list corrected` |
+| an empty list | `draft_line: lines has no items, so it has no runs` |
+
+**The tests, in the order I'd write them,** each failing first (the negative first):
+
+1. **(negative, curriculum)** `for_each` over a field that isn't a list is refused when read.
+2. **(negative)** The list value at the opening: wrong shapes, wrong types, over 100, all refused.
+3. The guide's example, run as written: two drafts, numbered, their keys.
+4. Reordering the list at a later opening gives the same names; an added key gets the next number.
+5. **(negative)** The other shapes refused when read: key, kinds, proposals, repeatable, rule
+   starts, approval, `each` misread or misnamed, outcome read; the high-risk error at the check.
+6. A repeated task: entries numbered, answered by entry, `waiting_for` naming numbers.
+7. `requires` over a repeated step, an empty list, a required repeated step owing each item.
+8. **(negative)** Items that repeat or lack a key fail the step.
+9. Provenance: an untrusted list makes each item untrusted; a trusted-only input refuses it.
+10. The routes: an edit refused; a rule's stop stops every open run; a retry by entry; a
+    migration renaming the step keeps the numbers; continue-as-new on Temporal; replay.
+11. The diff, the case map, the builder, the schema, the digest pin.
+
 ### For 18c and 18d: child cases (sketched; settled when they start)
 
 21. **The shape:** `{"kind": "case", "case": "repair@3", "inputs": {...}}`. A child case is named
