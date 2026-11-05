@@ -2836,3 +2836,70 @@ of the owed step after a rejected review, which a closed case refuses.
 rule starts it. "Done before the milestone" is proven only when every step that reaches it
 requires the step, directly or through what it requires, and no rule reaches it; anything less
 is warned about.
+
+## Repeated steps: one run per item
+
+A **repeated step** runs once for each item of a list in the case file, each run given its own
+item. Here an order is refunded line by line:
+
+```json
+"fields": {
+  "order_id": {"type": "reference", "system": "orders", "display": {"title": "Order"}},
+  "lines": {"type": "list", "display": {"title": "Order lines"},
+            "fields": {"sku": {"type": "string"}, "amount": {"type": "number"}}}
+},
+"steps": {
+  "refund_line": {
+    "kind": "activity",
+    "display": {"title": "Refund one line"},
+    "activity": "payments.refund@2",
+    "for_each": {"over": "lines", "key": "sku"},
+    "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "each.amount"}}
+  }
+}
+```
+
+**A list is given at the opening.** Each item is a record holding exactly the list's declared
+fields, each of its type; anything else is refused, saying the type, never the value. An event
+never carries a list, and a rule never sets one. Every value in the list comes from whoever gave
+it, with their sources: a list the customer typed leaves every line `untrusted:customer`.
+
+**Each run reads its own item** as `each.<field>`: here `each.amount`. (`item` is what `sum` and
+`count` call their own element, so a repeated step's item has its own word; `each` is never the
+name of a field, step, milestone or event.)
+
+**Each run is named by a number, never by its position or its value.** The engine gives each key
+(the field `key` names, here `sku`) a number the first time it sees it: A12 is item 1 and B7 item
+2, so their runs are `refund_line.1#1` and `refund_line.2#1`. The name goes into the run's
+idempotency key (brief, D17), so reordering the list never gives one line's payment another
+line's key; and no history line quotes a value (brief, D30). A list whose items repeat a key, or
+lack one, fails the step, which needs attention: nothing guesses which line is which.
+
+```python
+lines = [{"sku": "A12", "amount": 40}, {"sku": "B7", "amount": 25}]
+run = run_case(order_refund, file={"order_id": "ord-1", "lines": lines}, answers=[],
+               people=PEOPLE)
+assert [line for line in run.history if line.startswith("scheduled")] == [
+    "scheduled refund_line.1#1: payments.refund@2 (order_id from system:opener; amount from "
+    "system:opener), key memory/refund_line.1#1",
+    "scheduled refund_line.2#1: payments.refund@2 (order_id from system:opener; amount from "
+    "system:opener), key memory/refund_line.2#1",
+]
+assert run.closed
+```
+
+Reading a repeated step from elsewhere:
+
+- **`requires: ["refund_line"]`** is met once every item's latest run is done; with no items, at
+  once, and the history says so.
+- **`refund_line.outcome`** and its outputs are refused: with several runs there is no one
+  outcome.
+- **A required repeated step** owes a done run for every item (see "Required steps").
+
+**An edit never changes a list a step repeats over** (see "Changing an open case"): `lines is
+the list refund_line repeats over, so it is never edited: close the case and open it again with
+the list corrected`.
+
+`ventoux check` refuses `for_each` over a field that isn't a list (`steps.refund_line.for_each:
+order_id is a reference, not a list: a step repeats over a list field`), a key that isn't a text
+field of the list's items, and a repeated step that is a plan, a workflow or a wait.

@@ -588,69 +588,13 @@ Every route by which what is owed can be set or changed, each handled or refused
 **State keyed by a step's name:** none is stored. What is owed is worked out from the definition
 and the runs, which a migration renames, so the rename test is the check 17c's review asked for.
 
-## Guide drafts for 18b and 18c, kept here until their parts are built
+## Guide draft for 18c, kept here until its part is built
 
-Written in step 2 as if they worked. The guide's examples are run by its tests, so these sections
-can't sit in the guide before their parts exist; each moves back when its part starts, corrected
-by its answers (see "What changes in the guide, if answered as recommended").
+Written in step 2 as if it worked. The guide's examples are run by its tests, so the section can't
+sit in the guide before its part exists; it moves back when 18c starts, corrected by its answers
+(see "What changes in the guide, if answered as recommended"). The 18b draft moved back into the
+guide at 18b's step 2, corrected.
 
-> ## Repeated steps: one run per item
->
-> A **repeated step** runs once for each item of a list in the case file, each run given its item.
-> Here an order is refunded line by line:
->
-> ```json
-> "fields": {
->   "lines": {"type": "list", "display": {"title": "Order lines"},
->             "fields": {"sku": {"type": "string"}, "amount": {"type": "number"}}}
-> },
-> "steps": {
->   "refund_line": {
->     "kind": "activity",
->     "display": {"title": "Refund one line"},
->     "activity": "payments.refund@2",
->     "for_each": {"over": "lines", "key": "sku"},
->     "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "item.amount"}}
->   }
-> }
-> ```
->
-> `item` is the run's own item, read as `item.<field>`, as `sum` and `count` read theirs. Each run
-> is named by its item's **key**, the field `key` names: `refund_line[A12]#1`, `refund_line[B7]#1`.
-> The name goes into the run's idempotency key (brief, D17), so reordering the list, or adding a
-> line in front, never gives a payment another line's key. A list whose items repeat a key, or lack
-> one, fails the step, which needs attention: nothing guesses which line is which.
->
-> ```python
-> lines = [{"sku": "A12", "amount": 40}, {"sku": "B7", "amount": 25}]
-> run = run_case(order_refund, file={"order_id": "ord-1", "lines": lines}, answers=[],
->                people=PEOPLE)
-> assert run.history[:2] == [
->     (
->         "started refund_line[A12]#1: payments.refund@2 (amount from system:opener, "
->         "order_id from system:opener)"
->     ),
->     (
->         "started refund_line[B7]#1: payments.refund@2 (amount from system:opener, "
->         "order_id from system:opener)"
->     ),
-> ]
-> ```
->
-> An item's values come from the list they are in, with its sources: a list a customer typed is
-> still untrusted in each run.
->
-> - **`requires: ["refund_line"]`** is met once every item's run is done; with no items, at once.
->   `refund_line.outcome` isn't read: with several runs, there is no one outcome.
-> - **A required repeated step** owes a done run for each item.
-> - **When the list changes,** by an edit (see "Changing an open case"): an added item starts its
->   run; a removed item's open run is stopped, as a rule's stop would stop it, and a running one
->   finishes, flagged; an item whose values changed keeps a done run done, and its open run is
->   stopped and starts again with its new values. A rule never sets a list.
-> - `ventoux check` refuses `for_each` over a field that isn't a list: `steps.refund_line.for_each:
->   order_id is a reference, not a list: a step repeats over a list field`, and a key that isn't a
->   text field of the list's items.
->
 > ## Child cases
 >
 > A **child case** is a whole case started from a step of another: its own case file, release,
