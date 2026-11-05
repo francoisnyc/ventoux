@@ -12,15 +12,25 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from temporalio.client import Client
+from test_temporal_case import LARGE, QUEUE, on_temporal, reported
 
+from ventoux.case.advising import advisor_view
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.simulate import simulate
+from ventoux.case.story import parse_story
 from ventoux.case.validate import validate_case
+from ventoux.temporal.cases import CaseReport, answer, start_case
 from ventoux.testing import (
     CATALOG,
+    START,
     ChangeRefused,
+    DevelopmentCases,
     Outcome,
     load_definition,
+    migrate,
     propose,
+    release_of,
     retry,
     run_case,
     skip,
@@ -243,3 +253,118 @@ def test_a_skip_of_a_required_steps_failed_run_is_refused() -> None:
         activities={"payments.refund@2": failing_once()},
     )
     assert retried.closed
+
+
+def test_only_the_latest_run_of_a_required_step_counts() -> None:
+    # Done is the latest run's (brief, D72): `confirm` done once, run again, and stopped, is owed
+    # again, as `requires` reads its latest run.
+    run = run_case(
+        refund_confirmed_withdrawable(),
+        file=ORDER,
+        answers=[
+            ("review", "reject", "ana"),
+            propose("take_call", "ana"),  # open, so the case stays open meanwhile
+            propose("confirm", "ana"),
+            ("confirm", "confirmed", "ana"),
+            propose("confirm", "ana"),
+            ("take_call", "withdrew", "ana"),  # stops confirm#2
+        ],
+        people=PEOPLE,
+    )
+    assert "cancelled confirm#2" in "\n".join(run.history)
+    assert run.waiting_for == ["confirm, required, proposed by support"]
+    assert not run.closed
+
+
+def test_an_owed_step_with_its_run_open_is_said_once() -> None:
+    # While its run is open, the entry says what the case waits for; the owed line would say it
+    # twice (brief, D24) (brief, D72).
+    run = run_case(
+        refund_confirmed(),
+        file=ORDER,
+        answers=[("review", "reject", "ana"), propose("confirm", "ana")],
+        people=PEOPLE,
+    )
+    assert run.waiting_for == ["confirm by support"]
+
+
+def always_down(inputs: dict[str, Any]) -> dict[str, Any]:
+    """A provider that never answers: every run of the payment fails, and needs attention."""
+    raise ConnectionError("provider unreachable")
+
+
+def test_a_skip_proposed_before_its_step_became_required_is_not_applied() -> None:
+    # A skip is checked again when it is approved, against the case as it is then (brief, D52):
+    # proposed on release 1, where `pay` isn't required, it isn't applied on release 2, where it
+    # is (brief, D72).
+    not_required = refund_paying_required()
+    not_required["steps"]["pay"]["required"] = False
+    release_1 = release_of(not_required, 1)
+    release_2 = release_of(refund_paying_required(), 2)
+    people = OPERATING | {"pia": ["platform"], "lee": ["support-lead", "platform"]}
+    run = run_case(
+        not_required,
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 40}),
+            skip("pay#1", "omar"),
+            migrate(release_2, {}, "pia"),
+            ("case.change#2", "approve", "lee"),
+            ("case.change#1", "approve", "olga"),
+        ],
+        people=people,
+        release=release_1,
+        activities={"payments.refund@2": always_down},
+    )
+    assert run.history[-1] == (
+        "case.change#1 not applied: pay is required, so its run is never skipped: retry it, or "
+        "close the case with a reason"
+    )
+
+
+# --- Every reader of what the case waits for says what it owes (from the tutor's review) ---
+
+
+def test_a_story_ends_saying_what_the_case_owes() -> None:
+    # A story's end lists every kind of pending work; what is owed keeps the case open, so it is
+    # said too, never "nothing pending" (brief, D10) (brief, D72).
+    story = {
+        "title": "The refund is rejected",
+        "definition": "refund-confirmed.json",
+        "file": {"order_id": "ord-1", "amount": 40},
+        "people": {"ana": ["support"]},
+        "fakes": {"payments.refund@2": {"gives": {"refund_id": "refund-1"}}},
+        "timeline": [
+            {"at": "day 1", "answer": {"step": "review", "outcome": "reject", "by": "ana"}}
+        ],
+    }
+    simulation = simulate(parse_story(story), parse_case(refund_confirmed()), CATALOG)
+    assert simulation.end == ("status: open", "waiting for: confirm, required, proposed by support")
+
+
+def test_the_advisor_is_shown_what_the_case_owes() -> None:
+    # The advisor sees what the case waits for as the inbox says it (brief, D61): what it owes
+    # included.
+    run = run_case(
+        refund_confirmed(), file=ORDER, answers=[("review", "reject", "ana")], people=PEOPLE
+    )
+    view = advisor_view(
+        parse_case(refund_confirmed()), CATALOG, run.state, "ana", frozenset({"support"}), START
+    )
+    assert view.waiting_for == ("confirm, required, proposed by support",)
+
+
+def test_the_report_on_temporal_says_what_the_case_owes() -> None:
+    # The same words on Temporal as in memory (brief, D24) (brief, D72).
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(
+            client, DevelopmentCases, refund_confirmed(), LARGE, "refund-1", QUEUE
+        )
+        await reported(case, lambda now: now.waiting_at == ["review#1"])
+        await answer(case, "review#1", "reject", "ana", PEOPLE["ana"], {})
+        return await reported(case, lambda now: "review#1 done" in now.history)
+
+    report = on_temporal(scenario)
+    assert report.waiting_for == ["confirm, required, proposed by support"]
+    assert report.waiting_at == []  # an owed step has no entry yet: it is proposed, not answered
+    assert report.status == "open"

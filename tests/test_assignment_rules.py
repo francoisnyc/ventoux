@@ -27,10 +27,10 @@ from ventoux.case.validate import validate_case
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.testing import CATALOG, START, claim, give_back, migrate, propose, release_of, run_case
-
-GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "cases.md"
 from ventoux.tooling.builder import package as package_of
 from ventoux.tooling.schema import case_schema
+
+GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "cases.md"
 
 
 def with_pay_assigned(rule: dict[str, Any]) -> dict[str, Any]:
