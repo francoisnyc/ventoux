@@ -2782,8 +2782,17 @@ A requirement holds back only the case closing **by itself**:
   step, and the case closes once it is done.
 - **A person still closes the case** with a declared close reason, as ever: a requirement never
   traps a case. The last line says what was owed: `closed: duplicate, by ana; confirm not done`.
-- **A run a rule stopped,** or a cancelled run, isn't done (brief, D40): the step is owed still,
-  and the case waits for it to run again.
+- **A run a rule stopped,** or a rejected one, isn't done (brief, D40): the step is owed still,
+  and the case waits for it to run again. Until a requirement it waits for is met, and once
+  nothing else is pending, `waiting_for` says so: `confirm, required, after pay`. A step only a
+  rule starts reads `confirm, required, started by a rule`.
+- **An owed step that can no longer start needs attention.** Say `confirm` requires `pay`, and
+  Sam rejects the payment's approval: `pay` isn't repeatable, so it never runs again, and
+  `confirm` can never start. The case doesn't pretend to wait: `needs_attention` says `confirm:
+  required, and it can't start: confirm requires pay, which hasn't completed: close the case
+  with a reason`, and only a person's close ends it. The same holds for an owed step that has run
+  and isn't repeatable, and, while `closes_when` holds the close, for one whose requirement
+  nothing is on its way to meet, since nothing else starts then.
 - **A failed run** needs attention, as any other (brief, D17): an operator retries it, or closes
   the case. Skipping a failed run of a required step is refused, since a skip would end the
   case's obligation without anyone doing it: `confirm is required, so its run is never skipped:

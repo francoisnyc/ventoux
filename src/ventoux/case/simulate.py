@@ -13,10 +13,11 @@ from typing import Any
 
 from ventoux.case.admission import ProposalRefused, RetryRefused
 from ventoux.case.answers import AnswerRefused
-from ventoux.case.closing import CloseRefused, needs_attention, pending
+from ventoux.case.closing import CloseRefused, pending
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep
 from ventoux.case.memory import Activity, Driver, as_json, no_plans, outcome_of, wrapped
-from ventoux.case.owed import owed, waiting_for
+from ventoux.case.owed import owed
+from ventoux.case.owing import attention, waiting_for
 from ventoux.case.reading import EVERY_RULE, PatternReading, Reading, read_patterns, read_rules
 from ventoux.case.runtime import CaseRefused, EventRefused
 from ventoux.case.state import (
@@ -364,7 +365,7 @@ def end_of(case: CaseDefinition, state: CaseState) -> list[str]:
     parts = [
         *([f"waiting for: {', '.join(waiting)}"] if waiting else []),
         *([f"running: {', '.join(running)}"] if running else []),
-        *(f"needs attention: {line}" for line in needs_attention(state)),
+        *(f"needs attention: {line}" for line in attention(case, state)),
         *([f"approved, waiting to start: {', '.join(state.given)}"] if state.given else []),
         *(
             [f"proposed, waiting to start: {', '.join(state.waiting_to_start)}"]

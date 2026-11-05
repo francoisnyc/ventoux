@@ -27,6 +27,9 @@ from ventoux.testing import (
     ChangeRefused,
     DevelopmentCases,
     Outcome,
+    ProposalRefused,
+    close,
+    forget,
     load_definition,
     migrate,
     propose,
@@ -368,3 +371,231 @@ def test_the_report_on_temporal_says_what_the_case_owes() -> None:
     assert report.waiting_for == ["confirm, required, proposed by support"]
     assert report.waiting_at == []  # an owed step has no entry yet: it is proposed, not answered
     assert report.status == "open"
+
+
+# --- Slice 3: closes_when waits for what is owed ---
+
+
+def refund_confirmed_closing_when_paid() -> dict[str, Any]:
+    """The guide's refund with `confirm`, closing as soon as it is paid."""
+    definition = refund_confirmed()
+    definition["milestones"] = {"paid": {"display": {"title": "Refund paid"}}}
+    definition["steps"]["pay"]["reaches"] = ["paid"]
+    definition["closes_when"] = ["paid"]
+    return definition
+
+
+SMALL = {"order_id": "ord-1", "amount": 40}  # under 100: paid with no approval
+SMALL_REVIEW = ("review", "approve", "ana", {"approved_amount": 40})
+
+
+def test_closes_when_waits_for_an_owed_step() -> None:
+    # "Close early" and "not before this" meet, and the stricter wins: paid is reached, but the
+    # case owes confirm, so it doesn't close; nothing new starts but the owed step (brief, D72).
+    held = run_case(
+        refund_confirmed_closing_when_paid(), file=SMALL, answers=[SMALL_REVIEW], people=PEOPLE
+    )
+    assert held.reached("pay")
+    assert held.waiting_for == ["confirm, required, proposed by support"]
+    assert not held.closed
+    with pytest.raises(
+        ProposalRefused,
+        match="^paid is reached, so the case closes once confirm is done, or a person closes it: "
+        "nothing new starts but confirm$",
+    ):
+        run_case(
+            refund_confirmed_closing_when_paid(),
+            file=SMALL,
+            answers=[SMALL_REVIEW, propose("review", "ana")],
+            people=PEOPLE,
+        )
+    done = run_case(
+        refund_confirmed_closing_when_paid(),
+        file=SMALL,
+        answers=[SMALL_REVIEW, propose("confirm", "ana"), ("confirm", "confirmed", "ana")],
+        people=PEOPLE,
+    )
+    assert done.closed
+    assert done.history[-1] == "closed: paid reached"
+
+
+def with_close_reasons(definition: dict[str, Any]) -> dict[str, Any]:
+    """`definition`, which support may close as a duplicate."""
+    definition["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate request"}, "roles": ["support"]}
+    }
+    return definition
+
+
+def test_a_persons_close_is_never_held_and_names_what_was_owed() -> None:
+    # A requirement never traps a case: a person closes it with a declared reason, as ever, and
+    # the last line says what was owed (brief, D72). A closed case waits for nothing.
+    closed = run_case(
+        with_close_reasons(refund_confirmed()),
+        file=ORDER,
+        answers=[("review", "reject", "ana"), close("duplicate", "ana")],
+        people=PEOPLE,
+    )
+    assert closed.closed
+    assert closed.history[-1] == "closed: duplicate, by ana; confirm not done"
+    assert closed.waiting_for == []
+
+
+def test_a_close_by_forgetting_is_never_held_and_names_what_was_owed() -> None:
+    # Forgetting closes the case first (brief, D32): a requirement never holds that close either.
+    forgotten = run_case(
+        refund_confirmed(),
+        file=ORDER,
+        answers=[("review", "reject", "ana"), forget("pia", "olu")],
+        people=PEOPLE | {"pia": ["privacy"], "olu": ["privacy"]},
+    )
+    assert forgotten.closed
+    assert forgotten.history[-1] == "closed: forgotten; confirm not done"
+
+
+# --- Slice 4: an owed step that can no longer start needs attention (choice 12) ---
+
+
+def confirming_after_pay(pay_runs_again: bool = False) -> dict[str, Any]:
+    """The guide's refund, `confirm` requiring the payment instead of the review (the tutor's
+    run); with `pay_runs_again`, support may propose the payment again."""
+    definition = refund_confirmed()
+    definition["steps"]["confirm"]["requires"] = ["pay"]
+    if pay_runs_again:
+        definition["steps"]["pay"] |= {"repeatable": True, "proposed_by": ["support"]}
+    return definition
+
+
+PAY_REJECTED = [("review", "approve", "ana", {"approved_amount": 250}), ("pay", "reject", "sam")]
+
+
+def test_an_owed_step_whose_requirement_cant_run_again_needs_attention() -> None:
+    # Sam rejected the payment, which is not repeatable: it never runs again, so confirm can never
+    # start. Only a person's close ends that, so the case says so to a person (brief, D72).
+    run = run_case(confirming_after_pay(), file=ORDER, answers=PAY_REJECTED, people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "confirm: required, and it can't start: confirm requires pay, which hasn't completed: "
+            "close the case with a reason"
+        )
+    ]
+    assert run.waiting_for == []  # in needs_attention, as a failed run is (brief, D24)
+    assert not run.closed
+
+
+def test_an_owed_step_that_cant_run_again_needs_attention() -> None:
+    # confirm, stopped by the rule, isn't repeatable: nothing can start it again.
+    definition = refund_confirmed_withdrawable()
+    definition["steps"]["confirm"]["repeatable"] = False
+    run = run_case(
+        definition,
+        file=ORDER,
+        answers=[
+            ("review", "reject", "ana"),
+            propose("confirm", "ana"),
+            propose("take_call", "ana"),
+            ("take_call", "withdrew", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "confirm: required, and it can't start: confirm has run, and is not repeatable: close "
+            "the case with a reason"
+        )
+    ]
+    assert run.waiting_for == []
+
+
+def test_an_owed_step_whose_requirement_can_still_run_waits_for_it() -> None:
+    # Not stranded: support may propose the payment again, so confirm waits for it, saying so,
+    # since nothing else is pending.
+    run = run_case(
+        confirming_after_pay(pay_runs_again=True), file=ORDER, answers=PAY_REJECTED, people=PEOPLE
+    )
+    assert run.waiting_for == ["confirm, required, after pay"]
+    assert run.needs_attention == []
+
+
+def test_an_owed_step_a_rule_starts_waits_for_the_rule() -> None:
+    # "No rule starts it" is proven from the definition, never guessed (D37): a rule that starts
+    # confirm counts, even if its moment never comes, so the case waits, and a person may close it.
+    definition = refund_confirmed()
+    del definition["steps"]["confirm"]["proposed_by"]
+    definition["milestones"] = {"escalated": {"display": {"title": "Escalated"}}}
+    definition["steps"]["escalate"] = {
+        "kind": "task",
+        "display": {"title": "Escalate"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"escalated": {"display": {"title": "Escalated"}, "reaches": ["escalated"]}},
+    }
+    definition["rules"] = {
+        "confirm_when_escalated": {
+            "display": {"title": "Confirm once escalated"},
+            "on": {"reached": "escalated"},
+            "then": {"start": ["confirm"]},
+        }
+    }
+    run = run_case(definition, file=ORDER, answers=[("review", "reject", "ana")], people=PEOPLE)
+    assert run.waiting_for == ["confirm, required, started by a rule"]
+    assert run.needs_attention == []
+
+
+def logged_first(check_first: bool = False) -> dict[str, Any]:
+    """The guide's refund, closing once the order is logged, which happens at the opening: so the
+    close is held from the start by what is owed. With `check_first`, confirm requires a check
+    support proposes, which nothing starts while the close is held."""
+    definition = refund_confirmed()
+    definition["milestones"] = {"logged": {"display": {"title": "Order logged"}}}
+    definition["steps"]["log"] = {
+        "kind": "activity",
+        "display": {"title": "Log the order"},
+        "activity": "orders.lookup@1",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "reaches": ["logged"],
+    }
+    definition["closes_when"] = ["logged"]
+    if check_first:
+        definition["steps"]["check"] = {
+            "kind": "task",
+            "display": {"title": "Check the request"},
+            "roles": ["support"],
+            "automatic": False,
+            "proposed_by": ["support"],
+            "outcomes": {"checked": {"display": {"title": "Checked"}}},
+        }
+        definition["steps"]["confirm"]["requires"] = ["check"]
+    return definition
+
+
+def test_under_a_held_close_an_owed_step_waits_for_a_requirement_on_its_way() -> None:
+    # logged is reached at once, with the review still open: it is on its way, so confirm waits
+    # for it; the case closes once the review and confirm are done (brief, D72).
+    waiting = run_case(logged_first(), file=ORDER, answers=[], people=PEOPLE)
+    assert waiting.waiting_for == ["review by support"]
+    assert waiting.needs_attention == []
+    done = run_case(
+        logged_first(),
+        file=ORDER,
+        answers=[
+            ("review", "reject", "ana"),
+            propose("confirm", "ana"),
+            ("confirm", "confirmed", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert done.history[-1] == "closed: logged reached"
+
+
+def test_under_a_held_close_an_owed_step_whose_requirement_cant_start_needs_attention() -> None:
+    # While the close is held, nothing new starts but the owed step: the check confirm requires
+    # was never run and isn't on its way, so confirm can never start (brief, D72).
+    run = run_case(logged_first(check_first=True), file=ORDER, answers=[], people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "confirm: required, and it can't start: confirm requires check, which hasn't completed: "
+            "close the case with a reason"
+        )
+    ]

@@ -2975,7 +2975,8 @@ Adds to D9, D11, D22, D37, D47, D55, D60, D69 and D70, whose text is kept.*
 
 ### D72. Required steps: work the case owes, which only its doing or a person's close ends
 
-*Decided 2026-11-04, in layer 18a (`docs/layers/18-lifecycle.md`, choices A to C and 1 to 11).
+*Decided 2026-11-04, in layer 18a (`docs/layers/18-lifecycle.md`, choices A to C and 1 to 12;
+choice 12 on 2026-11-05, from the tutor's review).
 Adds to D10, D17, D24, D26, D34, D37, D40, D50, D51, D52 and D55, whose text is kept.*
 
 - **`"required": true` on a step of any kind** says the case owes it: it may not close by itself
@@ -3003,6 +3004,14 @@ Adds to D10, D17, D24, D26, D34, D37, D40, D50, D51, D52 and D55, whose text is 
   open entries, with who can start it: `confirm, required, proposed by support`; `confirm,
   required, started by a rule`; `confirm, required, after review`, the last only once nothing
   else is pending.
+- **An owed step that can no longer start needs attention,** naming why, and only a person's close
+  ends it: nothing can start it again (it can't start itself, nobody may propose it, and no rule
+  in the definition starts it, proven from the definition, never guessed); a step it requires
+  ended without completing and can't run again, by the same test; or, while every `closes_when`
+  milestone is reached, a requirement is unmet with nothing on its way to meet it. It is listed in
+  `needs_attention`, not `waiting_for`, as a failed run is: `confirm: required, and it can't
+  start: confirm requires pay, which hasn't completed: close the case with a reason`. Nothing
+  starts that nobody asked for.
 - **`ventoux check` proves each can be done** (D34, D37). Errors, holding for every case: a required
   step nothing can ever start, which is `NEVER_RUNS`, as for any step that can never run (the reach
   fixpoint; one cause, one issue), and `required` with `when`. A warning, since the rule may never

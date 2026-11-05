@@ -8,7 +8,7 @@ built from it in `ventoux.authoring`, which the worker never imports.
 from dataclasses import dataclass
 
 from ventoux.case.definition import CaseDefinition
-from ventoux.case.owed import waiting_for
+from ventoux.case.owing import waiting_for
 from ventoux.case.reading import kind_of
 from ventoux.case.runtime import proposal_refused
 from ventoux.case.state import CaseState

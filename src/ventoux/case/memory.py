@@ -12,9 +12,8 @@ from typing import Any
 
 from ventoux.case.called import unbound
 from ventoux.case.claims import assignees
-from ventoux.case.closing import needs_attention
 from ventoux.case.definition import CaseDefinition, parse_case
-from ventoux.case.owed import waiting_for
+from ventoux.case.owing import attention, waiting_for
 from ventoux.case.runtime import decide
 from ventoux.case.state import (
     CancelWorkflow,
@@ -55,7 +54,9 @@ class CaseRun:
 
     status: str  # open; closing: nothing new starts; closed (brief, D10)
     waiting_for: list[str]  # open tasks and approvals, in the order they opened (brief, D24)
-    needs_attention: list[str]  # failed step runs, each with its reason (brief, D17)
+    # Failed step runs, each with its reason (brief, D17), then each owed step that can't start
+    # (brief, D72).
+    needs_attention: list[str]
     flags: list[str]  # what completed after the close was requested, for a person to look at
     history: list[str]
     steps_done: frozenset[str]
@@ -133,14 +134,14 @@ def run_case_in_memory(
         else:
             state = driver.carry(state, event)
     done = frozenset(run.step for run in state.runs if run.status == "done")
-    attention = needs_attention(state)
+    needing = attention(driver.case, state)
     waiting = waiting_for(driver.case, state)
     registered = tuple(catalog.roles)
     timers = set_timers(state)
     return CaseRun(
         state.phase,
         waiting,
-        attention,
+        needing,
         state.flags,
         state.history,
         done,

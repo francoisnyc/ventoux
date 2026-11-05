@@ -1,7 +1,7 @@
 # Layer 18: Case lifecycle: required steps, repeated steps, child cases
 
 Status: 2026-11-05, choices A to C and 1 to 11 agreed; 18a's seams agreed; 18a slices 1 and 2 built
-and reviewed; choice 12 proposed (from the tutor's review). This note starts from `main` at
+and reviewed; choice 12 answered (from the tutor's review). This note starts from `main` at
 `f1e8512`, with layers 0 to 17 merged. The warm-up was asked and recorded (learning question 37).
 The guide was written first (curriculum step 2): `docs/guides/cases.md`, "Required steps", "Repeated
 steps: one run per item" and "Child cases", describes the layer as if it worked. Writing it showed
@@ -12,6 +12,9 @@ changes with the answers (listed at the end).
 built, with dated amendments under D10, D24 and D52. Choices 13 to 29 (numbered 12 to 28 until
 choice 12 was added) stay sketches, settled when their parts start; the guide's 18b to 18d sections
 change with them then.
+
+**Answered 2026-11-05.** Choice 12 is (a), with its two readings. D72 says so, in place, since it
+isn't merged.
 
 Prior art: `chartering/src/temporal/case-workflow.ts`. Each admitted fragment runs as a child
 workflow named `<case ID>/<fragment>-<n>`, the counter carried across continue-as-new. A promise
@@ -472,6 +475,17 @@ continue-as-new (13).
   counts (a done run run again and stopped is owed again); an owed step with its run open is said
   once; a skip proposed before its step became required (release 1 to 2) isn't applied, at the
   approval.
+
+- **Choice 12, as built.** `case/owing.py` says how a case that owes reports it: `waiting_for`
+  or `needs_attention`. It is apart from `owed.py` because it reads the held close, which
+  `closing.py` keeps, and `closing.py` reads `owed`. Under a held close no rule acts (D34), so an
+  owed step only a rule starts is stranded there: `confirm is started only by a rule, and no rule
+  acts while the close is held`. A requirement unmet but able to run again reads `after pay`,
+  ahead of "proposed by", since the proposal would be refused until it is met. A closing or
+  closed case waits for nothing it owes (found while building test 7: a closed case listed
+  `confirm`).
+- **A close names what was owed** for every close by a reason, forgetting included: `closed:
+  forgotten; confirm not done`.
 
 ## Guide drafts for 18b and 18c, kept here until their parts are built
 

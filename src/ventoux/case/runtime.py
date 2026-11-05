@@ -76,6 +76,7 @@ from ventoux.case.engine import known
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
 from ventoux.case.migrations import Moved, apply, problems_of, released
+from ventoux.case.owed import owed
 from ventoux.case.requests import answer_change, propose_change
 from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
 from ventoux.case.sequence import requirements
@@ -682,7 +683,9 @@ def propose(
         )
     if state.phase != "open":
         raise ProposalRefused(f"the case is {state.phase}: nothing starts")
-    if close_held(case, state):
+    # While the close is held, only an owed step starts: it is what the close waits for
+    # (brief, D72).
+    if close_held(case, state) and event.step not in owed(case, state):
         raise ProposalRefused(held_close_refusal(case, state))
     if event.step not in case.steps:
         raise ProposalRefused(f"{event.step} is not a step of {case.case}")
@@ -777,15 +780,20 @@ def holding(state: CaseState) -> list[str]:
 
 
 def held_close_refusal(case: CaseDefinition, state: CaseState) -> str:
-    """Why nothing starts while a failed run holds the close: what was reached, and what the case
-    waits for before it closes (brief, D34)."""
+    """Why nothing starts while the close is held: what was reached, and what the case waits for
+    before it closes: a failed run retried (brief, D34), a required step done (brief, D72)."""
     reached = listed(list(case.closes_when))
     verb = "is" if len(case.closes_when) == 1 else "are"
-    failed = holding(state)
-    retried = "is" if len(failed) == 1 else "are"
+    failed, owing = holding(state), owed(case, state)
+    waits = []
+    if failed:
+        waits.append(f"{listed(failed)} {'is' if len(failed) == 1 else 'are'} retried")
+    if owing:
+        waits.append(f"{listed(owing)} {'is' if len(owing) == 1 else 'are'} done")
+    but = f" but {listed(owing)}" if owing else ""
     return (
-        f"{reached} {verb} reached, so the case closes once {listed(failed)} {retried} retried, "
-        "or a person closes it: nothing new starts"
+        f"{reached} {verb} reached, so the case closes once {' and '.join(waits)}, or a person "
+        f"closes it: nothing new starts{but}"
     )
 
 
@@ -1405,7 +1413,7 @@ def admit(
             retried = latest if latest is not None and latest.status == "retrying" else None
             # Once the close is only held by a failed run, nothing new starts, whatever the
             # step's requirements: only the run an operator retries (brief, D34).
-            if close_held(case, state) and retried is None:
+            if close_held(case, state) and retried is None and name not in owed(case, state):
                 let_go_while_held(case, state, name)
                 continue
             if not requirements_met(required[name], state):
