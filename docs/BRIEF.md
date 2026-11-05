@@ -3017,9 +3017,11 @@ Adds to D10, D17, D24, D26, D34, D37, D40, D50, D51, D52 and D55, whose text is 
   fixpoint; one cause, one issue), and `required` with `when`. A warning, since the rule may never
   fire: a required step a rule may stop, or whose approval may reject, that could then never run
   again (`REQUIRED_MAY_STRAND`).
-- **The diff reads it as stricter turned on,** looser turned off (D55), the reverse of `automatic`
-  and `repeatable`, which turned on are looser. The case map's closing line names it; the builder
-  takes `required=True`; the JSON Schema follows (D60).
+- **The diff reads it as not proven, either way** (D55): turned on, the case takes what the other
+  version refuses (a proposal of the owed step after it would have closed), so neither way is a
+  proof for every case, as for `closes_when` and `stays_open`; the change is said, and a person
+  judges it. The case map's closing line names it; the builder takes `required=True`; the JSON
+  Schema follows (D60).
 - **Owed is worked out, never stored,** from the definition and the step's runs: it crosses
   continue-as-new (D27) and follows a migration's renames (D53) with the runs, and a migration's
   target decides what is required.

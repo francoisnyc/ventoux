@@ -2827,9 +2827,10 @@ per step, the first of:
 
 The case map says what is owed, on the step (`The case owes it: it doesn't close by itself
 until confirm is done.`) and in how the case closes (`It closes when nothing is left to do and
-confirm is done.`). The diff reads `required` turned on as stricter, since the case does more
-before it closes by itself, and turned off as looser (`true -> false (the case may close without
-it)`): the reverse of `automatic` and `repeatable`.
+confirm is done.`). The diff says a change of `required` and leaves its verdict to a person,
+`not proven` either way, as for `closes_when` and `stays_open`: turned on, the case does more
+before it closes by itself, but it also takes what the other version refuses, such as a proposal
+of the owed step after a rejected review, which a closed case refuses.
 
 "Can run again" is read from the definition: the step is repeatable, and a role proposes it or a
 rule starts it. "Done before the milestone" is proven only when every step that reaches it

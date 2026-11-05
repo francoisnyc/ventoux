@@ -12,7 +12,8 @@ built, with dated amendments under D10, D24 and D52. Choices 13 to 29 (numbered 
 choice 12 was added) stay sketches, settled when their parts start; the guide's 18b to 18d sections
 change with them then.
 
-**Answered 2026-11-05.** Choice 12 is (a), with its two readings. D72 says so, in place, since it
+**Answered 2026-11-05.** Choice 10 is corrected to (a): the diff reads `required` as not
+proven either way. Choice 12 is (a), with its two readings. D72 says so, in place, since it
 isn't merged.
 
 Prior art: `chartering/src/temporal/case-workflow.ts`. Each admitted fragment runs as a child
@@ -170,7 +171,7 @@ C. **No new dependency.** *Recommended.*
     The builder takes `required=True`. The JSON Schema follows from Pydantic. *Recommended: all in
     18a*, since a key the diff doesn't know would be a change it can't classify.
 
-    **Correction proposed 2026-11-05, from the tutor's review of #86 (not yet answered).** D55 says
+    **Corrected 2026-11-05, from the tutor's review of #86: answered (a).** D55 says
     stricter means the new version lets through strictly less, whatever a case holds. Turned on,
     `required` also takes what the other version refuses:
     - after the review is rejected, `propose("confirm", "ana")` is taken when `confirm` is
@@ -188,7 +189,8 @@ C. **No new dependency.** *Recommended.*
     - (b) Keep stricter on, looser off, as built.
 
     *Recommended (the tutor's, and mine): (a).* A verdict is a proof for every case (D55), and
-    this one fails on the run above.
+    this one fails on the run above. *Answered 2026-11-05: (a).* D72's bullet is changed in
+    place.
 
 11. **Engine version: none new** (D51). A history recorded before has no definition with
     `required`, so every recorded path decides as before. Confirmed by replaying a 17c history.
@@ -556,7 +558,7 @@ watched failing first, or, for a pin of behaviour already right, catching a muta
 | The warning's proof: a milestone a rule reaches is never proven; it reads through requirements; a step required itself, or starting at the opening, is on its way | `test_a_closes_when_milestone_a_rule_reaches_is_never_proven_after_a_requirement`, `test_done_before_is_read_through_what_a_step_requires`, `test_under_a_held_close_a_requirement_itself_owed_is_on_its_way` (its last line), `test_a_required_step_whose_requirement_may_be_unmet_once_the_case_may_close_is_warned` |
 | One cause, one issue: a step an error refuses isn't also warned about | `test_a_required_step_an_error_refuses_is_not_also_warned_about` |
 | A repeatable step nobody can start again is refused when read | `test_a_repeatable_step_nobody_can_start_again_is_refused_when_read` |
-| The diff: on is stricter, off looser, with its witness | `test_the_diff_reads_required_turned_on_as_stricter_and_off_as_looser`, `test_diff_people.py::test_each_comparison_has_a_witness[required]` |
+| The diff: not proven either way, each way with its witness (choice 10, corrected) | `test_the_diff_reads_required_as_not_proven_either_way`, `test_turned_on_required_takes_a_proposal_the_other_refuses`, `test_turned_off_required_takes_a_close_the_other_holds` |
 | The case map says what is owed, on the step and in how the case closes | `test_the_case_map_says_what_the_case_owes` |
 | The builder writes `required=True`, the same JSON | `test_the_builder_writes_the_guides_required_step`, `test_builder_coverage.py::test_the_builder_writes_every_key_of_the_format` |
 | The JSON Schema has the key | `test_schema.py::test_the_committed_schemas_are_what_the_models_say` |

@@ -921,14 +921,40 @@ def without_required(definition: dict[str, Any], step: str = "confirm") -> dict[
     return changed
 
 
-def test_the_diff_reads_required_turned_on_as_stricter_and_off_as_looser() -> None:
-    # The reverse of automatic and repeatable: required, the case does more before it closes by
-    # itself (brief, D55) (brief, D72).
+def test_the_diff_reads_required_as_not_proven_either_way() -> None:
+    # A verdict is a proof for every case (brief, D55), and neither way is one: each version takes
+    # something the other refuses (the two witnesses below). As closes_when and stays_open, the
+    # change is said, and a person judges it (13-diff.md, choice 27) (choice 10, corrected).
     owed, not_owed = refund_confirmed(), without_required(refund_confirmed())
-    assert judged_lines(not_owed, owed) == ["stricter   steps.confirm.required: false -> true"]
-    assert judged_lines(owed, not_owed) == [
-        "looser     steps.confirm.required: true -> false (the case may close without it)"
+    assert judged_lines(not_owed, owed) == [
+        (
+            "not proven steps.confirm.required: false -> true (the case owes it before it closes "
+            "by itself)"
+        )
     ]
+    assert judged_lines(owed, not_owed) == [
+        "not proven steps.confirm.required: true -> false (the case may close without it)"
+    ]
+
+
+def test_turned_on_required_takes_a_proposal_the_other_refuses() -> None:
+    # The witness one way: after the review is rejected, confirm is proposed. Required, the case
+    # is open and takes it; not required, it has closed and refuses it. So on isn't stricter.
+    rejected = [("review", "reject", "ana"), propose("confirm", "ana")]
+    taken = run_case(refund_confirmed(), file=ORDER, answers=rejected, people=PEOPLE)
+    assert taken.waiting_for == ["confirm by support"]
+    with pytest.raises(ProposalRefused, match="^the case is closed: nothing starts$"):
+        run_case(without_required(refund_confirmed()), file=ORDER, answers=rejected, people=PEOPLE)
+
+
+def test_turned_off_required_takes_a_close_the_other_holds() -> None:
+    # The witness the other way: not required, the rejected refund closes by itself; required, it
+    # doesn't. So off isn't stricter either.
+    rejected = [("review", "reject", "ana")]
+    assert run_case(
+        without_required(refund_confirmed()), file=ORDER, answers=rejected, people=PEOPLE
+    ).closed
+    assert not run_case(refund_confirmed(), file=ORDER, answers=rejected, people=PEOPLE).closed
 
 
 def test_the_case_map_says_what_the_case_owes() -> None:

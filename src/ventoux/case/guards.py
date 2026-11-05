@@ -467,12 +467,17 @@ def switch_change(leaf: Leaf, name: str) -> Change:
 
 
 def required_change(leaf: Leaf) -> Change:
-    """`required`: turned on, stricter, since the case does more before it closes by itself;
-    turned off, looser. The reverse of `automatic` and `repeatable` (brief, D72)."""
+    """`required`, either way: not proven. Turned on, the case takes what the other version
+    refuses (a proposal of the owed step after it would have closed), so neither way is a proof
+    for every case; as `closes_when` and `stays_open`, it is said, and a person judges it
+    (brief, D55) (brief, D72)."""
     said = f"{shown(leaf.before)} -> {shown(leaf.after)}"
-    if leaf.after is True:
-        return Change(leaf.path, "stricter", said, "required")
-    return Change(leaf.path, "looser", f"{said} (the case may close without it)", "required")
+    why = (
+        "the case owes it before it closes by itself"
+        if leaf.after is True
+        else "the case may close without it"
+    )
+    return Change(leaf.path, "not proven", f"{said} ({why})")
 
 
 # --- Closing and forgetting ----------------------------------------------------------------------
