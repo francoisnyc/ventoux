@@ -161,8 +161,8 @@ C. **No new dependency.** *Recommended.*
    *Recommended.*
 
 10. **The diff, the case map, the builder, the schema.** Turning `required` on is **stricter** (the
-    case does more before it closes by itself), off **looser**, as `automatic` and `repeatable` are
-    read (13b). The case map's closing line says it: "closes when nothing is left to do and confirm
+    case does more before it closes by itself), off **looser**, the reverse of `automatic` and
+    `repeatable`, which turned on are looser (13b; corrected 2026-11-05, from the tutor's review). The case map's closing line says it: "closes when nothing is left to do and confirm
     is done". The builder takes `required=True`. The JSON Schema follows from Pydantic. *Recommended:
     all in 18a*, since a key the diff doesn't know would be a change it can't classify.
 
@@ -187,6 +187,16 @@ C. **No new dependency.** *Recommended.*
       `needs_attention` and not `waiting_for` (D24). `REQUIRED_MAY_STRAND` also warns about a
       required step whose requirement may end and can't run again, and one whose requirements
       may be unmet when every `closes_when` milestone is reached.
+      Two readings, settled 2026-11-05 from the tutor's review:
+      - **"No rule starts it" is proven from the definition, never guessed** (D37): no rule in the
+        definition starts the step. A rule whose moment has passed still counts, so the case says
+        `confirm, required, started by a rule`: optimistic, but a person can close it. The other
+        reading (guessing that a rule will never fire) could send a case to attention while a
+        rule could still start the step.
+      - **Under a held close, "a requirement isn't met" reads "isn't met, and nothing is on its
+        way to meet it"**, as `ended_requirement` reads it: a requirement open, running, failed or
+        retried is on its way, and the owed step waits for it. Tested: `closes_when` reached
+        with `review` still open; the case closes once `review` and `confirm` are done.
     - (b) **Under a held close, the owed step's unmet requirements start too.** It frees the held
       close, but it starts work no rule or person asked for (a payment, with its side effect),
       against "nothing new starts" (D10), and it can't help a requirement that ended and can't run
@@ -422,6 +432,13 @@ the last one taught, so the list may change on the way.
 13. **On Temporal:** `CaseReport.waiting_for` lists the owed step; it crosses continue-as-new.
 14. **Replay:** every recorded history in `tests/histories` still replays, which is what "no new
     engine version" claims.
+15. **(choice 12)** An owed step that can't start needs attention, with the line, and leaves
+    `waiting_for`: its requirement ended and can't run again (the tutor's run: `pay`'s approval
+    rejected); nothing can start it again. Not stranded: a requirement that can still run
+    (`confirm, required, after pay`); a rule in the definition that starts it, its moment passed.
+16. **(choice 12, held close)** `closes_when` reached with `review` open: `confirm` waits for it,
+    and the case closes once `review` and `confirm` are done; with `review` ended and unable to
+    run again, `confirm` needs attention.
 
 **The routes, each handled or refused, with its test:** an answer (3), an edit (6: the skip is a
 change request; an edit of a field changes nothing owed, asserted in 3's variant), a migration
