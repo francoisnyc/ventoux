@@ -249,60 +249,84 @@ C. **No new dependency.** *Recommended.*
 | a retry (D26) | a retry that completes makes it done |
 | continue-as-new | nothing new is stored, so nothing new crosses |
 
-### For 18b: repeated steps (sketched; settled when it starts)
+### For 18b: repeated steps (proposed 2026-11-05; the sketch above it settled here)
+
+**What 18b is for.** One step, a run per item of a list in the case file, each run given its item.
+Writing the guide and reading the code showed three things the sketch didn't say: no case can hold
+a list value today (the type check fails closed on lists, so the opening refuses one); a high-risk
+contract needs an approval on its step, and the case keeps one open approval per step, never per
+run; and a proposal or a rule's start names a step, never an item. So 18b decides how a list value
+is given, and keeps a repeated step simple: it starts by itself, a run per item, with no approval.
 
 13. **The shape:** `"for_each": {"over": "<list field>", "key": "<text field of its items>"}`, on
     an activity or a task step. Not a plan, workflow or wait step, nor a child case, in this layer
     (deliberate limit, D48). *Recommended.*
 
-14. **How runs are named.**
-    - (a) by position: `refund_line#1`, `#2`. An edit that adds a line in front gives position 1
-      to another line, and a retry sends one line's idempotency key with another's amount.
-      **Ruled out.**
-    - (b) by the key's value: `refund_line[A12]#1`. Stable, but the name is in every history line
-      and workflow ID, which never quote a value (D30), and the key may be sensitive or untrusted.
-    - (c) **by an item number the engine gives each key the first time it sees it:**
-      `refund_line.1#1`, `refund_line.2#1`. Items are matched by their key, so reordering changes no
-      number. A removed key's number is never given again. The numbers are state, carried across
-      continue-as-new, and quote nothing.
+14. **How runs are named:** (c), by an item number the engine gives each key the first time it
+    sees it: `refund_line.1#1`. Items are matched by key, named by number, so reordering changes no
+    number, a removed key's number is never given again, and no name quotes a value (D30). The
+    key-to-number map is state, per step: it crosses continue-as-new and follows a migration's
+    renames of the step. A key must be a non-sensitive text field present and distinct in every
+    item; otherwise the step fails, needing attention. *Recommended* (unchanged from the sketch).
 
-    *Recommended: (c).* *Correcting the guide, which uses (b).* A key must be a non-sensitive text
-    field, and a list whose items repeat a key or lack one fails the step, which needs attention.
+15. **How a run reads its item:** `{"var": "each.<field>"}`; `each` is reserved, refused as the
+    name of a field, step, milestone or event, and refused outside a repeated step's `inputs`
+    and its task's outcomes' readers (it has no item there). *Recommended.*
 
-15. **How a run reads its item:** `{"var": "each.amount"}`. Not `item`, which `sum` and `count`
-    already use for their own element. A repeated step whose expression sums another list would
-    then have two meanings for one word. `each` becomes a reserved name, refused for a step,
-    field, milestone or event. *Correcting the guide.* *Recommended.*
+16. **Provenance:** every value of an item carries the list field's sources (D12). *Recommended.*
 
-16. **Provenance:** an item's values carry the list field's sources (D12). A list a customer typed
-    is untrusted in every run. *Recommended.*
+17. **Reading a repeated step from outside it:** `requires` met when every item's latest run is
+    done, at once for an empty list, the history saying so; its `outcome` and outputs refused at
+    validation. *Recommended.*
 
-17. **Reading a repeated step from outside it.** `requires: ["refund_line"]` is met when every
-    item's latest run is done, and at once for an empty list (the history says so).
-    `refund_line.outcome` and its outputs are refused at validation: several runs have no one
-    outcome. Reading how many were declined would need an operator, which is a decision of its own
-    (D20), not made here. *Recommended.*
+18. **A required repeated step** owes a done run for every item (D72). *Recommended.*
 
-18. **A required repeated step** owes a done run for every item in the list now. *Recommended.*
+19. **When the list changes**, by every route: the opening gives it (items numbered in order); a
+    rule never sets it and an event never carries it (D41, D42, D48, unchanged); a migration renames
+    the step and the list field, the numbers moving with the step; continue-as-new carries the
+    numbers. An edit: choice 31. *Recommended.*
 
-19. **When the list changes**, by every route:
-    - **an edit (D52):** an added key starts its run (automatic) or can be proposed. A removed
-      key's open run is stopped, as a rule's stop is (D40); a running one finishes, flagged. A
-      changed item (same key, other values): an open task entry is withdrawn and asked again, as
-      any entry whose values changed (D25); a running activity finishes on what it started with; a
-      done run stays done, and its step may be proposed again if repeatable.
-    - **a rule:** never sets a list (D42, D48), and stays refused.
-    - **a migration (D53):** renames of the step, the list field and the key field are followed,
-      and the item numbers move with the step's name. 17c's review found state keyed by a step's
-      name that didn't follow a rename, so this gets its own test.
-    - **the opening:** the list's items get numbers in order.
-    - **continue-as-new:** the numbers cross with the runs.
+20. **A bound:** a list holds at most 100 items, refused at the opening above that, saying the
+    limit: so one decision starts at most 100 runs of a step (D39). A fixed number in the engine,
+    a deliberate limit (D48); a definition or platform setting would be a later decision.
+    *Recommended.*
 
-    *Recommended.* Each gets a test.
+30. **A list value, checked where it is given.** A list is a JSON array of records; each record
+    has exactly the list's declared fields, each of its exact type, as any field's value is
+    checked (numbers exact, never floats; D20). Anything else is refused, naming the type, never
+    the value (D30). Given only at the opening in 18b. *Alternative:* also in a person's form
+    answer; not needed by anything in 18b. *Recommended:* the opening only.
 
-20. **A bound:** a decision starts at most one run per item, so the list's length bounds it (D39).
-    A list over a limit the platform team sets fails the step, needing attention. *Recommended*,
-    with the limit settled in 18b.
+31. **An edit of a list a step repeats over (D52).**
+    - (a) Allowed: an added key starts its run; a removed key's open run is stopped as a rule's
+      stop would be, a running activity finishing, flagged; a changed item keeps a done run done
+      and re-asks an open task. Useful, but each of these is a route with its own tests.
+    - (b) **Refused, saying so:** `lines is the list refund_line repeats over, so it is never
+      edited: close the case and open it again with the list corrected`. A list no step repeats
+      over may be edited as any field. A deliberate limit (D48); (a) stays a door.
+
+    *Recommended: (b).* It keeps 18b's routes few, and nothing in this layer needs (a).
+
+32. **Approvals: a repeated step has none in 18b.** A high-risk contract needs an approval (D11),
+    so it can't be repeated: `ventoux check` says so (`payments.refund@2 is high risk, and
+    refund_line is repeated, so it can have no approval: repeat a low-risk step, or pay once`).
+    *Alternative:* an approval per run, which changes the case's open approvals from one per step
+    to one per run, and with it what D25, D47, D69 to D71 key by step: a part of its own. The
+    guide's example then repeats a task and a low-risk draft, not the payment. *Recommended:* none
+    in 18b, a deliberate limit (D48).
+
+33. **How a repeated step starts:** by itself, once admitted, a run for each item that has none.
+    Not `proposed_by`, not `repeatable`, and no rule starts it: a proposal or a start names a step,
+    never an item, so each is refused at validation, saying so. A rule may stop it: every open run
+    of it is stopped (D40). An operator retries a failed run by its entry (`refund_line.1#1`, D26).
+    *Recommended.*
+
+34. **No new engine version (D51):** no definition readable before holds `for_each`, and no case
+    could hold a list value. *Recommended.*
+
+**One part, one pull request (18b),** in slices: the list value at the opening; the shape and its
+validation; the runs, named and given their items; reading from outside and required; the routes
+(edit refused, migration, stop, retry, continue-as-new); the diff, the case map, the builder.
 
 ### For 18c and 18d: child cases (sketched; settled when they start)
 
