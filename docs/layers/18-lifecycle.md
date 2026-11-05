@@ -1,12 +1,11 @@
 # Layer 18: Case lifecycle: required steps, repeated steps, child cases
 
-Status: 2026-11-05, choices A to C and 1 to 11 agreed; 18a's seams agreed; 18a slices 1 and 2 built
-and reviewed; choice 12 answered (from the tutor's review). This note starts from `main` at
-`f1e8512`, with layers 0 to 17 merged. The warm-up was asked and recorded (learning question 37).
-The guide was written first (curriculum step 2): `docs/guides/cases.md`, "Required steps", "Repeated
-steps: one run per item" and "Child cases", describes the layer as if it worked. Writing it showed
-four places where my first picks were wrong; the recommendations below correct them, and the guide
-changes with the answers (listed at the end).
+Status: 2026-11-05, 18a built, its promises checked; choices A to C and 1 to 12 agreed. This note
+starts from `main` at `f1e8512`, with layers 0 to 17 merged. The warm-up was asked and recorded
+(learning question 37). The guide was written first (curriculum step 2): `docs/guides/cases.md`,
+"Required steps", "Repeated steps: one run per item" and "Child cases", describes the layer as if it
+worked. Writing it showed four places where my first picks were wrong; the recommendations below
+correct them, and the guide changes with the answers (listed at the end).
 
 **Answered 2026-11-04.** Choices A to C and 1 to 11 as recommended. D72 is written before 18a is
 built, with dated amendments under D10, D24 and D52. Choices 13 to 29 (numbered 12 to 28 until
@@ -501,6 +500,68 @@ continue-as-new (13).
   that starts itself at the opening and nothing can end undone.
 - **A repeatable step nobody can start again is refused when read,** so `runs_again`'s "proposed
   or started by a rule" never meets one in a check; a test pins the refusal.
+
+## Promises (18a)
+
+Each claim the note, D72 and the guide's "Required steps" make, and the test that would fail
+if it weren't true. Tests without a file are in `tests/test_required.py`. Each new test was
+watched failing first, or, for a pin of behaviour already right, catching a mutation.
+
+| Promise | Test |
+|---|---|
+| `required: true` is read on a step of any kind; false leaves every pinned digest as it was | `test_digests.py::test_method_1_gives_the_digests_it_pinned`, `test_digests.py::test_the_pinned_packages_use_every_shape` (the `required` package) |
+| A required step nothing can ever start is refused at validation (`NEVER_RUNS`) | `test_a_required_step_nothing_can_ever_start_is_refused_at_validation` |
+| A required step with a `when` is refused when read | `test_a_required_step_with_a_condition_is_refused_when_read` |
+| A case that owes stays open, and `waiting_for` says what and who may start it | `test_a_case_that_owes_a_required_step_stays_open_and_says_so` |
+| Done is done with any outcome: declined, rejected, a plan's `failed` | `test_a_required_step_done_with_any_outcome_is_no_longer_owed`, `test_a_required_plan_step_ending_failed_is_done` |
+| Only the latest run counts | `test_only_the_latest_run_of_a_required_step_counts` |
+| A run a rule stopped, or whose approval was rejected, leaves the step owed | `test_a_required_step_a_rule_stopped_is_owed_still`, `test_a_required_step_whose_approval_was_rejected_is_owed_still` |
+| A skip of a required step's failed run is refused, at the proposal and at the approval | `test_a_skip_of_a_required_steps_failed_run_is_refused`, `test_a_skip_proposed_before_its_step_became_required_is_not_applied` |
+| A retry that completes does the step, and the case closes | `test_a_skip_of_a_required_steps_failed_run_is_refused` (its second half) |
+| `closes_when` waits for what is owed; only the owed step starts meanwhile, and a proposal of another says what the close waits for | `test_closes_when_waits_for_an_owed_step` |
+| A person's close is never held, nor a close by forgetting, and its last line names what was owed | `test_a_persons_close_is_never_held_and_names_what_was_owed`, `test_a_close_by_forgetting_is_never_held_and_names_what_was_owed` |
+| A closing or closed case waits for nothing it owes | `test_a_persons_close_is_never_held_and_names_what_was_owed` (`waiting_for == []`) |
+| An owed step with its run open is said once, by its entry | `test_an_owed_step_with_its_run_open_is_said_once`, `test_a_required_wait_is_done_by_its_event` |
+| `waiting_for`'s forms: proposed by, started by a rule, after a requirement (only once nothing else is pending) | `test_a_case_that_owes_a_required_step_stays_open_and_says_so`, `test_an_owed_step_a_rule_starts_waits_for_the_rule`, `test_an_owed_step_whose_requirement_can_still_run_waits_for_it`, `test_under_a_held_close_an_owed_step_waits_for_a_requirement_on_its_way` |
+| Every reader says the same: the run, the story's end, the advisor, Temporal's report | `test_a_case_that_owes_a_required_step_stays_open_and_says_so`, `test_a_story_ends_saying_what_the_case_owes`, `test_the_advisor_is_shown_what_the_case_owes`, `test_the_report_on_temporal_says_what_the_case_owes` |
+| An owed step that can't start needs attention, named, and leaves `waiting_for`: its requirement can't run again; it can't run again | `test_an_owed_step_whose_requirement_cant_run_again_needs_attention`, `test_an_owed_step_that_cant_run_again_needs_attention` |
+| "No rule starts it" is proven from the definition: a rule that may never fire still counts | `test_an_owed_step_a_rule_starts_waits_for_the_rule` |
+| Under a held close, a requirement is on its way if its run is, if a step under way reaches it (a milestone), or if it is owed and can start; otherwise the owed step needs attention | `test_under_a_held_close_an_owed_step_waits_for_a_requirement_on_its_way`, `test_under_a_held_close_a_milestone_an_open_task_will_reach_is_on_its_way`, `test_under_a_held_close_a_requirement_itself_owed_is_on_its_way`, `test_under_a_held_close_an_owed_step_whose_requirement_cant_start_needs_attention` |
+| Under a held close an automatic owed step starts by itself once its requirement completes; one only a rule starts needs attention | `test_under_a_held_close_an_automatic_owed_step_starts_once_its_requirement_completes`, `test_under_a_held_close_an_owed_step_only_a_rule_starts_needs_attention` |
+| A circle of owed requirements ends, each needing attention | `test_a_circle_of_owed_requirements_under_a_held_close_needs_attention_and_ends` |
+| `REQUIRED_MAY_STRAND` warns, never refuses, in each of its forms; none when the step can run again | the four `..._is_warned` tests and `test_a_required_step_that_can_run_again_is_not_warned` |
+| The warning's proof: a milestone a rule reaches is never proven; it reads through requirements; a step required itself, or starting at the opening, is on its way | `test_a_closes_when_milestone_a_rule_reaches_is_never_proven_after_a_requirement`, `test_done_before_is_read_through_what_a_step_requires`, `test_under_a_held_close_a_requirement_itself_owed_is_on_its_way` (its last line), `test_a_required_step_whose_requirement_may_be_unmet_once_the_case_may_close_is_warned` |
+| One cause, one issue: a step an error refuses isn't also warned about | `test_a_required_step_an_error_refuses_is_not_also_warned_about` |
+| A repeatable step nobody can start again is refused when read | `test_a_repeatable_step_nobody_can_start_again_is_refused_when_read` |
+| The diff: on is stricter, off looser, with its witness | `test_the_diff_reads_required_turned_on_as_stricter_and_off_as_looser`, `test_diff_people.py::test_each_comparison_has_a_witness[required]` |
+| The case map says what is owed, on the step and in how the case closes | `test_the_case_map_says_what_the_case_owes` |
+| The builder writes `required=True`, the same JSON | `test_the_builder_writes_the_guides_required_step`, `test_builder_coverage.py::test_the_builder_writes_every_key_of_the_format` |
+| The JSON Schema has the key | `test_schema.py::test_the_committed_schemas_are_what_the_models_say` |
+| A migration's renames are followed; its target decides what is required | the three `test_a_migration_...` tests |
+| An edit changes nothing owed | `test_an_edit_changes_nothing_the_case_owes` |
+| An event completes a required wait | `test_a_required_wait_is_done_by_its_event` |
+| What is owed crosses continue-as-new on Temporal | `test_what_is_owed_crosses_continue_as_new` |
+| No new engine version: every recorded history replays | the replay tests over `tests/histories` (`-k replay`, 34 tests) |
+
+## Routes checked before the pull request (18a)
+
+Every route by which what is owed can be set or changed, each handled or refused, with its test:
+
+| Route | What it does | Test |
+|---|---|---|
+| an answer | completes a task run: done, owed no more | `test_a_case_that_owes_a_required_step_stays_open_and_says_so` |
+| an edit (D52) | changes nothing owed; a skip of a required run is refused | `test_an_edit_changes_nothing_the_case_owes`, the two skip tests |
+| a migration (D53) | renames followed; the target decides what is required | the three `test_a_migration_...` tests |
+| an event | completes a required wait | `test_a_required_wait_is_done_by_its_event` |
+| a rule | a stop leaves it owed; a start may run it; none acts under a held close | `test_a_required_step_a_rule_stopped_is_owed_still`, `test_an_owed_step_a_rule_starts_waits_for_the_rule`, `test_under_a_held_close_an_owed_step_only_a_rule_starts_needs_attention` |
+| the opening | what nothing can start is refused before any case opens | `test_a_required_step_nothing_can_ever_start_is_refused_at_validation`, `test_a_required_step_with_a_condition_is_refused_when_read` |
+| a plan | a required plan step ending `failed` is done | `test_a_required_plan_step_ending_failed_is_done` |
+| a close or a stop (D40) | a person's close, and forgetting's, never held; a stop leaves it owed | the two close tests; `test_a_required_step_a_rule_stopped_is_owed_still` |
+| a retry (D26) | the retry that completes does it | `test_a_skip_of_a_required_steps_failed_run_is_refused` |
+| continue-as-new | owed is worked out from the runs, which cross | `test_what_is_owed_crosses_continue_as_new` |
+
+**State keyed by a step's name:** none is stored. What is owed is worked out from the definition
+and the runs, which a migration renames, so the rename test is the check 17c's review asked for.
 
 ## Guide drafts for 18b and 18c, kept here until their parts are built
 

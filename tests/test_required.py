@@ -15,6 +15,8 @@ import pytest
 from temporalio.client import Client
 from test_diff import packed
 from test_diff_people import judged_lines
+from test_events import waiting_for_a_receipt
+from test_plan_step import refund_order, refund_with_plan
 from test_temporal_case import LARGE, QUEUE, SwitchingCases, on_temporal, reported, runs_of
 
 from ventoux.case.advising import advisor_view
@@ -34,6 +36,7 @@ from ventoux.testing import (
     Outcome,
     ProposalRefused,
     close,
+    edit,
     forget,
     load_definition,
     migrate,
@@ -41,6 +44,7 @@ from ventoux.testing import (
     release_of,
     retry,
     run_case,
+    send,
     skip,
 )
 from ventoux.tooling.builder.written import written
@@ -1042,3 +1046,57 @@ def test_what_is_owed_crosses_continue_as_new() -> None:
     assert owing.waiting_for == ["confirm, required, proposed by support"]
     assert ended.status == "closed"
     assert ended.history[-1] == "closed: nothing left to do"
+
+
+# --- Routes: a plan, and an event ---
+
+
+def test_a_required_plan_step_ending_failed_is_done() -> None:
+    # A plan that ends in its failed final state gives the outcome `failed`: done, with an outcome
+    # someone handles (brief, D28), so the requirement is met (brief, D72).
+    definition = refund_with_plan()
+    del definition["steps"]["settle"]["when"]
+    definition["steps"]["settle"]["required"] = True
+    rejected = run_case(
+        definition,
+        file=ORDER,
+        answers=[("review", "approve", "ana", {"approved_amount": 250})],
+        people=PEOPLE,
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "reject", "sam")]},
+    )
+    assert "settle#1 gave failed" in rejected.history
+    assert rejected.closed
+
+
+def test_a_required_wait_is_done_by_its_event() -> None:
+    # An event's arrival completes the wait's run, and with it the requirement (brief, D41).
+    definition = waiting_for_a_receipt()
+    definition["steps"]["wait_for_receipt"]["required"] = True
+    approved = ("review", "approve", "ana", {"approved_amount": 40})
+    small = {"order_id": "ord-1", "amount": 40}
+    waiting = run_case(definition, file=small, answers=[approved], people=PEOPLE)
+    assert waiting.waiting_for == ["receipt_sent from portal"]  # said once, by its open run
+    receipt = send("receipt_sent", {"receipt": "doc-7"}, "system:portal")
+    sent = run_case(definition, file=small, answers=[approved, receipt], people=PEOPLE)
+    assert sent.closed
+
+
+def test_an_edit_changes_nothing_the_case_owes() -> None:
+    # `required` is the definition's, never a value: an edit of the case file leaves what is owed
+    # as it was (brief, D52) (brief, D72).
+    edited = run_case(
+        refund_confirmed(),
+        file=ORDER,
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 2500}),
+            edit("approved_amount", 250, "ana"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE | {"lee": ["support-lead"]},
+    )
+    assert any(line.startswith("applied case.change#1") for line in edited.history)
+    assert edited.waiting_for == [
+        "approval of pay by support-lead",
+        "confirm, required, proposed by support",
+    ]
