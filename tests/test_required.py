@@ -15,15 +15,17 @@ import pytest
 from temporalio.client import Client
 from test_diff import packed
 from test_diff_people import judged_lines
-from test_temporal_case import LARGE, QUEUE, on_temporal, reported
+from test_temporal_case import LARGE, QUEUE, SwitchingCases, on_temporal, reported, runs_of
 
 from ventoux.case.advising import advisor_view
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.memory import CaseRun
 from ventoux.case.sheet import case_map
 from ventoux.case.simulate import simulate
 from ventoux.case.story import parse_story
 from ventoux.case.validate import validate_case
 from ventoux.temporal.cases import CaseReport, answer, start_case
+from ventoux.temporal.cases import propose as temporal_propose
 from ventoux.testing import (
     CATALOG,
     START,
@@ -931,3 +933,112 @@ def test_the_case_map_says_what_the_case_owes() -> None:
     assert "- It closes when nothing is left to do and confirm is done." in read
     held = case_map(packed(refund_confirmed_closing_when_paid()), CATALOG)
     assert "- It closes once paid is reached and confirm is done." in held
+
+
+# --- Slice 7: a migration (brief, D53) ---
+
+
+def with_a_call(definition: dict[str, Any]) -> dict[str, Any]:
+    """`definition` with a call support may take, which keeps the case open while it is."""
+    definition["steps"]["take_call"] = {
+        "kind": "task",
+        "display": {"title": "Take the customer's call"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"taken": {"display": {"title": "Taken"}}},
+    }
+    return definition
+
+
+def renamed() -> dict[str, Any]:
+    """The refund with `confirm` and a call, `confirm` renamed `tell` in its next release."""
+    definition = with_a_call(refund_confirmed())
+    definition["steps"]["tell"] = definition["steps"].pop("confirm")
+    return definition
+
+
+PLATFORM = PEOPLE | {"pia": ["platform"], "lee": ["support-lead", "platform"]}
+
+
+def migrated(before: dict[str, Any], after: dict[str, Any], answers: list[Any]) -> CaseRun:
+    """The case opened on `before` (release 1), played with `answers`, then moved to `after`
+    (release 2) by Pia, approved by Lee, with the step renamed if `after` has `tell`."""
+    mapping = {"steps": {"confirm": "tell"}} if "tell" in after["steps"] else {}
+    run = run_case(
+        before,
+        file=ORDER,
+        answers=[
+            *answers,
+            migrate(release_of(after, 2), mapping, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PLATFORM,
+        release=release_of(before, 1),
+    )
+    assert any(line.startswith("applied case.change#1: migrated") for line in run.history)
+    return run
+
+
+def test_a_migration_renaming_a_required_step_keeps_it_owed_under_its_new_name() -> None:
+    # Owed is worked out from the runs and the definition, never stored, so it follows the
+    # rename with the runs (brief, D53) (brief, D72); 17c's review found state that didn't.
+    run = migrated(with_a_call(refund_confirmed()), renamed(), [("review", "reject", "ana")])
+    assert run.waiting_for == ["tell, required, proposed by support"]
+
+
+def test_a_migration_renaming_a_done_required_step_owes_nothing() -> None:
+    done = [
+        ("review", "reject", "ana"),
+        propose("take_call", "ana"),  # open, so the case stays open to be migrated
+        propose("confirm", "ana"),
+        ("confirm", "confirmed", "ana"),
+    ]
+    run = migrated(with_a_call(refund_confirmed()), renamed(), done)
+    assert run.waiting_for == ["take_call by support"]
+
+
+def test_a_migration_making_a_done_step_required_owes_nothing() -> None:
+    # The target decides what is required; a step done already is done. The call is taken first:
+    # with nothing owed on release 1, a rejected refund would close at once.
+    done = [
+        propose("take_call", "ana"),
+        ("review", "reject", "ana"),
+        propose("confirm", "ana"),
+        ("confirm", "confirmed", "ana"),
+    ]
+    not_required = without_required(with_a_call(refund_confirmed()))
+    run = migrated(not_required, with_a_call(refund_confirmed()), done)
+    assert run.waiting_for == ["take_call by support"]
+    # And one not yet run is owed from the migration on.
+    opened = [propose("take_call", "ana"), ("review", "reject", "ana")]
+    owing = migrated(not_required, with_a_call(refund_confirmed()), opened)
+    assert owing.waiting_for == ["take_call by support", "confirm, required, proposed by support"]
+
+
+# --- Slice 8: on Temporal, across continue-as-new (brief, D27) ---
+
+
+def test_what_is_owed_crosses_continue_as_new() -> None:
+    # The review rejected, then a refused answer: two events, so the case continues as new. What
+    # it owes is worked out from the runs, which cross with its state, so it still says so, and
+    # closes once confirm is done (brief, D27) (brief, D72).
+    async def scenario(client: Client) -> tuple[CaseReport, CaseReport, tuple[str, str]]:
+        case = await start_case(
+            client, SwitchingCases, refund_confirmed(), LARGE, "refund-1", QUEUE
+        )
+        await reported(case, lambda now: now.waiting_at == ["review#1"])
+        await answer(case, "review#1", "reject", "ana", PEOPLE["ana"], {})
+        await answer(case, "review#1", "reject", "ana", PEOPLE["ana"], {})  # refused: answered
+        owing = await reported(case, lambda now: "refused" in "\n".join(now.history))
+        switched = await runs_of(client, "refund-1")
+        await temporal_propose(case, "confirm", "ana", PEOPLE["ana"])
+        await reported(case, lambda now: now.waiting_at == ["confirm#1"])
+        await answer(case, "confirm#1", "confirmed", "ana", PEOPLE["ana"], {})
+        return owing, await case.result(), switched
+
+    owing, ended, (first, last) = on_temporal(scenario, cases=SwitchingCases)
+    assert last != first  # the case continued as new while it owed confirm
+    assert owing.waiting_for == ["confirm, required, proposed by support"]
+    assert ended.status == "closed"
+    assert ended.history[-1] == "closed: nothing left to do"
