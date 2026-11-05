@@ -249,7 +249,7 @@ C. **No new dependency.** *Recommended.*
 | a retry (D26) | a retry that completes makes it done |
 | continue-as-new | nothing new is stored, so nothing new crosses |
 
-### For 18b: repeated steps (proposed 2026-11-05; the sketch above it settled here)
+### For 18b: repeated steps (answered 2026-11-05: as recommended; D73)
 
 **What 18b is for.** One step, a run per item of a list in the case file, each run given its item.
 Writing the guide and reading the code showed three things the sketch didn't say: no case can hold

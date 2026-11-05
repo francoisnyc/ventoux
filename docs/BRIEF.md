@@ -3027,6 +3027,38 @@ Adds to D10, D17, D24, D26, D34, D37, D40, D50, D51, D52 and D55, whose text is 
   target decides what is required.
 - **No new engine version (D51):** no definition readable before holds `required`.
 
+### D73. Repeated steps: a run per item of a list, named by a number the engine gives
+
+*Decided 2026-11-05, in layer 18b (`docs/layers/18-lifecycle.md`, choices 13 to 20 and 30 to 34).
+Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is kept.*
+
+- **A list value is checked where it is given,** and given only at the opening for now: a JSON
+  array of at most 100 records, each with exactly the list's declared fields, each of its exact
+  type (numbers exact, D20). Anything else is refused, naming the type, never the value (D30). An
+  event never carries a list and a rule never sets one (D41, D42, D48, unchanged). Every value of
+  an item carries the list field's sources (D12).
+- **`"for_each": {"over": <list field>, "key": <text field of its items>}`** on a task or an
+  activity step runs it once per item. Not a plan, workflow or wait step: a deliberate limit.
+- **Each run is named by a number the engine gives each key the first time it sees it**
+  (`draft_line.1#1`), matched by the key, never by position or value: reordering the list never
+  gives one item's side effect another's idempotency key (D17), and no name quotes a value (D30). A
+  removed key's number is never given again. The key must be a non-sensitive text field, present
+  and distinct in every item; otherwise the step fails, needing attention. The numbers are state:
+  they cross continue-as-new (D27) and follow a migration's rename of the step (D53).
+- **A run reads its item as `each.<field>`;** `each` is a reserved name, and read nowhere but in a
+  repeated step.
+- **From outside,** `requires` is met once every item's latest run is done, at once for an empty
+  list, the history saying so; a repeated step's `outcome` and outputs are refused at validation.
+  A required repeated step owes a done run for every item (D72).
+- **It starts by itself,** a run for each item that has none: not proposed, not repeatable, and
+  started by no rule, since a proposal or a start names a step, never an item. A rule may stop it,
+  stopping every open run (D40); an operator retries a failed run by its entry (D26).
+- **Deliberate limits** (D48): no approval on a repeated step, so a high-risk contract can't be
+  repeated, and `ventoux check` says so; an edit never changes a list a step repeats over (D52),
+  saying so; at most 100 items. Each door is a decision of its own.
+- **No new engine version (D51):** no definition readable before holds `for_each`, and no case
+  could hold a list value.
+
 ## Concepts
 
 | Term | Meaning |
