@@ -15,7 +15,16 @@ import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, load_definition, propose, run_case
+from ventoux.testing import (
+    CATALOG,
+    ChangeRefused,
+    Outcome,
+    load_definition,
+    propose,
+    retry,
+    run_case,
+    skip,
+)
 from ventoux.tooling.builder.written import written
 
 ROOT = Path(__file__).parent.parent
@@ -103,3 +112,134 @@ def test_the_builder_writes_the_guides_required_step() -> None:
     # JSON whichever way it is written (brief, D58).
     found = runpy.run_path(str(ROOT / "examples" / "builder" / "required.py"))["refund"]
     assert json.loads(written(found), parse_float=Decimal) == refund_confirmed()
+
+
+def refund_paying_required() -> dict[str, Any]:
+    """The quickstart's refund, its payment owed in every case: no `when` (a required step has
+    none), so it runs after any review, and support may propose it again."""
+    definition = copy.deepcopy(REFUND)
+    pay = definition["steps"]["pay"]
+    del pay["when"]
+    pay |= {"required": True, "repeatable": True, "proposed_by": ["support"]}
+    return definition
+
+
+def declining(inputs: dict[str, Any]) -> dict[str, Any]:
+    """A provider that declines the refund: a business outcome, declared by the contract."""
+    raise Outcome("declined")
+
+
+def test_a_required_step_done_with_any_outcome_is_no_longer_owed() -> None:
+    # Done is done with any outcome, as `requires` reads it: a declined refund is an outcome
+    # someone handles (here, the call), not work left undone (brief, D72).
+    run = run_case(
+        refund_paying_required(),
+        file={"order_id": "ord-1", "amount": 40},
+        answers=[
+            ("review", "approve", "ana", {"approved_amount": 40}),
+            ("call_customer", "called", "ana"),
+        ],
+        people=PEOPLE,
+        activities={"payments.refund@2": declining},
+    )
+    assert run.closed
+
+
+def refund_confirmed_withdrawable() -> dict[str, Any]:
+    """The guide's refund with `confirm`, made repeatable, and a rule that stops it when the
+    customer withdraws, which support records by answering `take_call`."""
+    definition = refund_confirmed()
+    definition["steps"]["confirm"]["repeatable"] = True
+    definition["milestones"] = {"withdrawn": {"display": {"title": "Withdrawn"}}}
+    definition["steps"]["take_call"] = {
+        "kind": "task",
+        "display": {"title": "Take the customer's call"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"withdrew": {"display": {"title": "Withdrew"}, "reaches": ["withdrawn"]}},
+    }
+    definition["rules"] = {
+        "withdraw": {
+            "display": {"title": "Stop confirming when the customer withdraws"},
+            "on": {"reached": "withdrawn"},
+            "then": {"stop": ["confirm"]},
+        }
+    }
+    return definition
+
+
+def test_a_required_step_a_rule_stopped_is_owed_still() -> None:
+    # A run a rule stopped ends `cancelled`, neither done nor failed (brief, D40): the step is
+    # owed still, and the case waits for another run of it (brief, D72).
+    run = run_case(
+        refund_confirmed_withdrawable(),
+        file=ORDER,
+        answers=[
+            ("review", "reject", "ana"),
+            propose("confirm", "ana"),
+            propose("take_call", "ana"),
+            ("take_call", "withdrew", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert "cancelled confirm#1" in "\n".join(run.history)
+    assert run.waiting_for == ["confirm, required, proposed by support"]
+    assert not run.closed
+
+
+def test_a_required_step_whose_approval_was_rejected_is_owed_still() -> None:
+    # A rejected approval ends the run `rejected`: nothing was done, so the step is owed still
+    # (brief, D72), and support may propose it again.
+    run = run_case(
+        refund_paying_required(),
+        file=ORDER,
+        answers=[("review", "approve", "ana", {"approved_amount": 250}), ("pay", "reject", "sam")],
+        people=PEOPLE,
+    )
+    assert run.waiting_for == ["pay, required, proposed by support"]
+    assert not run.closed
+
+
+def failing_once() -> Any:
+    """A provider down for the first call, then up: the run fails, and its retry goes through."""
+    calls: list[str] = []
+
+    def refund(inputs: dict[str, Any]) -> dict[str, Any]:
+        calls.append(inputs["idempotency_key"])
+        if len(calls) == 1:
+            raise ConnectionError("provider unreachable")
+        return {"refund_id": "refund-ord-1"}
+
+    return refund
+
+
+OPERATING = PEOPLE | {"olga": ["operations"]}  # two operators, so a skip could be approved
+
+
+def test_a_skip_of_a_required_steps_failed_run_is_refused() -> None:
+    # A skip goes on as if the run weren't needed, and a required step is one that is: its
+    # obligation ends only by doing it, or by a person's close (brief, D72).
+    reviewed = ("review", "approve", "ana", {"approved_amount": 40})
+    small = {"order_id": "ord-1", "amount": 40}
+    with pytest.raises(
+        ChangeRefused,
+        match="^pay is required, so its run is never skipped: retry it, or close the case with a "
+        "reason$",
+    ):
+        run_case(
+            refund_paying_required(),
+            file=small,
+            answers=[reviewed, skip("pay#1", "omar")],
+            people=OPERATING,
+            activities={"payments.refund@2": failing_once()},
+        )
+    # The retry that completes does it, and the case closes.
+    retried = run_case(
+        refund_paying_required(),
+        file=small,
+        answers=[reviewed, retry("pay#1", "omar")],
+        people=OPERATING,
+        activities={"payments.refund@2": failing_once()},
+    )
+    assert retried.closed
