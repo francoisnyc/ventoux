@@ -3003,14 +3003,14 @@ Adds to D10, D17, D24, D26, D34, D37, D40, D50, D51, D52 and D55, whose text is 
   open entries, with who can start it: `confirm, required, proposed by support`; `confirm,
   required, started by a rule`; `confirm, required, after review`, the last only once nothing
   else is pending.
-- **`ventoux check` proves each can be done** (D34, D37). Errors, holding for every case: a
-  required step nothing can ever start, which is `NEVER_RUNS`, as for any step that can never
-  run (the reach fixpoint; one cause, one issue), and `required` with `when`. A warning, since the rule may never fire: a required step a rule may
-  stop, or whose approval may reject, that could then never run again
-  (`REQUIRED_MAY_STRAND`).
-- **The diff reads it as stricter turned on,** looser turned off (D55), the reverse of
-  `automatic` and `repeatable`, which turned on are looser. The case map's closing line names it; the builder takes `required=True`;
-  the JSON Schema follows (D60).
+- **`ventoux check` proves each can be done** (D34, D37). Errors, holding for every case: a required
+  step nothing can ever start, which is `NEVER_RUNS`, as for any step that can never run (the reach
+  fixpoint; one cause, one issue), and `required` with `when`. A warning, since the rule may never
+  fire: a required step a rule may stop, or whose approval may reject, that could then never run
+  again (`REQUIRED_MAY_STRAND`).
+- **The diff reads it as stricter turned on,** looser turned off (D55), the reverse of `automatic`
+  and `repeatable`, which turned on are looser. The case map's closing line names it; the builder
+  takes `required=True`; the JSON Schema follows (D60).
 - **Owed is worked out, never stored,** from the definition and the step's runs: it crosses
   continue-as-new (D27) and follows a migration's renames (D53) with the runs, and a migration's
   target decides what is required.

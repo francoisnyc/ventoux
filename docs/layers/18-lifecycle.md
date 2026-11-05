@@ -1,16 +1,17 @@
 # Layer 18: Case lifecycle: required steps, repeated steps, child cases
 
-Status: 2026-11-05, choices A to C and 1 to 11 agreed; 18a's seams agreed; 18a slices 1 and 2
-built and reviewed; choice 12 proposed (from the tutor's review). This note starts from `main` at `f1e8512`, with
-layers 0 to 17 merged. The warm-up was asked and recorded (learning question 37). The guide was
-written first (curriculum step 2): `docs/guides/cases.md`, "Required steps", "Repeated steps: one
-run per item" and "Child cases", describes the layer as if it worked. Writing it showed four places
-where my first picks were wrong; the recommendations below correct them, and the guide changes
-with the answers (listed at the end).
+Status: 2026-11-05, choices A to C and 1 to 11 agreed; 18a's seams agreed; 18a slices 1 and 2 built
+and reviewed; choice 12 proposed (from the tutor's review). This note starts from `main` at
+`f1e8512`, with layers 0 to 17 merged. The warm-up was asked and recorded (learning question 37).
+The guide was written first (curriculum step 2): `docs/guides/cases.md`, "Required steps", "Repeated
+steps: one run per item" and "Child cases", describes the layer as if it worked. Writing it showed
+four places where my first picks were wrong; the recommendations below correct them, and the guide
+changes with the answers (listed at the end).
 
 **Answered 2026-11-04.** Choices A to C and 1 to 11 as recommended. D72 is written before 18a is
-built, with dated amendments under D10, D24 and D52. Choices 12 to 28 stay sketches, settled when
-their parts start; the guide's 18b to 18d sections change with them then.
+built, with dated amendments under D10, D24 and D52. Choices 13 to 29 (numbered 12 to 28 until
+choice 12 was added) stay sketches, settled when their parts start; the guide's 18b to 18d sections
+change with them then.
 
 Prior art: `chartering/src/temporal/case-workflow.ts`. Each admitted fragment runs as a child
 workflow named `<case ID>/<fragment>-<n>`, the counter carried across continue-as-new. A promise
@@ -162,9 +163,10 @@ C. **No new dependency.** *Recommended.*
 
 10. **The diff, the case map, the builder, the schema.** Turning `required` on is **stricter** (the
     case does more before it closes by itself), off **looser**, the reverse of `automatic` and
-    `repeatable`, which turned on are looser (13b; corrected 2026-11-05, from the tutor's review). The case map's closing line says it: "closes when nothing is left to do and confirm
-    is done". The builder takes `required=True`. The JSON Schema follows from Pydantic. *Recommended:
-    all in 18a*, since a key the diff doesn't know would be a change it can't classify.
+    `repeatable`, which turned on are looser (13b; corrected 2026-11-05, from the tutor's review).
+    The case map's closing line says it: "closes when nothing is left to do and confirm is done".
+    The builder takes `required=True`. The JSON Schema follows from Pydantic. *Recommended: all in
+    18a*, since a key the diff doesn't know would be a change it can't classify.
 
 11. **Engine version: none new** (D51). A history recorded before has no definition with
     `required`, so every recorded path decides as before. Confirmed by replaying a 17c history.
@@ -252,10 +254,10 @@ C. **No new dependency.** *Recommended.*
     is untrusted in every run. *Recommended.*
 
 17. **Reading a repeated step from outside it.** `requires: ["refund_line"]` is met when every
-    item's latest run is done, and at once for an empty list (the history says so). `refund_line.outcome`
-    and its outputs are refused at validation: several runs have no one outcome. Reading how many
-    were declined would need an operator, which is a decision of its own (D20), not made here.
-    *Recommended.*
+    item's latest run is done, and at once for an empty list (the history says so).
+    `refund_line.outcome` and its outputs are refused at validation: several runs have no one
+    outcome. Reading how many were declined would need an operator, which is a decision of its own
+    (D20), not made here. *Recommended.*
 
 18. **A required repeated step** owes a done run for every item in the list now. *Recommended.*
 
@@ -462,10 +464,10 @@ continue-as-new (13).
 - **A skip's check reads the step directly:** a guard "if the step is known" would have let a
   skip through for an unknown step, a permissive default; a migration never leaves a run without
   its step.
-- **Every reader takes `owed.waiting_for`** (from the tutor's review): the in-memory run, the story's
-  end (which counts what is owed as pending, so it never says "nothing pending" of a case that
-  owes), the advisor's view, and Temporal's report. `waiting_at` keeps only the open entries' names:
-  an owed step, listed after them, has no entry yet.
+- **Every reader takes `owed.waiting_for`** (from the tutor's review): the in-memory run, the
+  story's end (which counts what is owed as pending, so it never says "nothing pending" of a case
+  that owes), the advisor's view, and Temporal's report. `waiting_at` keeps only the open entries'
+  names: an owed step, listed after them, has no entry yet.
 - **Pins added from the tutor's review,** each watched catching its mutation: only the latest run
   counts (a done run run again and stopped is owed again); an owed step with its run open is said
   once; a skip proposed before its step became required (release 1 to 2) isn't applied, at the
@@ -509,8 +511,14 @@ by its answers (see "What changes in the guide, if answered as recommended").
 > run = run_case(order_refund, file={"order_id": "ord-1", "lines": lines}, answers=[],
 >                people=PEOPLE)
 > assert run.history[:2] == [
->     "started refund_line[A12]#1: payments.refund@2 (amount from system:opener, order_id from system:opener)",
->     "started refund_line[B7]#1: payments.refund@2 (amount from system:opener, order_id from system:opener)",
+>     (
+>         "started refund_line[A12]#1: payments.refund@2 (amount from system:opener, "
+>         "order_id from system:opener)"
+>     ),
+>     (
+>         "started refund_line[B7]#1: payments.refund@2 (amount from system:opener, "
+>         "order_id from system:opener)"
+>     ),
 > ]
 > ```
 >
