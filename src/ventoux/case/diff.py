@@ -37,6 +37,7 @@ from ventoux.case.guards import (
     forgetting_change,
     plan_approvals,
     plan_approvers_change,
+    required_change,
     roles_change,
     step_condition_change,
     step_guards,
@@ -252,6 +253,7 @@ def under_max_age(path: str) -> bool:
 
 
 STEP_WHEN = ("steps", "*", "when")
+STEP_REQUIRED = ("steps", "*", "required")
 SWITCHES = ("automatic", "repeatable")
 
 
@@ -322,6 +324,8 @@ def judged(
             yield step_condition_change(leaf)
         elif (switch := switched(leaf.path)) is not None:
             yield switch_change(leaf, switch)
+        elif at(leaf.path, STEP_REQUIRED):
+            yield required_change(leaf)
         elif (comparison := roles_compared(leaf.path)) is not None:
             yield roles_change(leaf, versions, comparison)
         elif at(leaf.path, PLAN_APPROVERS):

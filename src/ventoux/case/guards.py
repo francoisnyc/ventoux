@@ -466,6 +466,15 @@ def switch_change(leaf: Leaf, name: str) -> Change:
     return Change(leaf.path, "stricter", said, name)
 
 
+def required_change(leaf: Leaf) -> Change:
+    """`required`: turned on, stricter, since the case does more before it closes by itself;
+    turned off, looser. The reverse of `automatic` and `repeatable` (brief, D72)."""
+    said = f"{shown(leaf.before)} -> {shown(leaf.after)}"
+    if leaf.after is True:
+        return Change(leaf.path, "stricter", said, "required")
+    return Change(leaf.path, "looser", f"{said} (the case may close without it)", "required")
+
+
 # --- Closing and forgetting ----------------------------------------------------------------------
 
 

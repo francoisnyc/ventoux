@@ -13,10 +13,13 @@ from typing import Any
 
 import pytest
 from temporalio.client import Client
+from test_diff import packed
+from test_diff_people import judged_lines
 from test_temporal_case import LARGE, QUEUE, on_temporal, reported
 
 from ventoux.case.advising import advisor_view
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.sheet import case_map
 from ventoux.case.simulate import simulate
 from ventoux.case.story import parse_story
 from ventoux.case.validate import validate_case
@@ -900,3 +903,31 @@ def test_a_required_step_an_error_refuses_is_not_also_warned_about() -> None:
         if i.path.startswith("steps.confirm")
     ]
     assert codes == ["NEVER_RUNS"]
+
+
+# --- Slice 6: the diff and the case map read it ---
+
+
+def without_required(definition: dict[str, Any], step: str = "confirm") -> dict[str, Any]:
+    """`definition`, its `step` no longer required."""
+    changed = copy.deepcopy(definition)
+    changed["steps"][step]["required"] = False
+    return changed
+
+
+def test_the_diff_reads_required_turned_on_as_stricter_and_off_as_looser() -> None:
+    # The reverse of automatic and repeatable: required, the case does more before it closes by
+    # itself (brief, D55) (brief, D72).
+    owed, not_owed = refund_confirmed(), without_required(refund_confirmed())
+    assert judged_lines(not_owed, owed) == ["stricter   steps.confirm.required: false -> true"]
+    assert judged_lines(owed, not_owed) == [
+        "looser     steps.confirm.required: true -> false (the case may close without it)"
+    ]
+
+
+def test_the_case_map_says_what_the_case_owes() -> None:
+    read = case_map(packed(refund_confirmed()), CATALOG)
+    assert "The case owes it: it doesn't close by itself until confirm is done." in read
+    assert "- It closes when nothing is left to do and confirm is done." in read
+    held = case_map(packed(refund_confirmed_closing_when_paid()), CATALOG)
+    assert "- It closes once paid is reached and confirm is done." in held

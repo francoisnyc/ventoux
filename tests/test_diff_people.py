@@ -1204,6 +1204,34 @@ def assignment_witness() -> Witness:
     return assigned, refund(), CATALOG, refused, reviewed(refund()).reached("review")
 
 
+def required_witness() -> Witness:
+    """With a required confirmation, a rejected refund doesn't close by itself: the case owes it
+    (brief, D72). Not required, the same refund closes."""
+    owed = refund()
+    owed["steps"]["confirm"] = {
+        "kind": "task",
+        "display": {"title": "Confirm the outcome with the customer"},
+        "roles": ["support"],
+        "outcomes": {"confirmed": {"display": {"title": "Outcome confirmed"}}},
+        "requires": ["review"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "required": True,
+    }
+    not_owed = copy.deepcopy(owed)
+    not_owed["steps"]["confirm"]["required"] = False
+
+    def rejected(case: dict[str, Any]) -> CaseRun:
+        return run_case(
+            case,
+            file={"order_id": "ord-1", "amount": 40},
+            answers=[("review", "reject", "ana")],
+            people=PEOPLE,
+        )
+
+    return owed, not_owed, CATALOG, not rejected(owed).closed, rejected(not_owed).closed
+
+
 def plan_answerers_witness() -> Witness:
     """A team lead's confirmation is refused while support alone confirms; then taken."""
     before = looking(lookup_plan(False, ["support"]))
@@ -1240,6 +1268,7 @@ WITNESSES: dict[str, Callable[[], Witness]] = {
     "plan approvers": plan_approvers_witness,
     "plan answerers": plan_answerers_witness,
     "assignment": assignment_witness,
+    "required": required_witness,
 }
 
 
