@@ -9,6 +9,7 @@ case is **closed**. Something that completes while closing flags the case for a 
 from ventoux.case.admission import latest_run, requirements_met
 from ventoux.case.approvals import with_given
 from ventoux.case.definition import CaseDefinition
+from ventoux.case.owed import owed
 from ventoux.case.state import CaseState, CloseAsked
 from ventoux.case.timers import cancel_timers
 from ventoux.case.writers import read_sources, untrusted_of
@@ -90,7 +91,13 @@ def cancel_changes(state: CaseState, because: str) -> None:
 def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
     """Close the case if it is done: open with nothing left to do (unless it stays open), or
     closing with nothing still running (brief, D10)."""
-    if state.phase == "open" and not case.stays_open and not pending(state):
+    # Nothing left to do: nothing pending, and no required step owed (brief, D72).
+    if (
+        state.phase == "open"
+        and not case.stays_open
+        and not pending(state)
+        and not owed(case, state)
+    ):
         state.phase = "closed"
         cancel_changes(state, "nothing left to do")
         say_kept_from_starting(case, catalog, state)

@@ -7,11 +7,12 @@ See docs/layers/17-assignment.md (17c) and docs/guides/cases.md, "Assignment rul
 import copy
 import json
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
 from test_approvals import FOUR_EYES
-from test_case import PEOPLE, REFUND, guide_json, guide_refund_with_rework
+from test_case import PEOPLE, REFUND, guide_refund_with_rework
 from test_schema import schema_accepts
 
 from ventoux import Assign, Case, Outcome
@@ -26,6 +27,8 @@ from ventoux.case.validate import validate_case
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.testing import CATALOG, START, claim, give_back, migrate, propose, release_of, run_case
+
+GUIDE = Path(__file__).parent.parent / "docs" / "guides" / "cases.md"
 from ventoux.tooling.builder import package as package_of
 from ventoux.tooling.schema import case_schema
 
@@ -122,11 +125,20 @@ def test_an_approval_needing_several_people_has_no_rule() -> None:
     ]
 
 
+def follow_up_json() -> dict[str, Any]:
+    """The guide's follow-up: the last JSON block of "Assignment rules", read from its own
+    section, so a section added after it moves nothing."""
+    text = GUIDE.read_text().split("### Assignment rules")[1].split("\n## ")[0]
+    block = text.split("```json\n")[-1].split("```")[0]
+    loaded: dict[str, Any] = json.loads("{" + block + "}", parse_float=Decimal)
+    return loaded
+
+
 def guide_follow_up() -> dict[str, Any]:
-    """The quickstart's refund with the guide's follow-up: its last JSON block, "Assignment
-    rules", so the guide can't drift from what runs."""
+    """The quickstart's refund with the guide's follow-up, so the guide can't drift from what
+    runs."""
     definition = copy.deepcopy(REFUND)
-    definition["steps"].update(guide_json(-1))
+    definition["steps"].update(follow_up_json())
     return definition
 
 
@@ -433,7 +445,7 @@ def test_the_builder_writes_the_guides_follow_up_and_the_schema_accepts_it() -> 
         assign=Assign.answered(review),
     )
     written_case = json.loads(package_of(refund)["case.json"])
-    assert written_case["steps"]["follow_up"] == guide_json(-1)["follow_up"]
+    assert written_case["steps"]["follow_up"] == follow_up_json()["follow_up"]
     assert schema_accepts(case_schema(), json.loads(json.dumps(guide_follow_up(), default=int)))
 
 

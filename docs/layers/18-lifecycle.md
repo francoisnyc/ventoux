@@ -397,3 +397,109 @@ change request; an edit of a field changes nothing owed, asserted in 3's variant
 (12), an event (a required wait step completed by its event, in 9), a rule (5, 9), the opening (1,
 2), a plan (4, with a plan step's `failed`), a close or a stop (5, 8), a retry (6),
 continue-as-new (13).
+
+## Guide drafts for 18b and 18c, kept here until their parts are built
+
+Written in step 2 as if they worked. The guide's examples are run by its tests, so these sections
+can't sit in the guide before their parts exist; each moves back when its part starts, corrected
+by its answers (see "What changes in the guide, if answered as recommended").
+
+> ## Repeated steps: one run per item
+>
+> A **repeated step** runs once for each item of a list in the case file, each run given its item.
+> Here an order is refunded line by line:
+>
+> ```json
+> "fields": {
+>   "lines": {"type": "list", "display": {"title": "Order lines"},
+>             "fields": {"sku": {"type": "string"}, "amount": {"type": "number"}}}
+> },
+> "steps": {
+>   "refund_line": {
+>     "kind": "activity",
+>     "display": {"title": "Refund one line"},
+>     "activity": "payments.refund@2",
+>     "for_each": {"over": "lines", "key": "sku"},
+>     "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "item.amount"}}
+>   }
+> }
+> ```
+>
+> `item` is the run's own item, read as `item.<field>`, as `sum` and `count` read theirs. Each run
+> is named by its item's **key**, the field `key` names: `refund_line[A12]#1`, `refund_line[B7]#1`.
+> The name goes into the run's idempotency key (brief, D17), so reordering the list, or adding a
+> line in front, never gives a payment another line's key. A list whose items repeat a key, or lack
+> one, fails the step, which needs attention: nothing guesses which line is which.
+>
+> ```python
+> lines = [{"sku": "A12", "amount": 40}, {"sku": "B7", "amount": 25}]
+> run = run_case(order_refund, file={"order_id": "ord-1", "lines": lines}, answers=[],
+>                people=PEOPLE)
+> assert run.history[:2] == [
+>     "started refund_line[A12]#1: payments.refund@2 (amount from system:opener, order_id from system:opener)",
+>     "started refund_line[B7]#1: payments.refund@2 (amount from system:opener, order_id from system:opener)",
+> ]
+> ```
+>
+> An item's values come from the list they are in, with its sources: a list a customer typed is
+> still untrusted in each run.
+>
+> - **`requires: ["refund_line"]`** is met once every item's run is done; with no items, at once.
+>   `refund_line.outcome` isn't read: with several runs, there is no one outcome.
+> - **A required repeated step** owes a done run for each item.
+> - **When the list changes,** by an edit (see "Changing an open case"): an added item starts its
+>   run; a removed item's open run is stopped, as a rule's stop would stop it, and a running one
+>   finishes, flagged; an item whose values changed keeps a done run done, and its open run is
+>   stopped and starts again with its new values. A rule never sets a list.
+> - `ventoux check` refuses `for_each` over a field that isn't a list: `steps.refund_line.for_each:
+>   order_id is a reference, not a list: a step repeats over a list field`, and a key that isn't a
+>   text field of the list's items.
+>
+> ## Child cases
+>
+> A **child case** is a whole case started from a step of another: its own case file, release,
+> people and lifecycle, and when it ends, a report to its parent. Use one where work has a life of
+> its own: a claim sends the vehicle to a garage, whose repair is assigned, chased and closed by
+> other people, over weeks.
+>
+> ```json
+> "repair": {
+>   "kind": "case",
+>   "display": {"title": "Repair the vehicle"},
+>   "case": "repair",
+>   "requires": ["assess"],
+>   "inputs": {"vehicle": {"var": "vehicle"}, "budget": {"var": "approved_amount"}}
+> }
+> ```
+>
+> Its `inputs` are the child's opening, read from the parent's case file with their sources, as a
+> plan step's are (brief, D28): a budget a person approved is still that person's in the child. A
+> sensitive value is given encrypted under the child's own key, never in plain text, and the child
+> lists who may see it as its own definition says.
+>
+> **Which release.** The child opens on the release of `repair` active in the parent's environment,
+> asked of the environment's registry before it starts (the releases guide, "A case in an
+> environment"). A definition not active there is refused before anything starts, and the step
+> needs attention: `repair#1 failed: repair has no active release in production: activate one, then
+> retry repair#1`.
+>
+> **What the parent hears.** The child runs as its own workflow, `claim-7/repair#1`, and the parent
+> waits for it, as for any running step. When it closes, it reports to the parent by a signal: how
+> it closed, the milestones it reached, and the fields its definition declares in `reports`, each
+> with the sources it had in the child. The step is then done, and the parent reads
+> `repair.outcome` (`done`, or the reason a person closed it with) and `repair.cost`:
+>
+> ```
+> started repair#1: case repair 3 (budget from person:ana, vehicle from system:opener), run claim-7/repair#1
+> repair#1 done: repair closed, nothing left to do, giving cost from person:garage-lee
+> ```
+>
+> - **A child that needs attention** is the child's: its operators retry it there. The parent waits.
+> - **When the parent closes, or a rule stops the step,** the child is closed too, saying why
+>   (`closed by its parent: duplicate, by ana`): its tasks are cancelled, its running activities
+>   finish, and the parent closes once the child has ended. A close never waits for a person.
+> - **A parent that continues as new** doesn't wait for its children: their report reaches it by
+>   its workflow ID.
+> - **A parent that migrates** leaves its children on their own release.
+> - **Forgetting the parent** forgets each child too, under one request; a child whose definition
+>   keeps its records (`"forgetting": "never"`) refuses it.

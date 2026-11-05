@@ -14,6 +14,7 @@ from ventoux.case.called import unbound
 from ventoux.case.claims import assignees
 from ventoux.case.closing import needs_attention
 from ventoux.case.definition import CaseDefinition, parse_case
+from ventoux.case.owed import waiting_for
 from ventoux.case.runtime import decide
 from ventoux.case.state import (
     CancelWorkflow,
@@ -133,7 +134,7 @@ def run_case_in_memory(
             state = driver.carry(state, event)
     done = frozenset(run.step for run in state.runs if run.status == "done")
     attention = needs_attention(state)
-    waiting = list(state.waiting.values())
+    waiting = waiting_for(driver.case, state)
     registered = tuple(catalog.roles)
     timers = set_timers(state)
     return CaseRun(
