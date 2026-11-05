@@ -666,17 +666,237 @@ def test_a_required_step_whose_requirement_may_end_and_cant_run_again_is_warned(
 
 
 def test_a_required_step_whose_requirement_may_be_unmet_once_the_case_may_close_is_warned() -> None:
-    # logged is reached by a step that doesn't require the review, so it may be reached with the
-    # review not done; then nothing new starts but confirm, which requires it.
-    assert strand_warnings(logged_first()) == [
+    # logged is reached by a step that doesn't require the check, which support proposes: it may
+    # be reached with the check never run, and then nothing new starts but confirm.
+    assert strand_warnings(logged_first(check_first=True)) == [
         (
             "steps.confirm",
             (
-                "confirm requires review, which may not be done when logged is reached, and "
+                "confirm requires check, which may not be done when logged is reached, and "
                 "nothing but confirm starts then; confirm is required, so it might never start: "
-                "make what reaches logged require review, or remove logged from closes_when"
+                "make what reaches logged require check, or remove logged from closes_when"
             ),
         )
     ]
+    # The review starts itself at the opening, so it is on its way, or done, whenever logged is
+    # reached: no warning (from the tutor's review).
+    assert strand_warnings(logged_first()) == []
     # paid is reached only by pay, which requires the review: done before, proven.
     assert strand_warnings(refund_confirmed_closing_when_paid()) == []
+
+
+# --- From the tutor's review at 603a254: what is on its way under a held close ---
+
+
+def withdrawable_closing() -> dict[str, Any]:
+    """The guide's refund, closing once the customer withdraws (support records it by answering
+    `take_call`), with `confirm` owed."""
+    definition = refund_confirmed_withdrawable()
+    definition["steps"]["confirm"]["repeatable"] = False
+    definition["rules"] = {}
+    definition["closes_when"] = ["withdrawn"]
+    return definition
+
+
+WITHDRAWS = [propose("take_call", "ana"), ("take_call", "withdrew", "ana")]
+
+
+def test_under_a_held_close_a_milestone_an_open_task_will_reach_is_on_its_way() -> None:
+    # confirm requires reviewed, which the open review reaches when answered: on its way, so
+    # confirm waits; answered, the review reaches it, confirm runs, and the case closes.
+    definition = withdrawable_closing()
+    definition["milestones"]["reviewed"] = {"display": {"title": "Reviewed"}}
+    definition["steps"]["review"]["reaches"] = ["reviewed"]
+    definition["steps"]["confirm"]["requires"] = ["reviewed"]
+    held = run_case(definition, file=ORDER, answers=WITHDRAWS, people=PEOPLE)
+    assert held.needs_attention == []
+    assert held.waiting_for == ["review by support"]
+    done = run_case(
+        definition,
+        file=ORDER,
+        answers=[
+            *WITHDRAWS,
+            ("review", "reject", "ana"),
+            propose("confirm", "ana"),
+            ("confirm", "confirmed", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert done.history[-1] == "closed: withdrawn reached"
+
+
+def settling_first() -> dict[str, Any]:
+    """`withdrawable_closing`, `confirm` requiring `settle`, a required task support proposes."""
+    definition = withdrawable_closing()
+    definition["steps"]["settle"] = {
+        "kind": "task",
+        "display": {"title": "Settle the request"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "required": True,
+        "outcomes": {"settled": {"display": {"title": "Settled"}}},
+    }
+    definition["steps"]["confirm"]["requires"] = ["settle"]
+    return definition
+
+
+def test_under_a_held_close_a_requirement_itself_owed_is_on_its_way() -> None:
+    # settle is owed, so it may start under the held close: confirm waits for it, and the case
+    # closes once both are done.
+    rejected_then_withdrawn = [("review", "reject", "ana"), *WITHDRAWS]
+    held = run_case(settling_first(), file=ORDER, answers=rejected_then_withdrawn, people=PEOPLE)
+    assert held.needs_attention == []
+    assert held.waiting_for == [  # owed steps in the order written
+        "confirm, required, after settle",
+        "settle, required, proposed by support",
+    ]
+    done = run_case(
+        settling_first(),
+        file=ORDER,
+        answers=[
+            *rejected_then_withdrawn,
+            propose("settle", "ana"),
+            ("settle", "settled", "ana"),
+            propose("confirm", "ana"),
+            ("confirm", "confirmed", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert done.history[-1] == "closed: withdrawn reached"
+    # Nor is it warned about: settle may start then, being owed itself.
+    assert strand_warnings(settling_first()) == []
+
+
+def test_under_a_held_close_an_automatic_owed_step_starts_once_its_requirement_completes() -> None:
+    # Pin: the held close lets an owed step start by itself, as soon as what it requires is done.
+    definition = logged_first()
+    definition["steps"]["confirm"]["automatic"] = True
+    del definition["steps"]["confirm"]["proposed_by"]
+    run = run_case(definition, file=ORDER, answers=[("review", "reject", "ana")], people=PEOPLE)
+    assert run.waiting_for == ["confirm by support"]
+
+
+def test_under_a_held_close_an_owed_step_only_a_rule_starts_needs_attention() -> None:
+    # Pin: no rule acts while the close is held (brief, D34), so a rule can't start it then.
+    definition = logged_first()
+    del definition["steps"]["confirm"]["proposed_by"]
+    definition["milestones"]["escalated"] = {"display": {"title": "Escalated"}}
+    definition["rules"] = {
+        "confirm_when_escalated": {
+            "display": {"title": "Confirm once escalated"},
+            "on": {"reached": "escalated"},
+            "then": {"start": ["confirm"]},
+        }
+    }
+    run = run_case(definition, file=ORDER, answers=[("review", "reject", "ana")], people=PEOPLE)
+    assert run.needs_attention == [
+        (
+            "confirm: required, and it can't start: confirm is started only by a rule, and no "
+            "rule acts while the close is held: close the case with a reason"
+        )
+    ]
+
+
+def test_a_circle_of_owed_requirements_under_a_held_close_needs_attention_and_ends() -> None:
+    # Pin: confirm and settle, each owed, each requiring the other (a deadlock validation refuses,
+    # DEADLOCK): the case still answers, saying each can't start, rather than asking for ever.
+    definition = settling_first()
+    definition["steps"]["settle"]["requires"] = ["confirm"]
+    run = run_case(
+        definition, file=ORDER, answers=[("review", "reject", "ana"), *WITHDRAWS], people=PEOPLE
+    )
+    assert run.needs_attention == [
+        (
+            "confirm: required, and it can't start: confirm requires settle, which hasn't "
+            "completed: close the case with a reason"
+        ),
+        (
+            "settle: required, and it can't start: settle requires confirm, which hasn't "
+            "completed: close the case with a reason"
+        ),
+    ]
+
+
+def test_a_repeatable_step_nobody_can_start_again_is_refused_when_read() -> None:
+    # So `REQUIRED_MAY_STRAND` never meets one: "can run again" needs only `repeatable` once the
+    # definition is read, and still names who starts it, as the format already insists.
+    definition = refund_confirmed()
+    definition["steps"]["confirm"] |= {"repeatable": True, "automatic": True}
+    del definition["steps"]["confirm"]["proposed_by"]
+    with pytest.raises(CaseInvalid, match="a repeatable step runs again only when proposed"):
+        parse_case(definition)
+
+
+def test_a_closes_when_milestone_a_rule_reaches_is_never_proven_after_a_requirement() -> None:
+    # confirm requires a check support proposes; paid is reached by pay, which requires it too:
+    # proven done before paid. A rule that may reach paid, on a moment that waits for nothing,
+    # takes the proof away: doubt warns.
+    definition = refund_confirmed_closing_when_paid()
+    definition["steps"]["check"] = {
+        "kind": "task",
+        "display": {"title": "Check the request"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"checked": {"display": {"title": "Checked"}}},
+    }
+    definition["steps"]["confirm"]["requires"] = ["check"]
+    definition["steps"]["pay"]["requires"] = ["check"]
+    assert strand_warnings(definition) == []
+    definition["milestones"]["escalated"] = {"display": {"title": "Escalated"}}
+    definition["rules"] = {
+        "paid_when_escalated": {
+            "display": {"title": "Count an escalated refund as paid"},
+            "on": {"reached": "escalated"},
+            "then": {"reach": ["paid"]},
+        }
+    }
+    assert [path for path, _ in strand_warnings(definition)] == ["steps.confirm"]
+
+
+def test_done_before_is_read_through_what_a_step_requires() -> None:
+    # confirm requires a check support proposes; paid is reached by notify, which requires pay,
+    # which requires the check: done before paid, through pay, proven.
+    definition = refund_confirmed_closing_when_paid()
+    del definition["steps"]["pay"]["reaches"]
+    definition["steps"]["check"] = {
+        "kind": "task",
+        "display": {"title": "Check the request"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"checked": {"display": {"title": "Checked"}}},
+    }
+    definition["steps"]["confirm"]["requires"] = ["check"]
+    definition["steps"]["pay"]["requires"] = ["check"]
+    definition["steps"]["notify"] = {
+        "kind": "task",
+        "display": {"title": "Tell the customer"},
+        "roles": ["support"],
+        "requires": ["pay"],
+        "outcomes": {"told": {"display": {"title": "Told"}}},
+        "reaches": ["paid"],
+    }
+    assert strand_warnings(definition) == []
+
+
+def test_a_required_step_an_error_refuses_is_not_also_warned_about() -> None:
+    # One cause, one issue: confirm can never run (NEVER_RUNS), so what might strand it isn't
+    # said beside it.
+    definition = withdrawable_closing()
+    definition["rules"] = {
+        "withdraw": {
+            "display": {"title": "Stop confirming when the customer withdraws"},
+            "on": {"reached": "withdrawn"},
+            "then": {"stop": ["confirm"]},
+        }
+    }
+    definition["milestones"]["reported"] = {"display": {"title": "Reported"}}
+    definition["steps"]["confirm"]["requires"] = ["reported"]  # nothing reaches it
+    codes = [
+        i.code
+        for i in validate_case(parse_case(definition), CATALOG)
+        if i.path.startswith("steps.confirm")
+    ]
+    assert codes == ["NEVER_RUNS"]

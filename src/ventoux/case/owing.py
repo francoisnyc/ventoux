@@ -10,6 +10,7 @@ from ventoux.case.admission import latest_counted, requirements_met
 from ventoux.case.closing import close_held, needs_attention, pending
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.owed import owed
+from ventoux.case.reach import reached_by
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState
 
@@ -58,7 +59,9 @@ def attention(case: CaseDefinition, state: CaseState) -> list[str]:
     return lines
 
 
-def stranded(case: CaseDefinition, state: CaseState, name: str) -> str | None:
+def stranded(
+    case: CaseDefinition, state: CaseState, name: str, seen: frozenset[str] = frozenset()
+) -> str | None:
     """Why the owed step `name` can never start now, or None if it still can: nothing can start
     it again; a step it requires ended and can't run again; or, while the close is held, a
     requirement is unmet with nothing on its way to meet it, since nothing else starts."""
@@ -71,12 +74,31 @@ def stranded(case: CaseDefinition, state: CaseState, name: str) -> str | None:
         if requirements_met((requirement,), state) or on_its_way(state, requirement):
             continue
         if requirement not in case.steps:
-            if held:  # a milestone nothing can reach now: nothing new starts
+            if held and not reaching_on_its_way(case, state, requirement):
                 return f"{name} requires {requirement}, which hasn't been reached"
             continue  # a milestone something may still reach
-        if held or cannot_start_again(case, state, requirement, held) is not None:
+        if held and not owed_and_able(case, state, requirement, seen | {name}):
+            return f"{name} requires {requirement}, which hasn't completed"
+        if not held and cannot_start_again(case, state, requirement, held) is not None:
             return f"{name} requires {requirement}, which hasn't completed"
     return None
+
+
+def reaching_on_its_way(case: CaseDefinition, state: CaseState, milestone: str) -> bool:
+    """Whether a step that reaches `milestone` has a run on its way: an open task answered, a
+    running step completing, a failed one retried (brief, D72)."""
+    return any(on_its_way(state, step) for step in reached_by(case, milestone))
+
+
+def owed_and_able(
+    case: CaseDefinition, state: CaseState, requirement: str, seen: frozenset[str]
+) -> bool:
+    """Whether `requirement` may still start under a held close: it is owed itself, so the close
+    lets it start, and it isn't stranded. A step already asked about on the way (`seen`) counts
+    as stranded, so a circle of requirements ends (brief, D72)."""
+    if requirement in seen or requirement not in owed(case, state):
+        return False
+    return stranded(case, state, requirement, seen) is None
 
 
 def cannot_start_again(case: CaseDefinition, state: CaseState, name: str, held: bool) -> str | None:

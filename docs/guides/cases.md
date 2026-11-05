@@ -2792,7 +2792,10 @@ A requirement holds back only the case closing **by itself**:
   required, and it can't start: confirm requires pay, which hasn't completed: close the case
   with a reason`, and only a person's close ends it. The same holds for an owed step that has run
   and isn't repeatable, and, while `closes_when` holds the close, for one whose requirement
-  nothing is on its way to meet, since nothing else starts then.
+  nothing is on its way to meet, since nothing else starts then. A requirement is on its way if
+  its run is under way, if it is a milestone a step under way will reach (an open review that
+  reaches `reviewed`), or if it is owed itself and can still start, since the held close lets an
+  owed step start.
 - **A failed run** needs attention, as any other (brief, D17): an operator retries it, or closes
   the case. Skipping a failed run of a required step is refused, since a skip would end the
   case's obligation without anyone doing it: `confirm is required, so its run is never skipped:
@@ -2816,9 +2819,11 @@ per step, the first of:
   which might never run again; confirm is required, so it might never start: make pay repeatable
   and proposed_by a role, or start it from a rule`;
 - a step it requires may not be done when a `closes_when` milestone is reached, after which
-  nothing but the owed step starts: `confirm requires review, which may not be done when logged
+  nothing but the owed step starts: `confirm requires check, which may not be done when logged
   is reached, and nothing but confirm starts then; confirm is required, so it might never start:
-  make what reaches logged require review, or remove logged from closes_when`.
+  make what reaches logged require check, or remove logged from closes_when`. A requirement that
+  is required itself, or that starts by itself at the opening (requiring nothing, with no
+  condition) and can't end undone, is on its way or done by then, and isn't warned about.
 
 "Can run again" is read from the definition: the step is repeatable, and a role proposes it or a
 rule starts it. "Done before the milestone" is proven only when every step that reaches it

@@ -494,6 +494,14 @@ continue-as-new (13).
   or through its requirements: doubt warns. A milestone requirement is not followed, so it warns
   too, the safe side for a warning.
 
+- **What is on its way under a held close** (from the tutor's review at `603a254`): a
+  requirement whose run is under way; a milestone a step under way will reach; a step owed itself
+  and not stranded, asked recursively, a step already asked on the way counting as stranded so a
+  circle ends. The warning's `closes_when` branch skips a requirement that is required itself, or
+  that starts itself at the opening and nothing can end undone.
+- **A repeatable step nobody can start again is refused when read,** so `runs_again`'s "proposed
+  or started by a rule" never meets one in a check; a test pins the refusal.
+
 ## Guide drafts for 18b and 18c, kept here until their parts are built
 
 Written in step 2 as if they worked. The guide's examples are run by its tests, so these sections

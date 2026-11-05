@@ -48,7 +48,9 @@ def may_strand(case: CaseDefinition, name: str) -> str | None:
             )
     for milestone in case.closes_when:
         for requirement in requirements(case)[name]:
-            if requirement in case.steps and not done_before(case, requirement, milestone):
+            if requirement not in case.steps or on_its_way_when_held(case, requirement):
+                continue
+            if not done_before(case, requirement, milestone):
                 return (
                     f"{name} requires {requirement}, which may not be done when {milestone} is "
                     f"reached, and nothing but {name} starts then; {name} is required, so it "
@@ -56,6 +58,17 @@ def may_strand(case: CaseDefinition, name: str) -> str | None:
                     f"or remove {milestone} from closes_when"
                 )
     return None
+
+
+def on_its_way_when_held(case: CaseDefinition, name: str) -> bool:
+    """Whether the step is sure to be on its way, or done, whenever the close is held: it is
+    required itself, so the held close lets it start; or it starts itself at the opening
+    (automatic, requiring nothing, with no condition) and nothing can end it undone."""
+    step = case.steps[name]
+    if step.required:
+        return True
+    at_opening = step.automatic and not requirements(case)[name] and step.when is None
+    return at_opening and may_end(case, name) is None
 
 
 def may_end(case: CaseDefinition, name: str) -> Literal["stopped", "rejected"] | None:
