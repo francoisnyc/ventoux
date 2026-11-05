@@ -52,6 +52,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 45 | Layer 16b: why an option is checked once, through an activity, when given | closed |
 | 46 | Layer 16c: why the case keeps the ID, never the file, and what checking it guards | closed |
 | 47 | Layer 17a: is an assignment a permission? | open |
+| 48 | Layer 18a: an owed step that can never start | open |
 
 ---
 
@@ -1968,4 +1969,35 @@ and record the key points. A question is closed once you can explain the answer 
   approve it; for everyone else, Pia's answer is refused while Sam holds it, and an assigner who is
   no party can still move it; unchanged for Sam, every check his answer faces (role, risk, sight,
   exclusions), and `waiting_for`, naming nobody.
+- Status: open, until the three parts come back from memory.
+
+## 48. Layer 18a: an owed step that can never start
+
+> The refund's `confirm` is required and proposed by support, and requires `pay`. Ana approves
+> 250, and Sam rejects `pay`'s approval. a) Why doesn't the case close by itself? b) What does it
+> say, and where (`waiting_for` or `needs_attention`), and why there? c) What does `ventoux check`
+> say about this definition before any case opens, and which two changes clear it?
+
+- Asked at the end of layer 18a's walk-through (2026-11-05), in place of the layer's own question
+  (what a child case can never do to its parent), which waits for 18c, where child cases are
+  built. Part c) was first put as "what would you change so the check warns": it already warns,
+  so it is recorded as asked here.
+- Your answer: asked to be told. Given:
+  - **a) Owed, so not closed:** `confirm` is required, so the case owes it until its latest run is
+    done (brief, D72); it never ran. Nothing is pending once the approval is rejected, but nothing
+    left to do also means nothing owed. A person may still close it with a reason, and the last
+    line says `; confirm not done`.
+  - **b) In `needs_attention`, not `waiting_for`:** `confirm: required, and it can't start: confirm
+    requires pay, which hasn't completed: close the case with a reason`. `pay` ended without
+    completing and can't run again (not repeatable, nobody proposes it), so `confirm` can never
+    start. `waiting_for` would claim the case waits for something that can never come; what only
+    a person can end is listed with what needs attention, as a failed run is (choice 12).
+  - **c) The warning, before any case opens:** `REQUIRED_MAY_STRAND` on `steps.confirm`: `confirm
+    requires pay, whose approval may be rejected, and which might never run again; confirm is
+    required, so it might never start: make pay repeatable and proposed_by a role, or start it
+    from a rule`. A warning, never an error: the approval may be given (brief, D37). Cleared by
+    letting `pay` run again (repeatable, and proposed by a role or started by a rule; the case then
+    says `confirm, required, after pay`), or by `confirm` no longer requiring `pay`.
+  - In one line: an owed step that can never start isn't something the case waits for; it needs
+    a person, and the check tells the author before any case opens.
 - Status: open, until the three parts come back from memory.
