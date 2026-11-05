@@ -1100,3 +1100,56 @@ def test_an_edit_changes_nothing_the_case_owes() -> None:
         "approval of pay by support-lead",
         "confirm, required, proposed by support",
     ]
+
+
+# --- From the tutor's review of #86 ---
+
+
+def test_under_a_held_close_a_milestone_an_owed_step_will_reach_is_on_its_way() -> None:
+    # settle is owed, and may start under the held close; answered settled, it reaches settled,
+    # which confirm requires: so confirm waits for it, and the case closes once both are done.
+    definition = settling_first()
+    definition["milestones"]["settled"] = {"display": {"title": "Settled"}}
+    definition["steps"]["settle"]["outcomes"]["settled"]["reaches"] = ["settled"]
+    definition["steps"]["confirm"]["requires"] = ["settled"]
+    rejected_then_withdrawn = [("review", "reject", "ana"), *WITHDRAWS]
+    held = run_case(definition, file=ORDER, answers=rejected_then_withdrawn, people=PEOPLE)
+    assert held.needs_attention == []
+    assert held.waiting_for == [  # owed steps in the order written
+        "confirm, required, after settled",
+        "settle, required, proposed by support",
+    ]
+    done = run_case(
+        definition,
+        file=ORDER,
+        answers=[
+            *rejected_then_withdrawn,
+            propose("settle", "ana"),
+            ("settle", "settled", "ana"),
+            propose("confirm", "ana"),
+            ("confirm", "confirmed", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert done.history[-1] == "closed: withdrawn reached"
+
+
+def test_a_requirement_at_the_opening_that_may_end_undone_is_warned() -> None:
+    # The review starts itself at the opening, but a rule may stop it: then it may not be done
+    # when logged is reached, though it can run again, so the warning stands.
+    definition = logged_first()
+    definition["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
+    definition["rules"] = {
+        "stop_review": {
+            "display": {"title": "Stop the review once logged"},
+            "on": {"reached": "logged"},
+            "then": {"stop": ["review"]},
+        }
+    }
+    assert [message for _, message in strand_warnings(definition)] == [
+        (
+            "confirm requires review, which may not be done when logged is reached, and "
+            "nothing but confirm starts then; confirm is required, so it might never start: "
+            "make what reaches logged require review, or remove logged from closes_when"
+        )
+    ]

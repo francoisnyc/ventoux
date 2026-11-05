@@ -74,7 +74,7 @@ def stranded(
         if requirements_met((requirement,), state) or on_its_way(state, requirement):
             continue
         if requirement not in case.steps:
-            if held and not reaching_on_its_way(case, state, requirement):
+            if held and not reaching_on_its_way(case, state, requirement, seen | {name}):
                 return f"{name} requires {requirement}, which hasn't been reached"
             continue  # a milestone something may still reach
         if held and not owed_and_able(case, state, requirement, seen | {name}):
@@ -84,10 +84,16 @@ def stranded(
     return None
 
 
-def reaching_on_its_way(case: CaseDefinition, state: CaseState, milestone: str) -> bool:
-    """Whether a step that reaches `milestone` has a run on its way: an open task answered, a
-    running step completing, a failed one retried (brief, D72)."""
-    return any(on_its_way(state, step) for step in reached_by(case, milestone))
+def reaching_on_its_way(
+    case: CaseDefinition, state: CaseState, milestone: str, seen: frozenset[str]
+) -> bool:
+    """Whether a step that reaches `milestone` is on its way: its run is under way (an open task
+    answered, a running step completing, a failed one retried), or it is owed and can still start,
+    since the held close lets it (brief, D72). `seen` guards a circle, as in `owed_and_able`."""
+    return any(
+        on_its_way(state, step) or owed_and_able(case, state, step, seen)
+        for step in reached_by(case, milestone)
+    )
 
 
 def owed_and_able(

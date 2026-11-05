@@ -170,6 +170,26 @@ C. **No new dependency.** *Recommended.*
     The builder takes `required=True`. The JSON Schema follows from Pydantic. *Recommended: all in
     18a*, since a key the diff doesn't know would be a change it can't classify.
 
+    **Correction proposed 2026-11-05, from the tutor's review of #86 (not yet answered).** D55 says
+    stricter means the new version lets through strictly less, whatever a case holds. Turned on,
+    `required` also takes what the other version refuses:
+    - after the review is rejected, `propose("confirm", "ana")` is taken when `confirm` is
+      required, and refused when it isn't (`the case is closed: nothing starts`);
+    - under a held close, the owed step starts after every `closes_when` milestone is reached,
+      where the other version starts nothing.
+
+    So neither direction is a proof. Layer 13 judged `closes_when` and `stays_open` not proven for
+    the same reason (`docs/layers/13-diff.md`, choice 27: closing is neither a permission nor its
+    absence).
+    - (a) **Not proven, both ways,** with a witness for each direction: a run each version takes
+      and the other refuses. The diff says the change and leaves the verdict to a person, as for
+      `closes_when`; D72's bullet changes in place, since D72 isn't merged; "required" leaves the
+      closed list of comparisons.
+    - (b) Keep stricter on, looser off, as built.
+
+    *Recommended (the tutor's, and mine): (a).* A verdict is a proof for every case (D55), and
+    this one fails on the run above.
+
 11. **Engine version: none new** (D51). A history recorded before has no definition with
     `required`, so every recorded path decides as before. Confirmed by replaying a 17c history.
     *Recommended.*
@@ -498,6 +518,9 @@ continue-as-new (13).
   and not stranded, asked recursively, a step already asked on the way counting as stranded so a
   circle ends. The warning's `closes_when` branch skips a requirement that is required itself, or
   that starts itself at the opening and nothing can end undone.
+- **A milestone an owed step will reach is on its way too** (from the tutor's review of #86): a
+  step reaching it counts if its run is under way, or if it is owed and able, under the same
+  guard against a circle.
 - **A repeatable step nobody can start again is refused when read,** so `runs_again`'s "proposed
   or started by a rule" never meets one in a check; a test pins the refusal.
 
@@ -537,7 +560,7 @@ watched failing first, or, for a pin of behaviour already right, catching a muta
 | The case map says what is owed, on the step and in how the case closes | `test_the_case_map_says_what_the_case_owes` |
 | The builder writes `required=True`, the same JSON | `test_the_builder_writes_the_guides_required_step`, `test_builder_coverage.py::test_the_builder_writes_every_key_of_the_format` |
 | The JSON Schema has the key | `test_schema.py::test_the_committed_schemas_are_what_the_models_say` |
-| A migration's renames are followed; its target decides what is required | the three `test_a_migration_...` tests |
+| A migration's renames are followed; its target decides what is required | `test_a_migration_renaming_a_required_step_keeps_it_owed_under_its_new_name`, `test_a_migration_renaming_a_done_required_step_owes_nothing`, `test_a_migration_making_a_done_step_required_owes_nothing` |
 | An edit changes nothing owed | `test_an_edit_changes_nothing_the_case_owes` |
 | An event completes a required wait | `test_a_required_wait_is_done_by_its_event` |
 | What is owed crosses continue-as-new on Temporal | `test_what_is_owed_crosses_continue_as_new` |
@@ -551,7 +574,7 @@ Every route by which what is owed can be set or changed, each handled or refused
 |---|---|---|
 | an answer | completes a task run: done, owed no more | `test_a_case_that_owes_a_required_step_stays_open_and_says_so` |
 | an edit (D52) | changes nothing owed; a skip of a required run is refused | `test_an_edit_changes_nothing_the_case_owes`, the two skip tests |
-| a migration (D53) | renames followed; the target decides what is required | the three `test_a_migration_...` tests |
+| a migration (D53) | renames followed; the target decides what is required | `test_a_migration_renaming_a_required_step_keeps_it_owed_under_its_new_name`, `test_a_migration_renaming_a_done_required_step_owes_nothing`, `test_a_migration_making_a_done_step_required_owes_nothing` |
 | an event | completes a required wait | `test_a_required_wait_is_done_by_its_event` |
 | a rule | a stop leaves it owed; a start may run it; none acts under a held close | `test_a_required_step_a_rule_stopped_is_owed_still`, `test_an_owed_step_a_rule_starts_waits_for_the_rule`, `test_under_a_held_close_an_owed_step_only_a_rule_starts_needs_attention` |
 | the opening | what nothing can start is refused before any case opens | `test_a_required_step_nothing_can_ever_start_is_refused_at_validation`, `test_a_required_step_with_a_condition_is_refused_when_read` |
