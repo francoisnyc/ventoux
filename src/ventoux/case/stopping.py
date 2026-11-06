@@ -5,7 +5,7 @@ a running activity finishes, since a side effect can't be cut off halfway (brief
 run is never stopped (brief, D17) (brief, D26). See docs/layers/11-rules.md (11c).
 """
 
-from ventoux.case.admission import latest_run, requirements_met
+from ventoux.case.admission import latest_of_item, latest_run, requirements_met
 from ventoux.case.approvals import with_given
 from ventoux.case.closing import close_held
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
@@ -29,6 +29,10 @@ def stop_step(
     the history writes when there is nothing to stop; `at` is the time of the event being
     decided, against which facts' ages are measured. The step may start again later
     (brief, D40)."""
+    if name in state.items:
+        # A repeated step: every item's run going on is stopped (brief, D40) (brief, D73).
+        stop_items(case, catalog, state, name, by, said, commands)
+        return
     latest = latest_run(state, name)
     if latest is not None and latest.status in ("failed", "retrying"):
         # Nothing is skipped automatically: an operator retries it, or closes the case
@@ -49,6 +53,37 @@ def stop_step(
         state.history.append(f"cancelled {latest.entry}: stopped by {by}")
         return
     if not stop_coming_run(case, state, name, by, at):
+        state.history.append(f"{said}: {name} not stopped: no run of {name} is going on")
+
+
+def stop_items(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    by: str,
+    said: str,
+    commands: list[Command],
+) -> None:
+    """Stop each item's run of the repeated step `name` that is going on: an open task cancelled,
+    a running activity asked to stop; a failed run never (brief, D17) (brief, D40)."""
+    going_on = False
+    for number in state.items[name].values():
+        latest = latest_of_item(state, name, number)
+        if latest is None or latest.status not in ("open", "running", "failed", "retrying"):
+            continue
+        going_on = True
+        if latest.status in ("failed", "retrying"):
+            state.history.append(
+                f"{said}: {latest.entry} not stopped: a failed run is never stopped"
+            )
+        elif latest.status == "running":
+            stop_running(case, catalog, state, latest, by, said, commands)
+        else:
+            latest.status = "cancelled"
+            del state.waiting[latest.entry]
+            state.history.append(f"cancelled {latest.entry}: stopped by {by}")
+    if not going_on:
         state.history.append(f"{said}: {name} not stopped: no run of {name} is going on")
 
 

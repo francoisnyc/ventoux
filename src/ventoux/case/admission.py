@@ -31,12 +31,26 @@ def latest_run(state: CaseState, step: str) -> StepRun | None:
 
 
 def requirements_met(required: tuple[str, ...], state: CaseState) -> bool:
-    """Whether each name is a milestone reached, or a step whose latest run is done."""
-    for name in required:
-        latest = latest_counted(state, name)
-        if name not in state.milestones and (latest is None or latest.status != "done"):
-            return False
-    return True
+    """Whether each name is a milestone reached, or a step that is done (`step_done`)."""
+    return all(name in state.milestones or step_done(state, name) for name in required)
+
+
+def step_done(state: CaseState, name: str) -> bool:
+    """Whether the step is done: its latest run is, as `requires` counts it; or, for a step repeated
+    over a list, every item's latest run is, and at once for a list with no items (brief, D73)."""
+    if name in state.items:
+        return all(
+            (latest := latest_of_item(state, name, number)) is not None and latest.status == "done"
+            for number in state.items[name].values()
+        )
+    latest = latest_counted(state, name)
+    return latest is not None and latest.status == "done"
+
+
+def latest_of_item(state: CaseState, name: str, number: int) -> StepRun | None:
+    """The latest run of the repeated step `name` for its item `number`, or None (brief, D73)."""
+    runs = [run for run in state.runs if run.step == name and run.item == number]
+    return runs[-1] if runs else None
 
 
 def latest_counted(state: CaseState, step: str) -> StepRun | None:

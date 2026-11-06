@@ -2836,3 +2836,103 @@ of the owed step after a rejected review, which a closed case refuses.
 rule starts it. "Done before the milestone" is proven only when every step that reaches it
 requires the step, directly or through what it requires, and no rule reaches it; anything less
 is warned about.
+
+## Repeated steps: one run per item
+
+A **repeated step** runs once for each item of a list in the case file, each run given its own
+item. Here a customer returns an order line by line: support inspects each line, and a letter is
+drafted for each, for a person to review:
+
+```json
+"fields": {
+  "order_id": {"type": "reference", "system": "orders", "display": {"title": "Order"}},
+  "email": {"type": "string", "display": {"title": "Customer email"}},
+  "lines": {"type": "list", "display": {"title": "Returned lines"},
+            "fields": {"sku": {"type": "string"}, "amount": {"type": "number"}}}
+},
+"steps": {
+  "inspect_line": {
+    "kind": "task",
+    "display": {"title": "Inspect a returned line"},
+    "roles": ["support"],
+    "for_each": {"over": "lines", "key": "sku"},
+    "outcomes": {"received": {"display": {"title": "Received"}},
+                 "missing": {"display": {"title": "Missing"}}}
+  },
+  "draft_line": {
+    "kind": "activity",
+    "display": {"title": "Draft a letter about one line"},
+    "activity": "letters.draft@2",
+    "for_each": {"over": "lines", "key": "sku"},
+    "inputs": {"to_customer": {"var": "email"}, "template": "line-returned"}
+  }
+}
+```
+
+**A list is given at the opening,** at most 100 items. Each item is a record holding exactly the
+list's declared fields, each of its type; anything else is refused, saying the type, never the
+value. An event never carries a list, and a rule never sets one. Every value in the list comes
+from whoever gave it, with their sources: a list the customer typed leaves every line
+`untrusted:customer`.
+
+**Each run reads its own item** as `each.<field>`, such as `each.amount`. (`item` is what `sum`
+and `count` call their own element, so a repeated step's item has its own word; `each` is never
+the name of a field, step, milestone or event.)
+
+**Each run is named by a number, never by its position or its value.** The engine gives each key
+(the field `key` names, here `sku`) a number the first time it sees it: A12 is item 1 and B7 item
+2, so the drafts are `draft_line.1#1` and `draft_line.2#1`. The name goes into the run's
+idempotency key (brief, D17), so reordering the list never gives one line's letter another line's
+key; and no history line quotes a value (brief, D30). A list whose items repeat a key, or lack
+one, fails the step, which needs attention: nothing guesses which line is which.
+
+```python
+lines = [{"sku": "A12", "amount": 40}, {"sku": "B7", "amount": 25}]
+run = run_case(order_return, file={"order_id": "ord-1", "email": "ana@example.com",
+               "lines": lines}, answers=[], people=PEOPLE)
+drafts = [line for line in run.history if line.startswith("scheduled draft_line")]
+assert [line.split(":")[0] for line in drafts] == [
+    "scheduled draft_line.1#1", "scheduled draft_line.2#1"]
+assert [line.split(", key ")[1] for line in drafts] == [
+    "memory/draft_line.1#1", "memory/draft_line.2#1"]
+```
+
+A repeated step **starts by itself**, a run for each item: nobody proposes it, it isn't
+repeatable, and no rule starts it, since a proposal or a start names a step, never an item. A
+rule's stop stops every open run of it; an operator retries one failed run by its entry
+(`draft_line.1#1`).
+
+Reading a repeated step from elsewhere:
+
+- **`requires: ["inspect_line"]`** is met once every item's latest run is done; with no items, at
+  once, and the history says so.
+- **`inspect_line.outcome`** and its outputs are refused: with several runs there is no one
+  outcome.
+- **A required repeated step** owes a done run for every item (see "Required steps").
+
+A repeated step may have a `when`, read for each run with its item: `{">": [{"var":
+"each.amount"}, 30]}` drafts only the lines over 30. On a list the customer typed, that keeps some
+lines from being drafted on untrusted data, which is allowed but never silent (brief, D48):
+`ventoux check` warns (`KEPT_FROM_STARTING`), and as the case closes the history names each line
+kept, by number: `draft_line.2 not started: its condition reads each.amount, from
+untrusted:customer, and is false`.
+
+**For now** (brief, D48) (brief, D73), each a door for later:
+
+- a repeated step has no approval, so a high-risk contract such as `payments.refund@2` is never
+  repeated: `payments.refund@2 is high risk, and draft_line is repeated, so it can have no
+  approval: repeat a low-risk step, or pay once`;
+- an edit never changes a list a step repeats over (see "Changing an open case"): `lines is the
+  list inspect_line repeats over, so it is never edited: close the case and open it again with
+  the list corrected`;
+- a repeated step reaches no milestone, sets no field from its answer, needs no fact fresh, and
+  is asked of its queue: each assumes one run per step;
+- a list is given only at the opening: never by a person's form, and never sensitive;
+- items that share a key fail the step, and its retry is refused, since the list never changes:
+  close the case.
+- a migration whose target repeats a step over another list or by another key is refused once
+  the step has runs: its items' numbers can't follow a new key.
+
+`ventoux check` refuses `for_each` over a field that isn't a list (`steps.draft_line.for_each:
+order_id is a reference, not a list: a step repeats over a list field`), a key that isn't a text
+field of the list's items, and a repeated step that is a plan, a workflow or a wait.

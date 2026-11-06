@@ -7,7 +7,7 @@ continue-as-new and follows a migration's renames with the runs themselves. How 
 what it owes is `owing.py`'s.
 """
 
-from ventoux.case.admission import latest_counted
+from ventoux.case.admission import step_done
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.state import CaseState
 
@@ -19,6 +19,6 @@ def owed(case: CaseDefinition, state: CaseState) -> list[str]:
 
 
 def done(state: CaseState, step: str) -> bool:
-    """Whether the step's latest run, as `requires` counts it, is done."""
-    latest = latest_counted(state, step)
-    return latest is not None and latest.status == "done"
+    """Whether the step is done, as `requires` counts it: for a repeated step, every item
+    (brief, D73)."""
+    return step_done(state, step)

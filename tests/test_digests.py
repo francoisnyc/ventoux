@@ -42,6 +42,8 @@ def packages() -> dict[str, Package]:
         ROOT / "tests" / "digests" / "assignments",
         # And the required step's, on every kind of step (brief, D72).
         ROOT / "tests" / "digests" / "required",
+        # And the repeated step's, on a task and an activity (brief, D73).
+        ROOT / "tests" / "digests" / "repeated",
     ):
         plans = [plan.read_text() for plan in sorted((folder / "plans").glob("*.json"))]
         found[str(folder.relative_to(ROOT))] = package((folder / "case.json").read_text(), plans)

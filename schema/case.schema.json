@@ -100,6 +100,17 @@
           "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*@[1-9][0-9]*$",
           "title": "Activity",
           "type": "string"
+        },
+        "for_each": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForEach"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1245,6 +1256,28 @@
           "$ref": "#/$defs/ListType"
         }
       ]
+    },
+    "ForEach": {
+      "additionalProperties": false,
+      "description": "A step run once per item of a list field, each run named by a number the engine gives its\nitem's key the first time it sees it (brief, D73).",
+      "properties": {
+        "over": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Over",
+          "type": "string"
+        },
+        "key": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "over",
+        "key"
+      ],
+      "title": "ForEach",
+      "type": "object"
     },
     "Ge": {
       "additionalProperties": false,
@@ -2536,6 +2569,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/Assign"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "for_each": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForEach"
             },
             {
               "type": "null"

@@ -76,6 +76,9 @@ class StepRun:
     # An operator's retry made while every `closes_when` milestone was reached, which the close
     # waits for (brief, D34), as its flag says it: `omar's retry, after paid was reached`.
     held_retry: str = ""
+    # For a repeated step, the number its item's key was given, the first time the engine saw it:
+    # `draft_line.1#1` (brief, D73). None for a step that runs once.
+    item: int | None = None
 
 
 @dataclass
@@ -224,6 +227,10 @@ class CaseState:
     refreshing: dict[str, str] = field(default_factory=dict[str, str])
     runs: list[StepRun] = field(default_factory=list[StepRun])  # every step run, in order
     approvals: dict[str, OpenApproval] = field(default_factory=dict[str, OpenApproval])  # by step
+    # For each repeated step, the number each item's key was given, the first time it was seen:
+    # its runs are named by it, never by position or value, and a number is never given again
+    # (brief, D73).
+    items: dict[str, dict[str, int]] = field(default_factory=dict[str, dict[str, int]])
     given: dict[str, GivenApproval] = field(default_factory=dict[str, GivenApproval])  # by step
     asked: dict[str, int] = field(default_factory=dict[str, int])  # approvals asked, by step
     withdrawn: dict[str, str] = field(default_factory=dict[str, str])  # entry: why

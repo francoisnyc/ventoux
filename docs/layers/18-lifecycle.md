@@ -1,6 +1,6 @@
 # Layer 18: Case lifecycle: required steps, repeated steps, child cases
 
-Status: 2026-11-05, 18a built, its promises checked; choices A to C and 1 to 12 agreed. This note
+Status: 2026-11-06, 18a merged; 18b built, its promises checked (D73). This note
 starts from `main` at `f1e8512`, with layers 0 to 17 merged. The warm-up was asked and recorded
 (learning question 37). The guide was written first (curriculum step 2): `docs/guides/cases.md`,
 "Required steps", "Repeated steps: one run per item" and "Child cases", describes the layer as if it
@@ -249,60 +249,232 @@ C. **No new dependency.** *Recommended.*
 | a retry (D26) | a retry that completes makes it done |
 | continue-as-new | nothing new is stored, so nothing new crosses |
 
-### For 18b: repeated steps (sketched; settled when it starts)
+### For 18b: repeated steps (answered 2026-11-05: as recommended; D73)
+
+**What 18b is for.** One step, a run per item of a list in the case file, each run given its item.
+Writing the guide and reading the code showed three things the sketch didn't say: no case can hold
+a list value today (the type check fails closed on lists, so the opening refuses one); a high-risk
+contract needs an approval on its step, and the case keeps one open approval per step, never per
+run; and a proposal or a rule's start names a step, never an item. So 18b decides how a list value
+is given, and keeps a repeated step simple: it starts by itself, a run per item, with no approval.
 
 13. **The shape:** `"for_each": {"over": "<list field>", "key": "<text field of its items>"}`, on
     an activity or a task step. Not a plan, workflow or wait step, nor a child case, in this layer
     (deliberate limit, D48). *Recommended.*
 
-14. **How runs are named.**
-    - (a) by position: `refund_line#1`, `#2`. An edit that adds a line in front gives position 1
-      to another line, and a retry sends one line's idempotency key with another's amount.
-      **Ruled out.**
-    - (b) by the key's value: `refund_line[A12]#1`. Stable, but the name is in every history line
-      and workflow ID, which never quote a value (D30), and the key may be sensitive or untrusted.
-    - (c) **by an item number the engine gives each key the first time it sees it:**
-      `refund_line.1#1`, `refund_line.2#1`. Items are matched by their key, so reordering changes no
-      number. A removed key's number is never given again. The numbers are state, carried across
-      continue-as-new, and quote nothing.
+14. **How runs are named:** (c), by an item number the engine gives each key the first time it
+    sees it: `refund_line.1#1`. Items are matched by key, named by number, so reordering changes no
+    number, a removed key's number is never given again, and no name quotes a value (D30). The
+    key-to-number map is state, per step: it crosses continue-as-new and follows a migration's
+    renames of the step. A key must be a non-sensitive text field present and distinct in every
+    item; otherwise the step fails, needing attention. *Recommended* (unchanged from the sketch).
 
-    *Recommended: (c).* *Correcting the guide, which uses (b).* A key must be a non-sensitive text
-    field, and a list whose items repeat a key or lack one fails the step, which needs attention.
+15. **How a run reads its item:** `{"var": "each.<field>"}`; `each` is reserved, refused as the
+    name of a field, step, milestone or event, and refused outside a repeated step's `inputs`
+    and its task's outcomes' readers (it has no item there). *Recommended.*
 
-15. **How a run reads its item:** `{"var": "each.amount"}`. Not `item`, which `sum` and `count`
-    already use for their own element. A repeated step whose expression sums another list would
-    then have two meanings for one word. `each` becomes a reserved name, refused for a step,
-    field, milestone or event. *Correcting the guide.* *Recommended.*
+16. **Provenance:** every value of an item carries the list field's sources (D12). *Recommended.*
 
-16. **Provenance:** an item's values carry the list field's sources (D12). A list a customer typed
-    is untrusted in every run. *Recommended.*
+17. **Reading a repeated step from outside it:** `requires` met when every item's latest run is
+    done, at once for an empty list, the history saying so; its `outcome` and outputs refused at
+    validation. *Recommended.*
 
-17. **Reading a repeated step from outside it.** `requires: ["refund_line"]` is met when every
-    item's latest run is done, and at once for an empty list (the history says so).
-    `refund_line.outcome` and its outputs are refused at validation: several runs have no one
-    outcome. Reading how many were declined would need an operator, which is a decision of its own
-    (D20), not made here. *Recommended.*
+18. **A required repeated step** owes a done run for every item (D72). *Recommended.*
 
-18. **A required repeated step** owes a done run for every item in the list now. *Recommended.*
+19. **When the list changes**, by every route: the opening gives it (items numbered in order); a
+    rule never sets it and an event never carries it (D41, D42, D48, unchanged); a migration renames
+    the step and the list field, the numbers moving with the step; continue-as-new carries the
+    numbers. An edit: choice 31. *Recommended.*
 
-19. **When the list changes**, by every route:
-    - **an edit (D52):** an added key starts its run (automatic) or can be proposed. A removed
-      key's open run is stopped, as a rule's stop is (D40); a running one finishes, flagged. A
-      changed item (same key, other values): an open task entry is withdrawn and asked again, as
-      any entry whose values changed (D25); a running activity finishes on what it started with; a
-      done run stays done, and its step may be proposed again if repeatable.
-    - **a rule:** never sets a list (D42, D48), and stays refused.
-    - **a migration (D53):** renames of the step, the list field and the key field are followed,
-      and the item numbers move with the step's name. 17c's review found state keyed by a step's
-      name that didn't follow a rename, so this gets its own test.
-    - **the opening:** the list's items get numbers in order.
-    - **continue-as-new:** the numbers cross with the runs.
+20. **A bound:** a list holds at most 100 items, refused at the opening above that, saying the
+    limit: so one decision starts at most 100 runs of a step (D39). A fixed number in the engine,
+    a deliberate limit (D48); a definition or platform setting would be a later decision.
+    *Recommended.*
 
-    *Recommended.* Each gets a test.
+30. **A list value, checked where it is given.** A list is a JSON array of records; each record
+    has exactly the list's declared fields, each of its exact type, as any field's value is
+    checked (numbers exact, never floats; D20). Anything else is refused, naming the type, never
+    the value (D30). Given only at the opening in 18b. *Alternative:* also in a person's form
+    answer; not needed by anything in 18b. *Recommended:* the opening only.
 
-20. **A bound:** a decision starts at most one run per item, so the list's length bounds it (D39).
-    A list over a limit the platform team sets fails the step, needing attention. *Recommended*,
-    with the limit settled in 18b.
+31. **An edit of a list a step repeats over (D52).**
+    - (a) Allowed: an added key starts its run; a removed key's open run is stopped as a rule's
+      stop would be, a running activity finishing, flagged; a changed item keeps a done run done
+      and re-asks an open task. Useful, but each of these is a route with its own tests.
+    - (b) **Refused, saying so:** `lines is the list refund_line repeats over, so it is never
+      edited: close the case and open it again with the list corrected`. A list no step repeats
+      over may be edited as any field. A deliberate limit (D48); (a) stays a door.
+
+    *Recommended: (b).* It keeps 18b's routes few, and nothing in this layer needs (a).
+
+32. **Approvals: a repeated step has none in 18b.** A high-risk contract needs an approval (D11),
+    so it can't be repeated: `ventoux check` says so (`payments.refund@2 is high risk, and
+    refund_line is repeated, so it can have no approval: repeat a low-risk step, or pay once`).
+    *Alternative:* an approval per run, which changes the case's open approvals from one per step
+    to one per run, and with it what D25, D47, D69 to D71 key by step: a part of its own. The
+    guide's example then repeats a task and a low-risk draft, not the payment. *Recommended:* none
+    in 18b, a deliberate limit (D48).
+
+33. **How a repeated step starts:** by itself, once admitted, a run for each item that has none.
+    Not `proposed_by`, not `repeatable`, and no rule starts it: a proposal or a start names a step,
+    never an item, so each is refused at validation, saying so. A rule may stop it: every open run
+    of it is stopped (D40). An operator retries a failed run by its entry (`refund_line.1#1`, D26).
+    *Recommended.*
+
+34. **No new engine version (D51):** no definition readable before holds `for_each`, and no case
+    could hold a list value. *Recommended.*
+
+**One part, one pull request (18b),** in slices: the list value at the opening; the shape and its
+validation; the runs, named and given their items; reading from outside and required; the routes
+(edit refused, migration, stop, retry, continue-as-new); the diff, the case map, the builder.
+
+### Seams and tests for 18b (curriculum step 4, proposed)
+
+The tests use only what a caller uses today; no test reads how the item numbers are stored.
+
+1. **The definition:** `for_each` on a task or activity step, read by `parse_case`; what can't
+   be repeated is refused when read (`CaseInvalid`).
+2. **The opening:** `run_case(..., file={..., "lines": [...]})`, a list given as data; a list
+   that doesn't fit is refused (`CaseRefused`).
+3. **The runs, in what a run reports:** `history` (`scheduled draft_line.1#1: …, key
+   memory/draft_line.1#1`), `waiting_for` (an open repeated task reads `inspect_line.1 by
+   support`: its number, never its value), `needs_attention`, `closed`. An answer names its entry:
+   `("inspect_line.1#1", "received", "ana")`; a retry, `retry("draft_line.1#1", "omar")`.
+4. **`validate_case`:** the issues, by code and message.
+5. **An edit:** `edit("lines", …)` refused with `ChangeRefused`.
+6. **On Temporal:** `CaseReport`, and a case continuing as new with repeated runs open.
+7. **The diff, the case map, the builder, the schema,** as in 18a.
+
+**The refusals and lines, word for word:**
+
+| Situation | What is said |
+|---|---|
+| `for_each` over a field that isn't a list | `steps.draft_line.for_each: order_id is a reference, not a list: a step repeats over a list field` |
+| a key that isn't a text field of the items | `steps.draft_line.for_each: amount is not a text field of lines: a key is a text field every item has` |
+| a repeated plan, workflow or wait step | `steps.settle: a plan step is never repeated: repeat a task or an activity` |
+| a repeated step proposed, repeatable, or started by a rule | `steps.draft_line: a repeated step starts by itself, a run per item: drop proposed_by` (`repeatable`; `the rule start_letters starts it`) |
+| an approval on a repeated step | `steps.draft_line.approval: a repeated step has no approval yet` |
+| a high-risk contract repeated (`ventoux check`, error) | `payments.refund@2 is high risk, and refund_line is repeated, so it can have no approval: repeat a low-risk step, or pay once` |
+| `each` read outside a repeated step | `steps.notify.inputs.amount: each is read only in a repeated step` |
+| `each` as a name | `fields.each: each is the name a repeated step reads its item by: name it otherwise` |
+| a repeated step's outcome or output read elsewhere | `steps.notify.when: inspect_line.outcome: a repeated step has no one outcome` |
+| the opening gives a list that doesn't fit | `lines is a list of records with sku (a text) and amount (a number), and the opening gives …` (the type, never the value), and `lines holds at most 100 items, and the opening gives 101` |
+| items repeat a key, or lack one (the step fails) | `draft_line can't run: two items of lines have the same sku: each item's key is its own` (`an item of lines has no sku`) |
+| an edit of a list a step repeats over | `lines is the list draft_line repeats over, so it is never edited: close the case and open it again with the list corrected` |
+| an empty list | `draft_line: lines has no items, so it has no runs` |
+
+**The tests, in the order I'd write them,** each failing first (the negative first):
+
+1. **(negative, curriculum)** `for_each` over a field that isn't a list is refused when read.
+2. **(negative)** The list value at the opening: wrong shapes, wrong types, over 100, all refused.
+3. The guide's example, run as written: two drafts, numbered, their keys.
+4. Reordering the list at a later opening gives the same names; an added key gets the next number.
+5. **(negative)** The other shapes refused when read: key, kinds, proposals, repeatable, rule
+   starts, approval, `each` misread or misnamed, outcome read; the high-risk error at the check.
+6. A repeated task: entries numbered, answered by entry, `waiting_for` naming numbers.
+7. `requires` over a repeated step, an empty list, a required repeated step owing each item.
+8. **(negative)** Items that repeat or lack a key fail the step.
+9. Provenance: an untrusted list makes each item untrusted; a trusted-only input refuses it.
+10. The routes: an edit refused; a rule's stop stops every open run; a retry by entry; a
+    migration renaming the step keeps the numbers; continue-as-new on Temporal; replay.
+11. The diff, the case map, the builder, the schema, the digest pin.
+
+### Choice 35: a repeated step's `when` on an untrusted list (from the tutor's review of #87)
+
+D48: untrusted data may keep something from happening, but never silently. A repeated step's `when`
+reads its item, and its item carries the list's sources. With `lines` from `untrusted:customer` and
+`draft_line` drafted only `when each.amount > 30`, neither the check nor the close says anything
+today: `KEPT_FROM_STARTING` finds no source for `each.amount`, and the close's line skips a step
+that has any run, and can't read `each`.
+
+- (a) **Say it.** The check reads `each.<field>` as its list (as `as_listed` already does for input
+  policies), so `KEPT_FROM_STARTING` warns. The close names each item kept, by number, never by
+  value: `draft_line.2 not started: its condition reads each.amount, from untrusted:customer, and
+  is false`.
+- (b) **Refuse it,** a deliberate limit (D48): a repeated step's `when` that reads `each` over a
+  list declared untrusted is refused when read, saying so.
+
+*Answered 2026-11-06: (a).* *Recommended: (a).* A condition per line is the guide's own example, a
+list a customer typed is the common case, and (a) is what D48 already asks of every other step; most
+of the work exists (`as_listed`, `say_kept_from_starting`).
+
+### Decided while building 18b
+
+- **The list value comes first:** no case could hold a list, so `fits` learned one, and the
+  in-memory run passes a list's whole numbers on as exact decimals, as the API does.
+- **Agreed while building:** a form never sets a list and a list is never sensitive (slice 1);
+  `reaches`, `sets`, `max_age` and `assign` refused on a repeated step (slice 3).
+- **A plan, workflow or wait step with `for_each`** gets the format's usual `not a field here`,
+  not a message of its own: those kinds have no such field.
+- **`order_id is a reference to orders, not a list`:** the type said as `a_type` says it, more
+  precise than the wording proposed.
+- **Test 4 (reordering) is moot:** within a case the list never changes; its promise, that a run
+  keeps its name and key, is the retry test's.
+- **A repeated run's outcome and outputs aren't written under its step's name;** nothing reads
+  them (they are refused), and each run would overwrite the last.
+- **Done is asked in one place, `step_done`:** the requirement check and what is owed ask it; for
+  a repeated step, every item's latest run is done, and the step's numbers say which items.
+- **Two bugs found by the tests and fixed:** an edit of a list crashed while reading it as one
+  value; validation crashed (`KeyError: 'each.amount'`) when an item reached a contract's input.
+  Validation now reads `each.<field>` as its list for provenance, per step.
+- **A step whose items share a key isn't retried:** the list never changes.
+- **From the tutor's review of #87:** a migration whose target repeats a numbered step over
+  another list, by another key, or not at all, is refused (`renumbered`, in `depending`): every
+  item would run again under new idempotency keys. And `owing.py` reads a repeated step per item:
+  on its way while any item's latest run is under way; stranded only when an item's latest run
+  ended undone, since an item's run starts at most once.
+- **The numbers are always written when the state crosses continue-as-new,** so the guard that
+  every field of the state crosses covers them. A Temporal run can't tell a lost map (the same
+  list renumbers the same way), so a read-back test pins it.
+
+## Promises (18b)
+
+Each claim the note, D73 and the guide's "Repeated steps" make, and the test that would fail if it
+weren't true. Tests without a file are in `tests/test_repeated.py`. Each was watched failing first
+or, for a pin of behaviour already built, catching a mutation.
+
+| Promise | Test |
+|---|---|
+| A step repeated over a field that isn't a list is refused when read (the curriculum's negative test) | `test_a_step_repeated_over_a_field_that_isnt_a_list_is_refused` |
+| A list fits when it holds at most 100 records, each with exactly the declared fields of their types; anything else is refused at the opening, naming the shape and the kind, never a value | `test_a_list_that_fits_is_given_at_the_opening`, `test_a_list_that_doesnt_fit_is_refused_at_the_opening` (six cases) |
+| What can't be repeated is refused when read: a key that isn't a text field; proposed, repeatable, not automatic or started by a rule; an approval; `each` misread or used as a name; a repeated step's outcome read; a form setting a list; a sensitive list | `test_what_cant_be_repeated_is_refused_when_read` (eleven cases) |
+| A plan, workflow or wait step has no `for_each` | `test_a_plan_workflow_or_wait_step_has_no_for_each` |
+| What assumes one run per step is refused on a repeated one: reaches, sets, max_age, assign | `test_what_a_repeated_step_cant_do_yet_is_refused` (five cases) |
+| A run per item, named by its key's number, keyed by that name; an open task reads its number, never its value | `test_each_item_gets_its_run_named_by_its_keys_number`, the guide's example in `test_case.py::test_the_guides_examples_run_as_written` |
+| A repeated task is answered by its entry, and its outcome isn't written under its step's name | `test_a_repeated_task_is_answered_by_its_entry_and_sets_nothing_under_its_name` |
+| Validation and the runtime read `each.<field>` with its item's types | `test_validation_reads_each_with_its_items_types` |
+| A repeated step's `when` is read for each run with its item | `test_a_repeated_steps_condition_is_read_for_each_run_with_its_item` |
+| On an untrusted list, a repeated step's `when` keeping a run from starting is never silent: the check warns, the close names each item kept by number (choice 35) | `test_the_check_warns_that_an_untrusted_item_may_keep_a_run_from_starting`, `test_the_close_says_each_item_an_untrusted_condition_kept_from_starting` |
+| `requires` over a repeated step waits for every item; an empty list meets it at once, saying so | `test_requires_over_a_repeated_step_waits_for_every_item`, `test_an_empty_list_meets_a_requirement_at_once_and_says_so` |
+| A required repeated step owes every item | `test_a_required_repeated_step_owes_every_item` |
+| A required repeated step is read per item: on its way while any item's run is; stranded only when an item's run ended undone | `test_a_required_repeated_step_with_an_item_to_retry_isnt_stranded`, `test_a_required_repeated_step_with_an_item_open_isnt_stranded`, `test_a_required_repeated_step_with_an_item_stopped_is_stranded` |
+| A migration never renumbers a repeated step's items: a target with another list or key is refused once the step has numbers | `test_a_migration_changing_a_repeated_steps_key_once_it_has_numbers_is_refused` |
+| Items that share a key fail the step, and its retry is refused | `test_items_that_share_a_key_fail_the_step`, `test_a_step_whose_items_share_a_key_isnt_retried` |
+| Each item carries the list's sources, at run time and at the check | `test_each_item_carries_the_lists_sources`, `test_the_check_reads_an_items_sources_as_its_lists` |
+| A repeated high-risk contract is an error at the check, saying why | `test_a_repeated_high_risk_contract_is_an_error_at_the_check` |
+| The diff reads a step made repeated as not proven | `test_the_diff_reads_a_step_made_repeated_as_not_proven` |
+| The case map says a step runs once per item | `test_the_case_map_says_a_step_runs_once_per_item` |
+| The builder writes `ForEach`, the same JSON | `test_the_builder_writes_the_guides_returned_order`, `test_builder_coverage.py` |
+| The JSON Schema has the key; no earlier digest changes; a pinned package writes it | `test_schema.py::test_the_committed_schemas_are_what_the_models_say`, `test_digests.py` (the `repeated` package) |
+| No new engine version: every recorded history replays | the replay tests over `tests/histories` |
+
+## Routes checked before the pull request (18b)
+
+| Route | What it does | Test |
+|---|---|---|
+| an answer | completes one item's task run, by its entry | `test_a_repeated_task_is_answered_by_its_entry_and_sets_nothing_under_its_name` |
+| an edit (D52) | of a list a step repeats over, refused | `test_an_edit_of_a_list_a_step_repeats_over_is_refused` |
+| a migration (D53) | renames the step's numbers with its runs; an open run keeps its entry and number; a target changing a numbered step's list or key is refused | `test_a_migration_renaming_a_repeated_step_keeps_its_items`, `test_a_migration_changing_a_repeated_steps_key_once_it_has_numbers_is_refused` |
+| an event | never carries a list (D41, unchanged) | `test_events.py::test_an_event_carries_no_list` |
+| a rule | never starts a repeated step, never sets a list; its stop stops every open run | `test_what_cant_be_repeated_is_refused_when_read`, `test_set.py::test_a_list_field_is_never_set`, `test_a_rules_stop_stops_every_open_run_of_a_repeated_step` |
+| the opening | gives the list, checked; the items numbered in order | the two opening tests, `test_each_item_gets_its_run_named_by_its_keys_number` |
+| a plan | a plan step is never repeated | `test_a_plan_workflow_or_wait_step_has_no_for_each` |
+| a close or a stop (D40) | a close cancels each open run as any; a stop stops every open run; a person's close names what was owed | `test_a_required_repeated_step_owes_every_item`, the stop test |
+| a retry (D26) | by entry, the same run with its key, per item; refused for items sharing a key | `test_a_failed_run_is_retried_by_its_entry_with_its_own_key`, `test_a_step_whose_items_share_a_key_isnt_retried` |
+| continue-as-new | each run's number and each step's numbers cross | `test_a_repeated_cases_state_reads_back_as_it_was`, `test_a_repeated_steps_items_cross_continue_as_new` |
+
+**State keyed by a step's name:** each repeated step's key-to-number map. It follows a migration's
+rename, tested; it crosses continue-as-new, tested.
 
 ### For 18c and 18d: child cases (sketched; settled when they start)
 
@@ -588,69 +760,13 @@ Every route by which what is owed can be set or changed, each handled or refused
 **State keyed by a step's name:** none is stored. What is owed is worked out from the definition
 and the runs, which a migration renames, so the rename test is the check 17c's review asked for.
 
-## Guide drafts for 18b and 18c, kept here until their parts are built
+## Guide draft for 18c, kept here until its part is built
 
-Written in step 2 as if they worked. The guide's examples are run by its tests, so these sections
-can't sit in the guide before their parts exist; each moves back when its part starts, corrected
-by its answers (see "What changes in the guide, if answered as recommended").
+Written in step 2 as if it worked. The guide's examples are run by its tests, so the section can't
+sit in the guide before its part exists; it moves back when 18c starts, corrected by its answers
+(see "What changes in the guide, if answered as recommended"). The 18b draft moved back into the
+guide at 18b's step 2, corrected.
 
-> ## Repeated steps: one run per item
->
-> A **repeated step** runs once for each item of a list in the case file, each run given its item.
-> Here an order is refunded line by line:
->
-> ```json
-> "fields": {
->   "lines": {"type": "list", "display": {"title": "Order lines"},
->             "fields": {"sku": {"type": "string"}, "amount": {"type": "number"}}}
-> },
-> "steps": {
->   "refund_line": {
->     "kind": "activity",
->     "display": {"title": "Refund one line"},
->     "activity": "payments.refund@2",
->     "for_each": {"over": "lines", "key": "sku"},
->     "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "item.amount"}}
->   }
-> }
-> ```
->
-> `item` is the run's own item, read as `item.<field>`, as `sum` and `count` read theirs. Each run
-> is named by its item's **key**, the field `key` names: `refund_line[A12]#1`, `refund_line[B7]#1`.
-> The name goes into the run's idempotency key (brief, D17), so reordering the list, or adding a
-> line in front, never gives a payment another line's key. A list whose items repeat a key, or lack
-> one, fails the step, which needs attention: nothing guesses which line is which.
->
-> ```python
-> lines = [{"sku": "A12", "amount": 40}, {"sku": "B7", "amount": 25}]
-> run = run_case(order_refund, file={"order_id": "ord-1", "lines": lines}, answers=[],
->                people=PEOPLE)
-> assert run.history[:2] == [
->     (
->         "started refund_line[A12]#1: payments.refund@2 (amount from system:opener, "
->         "order_id from system:opener)"
->     ),
->     (
->         "started refund_line[B7]#1: payments.refund@2 (amount from system:opener, "
->         "order_id from system:opener)"
->     ),
-> ]
-> ```
->
-> An item's values come from the list they are in, with its sources: a list a customer typed is
-> still untrusted in each run.
->
-> - **`requires: ["refund_line"]`** is met once every item's run is done; with no items, at once.
->   `refund_line.outcome` isn't read: with several runs, there is no one outcome.
-> - **A required repeated step** owes a done run for each item.
-> - **When the list changes,** by an edit (see "Changing an open case"): an added item starts its
->   run; a removed item's open run is stopped, as a rule's stop would stop it, and a running one
->   finishes, flagged; an item whose values changed keeps a done run done, and its open run is
->   stopped and starts again with its new values. A rule never sets a list.
-> - `ventoux check` refuses `for_each` over a field that isn't a list: `steps.refund_line.for_each:
->   order_id is a reference, not a list: a step repeats over a list field`, and a key that isn't a
->   text field of the list's items.
->
 > ## Child cases
 >
 > A **child case** is a whole case started from a step of another: its own case file, release,

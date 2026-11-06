@@ -20,6 +20,7 @@ from ventoux.case.admission import (
     ended_requirement,
     holds,
     latest_counted,
+    latest_of_item,
     latest_run,
     proposal_refusal,
     requirements_met,
@@ -59,6 +60,7 @@ from ventoux.case.closing import (
     settle,
 )
 from ventoux.case.definition import (
+    EACH,
     ActivityStep,
     CallStep,
     CaseDefinition,
@@ -69,6 +71,7 @@ from ventoux.case.definition import (
     WaitStep,
     WorkflowStep,
     form_fields,
+    is_repeated,
     rule_fields,
     sent_by,
 )
@@ -119,7 +122,7 @@ from ventoux.case.state import (
 )
 from ventoux.case.stopping import stop_children
 from ventoux.case.timers import cancel_timers, end_with_their_runs, fire_timer
-from ventoux.case.types import expression_problem
+from ventoux.case.types import expression_problem, step_types
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.case.writers import OPENER, read_sources, untrusted_of
 from ventoux.core.approval import inputs_digest
@@ -867,6 +870,13 @@ def take_answer(
     worded = as_worded(state, event)
     run.status = "done"
     del state.waiting[run.entry]
+    if run.item is not None:
+        # A repeated task's answer is its run's alone: it sets no field and no outcome under its
+        # step's name, which each answer would overwrite (brief, D73).
+        state.history.append(f"{event.by} answered {run.entry} {event.outcome} as {role}{worded}")
+        state.history.append(f"{run.entry} done")
+        state.moments.append(Moment(f"answered {run.step}", entry=run.entry))  # (brief, D39)
+        return
     # Whom a rule asking whoever answered this task asks next, with these roles (brief, D71).
     state.answerers[run.step] = Holder(event.by, event.roles, at=event.at)
     who = f"person:{event.by}"
@@ -984,6 +994,13 @@ def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Co
         failed(state, Failed(event.entry, problem, at=event.at))
         return
     run.status = "done"
+    if run.item is not None:
+        # A repeated run's outcome and outputs aren't written under its step's name, where each
+        # run would overwrite the last; nothing reads them (brief, D73).
+        ended = "" if event.outcome == DONE else f" with {event.outcome}"
+        state.history.append(f"{run.entry} done{ended}")
+        flag_if_stopping(state, run)
+        return
     state.values[f"{run.step}.outcome"] = event.outcome
     # Trusted: the contract, owned by the platform team, or the reviewed plan, declares the
     # outcomes (brief, D12). But what only untrusted data made exist is untrusted: a steered
@@ -1327,7 +1344,18 @@ def retry(
     run = next((run for run in state.runs if run.entry == event.entry), None)
     if run is None or run.status != "failed":
         raise RetryRefused(f"{event.entry} has not failed: nothing to retry")
-    latest = latest_run(state, run.step)
+    if run.item is None and is_repeated(case.steps[run.step]):
+        # Its items couldn't be told apart, and the list is never edited: it would fail again.
+        raise RetryRefused(
+            f"{event.entry} can't be retried: its list can't change, so it would fail again: "
+            "close the case"
+        )
+    # For a repeated step, the latest run of the same item (brief, D73).
+    latest = (
+        latest_run(state, run.step)
+        if run.item is None
+        else latest_of_item(state, run.step, run.item)
+    )
     if latest is not None and latest is not run:
         # Only a step's latest run runs again, so a retry of an earlier one could never start:
         # refused, rather than left waiting for nothing (brief, D26).
@@ -1348,9 +1376,13 @@ def retry(
             )
     if (problem := expression_problem(case, catalog, run.step)) is not None:
         raise RetryRefused(f"{event.entry} can't be retried: {problem}")
+    values = state.values
+    if run.item is not None:  # a repeated run reads its item (brief, D73)
+        assert isinstance(step, TaskStep | ActivityStep)
+        values, _ = with_item(case, state, step, item_of(state, run.step, step, run.item))
     if step.when is not None:
         try:
-            decided = holds(step.when, state.values, f"{run.step}'s condition")
+            decided = holds(step.when, values, f"{run.step}'s condition")
         except StepStopped as unreadable:
             raise RetryRefused(f"{event.entry} can't be retried: {unreadable}") from None
         # A stale fact is fetched again, never trusted to refuse: the retry is taken, and
@@ -1407,6 +1439,11 @@ def admit(
         if start_from_rules(case, catalog, state, commands, at):
             started = True
         for name, step in case.steps.items():
+            # A repeated step starts by itself, a run per item, and is never proposed (brief, D73).
+            if isinstance(step, TaskStep | ActivityStep) and step.for_each is not None:
+                if start_items(case, catalog, state, name, step, required[name], commands):
+                    started = True
+                continue
             if not free_to_start(state, name, step):
                 continue
             latest = latest_run(state, name)
@@ -1790,6 +1827,164 @@ def start(
     # another step's fact isn't the run anyone proposed, and its proposer still may not approve
     # it (brief, D25).
     proposal_spent(state, name)
+
+
+def start_items(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    step: TaskStep | ActivityStep,
+    required: tuple[str, ...],
+    commands: list[Command],
+) -> bool:
+    """Start the repeated step's run for each item that has none, once its requirements are met:
+    each named by the number its key was given, and read with its item as `each`. Whether any
+    started (brief, D73)."""
+    if close_held(case, state) and name not in owed(case, state):
+        return False  # nothing new starts while the close is held (brief, D34)
+    if not requirements_met(required, state):
+        return False
+    if any(run.step == name and run.item is None for run in state.runs):
+        return False  # its items couldn't be told apart: it waits for a person (brief, D17)
+    try:
+        items = numbered_items(state, name, step)
+    except StepStopped as error:
+        fail(state, name, str(error))
+        return True
+    # Every expression it reads is checked over the case's types and its item's first, so a
+    # misspelt outcome fails it instead of reading as false (brief, D35).
+    if (problem := expression_problem(case, catalog, name)) is not None:
+        fail(state, name, problem)
+        return True
+    started = False
+    for number, item in items:
+        latest = latest_of_item(state, name, number)
+        retried = latest if latest is not None and latest.status == "retrying" else None
+        if latest is not None and retried is None:
+            continue  # each item's run starts by itself at most once; again only when retried
+        values, sources = with_item(case, state, step, item)
+        try:
+            if step.when is not None and not holds(step.when, values, f"{name}'s condition"):
+                continue
+            start_item(case, catalog, state, name, step, number, values, sources, commands, retried)
+        except (StepStopped, InputRefused, NotInCatalog) as error:
+            if retried is not None:  # the same run fails again, keeping its key (brief, D26)
+                retried.status, retried.reason = "failed", str(error)
+                state.history.append(f"{retried.entry} failed again: {error}")
+            else:
+                entry = f"{name}.{number}#1"
+                run = StepRun(entry, name, "failed", reason=str(error), item=number)
+                run.started = False
+                state.runs.append(run)
+                state.history.append(f"{run.entry} failed: {error}")
+        started = True
+    return started
+
+
+def ran(
+    state: CaseState,
+    name: str,
+    entry: str,
+    number: int,
+    status: Literal["open", "running"],
+    retried: StepRun | None,
+) -> None:
+    """The item's run is now `status`: the run an operator retried, the same run (brief, D26), or
+    a new one, whose start is a moment for rules (brief, D38)."""
+    if retried is not None:
+        retried.status = status
+        return
+    state.runs.append(StepRun(entry, name, status, item=number))
+    state.moments.append(Moment(f"started {name}", entry, entry))
+
+
+def item_of(
+    state: CaseState, name: str, step: TaskStep | ActivityStep, number: int
+) -> dict[str, object]:
+    """The item of the list `name` repeats over whose key was given `number` (brief, D73)."""
+    assert step.for_each is not None
+    numbers = state.items[name]
+    items = cast(list[dict[str, object]], plain(state.values[step.for_each.over]))
+    return next(item for item in items if numbers.get(str(item[step.for_each.key])) == number)
+
+
+def numbered_items(
+    state: CaseState, name: str, step: TaskStep | ActivityStep
+) -> list[tuple[int, dict[str, object]]]:
+    """The items of the list the step repeats over, each with the number its key was given the
+    first time it was seen; or `StepStopped` if two items share a key: nothing guesses which is
+    which (brief, D73)."""
+    assert step.for_each is not None
+    over, key = step.for_each.over, step.for_each.key
+    if over not in state.values:
+        raise StepStopped(f"{name} can't run: {over} holds no value")
+    items = cast(list[dict[str, object]], plain(state.values[over]))
+    keys = [str(item[key]) for item in items]
+    if len(set(keys)) < len(keys):
+        raise StepStopped(
+            f"{name} can't run: two items of {over} have the same {key}: each item's key is its own"
+        )
+    first_seen = name not in state.items
+    numbers = state.items.setdefault(name, {})
+    for each in keys:
+        numbers.setdefault(each, len(numbers) + 1)  # a number is never given again
+    if first_seen and not items:
+        state.history.append(f"{name}: {over} has no items, so it has no runs")
+    return [(numbers[each], item) for each, item in zip(keys, items, strict=True)]
+
+
+def with_item(
+    case: CaseDefinition, state: CaseState, step: TaskStep | ActivityStep, item: dict[str, object]
+) -> tuple[dict[str, object], dict[str, frozenset[str]]]:
+    """The case file as one run of the repeated step reads it: its item's fields as `each.<field>`,
+    each with the list's sources (brief, D12) (brief, D73)."""
+    assert step.for_each is not None
+    over = step.for_each.over
+    values = {**state.values, **{f"{EACH}.{field}": value for field, value in item.items()}}
+    listed_by = state.sources.get(over, frozenset())
+    sources = {**state.sources, **{f"{EACH}.{field}": listed_by for field in item}}
+    return values, sources
+
+
+def start_item(
+    case: CaseDefinition,
+    catalog: Catalog,
+    state: CaseState,
+    name: str,
+    step: TaskStep | ActivityStep,
+    number: int,
+    values: Mapping[str, object],
+    sources: Mapping[str, frozenset[str]],
+    commands: list[Command],
+    retried: StepRun | None = None,
+) -> None:
+    """Open the item's task run, or schedule its activity with a key naming the case and the run
+    (brief, D17) (brief, D73). A `retried` run starts again as the same run, with its entry and
+    so its key (brief, D26)."""
+    entry = f"{name}.{number}#1" if retried is None else retried.entry
+    if isinstance(step, TaskStep):
+        ran(state, name, entry, number, "open", retried)
+        state.waiting[entry] = f"{name}.{number} by {' or '.join(step.roles)}"
+        state.history.append(
+            f"started {entry}: waiting for {' or '.join(step.outcomes)} by "
+            f"{' or '.join(step.roles)}"
+        )
+        return
+    contract = called(catalog, step)
+    if contract.risk == "high":
+        raise StepStopped(f"{contract.reference} is high risk, and {name} is repeated")
+    key = f"{state.case}/{entry}"
+    types = step_types(case, {f: declared.declared for f, declared in case.fields.items()}, name)
+    inputs = checked_inputs(contract, step.inputs, values, sources, key, types, ())
+    ran(state, name, entry, number, "running", retried)
+    said = "; ".join(
+        f"{field} from {', '.join(sorted(provenance(expression, sources))) or 'the case'}"
+        for field, expression in step.inputs.items()
+    )
+    keyed = f", key {key}" if contract.idempotency_key is not None else ""
+    state.history.append(f"scheduled {entry}: {contract.reference} ({said}){keyed}")
+    commands.append(Schedule(entry, contract.reference, inputs))
 
 
 def schedule(

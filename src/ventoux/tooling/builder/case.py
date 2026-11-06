@@ -16,6 +16,7 @@ from ventoux.tooling.builder.entries import (
     Approval,
     Assign,
     Event,
+    ForEach,
     Milestone,
     Moment,
     Outcome,
@@ -129,10 +130,14 @@ class Case:
         required: bool | None = None,
         reaches: Sequence[Milestone] | None = None,
         assign: Assign | None = None,
+        for_each: ForEach | None = None,
     ) -> Task:
         """A task for a person holding one of `roles`, answered with one of `outcomes`; asked of
-        whom `assign` picks when each run opens (brief, D71)."""
+        whom `assign` picks when each run opens (brief, D71); run once per item of a list with
+        `for_each` (brief, D73)."""
         entry: Data = {"kind": "task", "display": display(title, description), "roles": list(roles)}
+        if for_each is not None:
+            entry["for_each"] = for_each.written()
         entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         entry["outcomes"] = {key: answer(outcome) for key, outcome in outcomes.items()}
         if assign is not None:
@@ -156,11 +161,14 @@ class Case:
         reaches: Sequence[Milestone] | None = None,
         approval: Approval | None = None,
         max_age: Mapping[str, str] | None = None,
+        for_each: ForEach | None = None,
     ) -> Step:
         """A call to `activity` (`payments.refund@2`), a contract in the catalog, with `inputs`
-        read from the case file."""
+        read from the case file; run once per item of a list with `for_each` (brief, D73)."""
         entry: Data = {"kind": "activity", "display": display(title, description)}
         entry["activity"] = activity
+        if for_each is not None:
+            entry["for_each"] = for_each.written()
         entry |= calling(inputs)
         entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
         entry |= guarded(approval, max_age)
