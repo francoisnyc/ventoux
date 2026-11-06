@@ -13,7 +13,8 @@ import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import CaseRun
-from ventoux.testing import CaseRefused, load_definition, run_case
+from ventoux.case.validate import validate_case
+from ventoux.testing import CATALOG, CaseRefused, load_definition, run_case
 
 ROOT = Path(__file__).parent.parent
 GUIDE = ROOT / "docs" / "guides" / "cases.md"
@@ -231,20 +232,26 @@ def test_a_plan_workflow_or_wait_step_has_no_for_each() -> None:
         (
             "draft_line",
             {"reaches": ["drafted"]},
-            "steps.draft_line.reaches: a repeated step reaches no milestone yet: reach it from a "
-            "step that requires draft_line",
+            (
+                "steps.draft_line.reaches: a repeated step reaches no milestone yet: reach it from a "
+                "step that requires draft_line"
+            ),
         ),
         (
             "inspect_line",
             {"outcomes": {"received": {"display": {"title": "Received"}, "reaches": ["drafted"]}}},
-            "steps.inspect_line.outcomes.received.reaches: a repeated step reaches no milestone "
-            "yet: reach it from a step that requires inspect_line",
+            (
+                "steps.inspect_line.outcomes.received.reaches: a repeated step reaches no milestone "
+                "yet: reach it from a step that requires inspect_line"
+            ),
         ),
         (
             "inspect_line",
             {"outcomes": {"received": {"display": {"title": "Received"}, "sets": ["email"]}}},
-            "steps.inspect_line.outcomes.received.sets: a repeated task's answer sets no field "
-            "yet: each answer would overwrite the last",
+            (
+                "steps.inspect_line.outcomes.received.sets: a repeated task's answer sets no field "
+                "yet: each answer would overwrite the last"
+            ),
         ),
         (
             "draft_line",
@@ -268,3 +275,59 @@ def test_what_a_repeated_step_cant_do_yet_is_refused(
     with pytest.raises(CaseInvalid) as refused:
         parse_case(definition)
     assert str(refused.value) == refusal
+
+
+# --- Slice 3: the runs, a run per item, named by its key's number (brief, D73) ---
+
+
+def test_each_item_gets_its_run_named_by_its_keys_number() -> None:
+    # The guide's example, as written: a draft for each line, each named by the number its sku was
+    # given, and keyed by that name, so reordering the list never swaps two lines' keys.
+    run = opened(LINES)
+    drafts = [line for line in run.history if line.startswith("scheduled draft_line")]
+    assert [line.split(":")[0] for line in drafts] == [
+        "scheduled draft_line.1#1",
+        "scheduled draft_line.2#1",
+    ]
+    assert [line.split(", key ")[1] for line in drafts] == [
+        "memory/draft_line.1#1",
+        "memory/draft_line.2#1",
+    ]
+    # Each inspection is open, named by its number, never by its value (brief, D30).
+    assert run.waiting_for == ["inspect_line.1 by support", "inspect_line.2 by support"]
+
+
+def test_a_repeated_task_is_answered_by_its_entry_and_sets_nothing_under_its_name() -> None:
+    # Each inspection is its own run: answered by its entry, it's done, and its outcome isn't
+    # written under the step's name, where the next answer would overwrite it (brief, D73).
+    run = run_case(
+        order_return(),
+        file=FILE,
+        answers=[("inspect_line.2#1", "missing", "ana")],
+        people=PEOPLE,
+    )
+    assert "ana answered inspect_line.2#1 missing as support" in run.history
+    assert run.waiting_for == ["inspect_line.1 by support"]
+    assert "inspect_line.outcome" not in run.state.values
+    done = run_case(
+        order_return(),
+        file=FILE,
+        answers=[("inspect_line.1#1", "received", "ana"), ("inspect_line.2#1", "missing", "ana")],
+        people=PEOPLE,
+    )
+    assert done.closed
+
+
+def drafted_with(template: object) -> dict[str, Any]:
+    """The returned order, each letter's template read from `template`."""
+    definition = order_return()
+    definition["steps"]["draft_line"]["inputs"]["template"] = template
+    return definition
+
+
+def test_validation_reads_each_with_its_items_types() -> None:
+    # A repeated step's expressions are read over the case's types and its item's: each.sku is a
+    # text, so it may be a template; each.amount is a number, so it may not (brief, D35, D73).
+    assert validate_case(parse_case(drafted_with({"var": "each.sku"})), CATALOG) == []
+    [issue] = validate_case(parse_case(drafted_with({"var": "each.amount"})), CATALOG)
+    assert (issue.path, issue.code) == ("steps.draft_line.inputs.template", "INPUT_TYPE")

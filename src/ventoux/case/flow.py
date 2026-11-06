@@ -19,7 +19,7 @@ from ventoux.case.definition import (
     anchor,
 )
 from ventoux.case.rules import said as said_moment
-from ventoux.case.types import case_types, fits_type
+from ventoux.case.types import case_types, fits_type, step_types
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.case.writers import (
     always,
@@ -184,7 +184,7 @@ def type_issues(
             )
             continue
         expression = step.inputs[field]
-        given = check(expression, types)
+        given = check(expression, step_types(case, types, name))
         if isinstance(wanted_type, OutcomeType) and isinstance(expression, str):
             # A text written in the definition is one of them or not: if not, it is the mistake,
             # so the message names it (brief, D35).

@@ -57,9 +57,12 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
                 "started": run.started,
                 "stop_requested": run.stop_requested,
                 "held_retry": run.held_retry,
+                "item": run.item,  # a repeated run's item number; None for any other (brief, D73)
             }
             for run in state.runs
         ],
+        # Each repeated step's number for each key it has seen (brief, D73).
+        "items": {step: dict(keys) for step, keys in state.items.items()},
         "approvals": {
             step: {
                 "entry": open.entry,
@@ -241,9 +244,13 @@ def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Cas
                 stop_requested=run.get("stop_requested", ""),
                 # None in a state from before the checkpoint: no retry's flag said so.
                 held_retry=run.get("held_retry", ""),
+                # None in a state from before 18b: no step was repeated.
+                item=run.get("item"),
             )
             for run in data["runs"]
         ],
+        # None in a state from before 18b (brief, D73).
+        items={step: dict(keys) for step, keys in data.get("items", {}).items()},
         approvals={
             # Neither in a state from before 11h2: every approval was one person's.
             step: OpenApproval(

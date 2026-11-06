@@ -10,7 +10,15 @@ from decimal import Decimal
 from pydantic.fields import FieldInfo
 
 from ventoux.case.called import called
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, TaskStep, WaitStep
+from ventoux.case.definition import (
+    EACH,
+    ActivityStep,
+    CallStep,
+    CaseDefinition,
+    PlanStep,
+    TaskStep,
+    WaitStep,
+)
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
 from ventoux.core.expressions import (
@@ -20,6 +28,7 @@ from ventoux.core.expressions import (
     Expression,
     ExpressionInvalid,
     FieldType,
+    ListType,
     NumberType,
     OptionType,
     OutcomeType,
@@ -148,11 +157,24 @@ def type_problem(
     return None
 
 
+def step_types(
+    case: CaseDefinition, types: dict[str, FieldType], name: str
+) -> dict[str, FieldType]:
+    """The values the step `name` reads, and their types: the case's `types`, and, for a step
+    repeated over a list, its item's fields as `each.<field>` (brief, D73)."""
+    step = case.steps[name]
+    if not isinstance(step, TaskStep | ActivityStep) or step.for_each is None:
+        return types
+    listed = case.fields[step.for_each.over].declared
+    assert isinstance(listed, ListType)  # refused when read otherwise (brief, D73)
+    return types | {f"{EACH}.{field}": kind for field, kind in listed.fields.items()}
+
+
 def expression_problem(case: CaseDefinition, catalog: Catalog, name: str) -> str | None:
     """Why the step `name` can't read its expressions, or None: the first that doesn't check,
     said as `pay.when can't be read: …`. The runtime asks before reading them, so a misspelt
     outcome fails the step instead of reading as false (brief, D35)."""
-    types = case_types(case, catalog)
+    types = step_types(case, case_types(case, catalog), name)
     for where, expression, condition in expressions_of(case.steps[name]):
         problem = type_problem(expression, types, condition)
         if problem is not None:

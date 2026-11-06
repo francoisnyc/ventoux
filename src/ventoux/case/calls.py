@@ -10,7 +10,7 @@ from typing import Any
 from ventoux.case.called import called
 from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
 from ventoux.case.plan_step import PlanNotSupplied, supplied
-from ventoux.case.types import expressions_of, set_problem, type_problem
+from ventoux.case.types import expressions_of, set_problem, step_types, type_problem
 from ventoux.core.approval import risk_refusal
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
@@ -150,7 +150,7 @@ def expression_issues(
             read = fields_read(expression)
             if any(field.split(".")[0] in missing and "." in field for field in read):
                 continue
-            problem = type_problem(expression, types, condition)
+            problem = type_problem(expression, step_types(case, types, name), condition)
             if problem is not None:
                 issues.append(Issue(f"steps.{name}.{where}", "EXPRESSION_INVALID", problem))
     # A rule's condition too, as the runtime checks it before reading it (brief, D38).
