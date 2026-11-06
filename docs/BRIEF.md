@@ -3060,7 +3060,11 @@ Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is k
   needs fresh, an assignment rule. A list is given only at the opening: never by a person's form,
   and never sensitive. Each door is a decision of its own.
 - **A repeated run is its own:** its outcome and outputs are never written under its step's name,
-  which each run would overwrite. Its `when` is read for each run, with its item.
+  which each run would overwrite. Its `when` is read for each run, with its item; on an untrusted
+  list it may keep an item's run from starting, never silently (D48): `ventoux check` warns
+  (`KEPT_FROM_STARTING`), and the close names each item kept, by number, never value.
+- **A migration never renumbers a repeated step's items:** a target that repeats a step with
+  numbers over another list, by another key, or not at all, is refused (D53).
 - **A step whose items share a key fails, needing attention, and isn't retried:** the list never
   changes, so it would fail again; a person closes the case.
 - **No new engine version (D51):** no definition readable before holds `for_each`, and no case

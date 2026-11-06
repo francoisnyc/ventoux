@@ -762,3 +762,40 @@ def test_a_required_repeated_step_with_an_item_stopped_is_stranded() -> None:
             "item's run starts at most once: close the case with a reason"
         )
     ]
+
+
+# --- Choice 35: a repeated step's condition on an untrusted list is said, never silent (D48) ---
+
+
+def drafted_over_30() -> dict[str, Any]:
+    """The returned order, its lines typed by the customer, each letter drafted only for a line
+    over 30."""
+    definition = order_return()
+    definition["fields"]["lines"]["source"] = "untrusted:customer"
+    definition["steps"]["draft_line"]["when"] = {">": [{"var": "each.amount"}, 30]}
+    return definition
+
+
+def test_the_check_warns_that_an_untrusted_item_may_keep_a_run_from_starting() -> None:
+    # each.amount is its list's, which the customer typed: allowed, so a warning (brief, D48).
+    found = validate_case(parse_case(drafted_over_30()), CATALOG)
+    assert [(i.path, i.code, i.severity) for i in found] == [
+        ("steps.draft_line.when", "KEPT_FROM_STARTING", "warning")
+    ]
+    assert "its condition reads each.amount (untrusted:customer)" in found[0].message
+
+
+def test_the_close_says_each_item_an_untrusted_condition_kept_from_starting() -> None:
+    # Line 2 (25) isn't drafted: the close names it by number, and the field and its source,
+    # never a value (brief, D30) (brief, D48).
+    run = run_case(
+        drafted_over_30(),
+        file=FILE,
+        answers=[("inspect_line.1#1", "received", "ana"), ("inspect_line.2#1", "received", "ana")],
+        people=PEOPLE,
+    )
+    assert run.closed
+    assert (
+        "draft_line.2 not started: its condition reads each.amount, from untrusted:customer, and "
+        "is false"
+    ) in run.history

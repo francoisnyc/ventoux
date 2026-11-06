@@ -2911,7 +2911,11 @@ Reading a repeated step from elsewhere:
 - **A required repeated step** owes a done run for every item (see "Required steps").
 
 A repeated step may have a `when`, read for each run with its item: `{">": [{"var":
-"each.amount"}, 30]}` drafts only the lines over 30.
+"each.amount"}, 30]}` drafts only the lines over 30. On a list the customer typed, that keeps some
+lines from being drafted on untrusted data, which is allowed but never silent (brief, D48):
+`ventoux check` warns (`KEPT_FROM_STARTING`), and as the case closes the history names each line
+kept, by number: `draft_line.2 not started: its condition reads each.amount, from
+untrusted:customer, and is false`.
 
 **For now** (brief, D48) (brief, D73), each a door for later:
 
@@ -2926,6 +2930,8 @@ A repeated step may have a `when`, read for each run with its item: `{">": [{"va
 - a list is given only at the opening: never by a person's form, and never sensitive;
 - items that share a key fail the step, and its retry is refused, since the list never changes:
   close the case.
+- a migration whose target repeats a step over another list or by another key is refused once
+  the step has runs: its items' numbers can't follow a new key.
 
 `ventoux check` refuses `for_each` over a field that isn't a list (`steps.draft_line.for_each:
 order_id is a reference, not a list: a step repeats over a list field`), a key that isn't a text

@@ -6,9 +6,11 @@ starts; activities already running finish, since a side effect can't be cut off 
 case is **closed**. Something that completes while closing flags the case for a person.
 """
 
+from typing import cast
+
 from ventoux.case.admission import latest_run, requirements_met
 from ventoux.case.approvals import with_given
-from ventoux.case.definition import CaseDefinition
+from ventoux.case.definition import EACH, ActivityStep, CaseDefinition, TaskStep
 from ventoux.case.owed import owed
 from ventoux.case.state import CaseState, CloseAsked
 from ventoux.case.timers import cancel_timers
@@ -16,7 +18,9 @@ from ventoux.case.writers import read_sources, untrusted_of
 from ventoux.core.catalog import Catalog
 from ventoux.core.expressions import ExpressionError, evaluate
 from ventoux.core.person import identifier_problem
+from ventoux.core.provenance import fields_read
 from ventoux.core.roles import role_that_counts
+from ventoux.core.sensitive import plain
 
 
 class CloseRefused(Exception):
@@ -128,6 +132,9 @@ def say_kept_from_starting(case: CaseDefinition, catalog: Catalog, state: CaseSt
     but never silently (brief, D17) (brief, D48): the line names the field and its source, never
     the value (brief, D30)."""
     for name, step in case.steps.items():
+        if step.when is not None and name in state.items:
+            say_items_kept(case, catalog, state, name)  # a repeated step, item by item
+            continue
         if step.when is None or not step.automatic or latest_run(state, name) is not None:
             continue
         if not requirements_met(step.requires, state):
@@ -141,6 +148,39 @@ def say_kept_from_starting(case: CaseDefinition, catalog: Catalog, state: CaseSt
             continue
         reads = "; ".join(f"{field}, from {', '.join(sorted(s))}" for field, s in untrusted.items())
         state.history.append(f"{name} not started: its condition reads {reads}, and is false")
+
+
+def say_items_kept(case: CaseDefinition, catalog: Catalog, state: CaseState, name: str) -> None:
+    """As the case closes, say each item of the repeated step `name` whose run never started
+    because its condition, read with the item, was false on untrusted data: by its number, never
+    its value (brief, D30) (brief, D48) (brief, D73)."""
+    step = case.steps[name]
+    assert isinstance(step, TaskStep | ActivityStep) and step.for_each is not None
+    assert step.when is not None
+    over, key = step.for_each.over, step.for_each.key
+    listed_by = state.sources.get(over, frozenset())
+    reads = {
+        field: listed_by if field.split(".")[0] == EACH else sources
+        for field, sources in read_sources(case, catalog, state, step.when).items()
+    } | {field: listed_by for field in fields_read(step.when) if field.split(".")[0] == EACH}
+    untrusted = untrusted_of(reads)
+    if not untrusted:
+        return
+    said = "; ".join(f"{field}, from {', '.join(sorted(s))}" for field, s in untrusted.items())
+    items = cast(list[dict[str, object]], plain(state.values[over]))
+    for item in items:
+        number = state.items[name].get(str(item[key]))
+        if number is None or any(r.step == name and r.item == number for r in state.runs):
+            continue
+        values = {**state.values, **{f"{EACH}.{field}": v for field, v in item.items()}}
+        try:
+            kept = evaluate(step.when, values) is False
+        except ExpressionError:
+            continue  # a condition that can't be read is admission's to stop on
+        if kept:
+            state.history.append(
+                f"{name}.{number} not started: its condition reads {said}, and is false"
+            )
 
 
 def close_when_reached(case: CaseDefinition, state: CaseState) -> None:

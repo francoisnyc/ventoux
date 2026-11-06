@@ -394,9 +394,9 @@ that has any run, and can't read `each`.
 - (b) **Refuse it,** a deliberate limit (D48): a repeated step's `when` that reads `each` over a
   list declared untrusted is refused when read, saying so.
 
-*Recommended: (a).* A condition per line is the guide's own example, a list a customer typed is
-the common case, and (a) is what D48 already asks of every other step; most of the work exists
-(`as_listed`, `say_kept_from_starting`).
+*Answered 2026-11-06: (a).* *Recommended: (a).* A condition per line is the guide's own example, a
+list a customer typed is the common case, and (a) is what D48 already asks of every other step; most
+of the work exists (`as_listed`, `say_kept_from_starting`).
 
 ### Decided while building 18b
 
@@ -444,6 +444,7 @@ or, for a pin of behaviour already built, catching a mutation.
 | A repeated task is answered by its entry, and its outcome isn't written under its step's name | `test_a_repeated_task_is_answered_by_its_entry_and_sets_nothing_under_its_name` |
 | Validation and the runtime read `each.<field>` with its item's types | `test_validation_reads_each_with_its_items_types` |
 | A repeated step's `when` is read for each run with its item | `test_a_repeated_steps_condition_is_read_for_each_run_with_its_item` |
+| On an untrusted list, a repeated step's `when` keeping a run from starting is never silent: the check warns, the close names each item kept by number (choice 35) | `test_the_check_warns_that_an_untrusted_item_may_keep_a_run_from_starting`, `test_the_close_says_each_item_an_untrusted_condition_kept_from_starting` |
 | `requires` over a repeated step waits for every item; an empty list meets it at once, saying so | `test_requires_over_a_repeated_step_waits_for_every_item`, `test_an_empty_list_meets_a_requirement_at_once_and_says_so` |
 | A required repeated step owes every item | `test_a_required_repeated_step_owes_every_item` |
 | A required repeated step is read per item: on its way while any item's run is; stranded only when an item's run ended undone | `test_a_required_repeated_step_with_an_item_to_retry_isnt_stranded`, `test_a_required_repeated_step_with_an_item_open_isnt_stranded`, `test_a_required_repeated_step_with_an_item_stopped_is_stranded` |

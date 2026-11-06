@@ -22,6 +22,7 @@ from ventoux.case.definition import (
     WorkflowStep,
     anchor,
 )
+from ventoux.case.flow import as_listed
 from ventoux.case.known import DONE, Known, Read, Reading, reads, set_by_outcomes
 from ventoux.case.reach import starters
 from ventoux.case.rules import said as moment_said
@@ -582,7 +583,11 @@ def kept_from_starting_issues(
             continue
         if closing & set(step.reaches):
             continue
-        read = {field: sources.get(field, frozenset()) for field in fields_read(step.when)}
+        # A repeated step's item is read as its list, whose sources it carries (brief, D73).
+        read = {
+            field: sources.get(as_listed(case, name, field), frozenset())
+            for field in fields_read(step.when)
+        }
         untrusted = untrusted_of(read)
         if not untrusted:
             continue
