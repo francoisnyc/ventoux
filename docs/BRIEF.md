@@ -3055,7 +3055,14 @@ Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is k
   stopping every open run (D40); an operator retries a failed run by its entry (D26).
 - **Deliberate limits** (D48): no approval on a repeated step, so a high-risk contract can't be
   repeated, and `ventoux check` says so; an edit never changes a list a step repeats over (D52),
-  saying so; at most 100 items. Each door is a decision of its own.
+  saying so; at most 100 items. And, each assuming one run per step, refused on a repeated step
+  when read: a milestone it or its task's outcome reaches, a field its answer sets, a fact it
+  needs fresh, an assignment rule. A list is given only at the opening: never by a person's form,
+  and never sensitive. Each door is a decision of its own.
+- **A repeated run is its own:** its outcome and outputs are never written under its step's name,
+  which each run would overwrite. Its `when` is read for each run, with its item.
+- **A step whose items share a key fails, needing attention, and isn't retried:** the list never
+  changes, so it would fail again; a person closes the case.
 - **No new engine version (D51):** no definition readable before holds `for_each`, and no case
   could hold a list value.
 

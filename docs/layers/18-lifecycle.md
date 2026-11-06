@@ -1,6 +1,6 @@
 # Layer 18: Case lifecycle: required steps, repeated steps, child cases
 
-Status: 2026-11-05, 18a built, its promises checked; choices A to C and 1 to 12 agreed. This note
+Status: 2026-11-06, 18a merged; 18b built, its promises checked (D73). This note
 starts from `main` at `f1e8512`, with layers 0 to 17 merged. The warm-up was asked and recorded
 (learning question 37). The guide was written first (curriculum step 2): `docs/guides/cases.md`,
 "Required steps", "Repeated steps: one run per item" and "Child cases", describes the layer as if it
@@ -378,6 +378,76 @@ The tests use only what a caller uses today; no test reads how the item numbers 
 10. The routes: an edit refused; a rule's stop stops every open run; a retry by entry; a
     migration renaming the step keeps the numbers; continue-as-new on Temporal; replay.
 11. The diff, the case map, the builder, the schema, the digest pin.
+
+### Decided while building 18b
+
+- **The list value comes first:** no case could hold a list, so `fits` learned one, and the
+  in-memory run passes a list's whole numbers on as exact decimals, as the API does.
+- **Agreed while building:** a form never sets a list and a list is never sensitive (slice 1);
+  `reaches`, `sets`, `max_age` and `assign` refused on a repeated step (slice 3).
+- **A plan, workflow or wait step with `for_each`** gets the format's usual `not a field here`,
+  not a message of its own: those kinds have no such field.
+- **`order_id is a reference to orders, not a list`:** the type said as `a_type` says it, more
+  precise than the wording proposed.
+- **Test 4 (reordering) is moot:** within a case the list never changes; its promise, that a run
+  keeps its name and key, is the retry test's.
+- **A repeated run's outcome and outputs aren't written under its step's name;** nothing reads
+  them (they are refused), and each run would overwrite the last.
+- **Done is asked in one place, `step_done`:** the requirement check and what is owed ask it; for
+  a repeated step, every item's latest run is done, and the step's numbers say which items.
+- **Two bugs found by the tests and fixed:** an edit of a list crashed while reading it as one
+  value; validation crashed (`KeyError: 'each.amount'`) when an item reached a contract's input.
+  Validation now reads `each.<field>` as its list for provenance, per step.
+- **A step whose items share a key isn't retried:** the list never changes.
+- **The numbers are always written when the state crosses continue-as-new,** so the guard that
+  every field of the state crosses covers them. A Temporal run can't tell a lost map (the same
+  list renumbers the same way), so a read-back test pins it.
+
+## Promises (18b)
+
+Each claim the note, D73 and the guide's "Repeated steps" make, and the test that would fail if it
+weren't true. Tests without a file are in `tests/test_repeated.py`. Each was watched failing first
+or, for a pin of behaviour already built, catching a mutation.
+
+| Promise | Test |
+|---|---|
+| A step repeated over a field that isn't a list is refused when read (the curriculum's negative test) | `test_a_step_repeated_over_a_field_that_isnt_a_list_is_refused` |
+| A list fits when it holds at most 100 records, each with exactly the declared fields of their types; anything else is refused at the opening, naming the shape and the kind, never a value | `test_a_list_that_fits_is_given_at_the_opening`, `test_a_list_that_doesnt_fit_is_refused_at_the_opening` (six cases) |
+| What can't be repeated is refused when read: a key that isn't a text field; proposed, repeatable, not automatic or started by a rule; an approval; `each` misread or used as a name; a repeated step's outcome read; a form setting a list; a sensitive list | `test_what_cant_be_repeated_is_refused_when_read` (eleven cases) |
+| A plan, workflow or wait step has no `for_each` | `test_a_plan_workflow_or_wait_step_has_no_for_each` |
+| What assumes one run per step is refused on a repeated one: reaches, sets, max_age, assign | `test_what_a_repeated_step_cant_do_yet_is_refused` (five cases) |
+| A run per item, named by its key's number, keyed by that name; an open task reads its number, never its value | `test_each_item_gets_its_run_named_by_its_keys_number`, the guide's example in `test_case.py::test_the_guides_examples_run_as_written` |
+| A repeated task is answered by its entry, and its outcome isn't written under its step's name | `test_a_repeated_task_is_answered_by_its_entry_and_sets_nothing_under_its_name` |
+| Validation and the runtime read `each.<field>` with its item's types | `test_validation_reads_each_with_its_items_types` |
+| A repeated step's `when` is read for each run with its item | `test_a_repeated_steps_condition_is_read_for_each_run_with_its_item` |
+| `requires` over a repeated step waits for every item; an empty list meets it at once, saying so | `test_requires_over_a_repeated_step_waits_for_every_item`, `test_an_empty_list_meets_a_requirement_at_once_and_says_so` |
+| A required repeated step owes every item | `test_a_required_repeated_step_owes_every_item` |
+| Items that share a key fail the step, and its retry is refused | `test_items_that_share_a_key_fail_the_step`, `test_a_step_whose_items_share_a_key_isnt_retried` |
+| Each item carries the list's sources, at run time and at the check | `test_each_item_carries_the_lists_sources`, `test_the_check_reads_an_items_sources_as_its_lists` |
+| A repeated high-risk contract is an error at the check, saying why | `test_a_repeated_high_risk_contract_is_an_error_at_the_check` |
+| The diff reads a step made repeated as not proven | `test_the_diff_reads_a_step_made_repeated_as_not_proven` |
+| The case map says a step runs once per item | `test_the_case_map_says_a_step_runs_once_per_item` |
+| The builder writes `ForEach`, the same JSON | `test_the_builder_writes_the_guides_returned_order`, `test_builder_coverage.py` |
+| The JSON Schema has the key; no earlier digest changes; a pinned package writes it | `test_schema.py::test_the_committed_schemas_are_what_the_models_say`, `test_digests.py` (the `repeated` package) |
+| No new engine version: every recorded history replays | the replay tests over `tests/histories` |
+
+## Routes checked before the pull request (18b)
+
+| Route | What it does | Test |
+|---|---|---|
+| an answer | completes one item's task run, by its entry | `test_a_repeated_task_is_answered_by_its_entry_and_sets_nothing_under_its_name` |
+| an edit (D52) | of a list a step repeats over, refused | `test_an_edit_of_a_list_a_step_repeats_over_is_refused` |
+| a migration (D53) | renames the step's numbers with its runs; an open run keeps its entry and number | `test_a_migration_renaming_a_repeated_step_keeps_its_items` |
+| an event | never carries a list (D41, unchanged) | `test_events.py::test_an_event_carries_no_list` |
+| a rule | never starts a repeated step, never sets a list; its stop stops every open run | `test_what_cant_be_repeated_is_refused_when_read`, `test_set.py::test_a_list_field_is_never_set`, `test_a_rules_stop_stops_every_open_run_of_a_repeated_step` |
+| the opening | gives the list, checked; the items numbered in order | the two opening tests, `test_each_item_gets_its_run_named_by_its_keys_number` |
+| a plan | a plan step is never repeated | `test_a_plan_workflow_or_wait_step_has_no_for_each` |
+| a close or a stop (D40) | a close cancels each open run as any; a stop stops every open run; a person's close names what was owed | `test_a_required_repeated_step_owes_every_item`, the stop test |
+| a retry (D26) | by entry, the same run with its key, per item; refused for items sharing a key | `test_a_failed_run_is_retried_by_its_entry_with_its_own_key`, `test_a_step_whose_items_share_a_key_isnt_retried` |
+| continue-as-new | each run's number and each step's numbers cross | `test_a_repeated_cases_state_reads_back_as_it_was`, `test_a_repeated_steps_items_cross_continue_as_new` |
+
+**State keyed by a step's name:** each repeated step's key-to-number map. It follows a migration's
+rename, tested; it crosses continue-as-new, tested.
 
 ### For 18c and 18d: child cases (sketched; settled when they start)
 

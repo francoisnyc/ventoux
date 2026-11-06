@@ -28,6 +28,7 @@ from ventoux.testing import (
     CATALOG,
     CaseRefused,
     ChangeRefused,
+    RetryRefused,
     close,
     edit,
     load_definition,
@@ -645,3 +646,34 @@ def test_the_diff_reads_a_step_made_repeated_as_not_proven() -> None:
 def test_the_case_map_says_a_step_runs_once_per_item() -> None:
     read = case_map(packed(order_return()), CATALOG)
     assert "It runs once for each item of lines, told apart by its sku." in read
+
+
+def test_a_repeated_steps_condition_is_read_for_each_run_with_its_item() -> None:
+    # Only the line over 30 is drafted: each run reads its own item (brief, D73).
+    definition = order_return()
+    definition["steps"]["draft_line"]["when"] = {">": [{"var": "each.amount"}, 30]}
+    run = opened_with(definition, LINES)
+    assert [line.split(":")[0] for line in run.history if line.startswith("scheduled")] == [
+        "scheduled draft_line.1#1"
+    ]
+
+
+def test_a_step_whose_items_share_a_key_isnt_retried() -> None:
+    # The list never changes, so a retry would fail again: refused, saying so (brief, D26, D73).
+    twice = [{"sku": "A12", "amount": 40}, {"sku": "A12", "amount": 25}]
+    with pytest.raises(
+        RetryRefused,
+        match="^draft_line#1 can't be retried: its list can't change, so it would fail again: "
+        "close the case$",
+    ):
+        run_case(
+            order_return(),
+            file=FILE | {"lines": twice},
+            answers=[retry("draft_line#1", "omar")],
+            people=PEOPLE,
+        )
+
+
+def opened_with(definition: dict[str, Any], lines: object) -> CaseRun:
+    """`definition` opened with `lines`, nothing answered."""
+    return run_case(definition, file=FILE | {"lines": lines}, answers=[], people=PEOPLE)

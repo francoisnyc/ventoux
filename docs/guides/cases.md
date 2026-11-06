@@ -2910,10 +2910,22 @@ Reading a repeated step from elsewhere:
   outcome.
 - **A required repeated step** owes a done run for every item (see "Required steps").
 
-**For now** (brief, D48, D73): a repeated step has no approval, so a high-risk contract such as
-`payments.refund@2` is never repeated, and `ventoux check` says so; an edit never changes a list a
-step repeats over (see "Changing an open case"): `lines is the list draft_line repeats over, so it
-is never edited: close the case and open it again with the list corrected`.
+A repeated step may have a `when`, read for each run with its item: `{">": [{"var":
+"each.amount"}, 30]}` drafts only the lines over 30.
+
+**For now** (brief, D48) (brief, D73), each a door for later:
+
+- a repeated step has no approval, so a high-risk contract such as `payments.refund@2` is never
+  repeated: `payments.refund@2 is high risk, and draft_line is repeated, so it can have no
+  approval: repeat a low-risk step, or pay once`;
+- an edit never changes a list a step repeats over (see "Changing an open case"): `lines is the
+  list inspect_line repeats over, so it is never edited: close the case and open it again with
+  the list corrected`;
+- a repeated step reaches no milestone, sets no field from its answer, needs no fact fresh, and
+  is asked of its queue: each assumes one run per step;
+- a list is given only at the opening: never by a person's form, and never sensitive;
+- items that share a key fail the step, and its retry is refused, since the list never changes:
+  close the case.
 
 `ventoux check` refuses `for_each` over a field that isn't a list (`steps.draft_line.for_each:
 order_id is a reference, not a list: a step repeats over a list field`), a key that isn't a text
