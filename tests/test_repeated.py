@@ -14,7 +14,7 @@ import pytest
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, CaseRefused, load_definition, run_case
+from ventoux.testing import CATALOG, CaseRefused, close, load_definition, run_case
 
 ROOT = Path(__file__).parent.parent
 GUIDE = ROOT / "docs" / "guides" / "cases.md"
@@ -331,3 +331,88 @@ def test_validation_reads_each_with_its_items_types() -> None:
     assert validate_case(parse_case(drafted_with({"var": "each.sku"})), CATALOG) == []
     [issue] = validate_case(parse_case(drafted_with({"var": "each.amount"})), CATALOG)
     assert (issue.path, issue.code) == ("steps.draft_line.inputs.template", "INPUT_TYPE")
+
+
+# --- Slice 4: read from outside, required, its items told apart, and their sources ---
+
+
+def closing_out(**inspect: Any) -> dict[str, Any]:
+    """The returned order with a close-out task that requires every line inspected; with
+    `inspect`'s keys on `inspect_line`."""
+    definition = order_return()
+    definition["steps"]["inspect_line"].update(inspect)
+    definition["steps"]["close_out"] = {
+        "kind": "task",
+        "display": {"title": "Close out the return"},
+        "roles": ["support"],
+        "requires": ["inspect_line"],
+        "outcomes": {"closed": {"display": {"title": "Closed out"}}},
+    }
+    return definition
+
+
+def test_requires_over_a_repeated_step_waits_for_every_item() -> None:
+    # Line 2 inspected, line 1 not: the requirement isn't met, whichever run came last.
+    run = run_case(
+        closing_out(), file=FILE, answers=[("inspect_line.2#1", "received", "ana")], people=PEOPLE
+    )
+    assert run.waiting_for == ["inspect_line.1 by support"]
+    both = run_case(
+        closing_out(),
+        file=FILE,
+        answers=[("inspect_line.2#1", "received", "ana"), ("inspect_line.1#1", "missing", "ana")],
+        people=PEOPLE,
+    )
+    assert both.waiting_for == ["close_out by support"]
+
+
+def test_an_empty_list_meets_a_requirement_at_once_and_says_so() -> None:
+    run = run_case(closing_out(), file=FILE | {"lines": []}, answers=[], people=PEOPLE)
+    assert "inspect_line: lines has no items, so it has no runs" in run.history
+    assert run.waiting_for == ["close_out by support"]
+
+
+def test_a_required_repeated_step_owes_every_item() -> None:
+    # Owed until every item's latest run is done (brief, D72): with line 1 still open, closing it
+    # by a reason names what was owed.
+    definition = closing_out(required=True)
+    del definition["steps"]["close_out"]
+    definition["close_reasons"] = {
+        "duplicate": {"display": {"title": "Duplicate"}, "roles": ["support"]}
+    }
+    run = run_case(
+        definition,
+        file=FILE,
+        answers=[("inspect_line.2#1", "received", "ana"), close("duplicate", "ana")],
+        people=PEOPLE,
+    )
+    assert run.history[-1] == "closed: duplicate, by ana; inspect_line not done"
+
+
+def test_items_that_share_a_key_fail_the_step() -> None:
+    # Nothing guesses which line is which: the step needs attention (brief, D17) (brief, D73).
+    twice = [{"sku": "A12", "amount": 40}, {"sku": "A12", "amount": 25}]
+    run = opened(twice)
+    assert run.needs_attention == [
+        (
+            "inspect_line#1: inspect_line can't run: two items of lines have the same sku: each "
+            "item's key is its own"
+        ),
+        (
+            "draft_line#1: draft_line can't run: two items of lines have the same sku: each "
+            "item's key is its own"
+        ),
+    ]
+
+
+def test_each_item_carries_the_lists_sources() -> None:
+    # A list the customer typed leaves every line untrusted (brief, D12): a trusted-only input
+    # refuses its item's value, and each run fails, nothing drafted (brief, D73).
+    definition = order_return()
+    definition["fields"]["lines"]["source"] = "untrusted:customer"
+    definition["steps"]["draft_line"]["inputs"]["to_customer"] = {"var": "each.sku"}
+    run = run_case(definition, file=FILE, answers=[], people=PEOPLE)
+    failed = [line.split(": ")[0] for line in run.needs_attention]
+    assert failed == ["draft_line.1#1", "draft_line.2#1"]
+    assert "untrusted:customer" in run.needs_attention[0]
+    assert not any(line.startswith("scheduled draft_line") for line in run.history)
