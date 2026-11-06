@@ -379,6 +379,25 @@ The tests use only what a caller uses today; no test reads how the item numbers 
     migration renaming the step keeps the numbers; continue-as-new on Temporal; replay.
 11. The diff, the case map, the builder, the schema, the digest pin.
 
+### Choice 35: a repeated step's `when` on an untrusted list (from the tutor's review of #87)
+
+D48: untrusted data may keep something from happening, but never silently. A repeated step's `when`
+reads its item, and its item carries the list's sources. With `lines` from `untrusted:customer` and
+`draft_line` drafted only `when each.amount > 30`, neither the check nor the close says anything
+today: `KEPT_FROM_STARTING` finds no source for `each.amount`, and the close's line skips a step
+that has any run, and can't read `each`.
+
+- (a) **Say it.** The check reads `each.<field>` as its list (as `as_listed` already does for input
+  policies), so `KEPT_FROM_STARTING` warns. The close names each item kept, by number, never by
+  value: `draft_line.2 not started: its condition reads each.amount, from untrusted:customer, and
+  is false`.
+- (b) **Refuse it,** a deliberate limit (D48): a repeated step's `when` that reads `each` over a
+  list declared untrusted is refused when read, saying so.
+
+*Recommended: (a).* A condition per line is the guide's own example, a list a customer typed is
+the common case, and (a) is what D48 already asks of every other step; most of the work exists
+(`as_listed`, `say_kept_from_starting`).
+
 ### Decided while building 18b
 
 - **The list value comes first:** no case could hold a list, so `fits` learned one, and the
@@ -399,6 +418,11 @@ The tests use only what a caller uses today; no test reads how the item numbers 
   value; validation crashed (`KeyError: 'each.amount'`) when an item reached a contract's input.
   Validation now reads `each.<field>` as its list for provenance, per step.
 - **A step whose items share a key isn't retried:** the list never changes.
+- **From the tutor's review of #87:** a migration whose target repeats a numbered step over
+  another list, by another key, or not at all, is refused (`renumbered`, in `depending`): every
+  item would run again under new idempotency keys. And `owing.py` reads a repeated step per item:
+  on its way while any item's latest run is under way; stranded only when an item's latest run
+  ended undone, since an item's run starts at most once.
 - **The numbers are always written when the state crosses continue-as-new,** so the guard that
   every field of the state crosses covers them. A Temporal run can't tell a lost map (the same
   list renumbers the same way), so a read-back test pins it.
@@ -422,6 +446,8 @@ or, for a pin of behaviour already built, catching a mutation.
 | A repeated step's `when` is read for each run with its item | `test_a_repeated_steps_condition_is_read_for_each_run_with_its_item` |
 | `requires` over a repeated step waits for every item; an empty list meets it at once, saying so | `test_requires_over_a_repeated_step_waits_for_every_item`, `test_an_empty_list_meets_a_requirement_at_once_and_says_so` |
 | A required repeated step owes every item | `test_a_required_repeated_step_owes_every_item` |
+| A required repeated step is read per item: on its way while any item's run is; stranded only when an item's run ended undone | `test_a_required_repeated_step_with_an_item_to_retry_isnt_stranded`, `test_a_required_repeated_step_with_an_item_open_isnt_stranded`, `test_a_required_repeated_step_with_an_item_stopped_is_stranded` |
+| A migration never renumbers a repeated step's items: a target with another list or key is refused once the step has numbers | `test_a_migration_changing_a_repeated_steps_key_once_it_has_numbers_is_refused` |
 | Items that share a key fail the step, and its retry is refused | `test_items_that_share_a_key_fail_the_step`, `test_a_step_whose_items_share_a_key_isnt_retried` |
 | Each item carries the list's sources, at run time and at the check | `test_each_item_carries_the_lists_sources`, `test_the_check_reads_an_items_sources_as_its_lists` |
 | A repeated high-risk contract is an error at the check, saying why | `test_a_repeated_high_risk_contract_is_an_error_at_the_check` |
@@ -437,7 +463,7 @@ or, for a pin of behaviour already built, catching a mutation.
 |---|---|---|
 | an answer | completes one item's task run, by its entry | `test_a_repeated_task_is_answered_by_its_entry_and_sets_nothing_under_its_name` |
 | an edit (D52) | of a list a step repeats over, refused | `test_an_edit_of_a_list_a_step_repeats_over_is_refused` |
-| a migration (D53) | renames the step's numbers with its runs; an open run keeps its entry and number | `test_a_migration_renaming_a_repeated_step_keeps_its_items` |
+| a migration (D53) | renames the step's numbers with its runs; an open run keeps its entry and number; a target changing a numbered step's list or key is refused | `test_a_migration_renaming_a_repeated_step_keeps_its_items`, `test_a_migration_changing_a_repeated_steps_key_once_it_has_numbers_is_refused` |
 | an event | never carries a list (D41, unchanged) | `test_events.py::test_an_event_carries_no_list` |
 | a rule | never starts a repeated step, never sets a list; its stop stops every open run | `test_what_cant_be_repeated_is_refused_when_read`, `test_set.py::test_a_list_field_is_never_set`, `test_a_rules_stop_stops_every_open_run_of_a_repeated_step` |
 | the opening | gives the list, checked; the items numbered in order | the two opening tests, `test_each_item_gets_its_run_named_by_its_keys_number` |

@@ -209,6 +209,37 @@ def problems_of(
     return depending(case, target, catalog, state, migration)
 
 
+def renumbered(
+    case: CaseDefinition, target: CaseDefinition, state: CaseState, migration: Migration
+) -> list[str]:
+    """A repeated step whose items have numbers, which the target repeats over another list, by
+    another key, or not at all: its numbers are tied to its key, so its items would run again
+    under new names and new idempotency keys (brief, D17) (brief, D73)."""
+    problems = []
+    for name in state.items:
+        step, new = case.steps[name], renamed(migration, "steps", name)
+        repeats = step.for_each if isinstance(step, TaskStep | ActivityStep) else None
+        if repeats is None or new not in target.steps:
+            continue  # a step the target lacks is said where it lacks it
+        moved = target.steps[new]
+        then = moved.for_each if isinstance(moved, TaskStep | ActivityStep) else None
+        over = renamed(migration, "fields", repeats.over)
+        if then is not None and then.over == over and then.key == repeats.key:
+            continue
+        label = migration.label
+        if then is None:
+            changed = f"{label} doesn't repeat it"
+        elif then.over != over:
+            changed = f"{label} over {then.over} by {then.key}"
+        else:
+            changed = f"{label} by {then.key}"
+        problems.append(
+            f"{name} repeats over {repeats.over} by {repeats.key}, and {changed}: its items' "
+            "numbers can't follow a new key; keep the key, or migrate before it runs"
+        )
+    return problems
+
+
 def depending(
     case: CaseDefinition,
     target: CaseDefinition,
@@ -229,6 +260,7 @@ def depending(
             )
         elif run.status in UNTIL:
             problems += unfinished(case, target, migration, run, new)
+    problems += renumbered(case, target, state, migration)
     for milestone in state.milestones:
         if (new := renamed(migration, "milestones", milestone)) not in target.milestones:
             problems.append(

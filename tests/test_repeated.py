@@ -677,3 +677,88 @@ def test_a_step_whose_items_share_a_key_isnt_retried() -> None:
 def opened_with(definition: dict[str, Any], lines: object) -> CaseRun:
     """`definition` opened with `lines`, nothing answered."""
     return run_case(definition, file=FILE | {"lines": lines}, answers=[], people=PEOPLE)
+
+
+# --- From the tutor's review of #87 ---
+
+
+def labelled() -> dict[str, Any]:
+    """The returned order, its lines also carrying a label."""
+    definition = order_return()
+    definition["fields"]["lines"]["fields"]["label"] = {"type": "string"}
+    return definition
+
+
+LABELLED = [
+    {"sku": "A12", "amount": 40, "label": "boots"},
+    {"sku": "B7", "amount": 25, "label": "socks"},
+]
+
+
+def test_a_migration_changing_a_repeated_steps_key_once_it_has_numbers_is_refused() -> None:
+    # Its items' numbers are tied to the key: told apart by another, every item would run again,
+    # under new keys, and each letter be drafted twice (brief, D17, D53, D73).
+    by_label = labelled()
+    by_label["steps"]["draft_line"]["for_each"]["key"] = "label"
+    with pytest.raises(
+        ChangeRefused,
+        match="^draft_line repeats over lines by sku, and order-return 2 by label: its items' "
+        "numbers can't follow a new key; keep the key, or migrate before it runs$",
+    ):
+        run_case(
+            labelled(),
+            file=FILE | {"lines": LABELLED},
+            answers=[migrate(release_of(by_label, 2), {}, "pia")],
+            people=PEOPLE | {"pia": ["platform"], "lee": ["platform"]},
+            release=release_of(labelled(), 1),
+        )
+
+
+def test_a_required_repeated_step_with_an_item_to_retry_isnt_stranded() -> None:
+    # Line 1's draft failed, line 2's went through: the step can still be done, by the retry, so
+    # only the failed run needs attention (brief, D72) (brief, D73).
+    definition = order_return()
+    definition["steps"]["draft_line"]["required"] = True
+    run = run_case(
+        definition,
+        file=FILE,
+        answers=[],
+        people=PEOPLE,
+        activities={"letters.draft@2": down_for("memory/draft_line.1#1")},
+    )
+    assert [line.split(": ")[0] for line in run.needs_attention] == ["draft_line.1#1"]
+
+
+def test_a_required_repeated_step_with_an_item_open_isnt_stranded() -> None:
+    # Line 2 inspected, line 1 open: on its way (brief, D72) (brief, D73).
+    run = run_case(
+        closing_out(required=True),
+        file=FILE,
+        answers=[("inspect_line.2#1", "received", "ana")],
+        people=PEOPLE,
+    )
+    assert run.waiting_for == ["inspect_line.1 by support"]
+    assert run.needs_attention == []
+
+
+def test_a_required_repeated_step_with_an_item_stopped_is_stranded() -> None:
+    # Line 1's inspection was stopped by the rule, and an item's run starts at most once: only a
+    # person's close ends what is owed (brief, D72) (brief, D73).
+    definition = withdrawable()
+    definition["steps"]["inspect_line"]["required"] = True
+    run = run_case(
+        definition,
+        file=FILE,
+        answers=[
+            ("inspect_line.2#1", "received", "ana"),
+            propose("take_call", "ana"),
+            ("take_call", "withdrew", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        (
+            "inspect_line: required, and it can't start: inspect_line.1 ended undone, and an "
+            "item's run starts at most once: close the case with a reason"
+        )
+    ]

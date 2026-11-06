@@ -6,7 +6,7 @@ still start waits, saying for what; one that can't needs a person, since only a 
 ends it. Nothing starts that nobody asked for.
 """
 
-from ventoux.case.admission import latest_counted, requirements_met
+from ventoux.case.admission import latest_counted, latest_of_item, requirements_met
 from ventoux.case.closing import close_held, needs_attention, pending
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.owed import owed
@@ -111,6 +111,8 @@ def cannot_start_again(case: CaseDefinition, state: CaseState, name: str, held: 
     """Why nothing can start the step `name` again, or None: it may start itself (once), a
     person may propose it, or a rule in the definition starts it, proven from the definition,
     never guessed (brief, D37). A step that has run starts again only if repeatable."""
+    if name in state.items:  # a repeated step, read per item (brief, D73)
+        return item_ended_undone(state, name)
     step = case.steps[name]
     latest = latest_counted(state, name)
     if latest is None and step.automatic:
@@ -135,6 +137,23 @@ def started_by_a_rule(case: CaseDefinition, name: str) -> bool:
 
 
 def on_its_way(state: CaseState, step: str) -> bool:
-    """Whether the step's latest run is under way, and so shown by the case already."""
+    """Whether the step's latest run is under way, and so shown by the case already; for a
+    repeated step, any item's latest run (brief, D73)."""
+    if step in state.items:
+        return any(
+            (latest := latest_of_item(state, step, number)) is not None
+            and latest.status in ON_ITS_WAY
+            for number in state.items[step].values()
+        )
     latest = latest_counted(state, step)
     return latest is not None and latest.status in ON_ITS_WAY
+
+
+def item_ended_undone(state: CaseState, step: str) -> str | None:
+    """Why the repeated step `step` can never be done, or None: an item's latest run ended without
+    being done (stopped, rejected, skipped), and an item's run starts at most once (brief, D73)."""
+    for number in state.items[step].values():
+        latest = latest_of_item(state, step, number)
+        if latest is not None and latest.status in ("cancelled", "rejected", "skipped"):
+            return f"{step}.{number} ended undone, and an item's run starts at most once"
+    return None
