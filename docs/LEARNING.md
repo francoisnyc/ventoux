@@ -815,6 +815,15 @@ and record the key points. A question is closed once you can explain the answer 
     `"plan": "settle-claim@1"`. The builder writes the reference only; what it promises is the
     catalog's, checked by `ventoux check` (14c); where it runs is the binding's, never in a
     definition.
+- Retrieval (layer 18c warm-up, 2026-11-06): asked to be told. Given the card again: the catalog
+  answers what a definition may call (contracts, roles, labels; changes when a contract is added
+  or retired); a contract, what one entry promises (schemas, risk, effect, retries, timeouts,
+  idempotency, outcomes, output sources; never changes, a change is a new `@N`); a binding, where
+  it runs here (workflow type and queue; operations move it, no version, no release, activation
+  checks the pollers, D54). The test: could a case notice it or tighten it? Tied to 18c: a child's
+  release is pinned by its parent's (choice 22); a garage contract moved to another queue needs
+  no release; one with a new timeout is `@2`, a new `repair` release, and a new claim release that
+  pins it.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
 
 ## 29. Layer 1: why `@1` and not `@1.0`
