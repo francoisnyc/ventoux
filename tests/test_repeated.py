@@ -6,16 +6,20 @@ See docs/layers/18-lifecycle.md (18b) and docs/guides/cases.md, "Repeated steps:
 
 import copy
 import json
+import runpy
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 from temporalio.client import Client
+from test_diff import lines, packed
 from test_temporal_case import QUEUE, SwitchingCases, on_temporal, reported, runs_of
 
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.diff import diff
 from ventoux.case.memory import CaseRun
+from ventoux.case.sheet import case_map
 from ventoux.case.validate import validate_case
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import CaseReport, answer, start_case
@@ -33,6 +37,7 @@ from ventoux.testing import (
     retry,
     run_case,
 )
+from ventoux.tooling.builder.written import written
 
 ROOT = Path(__file__).parent.parent
 GUIDE = ROOT / "docs" / "guides" / "cases.md"
@@ -579,3 +584,64 @@ def test_a_repeated_cases_state_reads_back_as_it_was() -> None:
     back = state_from_data(ExactPayloadConverter().from_payload(payload, dict), {})
     assert back.items == {"inspect_line": {"A12": 1, "B7": 2}, "draft_line": {"A12": 1, "B7": 2}}
     assert back == run.state
+
+
+# --- Slice 6: the builder, the check, the diff and the case map ---
+
+
+def test_the_builder_writes_the_guides_returned_order() -> None:
+    # The same JSON whichever way it is written (brief, D58).
+    found = runpy.run_path(str(ROOT / "examples" / "builder" / "repeated.py"))["order_return"]
+    assert json.loads(written(found), parse_float=Decimal) == order_return()
+
+
+def test_a_repeated_high_risk_contract_is_an_error_at_the_check() -> None:
+    # It needs an approval, and a repeated step can have none yet (brief, D11, D48, D73).
+    definition = order_return()
+    definition["steps"]["draft_line"] |= {
+        "activity": "payments.refund@2",
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "each.amount"}},
+    }
+    found = validate_case(parse_case(definition), CATALOG)
+    assert [(i.path, i.message) for i in found if i.severity == "error"] == [
+        (
+            "steps.draft_line",
+            (
+                "payments.refund@2 is high risk, and draft_line is repeated, so it can have no "
+                "approval: repeat a low-risk step, or pay once"
+            ),
+        )
+    ]
+
+
+def test_the_check_reads_an_items_sources_as_its_lists() -> None:
+    # Before any case opens: each.sku comes from what the customer typed, which a trusted-only
+    # input refuses every time, so it is an error (brief, D21, D36, D73).
+    definition = order_return()
+    definition["fields"]["lines"]["source"] = "untrusted:customer"
+    definition["steps"]["draft_line"]["inputs"]["to_customer"] = {"var": "each.sku"}
+    found = validate_case(parse_case(definition), CATALOG)
+    assert [(i.path, i.code) for i in found if i.severity == "error"] == [
+        ("steps.draft_line.inputs.to_customer", "INPUT_POLICY")
+    ]
+    assert found[0].message == (
+        "letters.draft@2 takes to_customer only from a system or a person, never from untrusted "
+        "data, and this value comes from each.sku (the opener, untrusted:customer): use a value a "
+        "system or a person gave"
+    )
+
+
+def test_the_diff_reads_a_step_made_repeated_as_not_proven() -> None:
+    # A repeated step acts once per item: more often, on other values; no direction is a proof
+    # for every case (brief, D55).
+    after = order_return()
+    before = copy.deepcopy(after)
+    del before["steps"]["draft_line"]["for_each"]
+    assert lines(diff(packed(before), packed(after), CATALOG)) == [
+        'not proven steps.draft_line.for_each: none -> {"over": "lines", "key": "sku"}'
+    ]
+
+
+def test_the_case_map_says_a_step_runs_once_per_item() -> None:
+    read = case_map(packed(order_return()), CATALOG)
+    assert "It runs once for each item of lines, told apart by its sku." in read

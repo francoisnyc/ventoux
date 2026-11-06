@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ventoux.case.called import called
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
+from ventoux.case.definition import ActivityStep, CallStep, CaseDefinition, PlanStep, WorkflowStep
 from ventoux.case.plan_step import PlanNotSupplied, supplied
 from ventoux.case.types import expressions_of, set_problem, step_types, type_problem
 from ventoux.core.approval import risk_refusal
@@ -188,11 +188,20 @@ def approval_issues(
         assert isinstance(step, CallStep)  # only a call step has a contract
         if step.approval is None:
             if contract.risk == "high":
+                # A repeated step can have no approval yet, so "add one" can't be done
+                # (brief, D48) (brief, D73).
+                repeated = isinstance(step, ActivityStep) and step.for_each is not None
+                needs = (
+                    f"{name} is repeated, so it can have no approval: repeat a low-risk step, "
+                    "or pay once"
+                    if repeated
+                    else f"{name} has no approval: add one"
+                )
                 issues.append(
                     Issue(
                         f"steps.{name}",
                         "APPROVAL_REQUIRED",
-                        f"{contract.reference} is high risk, and {name} has no approval: add one",
+                        f"{contract.reference} is high risk, and {needs}",
                     )
                 )
             continue

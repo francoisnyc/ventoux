@@ -8,11 +8,14 @@ sources are known in one pass (brief, D34) (brief, D36). See docs/layers/10-case
 from collections.abc import Callable, Collection, Mapping
 
 from ventoux.case.definition import (
+    EACH,
+    ActivityStep,
     CallStep,
     CaseDefinition,
     PlanStep,
     Rule,
     Started,
+    TaskStep,
     Then,
     WaitStep,
     WorkflowStep,
@@ -37,6 +40,7 @@ from ventoux.core.contract import Contract, held_input
 from ventoux.core.expressions import (
     Expression,
     FieldType,
+    ListType,
     OutcomeType,
     ReferenceType,
     check,
@@ -287,6 +291,30 @@ def policy_issue(
     return None
 
 
+def as_listed(case: CaseDefinition, step: str | None, field: str) -> str:
+    """What `field` comes from, as provenance reads it: in a repeated step, its item's
+    `each.<field>` is its list, whose sources every item carries (brief, D12) (brief, D73)."""
+    repeated = case.steps[step] if step is not None else None
+    for_each = repeated.for_each if isinstance(repeated, TaskStep | ActivityStep) else None
+    if for_each is not None and field.split(".")[0] == EACH:
+        return for_each.over
+    return field
+
+
+def with_item_sources(
+    case: CaseDefinition, step: str, sources: Mapping[str, frozenset[str]]
+) -> Mapping[str, frozenset[str]]:
+    """`sources`, with a repeated step's `each.<field>` given its list's (brief, D73)."""
+    found = case.steps[step]
+    for_each = found.for_each if isinstance(found, TaskStep | ActivityStep) else None
+    if for_each is None:
+        return sources
+    listed = case.fields[for_each.over].declared
+    assert isinstance(listed, ListType)  # refused when read otherwise
+    listed_by = sources.get(for_each.over, frozenset())
+    return {**sources, **{f"{EACH}.{field}": listed_by for field in listed.fields}}
+
+
 class Refusals:
     """Whether a policy refuses what an expression reads, for a case `opener` opens: whichever
     rule wrote each value it reads (`always`), or only when some did (`sometimes`) (brief, D42)."""
@@ -299,11 +327,12 @@ class Refusals:
     def refused(self, policy: Policy) -> Callable[[frozenset[str]], bool]:
         return lambda sources: policy.refuses(sources) is not None
 
-    def always(self, policy: Policy, expression: Expression) -> bool:
+    def always(self, policy: Policy, expression: Expression, step: str | None = None) -> bool:
         """Whether `policy` refuses `expression`'s value every time. A value read from nothing
         has no sources, which some policies refuse; any other comes from the union of what it
-        reads, none of them empty, so it is refused whenever one of them always is."""
-        read = fields_read(expression)
+        reads, none of them empty, so it is refused whenever one of them always is. In the step
+        `step`, a repeated one's item is read as its list (brief, D73)."""
+        read = [as_listed(self.case, step, field) for field in fields_read(expression)]
         if not read:
             return policy.refuses(frozenset()) is not None
         if id(policy) not in self.found:
@@ -312,12 +341,14 @@ class Refusals:
             )
         return any(field in self.found[id(policy)] for field in read)
 
-    def sometimes(self, policy: Policy, expression: Expression) -> str | None:
+    def sometimes(
+        self, policy: Policy, expression: Expression, step: str | None = None
+    ) -> str | None:
         """The first value `expression` reads that `policy` refuses only when some rules wrote
         it, said with which; None if there is none."""
-        if self.always(policy, expression):
+        if self.always(policy, expression, step):
             return None
-        for field in fields_read(expression):
+        for field in (as_listed(self.case, step, read) for read in fields_read(expression)):
             own = self.sources.get(field, frozenset())
             if policy.refuses(own) is not None:
                 refused = self.refused(policy)
@@ -350,14 +381,13 @@ def policy_issues(
             for policy in contract.policies(field):
                 # Claimed only where refused whichever rule wrote what it reads (brief, D42).
                 refused = (
-                    by_a_system.always(policy, expression),
-                    by_a_person.always(policy, expression),
+                    by_a_system.always(policy, expression, name),
+                    by_a_person.always(policy, expression, name),
                 )
-                message = refusal(
-                    contract.reference, field, policy, expression, by_a_person.sources, named
-                )
+                sources = with_item_sources(case, name, by_a_person.sources)
+                message = refusal(contract.reference, field, policy, expression, sources, named)
                 issue = policy_issue(path, message, policy, field, refused)
-                sometimes = by_a_person.sometimes(policy, expression)
+                sometimes = by_a_person.sometimes(policy, expression, name)
                 if issue is None and sometimes is not None:
                     issue = writer_issue(path, message, sometimes.format(step=name))
                 if issue is not None:

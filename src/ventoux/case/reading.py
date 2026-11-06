@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 from ventoux.case.definition import (
+    ActivityStep,
     After,
     AnsweredTask,
     CallStep,
@@ -566,6 +567,10 @@ def read_step(name: str, case: CaseDefinition, catalog: Catalog) -> EntryReading
         # Fail closed: a kind of step the reader doesn't know is refused, never guessed.
         raise ReadingRefused(f"can't read {name}: {step!r} is no kind of step")
     sentences = [what_it_is(name, step, catalog), when_it_starts(name, step, case)]
+    if isinstance(step, TaskStep | ActivityStep) and step.for_each is not None:
+        # A run per item, as it runs (brief, D73).
+        over, key = step.for_each.over, step.for_each.key
+        sentences.append(f"It runs once for each item of {over}, told apart by its {key}.")
     if step.required:  # owed in every case (brief, D72)
         sentences.append(f"The case owes it: it doesn't close by itself until {name} is done.")
     fine: list[Clause] = []

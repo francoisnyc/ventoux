@@ -27,5 +27,6 @@
   "tests/digests/attachments": "dc5299cf739618daa486bce28e96e7815cf7f3a45dc792b151432846add17089",
   "tests/digests/every-shape": "8cd44455d571dbafc1910fee3d8ae05cfb51b23e82b328552e453300edab1040",
   "tests/digests/assignments": "a6648b5d7be446b82f175e94aceef58322407db5935b622ab54349e716107b51",
-  "tests/digests/required": "bf473af49f07bd545ddb5d53222a16d9c328f12e75912f87592e7fbabb287ea3"
+  "tests/digests/required": "bf473af49f07bd545ddb5d53222a16d9c328f12e75912f87592e7fbabb287ea3",
+  "tests/digests/repeated": "c5bec404217de1a1a0a04d1230c56f004210e8e1e59292173e7c6961ee5cacac"
 }
