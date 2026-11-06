@@ -516,6 +516,8 @@ def rename(
     state.refreshing = {key(name): run for name, run in state.refreshing.items()}
     for run in state.runs:
         run.step = renamed(migration, "steps", run.step)
+    # A repeated step's numbers follow its new name, as its runs do (brief, D53) (brief, D73).
+    state.items = {renamed(migration, "steps", name): keys for name, keys in state.items.items()}
     step = functools.partial(renamed, migration, "steps")
     state.approvals = {step(name): approval for name, approval in state.approvals.items()}
     state.given = {step(name): given for name, given in state.given.items()}
@@ -556,7 +558,9 @@ def rename(
             continue
         waits = target.steps[run.step]
         if isinstance(waits, TaskStep):
-            state.waiting[run.entry] = f"{run.step} by {' or '.join(waits.roles)}"
+            # A repeated run keeps its number under its step's new name (brief, D73).
+            named = run.step if run.item is None else f"{run.step}.{run.item}"
+            state.waiting[run.entry] = f"{named} by {' or '.join(waits.roles)}"
         elif isinstance(waits, WaitStep):
             state.waiting[run.entry] = f"{waits.event} {sent_by(target.events[waits.event])}"
 

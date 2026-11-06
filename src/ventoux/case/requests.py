@@ -9,7 +9,14 @@ See docs/layers/12-releases.md (12c).
 
 from ventoux.case.admission import latest_run
 from ventoux.case.answers import AnswerRefused, offers
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, rule_fields
+from ventoux.case.definition import (
+    ActivityStep,
+    CallStep,
+    CaseDefinition,
+    PlanStep,
+    TaskStep,
+    rule_fields,
+)
 from ventoux.case.migrations import Moved, apply, problems_of, released
 from ventoux.case.state import (
     Answered,
@@ -154,6 +161,14 @@ def edit_problem(case: CaseDefinition, state: CaseState, name: str, value: objec
             f"{name} is {shape.of} {system}, given only by a person's answer, where {system} "
             "checks it: an edit is never checked, so give it in the answer to the task that sets it"
         )
+    # The runs are numbered by the list's keys: a deliberate limit for now (brief, D48) (brief, D73).
+    for step_name, step in case.steps.items():
+        for_each = step.for_each if isinstance(step, TaskStep | ActivityStep) else None
+        if for_each is not None and for_each.over == name:
+            return (
+                f"{name} is the list {step_name} repeats over, so it is never edited: close the "
+                "case and open it again with the list corrected"
+            )
     if name not in state.values:
         return f"{name} holds no value yet: an edit changes a value, never gives the first"
     if declared.sensitive and not isinstance(value, Sensitive):

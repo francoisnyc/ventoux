@@ -4,17 +4,35 @@ by a number the engine gives its item's key, and given its item (brief, D73).
 See docs/layers/18-lifecycle.md (18b) and docs/guides/cases.md, "Repeated steps: one run per item".
 """
 
+import copy
 import json
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
+from temporalio.client import Client
+from test_temporal_case import QUEUE, SwitchingCases, on_temporal, reported, runs_of
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, CaseRefused, close, load_definition, run_case
+from ventoux.temporal.carried import state_as_data, state_from_data
+from ventoux.temporal.cases import CaseReport, answer, start_case
+from ventoux.temporal.converter import ExactPayloadConverter
+from ventoux.testing import (
+    CATALOG,
+    CaseRefused,
+    ChangeRefused,
+    close,
+    edit,
+    load_definition,
+    migrate,
+    propose,
+    release_of,
+    retry,
+    run_case,
+)
 
 ROOT = Path(__file__).parent.parent
 GUIDE = ROOT / "docs" / "guides" / "cases.md"
@@ -416,3 +434,148 @@ def test_each_item_carries_the_lists_sources() -> None:
     assert failed == ["draft_line.1#1", "draft_line.2#1"]
     assert "untrusted:customer" in run.needs_attention[0]
     assert not any(line.startswith("scheduled draft_line") for line in run.history)
+
+
+# --- Slice 5: the routes (brief, D73) ---
+
+
+def test_an_edit_of_a_list_a_step_repeats_over_is_refused() -> None:
+    # A deliberate limit: the runs are numbered by the list's keys (brief, D48, D52, D73).
+    with pytest.raises(
+        ChangeRefused,
+        match="^lines is the list inspect_line repeats over, so it is never edited: close the "
+        "case and open it again with the list corrected$",
+    ):
+        run_case(
+            order_return(),
+            file=FILE,
+            answers=[edit("lines", [{"sku": "A12", "amount": 40}], "ana")],
+            people=PEOPLE,
+        )
+
+
+def withdrawable() -> dict[str, Any]:
+    """The returned order, with a rule that stops every inspection when the customer withdraws,
+    which support records by answering `take_call`."""
+    definition = order_return()
+    definition["milestones"] = {"withdrawn": {"display": {"title": "Withdrawn"}}}
+    definition["steps"]["take_call"] = {
+        "kind": "task",
+        "display": {"title": "Take the customer's call"},
+        "roles": ["support"],
+        "automatic": False,
+        "proposed_by": ["support"],
+        "outcomes": {"withdrew": {"display": {"title": "Withdrew"}, "reaches": ["withdrawn"]}},
+    }
+    definition["rules"] = {
+        "withdraw": {
+            "display": {"title": "Stop inspecting when the customer withdraws"},
+            "on": {"reached": "withdrawn"},
+            "then": {"stop": ["inspect_line"]},
+        }
+    }
+    return definition
+
+
+def test_a_rules_stop_stops_every_open_run_of_a_repeated_step() -> None:
+    # Line 2 inspected already; line 1's open run is cancelled, as a close would (brief, D40).
+    run = run_case(
+        withdrawable(),
+        file=FILE,
+        answers=[
+            ("inspect_line.2#1", "received", "ana"),
+            propose("take_call", "ana"),
+            ("take_call", "withdrew", "ana"),
+        ],
+        people=PEOPLE,
+    )
+    assert "cancelled inspect_line.1#1: stopped by withdraw#1" in run.history
+    assert not any(entry.startswith("inspect_line") for entry in run.waiting_for)
+
+
+def down_for(first: str) -> Any:
+    """A letter service down for the first call with the key `first`, then up."""
+    seen: list[str] = []
+
+    def draft(inputs: dict[str, Any]) -> dict[str, Any]:
+        seen.append(inputs["idempotency_key"])
+        if inputs["idempotency_key"] == first and seen.count(first) == 1:
+            raise ConnectionError("letters down")
+        return {"draft_id": f"draft-{len(seen)}"}
+
+    return draft
+
+
+def test_a_failed_run_is_retried_by_its_entry_with_its_own_key() -> None:
+    # Line 1's draft fails; line 2's goes through after it. The retry of draft_line.1#1 is that
+    # run again, with its key: line 2's run came later, but it's another item's (brief, D26).
+    retried = run_case(
+        order_return(),
+        file=FILE,
+        answers=[retry("draft_line.1#1", "omar")],
+        people=PEOPLE,
+        activities={"letters.draft@2": down_for("memory/draft_line.1#1")},
+    )
+    assert "omar retried draft_line.1#1 as operations" in retried.history
+    assert retried.needs_attention == []
+    assert "draft_line.1#1 done" in retried.history
+
+
+def test_a_migration_renaming_a_repeated_step_keeps_its_items() -> None:
+    # Line 2 inspected, line 1 not, then inspect_line renamed check_line: close_out, which
+    # requires it, still waits for line 1 (brief, D53) (brief, D73).
+    before = closing_out()
+    after = copy.deepcopy(before)
+    after["steps"]["check_line"] = after["steps"].pop("inspect_line")
+    after["steps"]["close_out"]["requires"] = ["check_line"]
+    run = run_case(
+        before,
+        file=FILE,
+        answers=[
+            ("inspect_line.2#1", "received", "ana"),
+            migrate(release_of(after, 2), {"steps": {"inspect_line": "check_line"}}, "pia"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        people=PEOPLE | {"pia": ["platform"], "lee": ["platform"]},
+        release=release_of(before, 1),
+    )
+    assert any(line.startswith("applied case.change#1: migrated") for line in run.history)
+    # The open run keeps its entry, inspect_line.1#1, and its number under the new name.
+    assert run.waiting_for == ["check_line.1 by support"]
+
+
+def test_a_repeated_steps_items_cross_continue_as_new() -> None:
+    # Line 2 inspected, then a refused answer: two events, so the case continues as new. The
+    # numbers cross with the runs, so close_out still waits for line 1 (brief, D27) (brief, D73).
+    async def scenario(client: Client) -> tuple[CaseReport, CaseReport, tuple[str, str]]:
+        file = {"order_id": "ord-1", "email": "ana@example.com", "lines": EXACT_LINES}
+        case = await start_case(client, SwitchingCases, closing_out(), file, "return-1", QUEUE)
+        await reported(case, lambda now: "inspect_line.2#1" in now.waiting_at)
+        await answer(case, "inspect_line.2#1", "received", "ana", ["support"], {})
+        await answer(case, "inspect_line.2#1", "received", "ana", ["support"], {})  # refused
+        waiting = await reported(case, lambda now: "refused" in "\n".join(now.history))
+        switched = await runs_of(client, "return-1")
+        await answer(case, "inspect_line.1#1", "missing", "ana", ["support"], {})
+        closing = await reported(case, lambda now: now.waiting_at == ["close_out#1"])
+        return waiting, closing, switched
+
+    waiting, closing, (first, last) = on_temporal(scenario, cases=SwitchingCases)
+    assert last != first  # the case continued as new while line 1 was open
+    assert waiting.waiting_for == ["inspect_line.1 by support"]
+    assert closing.waiting_for == ["close_out by support"]
+
+
+EXACT_LINES = [{"sku": "A12", "amount": Decimal(40)}, {"sku": "B7", "amount": Decimal(25)}]
+
+
+def test_a_repeated_cases_state_reads_back_as_it_was() -> None:
+    # The whole state crosses continue-as-new as data (brief, D27): each run's item number, and
+    # each repeated step's numbers, the authority on which runs a step is done with (brief, D73).
+    run = run_case(
+        closing_out(), file=FILE, answers=[("inspect_line.2#1", "received", "ana")], people=PEOPLE
+    )
+    payload = ExactPayloadConverter().to_payload(state_as_data(run.state))
+    assert payload is not None
+    back = state_from_data(ExactPayloadConverter().from_payload(payload, dict), {})
+    assert back.items == {"inspect_line": {"A12": 1, "B7": 2}, "draft_line": {"A12": 1, "B7": 2}}
+    assert back == run.state
