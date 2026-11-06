@@ -53,6 +53,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 46 | Layer 16c: why the case keeps the ID, never the file, and what checking it guards | closed |
 | 47 | Layer 17a: is an assignment a permission? | open |
 | 48 | Layer 18a: an owed step that can never start | open |
+| 49 | Layer 18b: how a repeated run is named, retried and migrated | open |
 
 ---
 
@@ -2014,4 +2015,31 @@ and record the key points. A question is closed once you can explain the answer 
     says `confirm, required, after pay`), or by `confirm` no longer requiring `pay`.
   - In one line: an owed step that can never start isn't something the case waits for; it needs
     a person, and the check tells the author before any case opens.
+- Status: open, until the three parts come back from memory.
+
+## 49. Layer 18b: how a repeated run is named, retried and migrated
+
+> A returned order's `lines` are `A12` (40) and `B7` (25), and `draft_line` drafts a letter per
+> line. a) What are the two runs called, what are their idempotency keys, and why aren't they
+> `draft_line#1` and `#2`, nor `draft_line[A12]#1`? b) A12's draft fails and B7's goes through:
+> what does an operator do, and why isn't the retry refused though B7's run came later? c) Why is
+> a migration changing `draft_line`'s key from `sku` to `label` refused once the letters are
+> drafted?
+
+- Asked at the end of layer 18b's walk-through (2026-11-06), in place of the layer's own question,
+  which waits for 18c.
+- Your answer: asked to be told. Given:
+  - **a) Named by a number the engine gives each key:** `draft_line.1#1` and `draft_line.2#1`, keyed
+    `memory/draft_line.1#1` and `memory/draft_line.2#1`. Matched by the key, named by the number.
+    Not by position: a list that changed would give position 1 to another line, and a retry would
+    send one line's key with another's values (D17). Not by value: no history line or workflow ID
+    quotes a value of the case file (D30), and a key may be untrusted or personal.
+  - **b) A retry by its entry:** `retry("draft_line.1#1", "omar")`, the same run with the same key
+    (D26). "Only the latest run" is asked per item, so B7's run, another item's, doesn't count; a
+    required `draft_line` isn't stranded meanwhile, since the retry can still do it.
+  - **c) Numbers are tied to the key:** told apart by `label`, the items would be numbered 3 and 4
+    and drafted again under new keys, which the letter system can't recognise (D17). Refused once
+    the step has numbers: keep the key, or migrate before it runs (D53, D73).
+  - In one line: a repeated run is named by a number tied to its item's key, never by position or
+    value, so its key never moves to another item, and nothing renumbers it under a new key.
 - Status: open, until the three parts come back from memory.
