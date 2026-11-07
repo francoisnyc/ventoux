@@ -476,7 +476,7 @@ or, for a pin of behaviour already built, catching a mutation.
 **State keyed by a step's name:** each repeated step's key-to-number map. It follows a migration's
 rename, tested; it crosses continue-as-new, tested.
 
-### For 18c and 18d: child cases (18c's proposed 2026-11-07; 18d's sketched, settled when it starts)
+### For 18c and 18d: child cases (18c's answered 2026-11-07: as recommended; D74. 18d's sketched)
 
 Checked against the code before asking, as 18b's were. What the code already gives:
 

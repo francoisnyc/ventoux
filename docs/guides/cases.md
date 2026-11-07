@@ -2977,7 +2977,8 @@ still that adjuster's in the child, so the child's own checks judge where it rea
 The child is opened by its parent case, recorded as such, never by a person. Who may not approve
 crosses too: the person who opened the claim, and the person who proposed the step, approve
 nothing in the repair (brief, D25). A child case has no `approval` of its own; its steps carry
-theirs.
+theirs. A sensitive value is given only to a field the child keeps sensitive too, and
+the check refuses anything else: a view can hide more than its source, never less.
 
 **One subject, one key.** The child is sealed under its parent's key (brief, D31): a sensitive
 input crosses sealed, never opened. Forgetting the claim forgets its repair with the same request,
@@ -2992,8 +2993,8 @@ forgets it too`.
 
 When the child closes, the step is done, and the parent reads the report as the step's outputs:
 `repair.outcome` (`done`, or the reason a person closed the repair with) and `repair.cost`; the
-milestones the repair reached are in the step's history line. Each value keeps the sources it had in the child and
-gains `case:repair`, saying where it came from. Nothing else crosses back, and a child never
+milestones the repair reached are in the step's history line. Each value keeps the sources it had
+in the child and gains `case:repair`, saying where it came from. Nothing else crosses back, and a child never
 writes into its parent's case file: the parent decides what a report changes, with its own steps
 and rules.
 
@@ -3018,7 +3019,12 @@ repair#1 done: repair closed, nothing left to do, reaching fixed
 scheduled pay_garage#1: payments.refund@2 (order_id from system:opener; amount from person:lee, case:repair), key memory/pay_garage#1
 ```
 
-A child whose script isn't finished keeps the step running, and the parent open.
+A child whose script isn't finished keeps the step running, and the parent open: its
+`waiting_for` has one line for it, `repair#1: case repair, open`. The child's own tasks are the
+child's, listed in its own report, since those who see the claim may not see the repair. A
+reported field the child never set (a repair closed as a duplicate has no cost) is absent, and
+whatever reads it fails, so branch on `repair.outcome` first; `ventoux check` warns where a reader
+may find it unset.
 
 **While the child runs,** it is the child's:
 

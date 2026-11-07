@@ -3070,6 +3070,56 @@ Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is k
 - **No new engine version (D51):** no definition readable before holds `for_each`, and no case
   could hold a list value.
 
+### D74. Child cases: a whole case opened from a step, pinned by its parent, reporting back
+
+*Decided 2026-11-07, in layer 18c (`docs/layers/18-lifecycle.md`, choices 21 to 23, 25 to 27, 29
+and 36 to 41). Adds to D10, D24, D25, D28, D29, D40, D48, D50, D51, D52 and D53, whose text is
+kept. Temporal's part (choices 24, 28 and continue-as-new) is 18d's, decided as D75.*
+
+- **A case step opens a child case:** `{"kind": "case", "case": "repair@3", "inputs": {...}}`,
+  named with its release, as a plan is. It takes what a plan step takes, and, like one, no
+  `approval` (the child's steps carry theirs). No `for_each` (a deliberate limit, D48): one child
+  per run. A repeatable case step proposed again opens another child, `repair#2`.
+- **The parent's release pins the child's** (D51, D54): the release is in the parent's package,
+  so a new child process reaches the parent only by a release of the parent, which the diff shows.
+  Activating the parent checks the child's release is active in the environment with the same
+  digest; the child asks its registry as it opens, as any case does.
+- **The package holds the child as a package** (adds to D50): `cases/repair@3/`, with its own
+  `case.json` and `plans/`, read as the parent's is, and covered by the parent's digest. A child
+  named twice, a child nobody names, or a child folder that isn't a package is refused.
+- **The child is given an opening,** its fields read from the parent's case file, each with its
+  sources (D28). It is opened by the parent case, never a person, and the parent's exclusions
+  cross: the parent's opener and the step's proposer approve nothing in the child (D25). Each input
+  is checked at validation as any opening is: a field of the child, not set by its forms or rules,
+  of its type.
+- **A sensitive value enters a child only into a sensitive field, and a report carries no
+  sensitive field, for now** (deliberate limits, D48): a view hides more than its source, never
+  less.
+- **The child's end report lands as the step's outputs** (adds to D29): `repair.outcome`, which is
+  `done` or the close reason a person used, type-checked against the child's reasons; and each field
+  the child's `reports` lists (non-sensitive, not a list) that is set at its close, as
+  `repair.<field>`. Each keeps its sources in the child, plus `case:repair`. A child never writes
+  into its parent's case file. A reported field the child never set is absent: whatever reads it
+  fails, as reading any missing field does, and `ventoux check` warns (`MAY_BE_UNSET`). The
+  milestones the child reached are said in the history, never read by the parent (a deliberate
+  limit, D48).
+- **While it runs, the child is pending work** (adds to D24): the parent's `waiting_for` has one
+  line for it (`repair#1: case repair, open`); the child's own entries are the child's, since those
+  who see the parent may not see the child (D22, D30).
+- **A child needing attention is the child's,** retried by its operators; the parent waits. A
+  failure to open it (a release not active, an opening refused) is the parent's step failing,
+  retried there under the same entry; a retry never opens a second child once one has opened.
+- **The parent's routes reach a child only through its step.** A close, or a rule stopping the
+  step, closes the child through D40's one place, saying why (`closed by its parent: duplicate, by
+  ana`), and the parent closes once the child has ended; a close never waits for a person (D48). A
+  migration's target must open the same release from the step, renamed or not, or the migration
+  waits for the child to end (D53), and the record of each run's child follows a rename. An edit
+  never reaches a child (D52). Events and rules reach the parent only.
+- **One level only** (a deliberate limit, D48): a child's definition has no case step of its own,
+  refused when the parent is validated. That bounds what one close must reach, and no case opens
+  itself.
+- **No new engine version (D51):** no definition readable before has a case step.
+
 ## Concepts
 
 | Term | Meaning |
@@ -3103,7 +3153,8 @@ Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is k
 | Provenance tag | The sources a value was derived from |
 | Input policy | A rule on an activity input: which sources may influence it (a "sink policy" in the security literature; D21) |
 | Change request | A proposed change to a running case, applied only after someone else approves it |
-| Package | A case definition and the plans it uses, released together |
+| Package | A case definition, the plans it uses and the child cases it pins, released together |
+| Child case | A whole case opened from a step of another, pinned by its release, reporting back as the step's outputs |
 | Release | An immutable, numbered version of a package, identified by its behaviour digest |
 | Activation | Making new cases in an environment start on a given release |
 | Worker manifest | What one worker says it serves, as it starts: each contract with its hash, its workflow types and bindings |
