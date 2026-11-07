@@ -160,3 +160,123 @@ def test_a_report_carries_only_the_cases_own_plain_values(
     with pytest.raises(CaseInvalid) as refused:
         parse_case(definition)
     assert str(refused.value) == said
+
+
+# --- Slice 3: the child's opening, checked at validation (brief, D74) ---
+
+
+def issues_of(parent: dict[str, Any], child: dict[str, Any], code: str) -> list[tuple[str, str]]:
+    """What `validate_case` says, of `code`, of the claim given `child` as its `repair@3`."""
+    issues = validate_case(parse_case(parent), CATALOG, cases={"repair@3": child})
+    return [(i.path, i.message) for i in issues if i.code == code]
+
+
+@pytest.mark.parametrize(
+    ("given", "said"),
+    [
+        (
+            "cost",
+            "repair@3 takes no input cost: its task fix sets it; its inputs are budget, vehicle",
+        ),
+        ("mileage", "repair@3 has no input mileage: its inputs are budget, vehicle"),
+    ],
+)
+def test_a_child_is_given_only_what_it_takes_at_its_opening(given: str, said: str) -> None:
+    # One source per field: what the child's own form sets is never given at its opening.
+    definition = claim()
+    definition["steps"]["repair"]["inputs"][given] = {"var": "payout"}
+    assert issues_of(definition, repair(), "UNKNOWN_INPUT") == [
+        (f"steps.repair.inputs.{given}", said)
+    ]
+
+
+def test_a_child_is_never_given_what_its_rules_set() -> None:
+    child = repair()
+    child["fields"]["costly"] = {"type": "boolean", "display": {"title": "Costly"}}
+    child["rules"] = {
+        "size_up": {
+            "display": {"title": "Mark a costly repair"},
+            "on": "opened",
+            "when": {">": [{"var": "budget"}, 5000]},
+            "then": {"set": {"costly": True}},
+        }
+    }
+    definition = claim()
+    definition["steps"]["repair"]["inputs"]["costly"] = {"==": [{"var": "payout"}, 0]}
+    assert issues_of(definition, child, "UNKNOWN_INPUT") == [
+        (
+            "steps.repair.inputs.costly",
+            (
+                "repair@3 takes no input costly: its rule size_up sets it; its inputs are "
+                "budget, vehicle"
+            ),
+        )
+    ]
+
+
+def test_a_child_is_given_each_input_of_its_type() -> None:
+    # Never converted (brief, D36): a text is not a budget.
+    definition = claim()
+    definition["steps"]["repair"]["inputs"]["budget"] = {"var": "vehicle"}
+    assert issues_of(definition, repair(), "INPUT_TYPE") == [
+        (
+            "steps.repair.inputs.budget",
+            "repair@3 takes budget as a number, and is given a string: give it a number",
+        )
+    ]
+
+
+def test_a_sensitive_value_enters_a_child_only_into_a_sensitive_field() -> None:
+    # A view can hide more than its source, never less (brief, D74).
+    definition = claim()
+    definition["fields"]["owner"] = {
+        "type": "string",
+        "display": {"title": "Owner"},
+        "sensitive": True,
+        "visible_to": ["adjuster"],
+    }
+    definition["steps"]["repair"]["inputs"]["owner"] = {"var": "owner"}
+    child = repair()
+    child["fields"]["owner"] = {"type": "string", "display": {"title": "Owner"}}
+    expected = [
+        (
+            "steps.repair.inputs.owner",
+            (
+                "owner is sensitive, and repair@3's owner isn't: a child keeps a sensitive "
+                "value sensitive"
+            ),
+        )
+    ]
+    assert issues_of(definition, child, "SENSITIVE_TO_CHILD") == expected
+    child["fields"]["owner"] |= {"sensitive": True, "visible_to": ["garage"]}
+    assert issues_of(definition, child, "SENSITIVE_TO_CHILD") == []
+
+
+def test_a_child_opens_no_case_of_its_own() -> None:
+    # One level only: a deliberate limit (brief, D74), so one close reaches all it must.
+    child = repair()
+    child["steps"]["order_parts"] = {
+        "kind": "case",
+        "display": {"title": "Order the parts"},
+        "case": "parts@1",
+    }
+    assert issues_of(claim(), child, "NESTED_CASE") == [
+        (
+            "steps.repair.case",
+            "repair@3 has a case step, order_parts: a child case opens no case of its own",
+        )
+    ]
+
+
+def test_a_child_supplied_under_another_name_or_unreadable_is_refused() -> None:
+    # Fail closed: it never runs in place of the child the step names.
+    child = repair()
+    child["case"] = "garage-repair"
+    assert issues_of(claim(), child, "UNKNOWN_CASE") == [
+        ("steps.repair.case", "repair@3 is supplied as garage-repair: supply the case it names")
+    ]
+    child = repair()
+    del child["display"]
+    assert issues_of(claim(), child, "UNKNOWN_CASE") == [
+        ("steps.repair.case", "repair@3 can't be read: display: required")
+    ]

@@ -9,11 +9,13 @@ from ventoux.case.assignment_checks import assignment_issues
 from ventoux.case.calls import (
     approval_issues,
     called_contracts,
+    case_input_issues,
     contract_input_issues,
     expression_issues,
     plan_input_issues,
+    sensitive_to_child_issues,
+    supplied_cases,
     supplied_plans,
-    unknown_cases,
 )
 from ventoux.case.definition import (
     After,
@@ -100,7 +102,9 @@ def validate_case(
     contracts, unknown_contracts = called_contracts(case, catalog)
     supplied, unknown_plans = supplied_plans(case, plans or {})
     found += unknown_contracts + unknown_plans
-    found += unknown_cases(case, cases or {})
+    children, unknown_cases = supplied_cases(case, cases or {})
+    found += unknown_cases + case_input_issues(case, children)
+    found += sensitive_to_child_issues(case, children)
     found += contract_input_issues(case, contracts) + plan_input_issues(case, supplied)
     calling = {name for name, step in case.steps.items() if isinstance(step, CallStep | PlanStep)}
     missing = calling - set(contracts) - set(supplied)
@@ -114,7 +118,7 @@ def validate_case(
     # Only an error on the input is the cause: a warning (OPENER_DECIDES) never hides the
     # condition's refusal, which holds whoever opens the case.
     found += condition_issues(case, contracts, {i.path for i in found if i.severity == "error"})
-    found += type_issues(case, catalog, contracts, supplied, {issue.path for issue in found})
+    found += type_issues(case, catalog, contracts, supplied, {i.path for i in found}, children)
     found += plan_policy_issues(case, catalog, contracts, supplied, {i.path for i in found})
     found += plan_transition_issues(case, contracts, supplied)
     found += sensitive_issues(case, contracts, {issue.path for issue in found})

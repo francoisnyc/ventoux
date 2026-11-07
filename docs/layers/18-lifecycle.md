@@ -655,13 +655,13 @@ The tests use only what a caller uses today, plus three additions (`cases`, `cas
 | Situation | What is said |
 |---|---|
 | a child case named but not supplied (`validate_case`, error `UNKNOWN_CASE`) | `steps.repair.case: repair@3 isn't supplied: add it to the package's cases/` |
-| the reference's name isn't the child's | `steps.repair.case: repair@3 is the case garage_repair: a reference names its case` |
-| an input the child doesn't take at its opening (`UNKNOWN_INPUT`) | `steps.repair.inputs.cost: repair takes no input cost: its task fix sets it; its inputs are budget, vehicle` |
-| an input of another type | `steps.repair.inputs.budget: repair's budget is a number, and this gives a text` |
-| a sensitive value into a plain field | `steps.repair.inputs.owner: owner is sensitive here, and repair's owner isn't: a child keeps a sensitive value sensitive` |
+| the reference's name isn't the child's, or it can't be read | `steps.repair.case: repair@3 is supplied as garage-repair: supply the case it names` (`repair@3 can't be read: display: required`), as for a plan |
+| an input the child doesn't take at its opening (`UNKNOWN_INPUT`) | `steps.repair.inputs.cost: repair@3 takes no input cost: its task fix sets it; its inputs are budget, vehicle` (`its rule size_up sets it`; `repair@3 has no input mileage: …`), as for a plan |
+| an input of another type (`INPUT_TYPE`) | `steps.repair.inputs.budget: repair@3 takes budget as a number, and is given a string: give it a number`, as for a plan |
+| a sensitive value into a plain field (`SENSITIVE_TO_CHILD`) | `steps.repair.inputs.owner: owner is sensitive, and repair@3's owner isn't: a child keeps a sensitive value sensitive` |
 | an approval on a case step (when read) | `steps.repair: a case step has no approval: its child's steps ask for their own` |
 | `for_each` on a case step (when read) | `steps.repair.for_each: not a field here` (18b's line for a plan step) |
-| a child with a case step of its own | `steps.repair: repair@3 has a case step, order_parts: a child case opens no case of its own` |
+| a child with a case step of its own (`NESTED_CASE`) | `steps.repair.case: repair@3 has a case step, order_parts: a child case opens no case of its own` |
 | `reports` naming a field the case lacks (when read) | `reports.cost: repair has no field cost: a report lists the case's own fields` |
 | a sensitive or list field reported (when read) | `reports.owner: owner is sensitive, and a report carries no sensitive field yet` (`lines is a list, and a report carries no list`) |
 | `repair.outcome` compared with what it can't be | `steps.pay_garage.when: repair.outcome is done or one of repair's close reasons (duplicate, written_off), never fixed` |

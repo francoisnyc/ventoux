@@ -3041,5 +3041,5 @@ may find it unset.
 
 **One level only.** A child case's definition has no case step of its own (a deliberate limit,
 brief, D48): one close then reaches everything it must, and no case starts itself. `ventoux check`
-refuses it (`steps.repair: repair@3 has a case step, order_parts: a child case opens no case of
-its own`), and refuses an input the child doesn't take at its opening, or of another type.
+refuses it (`steps.repair.case: repair@3 has a case step, order_parts: a child case opens no
+case of its own`), and refuses an input the child doesn't take at its opening, or of another type.
