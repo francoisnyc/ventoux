@@ -760,58 +760,8 @@ Every route by which what is owed can be set or changed, each handled or refused
 **State keyed by a step's name:** none is stored. What is owed is worked out from the definition
 and the runs, which a migration renames, so the rename test is the check 17c's review asked for.
 
-## Guide draft for 18c, kept here until its part is built
+## Guide drafts
 
-Written in step 2 as if it worked. The guide's examples are run by its tests, so the section can't
-sit in the guide before its part exists; it moves back when 18c starts, corrected by its answers
-(see "What changes in the guide, if answered as recommended"). The 18b draft moved back into the
-guide at 18b's step 2, corrected.
-
-> ## Child cases
->
-> A **child case** is a whole case started from a step of another: its own case file, release,
-> people and lifecycle, and when it ends, a report to its parent. Use one where work has a life of
-> its own: a claim sends the vehicle to a garage, whose repair is assigned, chased and closed by
-> other people, over weeks.
->
-> ```json
-> "repair": {
->   "kind": "case",
->   "display": {"title": "Repair the vehicle"},
->   "case": "repair",
->   "requires": ["assess"],
->   "inputs": {"vehicle": {"var": "vehicle"}, "budget": {"var": "approved_amount"}}
-> }
-> ```
->
-> Its `inputs` are the child's opening, read from the parent's case file with their sources, as a
-> plan step's are (brief, D28): a budget a person approved is still that person's in the child. A
-> sensitive value is given encrypted under the child's own key, never in plain text, and the child
-> lists who may see it as its own definition says.
->
-> **Which release.** The child opens on the release of `repair` active in the parent's environment,
-> asked of the environment's registry before it starts (the releases guide, "A case in an
-> environment"). A definition not active there is refused before anything starts, and the step
-> needs attention: `repair#1 failed: repair has no active release in production: activate one, then
-> retry repair#1`.
->
-> **What the parent hears.** The child runs as its own workflow, `claim-7/repair#1`, and the parent
-> waits for it, as for any running step. When it closes, it reports to the parent by a signal: how
-> it closed, the milestones it reached, and the fields its definition declares in `reports`, each
-> with the sources it had in the child. The step is then done, and the parent reads
-> `repair.outcome` (`done`, or the reason a person closed it with) and `repair.cost`:
->
-> ```
-> started repair#1: case repair 3 (budget from person:ana, vehicle from system:opener), run claim-7/repair#1
-> repair#1 done: repair closed, nothing left to do, giving cost from person:garage-lee
-> ```
->
-> - **A child that needs attention** is the child's: its operators retry it there. The parent waits.
-> - **When the parent closes, or a rule stops the step,** the child is closed too, saying why
->   (`closed by its parent: duplicate, by ana`): its tasks are cancelled, its running activities
->   finish, and the parent closes once the child has ended. A close never waits for a person.
-> - **A parent that continues as new** doesn't wait for its children: their report reaches it by
->   its workflow ID.
-> - **A parent that migrates** leaves its children on their own release.
-> - **Forgetting the parent** forgets each child too, under one request; a child whose definition
->   keeps its records (`"forgetting": "never"`) refuses it.
+Each part's guide section was drafted here and moved back into the guide at that part's step 2,
+corrected by its answers (see "What changes in the guide, if answered as recommended"): 18b's at
+18b's step 2, 18c's at 18c's step 2.
