@@ -455,9 +455,11 @@ def test_the_check_warns_where_a_reported_field_may_be_unset() -> None:
     assert [(i.path, i.message, i.severity) for i in issues if i.code == "MAY_BE_UNSET"] == [
         (
             "steps.pay_garage.inputs.amount",
-            "pay_garage reads repair.cost, which repair gives only when done, and repair may end "
-            "written_off: then pay_garage fails and needs attention: read it only when "
-            "repair.outcome is done",
+            (
+                "pay_garage reads repair.cost, which repair gives only when done, and repair may "
+                "end written_off: then pay_garage fails and needs attention: read it only when "
+                "repair.outcome is done"
+            ),
             "warning",
         )
     ]
