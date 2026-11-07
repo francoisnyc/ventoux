@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping
 from ventoux.case.definition import (
     CallStep,
     CaseDefinition,
+    CaseStep,
     PlanStep,
     Rule,
     Started,
@@ -23,6 +24,7 @@ from ventoux.case.definition import (
 )
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState
+from ventoux.case.types import readable_child
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import Contract
 from ventoux.core.expressions import Expression
@@ -32,9 +34,16 @@ from ventoux.core.provenance import answering, fields_read, is_trusted
 # Where the case file's first values came from when a system opened the case (brief, D12).
 OPENER = "system:opener"
 
+# A child's opening field, as the child's own sources say it: where the parent gave it, worked out
+# in the parent (brief, D74). Only the static check writes it; it is never a value's source.
+GIVEN = "given:"
+
 # How a value is written, for the fixpoint: what it reads, and the sources its writer stamps on
 # it whatever it read (its mark), or None for a step's start, which only passes on what it read.
 type Write = tuple[frozenset[str], frozenset[str] | None]
+# Each value a case step's child reports, with its writes: what the parent gave and what the
+# child stamps (brief, D74).
+type Reports = Mapping[str, list[Write]]
 
 
 def start_of(step: str) -> str:
@@ -57,16 +66,22 @@ def editing(field: str) -> str:
 
 
 def case_sources(
-    case: CaseDefinition, contracts: Mapping[str, Contract], opener: str, edits: bool = False
+    case: CaseDefinition,
+    contracts: Mapping[str, Contract],
+    opener: str,
+    edits: bool = False,
+    reports: Reports | None = None,
+    opening: Mapping[str, frozenset[str]] | None = None,
 ) -> dict[str, frozenset[str]]:
     """Where each value of `case` may come from, by the name an expression reads it with, when
     `opener` opens it: the union of what each of its writers may stamp (brief, D34). A field
     rules set comes from what its rules read, so it is grown from nothing until a round changes
     nothing; it ends, since each round only adds, out of finitely many fields and sources
     (brief, D42). With `edits`, an edit is one more writer of every declared field
-    (brief, D52)."""
-    sources = stamped(case, contracts, opener)
-    computed = computed_writes(case, contracts)
+    (brief, D52). `reports` gives what each child reports (brief, D74); `opening`, each opening
+    field's own sources, for a child's (none: the opener's)."""
+    sources = stamped(case, contracts, opener, opening)
+    computed = computed_writes(case, contracts, reports)
     if edits:
         for name in case.fields:
             if name in computed:  # a field a rule sets is a declared field too
@@ -97,6 +112,7 @@ def always(
     contracts: Mapping[str, Contract],
     opener: str,
     refused: Callable[[frozenset[str]], bool],
+    reports: Reports | None = None,
 ) -> frozenset[str]:
     """Each value of `case`, opened by `opener`, that `refused` refuses whichever writer wrote
     it: what a check may claim of every case (brief, D34). A refusal looks for one source it
@@ -104,7 +120,7 @@ def always(
     refused when its field's mark is, or a value it reads always is. Grown from nothing, so two
     fields set from each other vouch for nothing (brief, D42)."""
     found = {name for name, sources in stamped(case, contracts, opener).items() if refused(sources)}
-    computed = computed_writes(case, contracts)
+    computed = computed_writes(case, contracts, reports)
     while True:
         more = {
             field
@@ -123,11 +139,12 @@ def always(
 
 
 def computed_writes(
-    case: CaseDefinition, contracts: Mapping[str, Contract]
+    case: CaseDefinition, contracts: Mapping[str, Contract], reports: Reports | None = None
 ) -> dict[str, list[Write]]:
     """Each value whose sources depend on what was read, with each of its writes: the fields
-    rules set, each step's start, and each steered call's or plan's outcome and outputs."""
-    found = rule_writes(case)
+    rules set, each step's start, each steered call's or plan's outcome and outputs, and what
+    each child reports (brief, D74)."""
+    found = rule_writes(case) | {value: list(writes) for value, writes in (reports or {}).items()}
     for name in case.steps:
         found[start_of(name)] = start_writes(case, name)
     stamps = stamped(case, contracts, OPENER)  # who opens it stamps no outcome or output
@@ -217,7 +234,10 @@ def starts_said(case: CaseDefinition) -> dict[str, list[str]]:
 
 
 def stamped(
-    case: CaseDefinition, contracts: Mapping[str, Contract], opener: str
+    case: CaseDefinition,
+    contracts: Mapping[str, Contract],
+    opener: str,
+    opening: Mapping[str, frozenset[str]] | None = None,
 ) -> dict[str, frozenset[str]]:
     """What each writer that reads nothing to stamp a value stamps it with: the opening, a
     person, a contract, a sender. A field rules set is left out (brief, D42)."""
@@ -234,7 +254,8 @@ def stamped(
     for name, field in case.fields.items():
         if name in computed:
             continue
-        writers = answered.get(name, {opener})
+        given = (opening or {}).get(name, frozenset({opener}))
+        writers = answered.get(name, set(given))
         # A mark adds distrust, never removes it, whoever writes the field (brief, D12).
         sources[name] = frozenset(writers | ({field.source} if field.source else set()))
     # Each value an event carries comes from its one sender, and its field's mark adds to that
@@ -261,11 +282,23 @@ def stamped(
 
 
 def could_come_from(
-    case: CaseDefinition, catalog: Catalog, opened_by: str | None, edits: bool = False
+    case: CaseDefinition,
+    catalog: Catalog,
+    opened_by: str | None,
+    edits: bool = False,
+    cases: Mapping[str, object] | None = None,
 ) -> dict[str, frozenset[str]]:
     """Where each value of a case `opened_by` opened (None: a system) could come from, with the
-    contracts the catalog holds: what the runtime reads for a value nobody has set yet. With
-    `edits`, an edit's people too, as the diff counts them (brief, D52)."""
+    contracts the catalog holds and the children `cases` pins: what the runtime reads for a value
+    nobody has set yet. With `edits`, an edit's people too, as the diff counts them
+    (brief, D52)."""
+    opener = OPENER if opened_by is None else f"person:{opened_by}"
+    reports = report_writes(case, children_of(case, cases or {}), catalog)
+    return case_sources(case, contract_steps(case, catalog), opener, edits, reports)
+
+
+def contract_steps(case: CaseDefinition, catalog: Catalog) -> dict[str, Contract]:
+    """The contract each call step calls, by step, of those the catalog holds."""
     contracts: dict[str, Contract] = {}
     for name, step in case.steps.items():
         if isinstance(step, CallStep):
@@ -273,8 +306,46 @@ def could_come_from(
                 contracts[name] = catalog.lookup(step.called)
             except NotInCatalog:
                 continue  # it gives nothing: a step reading it fails, saying so
-    opener = OPENER if opened_by is None else f"person:{opened_by}"
-    return case_sources(case, contracts, opener, edits)
+    return contracts
+
+
+def children_of(case: CaseDefinition, cases: Mapping[str, object]) -> dict[str, CaseDefinition]:
+    """The child each case step opens, by step, of those `cases` holds and can be read."""
+    found: dict[str, CaseDefinition] = {}
+    for name, step in case.steps.items():
+        if isinstance(step, CaseStep):
+            child = readable_child(cases, step.case)
+            if child is not None:
+                found[name] = child
+    return found
+
+
+def report_writes(
+    case: CaseDefinition, children: Mapping[str, CaseDefinition], catalog: Catalog
+) -> dict[str, list[Write]]:
+    """Where each value a child reports could come from, as one write in its parent: the child's
+    own sources for the field, read from the child's definition, where each opening field it was
+    given comes from what the parent's input read; then `case:<child>`, the route it came by.
+    So an untrusted value given to a child comes back untrusted (brief, D34) (brief, D74)."""
+    found: dict[str, list[Write]] = {}
+    for name, child in children.items():
+        step = case.steps[name]
+        assert isinstance(step, CaseStep)  # only a case step opens a child
+        route = f"case:{child.case}"
+        opening = {field: frozenset({f"{GIVEN}{field}"}) for field in child.fields}
+        inside = case_sources(child, contract_steps(child, catalog), OPENER, opening=opening)
+        # The outcome is declared by the child's reviewed release; what steered the start passes
+        # on, as for a plan's outcome (brief, D43).
+        found[f"{name}.outcome"] = [(frozenset({start_of(name)}), frozenset({route}))]
+        for field in child.reports:
+            sources = inside.get(field, frozenset())
+            given = [s.removeprefix(GIVEN) for s in sources if s.startswith(GIVEN)]
+            reads = {start_of(name)} | {
+                read for g in given if g in step.inputs for read in fields_read(step.inputs[g])
+            }
+            mark = frozenset(s for s in sources if not s.startswith(GIVEN)) | {route}
+            found[f"{name}.{field}"] = [(frozenset(reads), mark)]
+    return found
 
 
 def read_sources(
@@ -310,13 +381,14 @@ def writer_decides(
     opener: str,
     field: str,
     refused: Callable[[frozenset[str]], bool],
+    reports: Reports | None = None,
 ) -> str:
     """How a warning says that whether `field` is refused depends on which rule wrote it: the
     rules whose writes may be refused, and those whose writes never are (brief, D42). For a
     step's start, or what its run gives, it depends on how the step started (brief, D43)."""
     if (step := steered_step(case, contracts, field)) is not None:
-        return how_started(case, contracts, opener, step, refused)
-    sources = case_sources(case, contracts, opener)
+        return how_started(case, contracts, opener, step, refused, reports)
+    sources = case_sources(case, contracts, opener, reports=reports)
     stamps: dict[str, frozenset[str]] = {}
     for name, rule in case.rules.items():
         if field in rule.then.set:
@@ -354,10 +426,11 @@ def how_started(
     opener: str,
     step: str,
     refused: Callable[[frozenset[str]], bool],
+    reports: Reports | None = None,
 ) -> str:
     """How a warning says that whether the step's start is refused depends on how it started:
     the ways whose start may be refused, and those whose never is (brief, D43)."""
-    sources = case_sources(case, contracts, opener)
+    sources = case_sources(case, contracts, opener, reports=reports)
     some: list[str] = []
     others: list[str] = []
     for (reads, _), said in zip(start_writes(case, step), starts_said(case)[step], strict=False):

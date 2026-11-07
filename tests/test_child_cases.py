@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
 from ventoux.testing import CATALOG, run_case
 
@@ -296,17 +297,81 @@ def guide_python() -> str:
 def guide_history() -> list[str]:
     """The history lines the section shows."""
     section = GUIDE.read_text().split(SECTION)[1]
-    return section.split("```\n")[2].split("```")[0].splitlines()
+    after = section.split("```python\n")[1].split("```\n", 1)[1]  # past the example
+    return after.split("```\n", 1)[1].split("```")[0].splitlines()
 
 
 def test_the_guides_child_case_runs_as_written() -> None:
     # Our own documentation, run so it can't drift from the code; never a definition (data).
-    namespace = {"run_case": run_case, "claim_with_repair": claim(), "repair": repair()}
+    namespace: dict[str, Any] = {
+        "run_case": run_case,
+        "claim_with_repair": claim(),
+        "repair": repair(),
+    }
     namespace["PEOPLE"] = PEOPLE
     exec(guide_python(), namespace)  # noqa: S102 -- our guide, as in layer 7
     run = namespace["run"]
+    assert isinstance(run, CaseRun)
     shown = guide_history()
     assert [line for line in run.history if line in shown] == shown
     child = run.children["repair#1"]
     assert child.closed
-    assert child.history[0] == "opened by memory, from repair#1, with budget, vehicle"
+    assert child.history[0] == "opened by memory, from repair#1, with budget and vehicle"
+
+
+def test_a_value_a_child_was_given_comes_back_with_where_it_came_from() -> None:
+    # The static check follows a reported value through the child: an untrusted estimate given as
+    # the budget, and reported back, is still the customer's, and a trusted-only input refuses it
+    # in every case (brief, D34) (brief, D74).
+    definition = claim()
+    definition["fields"]["estimate"] = {
+        "type": "number",
+        "display": {"title": "Estimate"},
+        "source": "untrusted:customer",
+    }
+    definition["steps"]["repair"]["inputs"]["budget"] = {"var": "estimate"}
+    definition["steps"]["pay_garage"]["inputs"]["amount"] = {"var": "repair.budget"}
+    child = repair()
+    child["reports"] = ["cost", "budget"]
+    refused = issues_of(definition, child, "INPUT_POLICY")
+    assert [path for path, _ in refused] == ["steps.pay_garage.inputs.amount"]
+    assert "untrusted:customer" in refused[0][1]
+    # What the child's own form set is a person's: trusted, so the guide's payment passes.
+    assert issues_of(claim(), repair(), "INPUT_POLICY") == []
+
+
+def test_a_reported_value_passes_trusted_only_and_never_reads_as_from_a_system() -> None:
+    # `case:repair` is the route the value came by, trusted: its other sources decide (brief, D74).
+    run = run_case(
+        claim(),
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[("assess", "accept", "ana", {"payout": 900}), ("pay_garage", "approve", "sam")],
+        cases={"repair@3": repair()},
+        case_answers={"repair": [("fix", "fixed", "lee", {"cost": 640})]},
+        people=PEOPLE,
+    )
+    assert (
+        "scheduled pay_garage#1: payments.refund@2 (order_id from system:opener; amount from "
+        "case:repair, person:lee), key memory/pay_garage#1"
+    ) in run.history
+    assert run.closed
+    # A value the opening system gave the child, reported back, came by the child: `only_from`
+    # names systems, and a child is none of them.
+    from test_case_validation import with_ledger  # here: that module imports this one's guide
+
+    definition = claim()
+    definition["fields"]["estimate"] = {"type": "number", "display": {"title": "Estimate"}}
+    definition["steps"]["repair"]["inputs"]["budget"] = {"var": "estimate"}
+    definition["steps"]["record"] = {
+        "kind": "activity",
+        "display": {"title": "Record the repair's budget"},
+        "activity": "ledger.record@1",
+        "requires": ["repair"],
+        "inputs": {"amount": {"var": "repair.budget"}},
+    }
+    child = repair()
+    child["reports"] = ["cost", "budget"]
+    issues = validate_case(parse_case(definition), with_ledger(), cases={"repair@3": child})
+    refused = [(i.path, i.message) for i in issues if i.code == "INPUT_POLICY"]
+    assert [path for path, _ in refused] == ["steps.record.inputs.amount"]
+    assert "case:repair" in refused[0][1]

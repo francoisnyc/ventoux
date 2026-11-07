@@ -22,6 +22,7 @@ from ventoux.case.definition import (
     AnsweredTask,
     CallStep,
     CaseDefinition,
+    CaseStep,
     PlanStep,
     Reached,
     ReminderRule,
@@ -71,8 +72,22 @@ from ventoux.case.warnings import (
     kept_from_starting_issues,
     warning_issues,
 )
+from ventoux.case.writers import report_writes
 from ventoux.core.catalog import Catalog
+from ventoux.core.provenance import fields_read
 from ventoux.core.validate import Issue
+
+
+def blind_inputs(case: CaseDefinition, missing: set[str]) -> set[str]:
+    """The path of each input that reads a value a step in `missing` would give: one whose
+    contract, plan or child can't be found."""
+    return {
+        f"steps.{name}.inputs.{field}"
+        for name, step in case.steps.items()
+        if isinstance(step, CallStep | PlanStep | CaseStep)
+        for field, expression in step.inputs.items()
+        if any("." in read and read.split(".")[0] in missing for read in fields_read(expression))
+    }
 
 
 def validate_case(
@@ -105,26 +120,40 @@ def validate_case(
     children, unknown_cases = supplied_cases(case, cases or {})
     found += unknown_cases + case_input_issues(case, children)
     found += sensitive_to_child_issues(case, children)
+    reports = report_writes(case, children, catalog)  # where each reported value comes from
     found += contract_input_issues(case, contracts) + plan_input_issues(case, supplied)
-    calling = {name for name, step in case.steps.items() if isinstance(step, CallStep | PlanStep)}
-    missing = calling - set(contracts) - set(supplied)
+    calling = {
+        name
+        for name, step in case.steps.items()
+        if isinstance(step, CallStep | PlanStep | CaseStep)
+    }
+    missing = calling - set(contracts) - set(supplied) - set(children)
     found += expression_issues(case, case_types(case, catalog, cases), missing)
     found += approval_issues(case, catalog, contracts)
     # Where each value comes from (10c), in the order the runtime meets it: an input already
     # refused isn't asked again (one cause, one issue).
     found += reference_issues(case, contracts, supplied, {issue.path for issue in found})
-    said = {issue.path for issue in found}
-    found += policy_issues(case, contracts, said) + no_sources_issues(case, supplied, said)
+    # An input reading what a missing step would give has no known sources: its step's issue is
+    # the cause, said once (one cause, one issue).
+    blind = blind_inputs(case, missing)
+    said = {issue.path for issue in found} | blind
+    found += policy_issues(case, contracts, said, reports)
+    found += no_sources_issues(case, supplied, said)
     # Only an error on the input is the cause: a warning (OPENER_DECIDES) never hides the
     # condition's refusal, which holds whoever opens the case.
-    found += condition_issues(case, contracts, {i.path for i in found if i.severity == "error"})
-    found += type_issues(case, catalog, contracts, supplied, {i.path for i in found}, children)
-    found += plan_policy_issues(case, catalog, contracts, supplied, {i.path for i in found})
-    found += plan_transition_issues(case, contracts, supplied)
+    errors = {i.path for i in found if i.severity == "error"}
+    found += condition_issues(case, contracts, errors, reports)
+    found += type_issues(
+        case, catalog, contracts, supplied, {i.path for i in found} | blind, children, cases
+    )
+    found += plan_policy_issues(
+        case, catalog, contracts, supplied, {i.path for i in found}, reports
+    )
+    found += plan_transition_issues(case, contracts, supplied, reports)
     found += sensitive_issues(case, contracts, {issue.path for issue in found})
     found += approver_issues(case, catalog, contracts)
     found += assignment_issues(case, catalog)  # who a rule asks, when each entry opens (brief, D71)
-    found += trigger_issues(case, contracts)
+    found += trigger_issues(case, contracts, reports)
     found += role_issues_of(case, catalog, can, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     found += close_unreachable(case, can) + unreachable_milestones(case)
