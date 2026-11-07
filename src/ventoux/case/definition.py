@@ -362,6 +362,14 @@ class CaseStep(Step):
     inputs: dict[Name, PlanExpression] = {}  # each of the child's opening fields, from the file
     max_age: MaxAge = {}  # how old each fact it reads may be when it runs (brief, D18)
 
+    @model_validator(mode="before")
+    @classmethod
+    def no_approval(cls, data: Any) -> Any:
+        """A case step has no approval: the child's own steps ask for theirs (brief, D74)."""
+        if isinstance(data, dict) and "approval" in data:
+            raise ValueError("a case step has no approval: its child's steps ask for their own")
+        return data
+
 
 class Then(Shape):
     """What a rule does when it fires: stop steps (brief, D40), set fields (brief, D42), reach
@@ -634,6 +642,9 @@ class CaseDefinition(Shape):
     # Whether a request may forget it (brief, D32): `allowed` open or closed; `while_open`, refused
     # once it is closed (books and records); `never`, always refused.
     forgetting: Literal["allowed", "while_open", "never"] = "allowed"
+    # What its end report carries when it closes as a child: its own fields, read by its parent
+    # as the case step's outputs (brief, D74).
+    reports: tuple[Name, ...] = ()
 
     @property
     def rules(self) -> dict[str, Rule]:
@@ -693,6 +704,7 @@ class CaseDefinition(Shape):
             if field.sensitive and field.visible_to is None
         ]
         problems += list_problems(self)
+        problems += report_problems(self)
         started_by_rules = {step for rule in self.rules.values() for step in rule.then.start}
         for name, step in self.steps.items():
             problems += step_problems(f"steps.{name}", step, self, name in started_by_rules)
@@ -942,6 +954,26 @@ def expressions_in(case: CaseDefinition) -> list[tuple[str, str | None, PlanExpr
             for field, expression in rule.then.set.items()
         ]
     return found
+
+
+def report_problems(case: CaseDefinition) -> list[str]:
+    """What a report can't carry: a field the case doesn't have; a sensitive one, for now; a list,
+    since an output is an exact value (brief, D29) (brief, D74)."""
+    problems: list[str] = []
+    for name in case.reports:
+        path = f"reports.{name}"
+        field = case.fields.get(name)
+        if field is None:
+            problems.append(
+                f"{path}: {case.case} has no field {name}: a report lists the case's own fields"
+            )
+        elif field.sensitive:
+            problems.append(
+                f"{path}: {name} is sensitive, and a report carries no sensitive field yet"
+            )
+        elif isinstance(field.declared, ListType):
+            problems.append(f"{path}: {name} is a list, and a report carries no list")
+    return problems
 
 
 def step_problems(

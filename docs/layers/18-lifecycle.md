@@ -660,7 +660,7 @@ The tests use only what a caller uses today, plus three additions (`cases`, `cas
 | an input of another type | `steps.repair.inputs.budget: repair's budget is a number, and this gives a text` |
 | a sensitive value into a plain field | `steps.repair.inputs.owner: owner is sensitive here, and repair's owner isn't: a child keeps a sensitive value sensitive` |
 | an approval on a case step (when read) | `steps.repair: a case step has no approval: its child's steps ask for their own` |
-| `for_each` on a case step (when read) | `steps.repair: a case step is never repeated: repeat a task or an activity` (18b's line, already said for a plan) |
+| `for_each` on a case step (when read) | `steps.repair.for_each: not a field here` (18b's line for a plan step) |
 | a child with a case step of its own | `steps.repair: repair@3 has a case step, order_parts: a child case opens no case of its own` |
 | `reports` naming a field the case lacks (when read) | `reports.cost: repair has no field cost: a report lists the case's own fields` |
 | a sensitive or list field reported (when read) | `reports.owner: owner is sensitive, and a report carries no sensitive field yet` (`lines is a list, and a report carries no list`) |
