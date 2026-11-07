@@ -11,10 +11,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
 from dev_server import cli_binary, cli_folder, dev_server
+from replaying import replay_history
+from temporalio.api.enums.v1 import EventType
 from temporalio.client import Client, WorkflowHistory
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
@@ -63,7 +66,14 @@ from ventoux.temporal.cases import (
 from ventoux.temporal.children import SETTLE, ChildActivities, ChildAsked, ChildRead
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import ForgetReport, answer_forget, propose_forget
-from ventoux.temporal.registry import Retire, activation_of, ask, released
+from ventoux.temporal.registry import (
+    RegistryWorkflow,
+    Retire,
+    activation_of,
+    ask,
+    registry_id,
+    released,
+)
 from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     CATALOG,
@@ -73,6 +83,7 @@ from ventoux.testing import (
     DevelopmentForget,
     DevelopmentPlans,
     development_converter,
+    fixture_converter,
     release_of,
 )
 
@@ -793,3 +804,74 @@ def test_a_sensitive_value_crosses_into_the_child_sealed() -> None:
         raw, exported = as_stored(history)
         assert VIN.encode() not in raw, history.workflow_id
         assert VIN not in exported, history.workflow_id
+
+
+# --- Slice 9: replay (brief, D17) (brief, D75, choice 49) ---
+
+HERE = Path(__file__).parent / "histories"
+
+# Recorded under main at `dc2407e`, before 18d changes anything on Temporal: a case whose case
+# step failed closed, continuing as new; a case in production, closed; and production's registry,
+# activating, opening, closing and retiring. No new engine version: each replays as recorded.
+BEFORE_18D: dict[str, tuple[str, type[Any]]] = {
+    "before_18d_case_step_failed_switched": ("claim-2", SwitchingCases),
+    "before_18d_production_case": ("claim-3", ProductionCases),
+    "before_18d_registry": (registry_id("production"), RegistryWorkflow),
+}
+
+
+def test_histories_from_before_18d_replay() -> None:
+    for name, (id, workflow_class) in BEFORE_18D.items():
+        recorded = HERE / f"{name}.json"
+        history = WorkflowHistory.from_json(id, recorded.read_text())
+        asyncio.run(replay_history(history, [workflow_class], fixture_converter(recorded)))
+
+
+def test_a_history_with_a_child_replays() -> None:
+    # Everything 18d adds is recorded in the histories, never read from the world on replay: the
+    # child's start, its watch, the doorbell and its read, the question asked as a run starts,
+    # the daily timer, and the close, across switches on both sides (brief, D17) (brief, D75).
+    converter = development_converter()  # holds the keys the replay needs
+
+    async def scenario(environment: WorkflowEnvironment) -> list[WorkflowHistory]:
+        client = environment.client
+        parent = await start_case(client, SwitchingCases, CLOSING, FILE, "claim-50", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, SwitchingCases, "claim-50/repair#1")
+        first, _ = await runs_of(client, "claim-50")
+        await until_switched(client, "claim-50", first)
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        await environment.sleep(timedelta(hours=25))  # a daily check: the child still open
+        opened, _ = await runs_of(client, "claim-50/repair#1")
+        for entry in ("fix#8", "fix#9"):  # two events, recorded and ignored: the child switches
+            await child.signal("child_ended", entry)
+        await until_switched(client, "claim-50/repair#1", opened)
+        await close(parent, "duplicate", "ana", ["support"])
+        await reported(parent, lambda now: now.status == "closed")
+        await reported(child, lambda now: now.status == "closed")
+        return await every_run(client, "claim-50") + await every_run(client, "claim-50/repair#1")
+
+    histories = skipping(scenario, cases=SwitchingCases, converter=converter)
+    ids = [history.workflow_id for history in histories]
+    assert ids.count("claim-50") > 1 and ids.count("claim-50/repair#1") > 1  # both switched
+    # What 18d records, each there to replay: the child's start, the daily timer, the read, and
+    # the doorbell and the close, each a signal to another workflow.
+    recorded = {
+        (history.workflow_id, EventType.Name(event.event_type))
+        for history in histories
+        for event in history.events
+    } | {
+        ("activity", event.activity_task_scheduled_event_attributes.activity_type.name)
+        for history in histories
+        for event in history.events
+        if event.HasField("activity_task_scheduled_event_attributes")
+    }
+    assert {
+        ("claim-50", "EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED"),
+        ("claim-50", "EVENT_TYPE_TIMER_STARTED"),
+        ("claim-50", "EVENT_TYPE_SIGNAL_EXTERNAL_WORKFLOW_EXECUTION_INITIATED"),
+        ("claim-50/repair#1", "EVENT_TYPE_SIGNAL_EXTERNAL_WORKFLOW_EXECUTION_INITIATED"),
+        ("activity", "ventoux.child.read"),
+    } <= recorded
+    for history in histories:
+        asyncio.run(replay_history(history, [SwitchingCases], converter))
