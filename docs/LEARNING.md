@@ -1410,6 +1410,22 @@ and record the key points. A question is closed once you can explain the answer 
     author and changed only by a release.
   - Why now: layer 18's child cases raise the same question, since a child given a sensitive value
     must be under a key that forgetting the parent can reach (D15, D32).
+- Retrieval (layer 19 warm-up, 2026-11-07), the same three parts: asked to be told, a second
+  time running. Given as before, with what layer 19 adds:
+  - **a) What can be answered:** under which rule and release, who decided, in which role, with
+    which outcome, when and in what order; on which facts *by name and source* (`policy_status`
+    from `system:policies`), even where the value is gone; and any value that wasn't sensitive
+    where it was used (`estimated_damage`). From Temporal's history while it is kept, the closing
+    report, and, from layer 19, the audit export, which keeps them past Temporal's retention.
+  - **b) What can't, and why:** the national ID, the tax ID Ana typed, every value in a form
+    answer (D31) and the failed lookup's message. Only ever stored as ciphertext under claim-7's
+    own key; forgetting destroyed the key, and it is never made again. An export taken before
+    forgetting holds the same ciphertext (D15, "every copy stays encrypted"), so it is
+    unreadable too: that is the property layer 19 must keep, and its negative test checks.
+  - **c) Decided beforehand:** `"forgetting": "while_open"` or `"never"` in the definition (D32),
+    so the request is refused. A business decision about a kind of record, changed by a release.
+  - A memory hook for next time: **rule, people, facts by name: yes; values: no, unless the
+    definition said keep.**
 - Status: open, until "the facts by name and source" and the retention choice (D32) come back
   from memory.
 
