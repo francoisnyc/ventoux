@@ -1,9 +1,14 @@
 # Layer 19: Audit export and a production key provider
 
-Status: 2026-11-07, proposed, waiting for answers. This note starts from `main` at `ff37fb9`, with
-layers 0 to 18 merged. The warm-up was asked and recorded (learning question 37). The guide was
-written first (curriculum step 2): `docs/guides/audit.md` describes the layer as if it worked,
-with my recommendation for each choice below; it changes with the answers (listed at the end).
+Status: 2026-11-07, answered; 19a's seams proposed. This note starts from `main` at `ff37fb9`,
+with layers 0 to 18 merged. The warm-up was asked and recorded (learning question 37). The guide
+was written first (curriculum step 2): `docs/guides/audit.md` describes the layer as if it worked;
+it was changed with the answers (listed at the end).
+
+**Answered 2026-11-07.** Choices A to C and 1 to 21 as recommended. D76 is written before 19a is
+built, with dated amendments under D27 and D51; D77 and D78 are written before 19b and 19c, with
+the amendments choice B lists under D15, D17 and D32. The branch is renamed
+`layer-19a-audit-records`.
 
 Prior art: none in the prototype (the curriculum names none). Vault's transit engine API, read for
 this note: encrypt and decrypt take `associated_data` for AES-GCM keys; deleting a key needs
@@ -293,7 +298,69 @@ C. **No new dependency:** Vault through the standard library's HTTP (choice 17).
 
     *Recommended: (a).* It is about terminating (admin access), not the export or the keys.
 
-## What changes in the guide, if answered as recommended
+## Seams and tests for 19a (curriculum step 4, proposed)
+
+**Found while choosing the seams.**
+
+- **A refused act never reaches `decide`'s result:** `decide` raises and changes nothing, and each
+  driver records the refusal itself (on Temporal, a bare line, `refused …: …`). So the refusal's
+  record is made by one function in `case` that the drivers call, beside the line, never by
+  `decide`.
+- **A case in memory has no ID.** The stream a record belongs to is its workflow's ID, which only
+  the driver knows. So a record in `case` carries its number, and the export names its stream
+  (19b), as the codec finds a case's key from the workflow ID Temporal gives it.
+- **A plan run's events can't be exported by its own workflow:** making the plan workflow call
+  an activity would break the replay of every plan run recorded before, and a plan has no engine
+  version. They ride in the record of the plan step's end instead, from the run's report, which
+  its case already reads (19b). A plan run started outside a case exports nothing: said in D77.
+
+**The seams.** Only what a test of the engine uses today, plus one new field and one function:
+
+1. **`run_case(...)`,** as now: its `CaseRun` gains `audit`, the case's records in order. Its
+   `engine` argument, as now (the default becomes 3): `engine=2` makes none.
+2. **The record** (`ventoux.case.audit`), read field by field, never through its lines:
+   `AuditRecord(number, at, release, engine, act, decisions, lines)`;
+   `Act(kind, by, roles, entry, outcome, values)`;
+   `Decision(kind, step, entry, rule, read, reason)`; `Fact(field, sources, value)`. A value is as
+   the state holds it: an exact decimal, a text, a `Sensitive`.
+3. **`record_refused(state, act, refusal)`** (`ventoux.case.audit`): the state with the refused
+   act's record added, and nothing else changed. The Temporal driver calls it where it records a
+   refusal today (19b); a test calls it with the refusal `decide` raised.
+4. **The existing scripts:** answers, proposals, events, `later(…)`, change requests, retries,
+   closes, child cases' scripts, plan answers, as `run_case` takes them today.
+
+**The decisions, word for word (proposed):** a decision's `kind` is one of D76's list; `rule` is a
+path in the definition (`steps.pay.when`, `steps.pay.approval`, `steps.pay.approval.when`,
+`milestones.assessed`, `rules.escalate`, `closes_when`); `reason` is the refusal's or the
+failure's own text, which never quotes a value (D30), and a failure's is its type only:
+`payments.refund@2 failed with ConnectionError`.
+
+**The tests, in the order I'd write them,** each failing first (the negative first):
+
+1. **(negative)** A refused answer (the opener approving their own refund) is one record, its one
+   decision `refused` with the reason, and the state is otherwise unchanged.
+2. **(negative)** A sensitive value is never unwrapped in a record: `national_id` in the opening
+   act's values, and in the facts read by the step it reaches, is a `Sensitive`.
+3. The quickstart's small refund: one record per act, numbered from 1, each with its release,
+   engine and time; the opening's record holds `admitted` and `started review#1`; the review's
+   answer, its `set` of `approved_amount` and `started pay#1` with `rule: steps.pay.when` and the
+   facts read.
+4. The guide's example: an approval that approves and starts `pay` is one record, `approved` then
+   `started`, each with its rule and facts.
+5. A failure is recorded by its type, never its message; a retry's record says `retried`.
+6. A form value is in the record as the case file holds it: sensitive wrapped, others in clear.
+7. Each route makes its record: an event (and a rule it fires: `set`, `started` by `rules.…`), a
+   timer, a close and a stop, an edit and a migration (D52, D53), a claim and an assignment, a
+   `shown` line, a plan step's end, a child case (the parent's `started` and `completed` name it;
+   the child's records are its own), forgetting approved.
+8. A case opened at engine 2 makes no record; migrated to engine 3, its first record says that
+   what came before was not recorded.
+9. Every record's `lines` are exactly the lines its act added to the history, so the history is
+   unchanged: every existing test stays green.
+
+## What changed in the guide with the answers
+
+Done, on this branch:
 
 - The example event becomes one record per act (choice 1), its decisions inside it.
 - "Every form value in an answer is sealed too … and so is every failure's message" becomes: a

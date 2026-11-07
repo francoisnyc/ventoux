@@ -815,6 +815,8 @@ be erased on request), has size limits, and a second copy of business records go
   waits for it.
 - **Amended 2026-10-22, by D51** (the text above stands; this adds to it): what crosses includes
   the case's release (its name, number, digest and plans) and its engine version.
+- **Amended 2026-11-07, by D76** (the text above stands; this adds to it): what crosses includes
+  the case's audit records not yet exported, in order, and the number its next record takes.
 
 ### D28. A plan step runs as a child workflow of its case
 
@@ -2038,6 +2040,9 @@ D27, D28 and D50, whose text is kept.*
 - **Amended 2026-10-25, by D60** (the text above stands; this adds to it): the parser refuses four
   lax readings it accepted before, with no new engine version; D60's dated line says which, why,
   and what a record, a case or a run holding one does.
+- **Amended 2026-11-07, by D76** (the text above stands; this adds to it): version 3 makes audit
+  records. A case opened at 3 records the marker `ventoux-engine-3` and exports; a case opened
+  before decides and replays as it did, and exports nothing, saying so.
 
 ### D52. Change requests: proposed, approved by someone else, checked again, applied
 
@@ -3191,6 +3196,39 @@ D15, D17, D27, D29, D31, D32, D40, D48, D51, D54 and D74, whose text is kept.*
   then forgotten, loses the key under that child (`docs/layers/18-lifecycle.md`, "Found while
   building 18d").
 
+### D76. Audit records: one per act, the decisions it caused, the facts they read
+
+*Decided 2026-11-07, in layer 19a (`docs/layers/19-audit-keys.md`, choices 1 to 7). Adds to D8,
+D15, D27, D30, D31 and D51, whose text is kept.*
+
+- **The engine records each act it decides as data, beside its lines.** One audit record per act
+  that reaches the case (an opening, an answer, a proposal, an activity's completion or failure,
+  an event, a timer, a close, an edit, a migration, a retry, a claim): the act as it came (its
+  kind, who, their roles, the entry, the outcome, the values it gave), then each decision it
+  caused, in order, then the history lines it wrote. An answer that approves `pay` and so starts
+  it is one record: `approved`, `admitted`, `started`. A refused act is a record too, its one
+  decision `refused` with the reason, and it changes nothing else. Made in `case`, so it is
+  deterministic and the same in memory and on Temporal. History lines stay as they are, for
+  people; nothing ever parses them.
+- **A decision says what decided and on what.** Its kind (`answered`, `approved`, `rejected`,
+  `refused`, `admitted`, `started`, `completed`, `failed`, `retried`, `skipped`, `reached`, `set`,
+  `closed`, `stopped`, `edited`, `migrated`, `forgotten`), its step and entry, the rule as the
+  path in the definition that decided (`steps.pay.when`, `steps.pay.approval`,
+  `rules.escalate`), and each fact it read, by name, with its sources (D12) and its value.
+- **Values are carried, sensitive ones wrapped.** Reports need values (D8); a history line still
+  quotes none (D30), and reading the export filters them by role. A sensitive value stays
+  `Sensitive` in the record, as in the state (D31), never unwrapped. A form value is in the
+  record as the case file holds it: sensitive only if its field is. A failure is recorded by its
+  type alone, its message left out (D15's "or omits"); the message stays in Temporal's failure,
+  under the case's key.
+- **Numbered in a stream, never by time or chance.** A record's ID is its stream (the workflow
+  that made it: `claim-7`, `claim-7/repair#1`, `claim-7/forget`) and a number from 1. The number
+  is in the state and crosses continue-as-new, so a record written twice carries the same ID.
+  Each record carries its release and engine version (D51), and the act's time (D33).
+- **From engine version 3** (D51). A case opened before exports nothing and says so; a migration
+  that moves a case to version 3 starts its records there, the first saying that what came
+  before was not recorded. Never a partial trail passed off as whole.
+
 ## Concepts
 
 | Term | Meaning |
@@ -3223,6 +3261,8 @@ D15, D17, D27, D29, D31, D32, D40, D48, D51, D54 and D74, whose text is kept.*
 | Admission | The engine's decision to allow a proposed step, re-checked when it runs |
 | Provenance tag | The sources a value was derived from |
 | Input policy | A rule on an activity input: which sources may influence it (a "sink policy" in the security literature; D21) |
+| Audit record | One act a case decided, as data: who, the decisions it caused, the rules and facts they read; numbered in its stream, never parsed from history |
+| Audit export | The append-only copy of a case's audit records, in a store the platform team keeps, with its own retention; sensitive values sealed under the case's key |
 | Change request | A proposed change to a running case, applied only after someone else approves it |
 | Package | A case definition, the plans it uses and the child cases it pins, released together |
 | Child case | A whole case opened from a step of another, pinned by its release, reporting back as the step's outputs |
