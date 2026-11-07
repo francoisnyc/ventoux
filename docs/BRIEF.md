@@ -3182,6 +3182,14 @@ D15, D17, D27, D29, D31, D32, D40, D48, D51, D54 and D74, whose text is kept.*
 - **No new engine version (D51):** a case's start never carried children before this, so no
   recorded history ever started a child, and every one replays the same, as no release held an
   attachment before D68.
+- *Changed while building 18d, before D75 was merged:* a doorbell's read waits up to 5 s for the
+  child that rang to end, since it ends in the workflow task after it rings; the run that started
+  a child sets the daily check too, set only while a child is open; a child's end read twice
+  lands once; a close waits only for a child the current run is still starting; any ID with a `/`
+  is refused for forgetting alone, being under the key of the case before it; and a migration
+  carries the children its target pins. Carried: a parent terminated with a child still running,
+  then forgotten, loses the key under that child (`docs/layers/18-lifecycle.md`, "Found while
+  building 18d").
 
 ## Concepts
 

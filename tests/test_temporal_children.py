@@ -23,7 +23,7 @@ from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.workflow import ParentClosePolicy
 from test_activation import NEEDS, SERVED, SERVES, production, worker
-from test_child_cases import CLOSABLE, claim, repair
+from test_child_cases import CLOSABLE, claim, repair, written_off_repair
 from test_temporal_case import QUEUE, Case, SwitchingCases, on_temporal, reported, runs_of, skipping
 from test_temporal_forget import on_temporal as forgetting_on_temporal
 from test_temporal_forget import reported as forget_reported
@@ -920,6 +920,36 @@ def test_a_childs_plan_step_runs_on_temporal() -> None:
 
     waiting = on_temporal(scenario)
     assert waiting.waiting_at == "approve_refund#1"
+
+
+def test_on_temporal_who_closed_the_child_approves_nothing_its_outcome_decides() -> None:
+    # Who closed the child crosses in its report, so its outcome is that person's act on
+    # Temporal too: lee closes the repair as written off, which decides that pay_garage runs, so
+    # lee approves nothing of it (brief, D11) (brief, D74) (brief, D75).
+    definition = claim()
+    definition["steps"]["pay_garage"]["when"] = {"==": [{"var": "repair.outcome"}, "written_off"]}
+    definition["steps"]["pay_garage"]["inputs"]["amount"] = {"var": "payout"}
+    released = release_of(definition, 1, cases={"repair@3": written_off_repair()})
+
+    async def scenario(client: Client) -> CaseReport:
+        parent = await start_case(client, DevelopmentCases, released, FILE, "claim-62", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, DevelopmentCases, "claim-62/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        await close(child, "written_off", "lee", ["support-lead"])
+        await reported(parent, lambda now: now.waiting_at == ["pay_garage.approval#1"])
+        await answer(parent, "pay_garage.approval#1", "approve", "lee", ["support-lead"], None)
+        await reported(parent, lambda now: any("refused lee" in line for line in now.history))
+        roles = ["support", "support-lead"]
+        await answer(parent, "pay_garage.approval#1", "approve", "sam", roles, None)
+        return await reported(parent, lambda now: now.status == "closed")
+
+    report = on_temporal(scenario)
+    assert (
+        "refused lee's answer approve to pay_garage.approval#1: lee set repair.outcome, which "
+        "decides whether pay_garage runs, so cannot approve it"
+    ) in report.history
+    assert any(line.startswith("scheduled pay_garage#1") for line in report.history)
 
 
 # --- Slice 9: replay (brief, D17) (brief, D75, choice 49) ---
