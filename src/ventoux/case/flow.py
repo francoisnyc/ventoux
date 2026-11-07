@@ -46,6 +46,7 @@ from ventoux.core.expressions import (
     ListType,
     OutcomeType,
     ReferenceType,
+    Var,
     check,
 )
 from ventoux.core.expressions.check import a_type
@@ -173,12 +174,35 @@ def type_issues(
         for field, declared in plan.fields.items():
             if not isinstance(declared, ReferenceType):
                 wanted.append((name, f"{plan.plan}@{plan.version}", field, declared, ""))
+    issues: list[Issue] = []
     for name, child in (children or {}).items():
         step = case.steps[name]
         assert isinstance(step, CaseStep)  # only a case step opens a child
         for field, opening in child.fields.items():
-            wanted.append((name, step.case, field, opening.declared, ""))
-    issues: list[Issue] = []
+            if not isinstance(opening.declared, ReferenceType):
+                wanted.append((name, step.case, field, opening.declared, ""))
+                continue
+            # A reference takes a reference to its system, read as it is, as a plan's field does
+            # (brief, D30) (brief, D36).
+            path = f"steps.{name}.inputs.{field}"
+            if field not in step.inputs or path in said:
+                continue
+            reading = step.inputs[field]
+            read_as = check(reading, step_types(case, types, name))
+            system = opening.declared.system
+            if not (
+                isinstance(reading, Var)
+                and isinstance(read_as, ReferenceType)
+                and read_as.system == system
+            ):
+                issues.append(
+                    Issue(
+                        path,
+                        "INPUT_TYPE",
+                        f"{step.case} takes {field} as a reference to {system}, read as it is, "
+                        f"and is given {a_type(read_as)}: give it a reference field of {system}",
+                    )
+                )
     for name, reference, field, wanted_type, kind in wanted:
         step = case.steps[name]
         # Only these call a contract, run a plan or open a child.
@@ -614,18 +638,34 @@ def child_policy_issues(
             _, child_step, _, child_input = issue.path.split(".", 3)
             read = child.steps[child_step]
             assert isinstance(read, CallStep)  # only a call step's input has a policy
-            for field in fields_read(read.inputs[child_input]):
-                if field in step.inputs and field not in given:
-                    given.add(field)
-                    issues.append(
-                        Issue(
-                            f"steps.{name}.inputs.{field}",
-                            issue.code,
-                            f"{step.case}, in its step {child_step}: {issue.message}",
-                            issue.severity,
-                        )
-                    )
+            said_here = f"{step.case}, in its step {child_step}: {issue.message}"
+            # Each parent input that feeds it, through the child's rules if need be; never
+            # dropped: one that traces to no input is said at the case step itself.
+            fed = opening_fields(child, read.inputs[child_input]) & set(step.inputs)
+            paths = [f"steps.{name}.inputs.{field}" for field in sorted(fed - given)]
+            if not fed:
+                paths = [f"steps.{name}"]
+            given |= fed
+            issues += [Issue(path, issue.code, said_here, issue.severity) for path in paths]
     return issues
+
+
+def opening_fields(child: CaseDefinition, expression: Expression) -> set[str]:
+    """The fields `expression` reads, and, for each a rule of `child` sets, what those rules read,
+    until nothing new: where in the child's opening a value it reads may have come from
+    (brief, D42)."""
+    found: set[str] = set()
+    waiting = list(fields_read(expression))
+    while waiting:
+        field = waiting.pop()
+        if field in found:
+            continue
+        found.add(field)
+        for rule in child.rules.values():
+            if field in rule.then.set:
+                waiting += fields_read(rule.then.set[field])
+                waiting += [] if rule.when is None else fields_read(rule.when)
+    return found
 
 
 def plan_fields_sources(

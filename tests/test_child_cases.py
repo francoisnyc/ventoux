@@ -24,6 +24,7 @@ from ventoux.case.memory import CaseRun
 from ventoux.case.releases import PackageRefused, digest, package, stored
 from ventoux.case.sheet import case_map
 from ventoux.case.validate import validate_case
+from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.cases import CaseReport, answer, start_case
 from ventoux.testing import (
     CATALOG,
@@ -1236,3 +1237,113 @@ def test_the_check_reads_a_childs_opening_with_the_sources_its_parent_gives() ->
     # The same child, given a trusted vehicle, is refused nowhere.
     issues = validate_case(parse_case(claim()), CATALOG, cases={"repair@3": telling_repair()})
     assert [i for i in issues if i.code == "INPUT_POLICY"] == []
+
+
+def test_a_childs_refusal_through_its_rules_is_said_at_the_parents_input() -> None:
+    # From the tutor's review of #88: contact is set by a child's rule from vehicle, which the
+    # customer typed in the parent. The check follows contact's writers back to the opening
+    # field, and never drops the refusal (brief, D36) (brief, D74).
+    child = telling_repair()
+    child["fields"]["contact"] = {"type": "string", "display": {"title": "Contact"}}
+    child["rules"] = {
+        "copy": {
+            "display": {"title": "Write to the vehicle's contact"},
+            "on": "opened",
+            "then": {"set": {"contact": {"var": "vehicle"}}},
+        }
+    }
+    child["steps"]["tell"]["inputs"]["to_customer"] = {"var": "contact"}
+    run = run_case(
+        customer_vehicle(),
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[ASSESSED],
+        cases={"repair@3": child},
+        people=PEOPLE,
+    )
+    [failed] = [
+        line for line in run.children["repair#1"].history if line.startswith("tell#1 failed")
+    ]
+    assert failed.endswith("this value comes from contact (system:opener, untrusted:customer)")
+    issues = validate_case(parse_case(customer_vehicle()), CATALOG, cases={"repair@3": child})
+    refused = [(i.path, i.message) for i in issues if i.code == "INPUT_POLICY"]
+    assert [path for path, _ in refused] == ["steps.repair.inputs.vehicle"]
+    assert refused[0][1].startswith("repair@3, in its step tell: letters.draft@2 takes to_customer")
+
+
+def test_a_child_takes_a_reference_only_as_a_reference_of_its_system_read_as_it_is() -> None:
+    # Found while answering the review of #88: a child's reference field refused every input.
+    # It takes a reference to its system, read as it is, as a plan's does (brief, D30) (brief, D36).
+    definition = claim()
+    definition["steps"]["repair"]["inputs"]["order_id"] = {"var": "order_id"}
+    issues = validate_case(parse_case(definition), CATALOG, cases={"repair@3": paying_repair()})
+    assert [i for i in issues if i.code == "INPUT_TYPE"] == []
+    definition["steps"]["repair"]["inputs"]["order_id"] = {"var": "vehicle"}
+    issues = validate_case(parse_case(definition), CATALOG, cases={"repair@3": paying_repair()})
+    assert [(i.path, i.message) for i in issues if i.code == "INPUT_TYPE"] == [
+        (
+            "steps.repair.inputs.order_id",
+            (
+                "repair@3 takes order_id as a reference to orders, read as it is, and is given a "
+                "string: give it a reference field of orders"
+            ),
+        )
+    ]
+
+
+def test_a_childs_refusal_that_traces_to_no_input_is_said_at_the_case_step() -> None:
+    # The customer's vehicle decides whether the child looks the order up, so the lookup's status
+    # carries it (brief, D43); no input of the parent gives status, so the refusal is said at the
+    # case step, never dropped.
+    child = telling_repair()
+    child["fields"]["order_id"] = {
+        "type": "reference",
+        "system": "orders",
+        "display": {"title": "Order"},
+    }
+    child["steps"]["lookup"] = {
+        "kind": "activity",
+        "display": {"title": "Look the order up"},
+        "activity": "orders.lookup@2",
+        "inputs": {"order_id": {"var": "order_id"}},
+        "when": {"==": [{"var": "vehicle"}, "veh-9"]},
+    }
+    child["steps"]["tell"] |= {"requires": ["lookup"]}
+    child["steps"]["tell"]["inputs"]["to_customer"] = {"var": "lookup.status"}
+    parent = customer_vehicle()
+    parent["steps"]["repair"]["inputs"]["order_id"] = {"var": "order_id"}
+    issues = validate_case(parse_case(parent), CATALOG, cases={"repair@3": child})
+    refused = [(i.path, i.message) for i in issues if i.code == "INPUT_POLICY"]
+    assert [path for path, _ in refused] == ["steps.repair"]
+    assert refused[0][1].startswith("repair@3, in its step tell: letters.draft@2 takes to_customer")
+    run = run_case(
+        parent,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[ASSESSED],
+        cases={"repair@3": child},
+        activities={"orders.lookup@2": lambda _: {"status": "open"}},
+        people=PEOPLE,
+    )
+    assert any(line.startswith("tell#1 failed") for line in run.children["repair#1"].history)
+
+
+def test_a_childs_state_crosses_continue_as_new() -> None:
+    # Who closed it, with which reason, the children it pins and who its parent excluded: each
+    # crosses as the state does, so a case continuing as new reports and excludes the same
+    # (brief, D27) (brief, D74).
+    run = run_case(
+        claim() | {"close_reasons": CLOSABLE},
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[ASSESSED],
+        cases={"repair@3": written_off_repair()},
+        case_answers={"repair": [close("written_off", "lee")]},
+        people=PEOPLE,
+        opened_by="sam",
+    )
+    child = run.children["repair#1"].state
+    assert (child.closed_as, child.closed_by) == ("written_off", "lee")
+    assert child.excluded == {"sam": "sam opened the case, so cannot approve its steps"}
+    for state in (child, run.state):
+        again = state_from_data(state_as_data(state), {})
+        assert (again.closed_as, again.closed_by) == (state.closed_as, state.closed_by)
+        assert (again.cases, again.excluded) == (state.cases, state.excluded)
+    assert list(state_from_data(state_as_data(run.state), {}).cases) == ["repair@3"]

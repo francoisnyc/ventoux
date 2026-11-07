@@ -338,7 +338,9 @@ def report_writes(
         inside = case_sources(child, contract_steps(child, catalog), OPENER, opening=opening)
         # The outcome is declared by the child's reviewed release; what steered the start passes
         # on, as for a plan's outcome (brief, D43). A close reason is a person's choice, as a
-        # task's answer is: whoever closes the child, said as a stand-in (brief, D11).
+        # task's answer is: whoever closes the child, said as a stand-in (brief, D11). It is what
+        # a reader of who may be excluded from approving a step finds (`excluded`, the diff's), as
+        # `person:answering <task>` is; the diff doesn't give the check a case's children yet.
         closer = {f"person:closing {child.case}"} if child.close_reasons else set()
         found[f"{name}.outcome"] = [(frozenset({start_of(name)}), frozenset({route, *closer}))]
         for field in child.reports:

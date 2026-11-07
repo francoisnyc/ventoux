@@ -743,7 +743,13 @@ The tests use only what a caller uses today, plus three additions (`cases`, `cas
   refuses on its own stays its own release check's. Not followed yet, carried: the child's
   conditions and rules, read with those sources (`UNTRUSTED_TRIGGER`, a steered start), and, from
   the review, whether a person answering a wait inside a plan should be excluded from what the
-  plan's outcome decides.
+  plan's outcome decides; and the diff's `excluded`, which reads where a step's values may come
+  from without the case's children, so finds no one through a child's report.
+- **From the tutor's second review of #88:** a child refusal said at the parent's input follows
+  the child's rules back to the opening field (`opening_fields`); one that traces to no input (a
+  start the opening steered) is said at the case step, never dropped. A bug found on the way: a
+  child's reference field refused every input; it now takes a reference to its system, read as
+  it is, as a plan's field does.
 
 ## Promises (18c)
 
@@ -764,6 +770,9 @@ first or, for a pin of behaviour already built, catching a mutation.
 | An untrusted value given to a child comes back untrusted, at the check | `test_a_value_a_child_was_given_comes_back_with_where_it_came_from` |
 | A child's opening keeps its parent's sources at runtime, and the check reads its input policies with them, refusing at the parent's input | `test_a_childs_opening_keeps_the_sources_its_parent_gave_it`, `test_the_check_reads_a_childs_opening_with_the_sources_its_parent_gives` |
 | Who closed a child with a reason decided its outcome, and approves nothing it decides; `done` is the child's alone | `test_who_closed_the_child_decided_its_outcome_so_approves_nothing_it_feeds` |
+| A child refusal is said at the parent's input that feeds it, through the child's rules, or at the case step: never dropped | `test_a_childs_refusal_through_its_rules_is_said_at_the_parents_input`, `test_a_childs_refusal_that_traces_to_no_input_is_said_at_the_case_step` |
+| A child's reference field takes a reference to its system, read as it is | `test_a_child_takes_a_reference_only_as_a_reference_of_its_system_read_as_it_is` |
+| Who closed a child, its reason, its children and its exclusions cross continue-as-new | `test_a_childs_state_crosses_continue_as_new` |
 | `case:` is trusted, and never read as a system | `test_a_reported_value_passes_trusted_only_and_never_reads_as_from_a_system` |
 | An open child keeps its step running, in one line of `waiting_for`, after the parent's own entries | `test_an_open_child_keeps_its_step_running_and_its_parent_waiting`, `test_an_open_childs_line_comes_after_the_parents_own_open_entries` |
 | The outcome is `done` or a close reason, type-checked; a report carries nothing else, and the parent never reads the child's milestones | `test_a_child_closed_by_a_person_reports_its_reason_as_the_outcome`, `test_a_childs_outcome_is_done_or_one_of_its_close_reasons`, `test_a_report_carries_nothing_its_child_doesnt_report` |
