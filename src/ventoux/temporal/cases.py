@@ -283,6 +283,9 @@ class CaseMigration:
     engine: int  # the engine version it moves to
     by: str  # who proposes it, as the trusted caller states (brief, D19)
     roles: list[str]  # their roles, stated with the proposal (brief, D22)
+    # The child cases it pins, as stored data, by reference, which its digest covers; none in a
+    # migration sent before 18d (brief, D75).
+    cases: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def migration(self) -> Migration:
         return Migration(
@@ -294,6 +297,7 @@ class CaseMigration:
             self.plans,
             self.mapping,
             self.engine,
+            self.cases,
         )
 
 
@@ -1606,6 +1610,7 @@ def migration_sent(
         target.engine,
         by,
         sorted(roles),
+        dict(target.cases),
     )
 
 

@@ -47,7 +47,7 @@ from ventoux.case.registry import (
     opened,
     retire,
 )
-from ventoux.case.releases import Hash, Record
+from ventoux.case.releases import Hash, Record, digest, package
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseEnded, CaseState, ForgetApproved, Opened
 from ventoux.case.visibility import CaseView
@@ -59,6 +59,8 @@ from ventoux.temporal.cases import (
     answer,
     case_handle,
     close,
+    propose_migration,
+    retry,
     send_event,
     start_case,
     view,
@@ -75,6 +77,7 @@ from ventoux.temporal.registry import (
     released,
 )
 from ventoux.temporal.worker import case_worker
+from ventoux.temporal.workflow import RunReport
 from ventoux.testing import (
     CATALOG,
     FAKES,
@@ -82,6 +85,7 @@ from ventoux.testing import (
     DevelopmentCases,
     DevelopmentForget,
     DevelopmentPlans,
+    as_text,
     development_converter,
     fixture_converter,
     release_of,
@@ -757,6 +761,38 @@ def test_on_temporal_a_child_refused_as_it_opens_fails_its_step() -> None:
     ]
 
 
+def test_on_temporal_a_retry_starts_the_refused_child_again_under_its_id() -> None:
+    # An operator retries the failed step: the same entry, so the same child workflow ID, which
+    # Temporal lets start again only because the earlier attempt failed (brief, D26) (brief,
+    # D75). Refused again here, since its release is still retired.
+    async def scenario(client: Client) -> CaseReport:
+        async with production_worker(client):
+            for record in (release_of(repair(), 3), release_of(repair(), 4)):
+                await activated_here(client, record)
+            gone = Retiring(Released("repair", 3, release_of(repair(), 3).digest), "pia")
+            assert (await ask(client, "production", "retire", Retire(gone))).done
+            unpinned = Activating(released(RELEASE), {}, REFUNDS, {REFUNDS: ["refunds-a"]}, "pia")
+            assert (await ask(client, "production", "activate", unpinned)).done
+            case = await start_case(client, ProductionCases, RELEASE, FILE, "claim-32", REFUNDS)
+            await answer(case, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+            await reported(case, lambda now: bool(now.needs_attention))
+            await retry(case, "repair#1", "omar", ["operations"])
+
+            def again(now: CaseReport) -> bool:
+                opened = [line for line in now.history if line.startswith("started repair#1")]
+                return len(opened) == 2 and bool(now.needs_attention)
+
+            return await reported(case, again)
+
+    report = in_production(scenario)
+    assert report.needs_attention == [
+        (
+            "repair#1: repair@3 refused its opening: claim-32/repair#1 can't open on repair 3: "
+            "repair 3 is retired in production"
+        )
+    ]
+
+
 # --- Slice 8: sensitive values cross sealed (brief, D31) (brief, D75) ---
 
 VIN = "WP0ZZZ99ZTS392124"
@@ -804,6 +840,86 @@ def test_a_sensitive_value_crosses_into_the_child_sealed() -> None:
         raw, exported = as_stored(history)
         assert VIN.encode() not in raw, history.workflow_id
         assert VIN not in exported, history.workflow_id
+
+
+def test_a_migration_renaming_the_case_step_keeps_its_open_child_on_temporal() -> None:
+    # A run keeps its entry across a migration's rename, so its child's workflow ID, its
+    # doorbell and its read: the report lands under the renamed step, across a switch
+    # (brief, D53) (brief, D75).
+    before = claim()
+    after = claim()
+    after["steps"]["fix_vehicle"] = after["steps"].pop("repair")
+    after["steps"]["pay_garage"]["requires"] = ["fix_vehicle"]
+    after["steps"]["pay_garage"]["inputs"]["amount"] = {"var": "fix_vehicle.cost"}
+    one = release_of(before, 1, cases={"repair@3": repair()})
+    two = release_of(after, 2, cases={"repair@3": repair()})
+
+    async def scenario(client: Client) -> CaseReport:
+        parent = await start_case(client, SwitchingCases, one, FILE, "claim-60", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, SwitchingCases, "claim-60/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        renamed = {"steps": {"repair": "fix_vehicle"}}
+        await propose_migration(parent, two, renamed, "pia", ["platform"])
+        await reported(parent, lambda now: "case.change#1" in now.waiting_at)
+        await answer(parent, "case.change#1", "approve", "lee", ["support-lead", "platform"])
+        await reported(parent, lambda now: now.release == "claim 2")
+        await answer(child, "fix#1", "fixed", "lee", ["support-lead"], {"cost": Decimal(640)})
+        await reported(parent, lambda now: now.waiting_at == ["pay_garage.approval#1"])
+        roles = ["support", "support-lead"]
+        await answer(parent, "pay_garage.approval#1", "approve", "sam", roles, None)
+        return await reported(parent, lambda now: now.status == "closed")
+
+    report = on_temporal(scenario, cases=SwitchingCases)
+    assert "repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost" in (
+        report.history
+    )
+    assert "amount from case:repair, person:lee" in "\n".join(
+        report.history
+    )  # read as fix_vehicle.cost
+
+
+def test_a_childs_plan_step_runs_on_temporal() -> None:
+    # A child's plan comes from its parent's release, which holds its children's plans too: one
+    # reference is one plan (brief, D74). Its plan runs as the child's own child workflow, under
+    # the family's key, and asks its people as any plan does (brief, D75).
+    from test_case import refund_order  # here: that module imports the guide's tests
+
+    child = repair()
+    child["fields"]["order_id"] = {
+        "type": "reference",
+        "system": "orders",
+        "display": {"title": "Order"},
+    }
+    child["steps"]["settle"] = {
+        "kind": "plan",
+        "display": {"title": "Settle the parts"},
+        "plan": "refund-order@1",
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "budget"}},
+    }
+    parent = claim()
+    parent["steps"]["repair"]["inputs"]["order_id"] = {"var": "order_id"}
+    children = {"repair@3": package(as_text(child), [as_text(refund_order())])}
+    packaged = package(as_text(parent), [], children)
+    released = Record("claim", 1, 1, digest(packaged), "memory", {}, packaged.written)
+
+    async def scenario(client: Client) -> RunReport:
+        case = await start_case(client, DevelopmentCases, released, FILE, "claim-61", QUEUE)
+        await answer(case, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        await started(client, DevelopmentCases, "claim-61/repair#1")
+        plan = client.get_workflow_handle("claim-61/repair#1/settle#1", result_type=RunReport)
+        for _ in range(100):
+            try:
+                now: RunReport = await plan.query("report", result_type=RunReport)
+                if now.waiting_at == "approve_refund#1":
+                    return now
+            except RPCError:
+                pass  # not started yet
+            await asyncio.sleep(0.05)
+        raise AssertionError("the child's plan never waited")
+
+    waiting = on_temporal(scenario)
+    assert waiting.waiting_at == "approve_refund#1"
 
 
 # --- Slice 9: replay (brief, D17) (brief, D75, choice 49) ---

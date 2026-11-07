@@ -2965,11 +2965,16 @@ assessed, and `pay_garage` pays what the repair cost:
 
 **A child case is named with its release,** `repair@3`, as a plan is. The release is the
 claim's: `repair 3` is in the claim's package, so in its digest, and the claim's diff shows a
-change to it. Activating the claim checks that `repair 3` is active in the environment (see the
-releases guide, "A case in an environment"); the registry is asked again as the child opens, and a
-release retired since refuses it before anything starts: the step fails and needs attention,
-`repair#1 failed: repair 3 is not active in production: activate it, then retry repair#1`. A new
-garage process reaches claims by releasing the claim too, never on its own.
+change to it. Activating the claim checks that `repair 3` is activated in the environment, not
+retired, with the digest the claim's package gives it, on the claim's queue, every problem said at
+once (`claim 1 pins repair 3, which production never activated`; see the releases guide, "A case
+in an environment"). The child opens on `repair 3` whichever repair release is active, so
+activating `repair 4` breaks no claim; and `repair 3` isn't retired while a claim release still
+in use pins it (`repair 3 not retired: claim 1, active in production, pins it`). The child asks
+the registry again as it opens; one refused all the same fails the step, needing attention:
+`repair#1: repair@3 refused its opening: claim-7/repair#1 can't open on repair 3: repair 3 is
+retired in production`. A new garage process reaches claims by releasing the claim too, never on
+its own.
 
 **What the child is given.** Its `inputs` are the child's opening fields, read from the parent's
 case file, each with its sources, as a plan step's are (brief, D28): a budget an adjuster set is
@@ -2982,8 +2987,9 @@ the check refuses anything else: a view can hide more than its source, never les
 
 **One subject, one key.** The child is sealed under its parent's key (brief, D31): a sensitive
 input crosses sealed, never opened. Forgetting the claim forgets its repair with the same request,
-and a repair is never forgotten alone: `repair is a child of claim-7: forget claim-7, which
-forgets it too`.
+and a repair is never forgotten alone: `repair#1 is a child of claim-7: forget claim-7, which
+forgets it too`. The family keeps its records as strictly as any of its cases: a claim whose
+repair says `forgetting: never` is never forgotten.
 
 **What comes back.** The child's definition says what its report carries, in `reports`:
 
@@ -3030,8 +3036,8 @@ may find it unset.
 **While the child runs,** it is the child's:
 
 - **A child that needs attention** is retried by its own operators, there; the parent waits. Only
-  a failure to *start* the child (a release not active, inputs refused) is the parent's step
-  failing, retried in the parent. A retry never starts a second child once one has run.
+  a failure to *start* the child (its release refused as it opens, inputs refused) is the
+  parent's step failing, retried in the parent. A retry never starts a second child once one has run.
 - **When the parent closes, or a rule stops the step,** the child is closed too, saying why
   (`closed by its parent: duplicate, by ana`): its tasks are cancelled, its running activities
   finish, and the parent closes once the child has ended. A close never waits for a person.
@@ -3039,6 +3045,10 @@ may find it unset.
   `repair@3` from that step, or the migration waits for the child to end.
 - **A parent that continues as new** doesn't wait for its child: the report reaches the parent's
   latest run.
+- **A child that ends without reporting** (terminated from outside, failed, timed out) fails the
+  step, never waited for in silence: `repair#1: repair@3 ended without reporting: it was
+  terminated: look at the child, then retry or close`. On Temporal the run that started the
+  child hears it at once; a later run asks each open child as it starts, and every day.
 
 **One level only.** A child case's definition has no case step of its own (a deliberate limit,
 brief, D48): one close then reaches everything it must, and no case starts itself. `ventoux check`
