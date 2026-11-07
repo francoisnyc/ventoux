@@ -11,20 +11,30 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
+from typing import Any
 
 from dev_server import cli_binary, cli_folder, dev_server
 from temporalio.client import Client
+from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import WorkflowEnvironment
 from temporalio.workflow import ParentClosePolicy
-from test_child_cases import claim, repair
-from test_temporal_case import QUEUE, SwitchingCases, on_temporal, reported, runs_of, skipping
+from test_child_cases import CLOSABLE, claim, repair
+from test_temporal_case import QUEUE, Case, SwitchingCases, on_temporal, reported, runs_of, skipping
 from worker_threads import worker_threads
 
 from ventoux.case.definition import parse_case
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseEnded, CaseState, Opened
 from ventoux.core.provenance import Sourced
-from ventoux.temporal.cases import CaseReport, answer, case_handle, start_case
+from ventoux.temporal.cases import (
+    CaseReport,
+    CaseWorkflow,
+    answer,
+    case_handle,
+    close,
+    send_event,
+    start_case,
+)
 from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     CATALOG,
@@ -63,7 +73,7 @@ def test_the_guides_child_case_runs_on_temporal() -> None:
         parent = await start_case(client, DevelopmentCases, RELEASE, FILE, "claim-7", QUEUE)
         await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
-        child = case_handle(client, DevelopmentCases, "claim-7/repair#1")
+        child = await started(client, DevelopmentCases, "claim-7/repair#1")
         await reported(child, lambda now: now.waiting_at == ["fix#1"])
         await answer(child, "fix#1", "fixed", "lee", ["support-lead"], {"cost": Decimal(640)})
         await reported(parent, lambda now: now.waiting_at == ["pay_garage.approval#1"])
@@ -116,7 +126,7 @@ def test_the_child_outlives_its_parents_switch() -> None:
         await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
         first, _ = await runs_of(client, "claim-9")
-        child = case_handle(client, SwitchingCases, "claim-9/repair#1")
+        child = await started(client, SwitchingCases, "claim-9/repair#1")
         await reported(child, lambda now: now.waiting_at == ["fix#1"])
         await reported(parent, lambda now: now.history[-1].startswith("started repair#1"))
         switched = await until_switched(client, "claim-9", first)
@@ -194,7 +204,7 @@ def test_a_child_terminated_in_the_run_that_started_it_fails_the_step_at_once() 
         parent = await start_case(client, DevelopmentCases, RELEASE, FILE, "claim-10", QUEUE)
         await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
-        child = case_handle(client, DevelopmentCases, "claim-10/repair#1")
+        child = await started(client, DevelopmentCases, "claim-10/repair#1")
         await reported(child, lambda now: now.waiting_at == ["fix#1"])
         await child.terminate("from outside")
         return await reported(parent, lambda now: bool(now.needs_attention))
@@ -215,7 +225,7 @@ def test_a_child_terminated_after_a_switch_is_noticed_when_the_next_run_starts()
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
         first, _ = await runs_of(client, "claim-11")
         _, second = await until_switched(client, "claim-11", first)
-        child = case_handle(client, SwitchingCases, "claim-11/repair#1")
+        child = await started(client, SwitchingCases, "claim-11/repair#1")
         await reported(child, lambda now: now.waiting_at == ["fix#1"])
         await child.terminate("from outside")
         for entry in ("repair#8", "repair#9"):  # two events: the case switches again
@@ -261,7 +271,7 @@ def test_a_child_terminated_unheard_is_noticed_within_a_day() -> None:
         parent = await start_case(client, DevelopmentCases, RELEASE, FILE, "claim-13", QUEUE)
         await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
-        child = case_handle(client, DevelopmentCases, "claim-13/repair#1")
+        child = await started(client, DevelopmentCases, "claim-13/repair#1")
         await reported(child, lambda now: now.waiting_at == ["fix#1"])
         await child.terminate("from outside")
         await environment.sleep(timedelta(hours=23))
@@ -285,7 +295,7 @@ def test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day() -> 
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
         first, _ = await runs_of(client, "claim-14")
         await until_switched(client, "claim-14", first)
-        child = case_handle(client, SwitchingCases, "claim-14/repair#1")
+        child = await started(client, SwitchingCases, "claim-14/repair#1")
         await reported(child, lambda now: now.waiting_at == ["fix#1"])
         await child.terminate("from outside")
         await environment.sleep(timedelta(hours=25))
@@ -293,3 +303,111 @@ def test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day() -> 
 
     noticed = skipping(scenario, cases=SwitchingCases)
     assert noticed.needs_attention == [ENDED_WITHOUT]
+
+
+CLOSING = release_of(claim() | {"close_reasons": CLOSABLE}, 1, cases={"repair@3": repair()})
+
+
+def test_a_parent_closed_after_a_switch_closes_its_child_saying_why() -> None:
+    # A close asked across a switch is asked again, once, by the new run: the child is closed
+    # by its parent, saying why, and the parent closes once the child has ended (brief, D40)
+    # (brief, D75).
+    async def scenario(client: Client) -> tuple[CaseReport, CaseReport]:
+        parent = await start_case(client, SwitchingCases, CLOSING, FILE, "claim-15", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
+        first, _ = await runs_of(client, "claim-15")
+        await until_switched(client, "claim-15", first)
+        child = await started(client, SwitchingCases, "claim-15/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        await close(parent, "duplicate", "ana", ["support"])
+        done = await reported(parent, lambda now: now.status == "closed")
+        return done, await reported(child, lambda now: now.status == "closed")
+
+    parent, child = on_temporal(scenario, cases=SwitchingCases)
+    assert child.history[-2:] == [
+        "cancelled fix#1: closed by its parent: duplicate, by ana",
+        "closed: by its parent: duplicate, by ana",
+    ]
+    assert "repair#1 cancelled: the case is closing" in parent.history
+
+
+async def started(client: Client, cases: type[CaseWorkflow], id: str) -> Case:
+    """The child case `id`, once Temporal has recorded its start: its parent says it is open as
+    it decides to open it, before the start is recorded. Asked a bounded number of times."""
+    for _ in range(100):
+        try:
+            await client.get_workflow_handle(id).describe()
+            return case_handle(client, cases, id)
+        except RPCError as error:
+            if error.status != RPCStatusCode.NOT_FOUND:
+                raise
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"{id} never started")
+
+
+def test_a_parent_that_closes_closes_its_child_saying_why() -> None:
+    # In the run that started it: the child is closed by its parent, its tasks cancelled, and
+    # the parent closes once the child has ended; the child's report changes nothing there
+    # (brief, D40) (brief, D75).
+    async def scenario(client: Client) -> tuple[CaseReport, CaseReport]:
+        parent = await start_case(client, DevelopmentCases, CLOSING, FILE, "claim-16", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, DevelopmentCases, "claim-16/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        await close(parent, "duplicate", "ana", ["support"])
+        done = await reported(parent, lambda now: now.status == "closed")
+        return done, await reported(child, lambda now: now.status == "closed")
+
+    parent, child = on_temporal(scenario)
+    assert child.history[-2:] == [
+        "cancelled fix#1: closed by its parent: duplicate, by ana",
+        "closed: by its parent: duplicate, by ana",
+    ]
+    assert "repair#1 cancelled: the case is closing" in parent.history
+    assert not [line for line in parent.history if line.startswith("reached repair")]
+
+
+def withdrawable() -> dict[str, Any]:
+    """The claim, whose rule stops the repair when the customer withdraws."""
+    definition = claim()
+    definition["events"] = {
+        "withdrawn": {
+            "display": {"title": "The customer withdraws"},
+            "sent_by": {"system": "portal"},
+        }
+    }
+    definition["rules"] = {
+        "withdraw": {
+            "display": {"title": "Stop the repair when the customer withdraws"},
+            "on": {"event": "withdrawn"},
+            "then": {"stop": ["repair"]},
+        }
+    }
+    return definition
+
+
+def test_a_rule_that_stops_the_step_closes_its_child_and_the_parent_goes_on() -> None:
+    # The child is closed by its parent, saying which rule stopped it; also across a switch: the
+    # new run asks the child to close, once (brief, D40) (brief, D75).
+    released = release_of(withdrawable(), 1, cases={"repair@3": repair()})
+
+    async def scenario(client: Client) -> tuple[CaseReport, CaseReport]:
+        parent = await start_case(client, SwitchingCases, released, FILE, "claim-17", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, SwitchingCases, "claim-17/repair#1")
+        first, _ = await runs_of(client, "claim-17")
+        await until_switched(client, "claim-17", first)
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        await send_event(parent, "withdrawn", {}, "system:portal")
+        child_closed = await reported(child, lambda now: now.status == "closed")
+        stopped = await reported(parent, lambda now: now.status == "closed")
+        return stopped, child_closed
+
+    parent, child = on_temporal(scenario, cases=SwitchingCases)
+    assert child.history[-1] == "closed: by its parent: stopped by withdraw#1"
+    # As in memory: the repair stopped, the claim has nothing left to do, so it closes.
+    assert parent.history[-2:] == [
+        "repair#1 cancelled: stopped by withdraw#1",
+        "closed: nothing left to do",
+    ]

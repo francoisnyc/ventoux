@@ -456,8 +456,9 @@ class CaseWorkflow:
         self.children: dict[str, workflow.ChildWorkflowHandle[Any, Any]] = {}
         # Each step run the case has asked to stop, and why: asked once, never twice (brief, D40).
         self.stopping: dict[str, str] = {}
-        # Each child case this run knows has started, by its entry, and the release it runs.
-        self.child_cases: dict[str, str] = {}
+        # Each child case this run is starting, by its entry: a close waits until its start is
+        # recorded. A child another run started has started (brief, D75).
+        self.starting: set[str] = set()
         # Whether this run's daily check of its open children is set: one at a time (brief, D75).
         self.checking = False
         # An engine bug raised in a task beside the loop, which the loop raises in its turn.
@@ -905,6 +906,7 @@ class CaseWorkflow:
         if isinstance(command, OpenCase):
             self.stopping.pop(command.entry, None)  # a retry is a new attempt (brief, D26)
             self.running += 1  # until its start is recorded
+            self.starting.add(command.entry)
             self.beside(self.open_child(command))
             return
         self.running += 1
@@ -1089,7 +1091,7 @@ class CaseWorkflow:
             return
         finally:
             self.running -= 1
-        self.child_cases[command.entry] = command.case
+            self.starting.discard(command.entry)
         self.check_daily()
         if command.entry in self.stopping:  # closed while it was starting: told once started
             await self.close_child(CloseCase(command.entry, self.stopping.pop(command.entry)))
@@ -1187,7 +1189,7 @@ class CaseWorkflow:
     async def close_child(self, command: CloseCase) -> None:
         """Close the child case, saying why, through its own signal, once its start is recorded,
         asked once (brief, D40) (brief, D75)."""
-        if command.entry not in self.child_cases:
+        if command.entry in self.starting:
             self.stopping[command.entry] = command.reason  # starting: told once started
             return
         child = workflow.get_external_workflow_handle(
