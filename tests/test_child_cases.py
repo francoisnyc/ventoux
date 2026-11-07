@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from temporalio.client import Client
+from test_temporal_case import QUEUE, on_temporal, reported
 
 from ventoux.case import checked
 from ventoux.case.admission import RetryRefused
@@ -22,9 +24,11 @@ from ventoux.case.memory import CaseRun
 from ventoux.case.releases import PackageRefused, digest, package, stored
 from ventoux.case.sheet import case_map
 from ventoux.case.validate import validate_case
+from ventoux.temporal.cases import CaseReport, answer, start_case
 from ventoux.testing import (
     CATALOG,
     ChangeRefused,
+    DevelopmentCases,
     as_text,
     close,
     edit,
@@ -1027,3 +1031,124 @@ def test_the_builder_writes_the_guides_claim_and_its_child() -> None:
     assert sorted(files) == ["case.json", "cases/repair@3/case.json"]
     assert json.loads(files["case.json"], parse_float=Decimal) == claim()
     assert json.loads(files["cases/repair@3/case.json"], parse_float=Decimal) == repair()
+
+
+# --- Step 6: promises without a test yet (brief, D74) ---
+
+
+def test_the_parents_opener_approves_nothing_in_the_child() -> None:
+    # The opener's exclusion crosses as the proposer's does. The child's letter reads nothing the
+    # opener gave, so only the crossing refuses them (brief, D11) (brief, D25).
+    child = repair()
+    child["steps"]["tell_owner"] = {
+        "kind": "activity",
+        "display": {"title": "Tell the owner"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": "owner@example.com", "template": "repair-started"},
+        "approval": {"roles": ["support-lead"], "display": {"reason": "A letter is reviewed"}},
+    }
+    opened: dict[str, Any] = {
+        "file": {"order_id": "ord-1", "vehicle": "veh-9"},
+        "answers": [ASSESSED],
+        "cases": {"repair@3": child},
+        "people": PEOPLE,
+        "opened_by": "sam",
+    }
+    with pytest.raises(AnswerRefused, match="sam opened the case, so cannot approve its steps"):
+        run_case(claim(), case_answers={"repair": [("tell_owner", "approve", "sam")]}, **opened)
+    run = run_case(claim(), case_answers={"repair": [("tell_owner", "approve", "lee")]}, **opened)
+    assert "lee answered tell_owner.approval#1 approve as support-lead" in (
+        run.children["repair#1"].history
+    )
+
+
+def test_an_event_reaches_the_parent_only() -> None:
+    # The child is its own case: what the parent hears, it doesn't, unless a rule stops the step.
+    definition = claim()
+    definition["events"] = {
+        "withdrawn": {
+            "display": {"title": "The customer withdraws"},
+            "sent_by": {"system": "portal"},
+        }
+    }
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[ASSESSED, send("withdrawn", {}, "system:portal")],
+        cases={"repair@3": repair()},
+        people=PEOPLE,
+    )
+    assert "withdrawn#1 from portal" in run.history
+    assert not any("withdrawn" in line for line in run.children["repair#1"].history)
+    assert run.children["repair#1"].waiting_for == ["fix by support-lead"]
+
+
+def test_a_report_carries_nothing_its_child_doesnt_report() -> None:
+    # Only the outcome and the fields `reports` lists land; the child's milestones are said in
+    # the history, never read (brief, D74).
+    run = run_case(
+        claim(),
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[ASSESSED],
+        cases={"repair@3": repair()},
+        case_answers={"repair": [("fix", "fixed", "lee", {"cost": 640})]},
+        people=PEOPLE,
+    )
+    landed = sorted(name for name in run.state.values if name.startswith("repair."))
+    assert landed == ["repair.cost", "repair.outcome"]
+    reading = claim()
+    reading["steps"]["pay_garage"]["when"] = {"var": "repair.fixed"}
+    issues = validate_case(parse_case(reading), CATALOG, cases={"repair@3": repair()})
+    assert [i.path for i in issues if i.code == "EXPRESSION_INVALID"] == ["steps.pay_garage.when"]
+
+
+def test_an_open_childs_line_comes_after_the_parents_own_open_entries() -> None:
+    definition = claim()
+    definition["steps"]["call"] = {
+        "kind": "task",
+        "display": {"title": "Call the customer"},
+        "roles": ["support"],
+        "requires": ["assessed"],
+        "outcomes": {"called": {"display": {"title": "Called"}}},
+    }
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[ASSESSED],
+        cases={"repair@3": repair()},
+        people=PEOPLE,
+    )
+    # repair opened before call: its line still comes after the case's own entries (brief, D74).
+    started = [line for line in run.history if line.startswith("started ")]
+    assert started.index(next(s for s in started if "repair#1" in s)) < started.index(
+        "started call#1: waiting for called by support"
+    )
+    assert run.waiting_for == ["call by support", "repair#1: case repair, open"]
+
+
+def test_on_temporal_a_case_step_fails_closed_until_child_cases_run_there() -> None:
+    # Layer 18d runs a child as its own workflow; until then the step fails, needing attention,
+    # never a silent start (brief, D74).
+    async def scenario(client: Client) -> CaseReport:
+        case = await start_case(
+            client,
+            DevelopmentCases,
+            claim(),
+            {"order_id": "ord-1", "vehicle": "veh-9"},
+            "c-1",
+            QUEUE,
+        )
+        await answer(case, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        return await reported(case, lambda now: bool(now.needs_attention))
+
+    # Found by this test: an empty start crashed the workflow task, which Temporal retries for
+    # ever. Now the engine refuses a child its start didn't give, here and in memory alike.
+    refused = (
+        "repair#1: repair@3 isn't a child this case holds: its start gives the children its "
+        "release pins"
+    )
+    assert on_temporal(scenario).needs_attention == [refused]
+    run = run_case(
+        claim(), file={"order_id": "ord-1", "vehicle": "veh-9"}, answers=[ASSESSED], people=PEOPLE
+    )
+    assert run.needs_attention == [refused]

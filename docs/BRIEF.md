@@ -3074,7 +3074,9 @@ Adds to D9, D12, D17, D20, D27, D30, D39, D48, D52, D53 and D72, whose text is k
 
 *Decided 2026-11-07, in layer 18c (`docs/layers/18-lifecycle.md`, choices 21 to 23, 25 to 27, 29
 and 36 to 41). Adds to D10, D24, D25, D28, D29, D40, D48, D50, D51, D52 and D53, whose text is
-kept. Temporal's part (choices 24, 28 and continue-as-new) is 18d's, decided as D75.*
+kept. Temporal's part (choices 24, 28 and continue-as-new) is 18d's, decided as D75, and so are
+the environment registry's checks of a child's release below: activating the parent, and the
+child asking as it opens. Until then a case step on Temporal fails, needing attention.*
 
 - **A case step opens a child case:** `{"kind": "case", "case": "repair@3", "inputs": {...}}`,
   named with its release, as a plan is. It takes what a plan step takes, and, like one, no
@@ -3113,8 +3115,9 @@ kept. Temporal's part (choices 24, 28 and continue-as-new) is 18d's, decided as 
   step, closes the child through D40's one place, saying why (`closed by its parent: duplicate, by
   ana`), and the parent closes once the child has ended; a close never waits for a person (D48). A
   migration's target must open the same release from the step, renamed or not, or the migration
-  waits for the child to end (D53), and the record of each run's child follows a rename. An edit
-  never reaches a child (D52). Events and rules reach the parent only.
+  waits for the child to end, refused until then (`migrate after it finishes`, D53), and the record
+  of each run's child follows a rename. An edit never reaches a child (D52). Events and rules
+  reach the parent only.
 - **One level only** (a deliberate limit, D48): a child's definition has no case step of its own,
   refused when the parent is validated. That bounds what one close must reach, and no case opens
   itself.
@@ -3127,6 +3130,8 @@ kept. Temporal's part (choices 24, 28 and continue-as-new) is 18d's, decided as 
 - **The parent holds its pinned children as stored data, by reference,** given when it opens, as a
   case's start holds its plans: the engine reads each child's outcomes and reported fields from
   them, so `repair.cost` is type-checked at runtime as at validation.
+- **A child its case doesn't hold fails the step** (fail closed): the step's start never guesses a
+  definition, and waits for a person (D17).
 - **No new engine version (D51):** no definition readable before has a case step.
 
 ## Concepts

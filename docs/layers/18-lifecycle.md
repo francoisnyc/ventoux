@@ -669,7 +669,7 @@ The tests use only what a caller uses today, plus three additions (`cases`, `cas
 | the child closed | `repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost` (or `repair closed: duplicate, by lee; reporting nothing`) |
 | the child's opening refused (the step fails) | in `needs_attention`: `repair#1: repair@3 refused its opening: budget is declared untrusted:robots, a label nobody registered`; the operator fixes the cause and retries the same entry |
 | the parent closes, or a rule stops the step | in the child: `closed by its parent: duplicate, by ana` (`closed by its parent: stopped by withdraw#1`); in the parent: `repair#1 cancelled: the case is closing` |
-| a migration whose target opens another child | the migration waits: `repair#1 runs repair@3, and the target opens repair@4 from repair: it waits for repair#1 to end` |
+| a migration whose target opens another child | refused until it ends (D53's "waits"): `repair#1 is running on repair@3, and claim 2's repair opens repair@4: migrate after it finishes` |
 | the package | `cases/repair@3 isn't a package: a child case is a folder holding case.json`; `cases/repair@4 is named by no step` |
 | a package's plans disagree | `plans/refund-order@1 differs between claim and cases/repair@3: one reference is one plan` |
 
@@ -694,6 +694,102 @@ The tests use only what a caller uses today, plus three additions (`cases`, `cas
    a failed opening; a required case step; a repeatable one opening `repair#2`.
 10. The package: `cases/` read, refused shapes, the digest covering the child, plans that disagree.
 11. The diff, the case map, the builder, the schema, the digest pin.
+
+### Decided while building 18c
+
+- **`case:<child>` is a trusted origin** (asked in slice 4, answered (a); added to D74): it records
+  the route a value came by, and its other sources decide its trust. `only_from` still refuses it.
+- **The static check follows a report through the child** (asked in slice 4, answered (a)): each
+  reported field's sources are the child's own, each opening field marked by where the parent gave
+  it, written as one more computed write in the parent, so `always` and the warnings read it. The
+  children reach every check that works out sources (`writers.py`, `flow.py`, `warnings.py`).
+- **The parent holds its pinned children in its state** (`cases`, given at the opening, carried
+  across continue-as-new, replaced by a migration's target): the engine reads a child's outcomes
+  and reported types from them at runtime, without a new argument to `decide`.
+- **A bug found and fixed:** an input under a policy, reading what a missing contract would give,
+  crashed `validate_case` (`KeyError`). An input reading a missing step's value is now said once,
+  by that step's issue (`blind_inputs`), for a missing contract, plan or child alike.
+- **A second, found by the Temporal test:** a case whose start gives no children crashed the
+  workflow task when a case step started, and Temporal retries a crashed task for ever. The engine
+  now fails the step: `repair@3 isn't a child this case holds: its start gives the children its
+  release pins`. That is what a case step does on Temporal until 18d passes the children.
+- **Wordings that follow the engine's existing lines,** not the ones proposed: the plan's input
+  refusals (`repair@3 takes no input cost: …`, `… give it a number`); `with budget and vehicle`;
+  `the inputs of pay_garage can't be read: repair.cost has no value`; the owed line for a stopped
+  required child; the opening refusal said in `needs_attention`. The child's closed line is
+  `closed: by its parent: …`, since every closed line starts `closed:`.
+- **A migration that would change a running child's release is refused**, saying `migrate after it
+  finishes`, as for a running plan: D53 refuses rather than waits.
+- **The child's `waiting_for` line comes after the parent's own entries** (added to D74): kept in
+  its true place it would sit among the entries a close cancels and a migration renames.
+- **Exclusions cross by the child's state** (`excluded`, carried), read by `why_excluded` beside
+  the child's own opener, so an assigner can't move a child's approval to an excluded person.
+- **A child's plan steps run on the parent's plans**, one reference being one plan; a package
+  refuses a reference that means two plans.
+- **The digest writes `cases` only for a package with children,** so every digest made before is
+  unchanged, as a default is left out (D50). A record written now holds an empty `cases`.
+- **The registry's checks are 18d's** (said in D74): activating the parent with the child's
+  release, and the child asking as it opens. In memory, `repair@3` is only a name.
+- **In memory, a child plays its script when it opens,** and carries on from its own state when its
+  parent closes it. A child that finishes later, after its parent moved on, is 18d's: its end comes
+  by a signal.
+
+## Promises (18c)
+
+Each claim the note, D74 and the guide's "Child cases" make, and the test that would fail if it
+weren't true. Tests without a file are in `tests/test_child_cases.py`. Each was watched failing
+first or, for a pin of behaviour already built, catching a mutation.
+
+| Promise | Test |
+|---|---|
+| A child nobody supplied is refused at validation (the curriculum's negative test) | `test_a_child_case_that_isnt_supplied_is_refused` |
+| A case step has no approval, and is never repeated | `test_a_case_step_has_no_approval`, `test_a_case_step_is_never_repeated` |
+| A report lists the case's own fields, none sensitive, none a list | `test_a_report_carries_only_the_cases_own_plain_values` (three cases) |
+| A child is given only its opening: nothing its forms or rules set, nothing it lacks, each of its type | `test_a_child_is_given_only_what_it_takes_at_its_opening`, `test_a_child_is_never_given_what_its_rules_set`, `test_a_child_is_given_each_input_of_its_type` |
+| A sensitive value enters a child only into a sensitive field | `test_a_sensitive_value_enters_a_child_only_into_a_sensitive_field` |
+| One level only: a child opens no case, in validation and in the package | `test_a_child_opens_no_case_of_its_own`, `test_a_child_that_pins_children_of_its_own_is_refused` |
+| A child supplied under another name, or unreadable, is refused | `test_a_child_supplied_under_another_name_or_unreadable_is_refused` |
+| The child opens with its sources, plays, closes, and reports as the step's outputs, each with `case:<child>` | `test_the_guides_child_case_runs_as_written`, and in `test_case.py` |
+| An untrusted value given to a child comes back untrusted, at the check | `test_a_value_a_child_was_given_comes_back_with_where_it_came_from` |
+| `case:` is trusted, and never read as a system | `test_a_reported_value_passes_trusted_only_and_never_reads_as_from_a_system` |
+| An open child keeps its step running, in one line of `waiting_for`, after the parent's own entries | `test_an_open_child_keeps_its_step_running_and_its_parent_waiting`, `test_an_open_childs_line_comes_after_the_parents_own_open_entries` |
+| The outcome is `done` or a close reason, type-checked; a report carries nothing else, and the parent never reads the child's milestones | `test_a_child_closed_by_a_person_reports_its_reason_as_the_outcome`, `test_a_childs_outcome_is_done_or_one_of_its_close_reasons`, `test_a_report_carries_nothing_its_child_doesnt_report` |
+| A reported field never set is absent: its reader fails, and the check warns | `test_a_reported_field_the_child_never_set_fails_whatever_reads_it`, `test_the_check_warns_where_a_reported_field_may_be_unset` |
+| The parent's opener and the step's proposer approve nothing in the child; nobody is its opener | `test_the_parents_opener_approves_nothing_in_the_child`, `test_who_proposed_the_case_step_approves_nothing_in_the_child` |
+| A refused opening fails the step; a retry opens the same entry, never a second child | `test_a_refused_opening_fails_the_step_and_a_retry_opens_no_second_child`, `test_a_child_that_opened_is_never_opened_again_by_a_retry` |
+| A child the case doesn't hold fails the step, here and on Temporal | `test_on_temporal_a_case_step_fails_closed_until_child_cases_run_there` |
+| The parent's close and a rule's stop close the child, saying why; its report changes nothing | `test_a_parent_that_closes_closes_its_child_saying_why`, `test_a_rule_that_stops_the_step_closes_its_child_and_the_parent_goes_on` |
+| An edit and an event never reach a child | `test_an_edit_never_reaches_a_child`, `test_an_event_reaches_the_parent_only` |
+| A failed opening may be skipped by operators; a required case step is done once its child closes, owed if stopped; a repeatable one opens another child | `test_a_failed_opening_may_be_skipped_by_operators_like_any_failed_run`, `test_a_required_case_step_is_done_once_its_child_closes_and_owed_if_stopped`, `test_a_repeatable_case_step_proposed_again_opens_another_child` |
+| The package holds each child, and refuses children that don't fit, and a plan reference meaning two plans | `test_a_package_holds_each_child_it_pins_as_a_package_of_its_own`, `test_a_package_whose_children_dont_fit_its_case_steps_is_refused`, `test_a_plan_reference_meaning_two_plans_in_one_package_is_refused` |
+| The digest covers what children do, not their wording; no earlier digest changes | `test_the_parents_digest_covers_what_its_children_do`, `test_digests.py` (the `children` package) |
+| A record keeps its children and reads back as the same package | `test_a_release_record_keeps_its_children_and_reads_back_as_the_same_package` |
+| A migration keeping the child's release (renamed) keeps the open child; one changing it is refused until it ends | `test_a_migration_renaming_the_case_step_keeps_its_open_child`, `test_a_migration_opening_another_release_from_the_step_is_refused_until_it_ends` |
+| The release check checks each child and gives the parent its children | `test_the_release_check_checks_each_child_and_gives_the_parent_its_children` |
+| A child's plan step finds its plan beside its parent's | `test_a_childs_plan_step_finds_its_plan_beside_its_parents` |
+| The diff reads inside each child with its verdict; a child added or removed is said whole | `test_the_diff_says_what_changes_inside_a_child_with_the_childs_verdict` |
+| The case map reads the step and maps each child | `test_the_case_map_reads_the_case_step_and_maps_each_child` |
+| The builder writes `child_case` and `reports`, the same JSON, the child in its package | `test_the_builder_writes_the_guides_claim_and_its_child`, `test_builder_coverage.py`, `test_builder_guide.py` |
+| The JSON Schema has the keys | `test_schema.py::test_the_committed_schemas_are_what_the_models_say` |
+| No new engine version: every recorded history replays | the replay tests over `tests/histories` |
+
+## Routes checked before the pull request (18c)
+
+| Route | What it does | Test |
+|---|---|---|
+| an answer | the child's own entries are answered in the child, by its script; the parent's are its own | `test_the_guides_child_case_runs_as_written`, the approval tests |
+| an edit (D52) | changes the parent only; the child keeps its opening | `test_an_edit_never_reaches_a_child` |
+| a migration (D53) | keeps an open child under a renamed step; refused while the target opens another release | the two migration tests |
+| an event | reaches the parent only | `test_an_event_reaches_the_parent_only` |
+| a rule | may start a case step or stop it; a stop closes the child | `test_a_rule_that_stops_the_step_closes_its_child_and_the_parent_goes_on` |
+| the opening | the child's checked; a refusal fails the step; a child not held fails it | the refused-opening test, the Temporal test |
+| a plan | a child's plan step runs on the parent's plans | `test_a_childs_plan_step_finds_its_plan_beside_its_parents` |
+| a close or a stop (D40) | closes the child through `ask_to_stop`, saying why; the parent waits for its end | the close and stop tests |
+| a retry (D26) | of a failed opening only, the same entry; refused for an open child | the two retry tests |
+| continue-as-new | `cases`, `closed_as` and `excluded` cross; an earlier state reads them empty | `test_temporal_case.py::test_a_carried_state_reads_back_as_it_was` (the guard that every field crosses) |
+
+**State keyed by a step's name:** none new. Which child a run opened is the run itself (its entry,
+`repair#1`), which a migration renames with the step, tested.
 
 ### What changes in the guide, if answered as recommended
 

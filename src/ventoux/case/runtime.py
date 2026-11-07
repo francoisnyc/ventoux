@@ -2173,6 +2173,13 @@ def open_child(state: CaseState, name: str, step: CaseStep, commands: list[Comma
     """Open the step's child case with its opening, each value with where it came from, so the
     child's own checks see the real sources (brief, D74). The child checks its opening when it
     opens, as any case does."""
+    if step.case not in state.cases:
+        # Fail closed: a child its start didn't give is never guessed at; the step fails and
+        # waits for a person (brief, D17).
+        raise InputRefused(
+            f"{step.case} isn't a child this case holds: its start gives the children its release "
+            "pins"
+        )
     fields: dict[str, Sourced] = {}
     for field, expression in step.inputs.items():
         try:
@@ -2193,7 +2200,7 @@ def open_child(state: CaseState, name: str, step: CaseStep, commands: list[Comma
     state.history.append(
         f"started {run.entry}: case {step.case} ({origins(step.inputs, state)}), run {child_run}"
     )
-    definition = state.cases[step.case]  # validated: the package holds every child it pins
+    definition = state.cases[step.case]
     commands.append(OpenCase(run.entry, step.case, definition, fields, child_run, excluded))
 
 
