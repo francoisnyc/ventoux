@@ -1014,6 +1014,8 @@ slice's commit).
 | A doorbell from anyone, for no open child or one still open, is recorded and changes nothing | `test_a_doorbell_for_no_open_child_is_recorded_and_changes_nothing`, `test_a_doorbell_for_a_child_still_open_reads_and_changes_nothing` |
 | A doorbell's read waits, 5 s at most, for the child that rang to end | `test_a_doorbell_read_waits_for_the_child_ringing_it_to_end` |
 | A child's end read twice lands once | `test_a_childs_end_read_twice_lands_once` |
+| A read never takes a child it can't find, or one that ended without its report, as open: either fails the step (the daily check would otherwise find it open every day) | `test_a_child_read_that_finds_no_workflow_says_it_is_gone`, `test_a_child_read_that_finds_no_ending_says_so` (from the tutor's review of #89) |
+| A child found ended after its report landed changes nothing | `test_a_child_found_ended_after_its_report_landed_changes_nothing` (from the tutor's review of #89) |
 | `ABANDON`, from the parent's history; the child outlives the parent's switch, which waits for no child; the doorbell reaches the new run | `test_the_child_outlives_its_parents_switch` |
 | A child ending without reporting fails the step: at once in the run that started it (development server), as a later run starts, and within a day | `test_a_child_terminated_in_the_run_that_started_it_fails_the_step_at_once`, `test_a_child_terminated_after_a_switch_is_noticed_when_the_next_run_starts`, `test_a_child_terminated_unheard_is_noticed_within_a_day`, `test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day` |
 | A question that finds the child open records nothing | `test_the_child_outlives_its_parents_switch` (no `child_ended` line) |

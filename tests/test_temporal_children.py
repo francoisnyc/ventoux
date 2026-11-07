@@ -49,7 +49,14 @@ from ventoux.case.registry import (
 )
 from ventoux.case.releases import Hash, Record, digest, package
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, CaseEnded, CaseState, ForgetApproved, Opened
+from ventoux.case.state import (
+    Answered,
+    CaseEnded,
+    CaseState,
+    ChildNotEnded,
+    ForgetApproved,
+    Opened,
+)
 from ventoux.case.visibility import CaseView
 from ventoux.core.provenance import Sourced
 from ventoux.core.sensitive import Sensitive
@@ -307,6 +314,28 @@ def test_a_childs_end_read_twice_lands_once() -> None:
     assert commands == []
 
 
+def test_a_child_found_ended_after_its_report_landed_changes_nothing() -> None:
+    # A question asked as a run starts can find the child ended after its report has landed
+    # (here, terminated after closing): the step is done, and stays so (brief, D75).
+    case = parse_case(claim())
+    opened = Opened(FILE, None, at=START, cases={"repair@3": repair()})
+    state, _ = decide(case, CATALOG, CaseState("claim-72/run"), opened)
+    accepted = Answered(
+        "assess#1", "accept", "ana", frozenset({"support"}), {"payout": Decimal(900)}, at=START
+    )
+    state, _ = decide(case, CATALOG, state, accepted)
+    cost = Sourced(Decimal(640), frozenset({"person:lee"}))
+    ended = CaseEnded(
+        "repair#1", "done", None, "nothing left to do", ("fixed",), {"cost": cost}, at=START
+    )
+    state, _ = decide(case, CATALOG, state, ended)
+    once = copy.deepcopy(state)
+    late = ChildNotEnded("repair#1", "it was terminated", at=START + 1)
+    state, commands = decide(case, CATALOG, state, late)
+    assert (state.history, state.runs, state.values) == (once.history, once.runs, once.values)
+    assert commands == []
+
+
 def test_a_child_terminated_unheard_is_noticed_within_a_day() -> None:
     # A run that never hears its child end (the test server never tells it; a server may lose
     # it) asks each open child how it stands once a day, on a durable timer: a child lost goes
@@ -456,6 +485,32 @@ def test_a_rule_that_stops_the_step_closes_its_child_and_the_parent_goes_on() ->
         "repair#1 cancelled: stopped by withdraw#1",
         "closed: nothing left to do",
     ]
+
+
+def test_a_child_read_that_finds_no_workflow_says_it_is_gone() -> None:
+    # No such workflow (never started, or past Temporal's retention): never read as open, which
+    # the daily check would find every day, so the step would wait in silence for ever (brief,
+    # D17) (brief, D75).
+    async def scenario(client: Client) -> ChildRead:
+        reads = ChildActivities(client).read
+        return await ActivityEnvironment().run(reads, ChildAsked("claim-70/repair#1"))
+
+    assert on_temporal(scenario) == ChildRead(None, "it is gone")
+
+
+def test_a_child_read_that_finds_no_ending_says_so() -> None:
+    # A workflow that completed with no ending in its report (here a case of its own, closed):
+    # never read as open, for the same reason; failing the step, it waits for a person (brief,
+    # D17) (brief, D75).
+    async def scenario(client: Client) -> ChildRead:
+        definition = claim() | {"close_reasons": CLOSABLE}
+        case = await start_case(client, DevelopmentCases, definition, FILE, "claim-71", QUEUE)
+        await close(case, "duplicate", "ana", ["support"])
+        assert (await case.result()).ending is None
+        reads = ChildActivities(client).read
+        return await ActivityEnvironment().run(reads, ChildAsked("claim-71"))
+
+    assert on_temporal(scenario) == ChildRead(None, "it ended without its report")
 
 
 def test_a_doorbell_read_waits_for_the_child_ringing_it_to_end() -> None:
