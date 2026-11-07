@@ -108,6 +108,8 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.temporal.bindings import Binding
     from ventoux.temporal.carried import state_as_data, state_from_data
     from ventoux.temporal.children import (
+        SETTLE,
+        ChildAsked,
         ChildEnding,
         ChildRead,
         ParentStart,
@@ -1139,8 +1141,9 @@ class CaseWorkflow:
     async def read_child(self, command: ReadChild) -> None:
         """Read the child's end from its own result, through the case worker's activity, and
         decide on that, never on what rang (brief, D75)."""
+        asked = ChildAsked(command.run, settle=SETTLE)  # the child that rang may be ending
         read = await workflow.execute_activity(
-            "ventoux.child.read", command.run, start_to_close_timeout=CALL, result_type=ChildRead
+            "ventoux.child.read", asked, start_to_close_timeout=CALL, result_type=ChildRead
         )
         self.inbox.append(event_of(command.entry, read, now()))
 
@@ -1178,9 +1181,9 @@ class CaseWorkflow:
 
     async def ask_child(self, entry: str) -> None:
         """Read how the child at `entry` stands; one still open changes nothing, unrecorded."""
-        run = f"{workflow.info().workflow_id}/{entry}"
+        asked = ChildAsked(f"{workflow.info().workflow_id}/{entry}")
         read = await workflow.execute_activity(
-            "ventoux.child.read", run, start_to_close_timeout=CALL, result_type=ChildRead
+            "ventoux.child.read", asked, start_to_close_timeout=CALL, result_type=ChildRead
         )
         if read.ending is None and read.how == "open":
             return

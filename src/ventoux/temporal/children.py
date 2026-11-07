@@ -6,6 +6,7 @@ the parent as a doorbell, a signal with the entry only: a signal says nothing of
 the parent reads the report itself, from the child's own result, through `read`.
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -37,6 +38,22 @@ class ChildEnding:
     closed: str  # its closed line, without `closed: `
     reached: list[str]  # its milestones, in the order reached
     report: dict[str, Given] = field(default_factory=dict[str, Given])
+
+
+# How long a doorbell's read waits, in seconds, for the child that rang to end: it rings as its
+# last act, then ends in its next workflow task, which a parent quick to read can come before.
+SETTLE = 5
+PAUSE = 0.1  # seconds between two questions to Temporal while it waits
+
+
+@dataclass
+class ChildAsked:
+    """A read of a child: which, and how long to wait for one still running to end."""
+
+    child: str  # the child's workflow ID, `claim-7/repair#1`
+    # A doorbell's read waits `SETTLE` for the child that rang to end; a question asked as a run
+    # starts, or daily, waits for nothing: an open child is the usual answer (brief, D75).
+    settle: int = 0  # in whole seconds: the case's converter carries no float
 
 
 @dataclass
@@ -96,19 +113,25 @@ class ChildActivities:
         self.client = client
 
     @activity.defn(name="ventoux.child.read")
-    async def read(self, child: str) -> ChildRead:
-        """How the child workflow `child` stands: its ending, read from its own latest run's
-        result, never from a signal; `open` while it runs; or how it ended without one. Any other
-        failure is retried, as any outage (brief, D17)."""
-        handle = self.client.get_workflow_handle(child)
-        try:
-            described = await handle.describe()
-        except RPCError as error:
-            if error.status != RPCStatusCode.NOT_FOUND:
-                raise
-            return ChildRead(None, "it is gone")
-        if described.status == WorkflowExecutionStatus.RUNNING:
-            return ChildRead(None, "open")
+    async def read(self, asked: ChildAsked) -> ChildRead:
+        """How the child workflow stands: its ending, read from its own latest run's result,
+        never from a signal; `open` while it runs, once `asked.settle` has passed; or how it
+        ended without one. Any other failure is retried, as any outage (brief, D17)."""
+        handle = self.client.get_workflow_handle(asked.child)
+        waited = 0.0  # seconds
+        while True:
+            try:
+                described = await handle.describe()
+            except RPCError as error:
+                if error.status != RPCStatusCode.NOT_FOUND:
+                    raise
+                return ChildRead(None, "it is gone")
+            if described.status != WorkflowExecutionStatus.RUNNING:
+                break
+            if waited >= asked.settle:
+                return ChildRead(None, "open")
+            await asyncio.sleep(PAUSE)
+            waited += PAUSE
         status = described.status
         if status != WorkflowExecutionStatus.COMPLETED:
             how = "it ended otherwise" if status is None else ENDED_WITHOUT.get(status)

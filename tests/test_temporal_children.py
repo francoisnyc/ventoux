@@ -16,7 +16,7 @@ from typing import Any
 from dev_server import cli_binary, cli_folder, dev_server
 from temporalio.client import Client
 from temporalio.service import RPCError, RPCStatusCode
-from temporalio.testing import WorkflowEnvironment
+from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.workflow import ParentClosePolicy
 from test_child_cases import CLOSABLE, claim, repair
 from test_temporal_case import QUEUE, Case, SwitchingCases, on_temporal, reported, runs_of, skipping
@@ -35,6 +35,7 @@ from ventoux.temporal.cases import (
     send_event,
     start_case,
 )
+from ventoux.temporal.children import SETTLE, ChildActivities, ChildAsked, ChildRead
 from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     CATALOG,
@@ -411,3 +412,26 @@ def test_a_rule_that_stops_the_step_closes_its_child_and_the_parent_goes_on() ->
         "repair#1 cancelled: stopped by withdraw#1",
         "closed: nothing left to do",
     ]
+
+
+def test_a_doorbell_read_waits_for_the_child_ringing_it_to_end() -> None:
+    # A child rings as its last act, then ends in its next workflow task: a parent quick to
+    # read finds it still running. So a doorbell's read waits for it to end, a few seconds at
+    # most, and reads the report; it never says `open` of a child about to end (brief, D75).
+    async def scenario(client: Client) -> ChildRead:
+        parent = await start_case(client, DevelopmentCases, RELEASE, FILE, "claim-20", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, DevelopmentCases, "claim-20/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        reads = ActivityEnvironment().run(
+            ChildActivities(client).read, ChildAsked("claim-20/repair#1", SETTLE)
+        )
+        reading = asyncio.ensure_future(reads)
+        await asyncio.sleep(0.3)  # the read has found the child running
+        await answer(child, "fix#1", "fixed", "lee", ["support-lead"], {"cost": Decimal(640)})
+        return await reading
+
+    read = on_temporal(scenario)
+    assert read.how == ""
+    assert read.ending is not None
+    assert read.ending.closed == "nothing left to do"
