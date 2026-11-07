@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
+from ventoux.case.audit import Act, AuditRecord, Decision, Fact
 from ventoux.case.engine import known
 from ventoux.case.state import (
     CaseState,
@@ -153,6 +154,45 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
             for entry, request in state.changes.items()
         },
         "requested": state.requested,
+        # Each audit record not yet exported, in order, its values as the state holds them,
+        # sensitive ones wrapped (brief, D27) (brief, D76).
+        "audit": [record_as_data(each) for each in state.audit],
+        # Always empty between events, like `moments` (brief, D76).
+        "deciding": [decision_as_data(each) for each in state.deciding],
+    }
+
+
+def record_as_data(record: AuditRecord) -> dict[str, Any]:
+    act = record.act
+    return {
+        "number": record.number,
+        "at": record.at,
+        "release": record.release,
+        "engine": record.engine,
+        "act": {
+            "kind": act.kind,
+            "by": act.by,
+            "roles": list(act.roles),
+            "entry": act.entry,
+            "outcome": act.outcome,
+            "values": dict(act.values),
+        },
+        "decisions": [decision_as_data(each) for each in record.decisions],
+        "lines": list(record.lines),
+    }
+
+
+def decision_as_data(decision: Decision) -> dict[str, Any]:
+    return {
+        "kind": decision.kind,
+        "step": decision.step,
+        "entry": decision.entry,
+        "rule": decision.rule,
+        "read": [
+            {"field": fact.field, "sources": list(fact.sources), "value": fact.value}
+            for fact in decision.read
+        ],
+        "reason": decision.reason,
     }
 
 
@@ -333,6 +373,53 @@ def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Cas
             for entry, request in data.get("changes", {}).items()
         },
         requested=whole(data.get("requested", 0)),
+        # None in a state from before 19a: no case made records.
+        audit=[record_from_data(each, types) for each in data.get("audit", [])],
+        deciding=[decision_from_data(each, types) for each in data.get("deciding", [])],
+    )
+
+
+def record_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> AuditRecord:
+    """A record `record_as_data` wrote, read back as it was. An opening's and an answer's values
+    are the case file's fields, read back by their types; a completion's are what the activity
+    gave, as it gave them."""
+    act = data["act"]
+    values: dict[str, object] = dict(act["values"])
+    if act["kind"] != "completed":
+        values = {name: read_back(name, value, types.get(name)) for name, value in values.items()}
+    return AuditRecord(
+        number=whole(data["number"]),
+        at=whole(data["at"]),
+        release=data["release"],
+        engine=known(whole(data["engine"])),
+        act=Act(
+            act["kind"],
+            by=act["by"],
+            roles=tuple(act["roles"]),
+            entry=act["entry"],
+            outcome=act["outcome"],
+            values=values,
+        ),
+        decisions=[decision_from_data(each, types) for each in data["decisions"]],
+        lines=list(data["lines"]),
+    )
+
+
+def decision_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Decision:
+    return Decision(
+        data["kind"],
+        step=data["step"],
+        entry=data["entry"],
+        rule=data["rule"],
+        read=tuple(
+            Fact(
+                fact["field"],
+                tuple(fact["sources"]),
+                read_back(fact["field"], fact["value"], types.get(fact["field"])),
+            )
+            for fact in data["read"]
+        ),
+        reason=data["reason"],
     )
 
 

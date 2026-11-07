@@ -43,6 +43,7 @@ from ventoux.case.approvals import (
 )
 from ventoux.case.assigning import assign, unassign
 from ventoux.case.assignment_rules import follow_rule
+from ventoux.case.audit import Decision
 from ventoux.case.called import called
 from ventoux.case.claims import (
     ClaimRefused,
@@ -79,8 +80,10 @@ from ventoux.case.definition import (
 from ventoux.case.engine import known
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
+from ventoux.case.keeping import kept
 from ventoux.case.migrations import Moved, apply, problems_of, released
 from ventoux.case.owed import owed
+from ventoux.case.recording import decided_start, recorded
 from ventoux.case.requests import answer_change, propose_change
 from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
 from ventoux.case.sequence import requirements
@@ -205,6 +208,7 @@ def decide(
     refuse_unless_whole(event.at)  # time is only ever event data, so it is checked first
     state = copy.deepcopy(state)  # the state passed in is never changed
     state.started_by_rules.clear()  # a guard for this decision only (brief, D39)
+    since = len(state.history)  # the lines this act adds, which its audit record keeps
     commands: list[Command] = []
     was_open = state.phase == "open"
     if isinstance(event, Opened):
@@ -266,6 +270,7 @@ def decide(
         complete(case, catalog, state, event)
     decide_again(case, catalog, state, commands, event.at, was_open)
     let_go_of_ended(state)
+    recorded(case, state, event, since)  # the act, as data, beside its lines (brief, D76)
     return state, commands
 
 
@@ -579,20 +584,6 @@ def refuse_unless_wrapped(
             )
 
 
-def kept(case: CaseDefinition, name: str, value: object) -> object:
-    """A form's value as the case file keeps it: wrapped for a sensitive field, plain otherwise.
-    The client wraps every value of a form, since it can't tell which are sensitive."""
-    if name not in case.fields:
-        return plain(value)
-    field = case.fields[name]
-    # A date's text is read into the day it names, by the field's type (brief, D66); a sensitive
-    # one inside its wrapper, which holds the plain value of the field's type (brief, D31).
-    read = read_as(plain(value), field.declared)
-    if field.sensitive and isinstance(value, Sensitive):
-        return Sensitive(read)
-    return value if field.sensitive else read
-
-
 def marked(case: CaseDefinition, name: str, origin: str) -> frozenset[str]:
     """Where a value of the field `name` came from: `origin`, and the field's declared mark. A
     mark adds distrust, never removes it (brief, D12)."""
@@ -896,6 +887,8 @@ def take_answer(
     worded = as_worded(state, event)
     run.status = "done"
     del state.waiting[run.entry]
+    rule = f"steps.{run.step}.outcomes.{event.outcome}"  # what the outcome sets and reaches
+    state.deciding.append(Decision("answered", step=run.step, entry=run.entry, rule=rule))
     if run.item is not None:
         # A repeated task's answer is its run's alone: it sets no field and no outcome under its
         # step's name, which each answer would overwrite (brief, D73).
@@ -1033,6 +1026,9 @@ def complete(
         failed(state, Failed(event.entry, problem, at=event.at))
         return
     run.status = "done"
+    state.deciding.append(
+        Decision("completed", step=run.step, entry=run.entry, rule=f"steps.{run.step}")
+    )
     if run.item is not None:
         # A repeated run's outcome and outputs aren't written under its step's name, where each
         # run would overwrite the last; nothing reads them (brief, D73).
@@ -1829,6 +1825,7 @@ def start(
         proposal_spent(state, name)  # a wait has no approval: the proposed run has started
         state.waiting[entry] = f"{step.event} {sent_by(case.events[step.event])}"
         state.history.append(f"started {entry}: waiting for {state.waiting[entry]}")
+        decided_start(state, name, step, entry)
         return
     if isinstance(step, TaskStep):
         run = coming_run(state, name, "open")
@@ -1840,6 +1837,7 @@ def start(
             f"started {entry}: waiting for {' or '.join(step.outcomes)} by "
             f"{' or '.join(step.roles)}"
         )
+        decided_start(state, name, step, entry)
         if step.assign is not None:
             follow_rule(case, catalog, state, run, step.assign)
         return
@@ -2012,6 +2010,7 @@ def start_item(
             f"started {entry}: waiting for {' or '.join(step.outcomes)} by "
             f"{' or '.join(step.roles)}"
         )
+        decided_start(state, name, step, entry)
         return
     contract = called(catalog, step)
     if contract.risk == "high":
@@ -2026,6 +2025,7 @@ def start_item(
     )
     keyed = f", key {key}" if contract.idempotency_key is not None else ""
     state.history.append(f"scheduled {entry}: {contract.reference} ({said}){keyed}")
+    decided_start(state, name, step, entry)
     commands.append(Schedule(entry, contract.reference, inputs))
 
 
@@ -2069,12 +2069,14 @@ def schedule(
             f"started {entry}: workflow {contract.reference} ({origins(step.inputs, state)}), "
             f"run {key}"
         )
+        decided_start(state, name, step, entry)
         commands.append(StartWorkflow(entry, contract.reference, inputs, key))
         return
     keyed = f", key {key}" if contract.idempotency_key is not None else ""
     state.history.append(
         f"scheduled {entry}: {contract.reference} ({origins(step.inputs, state)}){keyed}"
     )
+    decided_start(state, name, step, entry)
     commands.append(Schedule(entry, contract.reference, inputs))
 
 
@@ -2172,6 +2174,7 @@ def start_plan(
     state.history.append(
         f"started {run.entry}: plan {step.plan} ({origins(step.inputs, state)}), run {plan_run}"
     )
+    decided_start(state, name, step, run.entry)
     types = {field: declared.declared for field, declared in case.fields.items()}
     references = {
         field: given_as_reference(expression, types) for field, expression in step.inputs.items()
@@ -2214,6 +2217,7 @@ def open_child(state: CaseState, name: str, step: CaseStep, commands: list[Comma
     state.history.append(
         f"started {run.entry}: case {step.case} ({origins(step.inputs, state)}), run {child_run}"
     )
+    decided_start(state, name, step, run.entry)
     definition = state.cases[step.case]
     commands.append(OpenCase(run.entry, step.case, definition, fields, child_run, excluded))
 

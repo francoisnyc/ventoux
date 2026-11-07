@@ -10,6 +10,7 @@ from typing import cast
 
 from ventoux.case.admission import latest_run, requirements_met
 from ventoux.case.approvals import with_given
+from ventoux.case.audit import Decision
 from ventoux.case.definition import EACH, ActivityStep, CaseDefinition, TaskStep
 from ventoux.case.owed import owed
 from ventoux.case.state import CaseState, CloseAsked
@@ -105,11 +106,17 @@ def settle(case: CaseDefinition, catalog: Catalog, state: CaseState) -> None:
         state.phase = "closed"
         cancel_changes(state, "nothing left to do")
         say_kept_from_starting(case, catalog, state)
-        state.history.append(f"closed: nothing left to do{not_reached(case, state)}")
+        closed(state, f"nothing left to do{not_reached(case, state)}")
     elif state.phase == "closing" and not running(state):
         state.phase = "closed"
         say_kept_from_starting(case, catalog, state)
-        state.history.append(f"closed: {state.closed_because}{not_done(case, state)}")
+        closed(state, f"{state.closed_because}{not_done(case, state)}")
+
+
+def closed(state: CaseState, why: str) -> None:
+    """Say the case closed, and why: its last line, and its record's last decision."""
+    state.history.append(f"closed: {why}")
+    state.deciding.append(Decision("closed", reason=why))
 
 
 def not_reached(case: CaseDefinition, state: CaseState) -> str:

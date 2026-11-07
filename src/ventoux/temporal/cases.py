@@ -45,12 +45,13 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.closing import CloseRefused, needs_attention
     from ventoux.case.definition import CaseInvalid, CaseStep, PlanStep, parse_case
     from ventoux.case.ending import ending_of
-    from ventoux.case.engine import ENGINE, KNOWN, opening_engine
+    from ventoux.case.engine import ENGINE, OPENING, opening_engine
     from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.freshness import TimeRefused
     from ventoux.case.migrations import all_plans, migration_of
     from ventoux.case.owing import attention, waiting_for
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
+    from ventoux.case.recording import asked
     from ventoux.case.registry import Answer, Moving, Opening, Released
     from ventoux.case.releases import Hash, Record, behaviour_digest, is_release
     from ventoux.case.requests import ChangeRefused
@@ -1321,7 +1322,7 @@ def engine() -> int:
     """The engine version a case opens at: asked of Temporal's patch markers, newest first, so a
     replay reads the version its history recorded (brief, D51). Temporal: `patched` says whether
     a marker is in force, adding it when the run is new; asked only at the opening."""
-    return opening_engine(KNOWN, lambda version: workflow.patched(f"ventoux-engine-{version}"))
+    return opening_engine(OPENING, lambda version: workflow.patched(f"ventoux-engine-{version}"))
 
 
 def now() -> int:
@@ -1342,35 +1343,6 @@ def names_its_entry(event: Event, state: CaseState) -> None:
         ]
         example = open_now[0] if open_now else f"{step}#1"
         raise AnswerRefused(f"name the entry it answers, such as {example}")
-
-
-def asked(event: Event) -> str:
-    """What a person asked, as a refusal names it: `sam's answer approve to review#1`."""
-    if isinstance(event, Answered):
-        return f"{event.by}'s answer {event.outcome} to {event.entry}"
-    if isinstance(event, Proposed):
-        return f"{event.by}'s proposal of {event.step}"
-    if isinstance(event, Retried):
-        return f"{event.by}'s retry of {event.entry}"
-    if isinstance(event, Claimed):
-        return f"{event.by}'s claim of {event.entry}"
-    if isinstance(event, GivenBack):
-        return f"{event.by}'s give-back of {event.entry}"
-    if isinstance(event, Assigned):
-        return f"{event.by}'s assignment of {event.entry}"
-    if isinstance(event, Unassigned):
-        return f"{event.by}'s return of {event.entry}"
-    if isinstance(event, CloseAsked):
-        return f"{event.by}'s close as {event.reason}"
-    if isinstance(event, Shown):
-        return f"the record of {event.field} shown to {event.by}"
-    if isinstance(event, ForgetApproved):
-        return f"forgetting the case, approved by {event.approved_by}"
-    if isinstance(event, ChangeProposed):
-        return f"{event.by}'s proposal to {event.kind} {event.target}"  # never the value
-    if isinstance(event, Sent):
-        return f"{event.event} from {event.by}"  # who sent it, never what it carries
-    return type(event).__name__  # only people's requests are refused; anything else is a bug
 
 
 async def start_case(
