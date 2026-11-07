@@ -1,7 +1,7 @@
 # Layer 18: Case lifecycle: required steps, repeated steps, child cases
 
-Status: 2026-11-06, 18a merged; 18b built, its promises checked (D73). This note
-starts from `main` at `f1e8512`, with layers 0 to 17 merged. The warm-up was asked and recorded
+Status: 2026-11-07, 18a to 18c merged (#86, #87, #88: D72, D73, D74); 18d, child cases on
+Temporal (D75), next. This note starts from `main` at `f1e8512`, with layers 0 to 17 merged. The warm-up was asked and recorded
 (learning question 37). The guide was written first (curriculum step 2): `docs/guides/cases.md`,
 "Required steps", "Repeated steps: one run per item" and "Child cases", describes the layer as if it
 worked. Writing it showed four places where my first picks were wrong; the recommendations below
