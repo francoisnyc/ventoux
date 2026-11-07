@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 from dev_server import cli_binary, cli_folder, dev_server
-from temporalio.client import Client
+from temporalio.client import Client, WorkflowHistory
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.workflow import ParentClosePolicy
@@ -26,6 +26,7 @@ from test_temporal_forget import on_temporal as forgetting_on_temporal
 from test_temporal_forget import reported as forget_reported
 from test_temporal_registry import QUEUE as REFUNDS
 from test_temporal_registry import ProductionCases, in_production, production_worker
+from test_temporal_sensitive import as_stored, every_run
 from worker_threads import worker_threads
 
 from ventoux.case.definition import parse_case
@@ -46,7 +47,9 @@ from ventoux.case.registry import (
 from ventoux.case.releases import Hash, Record
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseEnded, CaseState, ForgetApproved, Opened
+from ventoux.case.visibility import CaseView
 from ventoux.core.provenance import Sourced
+from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.cases import (
     CaseReport,
     CaseWorkflow,
@@ -55,6 +58,7 @@ from ventoux.temporal.cases import (
     close,
     send_event,
     start_case,
+    view,
 )
 from ventoux.temporal.children import SETTLE, ChildActivities, ChildAsked, ChildRead
 from ventoux.temporal.converter import keys_of
@@ -740,3 +744,52 @@ def test_on_temporal_a_child_refused_as_it_opens_fails_its_step() -> None:
             "repair 3 is retired in production"
         )
     ]
+
+
+# --- Slice 8: sensitive values cross sealed (brief, D31) (brief, D75) ---
+
+VIN = "WP0ZZZ99ZTS392124"
+
+
+def sensitive(definition: dict[str, Any], seen_by: str) -> dict[str, Any]:
+    """`definition` with its vehicle sensitive, seen only by `seen_by`."""
+    vehicle = definition["fields"]["vehicle"] | {"sensitive": True, "visible_to": [seen_by]}
+    return definition | {"fields": definition["fields"] | {"vehicle": vehicle}}
+
+
+def test_a_sensitive_value_crosses_into_the_child_sealed() -> None:
+    # The child is under its parent's key: a sensitive value it is given crosses sealed into its
+    # start, and is in plain text nowhere, in any run of either history; inside the worker the
+    # child reads it, and shows it only to whom may see it (brief, D31) (brief, D75).
+    released = release_of(
+        sensitive(claim(), "support"), 1, cases={"repair@3": sensitive(repair(), "support-lead")}
+    )
+
+    async def scenario(client: Client) -> tuple[list[WorkflowHistory], CaseView, CaseView]:
+        file = FILE | {"vehicle": VIN}
+        parent = await start_case(client, SwitchingCases, released, file, "claim-40", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, SwitchingCases, "claim-40/repair#1")
+        # Its start, as soon as it exists: a value given in plain text would be there.
+        [opening] = (await every_run(client, "claim-40/repair#1"))[:1]
+        assert VIN.encode() not in as_stored(opening)[0], "the child's start holds it in plain text"
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        seen, unseen = await view(child, ["support-lead"]), await view(child, ["support"])
+        await answer(child, "fix#1", "fixed", "lee", ["support-lead"], {"cost": Decimal(640)})
+        await reported(parent, lambda now: now.waiting_at == ["pay_garage.approval#1"])
+        roles = ["support", "support-lead"]
+        await answer(parent, "pay_garage.approval#1", "approve", "sam", roles, None)
+        await reported(parent, lambda now: now.status == "closed")
+        runs = await every_run(client, "claim-40") + await every_run(client, "claim-40/repair#1")
+        return runs, seen, unseen
+
+    histories, seen, unseen = on_temporal(scenario, cases=SwitchingCases)
+    # It reached the child, opened by the client, which holds the keys, still wrapped.
+    assert seen.values["vehicle"] == Sensitive(VIN)
+    assert "vehicle" not in unseen.values
+    assert {history.workflow_id for history in histories} == {"claim-40", "claim-40/repair#1"}
+    assert len(histories) > 2  # the parent, at least, continued as new
+    for history in histories:
+        raw, exported = as_stored(history)
+        assert VIN.encode() not in raw, history.workflow_id
+        assert VIN not in exported, history.workflow_id
