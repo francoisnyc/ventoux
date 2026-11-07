@@ -2245,7 +2245,7 @@ def child_not_ended(case: CaseDefinition, state: CaseState, event: ChildNotEnded
             f"child_ended for {event.entry}, whose case is still open: nothing read"
         )
         return
-    why = f"{step.case} ended without reporting: it was {event.how}: look at the child, then "
+    why = f"{step.case} ended without reporting: {event.how}: look at the child, then "
     failed(state, Failed(event.entry, why + "retry or close", at=event.at))
 
 

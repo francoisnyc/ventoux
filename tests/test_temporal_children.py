@@ -6,15 +6,25 @@ See docs/layers/18-lifecycle.md (18d) and docs/guides/cases.md, "Child cases".
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
+from dev_server import cli_binary, cli_folder, dev_server
 from temporalio.client import Client
 from temporalio.workflow import ParentClosePolicy
 from test_child_cases import claim, repair
 from test_temporal_case import QUEUE, SwitchingCases, on_temporal, reported, runs_of
+from worker_threads import worker_threads
 
 from ventoux.temporal.cases import CaseReport, answer, case_handle, start_case
-from ventoux.testing import DevelopmentCases, release_of
+from ventoux.temporal.worker import case_worker
+from ventoux.testing import (
+    FAKES,
+    DevelopmentCases,
+    DevelopmentPlans,
+    development_converter,
+    release_of,
+)
 
 FILE = {"order_id": "ord-1", "vehicle": "veh-9"}
 
@@ -131,3 +141,52 @@ async def until_switched(client: Client, id: str, first: str) -> list[str]:
             return [first, current]
         await asyncio.sleep(0.05)
     raise AssertionError(f"{id} never continued as new")
+
+
+ENDED_WITHOUT = (
+    "repair#1: repair@3 ended without reporting: it was terminated: look at the child, then retry "
+    "or close"
+)
+
+
+def on_dev_server[T](scenario: Callable[[Client], Awaitable[T]]) -> T:
+    """Run `scenario` against a case worker on the development server. Only it tells a parent
+    that its child was terminated: the time-skipping test server never does, under any parent
+    close policy (18d, slice 4, run on both)."""
+
+    async def go() -> T:
+        binary = await cli_binary(cli_folder())
+        async with (
+            dev_server(binary, data_converter=development_converter()) as environment,
+            worker_threads() as threads,
+            case_worker(
+                environment.client,
+                QUEUE,
+                DevelopmentCases,
+                DevelopmentPlans,
+                FAKES,
+                activity_executor=threads,
+            ),
+        ):
+            # Bounded: a case that hangs fails the test.
+            return await asyncio.wait_for(scenario(environment.client), timeout=60)
+
+    return asyncio.run(go())
+
+
+def test_a_child_terminated_in_the_run_that_started_it_fails_the_step_at_once() -> None:
+    # Anyone with the namespace may terminate a child, which then never rings: the run that
+    # started it watches it, so its step fails at once and waits for a person, never waited for
+    # in silence (brief, D17) (brief, D75).
+    async def scenario(client: Client) -> CaseReport:
+        parent = await start_case(client, DevelopmentCases, RELEASE, FILE, "claim-10", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
+        child = case_handle(client, DevelopmentCases, "claim-10/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        await child.terminate("from outside")
+        return await reported(parent, lambda now: bool(now.needs_attention))
+
+    report = on_dev_server(scenario)
+    assert report.needs_attention == [ENDED_WITHOUT]
+    assert report.waiting_for == []

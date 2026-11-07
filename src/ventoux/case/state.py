@@ -461,7 +461,7 @@ class ChildNotEnded:
     workflow ended without reporting (terminated, failed, timed out) (brief, D75)."""
 
     entry: str  # the step run, such as `repair#1`
-    how: str  # `open`; or how its workflow ended: `terminated`, `failed`, `timed out`
+    how: str  # `open`; or how its workflow ended: `it was terminated`, `it failed`, `it timed out`
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
