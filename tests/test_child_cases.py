@@ -15,7 +15,7 @@ import pytest
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, run_case
+from ventoux.testing import CATALOG, close, run_case
 
 ROOT = Path(__file__).parent.parent
 GUIDE = ROOT / "docs" / "guides" / "cases.md"
@@ -394,3 +394,91 @@ def test_an_open_child_keeps_its_step_running_and_its_parent_waiting() -> None:
     assert run.waiting_for == ["repair#1: case repair, open"]
     assert not run.reached("repair")
     assert run.children["repair#1"].waiting_for == ["fix by support-lead"]
+
+
+# --- Slice 6: the report (brief, D74) ---
+
+
+def written_off_repair() -> dict[str, Any]:
+    """The guide's repair, which a garage lead may also close as written off, with no cost."""
+    child = repair()
+    child["close_reasons"] = {
+        "written_off": {"display": {"title": "Written off"}, "roles": ["support-lead"]}
+    }
+    return child
+
+
+def test_a_child_closed_by_a_person_reports_its_reason_as_the_outcome() -> None:
+    definition = claim()
+    definition["steps"]["pay_garage"]["when"] = {"==": [{"var": "repair.outcome"}, "done"]}
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[("assess", "accept", "ana", {"payout": 900})],
+        cases={"repair@3": written_off_repair()},
+        case_answers={"repair": [close("written_off", "lee")]},
+        people=PEOPLE,
+    )
+    assert "repair#1 done: repair closed, written_off, by lee; reporting nothing" in run.history
+    assert run.state.values["repair.outcome"] == "written_off"
+    assert run.state.sources["repair.outcome"] == {"case:repair"}
+    assert "repair.cost" not in run.state.values  # never set in the child, so absent
+    assert run.closed
+
+
+def test_a_reported_field_the_child_never_set_fails_whatever_reads_it() -> None:
+    # Fail closed: an absent value is never read as zero (brief, D74).
+    run = run_case(
+        claim(),
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[("assess", "accept", "ana", {"payout": 900})],
+        cases={"repair@3": written_off_repair()},
+        case_answers={"repair": [close("written_off", "lee")]},
+        people=PEOPLE,
+    )
+    assert run.waiting_for == ["approval of pay_garage by support-lead"]
+    run = run_case(
+        claim(),
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[("assess", "accept", "ana", {"payout": 900}), ("pay_garage", "approve", "sam")],
+        cases={"repair@3": written_off_repair()},
+        case_answers={"repair": [close("written_off", "lee")]},
+        people=PEOPLE,
+    )
+    assert run.needs_attention == [
+        "pay_garage#1: the inputs of pay_garage can't be read: repair.cost has no value"
+    ]
+
+
+def test_the_check_warns_where_a_reported_field_may_be_unset() -> None:
+    issues = validate_case(parse_case(claim()), CATALOG, cases={"repair@3": written_off_repair()})
+    assert [(i.path, i.message, i.severity) for i in issues if i.code == "MAY_BE_UNSET"] == [
+        (
+            "steps.pay_garage.inputs.amount",
+            "pay_garage reads repair.cost, which repair gives only when done, and repair may end "
+            "written_off: then pay_garage fails and needs attention: read it only when "
+            "repair.outcome is done",
+            "warning",
+        )
+    ]
+    # A child with no close reason closes only done: the guide's repair isn't warned about.
+    issues = validate_case(parse_case(claim()), CATALOG, cases={"repair@3": repair()})
+    assert [i for i in issues if i.code == "MAY_BE_UNSET"] == []
+    guarded = claim()
+    guarded["steps"]["pay_garage"]["when"] = {"==": [{"var": "repair.outcome"}, "done"]}
+    issues = validate_case(parse_case(guarded), CATALOG, cases={"repair@3": written_off_repair()})
+    assert [i for i in issues if i.code == "MAY_BE_UNSET"] == []
+
+
+def test_a_childs_outcome_is_done_or_one_of_its_close_reasons() -> None:
+    definition = claim()
+    definition["steps"]["pay_garage"]["when"] = {"==": [{"var": "repair.outcome"}, "fixed"]}
+    issues = validate_case(
+        parse_case(definition), CATALOG, cases={"repair@3": written_off_repair()}
+    )
+    assert [(i.path, i.message) for i in issues if i.code == "EXPRESSION_INVALID"] == [
+        (
+            "steps.pay_garage.when",
+            '==[1]: repair.outcome has no outcome "fixed"; its outcomes are done, written_off',
+        )
+    ]

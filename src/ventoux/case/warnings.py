@@ -65,11 +65,13 @@ def warning_issues(
     plans: Mapping[str, Plan],
     said: Collection[str],
     missing: Collection[str],
+    children: Mapping[str, CaseDefinition] | None = None,
 ) -> list[Issue]:
     """10d's issues, given the paths an issue already names (`said`) and the steps that are
-    `missing` their contract or plan, or refused by an error: one cause, one issue (brief, D35).
-    Such a step gets none of these, and nor does what it would give."""
-    reading = Reading(case, contracts, plans)
+    `missing` their contract, plan or child, or refused by an error: one cause, one issue
+    (brief, D35). Such a step gets none of these, and nor does what it would give. A child case
+    may close with a reason, leaving what it reports unset (brief, D74)."""
+    reading = Reading(case, contracts, plans, children or {})
     unset = unset_reads(reading, said, missing)
     # An outcome that leaves an output another step reads is said by that read: the reading step
     # fails, and someone hears of it.

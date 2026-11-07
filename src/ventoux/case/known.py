@@ -80,13 +80,18 @@ class Reading:
     case: CaseDefinition
     contracts: Mapping[str, Contract]
     plans: Mapping[str, object]
+    # The child each case step opens, by step, of those that can be read (brief, D74).
+    children: Mapping[str, CaseDefinition] = field(default_factory=dict[str, CaseDefinition])
 
     def endings(self, name: str) -> frozenset[str]:
         """Every way the step may end: a task with one of its outcomes; an activity done or with
-        one its contract declares; a plan done or failed; a workflow done."""
+        one its contract declares; a plan done or failed; a child case done or closed with one of
+        its close reasons (brief, D74); a workflow done."""
         step = self.case.steps[name]
         if isinstance(step, TaskStep):
             return frozenset(step.outcomes)
+        if name in self.children:
+            return frozenset({DONE, *self.children[name].close_reasons})
         contract = self.contracts.get(name)
         if isinstance(step, ActivityStep) and isinstance(contract, ActivityContract):
             return frozenset({DONE, *contract.outcomes})

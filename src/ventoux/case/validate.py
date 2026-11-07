@@ -163,7 +163,7 @@ def validate_case(
     refused = {i.path.split(".")[1] for i in found if i.severity == "error" and "." in i.path}
     refused |= {name for name in case.steps if name not in can}
     said = {issue.path for issue in found}
-    found += warning_issues(case, contracts, supplied, said, missing | refused)
+    found += warning_issues(case, contracts, supplied, said, missing | refused, children)
     found += first_start_issues(case, {issue.path for issue in found})
     # A required step that may be left owed with nothing able to start it (brief, D72).
     found += may_strand_issues(case, refused)
