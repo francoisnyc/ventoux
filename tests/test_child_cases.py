@@ -17,7 +17,7 @@ from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, close, propose, retry, run_case
+from ventoux.testing import CATALOG, close, edit, propose, retry, run_case, send, skip
 
 ROOT = Path(__file__).parent.parent
 GUIDE = ROOT / "docs" / "guides" / "cases.md"
@@ -579,3 +579,168 @@ def test_a_child_that_opened_is_never_opened_again_by_a_retry() -> None:
             cases={"repair@3": repair()},
             people=PEOPLE | {"omar": ["operations"]},
         )
+
+
+# --- Slice 9: the parent's routes (brief, D40) (brief, D74) ---
+
+CLOSABLE = {"duplicate": {"display": {"title": "Duplicate claim"}, "roles": ["support"]}}
+
+
+def test_a_parent_that_closes_closes_its_child_saying_why() -> None:
+    # Through D40's one place: the child's tasks are cancelled, and the parent closes once the
+    # child has ended. Its report changes nothing in the parent (brief, D74).
+    definition = claim() | {"close_reasons": CLOSABLE}
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[("assess", "accept", "ana", {"payout": 900}), close("duplicate", "ana")],
+        cases={"repair@3": repair()},
+        people=PEOPLE,
+    )
+    child = run.children["repair#1"]
+    assert child.history[-2:] == [
+        "cancelled fix#1: closed by its parent: duplicate, by ana",
+        "closed: by its parent: duplicate, by ana",
+    ]
+    assert "repair#1 cancelled: the case is closing" in run.history
+    assert "repair.outcome" not in run.state.values
+    assert run.closed
+
+
+def test_a_rule_that_stops_the_step_closes_its_child_and_the_parent_goes_on() -> None:
+    definition = claim()
+    definition["events"] = {
+        "withdrawn": {
+            "display": {"title": "The customer withdraws"},
+            "sent_by": {"system": "portal"},
+        }
+    }
+    definition["rules"] = {
+        "withdraw": {
+            "display": {"title": "Stop the repair when the customer withdraws"},
+            "on": {"event": "withdrawn"},
+            "then": {"stop": ["repair"]},
+        }
+    }
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[
+            ("assess", "accept", "ana", {"payout": 900}),
+            send("withdrawn", {}, "system:portal"),
+        ],
+        cases={"repair@3": repair()},
+        people=PEOPLE,
+    )
+    assert run.children["repair#1"].history[-1] == "closed: by its parent: stopped by withdraw#1"
+    assert "repair#1 cancelled: stopped by withdraw#1" in run.history
+    assert not run.reached("repair")
+
+
+def test_an_edit_never_reaches_a_child() -> None:
+    # The child keeps what it was given at its opening (brief, D52) (brief, D74).
+    run = run_case(
+        claim(),
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[
+            ("assess", "accept", "ana", {"payout": 900}),
+            edit("vehicle", "veh-10", "ana"),
+            ("case.change#1", "approve", "lee"),
+        ],
+        cases={"repair@3": repair()},
+        people=PEOPLE,
+    )
+    assert run.state.values["vehicle"] == "veh-10"
+    assert run.children["repair#1"].state.values["vehicle"] == "veh-9"
+
+
+def test_a_failed_opening_may_be_skipped_by_operators_like_any_failed_run() -> None:
+    # A person decides, another approves: nothing is skipped automatically (brief, D52).
+    child = repair()
+    child["fields"]["budget"]["source"] = "untrusted:robots"  # a label nobody registered
+    definition = claim()
+    del definition["steps"]["pay_garage"]  # nothing reads what the repair would have given
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[
+            ("assess", "accept", "ana", {"payout": 900}),
+            skip("repair#1", "omar"),
+            ("case.change#1", "approve", "olga"),
+        ],
+        cases={"repair@3": child},
+        people=PEOPLE | {"omar": ["operations"], "olga": ["operations"]},
+    )
+    assert any(
+        line == "applied case.change#1: repair#1 skipped by omar, approved by olga"
+        for line in run.history
+    )
+    assert run.children == {}
+    assert run.closed
+
+
+def test_a_required_case_step_is_done_once_its_child_closes_and_owed_if_stopped() -> None:
+    # Done is a run that ended with an outcome: a child closed as written off is done; a child its
+    # parent closed is cancelled, so the step is still owed, and only a person's close ends it
+    # (brief, D72) (brief, D74).
+    definition = claim() | {"close_reasons": CLOSABLE}
+    definition["steps"]["repair"]["required"] = True
+    definition["steps"]["pay_garage"]["when"] = {"==": [{"var": "repair.outcome"}, "done"]}
+    written_off = run_case(
+        definition,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[("assess", "accept", "ana", {"payout": 900})],
+        cases={"repair@3": written_off_repair()},
+        case_answers={"repair": [close("written_off", "lee")]},
+        people=PEOPLE,
+    )
+    assert written_off.closed
+    definition["events"] = {
+        "withdrawn": {
+            "display": {"title": "The customer withdraws"},
+            "sent_by": {"system": "portal"},
+        }
+    }
+    definition["rules"] = {
+        "withdraw": {
+            "display": {"title": "Stop the repair when the customer withdraws"},
+            "on": {"event": "withdrawn"},
+            "then": {"stop": ["repair"]},
+        }
+    }
+    stopped = run_case(
+        definition,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[
+            ("assess", "accept", "ana", {"payout": 900}),
+            send("withdrawn", {}, "system:portal"),
+        ],
+        cases={"repair@3": repair()},
+        people=PEOPLE,
+    )
+    assert stopped.status == "open"
+    owed = (
+        "repair: required, and it can't start: repair has run, and is not repeatable: close the "
+        "case with a reason"
+    )
+    assert stopped.needs_attention == [owed]
+
+
+def test_a_repeatable_case_step_proposed_again_opens_another_child() -> None:
+    # Each run is its own child, with its own script by entry, and its own keys (brief, D74).
+    definition = claim() | {"close_reasons": CLOSABLE, "stays_open": True}
+    definition["steps"]["repair"] |= {"repeatable": True, "proposed_by": ["support-lead"]}
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[("assess", "accept", "ana", {"payout": 900}), propose("repair", "lee")],
+        cases={"repair@3": repair()},
+        case_answers={
+            "repair#1": [("fix", "fixed", "lee", {"cost": 640})],
+            "repair#2": [("fix", "fixed", "lee", {"cost": 120})],
+        },
+        people=PEOPLE,
+    )
+    assert sorted(run.children) == ["repair#1", "repair#2"]
+    assert run.children["repair#2"].state.case == "memory/repair#2"
+    assert run.state.values["repair.cost"] == 120  # the latest run's, as for any step

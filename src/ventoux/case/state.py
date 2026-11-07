@@ -440,6 +440,15 @@ class CaseEnded:
 
 
 @dataclass(frozen=True)
+class ClosedByParent:
+    """A child case's parent closes it: it is closing, or a rule stopped the step that opened it.
+    The child begins closing as a person's close does (brief, D40) (brief, D74)."""
+
+    reason: str  # why, as its parent says: `duplicate, by ana`, `stopped by withdraw#1`
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
 class WorkflowCancelled:
     """A cancellable workflow step ended cancelled, after the case asked, closing or stopping it:
     its team's promise is that nothing it started completed after the request (brief, D40)."""
@@ -565,6 +574,7 @@ type Event = (
     | CloseAsked
     | PlanCancelled
     | CaseEnded
+    | ClosedByParent
     | WorkflowCancelled
     | Shown
     | ForgetApproved
@@ -633,6 +643,15 @@ class OpenCase:
     excluded: dict[str, str]
 
 
+@dataclass(frozen=True)
+class CloseCase:
+    """Close a case step's child, because its parent is closing or a rule stops the step; the
+    parent waits for it to end (brief, D40) (brief, D74)."""
+
+    entry: str  # the step run, such as `repair#1`
+    reason: str  # why, naming only who asked: `duplicate, by ana`, `stopped by withdraw#1`
+
+
 # Why a child is stopped when its case closes: the reason a plan's stop signal gives by default,
 # so a history recorded before 11c, whose signal gave none, replays the same (brief, D40).
 CLOSING = "the case is closing"
@@ -667,5 +686,12 @@ class UseRelease:
 
 
 type Command = (
-    Schedule | StartWorkflow | StartPlan | OpenCase | StopPlan | CancelWorkflow | UseRelease
+    Schedule
+    | StartWorkflow
+    | StartPlan
+    | OpenCase
+    | StopPlan
+    | CloseCase
+    | CancelWorkflow
+    | UseRelease
 )

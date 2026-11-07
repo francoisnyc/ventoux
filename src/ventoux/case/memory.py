@@ -19,6 +19,7 @@ from ventoux.case.state import (
     CancelWorkflow,
     CaseEnded,
     CaseState,
+    CloseCase,
     Completed,
     Event,
     Failed,
@@ -48,11 +49,15 @@ PlanRunner = Callable[[StartPlan, int], Completed | Failed | None]
 # Opens a case step's child and runs it as far as it goes: how it ended, as an event at the time
 # given; or None while it is open, and the step keeps running. Given by the caller, which knows
 # the child's script, as a plan's runner knows the plan's (brief, D74).
-ChildRunner = Callable[[OpenCase, int], CaseEnded | Failed | None]
+# A close asked of an open child goes to the same runner, which continues the child it opened.
+ChildRunner = Callable[[OpenCase | CloseCase, int], CaseEnded | Failed | None]
 
 
-def no_children(command: OpenCase, at: int) -> Failed:
-    """A driver that runs no child cases: a case step fails, and a person looks at it."""
+def no_children(command: OpenCase | CloseCase, at: int) -> Failed | None:
+    """A driver that runs no child cases: a case step fails, and a person looks at it. Nothing
+    opened, so a close reaches nothing."""
+    if isinstance(command, CloseCase):
+        return None
     return Failed(command.entry, f"{command.case} can't open here: no child cases run", at=at)
 
 
@@ -133,13 +138,15 @@ def run_case_in_memory(
     plans: PlanRunner = no_plans,
     workflows: Mapping[str, Activity] | None = None,
     children: ChildRunner = no_children,
+    state: CaseState | None = None,
 ) -> CaseRun:
     """Play `events` in order, the first opening the case; `name` names the case in its keys.
     The runs of the steps in `held` keep running until a `Finish` names them, so a test can
     close a case while an activity runs (brief, D10). `workflows` binds each workflow contract
     to the code that runs it, by reference; one it doesn't bind fails its step. Before each
     event, and at each `Advance`, every timer due by its time fires first (brief, D44)."""
-    state = CaseState(name)
+    # A child case closed by its parent continues from where it was, with no new opening.
+    state = CaseState(name) if state is None else state
     driver = Driver(
         case, catalog, implementations, frozenset(held), plans, workflows or {}, children
     )
@@ -224,7 +231,7 @@ class Driver:
                 elif isinstance(command, StartPlan):
                     if (ended := self.plans(command, at)) is not None:
                         queue.append(ended)  # else it waits for an answer: the step runs on
-                elif isinstance(command, OpenCase):
+                elif isinstance(command, OpenCase | CloseCase):
                     if (closed := self.children(command, at)) is not None:
                         queue.append(closed)  # else the child is open: the step runs on
                 elif isinstance(command, StartWorkflow) and command.workflow not in self.workflows:

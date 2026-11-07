@@ -93,6 +93,7 @@ from ventoux.case.state import (
     ChangeProposed,
     Claimed,
     CloseAsked,
+    ClosedByParent,
     Command,
     Completed,
     Event,
@@ -220,6 +221,11 @@ def decide(
             failed(state, event)
     elif isinstance(event, PlanCancelled):
         plan_cancelled(state, event)
+    elif isinstance(event, ClosedByParent):
+        # Closed as a person's close is, saying its parent asked (brief, D74).
+        begin_closing(
+            state, f"closed by its parent: {event.reason}", f"by its parent: {event.reason}"
+        )
     elif isinstance(event, WorkflowCancelled):
         workflow_cancelled(state, event)
     elif isinstance(event, Retried):
@@ -2195,6 +2201,11 @@ def child_ended(state: CaseState, run: StepRun, step: CaseStep, event: CaseEnded
     """A case step's child closed: its outcome, and each field it reports, land as the step's
     outputs, each with its sources in the child and `case:<child>`, the route it came by. A child
     never writes into its parent's case file (brief, D74)."""
+    if run.stop_requested or state.phase == "closing":
+        # Closed by its parent: it has ended, and its report changes nothing here (brief, D74).
+        run.status = "cancelled"
+        state.history.append(f"{run.entry} cancelled: {stopped_because(run)}")
+        return
     route = f"case:{step.case.split('@')[0]}"
     run.status = "done"
     state.values[f"{run.step}.outcome"] = event.outcome

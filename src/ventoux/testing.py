@@ -44,6 +44,8 @@ from ventoux.case.state import (
     ChangeProposed,
     Claimed,
     CloseAsked,
+    CloseCase,
+    ClosedByParent,
     Completed,
     Event,
     Failed,
@@ -580,7 +582,9 @@ def child_runner(
     or None while it is open (brief, D74). Each child's run is kept in `ran`, by entry. The child
     reads `catalog`, and calls `activities` and `workflows`, as its parent does."""
 
-    def run(command: OpenCase, at: int) -> CaseEnded | Failed | None:
+    def run(command: OpenCase | CloseCase, at: int) -> CaseEnded | Failed | None:
+        if isinstance(command, CloseCase):
+            return close_child(command, at)
         child = parse_case(command.definition)  # validated with its parent, in its package
         step = command.entry.split("#")[0]
         script = case_answers.get(command.entry, case_answers.get(step, ()))
@@ -607,6 +611,23 @@ def child_runner(
         if not child_run.closed:
             return None  # open: the step runs on
         return ended(command.entry, child, child_run.state, at)
+
+    def close_child(command: CloseCase, at: int) -> CaseEnded | None:
+        """Its parent closes the open child: it carries on from where it was, closing."""
+        was = ran[command.entry]
+        child_run = run_case_in_memory(
+            was.definition,
+            catalog,
+            activities,
+            [ClosedByParent(command.reason, at=at)],
+            name=was.state.case,
+            workflows=workflows,
+            state=was.state,
+        )
+        ran[command.entry] = child_run
+        if not child_run.closed:
+            return None  # its activities still run: the parent waits for its end
+        return ended(command.entry, child_run.definition, child_run.state, at)
 
     return run
 

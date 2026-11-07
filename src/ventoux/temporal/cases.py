@@ -68,6 +68,7 @@ with workflow.unsafe.imports_passed_through():
         ChangeProposed,
         Claimed,
         CloseAsked,
+        CloseCase,
         Command,
         Completed,
         Event,
@@ -830,6 +831,8 @@ class CaseWorkflow:
         if isinstance(command, CancelWorkflow):
             self.cancel_workflow(command)
             return
+        if isinstance(command, CloseCase):
+            return  # no child opens on Temporal before layer 18d, so none is left to close
         if isinstance(command, OpenCase):
             # A child case runs on Temporal from layer 18d: until then the step fails, needing
             # attention, never a silent start (fail closed) (brief, D74).
