@@ -103,6 +103,10 @@ def why_excluded(
     # The person who opened the case approves none of its steps (brief, D11).
     if by == state.opened_by:
         return f"{by} opened the case, so cannot approve its steps"
+    # Nor, in a child case, does anyone its parent excluded: who opened the parent, who proposed
+    # the step that opened the child (brief, D25) (brief, D74).
+    if by in state.excluded:
+        return state.excluded[by]
     # Nor does the person who proposed this run: their proposal decides that it runs (brief, D25).
     if by == state.proposers.get(name):
         return f"{by} proposed {name}, so cannot approve it"

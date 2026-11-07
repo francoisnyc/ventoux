@@ -478,6 +478,7 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
     state.engine = known(event.engine)  # set once, here, never by itself after (brief, D51)
     state.release = event.release
     state.cases = dict(event.cases)  # the children its release pins (brief, D74)
+    state.excluded = dict(event.excluded)  # a child's parent's exclusions cross (brief, D25)
     if event.release is not None:  # a draft's history is as it was before releases
         state.history.append(f"opened on {event.release}, engine {state.engine}")
     origin = OPENER if event.by is None else f"person:{event.by}"

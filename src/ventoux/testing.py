@@ -591,6 +591,7 @@ def child_runner(
             at=at,
             parent=(parent, command.entry),
             sources={name: given.sources for name, given in command.fields.items()},
+            excluded=command.excluded,
         )
         events = [opened, *script_events(script, people, at)]
         child_run = run_case_in_memory(

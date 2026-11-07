@@ -270,6 +270,9 @@ class CaseState:
     # The child cases its release pins, as stored data, by reference (`repair@3`): given when it
     # opens, as a case's start holds its plans, so the engine reads what each reports (brief, D74).
     cases: dict[str, object] = field(default_factory=dict[str, object])
+    # Who approves nothing in this case, and why, as a child's parent gave it: its opener and the
+    # case step's proposer (brief, D25) (brief, D74). Empty for a case no parent opened.
+    excluded: dict[str, str] = field(default_factory=dict[str, str])
     flags: list[str] = field(default_factory=list[str])  # what a person should look at
     history: list[str] = field(default_factory=list[str])  # what happened, one line each
     firings: list[RuleFiring] = field(default_factory=list[RuleFiring])  # every rule's, in order
@@ -327,6 +330,8 @@ class Opened:
     sources: Mapping[str, frozenset[str]] | None = field(kw_only=True, default=None)
     # The child cases its release pins, as stored data, by reference (brief, D74).
     cases: Mapping[str, object] = field(kw_only=True, default_factory=dict[str, object])
+    # Who approves nothing in a child, and why, as its parent says (brief, D25) (brief, D74).
+    excluded: Mapping[str, str] = field(kw_only=True, default_factory=dict[str, str])
 
 
 @dataclass

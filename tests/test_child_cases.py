@@ -12,10 +12,11 @@ from typing import Any
 
 import pytest
 
+from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, close, run_case
+from ventoux.testing import CATALOG, close, propose, run_case
 
 ROOT = Path(__file__).parent.parent
 GUIDE = ROOT / "docs" / "guides" / "cases.md"
@@ -484,3 +485,53 @@ def test_a_childs_outcome_is_done_or_one_of_its_close_reasons() -> None:
             '==[1]: repair.outcome has no outcome "fixed"; its outcomes are done, written_off',
         )
     ]
+
+
+# --- Slice 7: who approves in the child (brief, D25) (brief, D74) ---
+
+
+def paying_repair() -> dict[str, Any]:
+    """The guide's repair, which also pays for its parts behind a team lead's approval."""
+    child = repair()
+    child["fields"]["order_id"] = {
+        "type": "reference",
+        "system": "orders",
+        "display": {"title": "Order"},
+    }
+    child["steps"]["pay_parts"] = {
+        "kind": "activity",
+        "display": {"title": "Pay for the parts"},
+        "activity": "payments.refund@2",
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "budget"}},
+        "approval": {"roles": ["support-lead"], "display": {"reason": "Parts cost money"}},
+    }
+    return child
+
+
+def test_who_proposed_the_case_step_approves_nothing_in_the_child() -> None:
+    # The parent's exclusions cross, or a child case would be a way around "someone else
+    # approves": here sam proposed the repair, so sam approves nothing in it (brief, D25). The
+    # parent's opener crosses the same way.
+    definition = claim()
+    definition["steps"]["repair"] |= {"automatic": False, "proposed_by": ["support-lead"]}
+    definition |= {
+        "stays_open": True,
+        "close_reasons": {"done": {"display": {"title": "Done"}, "roles": ["support"]}},
+    }
+    definition["steps"]["repair"]["inputs"]["order_id"] = {"var": "order_id"}
+    answered = [("assess", "accept", "ana", {"payout": 900}), propose("repair", "sam")]
+    opened: dict[str, Any] = {
+        "file": {"order_id": "ord-1", "vehicle": "veh-9"},
+        "answers": answered,
+        "cases": {"repair@3": paying_repair()},
+        "people": PEOPLE,
+    }
+    with pytest.raises(AnswerRefused, match="sam proposed repair, so cannot approve it"):
+        run_case(definition, case_answers={"repair": [("pay_parts", "approve", "sam")]}, **opened)
+    run = run_case(definition, case_answers={"repair": [("pay_parts", "approve", "lee")]}, **opened)
+    child = run.children["repair#1"]
+    assert "lee answered pay_parts.approval#1 approve as support-lead" in child.history
+    # Its keys are the child's run's: never the same as one of its parent's (brief, D17).
+    assert any("key memory/repair#1/pay_parts#1" in line for line in child.history)
+    # Opened by its parent, never by a person: nobody is the child's own opener.
+    assert child.state.opened_by is None

@@ -96,6 +96,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "closed_because": state.closed_because,
         "closed_as": state.closed_as,  # the close reason a person used, or None (brief, D74)
         "cases": dict(state.cases),  # the children its release pins, as stored data (brief, D74)
+        "excluded": dict(state.excluded),  # who approves nothing, as a parent said (brief, D74)
         "flags": list(state.flags),
         "history": list(state.history),
         "firings": [
@@ -292,6 +293,7 @@ def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Cas
         # None in a state from before layer 18c: no close reason was kept, and no child pinned.
         closed_as=data.get("closed_as"),
         cases=dict(data.get("cases", {})),
+        excluded=dict(data.get("excluded", {})),
         flags=list(data["flags"]),
         history=list(data["history"]),
         # None in a state from before layer 11a: no rule had fired.
