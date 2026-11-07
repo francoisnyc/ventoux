@@ -476,80 +476,150 @@ or, for a pin of behaviour already built, catching a mutation.
 **State keyed by a step's name:** each repeated step's key-to-number map. It follows a migration's
 rename, tested; it crosses continue-as-new, tested.
 
-### For 18c and 18d: child cases (sketched; settled when they start)
+### For 18c and 18d: child cases (18c's proposed 2026-11-07; 18d's sketched, settled when it starts)
 
-21. **The shape:** `{"kind": "case", "case": "repair@3", "inputs": {...}}`. A child case is named
-    with its release, as a plan is (`refund-order@1`). It may be required. It has no approval of
-    its own: the child's own steps carry theirs, as a plan's do (D28). *Recommended.*
+Checked against the code before asking, as 18b's were. What the code already gives:
+
+- **The opening check:** `runtime.py` refuses an opening field that a person's form or a rule
+  sets, or of the wrong type. A child's inputs are an opening, so the same check judges them.
+- **A plan's inputs:** `calls.py`'s `plan_input_issues` checks each plan step's inputs against
+  the fields the plan takes at its start. A case step's inputs are checked the same way, against
+  the child's opening.
+- **The package:** `releases.py` reads `case.json` and `plans/`, nothing else (D50). A pinned
+  child needs a place in it.
+- **Close reasons are declared** (`close_reasons`), so the values `repair.outcome` may take are
+  known when the parent is validated: `done`, or one of the child's reasons.
+- **`waiting_for`** lists open entries (D24); a running plan step adds none of its own waits.
+- **The codec** takes a case's key from its workflow ID's first part (`case_of`), so a child
+  `claim-7/repair#1` is already sealed under `claim-7`'s key: 18d's choice 24.
+
+**The split.** 18c is the engine, in memory: the step's shape, the package, validation, opening
+the child, its report, every parent route, the diff, the case map, the builder, the schema and the
+digest. 18d is Temporal: the child as its own workflow, its end signal, its parent close policy,
+the registry asked for its release, the shared key, forgetting and continue-as-new. 18c's in-memory
+child stands in for all of that the way `plan_runner` stands in for a plan's child workflow.
+*Recommended.*
+
+#### 18c: in the engine
+
+21. **The shape:** `{"kind": "case", "case": "repair@3", "inputs": {...}}`, named with its
+    release, as a plan is (`refund-order@1`). It takes what a plan step takes (`requires`, `when`,
+    `required`, `reaches`, `proposed_by`, `repeatable`, `max_age`) and, like one, no `approval`
+    (the child's own steps carry theirs, D28) and no `for_each` (a deliberate limit, D48: one child
+    per run). A repeatable case step proposed again opens a second child, `repair#2`.
+    *Recommended.*
 
 22. **Which release the child runs** (D51, D54).
-    - (a) **pinned by the parent's release:** `repair@3` is in the parent's package, so in its
-      digest. Activating the parent checks `repair 3` is active in the environment. The child asks
-      the registry as it opens, as any case does. A retired or deactivated release refuses it
-      before it starts, and the step fails, needing attention.
-    - (b) the release of `repair` active when the child starts. The parent's behaviour would then
-      change without a release of its own.
+    - (a) **Pinned by the parent's release:** the parent's package names `repair@3`, and its digest
+      covers what `repair 3` does. Activating the parent checks `repair 3` is active in the
+      environment; the child asks the registry again as it opens, as any case does (18d).
+    - (b) The release of `repair` active when the child opens. The parent's behaviour would then
+      change without a release of its own, and its diff could never show it.
 
-    *Recommended: (a).* What a release does is what it says. A new garage process is released by
-    releasing the claim too, and the diff shows it. *Correcting the guide, which says (b).* In
-    memory, `run_case` is given the child definitions by name and number.
+    *Recommended: (a).* What a release does is what it says, and a new garage process reaches
+    claims by a claim release the diff shows. In memory, `run_case` is given the child definitions
+    by name and release (`cases=`), as it is given plans.
+
+36. **Where the pinned child sits in the package** (adds to D50).
+    - (a) **`cases/repair@3/`, the child's own package** (its `case.json` and `plans/`), read as
+      the parent's is. The parent's digest covers the child's. Validation reads the child from
+      there. Activating the parent checks that the environment's `repair 3` has that same digest,
+      so the copy can't say something the released `repair 3` doesn't.
+    - (b) Only the reference; validation and the digest read `repair 3` from the release store.
+      Then `ventoux check` needs the store, and a package isn't checkable on its own.
+
+    *Recommended: (a),* as plans are: one folder is the whole of what a release does. A child
+    named twice, a child nobody names, or a child folder that isn't a package is refused.
 
 23. **What the child is given.** Its opening fields, from the parent's case file, each with its
-    sources (D28): a budget a person approved is still that person's in the child. The parent's
-    exclusions cross: the parent's opener, and the step's proposer, approve nothing in the child
-    (D25, D28). The child is **opened by the parent case**, recorded as such, never by a person.
-    Validation checks each input is a field the child's definition takes at the opening, of its
-    type. *Recommended.*
+    sources (D28): a budget an adjuster set is still `person:ana` in the child. The child is
+    **opened by the parent case**, recorded as such (`opened by claim-7`), never by a person, so
+    nobody is "the opener" of the child. The parent's exclusions cross: the parent's opener and the
+    step's proposer approve nothing in the child (D25, D28). Validation checks each input against
+    the child's opening, as `plan_input_issues` checks a plan's: a field the child has, given at
+    its opening (not set by its forms or rules), of its type. A field the child takes and the step
+    doesn't give is simply not given, as at any opening. *Recommended.*
 
-24. **Sensitive values and keys** (D15, D31, D32).
-    - (a) **The child is under its parent's key.** The codec already takes a case's key from its
-      workflow ID's first part (`case_of("claim-7/repair#1") == "claim-7"`). Sensitive inputs
-      cross sealed, never opened. Forgetting the parent forgets its children with the same act. A
-      child can't be forgotten alone (the request is refused, naming the parent). The stricter
-      `forgetting` of the two applies to both: a child that keeps its records keeps the family's.
-    - (b) Its own key. Every sensitive input is opened and sealed again in the codec. Forgetting
-      must then find and destroy every child's key, and a missed child keeps the person.
+37. **Sensitive values, in the engine** (D15, D31; the keys are 18d's, choice 24).
+    - (a) **A sensitive value enters the child only into a sensitive field, and a report carries
+      no sensitive field, for now** (deliberate limits, D48). A view can hide more than its source,
+      never less: a sensitive parent value given to a plain child field would be shown to anyone
+      who reads the child. Refused at validation, saying which.
+    - (b) Let them cross both ways, each marked sensitive where it lands.
 
-    *Recommended: (a).* It is one subject, so one key. And the forgetting can't miss a child.
-    *Correcting the guide.*
+    *Recommended: (a).* Inputs are where the risk is now; a sensitive report is its own door.
 
-25. **What the end report may carry** (adds to D29). How the child closed (`done`, or the reason a
-    person closed it with), the milestones it reached, and the fields its definition declares in
-    `reports`. Each value carries the sources it had in the child, never re-stamped, plus
-    `case:repair` naming where it came from. A sensitive field stays sealed under the shared key.
-    The values land as the step's outputs (`repair.cost`), never in the parent's own fields: the
-    parent reads them as it reads any output. A report carries nothing else. *Recommended.*
+25. **What the end report carries** (adds to D29). The child's definition declares `reports`: a
+    list of its own fields, each non-sensitive (choice 37) and not a list (an output is an exact
+    value, D29). When the child closes, the step is done; `repair.outcome` is `done` or the close
+    reason a person used, and each reported field present at the close lands as `repair.<field>`.
+    Each value keeps the sources it had in the child, plus `case:repair`, saying where it came from.
+    Nothing lands in the parent's own fields; the parent reads the report as it reads any output.
+    `repair.outcome` is type-checked against `done` and the child's close reasons. *Recommended.*
 
-26. **A child that needs attention** is the child's: retried by its operators, there. The parent's
-    step is running, and the parent waits. A failure to **start** the child (definition not active,
-    inputs refused) is the parent's step failing, retried by the parent's operator. The retry
-    starts the child under the same ID, and refuses to start a second child if one of that ID has
-    run. *Recommended.*
+38. **A reported field the child never set.**
+    - (a) **It is absent in the parent:** whatever reads it fails, as reading any missing field
+      does (fail closed). The history line names the fields that came back. `ventoux check` warns
+      where a reader of `repair.cost` can run with the child closed by a reason that may leave it
+      unset, as it warns `MAY_BE_UNSET` elsewhere.
+    - (b) The step fails, needing attention. But the child is closed, so no retry could help, and
+      only a person's close would end it.
 
-27. **What the parent's lifecycle does to running children:**
-    - **closes, or a rule stops the step:** through D40's one place, the child is closed with a
-      reason naming its parent (`closed by its parent: duplicate, by ana`). Its tasks are
-      cancelled, its activities finish, and the parent waits for it to end. A close never waits
-      for a person (D48). Signalled only once started (the prototype's rule).
-    - **migrates:** the child keeps its own release. The parent's target must start the same
-      `repair@3` from that step, or the migration waits for the child (D53, "running work
-      finishes under what it started with").
-    - **continues as new:** doesn't wait for the child (adds to D27, closing D48's note). The
-      child's end signal is addressed to the workflow ID, so it reaches the latest run. To verify on
-      Temporal's test server: a child started with the default parent close policy is terminated
-      when its parent's run continues as new, so children are started with `ABANDON`, and the
-      parent stops them itself.
-    - **is forgotten:** choice 24.
+    *Recommended: (a).* A repair closed as a duplicate has no cost; the parent branches on
+    `repair.outcome` before reading it.
+
+39. **The milestones the child reached** are said in the step's history line (`reaching fixed`),
+    never readable by the parent: a list value would be a new kind of read, and a child can report
+    any fact the parent needs as a field. A deliberate limit (D48). *Recommended.*
+
+40. **What the parent waits for while the child runs** (adds to D24). The parent's `waiting_for`
+    has one line for the running child: `repair#1: case repair, open`. The child's own tasks and
+    approvals are the child's, listed in its own report: the people who may see the parent may not
+    see the child (D22, D30). A child is pending work, so the parent never closes under it by
+    itself. *Recommended.*
+
+26. **A child that needs attention** is the child's: its operators retry it there, and the parent
+    waits. A failure to **start** it (a release not active, inputs refused at its opening) is the
+    parent's step failing, retried by the parent's operator, under the same entry; a retry never
+    opens a second child once one has opened. *Recommended.*
+
+27. **What the parent's routes do to a running child** (in memory; Temporal's half is 18d's):
+    - **closes, or a rule stops the step:** through D40's one place, the child is closed, saying
+      why (`closed by its parent: duplicate, by ana`; `closed by its parent: stopped by
+      withdraw#1`). Its tasks and approvals are cancelled, its running activities finish, and the
+      parent closes once the child has ended. A close never waits for a person (D48). The child's
+      report then changes nothing in the parent.
+    - **migrates:** the child keeps its release. The target must start the same `repair@3` from the
+      step (renamed or not), or the migration waits for the child to end (D53). The record of which
+      child each run opened follows a rename of the step.
+    - **edits a field given to the child** (D52): the child keeps what it was given; an edit never
+      reaches a child.
+    - **skips:** only a step that failed to start, as any failed run.
+    - **events and rules:** reach the parent only; a rule may start a case step or stop it.
 
     *Recommended.*
 
-28. **The end signal:** carries the entry, the child's workflow ID and its report. One for an entry
-    that isn't a running child of this case, or sent twice, is recorded and changes nothing. It is
-    sent by the child's own workflow as its last act, never by a client. *Recommended.*
+29. **One level only** (deliberate limit, adds to D48): a child's definition has no case step of
+    its own, refused when the parent is validated. That bounds what one close must reach, and rules
+    out a case starting itself. *Recommended.*
 
-29. **One level only** (deliberate limit, adds to D48): a child case's definition has no case step
-    of its own, refused when the parent is validated. That bounds what one close must reach, and
-    rules out a case starting itself. *Recommended.*
+41. **No new engine version** (D51): no definition readable before has a case step. *Recommended.*
+
+#### 18d: on Temporal (sketched; settled when 18d starts)
+
+24. **The child is under its parent's key.** The codec already takes a case's key from its
+    workflow ID's first part. Sensitive inputs cross sealed. Forgetting the parent forgets its
+    children with the same act. A child can't be forgotten alone (refused, naming the parent). The
+    stricter `forgetting` of the two applies to both.
+
+27, Temporal's half. **Continue-as-new** doesn't wait for a child (adds to D27, closing D48's
+    note): its end comes by a signal to the parent's workflow ID. Children are started with
+    `ABANDON` (to verify: the default close policy terminates a child when its parent's run
+    continues as new), and the parent closes them itself.
+
+28. **The end signal** carries the entry, the child's workflow ID and its report. One for an entry
+    that isn't a running child of this case, or sent twice, is recorded and changes nothing. It is
+    sent by the child's workflow as its last act, never by a client.
 
 ### What changes in the guide, if answered as recommended
 
