@@ -39,7 +39,7 @@ with workflow.unsafe.imports_passed_through():
         Retiring,
         open_on,
     )
-    from ventoux.case.releases import Record
+    from ventoux.case.releases import Record, digest, unwritten
 
 # The task queue every environment's registry runs on, served by `registry_worker`.
 REGISTRY_QUEUE = "ventoux-registry"
@@ -345,14 +345,24 @@ async def seen_pollers(client: Client, registry: Registry, queue: str) -> dict[s
     return seen | await pollers(client, sorted(bound - {queue}))
 
 
+def activation_of(record: Record, queue: str, seen: dict[str, list[str]], by: str) -> Activating:
+    """The request to activate `record`'s release, its new cases opening on `queue`, with the
+    pollers `seen`, and each child release its package pins, with the digest it gives it, which
+    the registry checks too (brief, D75)."""
+    pins: list[Released] = []
+    for reference, child in sorted(record.written.cases.items()):
+        name, _, number = reference.partition("@")  # `repair@3`: the package, then its release
+        pins.append(Released(name, int(number), digest(unwritten(child))))
+    return Activating(released(record), dict(record.contracts), queue, seen, by, pins=tuple(pins))
+
+
 async def activate(client: Client, environment: str, record: Record, queue: str, by: str) -> Answer:
     """Activate `record`'s release in `environment`, its new cases opening on `queue`: the registry
     checks the workers' manifests against the record, with the pollers Temporal lists now, and
     refuses saying every problem (brief, D5). Rolling back is activating an earlier release."""
     registry = await registry_of(client, environment)
     seen = await seen_pollers(client, registry, queue)
-    asked = Activating(released(record), dict(record.contracts), queue, seen, by)
-    return await ask(client, environment, "activate", asked)
+    return await ask(client, environment, "activate", activation_of(record, queue, seen, by))
 
 
 async def retire(client: Client, environment: str, record: Record, by: str) -> Answer:

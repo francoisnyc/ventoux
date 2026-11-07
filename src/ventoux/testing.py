@@ -17,7 +17,8 @@ from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.claims import ClaimRefused
 from ventoux.case.closing import CloseRefused
-from ventoux.case.definition import CaseDefinition, parse_case
+from ventoux.case.definition import parse_case
+from ventoux.case.ending import ending_of
 from ventoux.case.engine import ENGINE
 from ventoux.case.freshness import seconds_in
 from ventoux.case.memory import (
@@ -42,6 +43,7 @@ from ventoux.case.state import (
     CaseEnded,
     CaseState,
     ChangeProposed,
+    ChildNotEnded,
     Claimed,
     CloseAsked,
     CloseCase,
@@ -54,6 +56,7 @@ from ventoux.case.state import (
     OpenCase,
     Opened,
     Proposed,
+    ReadChild,
     Retried,
     Sent,
     Shown,
@@ -586,9 +589,17 @@ def child_runner(
     reads `catalog`, and calls `activities`, `workflows` and `plans`, as its parent does: one
     reference is one plan."""
 
-    def run(command: OpenCase | CloseCase, at: int) -> CaseEnded | Failed | None:
+    def run(
+        command: OpenCase | CloseCase | ReadChild, at: int
+    ) -> CaseEnded | ChildNotEnded | Failed | None:
         if isinstance(command, CloseCase):
             return close_child(command, at)
+        if isinstance(command, ReadChild):
+            # In memory a child that closed has reported already: one read is still open.
+            was = ran[command.entry]
+            if was.closed:
+                return ending_of(command.entry, was.definition, was.state, at)
+            return ChildNotEnded(command.entry, "open", at=at)
         child = parse_case(command.definition)  # validated with its parent, in its package
         step = command.entry.split("#")[0]
         script = case_answers.get(command.entry, case_answers.get(step, ()))
@@ -614,7 +625,7 @@ def child_runner(
         ran[command.entry] = child_run
         if not child_run.closed:
             return None  # open: the step runs on
-        return ended(command.entry, child, child_run.state, at)
+        return ending_of(command.entry, child, child_run.state, at)
 
     def close_child(command: CloseCase, at: int) -> CaseEnded | None:
         """Its parent closes the open child: it carries on from where it was, closing."""
@@ -632,28 +643,9 @@ def child_runner(
         ran[command.entry] = child_run
         if not child_run.closed:
             return None  # its activities still run: the parent waits for its end
-        return ended(command.entry, child_run.definition, child_run.state, at)
+        return ending_of(command.entry, child_run.definition, child_run.state, at)
 
     return run
-
-
-def ended(entry: str, child: CaseDefinition, state: CaseState, at: int) -> CaseEnded:
-    """How a closed child reports to its parent: its outcome, its closed line, the milestones it
-    reached, and each field it reports that is set, with its sources (brief, D74)."""
-    closed = next(line for line in reversed(state.history) if line.startswith("closed: "))
-    return CaseEnded(
-        entry,
-        state.closed_as or "done",
-        state.closed_by if state.closed_as is not None else None,
-        closed.removeprefix("closed: "),
-        tuple(state.milestones),
-        {
-            name: Sourced(state.values[name], state.sources[name])
-            for name in child.reports
-            if name in state.values
-        },
-        at=at,
-    )
 
 
 def script_events(

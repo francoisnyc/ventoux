@@ -91,6 +91,8 @@ from ventoux.case.state import (
     CaseEnded,
     CaseState,
     ChangeProposed,
+    ChildNotEnded,
+    ChildRang,
     Claimed,
     CloseAsked,
     ClosedByParent,
@@ -111,6 +113,7 @@ from ventoux.case.state import (
     Opened,
     PlanCancelled,
     Proposed,
+    ReadChild,
     Retried,
     RuleStart,
     Schedule,
@@ -221,6 +224,10 @@ def decide(
             failed(state, event)
     elif isinstance(event, PlanCancelled):
         plan_cancelled(state, event)
+    elif isinstance(event, ChildRang):
+        child_rang(case, state, event, commands)
+    elif isinstance(event, ChildNotEnded):
+        child_not_ended(case, state, event)
     elif isinstance(event, ClosedByParent):
         # Closed as a person's close is, saying its parent asked (brief, D74).
         begin_closing(
@@ -1002,7 +1009,11 @@ def complete(
     steered adds what steered it to each, and reaches nothing (brief, D43)."""
     run = next((run for run in state.runs if run.entry == event.entry), None)
     if isinstance(event, CaseEnded):
-        assert run is not None  # only a running child ends, by its parent's driver
+        if run is None or run.status != "running":
+            # Its doorbell and a new run's question can both read the same end: the second
+            # changes nothing, and its report never lands twice (brief, D75).
+            state.history.append(f"{event.entry} ended again: nothing read")
+            return
         step = case.steps[run.step]
         assert isinstance(step, CaseStep)  # only a case step opens a child
         child_ended(state, run, step, event)
@@ -2197,12 +2208,49 @@ def open_child(state: CaseState, name: str, step: CaseStep, commands: list[Comma
     excluded = may_not_approve(state, name, run)
     run.excluded = excluded
     proposal_spent(state, name)  # the proposed run has started
-    child_run = f"{state.case}/{run.entry}"
+    # The child's own workflow ID, under its parent's: the first part of this case's name is its
+    # workflow ID (`claim-7`), so the codec seals the child under the parent's key (brief, D75).
+    child_run = f"{state.case.split('/')[0]}/{run.entry}"
     state.history.append(
         f"started {run.entry}: case {step.case} ({origins(step.inputs, state)}), run {child_run}"
     )
     definition = state.cases[step.case]
     commands.append(OpenCase(run.entry, step.case, definition, fields, child_run, excluded))
+
+
+def child_rang(
+    case: CaseDefinition, state: CaseState, event: ChildRang, commands: list[Command]
+) -> None:
+    """A doorbell: read the child's own end, if the entry is an open child of this case; else it
+    finds nothing to read, recorded, and changes nothing, whoever rang (brief, D75)."""
+    run = next((run for run in state.runs if run.entry == event.entry), None)
+    open_child = (
+        run is not None
+        and run.status == "running"
+        and isinstance(case.steps.get(run.step), CaseStep)
+    )
+    if not open_child:
+        state.history.append(f"child_ended for {event.entry}, which is no open child: nothing read")
+        return
+    commands.append(ReadChild(event.entry, f"{state.case.split('/')[0]}/{event.entry}"))
+
+
+def child_not_ended(case: CaseDefinition, state: CaseState, event: ChildNotEnded) -> None:
+    """What reading a child found when it had no report: still open, so nothing changes; or its
+    workflow ended without reporting, so its step fails and waits for a person, never waited for
+    in silence (brief, D17) (brief, D75)."""
+    run = next((run for run in state.runs if run.entry == event.entry), None)
+    if run is None or run.status != "running":
+        return  # it ended meanwhile: what it gave is already recorded
+    step = case.steps[run.step]
+    assert isinstance(step, CaseStep)  # only a case step's run is read as a child
+    if event.how == "open":
+        state.history.append(
+            f"child_ended for {event.entry}, whose case is still open: nothing read"
+        )
+        return
+    why = f"{step.case} ended without reporting: {event.how}: look at the child, then "
+    failed(state, Failed(event.entry, why + "retry or close", at=event.at))
 
 
 def child_ended(state: CaseState, run: StepRun, step: CaseStep, event: CaseEnded) -> None:

@@ -447,6 +447,25 @@ class CaseEnded:
 
 
 @dataclass(frozen=True)
+class ChildRang:
+    """A doorbell: a signal saying a child case ended. A signal says nothing of who sent it, so
+    it carries only the entry, and the parent reads the report itself (brief, D75)."""
+
+    entry: str  # the step run whose child it names, such as `repair#1`
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class ChildNotEnded:
+    """What reading a child found, when it isn't a report: the child's case still open, or its
+    workflow ended without reporting (terminated, failed, timed out) (brief, D75)."""
+
+    entry: str  # the step run, such as `repair#1`
+    how: str  # `open`; or how its workflow ended: `it was terminated`, `it failed`, `it timed out`
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
 class ClosedByParent:
     """A child case's parent closes it: it is closing, or a rule stopped the step that opened it.
     The child begins closing as a person's close does (brief, D40) (brief, D74)."""
@@ -581,6 +600,8 @@ type Event = (
     | CloseAsked
     | PlanCancelled
     | CaseEnded
+    | ChildRang
+    | ChildNotEnded
     | ClosedByParent
     | WorkflowCancelled
     | Shown
@@ -659,6 +680,15 @@ class CloseCase:
     reason: str  # why, naming only who asked: `duplicate, by ana`, `stopped by withdraw#1`
 
 
+@dataclass(frozen=True)
+class ReadChild:
+    """Read how a case step's child ended, from the child's own run: what the parent decides on,
+    never what a doorbell said (brief, D75)."""
+
+    entry: str  # the step run, such as `repair#1`
+    run: str  # the child's workflow ID: `claim-7/repair#1`
+
+
 # Why a child is stopped when its case closes: the reason a plan's stop signal gives by default,
 # so a history recorded before 11c, whose signal gave none, replays the same (brief, D40).
 CLOSING = "the case is closing"
@@ -699,6 +729,7 @@ type Command = (
     | OpenCase
     | StopPlan
     | CloseCase
+    | ReadChild
     | CancelWorkflow
     | UseRelease
 )

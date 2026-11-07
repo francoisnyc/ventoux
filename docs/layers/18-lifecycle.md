@@ -1,11 +1,11 @@
 # Layer 18: Case lifecycle: required steps, repeated steps, child cases
 
-Status: 2026-11-06, 18a merged; 18b built, its promises checked (D73). This note
-starts from `main` at `f1e8512`, with layers 0 to 17 merged. The warm-up was asked and recorded
-(learning question 37). The guide was written first (curriculum step 2): `docs/guides/cases.md`,
-"Required steps", "Repeated steps: one run per item" and "Child cases", describes the layer as if it
-worked. Writing it showed four places where my first picks were wrong; the recommendations below
-correct them, and the guide changes with the answers (listed at the end).
+Status: 2026-11-07, 18a to 18c merged (#86, #87, #88: D72, D73, D74); 18d, child cases on Temporal
+(D75), built, in review. This note starts from `main` at `f1e8512`, with layers 0 to 17 merged. The
+warm-up was asked and recorded (learning question 37). The guide was written first (curriculum step
+2): `docs/guides/cases.md`, "Required steps", "Repeated steps: one run per item" and "Child cases",
+describes the layer as if it worked. Writing it showed four places where my first picks were wrong;
+the recommendations below correct them, and the guide changes with the answers (listed at the end).
 
 **Answered 2026-11-04.** Choices A to C and 1 to 11 as recommended. D72 is written before 18a is
 built, with dated amendments under D10, D24 and D52. Choices 13 to 29 (numbered 12 to 28 until
@@ -605,21 +605,200 @@ child stands in for all of that the way `plan_runner` stands in for a plan's chi
 
 41. **No new engine version** (D51): no definition readable before has a case step. *Recommended.*
 
-#### 18d: on Temporal (sketched; settled when 18d starts)
+#### 18d: on Temporal (answered 2026-11-07: as recommended; D75)
 
-24. **The child is under its parent's key.** The codec already takes a case's key from its
-    workflow ID's first part. Sensitive inputs cross sealed. Forgetting the parent forgets its
-    children with the same act. A child can't be forgotten alone (refused, naming the parent). The
-    stricter `forgetting` of the two applies to both.
+Checked against the code and the prototype before asking, as 18b's and 18c's were:
 
-27, Temporal's half. **Continue-as-new** doesn't wait for a child (adds to D27, closing D48's
-    note): its end comes by a signal to the parent's workflow ID. Children are started with
-    `ABANDON` (to verify: the default close policy terminates a child when its parent's run
-    continues as new), and the parent closes them itself.
+- **A plan step's child is awaited** (`run_plan`: `await child`), so a running plan holds the
+  parent's continue-as-new (D48). A child case can wait weeks: it must not.
+- **The codec already seals a child under its parent's key:** `case_of("claim-7/repair#1")` is
+  `claim-7`, and so is a child's plan, `claim-7/repair#1/settle#1`.
+- **Forgetting is its own workflow,** `<case ID>/forget` (`temporal/forget.py`), checking the
+  case's `forgetting` through a lookup activity.
+- **A case asks its registry as it opens** for its package's *active* release (`opened`); a
+  migration's target asks only that it was activated there and isn't retired (`Moving`).
+- **The prototype** (`chartering/src/temporal/case-workflow.ts`) never signals a child before it
+  exists (`await started.get(target)`), and holds continue-as-new while children run.
 
-28. **The end signal** carries the entry, the child's workflow ID and its report. One for an entry
-    that isn't a running child of this case, or sent twice, is recorded and changes nothing. It is
-    sent by the child's workflow as its last act, never by a client.
+**The experiment: what a parent's continue-as-new does to its child.** A parent starts a child,
+then continues as new; the child then signals the parent's workflow ID. Run on both of Temporal's
+servers (the script is at the end of this note, "The parent close policy, run"):
+
+| Server | policy left out (the default) | `TERMINATE` | `ABANDON` |
+|---|---|---|---|
+| time-skipping test server, which the tests use | child runs on | child runs on | child runs on |
+| development server (Temporal Server 1.32.2) | **child terminated** | **child terminated** | child runs on; its signal to the parent's workflow ID reaches the latest run |
+
+So the default kills a child at the parent's first continue-as-new, and the test server would
+never show it: a test on it can't catch a child started without `ABANDON`.
+
+42. **Keys and forgetting** (choice 24; D15, D31, D32). The child is under its parent's key,
+    which the codec already gives it: sensitive inputs cross sealed, never opened. Forgetting the
+    parent destroys the one key, so it forgets its children with the same act.
+    - A child is never forgotten alone: a request for `claim-7/repair#1` is refused, naming the
+      parent (`repair#1 is a child of claim-7: forget claim-7, which forgets it too`).
+    - The stricter `forgetting` of the parent and its pinned children applies to the family:
+      a claim whose repair says `never` is never forgotten; `while_open` holds once either is
+      closed. Worked out from the parent's release, so the lookup needs no child running.
+
+    *Recommended.*
+
+43. **The parent close policy** (choice 27, Temporal's half). Children start with `ABANDON`, and
+    the parent closes them itself, through D40's one place, as in memory: the experiment shows the
+    default terminates a child at the parent's first continue-as-new. Since the test server
+    doesn't enforce it, the test reads the policy the parent's history records for the child's
+    start, beside a test that the child outlives a switch. *Recommended.*
+
+44. **The end signal** (choice 28). The child's workflow, as its last act, signals the parent's
+    workflow ID (never a run ID) with only the entry: `child_ended("repair#1")`. A signal says
+    nothing of who sent it, so it is a doorbell, never a report.
+    - (a) **The parent then reads the report itself:** an activity asks Temporal for the child
+      workflow `claim-7/repair#1`'s result (its latest run, following continue-as-new), and that
+      result, written by the child's own run, is what lands. A doorbell from anyone else, for an
+      entry that isn't an open child, or for a child still running, finds nothing to read: it is
+      recorded and changes nothing (`child_ended for repair#1, which is open: nothing read`).
+    - (b) The signal carries the report, checked by a token the parent gave the child at its
+      start. The token is in both histories, so anyone who reads a history can forge a report.
+
+    *Recommended: (a).* Nothing a sender writes reaches the parent; the report is what the child
+    returned. The report's values cross sealed where sensitive, under the one key.
+
+45. **A child that ends without ringing** (terminated, its workflow failing, timed out): the
+    parent's step must never wait silently (D17).
+    - (a) **The run that started the child also watches it** (the child's handle, as a plan's is
+      awaited, but beside the loop, never holding the switch); every later run asks Temporal for
+      each open child's status as it starts after continue-as-new, and on a durable timer, daily.
+      A child found ended without a report fails the step: `repair#1: repair@3 ended without
+      reporting: it was terminated: look at the child, then retry or close`. A child whose queue
+      has no worker isn't ended: it is any case with no worker, which `ventoux environment check`
+      already watches (D54).
+    - (b) Only the doorbell: a terminated child leaves its parent waiting for ever.
+
+    *Recommended: (a).* The daily check bounds how long a lost child goes unnoticed after a
+    switch; within a run it is noticed at once.
+
+46. **What the parent may send a child, and when.** One signal only, the close (`close_by_parent`,
+    with its reason), and only once the child's start is recorded: a close asked while it starts
+    is sent once it has started, as a plan's stop is (`run_plan`), and the prototype's rule. A
+    child that has already ended needs nothing: its report is on its way. Never an answer, an
+    edit or an event: those are the child's own, from its own people (D74). *Recommended.*
+
+47. **Continue-as-new on either side** (adds to D27, closing D48's note). The parent's switch no
+    longer waits for an open child: the child's entry is the run's, in the state that crosses
+    (its workflow ID is `<case ID>/<entry>`), and its doorbell and its report reach whichever run
+    is current. A child's own switch is its business: its result is its latest run's, which the
+    parent's read follows. A close asked across a switch is asked again by the new run, once.
+    *Recommended.*
+
+48. **The registry** (D54; the checks D74 hands to 18d).
+    - **Activating the parent** checks that each pinned child release is activated in the
+      environment, not retired, with the digest the parent's package gives it, on the parent's
+      queue; every problem said at once, as activation says them.
+    - **The child asks as it opens,** as any case does, but for its pinned release: activated
+      there and not retired, with its digest, as a migration's target is asked, never "the active
+      one", so activating `repair 4` doesn't break claims that pin `repair 3`.
+    - **Retiring a release a release still in use pins** (active, or with open cases) is refused,
+      naming the parents: fail closed early. And should one go anyway (between the parent's start
+      and the child's opening), the child's ask refuses it, and the parent's step fails, needing
+      attention (D74): `repair#1: repair 3 can't open in production: it is retired`.
+
+    *Recommended.*
+
+49. **The engine version** (D51). No new one: a case step could never run on Temporal before
+    18d, since a case's start never carried children, and `open_child` refused every child its
+    state didn't hold. Every history recorded before 18d has no child started, so it replays the
+    same; only a case whose start carries children opens one, and no such start existed, as no
+    release held an attachment before D68. *Recommended.*
+
+### Seams and tests for 18d (curriculum step 4, proposed)
+
+The tests use only what a caller and an operator use today, on Temporal's time-skipping test
+server, with bounded waits and the thread guard on. No test reads the parent's workflow object.
+
+1. **Opening:** `start_case(client, cases, record, file, id, queue)` with a release record whose
+   package pins children (`release_of(claim, 1, cases={"repair@3": repair})`): its children
+   travel in the start, beside its plans (`ReleaseStart`). A draft, started from a definition,
+   pins none, so its case step fails closed as in 18c.
+2. **The child is a case:** `case_handle(client, "claim-7/repair#1")` and the existing calls
+   (`answer`, `close`, `report`) act on it as on any case; its `CaseReport` is its own.
+3. **What the parent says:** its `CaseReport` (`history`, `waiting_for`, `needs_attention`,
+   `closed`), and `repair.*` in its view.
+4. **From outside, as anyone could:** a doorbell sent with the client's own `signal`
+   (`child_ended`, an entry), and a child ended with the client's `terminate`: what an operator,
+   or anyone with access to the namespace, can do.
+5. **The close policy:** read from the parent's history, the event that starts the child.
+6. **Continue-as-new:** the existing `SwitchingCases` (two events a run), for parent and child.
+7. **Forgetting:** `propose_forget(client, "claim-7/repair#1", ...)` refused; the parent's
+   forgetting, as today's forget tests run it.
+8. **The registry:** `in_production`, `activated(client, record)` and `retire`, as the registry
+   tests use them.
+9. **Replay:** the histories recorded before 18d replay unchanged (`tests/histories`).
+
+**The refusals and lines, word for word (as built; two rows changed while building, marked):**
+
+| Situation | What is said |
+|---|---|
+| the child opens | in the parent, as in memory: `started repair#1: case repair@3 (…), run claim-7/repair#1`; in the child, `opened by claim-7, from repair#1, with budget and vehicle` |
+| the doorbell, read | `repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost`, as in memory |
+| a doorbell for an entry that isn't an open child, or rung twice | `child_ended for repair#2, which is no open child: nothing read` |
+| a doorbell from a child still running | `child_ended for repair#1, whose case is still open: nothing read` |
+| a child ended without reporting | `repair#1: repair@3 ended without reporting: it was terminated: look at the child, then retry or close` (`it failed`, `it timed out`) |
+| a child alone, forgotten | `repair#1 is a child of claim-7: forget claim-7, which forgets it too` |
+| the family's forgetting | the stricter of the parent's and its children's, said as today's refusal names it |
+| activating a parent whose child isn't usable | `claim 1 pins repair 3, which production never activated` (`which is retired in production`; `whose digest in production is another`; `which production activated on repairs, not refunds`), each said at once *(changed: the queue added)* |
+| retiring a pinned release | `repair 3 not retired: claim 1, active in production, pins it` |
+| a child refused as it opens | `repair#1: repair@3 refused its opening: claim-7/repair#1 can't open on repair 3: repair 3 is retired in production` *(changed: the child's own refusal, quoted whole)* |
+
+**The tests, in the order I'd write them,** each failing first (the negative first):
+
+1. **(negative)** A doorbell from anyone, for a child still running or no child, changes nothing.
+2. The guide's claim on Temporal: the child opens as its own workflow under the parent's ID,
+   rings, and the parent reads its report with `case:repair`; its sources and who closed it as in
+   memory.
+3. The close policy is `ABANDON`, read from the history; the child outlives the parent's switch,
+   and the parent's switch doesn't wait for it.
+4. **(negative)** A child terminated from outside fails the parent's step: at once in the run that
+   started it; after a switch, when the new run starts, and on the daily timer.
+5. The parent's close and a rule's stop close the child, saying why, also across a switch.
+6. **(negative)** A child forgotten alone is refused; forgetting the parent forgets the family;
+   the stricter forgetting applies.
+7. **(negative)** The registry: activation refuses a parent whose child isn't activated, is
+   retired, or has another digest; retiring a pinned release is refused; a child refused as it
+   opens fails the step.
+8. Sensitive inputs and reports cross sealed, under the one key: no plain value in either
+   history.
+9. Replay: every recorded history replays; a new one with a child recorded and replayed.
+
+### Found while building 18d
+
+- **The test server never tells a parent its child was terminated,** under any close policy;
+  the development server does at once (`TerminatedError`). So the test that a run notices at
+  once runs on the development server (`tests/dev_server.py`); the questions asked after a
+  switch and daily are tested on the test server, where only they can notice.
+- **A doorbell's read waits for the child that rang to end, 5 s at most.** The child rings as its
+  last act and ends in its next workflow task: a parent quick to read found it running, recorded
+  it open, and waited for the daily check. Sending the doorbell in the task that completes the
+  child was tried: the development server never delivers it.
+- **A run that started a child sets the daily check too,** not only the later runs: a watch the
+  server never answers (the test server's, or one lost) is caught within a day. Set only while a
+  child is open, so a history recorded before 18d sets no timer (watched: setting it in every case
+  fails their replay).
+- **A child's end read twice lands once:** its doorbell and a new run's question can both read
+  it; the second says `repair#1 ended again: nothing read`.
+- **A close waits only for a child this run is still starting.** A run after a switch held every
+  open child as not started, so a close across a switch was never sent.
+- **A child is never forgotten alone, whatever its ID:** any ID with a `/` is under the key of the
+  case before it, a plan run's included. Before, the request was refused only because the key
+  provider knew no key by that ID ("no key was ever made"), true but misleading.
+- **A migration on Temporal dropped the children its target pins** (found checking the routes):
+  `CaseMigration` had no `cases`, so a case pinning children never migrated ("doesn't give its
+  digest"). It carries them now, none in a migration sent before 18d.
+- **Carried: a parent terminated with a child running, then forgotten.** The key goes once the
+  parent has ended; a child still running under it fails its workflow tasks, unable to read its
+  own values, until an operator terminates it. Nothing permissive happens, and the data was to
+  become unreadable; but the child isn't closed. Destroying the key only once no workflow of the
+  family runs needs every child found from the parent's history, across its runs: left for a
+  later layer, as decided at slice 6.
 
 ### Seams and tests for 18c (curriculum step 4, proposed)
 
@@ -821,6 +1000,72 @@ first or, for a pin of behaviour already built, catching a mutation.
 - "Child cases": `"case": "repair@3"`, pinned (choice 22); the child under its parent's key, and
   forgetting refused for a child alone (choice 24); the report's sources gain `case:repair`
   (choice 25).
+
+## Promises (18d)
+
+Each claim the note, D75 and the guide's "Child cases" make about Temporal, and the test that
+would fail if it weren't true. Tests are in `tests/test_temporal_children.py`. Each was watched
+failing first or, for a pin of behaviour already built, catching a mutation (said in each
+slice's commit).
+
+| Promise | Test |
+|---|---|
+| A child is its own workflow, `<parent ID>/<entry>`, opened by its parent with its sources; the parent reads its report with `case:repair` | `test_the_guides_child_case_runs_on_temporal` |
+| A doorbell from anyone, for no open child or one still open, is recorded and changes nothing | `test_a_doorbell_for_no_open_child_is_recorded_and_changes_nothing`, `test_a_doorbell_for_a_child_still_open_reads_and_changes_nothing` |
+| A doorbell's read waits, 5 s at most, for the child that rang to end | `test_a_doorbell_read_waits_for_the_child_ringing_it_to_end` |
+| A child's end read twice lands once | `test_a_childs_end_read_twice_lands_once` |
+| A read never takes a child it can't find, or one that ended without its report, as open: either fails the step (the daily check would otherwise find it open every day) | `test_a_child_read_that_finds_no_workflow_says_it_is_gone`, `test_a_child_read_that_finds_no_ending_says_so` (from the tutor's review of #89) |
+| A child found ended after its report landed changes nothing | `test_a_child_found_ended_after_its_report_landed_changes_nothing` (from the tutor's review of #89) |
+| `ABANDON`, from the parent's history; the child outlives the parent's switch, which waits for no child; the doorbell reaches the new run | `test_the_child_outlives_its_parents_switch` |
+| A child ending without reporting fails the step: at once in the run that started it (development server), as a later run starts, and within a day | `test_a_child_terminated_in_the_run_that_started_it_fails_the_step_at_once`, `test_a_child_terminated_after_a_switch_is_noticed_when_the_next_run_starts`, `test_a_child_terminated_unheard_is_noticed_within_a_day`, `test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day` |
+| A question that finds the child open records nothing | `test_the_child_outlives_its_parents_switch` (no `child_ended` line) |
+| The parent's close and a rule's stop close the child, saying why, also across a switch | `test_a_parent_that_closes_closes_its_child_saying_why`, `test_a_parent_closed_after_a_switch_closes_its_child_saying_why`, `test_a_rule_that_stops_the_step_closes_its_child_and_the_parent_goes_on` |
+| A child is never forgotten alone; forgetting the parent forgets the family, the key going once both ended | `test_a_child_is_never_forgotten_alone`, `test_forgetting_the_parent_forgets_its_children` |
+| The family's forgetting is the strictest of its cases, in the request and in the case's own check | `test_the_familys_forgetting_is_the_strictest_of_its_cases`, `test_the_case_itself_refuses_forgetting_a_family_that_keeps_its_records` |
+| Activating a parent checks each pinned child (activated, not retired, its digest, the parent's queue), all at once; the command's request carries the pins | `test_activating_a_parent_checks_each_child_it_pins`, `test_on_temporal_activating_a_parent_before_its_child_is_refused` |
+| A release a release in use pins is not retired | `test_a_release_a_release_in_use_pins_is_not_retired` |
+| A child opens on its pinned release, whichever is active; a case of its own still opens only on the active one | `test_a_child_opens_on_its_pinned_release_never_the_active_one`, `test_on_temporal_a_child_opens_on_its_pinned_release` |
+| A child refused as it opens fails the step; a retry starts it again under its ID | `test_on_temporal_a_child_refused_as_it_opens_fails_its_step`, `test_on_temporal_a_retry_starts_the_refused_child_again_under_its_id` |
+| A sensitive value crosses into the child sealed: in plain text in no run of either history | `test_a_sensitive_value_crosses_into_the_child_sealed` |
+| A migration renaming the case step keeps the open child, whose report lands under the new name | `test_a_migration_renaming_the_case_step_keeps_its_open_child_on_temporal` |
+| A child's plan step runs on its parent's release's plans | `test_a_childs_plan_step_runs_on_temporal` |
+| Who closed the child crosses in its report, and approves nothing its outcome decides | `test_on_temporal_who_closed_the_child_approves_nothing_its_outcome_decides` |
+| No new engine version: histories from before 18d replay; one with a child replays | `test_histories_from_before_18d_replay`, `test_a_history_with_a_child_replays` |
+| A case worker serves the child read; an activity nobody picks up still needs attention | every test here; `test_temporal_registry.py::test_an_activity_nobody_picks_up_needs_attention` |
+
+**Not tested, said so:** a close asked while the child is still starting is held, then sent
+once its start is recorded (`stopping`, as a plan's stop is). Catching that moment needs a race no
+test here makes happen on demand.
+
+**Carried, said so:** a parent terminated with a child running, then forgotten (above, "Found
+while building 18d").
+
+## Routes checked before the pull request (18d)
+
+| Route | What it does on Temporal | Test |
+|---|---|---|
+| an answer | the child's entries are answered on the child's workflow, the parent's on its own | `test_the_guides_child_case_runs_on_temporal` |
+| an edit (D52) | decided by the same engine as in memory: the parent only | `test_child_cases.py::test_an_edit_never_reaches_a_child` |
+| a migration (D53) | carries the target's children; keeps the open child under a renamed step | `test_a_migration_renaming_the_case_step_keeps_its_open_child_on_temporal` |
+| an event | reaches the parent only, as in memory; a rule it fires may stop the step | `test_a_rule_that_stops_the_step_closes_its_child_and_the_parent_goes_on` |
+| a rule | its stop closes the child, across a switch | the same |
+| the opening | the child asks the registry for its pinned release; a refusal fails the step | the registry tests above |
+| a plan | a child's plan step finds its plan in the parent's release | `test_a_childs_plan_step_runs_on_temporal` |
+| a close or a stop (D40) | the close signal, once started, also from a later run | the close tests above |
+| a retry (D26) | the same entry, so the same child ID, started again only after a failed attempt | `test_on_temporal_a_retry_starts_the_refused_child_again_under_its_id` |
+| continue-as-new | waits for no child; the doorbell and the read reach the current run; a new run asks each open child | `test_the_child_outlives_its_parents_switch`, the switch tests above |
+| the end signal | a doorbell only; the report read from the child's own result; anyone else's changes nothing | the doorbell tests above |
+
+**State keyed by a step's name:** none new. `starting`, `stopping`, the child's workflow ID and
+its doorbell are keyed by the run's entry, which a migration keeps (tested above); `open_children`
+reads each run's step in the current definition. **A repeated step:** a case step is never
+repeated (D74).
+
+**Sources across every boundary:** into the child (the opening's sources, the guide's test), out
+of it (`case:repair`, and who closed it), and through the signal (it carries no value: the report
+is read). **Whoever's act decides a value approves nothing that reads it:** who closed the child
+crosses in its report, so the closer approves nothing its outcome decides, on Temporal too
+(`test_on_temporal_who_closed_the_child_approves_nothing_its_outcome_decides`).
 
 ## Seams and tests for 18a (curriculum step 4)
 
@@ -1027,3 +1272,117 @@ and the runs, which a migration renames, so the rename test is the check 17c's r
 Each part's guide section was drafted here and moved back into the guide at that part's step 2,
 corrected by its answers (see "What changes in the guide, if answered as recommended"): 18b's at
 18b's step 2, 18c's at 18c's step 2.
+
+## The parent close policy, run (18d, choice 43)
+
+Run with `uv run python <file> test` (the time-skipping test server) and `uv run python <file>
+dev` (the development server, which `WorkflowEnvironment.start_local()` downloads). Kept here as
+the evidence choice 43 rests on, not as code of the project.
+
+```python
+"""What a parent's continue-as-new does to its child, under each parent close policy, on
+Temporal's test server; and whether a signal to the parent's workflow ID reaches its latest run."""
+
+import asyncio
+from dataclasses import dataclass
+from datetime import timedelta
+
+from temporalio import workflow
+from temporalio.client import WorkflowExecutionStatus
+from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import UnsandboxedWorkflowRunner, Worker
+
+
+@dataclass
+class ParentStart:
+    policy: str
+    switched: bool = False
+
+
+@workflow.defn
+class Child:
+    def __init__(self) -> None:
+        self.done = False
+
+    @workflow.signal
+    def finish(self) -> None:
+        self.done = True
+
+    @workflow.run
+    async def run(self, parent: str) -> str:
+        await workflow.wait_condition(lambda: self.done)
+        # Its last act: ring the parent, by its workflow ID only, never a run ID.
+        await workflow.get_external_workflow_handle(parent).signal("child_ended", "repair#1")
+        return "ended"
+
+
+@workflow.defn
+class Parent:
+    def __init__(self) -> None:
+        self.heard: list[str] = []
+
+    @workflow.signal
+    def child_ended(self, entry: str) -> None:
+        self.heard.append(entry)
+
+    @workflow.query
+    def heard_so_far(self) -> list[str]:
+        return self.heard
+
+    @workflow.run
+    async def run(self, start: ParentStart) -> None:
+        if not start.switched:
+            await workflow.start_child_workflow(
+                Child.run,
+                workflow.info().workflow_id,
+                id=f"{workflow.info().workflow_id}/repair#1",
+                **(
+                    {}
+                    if start.policy == "DEFAULT"
+                    else {"parent_close_policy": getattr(workflow.ParentClosePolicy, start.policy)}
+                ),
+            )
+            workflow.continue_as_new(ParentStart(start.policy, switched=True))
+        await workflow.wait_condition(lambda: bool(self.heard))
+
+
+import sys
+
+
+async def main() -> None:
+    server = sys.argv[1]
+    starting = (
+        WorkflowEnvironment.start_local()
+        if server == "dev"
+        else WorkflowEnvironment.start_time_skipping()
+    )
+    async with await starting as env:
+        async with Worker(
+            env.client,
+            task_queue="q",
+            workflows=[Parent, Child],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+        ):
+            for policy in ("DEFAULT", "TERMINATE", "ABANDON"):
+                pid = f"claim-{policy}"
+                parent = await env.client.start_workflow(
+                    Parent.run, ParentStart(policy), id=pid, task_queue="q"
+                )
+                child = env.client.get_workflow_handle(f"{pid}/repair#1")
+                for _ in range(100):  # bounded: the switch and the child's start
+                    described = await parent.describe()
+                    if described.run_id != parent.first_execution_run_id:
+                        break
+                    await asyncio.sleep(0.05)
+                status = (await child.describe()).status
+                after = f"{server} {policy}: after the parent continued as new, the child is"
+                print(f"{after} {status.name}")
+                if status == WorkflowExecutionStatus.RUNNING:
+                    await child.signal("finish")
+                    await asyncio.wait_for(parent.result(), timeout=10)
+                    reached = f"the child's signal to {pid} reached its latest run, which ended"
+                    print(f"{server} {policy}: {reached}")
+
+
+asyncio.run(main())
+```

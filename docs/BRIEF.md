@@ -3140,6 +3140,57 @@ child asking as it opens. Until then a case step on Temporal fails, needing atte
   definition, and waits for a person (D17).
 - **No new engine version (D51):** no definition readable before has a case step.
 
+### D75. Child cases on Temporal: a child workflow abandoned to itself, a doorbell, a report read
+
+*Decided 2026-11-07, in layer 18d (`docs/layers/18-lifecycle.md`, choices 42 to 49). Adds to D5,
+D15, D17, D27, D29, D31, D32, D40, D48, D51, D54 and D74, whose text is kept.*
+
+- **A child is its own workflow, `<parent ID>/<entry>`** (`claim-7/repair#1`), under its
+  parent's key: the codec takes a case's key from its workflow ID's first part, so sensitive
+  inputs cross sealed, never opened (D31).
+- **Forgetting is the family's** (D32): forgetting the parent destroys the one key, so it forgets
+  its children with the same act; a child is never forgotten alone, the request refused naming
+  its parent. The stricter `forgetting` of the parent and its pinned children applies to all,
+  worked out from the parent's release.
+- **Started with `ABANDON`, closed by its parent** (D40): Temporal's default parent close policy
+  terminates a child when its parent's run continues as new, as the development server shows and
+  the time-skipping test server doesn't, so the policy is tested from the parent's history. The
+  parent closes a child itself, through D40's one place, with the close signal and its reason,
+  and only once the child's start is recorded. It sends a child nothing else.
+- **The end signal is a doorbell, never a report.** As its last act, the child signals its
+  parent's workflow ID, never a run ID, with only its entry. A signal says nothing of who sent
+  it, so the parent then reads the report itself, through an activity: the child workflow's
+  result, its latest run's, as the child returned it. A doorbell for an entry that isn't an open
+  child, from a child still running, or rung twice finds nothing to read: it is recorded and
+  changes nothing.
+- **A child that ends without ringing is never waited for silently** (D17): the run that started
+  it watches its handle, beside the loop; every later run asks each open child's status as it
+  starts and on a daily durable timer. One found ended without a report (terminated, failed,
+  timed out) fails the step, needing attention. A child with no worker hasn't ended: it is any
+  case with no worker, watched by `ventoux environment check` (D54).
+- **Continue-as-new waits for no child** (adds to D27, closing D48's note): an open child is its
+  run in the state that crosses, and its doorbell and report reach whichever run is current. A
+  child's own switch is its own; its result is its latest run's. A close asked across a switch is
+  asked again, once, by the new run.
+- **The registry checks a pinned child's release** (D54): activating the parent checks each one is
+  activated in the environment, not retired, with the digest the parent's package gives it, on
+  the parent's queue, every problem said at once. The child asks as it opens for its pinned
+  release, as a migration's target is asked, never for "the active one": activating `repair 4`
+  breaks no claim pinning `repair 3`. Retiring a release that a release still active or with open
+  cases pins is refused, naming them. A child refused as it opens fails its parent's step,
+  needing attention (D74).
+- **No new engine version (D51):** a case's start never carried children before this, so no
+  recorded history ever started a child, and every one replays the same, as no release held an
+  attachment before D68.
+- *Changed while building 18d, before D75 was merged:* a doorbell's read waits up to 5 s for the
+  child that rang to end, since it ends in the workflow task after it rings; the run that started
+  a child sets the daily check too, set only while a child is open; a child's end read twice
+  lands once; a close waits only for a child the current run is still starting; any ID with a `/`
+  is refused for forgetting alone, being under the key of the case before it; and a migration
+  carries the children its target pins. Carried: a parent terminated with a child still running,
+  then forgotten, loses the key under that child (`docs/layers/18-lifecycle.md`, "Found while
+  building 18d").
+
 ## Concepts
 
 | Term | Meaning |

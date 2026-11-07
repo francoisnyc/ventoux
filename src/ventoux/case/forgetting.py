@@ -6,8 +6,10 @@ again here, depending on nothing the request did.
 See docs/layers/09-case-data.md (9c).
 """
 
+from collections.abc import Iterable
+
 from ventoux.case.closing import begin_closing
-from ventoux.case.definition import CaseDefinition
+from ventoux.case.definition import CaseDefinition, parse_case
 from ventoux.case.state import CaseState, ForgetApproved
 from ventoux.core.catalog import Catalog
 from ventoux.core.person import identifier_problem
@@ -54,7 +56,9 @@ def forget(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Forg
             raise ForgetRefused(wrong)
     if state.phase == "closed":
         raise ForgetRefused("the case is closed: nothing records it any more")
-    if case.forgetting == "never":
+    # The children its release pins are forgotten with it (brief, D75).
+    children = [parse_case(data) for data in state.cases.values()]
+    if family_forgetting(case, children) == "never":
         raise ForgetRefused(
             f"{case_id} keeps its records (forgetting: never): it can't be forgotten"
         )
@@ -80,6 +84,18 @@ def forget(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Forg
     if state.phase == "closing":
         return  # already closing, with its own reason: it closes, then the key goes
     begin_closing(state, "the case is being forgotten", "forgotten")
+
+
+# What a definition may say of forgetting, from the loosest to the strictest (brief, D32).
+STRICTNESS = ("allowed", "while_open", "never")
+
+
+def family_forgetting(case: CaseDefinition, children: Iterable[CaseDefinition]) -> str:
+    """What the family says of forgetting: the strictest of the case's and its children's.
+    Forgetting a case forgets its children with it, under its one key, so a child that keeps
+    its records keeps the family's (brief, D75)."""
+    said = [case.forgetting, *(child.forgetting for child in children)]
+    return max(said, key=STRICTNESS.index)
 
 
 def forgetting_role(catalog: Catalog, roles: frozenset[str]) -> str:

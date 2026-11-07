@@ -19,12 +19,14 @@ from ventoux.case.state import (
     CancelWorkflow,
     CaseEnded,
     CaseState,
+    ChildNotEnded,
     CloseCase,
     Completed,
     Event,
     Failed,
     OpenCase,
     PlanCancelled,
+    ReadChild,
     Schedule,
     StartPlan,
     StartWorkflow,
@@ -49,14 +51,17 @@ PlanRunner = Callable[[StartPlan, int], Completed | Failed | None]
 # Opens a case step's child and runs it as far as it goes: how it ended, as an event at the time
 # given; or None while it is open, and the step keeps running. Given by the caller, which knows
 # the child's script, as a plan's runner knows the plan's (brief, D74).
-# A close asked of an open child goes to the same runner, which continues the child it opened.
-ChildRunner = Callable[[OpenCase | CloseCase, int], CaseEnded | Failed | None]
+# A close asked of an open child, or a read of how it ended, goes to the same runner, which
+# knows the child it opened.
+ChildRunner = Callable[
+    [OpenCase | CloseCase | ReadChild, int], CaseEnded | ChildNotEnded | Failed | None
+]
 
 
-def no_children(command: OpenCase | CloseCase, at: int) -> Failed | None:
+def no_children(command: OpenCase | CloseCase | ReadChild, at: int) -> Failed | None:
     """A driver that runs no child cases: a case step fails, and a person looks at it. Nothing
-    opened, so a close reaches nothing."""
-    if isinstance(command, CloseCase):
+    opened, so a close or a read reaches nothing."""
+    if isinstance(command, CloseCase | ReadChild):
         return None
     return Failed(command.entry, f"{command.case} can't open here: no child cases run", at=at)
 
@@ -231,7 +236,7 @@ class Driver:
                 elif isinstance(command, StartPlan):
                     if (ended := self.plans(command, at)) is not None:
                         queue.append(ended)  # else it waits for an answer: the step runs on
-                elif isinstance(command, OpenCase | CloseCase):
+                elif isinstance(command, OpenCase | CloseCase | ReadChild):
                     if (closed := self.children(command, at)) is not None:
                         queue.append(closed)  # else the child is open: the step runs on
                 elif isinstance(command, StartWorkflow) and command.workflow not in self.workflows:

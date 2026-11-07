@@ -2052,3 +2052,31 @@ and record the key points. A question is closed once you can explain the answer 
   - In one line: a repeated run is named by a number tied to its item's key, never by position or
     value, so its key never moves to another item, and nothing renumbers it under a new key.
 - Status: open, until the three parts come back from memory.
+
+## 50. Layer 18: what a child case can never do to its parent
+
+> A claim's `repair` step opens `repair@3`. What can the repair never do to the claim, and why?
+
+- Asked at the end of layer 18c's walk-through (2026-11-07): the layer's own check-yourself
+  question, kept from 18a and 18b until child cases were built.
+- Your answer: asked to be told. Given:
+  - **Never write into the parent's case file.** What it reports lands only as the step's outputs
+    (`repair.outcome`, `repair.cost`), never in the claim's own fields; the claim decides what a
+    report changes, with its own steps and rules (D74). A value from outside the claim stays
+    named for where it came from, so the claim's policies, sources and approvals still judge it.
+  - **Never carry a value in, or out, cleaner than it is.** Its opening keeps the sources the
+    claim gave, so a customer's vehicle is still `untrusted:customer` in the repair; what it
+    reports keeps its sources in the repair, plus `case:repair`, the route it came by (D12). And
+    the check reads both ways before any case opens.
+  - **Never become a way around "someone else approves".** The claim's opener and the step's
+    proposer approve nothing in it; whoever closed it with a reason chose its outcome, so
+    approves nothing that outcome decides (D11, D25).
+  - **Never act on the claim's lifecycle.** It can't close, stop, edit or migrate the claim, nor
+    reach its milestones (its own are said in the history, never read). The claim's routes reach
+    the repair only through its step: a close or a stop closes it, through D40's one place.
+  - **Never open a case of its own.** One level only (D48): one close then reaches all it must,
+    and no case opens itself.
+  - In one line: a child is a peer case that only answers: given an opening, it returns a report
+    the parent reads as outputs, so nothing it does reaches the parent except what the parent
+    chooses to read, with its sources and who decided it.
+- Status: open, until it comes back from memory.

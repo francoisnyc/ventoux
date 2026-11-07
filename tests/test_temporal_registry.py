@@ -20,7 +20,6 @@ from skipping_server import time_skipping
 from temporalio import workflow
 from temporalio.client import Client, WorkflowFailureError, WorkflowHistory
 from temporalio.exceptions import ApplicationError
-from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from test_migrations import PEOPLE, REFUND_1, REFUND_2
 from test_temporal_approvals import EveryEventCases
@@ -32,7 +31,6 @@ from test_temporal_case import (
     on_temporal,
     replay,
     reported,
-    skipping,
 )
 from test_temporal_case_release import markers_of
 from worker_threads import worker_threads
@@ -71,6 +69,7 @@ from ventoux.temporal.registry import (
     released,
     retire,
 )
+from ventoux.temporal.sandbox import SANDBOX
 from ventoux.testing import (
     CATALOG,
     FAKES,
@@ -609,16 +608,27 @@ class QuicklyTimedOut(CaseWorkflow):
 
 
 def test_an_activity_nobody_picks_up_needs_attention() -> None:
-    # The case worker serves no activity at all, so nobody polls for payments.refund@2: past its
-    # contract's schedule-to-start timeout the step fails loudly, never retried (Temporal doesn't
-    # retry that timeout), and the case needs attention, never waits silently (brief, D5)
-    # (brief, D17).
-    async def scenario(environment: WorkflowEnvironment) -> CaseReport:
-        client = environment.client
-        case = await start_case(client, QuicklyTimedOut, REFUND, SMALL, "refund-1", "cases")
-        await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], SMALL_FORM)
-        return await reported(case, lambda now: bool(now.needs_attention))
+    # A worker serves the workflows and no activity at all, so nobody polls for
+    # payments.refund@2: past its contract's schedule-to-start timeout the step fails loudly,
+    # never retried (Temporal doesn't retry that timeout), and the case needs attention, never
+    # waits silently (brief, D5) (brief, D17). A case worker always serves one activity, reading
+    # how a child case ended (brief, D75), so the test builds its worker without it.
+    async def go() -> CaseReport:
+        async with (
+            time_skipping(development_converter()) as environment,
+            Worker(
+                environment.client,
+                task_queue="cases",
+                workflows=[QuicklyTimedOut, DevelopmentPlans],
+                workflow_runner=SANDBOX,
+            ),
+        ):
+            client = environment.client
+            case = await start_case(client, QuicklyTimedOut, REFUND, SMALL, "refund-1", "cases")
+            await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], SMALL_FORM)
+            found = reported(case, lambda now: bool(now.needs_attention))
+            return await asyncio.wait_for(found, timeout=20)
 
-    now = skipping(scenario, {}, QuicklyTimedOut)
+    now = asyncio.run(go())
     assert now.needs_attention == ["pay#1: payments.refund@2 failed with TimeoutError: ‹sensitive›"]
     assert now.status == "open"

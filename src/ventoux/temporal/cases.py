@@ -28,6 +28,7 @@ from temporalio.exceptions import (
     CancelledError,
     ChildWorkflowError,
     FailureError,
+    TerminatedError,
 )
 from temporalio.exceptions import TimeoutError as TemporalTimeout  # not Python's own TimeoutError
 from temporalio.service import RPCError, RPCStatusCode
@@ -42,15 +43,16 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.called import unbound
     from ventoux.case.claims import ClaimRefused, assignees
     from ventoux.case.closing import CloseRefused, needs_attention
-    from ventoux.case.definition import CaseInvalid, parse_case
+    from ventoux.case.definition import CaseInvalid, CaseStep, PlanStep, parse_case
+    from ventoux.case.ending import ending_of
     from ventoux.case.engine import ENGINE, KNOWN, opening_engine
     from ventoux.case.forgetting import ForgetRefused
     from ventoux.case.freshness import TimeRefused
-    from ventoux.case.migrations import migration_of
+    from ventoux.case.migrations import all_plans, migration_of
     from ventoux.case.owing import attention, waiting_for
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
     from ventoux.case.registry import Answer, Moving, Opening, Released
-    from ventoux.case.releases import Hash, Record, is_release
+    from ventoux.case.releases import Hash, Record, behaviour_digest, is_release
     from ventoux.case.requests import ChangeRefused
     from ventoux.case.runtime import (
         CaseRefused,
@@ -66,9 +68,12 @@ with workflow.unsafe.imports_passed_through():
         CancelWorkflow,
         CaseState,
         ChangeProposed,
+        ChildNotEnded,
+        ChildRang,
         Claimed,
         CloseAsked,
         CloseCase,
+        ClosedByParent,
         Command,
         Completed,
         Event,
@@ -80,6 +85,7 @@ with workflow.unsafe.imports_passed_through():
         Opened,
         PlanCancelled,
         Proposed,
+        ReadChild,
         Retried,
         Schedule,
         Sent,
@@ -95,11 +101,21 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.types import case_types
     from ventoux.case.visibility import ApprovalSheet, CaseView, SheetRefused, case_view, sheet_of
     from ventoux.core.catalog import Catalog
+    from ventoux.core.plan import parse_plan
     from ventoux.core.sensitive import Sensitive
     from ventoux.core.workflow_contract import WorkflowContract
     from ventoux.temporal.activities import OUTCOME
     from ventoux.temporal.bindings import Binding
     from ventoux.temporal.carried import state_as_data, state_from_data
+    from ventoux.temporal.children import (
+        SETTLE,
+        ChildAsked,
+        ChildEnding,
+        ChildRead,
+        ParentStart,
+        ending_data,
+        event_of,
+    )
     from ventoux.temporal.converter import keys_of
     from ventoux.temporal.options import activity_options
     from ventoux.temporal.registry import CALL, Asked
@@ -110,6 +126,10 @@ with workflow.unsafe.imports_passed_through():
 # The patch marker a case in an environment records at its opening, once 12e asks its registry: a
 # history without it, recorded before, replays without asking (brief, D51).
 REGISTRY_PATCH = "ventoux-registry"
+
+# How often a case asks how each open child stands, which bounds how long a child that ended
+# without ringing goes unnoticed (brief, D75).
+CHILD_CHECK = timedelta(days=1)
 
 # What a person's request may be refused with: recorded, and the case waits on.
 REFUSALS = (
@@ -142,7 +162,11 @@ class ReleaseStart:
     name: str  # the package: `refund`
     release: int  # its number
     digest: Hash  # its behaviour digest, which the case checks what it was given against
-    plans: dict[str, Any]  # its plans, as stored data, by reference (`refund-order@1`)
+    # Its plans, as stored data, by reference (`refund-order@1`): its children's too, since one
+    # reference is one plan (brief, D74).
+    plans: dict[str, Any]
+    # The child cases it pins, as stored data, by reference (`repair@3`); none before 18d.
+    cases: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass
@@ -164,6 +188,9 @@ class CaseStart:
     # The opener's roles, as the API states them, so a rule asking the opener judges them; none
     # for a system, or a start from before 17c (brief, D71).
     opener_roles: list[str] = field(default_factory=list[str])
+    # For a child case: its parent, which it rings as its last act; None: no parent opened it
+    # (brief, D75). Crosses every continue-as-new.
+    parent: ParentStart | None = None
 
 
 @dataclass
@@ -186,6 +213,8 @@ class CaseReport:
     # Each held open entry and its holder, in the order the entries opened; an entry in its
     # queue is absent (brief, D69). Empty from a worker before 17a.
     assignees: dict[str, str] = field(default_factory=dict[str, str])
+    # A closed child case's report, which its parent reads; None for any other (brief, D75).
+    ending: ChildEnding | None = None
 
 
 @dataclass
@@ -254,6 +283,9 @@ class CaseMigration:
     engine: int  # the engine version it moves to
     by: str  # who proposes it, as the trusted caller states (brief, D19)
     roles: list[str]  # their roles, stated with the proposal (brief, D22)
+    # The child cases it pins, as stored data, by reference, which its digest covers; none in a
+    # migration sent before 18d (brief, D75).
+    cases: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def migration(self) -> Migration:
         return Migration(
@@ -265,6 +297,7 @@ class CaseMigration:
             self.plans,
             self.mapping,
             self.engine,
+            self.cases,
         )
 
 
@@ -429,6 +462,11 @@ class CaseWorkflow:
         self.children: dict[str, workflow.ChildWorkflowHandle[Any, Any]] = {}
         # Each step run the case has asked to stop, and why: asked once, never twice (brief, D40).
         self.stopping: dict[str, str] = {}
+        # Each child case this run is starting, by its entry: a close waits until its start is
+        # recorded. A child another run started has started (brief, D75).
+        self.starting: set[str] = set()
+        # Whether this run's daily check of its open children is set: one at a time (brief, D75).
+        self.checking = False
         # An engine bug raised in a task beside the loop, which the loop raises in its turn.
         self.broken: Exception | None = None
 
@@ -509,6 +547,19 @@ class CaseWorkflow:
         self.inbox.append(
             Sent(sent.event, dict(sent.payload), sent.by, frozenset(sent.roles), at=now())
         )
+
+    # A doorbell: a child case's workflow rings as its last act, with its entry only. Anyone may
+    # send a signal, so it carries nothing the case would take: the case reads the child's end
+    # itself (brief, D75).
+    @workflow.signal(name="child_ended")
+    def child_ended(self, entry: str) -> None:
+        self.inbox.append(ChildRang(entry, at=now()))
+
+    # A child case's parent closes it, saying why, as a person's close does (brief, D40). Sent
+    # only by its parent's workflow, as other signals by the trusted API (brief, D19).
+    @workflow.signal(name="close_by_parent")
+    def close_by_parent(self, reason: str) -> None:
+        self.inbox.append(ClosedByParent(reason, at=now()))
 
     # Temporal: a query reads a workflow's state without changing it, and isn't recorded.
     @workflow.query(name="report")
@@ -628,7 +679,8 @@ class CaseWorkflow:
             self.definition = start.definition  # as stored data, for the next run's start
             named = None if start.release is None else self.released_on(case, start.release)
             if start.carried is None:
-                await self.ask_to_open()
+                await self.ask_to_open(pinned=start.parent is not None)
+                parent = start.parent
                 opened = Opened(
                     start.file,
                     start.opened_by,
@@ -636,6 +688,14 @@ class CaseWorkflow:
                     engine=engine(),
                     release=named,
                     roles=frozenset(start.opener_roles),
+                    # The children its release pins; and, for a child, its parent, the sources
+                    # its parent gave, and whom its parent excluded (brief, D74).
+                    cases={} if start.release is None else dict(start.release.cases),
+                    parent=None if parent is None else (parent.case, parent.entry),
+                    sources=None
+                    if parent is None
+                    else {name: frozenset(given) for name, given in parent.sources.items()},
+                    excluded={} if parent is None else dict(parent.excluded),
                 )
                 self.decide(case, opened)
             else:
@@ -658,6 +718,9 @@ class CaseWorkflow:
             # workflow task, which Temporal retries until fixed code is deployed (brief, D17).
             kind = type(refused).__name__
             raise ApplicationError(str(refused), type=kind, non_retryable=True) from None
+        if start.carried is not None:
+            self.ask_open_children()  # this run holds no handle on them (brief, D75)
+            self.check_daily()
         while self.state.phase != "closed":
             await self.until_something_comes()
             if self.broken is not None:
@@ -694,12 +757,20 @@ class CaseWorkflow:
         for event in self.inbox:
             self.state.history.append(f"refused {asked(event)}: the case is closed")
         self.inbox.clear()
-        return self.report()
+        report = self.report()
+        if start.parent is not None:
+            # A child's last act: ring its parent, by its workflow ID, never a run ID, with the
+            # entry only; the parent reads this report itself (brief, D75).
+            ended = ending_of(start.parent.entry, self.case, self.state, now())
+            report.ending = ending_data(ended)
+            await ring(start.parent)
+        return report
 
-    async def ask_to_open(self) -> None:
+    async def ask_to_open(self, pinned: bool) -> None:
         """In an environment, ask its registry whether the case may open: on its package's
         active release, with that digest, on the queue it was activated on; a draft only where
-        drafts run. Refused, `CaseRefused`, and nothing is decided (brief, D54). The answer comes
+        drafts run; a child, `pinned`, on the release its parent pins, whichever is active
+        (brief, D75). Refused, `CaseRefused`, and nothing is decided (brief, D54). The answer comes
         from an activity, recorded in this history: a replay reads it there, and never asks
         again. Behind a patch, so a case opened before 12e replays as it was recorded."""
         if self.environment is None or not workflow.patched(REGISTRY_PATCH):
@@ -710,7 +781,10 @@ class CaseWorkflow:
         if self.release is not None:
             released = Released(self.release.name, self.release.release, self.release.digest)
         answer = await self.ask_registry(
-            Asked(self.environment, opening=Opening(info.workflow_id, info.task_queue, released))
+            Asked(
+                self.environment,
+                opening=Opening(info.workflow_id, info.task_queue, released, pinned=pinned),
+            )
         )
         if not answer.done:
             raise CaseRefused(answer.said[0])
@@ -750,7 +824,7 @@ class CaseWorkflow:
         that release's package; otherwise `CaseRefused`, so it never opens on behaviour nobody
         released. Depends on nothing the client did (brief, D34) (brief, D51)."""
         named = f"{release.name} {release.release}"
-        if not is_release(case, release.plans, release.digest):
+        if not is_release(case, release.plans, release.digest, release.cases):
             raise CaseRefused(
                 f"{workflow.info().workflow_id} can't open on {named}: what it was given isn't "
                 f"{named}'s package"
@@ -809,6 +883,7 @@ class CaseWorkflow:
             state_as_data(self.state),
             self.release,
             self.registered,
+            parent=start.parent,  # a child rings the same parent from whichever run (brief, D75)
         )
         # Temporal: ends this run and starts the next one of the same workflow, with `carried`.
         workflow.continue_as_new(carried)
@@ -832,12 +907,17 @@ class CaseWorkflow:
             self.cancel_workflow(command)
             return
         if isinstance(command, CloseCase):
-            return  # no child opens on Temporal before layer 18d, so none is left to close
+            self.beside(self.close_child(command))
+            return
+        if isinstance(command, ReadChild):
+            self.running += 1  # the read is recorded before the case may switch
+            self.beside(self.until_back(self.read_child(command)))
+            return
         if isinstance(command, OpenCase):
-            # A child case runs on Temporal from layer 18d: until then the step fails, needing
-            # attention, never a silent start (fail closed) (brief, D74).
-            said = f"{command.case} can't open here: a child case doesn't run on Temporal yet"
-            self.inbox.append(Failed(command.entry, said, at=now()))
+            self.stopping.pop(command.entry, None)  # a retry is a new attempt (brief, D26)
+            self.running += 1  # until its start is recorded
+            self.starting.add(command.entry)
+            self.beside(self.open_child(command))
             return
         self.running += 1
         # A start is a new attempt, an operator's retry under the same entry included: a stop
@@ -859,7 +939,8 @@ class CaseWorkflow:
         self.case = parse_case(self.definition)
         digest = Hash(migration.method, migration.sha256)
         plans = dict(migration.plans)
-        self.release = ReleaseStart(migration.name, migration.release, digest, plans)
+        cases = dict(migration.cases)  # the children the target pins (brief, D74)
+        self.release = ReleaseStart(migration.name, migration.release, digest, plans, cases)
         self.its_plans = plans
 
     def beside(self, work: Coroutine[Any, Any, None]) -> None:
@@ -991,6 +1072,146 @@ class CaseWorkflow:
             self.children.pop(command.entry, None)
         self.inbox.append(Completed(command.entry, output, at=now()))
 
+    async def open_child(self, command: OpenCase) -> None:
+        """Start the step's child case as its own workflow, `<case ID>/<entry>`, under the case's
+        key, on its pinned release, abandoned to itself when this run continues as new: the case
+        closes it itself (brief, D75). Then watch it beside the loop, never holding a switch."""
+        info = workflow.info()
+        child_id = f"{info.workflow_id}/{command.entry}"
+        try:
+            start = self.child_start(command)
+            # Temporal: a child workflow with `ABANDON` outlives its parent's run, which the
+            # default policy would terminate when the parent continues as new. A retry starts it
+            # again under the same ID only if the earlier attempt failed (brief, D26).
+            child = await workflow.start_child_workflow(
+                info.workflow_type,
+                start,
+                id=child_id,
+                task_queue=info.task_queue,
+                parent_close_policy=workflow.ParentClosePolicy.ABANDON,
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+                result_type=CaseReport,
+            )
+        except (ChildWorkflowError, CaseInvalid) as error:
+            cause = error.cause if isinstance(error, ChildWorkflowError) else None
+            said = cause.message if isinstance(cause, FailureError) else str(error)
+            self.inbox.append(
+                Failed(command.entry, f"{command.case} can't start: {said}", at=now())
+            )
+            return
+        finally:
+            self.running -= 1
+            self.starting.discard(command.entry)
+        self.check_daily()
+        if command.entry in self.stopping:  # closed while it was starting: told once started
+            await self.close_child(CloseCase(command.entry, self.stopping.pop(command.entry)))
+        await self.watch_child(command, child)
+
+    def child_start(self, command: OpenCase) -> CaseStart:
+        """What the child opens with: its definition, its pinned release with its own plans and
+        digest, its opening, and its parent (brief, D74)."""
+        assert self.release is not None  # only a release pins children
+        child = parse_case(dict(cast_data(command.definition)))
+        named = {s.plan for s in child.steps.values() if isinstance(s, PlanStep)}
+        plans = {reference: self.its_plans[reference] for reference in named}
+        parsed = {reference: parse_plan(data) for reference, data in plans.items()}
+        digest = behaviour_digest(child, parsed)
+        release = int(command.case.split("@")[1])
+        return CaseStart(
+            dict(cast_data(command.definition)),
+            {name: given.value for name, given in command.fields.items()},
+            None,  # opened by its parent case, never by a person (brief, D74)
+            release=ReleaseStart(child.case, release, digest, plans),
+            parent=ParentStart(
+                workflow.info().workflow_id,
+                command.entry,
+                {name: sorted(given.sources) for name, given in command.fields.items()},
+                dict(command.excluded),
+            ),
+        )
+
+    async def watch_child(
+        self, command: OpenCase, child: workflow.ChildWorkflowHandle[Any, CaseReport]
+    ) -> None:
+        """Wait beside the loop for the child this run started. Its report comes by its
+        doorbell; a child that ends without one is said at once, never waited for in silence
+        (brief, D17) (brief, D75)."""
+        try:
+            await child
+        except ChildWorkflowError as error:
+            cause = error.cause
+            if isinstance(cause, ApplicationError) and cause.type == "CaseRefused":
+                said = f"{command.case} refused its opening: {cause.message}"
+                self.inbox.append(Failed(command.entry, said, at=now()))
+                return
+            self.inbox.append(ChildNotEnded(command.entry, ended_how(cause), at=now()))
+
+    async def read_child(self, command: ReadChild) -> None:
+        """Read the child's end from its own result, through the case worker's activity, and
+        decide on that, never on what rang (brief, D75)."""
+        asked = ChildAsked(command.run, settle=SETTLE)  # the child that rang may be ending
+        read = await workflow.execute_activity(
+            "ventoux.child.read", asked, start_to_close_timeout=CALL, result_type=ChildRead
+        )
+        self.inbox.append(event_of(command.entry, read, now()))
+
+    def open_children(self) -> list[str]:
+        """The entries of the case's child cases still open, as its state says."""
+        steps = self.case.steps
+        running = (run for run in self.state.runs if run.status == "running")
+        return [run.entry for run in running if isinstance(steps.get(run.step), CaseStep)]
+
+    def ask_open_children(self) -> None:
+        """Ask how each open child stands: a run after a switch can't watch a child another run
+        started, so it asks as it starts. A child ended without reporting fails its step, never
+        waited for in silence (brief, D17) (brief, D75)."""
+        for entry in self.open_children():
+            self.running += 1  # the read is recorded before the case may switch
+            self.beside(self.until_back(self.ask_child(entry)))
+
+    def check_daily(self) -> None:
+        """While the case has an open child, ask how each stands once a day: a child that ended
+        without ringing, and that no watch heard, goes unnoticed a day at most (brief, D17)
+        (brief, D75). A case with no child sets no timer, so histories recorded before 18d
+        replay as they were."""
+        if self.checking or not self.open_children():
+            return
+        self.checking = True
+        self.beside(self.daily_checks())
+
+    async def daily_checks(self) -> None:
+        while self.open_children():
+            # Temporal: a durable timer, recorded in history; it holds no switch, and a run that
+            # ends while it waits simply drops it.
+            await workflow.sleep(CHILD_CHECK)
+            self.ask_open_children()
+        self.checking = False
+
+    async def ask_child(self, entry: str) -> None:
+        """Read how the child at `entry` stands; one still open changes nothing, unrecorded."""
+        asked = ChildAsked(f"{workflow.info().workflow_id}/{entry}")
+        read = await workflow.execute_activity(
+            "ventoux.child.read", asked, start_to_close_timeout=CALL, result_type=ChildRead
+        )
+        if read.ending is None and read.how == "open":
+            return
+        self.inbox.append(event_of(entry, read, now()))
+
+    async def close_child(self, command: CloseCase) -> None:
+        """Close the child case, saying why, through its own signal, once its start is recorded,
+        asked once (brief, D40) (brief, D75)."""
+        if command.entry in self.starting:
+            self.stopping[command.entry] = command.reason  # starting: told once started
+            return
+        child = workflow.get_external_workflow_handle(
+            f"{workflow.info().workflow_id}/{command.entry}"
+        )
+        try:
+            await child.signal("close_by_parent", command.reason)
+        except ApplicationError as error:
+            if error.type != ENDED:
+                raise  # an engine bug, never lost (brief, D17)
+
     async def stop_plan(self, command: StopPlan) -> None:
         """Stop a child plan because the case is closing or a rule stops it (brief, D28)
         (brief, D40). A signal, not Temporal's cancellation: cancellation would cut short the
@@ -1052,6 +1273,34 @@ async def signal_stop(child: workflow.ChildWorkflowHandle[Any, Any], reason: str
     except ApplicationError as error:
         if error.type != ENDED:
             raise
+
+
+async def ring(parent: ParentStart) -> None:
+    """A child's doorbell, to its parent's workflow ID: whichever run is current hears it. A
+    parent that has already ended needs nothing (brief, D75)."""
+    handle = workflow.get_external_workflow_handle(parent.case)
+    try:
+        await handle.signal("child_ended", parent.entry)
+    except ApplicationError as error:
+        if error.type != ENDED:
+            raise
+
+
+def ended_how(cause: BaseException | None) -> str:
+    """How a child's workflow ended without its report, as the parent's line says it."""
+    if isinstance(cause, TerminatedError):
+        return "it was terminated"
+    if isinstance(cause, TemporalTimeout):
+        return "it timed out"
+    if isinstance(cause, CancelledError):
+        return "it was cancelled"
+    return "it failed"
+
+
+def cast_data(data: object) -> dict[str, Any]:
+    """Stored data as the dict it is: a definition crosses as JSON's object."""
+    assert isinstance(data, dict)
+    return data
 
 
 # How Temporal says a workflow signalled has already ended.
@@ -1164,11 +1413,17 @@ def opening(
     reads a definition, numbers as exact decimals (brief, D20); or a definition, for a draft."""
     if isinstance(opening_on, Record):
         definition = json.loads(opening_on.written.case, parse_float=Decimal)
+        # Every plan in the package, its children's too (one reference is one plan), and the
+        # children it pins (brief, D74).
         plans = {
             reference: json.loads(text, parse_float=Decimal)
-            for reference, text in opening_on.written.plans.items()
+            for reference, text in all_plans(opening_on.written)
         }
-        release = ReleaseStart(opening_on.name, opening_on.release, opening_on.digest, plans)
+        cases = {
+            reference: json.loads(child.case, parse_float=Decimal)
+            for reference, child in opening_on.written.cases.items()
+        }
+        release = ReleaseStart(opening_on.name, opening_on.release, opening_on.digest, plans, cases)
     else:
         definition, release = opening_on, None
     # Each sensitive field's value wrapped: it crosses Temporal in its own part, sealed with the
@@ -1355,6 +1610,7 @@ def migration_sent(
         target.engine,
         by,
         sorted(roles),
+        dict(target.cases),
     )
 
 
