@@ -66,6 +66,7 @@ with workflow.unsafe.imports_passed_through():
         CancelWorkflow,
         CaseState,
         ChangeProposed,
+        ChildRang,
         Claimed,
         CloseAsked,
         CloseCase,
@@ -80,6 +81,7 @@ with workflow.unsafe.imports_passed_through():
         Opened,
         PlanCancelled,
         Proposed,
+        ReadChild,
         Retried,
         Schedule,
         Sent,
@@ -510,6 +512,13 @@ class CaseWorkflow:
             Sent(sent.event, dict(sent.payload), sent.by, frozenset(sent.roles), at=now())
         )
 
+    # A doorbell: a child case's workflow rings as its last act, with its entry only. Anyone may
+    # send a signal, so it carries nothing the case would take: the case reads the child's end
+    # itself (brief, D75).
+    @workflow.signal(name="child_ended")
+    def child_ended(self, entry: str) -> None:
+        self.inbox.append(ChildRang(entry, at=now()))
+
     # Temporal: a query reads a workflow's state without changing it, and isn't recorded.
     @workflow.query(name="report")
     def report(self) -> CaseReport:
@@ -833,6 +842,11 @@ class CaseWorkflow:
             return
         if isinstance(command, CloseCase):
             return  # no child opens on Temporal before layer 18d, so none is left to close
+        if isinstance(command, ReadChild):
+            # No child opens here yet, so no read is asked; one would fail closed.
+            said = f"{command.run} can't be read here: a child case doesn't run on Temporal yet"
+            self.inbox.append(Failed(command.entry, said, at=now()))
+            return
         if isinstance(command, OpenCase):
             # A child case runs on Temporal from layer 18d: until then the step fails, needing
             # attention, never a silent start (fail closed) (brief, D74).

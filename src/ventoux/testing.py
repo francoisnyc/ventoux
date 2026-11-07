@@ -42,6 +42,7 @@ from ventoux.case.state import (
     CaseEnded,
     CaseState,
     ChangeProposed,
+    ChildNotEnded,
     Claimed,
     CloseAsked,
     CloseCase,
@@ -54,6 +55,7 @@ from ventoux.case.state import (
     OpenCase,
     Opened,
     Proposed,
+    ReadChild,
     Retried,
     Sent,
     Shown,
@@ -586,9 +588,17 @@ def child_runner(
     reads `catalog`, and calls `activities`, `workflows` and `plans`, as its parent does: one
     reference is one plan."""
 
-    def run(command: OpenCase | CloseCase, at: int) -> CaseEnded | Failed | None:
+    def run(
+        command: OpenCase | CloseCase | ReadChild, at: int
+    ) -> CaseEnded | ChildNotEnded | Failed | None:
         if isinstance(command, CloseCase):
             return close_child(command, at)
+        if isinstance(command, ReadChild):
+            # In memory a child that closed has reported already: one read is still open.
+            was = ran[command.entry]
+            if was.closed:
+                return ended(command.entry, was.definition, was.state, at)
+            return ChildNotEnded(command.entry, "open", at=at)
         child = parse_case(command.definition)  # validated with its parent, in its package
         step = command.entry.split("#")[0]
         script = case_answers.get(command.entry, case_answers.get(step, ()))
