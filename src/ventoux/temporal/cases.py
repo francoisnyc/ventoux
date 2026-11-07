@@ -43,7 +43,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.called import unbound
     from ventoux.case.claims import ClaimRefused, assignees
     from ventoux.case.closing import CloseRefused, needs_attention
-    from ventoux.case.definition import CaseInvalid, PlanStep, parse_case
+    from ventoux.case.definition import CaseInvalid, CaseStep, PlanStep, parse_case
     from ventoux.case.ending import ending_of
     from ventoux.case.engine import ENGINE, KNOWN, opening_engine
     from ventoux.case.forgetting import ForgetRefused
@@ -124,6 +124,10 @@ with workflow.unsafe.imports_passed_through():
 # The patch marker a case in an environment records at its opening, once 12e asks its registry: a
 # history without it, recorded before, replays without asking (brief, D51).
 REGISTRY_PATCH = "ventoux-registry"
+
+# How often a case asks how each open child stands, which bounds how long a child that ended
+# without ringing goes unnoticed (brief, D75).
+CHILD_CHECK = timedelta(days=1)
 
 # What a person's request may be refused with: recorded, and the case waits on.
 REFUSALS = (
@@ -454,6 +458,8 @@ class CaseWorkflow:
         self.stopping: dict[str, str] = {}
         # Each child case this run knows has started, by its entry, and the release it runs.
         self.child_cases: dict[str, str] = {}
+        # Whether this run's daily check of its open children is set: one at a time (brief, D75).
+        self.checking = False
         # An engine bug raised in a task beside the loop, which the loop raises in its turn.
         self.broken: Exception | None = None
 
@@ -705,6 +711,9 @@ class CaseWorkflow:
             # workflow task, which Temporal retries until fixed code is deployed (brief, D17).
             kind = type(refused).__name__
             raise ApplicationError(str(refused), type=kind, non_retryable=True) from None
+        if start.carried is not None:
+            self.ask_open_children()  # this run holds no handle on them (brief, D75)
+            self.check_daily()
         while self.state.phase != "closed":
             await self.until_something_comes()
             if self.broken is not None:
@@ -1081,6 +1090,7 @@ class CaseWorkflow:
         finally:
             self.running -= 1
         self.child_cases[command.entry] = command.case
+        self.check_daily()
         if command.entry in self.stopping:  # closed while it was starting: told once started
             await self.close_child(CloseCase(command.entry, self.stopping.pop(command.entry)))
         await self.watch_child(command, child)
@@ -1131,6 +1141,48 @@ class CaseWorkflow:
             "ventoux.child.read", command.run, start_to_close_timeout=CALL, result_type=ChildRead
         )
         self.inbox.append(event_of(command.entry, read, now()))
+
+    def open_children(self) -> list[str]:
+        """The entries of the case's child cases still open, as its state says."""
+        steps = self.case.steps
+        running = (run for run in self.state.runs if run.status == "running")
+        return [run.entry for run in running if isinstance(steps.get(run.step), CaseStep)]
+
+    def ask_open_children(self) -> None:
+        """Ask how each open child stands: a run after a switch can't watch a child another run
+        started, so it asks as it starts. A child ended without reporting fails its step, never
+        waited for in silence (brief, D17) (brief, D75)."""
+        for entry in self.open_children():
+            self.running += 1  # the read is recorded before the case may switch
+            self.beside(self.until_back(self.ask_child(entry)))
+
+    def check_daily(self) -> None:
+        """While the case has an open child, ask how each stands once a day: a child that ended
+        without ringing, and that no watch heard, goes unnoticed a day at most (brief, D17)
+        (brief, D75). A case with no child sets no timer, so histories recorded before 18d
+        replay as they were."""
+        if self.checking or not self.open_children():
+            return
+        self.checking = True
+        self.beside(self.daily_checks())
+
+    async def daily_checks(self) -> None:
+        while self.open_children():
+            # Temporal: a durable timer, recorded in history; it holds no switch, and a run that
+            # ends while it waits simply drops it.
+            await workflow.sleep(CHILD_CHECK)
+            self.ask_open_children()
+        self.checking = False
+
+    async def ask_child(self, entry: str) -> None:
+        """Read how the child at `entry` stands; one still open changes nothing, unrecorded."""
+        run = f"{workflow.info().workflow_id}/{entry}"
+        read = await workflow.execute_activity(
+            "ventoux.child.read", run, start_to_close_timeout=CALL, result_type=ChildRead
+        )
+        if read.ending is None and read.how == "open":
+            return
+        self.inbox.append(event_of(entry, read, now()))
 
     async def close_child(self, command: CloseCase) -> None:
         """Close the child case, saying why, through its own signal, once its start is recorded,

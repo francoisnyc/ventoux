@@ -6,20 +6,30 @@ See docs/layers/18-lifecycle.md (18d) and docs/guides/cases.md, "Child cases".
 """
 
 import asyncio
+import copy
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
+from datetime import timedelta
 from decimal import Decimal
 
 from dev_server import cli_binary, cli_folder, dev_server
 from temporalio.client import Client
+from temporalio.testing import WorkflowEnvironment
 from temporalio.workflow import ParentClosePolicy
 from test_child_cases import claim, repair
-from test_temporal_case import QUEUE, SwitchingCases, on_temporal, reported, runs_of
+from test_temporal_case import QUEUE, SwitchingCases, on_temporal, reported, runs_of, skipping
 from worker_threads import worker_threads
 
+from ventoux.case.definition import parse_case
+from ventoux.case.runtime import decide
+from ventoux.case.state import Answered, CaseEnded, CaseState, Opened
+from ventoux.core.provenance import Sourced
 from ventoux.temporal.cases import CaseReport, answer, case_handle, start_case
 from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
+    CATALOG,
     FAKES,
+    START,
     DevelopmentCases,
     DevelopmentPlans,
     development_converter,
@@ -127,6 +137,8 @@ def test_the_child_outlives_its_parents_switch() -> None:
     assert policies == [ParentClosePolicy.ABANDON]  # one child started, and abandoned
     assert runs[0] != runs[1]  # the parent switched while its child was open
     # ... and the child, answered after the switch, rang the new run, which read its report.
+    # The new run asked how its open child stood as it started: still open, so nothing recorded.
+    assert not [line for line in done.history if line.startswith("child_ended")]
     assert "repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost" in (
         done.history
     )
@@ -190,3 +202,94 @@ def test_a_child_terminated_in_the_run_that_started_it_fails_the_step_at_once() 
     report = on_dev_server(scenario)
     assert report.needs_attention == [ENDED_WITHOUT]
     assert report.waiting_for == []
+
+
+def test_a_child_terminated_after_a_switch_is_noticed_when_the_next_run_starts() -> None:
+    # A run after a switch holds no handle on the child: it can't watch it. So every run that
+    # starts with an open child asks how it stands, and one ended without reporting fails its
+    # step there, never waited for in silence (brief, D17) (brief, D75). The test server never
+    # tells the run either way, so only that question can notice.
+    async def scenario(client: Client) -> tuple[CaseReport, list[str]]:
+        parent = await start_case(client, SwitchingCases, RELEASE, FILE, "claim-11", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
+        first, _ = await runs_of(client, "claim-11")
+        _, second = await until_switched(client, "claim-11", first)
+        child = case_handle(client, SwitchingCases, "claim-11/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        await child.terminate("from outside")
+        for entry in ("repair#8", "repair#9"):  # two events: the case switches again
+            await case_handle(client, SwitchingCases, "claim-11").signal("child_ended", entry)
+        _, third = await until_switched(client, "claim-11", second)
+        noticed = await reported(parent, lambda now: bool(now.needs_attention))
+        return noticed, [first, second, third]
+
+    report, runs = on_temporal(scenario, cases=SwitchingCases)
+    assert len(set(runs)) == 3
+    assert report.needs_attention == [ENDED_WITHOUT]
+    assert report.waiting_for == []
+
+
+def test_a_childs_end_read_twice_lands_once() -> None:
+    # Its doorbell and a new run's question can both read the same end: the second finds no
+    # open child, is recorded, and changes nothing; the report never lands twice (brief, D75).
+    case = parse_case(claim())
+    opened = Opened(FILE, None, at=START, cases={"repair@3": repair()})
+    state, _ = decide(case, CATALOG, CaseState("claim-12/run"), opened)
+    accepted = Answered(
+        "assess#1", "accept", "ana", frozenset({"support"}), {"payout": Decimal(900)}, at=START
+    )
+    state, _ = decide(case, CATALOG, state, accepted)
+    cost = Sourced(Decimal(640), frozenset({"person:lee"}))
+    ended = CaseEnded(
+        "repair#1", "done", None, "nothing left to do", ("fixed",), {"cost": cost}, at=START
+    )
+    state, _ = decide(case, CATALOG, state, ended)
+    once = copy.deepcopy(state)
+    state, commands = decide(case, CATALOG, state, replace(ended, at=START + 1))
+    assert state.history == [*once.history, "repair#1 ended again: nothing read"]
+    assert (state.values, state.sources, state.runs) == (once.values, once.sources, once.runs)
+    assert commands == []
+
+
+def test_a_child_terminated_unheard_is_noticed_within_a_day() -> None:
+    # A run that never hears its child end (the test server never tells it; a server may lose
+    # it) asks each open child how it stands once a day, on a durable timer: a child lost goes
+    # unnoticed a day at most, never for ever (brief, D17) (brief, D75).
+    async def scenario(environment: WorkflowEnvironment) -> tuple[CaseReport, CaseReport]:
+        client = environment.client
+        parent = await start_case(client, DevelopmentCases, RELEASE, FILE, "claim-13", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
+        child = case_handle(client, DevelopmentCases, "claim-13/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        await child.terminate("from outside")
+        await environment.sleep(timedelta(hours=23))
+        unheard = await reported(parent, lambda now: True)
+        await environment.sleep(timedelta(hours=2))
+        return unheard, await reported(parent, lambda now: bool(now.needs_attention))
+
+    unheard, noticed = skipping(scenario, cases=DevelopmentCases)
+    assert unheard.needs_attention == []  # not yet a day
+    assert noticed.needs_attention == [ENDED_WITHOUT]
+    assert noticed.waiting_for == []
+
+
+def test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day() -> None:
+    # A run after a switch sets its own daily check: the starting run's timer ended with it
+    # (brief, D75).
+    async def scenario(environment: WorkflowEnvironment) -> CaseReport:
+        client = environment.client
+        parent = await start_case(client, SwitchingCases, RELEASE, FILE, "claim-14", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
+        first, _ = await runs_of(client, "claim-14")
+        await until_switched(client, "claim-14", first)
+        child = case_handle(client, SwitchingCases, "claim-14/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        await child.terminate("from outside")
+        await environment.sleep(timedelta(hours=25))
+        return await reported(parent, lambda now: bool(now.needs_attention))
+
+    noticed = skipping(scenario, cases=SwitchingCases)
+    assert noticed.needs_attention == [ENDED_WITHOUT]

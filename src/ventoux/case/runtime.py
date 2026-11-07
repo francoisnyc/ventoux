@@ -1009,7 +1009,11 @@ def complete(
     steered adds what steered it to each, and reaches nothing (brief, D43)."""
     run = next((run for run in state.runs if run.entry == event.entry), None)
     if isinstance(event, CaseEnded):
-        assert run is not None  # only a running child ends, by its parent's driver
+        if run is None or run.status != "running":
+            # Its doorbell and a new run's question can both read the same end: the second
+            # changes nothing, and its report never lands twice (brief, D75).
+            state.history.append(f"{event.entry} ended again: nothing read")
+            return
         step = case.steps[run.step]
         assert isinstance(step, CaseStep)  # only a case step opens a child
         child_ended(state, run, step, event)
