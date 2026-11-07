@@ -60,6 +60,8 @@ class Case:
         self.stays_open = stays_open  # True: it never closes by itself; a person closes it
         self.forgetting = forgetting
         self.plans: dict[str, Plan] = {}  # the plans its plan steps run, by reference
+        self.cases: dict[str, Case] = {}  # the child cases its case steps open, by reference
+        self.reported: list[str] = []  # `reports`: what it reports when it closes as a child
         # Where each entry was written, by its path (`steps.pay`), `""` the case itself: where
         # `ventoux check` says a problem (brief, D59).
         self.where: dict[str, str] = {"": called_from()}
@@ -249,6 +251,51 @@ class Case:
         self.plans[plan.reference] = plan
         return Step(name)
 
+    def child_case(
+        self,
+        name: str,
+        child: "Case",
+        release: int,
+        title: str,
+        inputs: Mapping[str, Expr[Any]] | None = None,
+        description: str | None = None,
+        requires: Sequence[Step | Milestone] = (),
+        when: Expr[bool] | None = None,
+        automatic: bool | None = None,
+        proposed_by: Sequence[str] | None = None,
+        repeatable: bool | None = None,
+        required: bool | None = None,
+        reaches: Sequence[Milestone] | None = None,
+        max_age: Mapping[str, str] | None = None,
+    ) -> Step:
+        """`child`, opened as a whole case from one step, its opening given from the case file;
+        `release` is the child's release this case pins, written `repair@3` (brief, D74). It joins
+        the case's package, under `cases/`. What it reports is read as the step's outputs:
+        `repair.output("cost", Field.number())`."""
+        entry: Data = {"kind": "case", "display": display(title, description)}
+        entry["case"] = reference = f"{child.name}@{release}"
+        entry |= calling(inputs)
+        entry |= starting(requires, when, automatic, proposed_by, repeatable, reaches, required)
+        entry |= guarded(None, max_age)
+        self.add(name, entry)
+        self.cases[reference] = child
+        return Step(name)
+
+    def reports(self, *fields: Expr[Any]) -> None:
+        """What the case reports when it closes as a child: these fields of its own, read by its
+        parent as the case step's outputs (brief, D74). Said once."""
+        if self.reported:
+            raise ValueError(f"{self.name} already reports {', '.join(self.reported)}")
+        names: list[str] = []
+        for field in fields:
+            data = field.data
+            if not (isinstance(data, dict) and set(data) == {"var"} and data["var"] in self.fields):
+                # Fail closed: a report lists the case's own fields, never a computed value.
+                raise ValueError(f"{self.name} reports its own fields only, and {field} is not one")
+            names.append(data["var"])
+        self.reported = names
+        self.where["reports"] = called_from()
+
     def sequence(self, *steps: Step) -> None:
         """`steps` run in this order, each starting by itself when the one before is done."""
         if self.order:
@@ -387,6 +434,8 @@ class Case:
             data["stays_open"] = self.stays_open
         if self.forgetting is not None:
             data["forgetting"] = self.forgetting
+        if self.reported:
+            data["reports"] = list(self.reported)
         return data
 
 

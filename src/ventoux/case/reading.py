@@ -609,6 +609,9 @@ def what_it_is(name: str, step: object, catalog: Catalog) -> str:
         return f"{name} calls {called_with(name, step.called, catalog)}{giving(name, step.inputs)}."
     if isinstance(step, PlanStep):
         return f"{name} runs the plan {step.plan}{giving(name, step.inputs)}."
+    if isinstance(step, CaseStep):
+        # A child case: what it does is read in its own section of the map (brief, D74).
+        return f"{name} opens the case {step.case}{giving(name, step.inputs)}."
     if isinstance(step, WaitStep):
         return f"{name} waits for {step.event}."
     raise ReadingRefused(f"can't read {name}: {step!r} is no kind of step")
@@ -800,7 +803,14 @@ def read_closing(case: CaseDefinition) -> EntryReading:
         closes = f"It closes once {listed_and(list(case.closes_when))} {verb} reached{and_done}."
     else:
         closes = f"It closes when nothing is left to do{and_done}."
-    return EntryReading("closing", f"{closes} {FORGETTING[case.forgetting]}")
+    # What it reports, when a case step opens it, is all a parent ever reads of it (brief, D74).
+    reports = (
+        f" Opened as a child, it reports {listed_and(list(case.reports))} to the case that "
+        "opened it."
+        if case.reports
+        else ""
+    )
+    return EntryReading("closing", f"{closes}{reports} {FORGETTING[case.forgetting]}")
 
 
 def read_state(name: str, plan: Plan, catalog: Catalog) -> EntryReading:

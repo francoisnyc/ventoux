@@ -12,11 +12,11 @@ from typing import Any
 
 import pytest
 
+from ventoux.case import releases
+from ventoux.case.checked import issues_of
 from ventoux.case.definition import parse_case
-from ventoux.case.releases import behaviour_digest
-from ventoux.case.validate import validate_case
-from ventoux.core.plan import parse_plan
-from ventoux.core.validate import Issue, validate
+from ventoux.case.releases import Package, behaviour_digest
+from ventoux.core.validate import Issue
 from ventoux.testing import CATALOG, load_definition
 from ventoux.tooling.builder import Case, package
 from ventoux.tooling.builder.written import written
@@ -61,15 +61,25 @@ def test_every_example_is_a_package_the_check_accepts() -> None:
     # development catalog; warnings may be shown.
     for path in sorted(EXAMPLES.glob("*.py")):
         for case in [v for v in runpy.run_path(str(path)).values() if isinstance(v, Case)]:
-            files = package(case)
-            plans = {}
-            for name, text in files.items():
-                if name != "case.json":
-                    plan = parse_plan(json.loads(text, parse_float=Decimal))
-                    plans[f"{plan.plan}@{plan.version}"] = json.loads(text, parse_float=Decimal)
-                    assert not errors(validate(plan, CATALOG)), (path, name)
-            parsed = parse_case(json.loads(files["case.json"], parse_float=Decimal))
-            assert not errors(validate_case(parsed, CATALOG, plans)), path
+            # Checked as `ventoux release` checks it: its plans, its case and each child it pins
+            # (brief, D74).
+            released = released_from(package(case))
+            assert not errors(issues_of(released, CATALOG)), path
+
+
+def released_from(files: dict[str, str], under: str = "") -> Package:
+    """The package `files` hold, by path, read as a folder is: a child under `cases/<ref>/`."""
+    children: dict[str, Package] = {}
+    for name in files:
+        if name.startswith(f"{under}cases/") and name.endswith("/case.json"):
+            reference = name.removeprefix(f"{under}cases/").split("/")[0]
+            children[reference] = released_from(files, f"{under}cases/{reference}/")
+    plans = [
+        text
+        for name, text in files.items()
+        if name.startswith(f"{under}plans/") and name.count("/") == under.count("/") + 1
+    ]
+    return releases.package(files[f"{under}case.json"], plans, children)
 
 
 def errors(issues: list[Issue]) -> list[str]:

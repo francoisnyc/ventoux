@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from ventoux.case.definition import CaseDefinition
 from ventoux.case.releases import METHOD, Package, digest, package
 from ventoux.core.plan import Plan
+from ventoux.tooling.releases import read_package
 
 ROOT = Path(__file__).parent.parent
 PINNED = Path(__file__).parent / "digests" / f"method-{METHOD}.json"
@@ -44,9 +45,10 @@ def packages() -> dict[str, Package]:
         ROOT / "tests" / "digests" / "required",
         # And the repeated step's, on a task and an activity (brief, D73).
         ROOT / "tests" / "digests" / "repeated",
+        # And the case step's, and the child's report, read with its children (brief, D74).
+        ROOT / "tests" / "digests" / "children",
     ):
-        plans = [plan.read_text() for plan in sorted((folder / "plans").glob("*.json"))]
-        found[str(folder.relative_to(ROOT))] = package((folder / "case.json").read_text(), plans)
+        found[str(folder.relative_to(ROOT))] = read_package(folder)
     return found
 
 
@@ -110,9 +112,11 @@ def test_the_pinned_packages_use_every_shape() -> None:
     every = {(model, name) for model in models for name in model.model_fields}
     used: set[tuple[type[BaseModel], str]] = set()
     for each in packages().values():
-        written_fields(each.case, used)
-        for plan in each.plans.values():
-            written_fields(plan, used)
+        # A package's children are packages too, read the same way (brief, D74).
+        for found in (each, *each.cases.values()):
+            written_fields(found.case, used)
+            for plan in found.plans.values():
+                written_fields(plan, used)
     unused = sorted(
         f"{model.__module__}.{model.__qualname__}.{name}" for model, name in every - used
     )

@@ -6,6 +6,7 @@ See docs/layers/18-lifecycle.md (18c) and docs/guides/cases.md, "Child cases".
 
 import copy
 import json
+import runpy
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -16,8 +17,10 @@ from ventoux.case import checked
 from ventoux.case.admission import RetryRefused
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import CaseInvalid, parse_case
+from ventoux.case.diff import diff
 from ventoux.case.memory import CaseRun
 from ventoux.case.releases import PackageRefused, digest, package, stored
+from ventoux.case.sheet import case_map
 from ventoux.case.validate import validate_case
 from ventoux.testing import (
     CATALOG,
@@ -33,6 +36,7 @@ from ventoux.testing import (
     send,
     skip,
 )
+from ventoux.tooling.builder.written import package as builder_package
 from ventoux.tooling.releases import read_package
 
 ROOT = Path(__file__).parent.parent
@@ -969,3 +973,57 @@ def test_a_childs_plan_step_finds_its_plan_beside_its_parents() -> None:
         people=PEOPLE,
     )
     assert "settle#1 done" in run.children["repair#1"].history
+
+
+# --- Slice 11: the diff, the case map, the builder, the schema (brief, D55) (brief, D74) ---
+
+
+def packed_with(parent: dict[str, Any], children: dict[str, Any]) -> Any:
+    """The package of `parent`, pinning each child by reference."""
+    pinned = {ref: package(as_text(child), []) for ref, child in children.items()}
+    return package(as_text(parent), [], pinned)
+
+
+def test_the_diff_says_what_changes_inside_a_child_with_the_childs_verdict() -> None:
+    # Never silent: what a child does is what its parent's cases do (brief, D55) (brief, D74).
+    wider = repair()
+    wider["steps"]["fix"]["roles"] = ["support-lead", "support"]
+    changed = diff(
+        packed_with(claim(), {"repair@3": repair()}),
+        packed_with(claim(), {"repair@3": wider}),
+        CATALOG,
+    )
+    said = {(c.path, c.verdict) for c in changed.changes}
+    # The child's own diff, every change under its reference: the role, and who sees its fields.
+    assert ("cases.repair@3.steps.fix.roles", "looser") in said
+    assert all(path.startswith("cases.repair@3.") for path, _ in said)
+    moved = claim()
+    moved["steps"]["repair"]["case"] = "repair@4"
+    changed = diff(
+        packed_with(claim(), {"repair@3": repair()}),
+        packed_with(moved, {"repair@4": repair()}),
+        CATALOG,
+    )
+    assert [(c.path, c.verdict, c.entry) for c in changed.changes] == [
+        ("steps.repair.case", "not proven", ""),
+        ("cases.repair@3", "not proven", "removed"),
+        ("cases.repair@4", "not proven", "added"),
+    ]
+
+
+def test_the_case_map_reads_the_case_step_and_maps_each_child() -> None:
+    # What a case of the package can do includes what its children do (brief, D56) (brief, D74).
+    mapped = case_map(packed_with(claim(), {"repair@3": repair()}), CATALOG)
+    assert "- repair opens the case repair@3, giving" in mapped
+    child = mapped.split("## Child case repair@3\n")[1]
+    assert "### Steps" in child and "- fix is a task for support-lead" in child
+    assert "it reports cost to the case that opened it" in child
+
+
+def test_the_builder_writes_the_guides_claim_and_its_child() -> None:
+    # The same JSON whichever way it is written, the child in its package (brief, D58).
+    built = runpy.run_path(str(ROOT / "examples" / "builder" / "child.py"))
+    files = builder_package(built["claim"])
+    assert sorted(files) == ["case.json", "cases/repair@3/case.json"]
+    assert json.loads(files["case.json"], parse_float=Decimal) == claim()
+    assert json.loads(files["cases/repair@3/case.json"], parse_float=Decimal) == repair()
