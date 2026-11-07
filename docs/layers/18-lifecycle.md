@@ -621,6 +621,80 @@ child stands in for all of that the way `plan_runner` stands in for a plan's chi
     that isn't a running child of this case, or sent twice, is recorded and changes nothing. It is
     sent by the child's workflow as its last act, never by a client.
 
+### Seams and tests for 18c (curriculum step 4, proposed)
+
+The tests use only what a caller uses today, plus three additions (`cases`, `case_answers`,
+`CaseRun.children`). No test reads how a running child is stored.
+
+1. **The definition:** a step `{"kind": "case", "case": "repair@3", "inputs": {...}}`, and a
+   case's `"reports": [...]`, read by `parse_case`. What a case step can't be (`approval`,
+   `for_each`) is refused when read (`CaseInvalid`).
+2. **`run_case(..., cases=, case_answers=)`:**
+   - `cases` gives the child definitions as stored data, by reference (`{"repair@3": repair}`),
+     as `plans` gives plans. A child's plan steps find their plans in the same `plans`. The name
+     before `@` must be the child's `case`; the number is the release's, checked at activation
+     (18d), so in memory it is only a name.
+   - `case_answers` gives each child its own script, by step or by entry (`"repair"`, or
+     `"repair#2"` for a repeatable step's second child), in the same form as `answers`: answers,
+     `retry`, `close`, `finish` and the rest. A child plays its script when it opens, to its end or
+     its first unanswered entry, as a plan step's runner does.
+   - People, the catalog, the fakes and the clock are the parent's.
+3. **What a run reports:** the parent's `history`, `waiting_for` (`repair#1: case repair, open`),
+   `needs_attention`, `closed`; and **`CaseRun.children`**, each child's own `CaseRun` by entry
+   (`run.children["repair#1"].history`), so a test reads what the child did without its internals.
+4. **`validate_case(case, catalog, plans=..., cases=...)`:** the issues, by code and message. No
+   cases means none: a case step's child is then missing (fail closed), as a plan's is.
+5. **The package:** `read_package` reads `cases/<reference>/` as a package; `Package.cases` holds
+   each child's `Package`, by reference. The digest covers them.
+6. **A change request:** `edit` and `skip` and `migrate`, as today; refused with `ChangeRefused`.
+7. **The diff, the case map, the builder (`case.child_case(...)`, and `reports=` on `Case`), the
+   schema, the digest pin,** as in 18a and 18b.
+
+**The refusals and lines, word for word (proposed):**
+
+| Situation | What is said |
+|---|---|
+| a child case named but not supplied (`validate_case`, error `UNKNOWN_CASE`) | `steps.repair.case: repair@3 isn't supplied: add it to the package's cases/` |
+| the reference's name isn't the child's | `steps.repair.case: repair@3 is the case garage_repair: a reference names its case` |
+| an input the child doesn't take at its opening (`UNKNOWN_INPUT`) | `steps.repair.inputs.cost: repair takes no input cost: its task fix sets it; its inputs are budget, vehicle` |
+| an input of another type | `steps.repair.inputs.budget: repair's budget is a number, and this gives a text` |
+| a sensitive value into a plain field | `steps.repair.inputs.owner: owner is sensitive here, and repair's owner isn't: a child keeps a sensitive value sensitive` |
+| an approval on a case step (when read) | `steps.repair: a case step has no approval: its child's steps ask for their own` |
+| `for_each` on a case step (when read) | `steps.repair: a case step is never repeated: repeat a task or an activity` (18b's line, already said for a plan) |
+| a child with a case step of its own | `steps.repair: repair@3 has a case step, order_parts: a child case opens no case of its own` |
+| `reports` naming a field the case lacks (when read) | `reports.cost: repair has no field cost: a report lists the case's own fields` |
+| a sensitive or list field reported (when read) | `reports.owner: owner is sensitive, and a report carries no sensitive field yet` (`lines is a list, and a report carries no list`) |
+| `repair.outcome` compared with what it can't be | `steps.pay_garage.when: repair.outcome is done or one of repair's close reasons (duplicate, written_off), never fixed` |
+| the child opened | `started repair#1: case repair@3 (vehicle from system:opener; budget from person:ana), run memory/repair#1`; the child's first line, `opened by claim-7, from repair#1` |
+| the child closed | `repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost` (or `repair closed: duplicate, by lee; reporting nothing`) |
+| the child's opening refused (the step fails) | `repair#1 failed: repair refused its opening: budget is set by a person in approve, never given at the opening: correct repair's release, then retry repair#1` |
+| the parent closes, or a rule stops the step | in the child: `closed by its parent: duplicate, by ana` (`closed by its parent: stopped by withdraw#1`); in the parent: `repair#1 cancelled: the case is closing` |
+| a migration whose target opens another child | the migration waits: `repair#1 runs repair@3, and the target opens repair@4 from repair: it waits for repair#1 to end` |
+| the package | `cases/repair@3 isn't a package: a child case is a folder holding case.json`; `cases/repair@4 is named by no step` |
+| a package's plans disagree | `plans/refund-order@1 differs between claim and cases/repair@3: one reference is one plan` |
+
+**The tests, in the order I'd write them,** each failing first (the negative first):
+
+1. **(negative, curriculum)** A child case that isn't supplied is refused at validation.
+2. **(negative)** The shapes refused when read: an approval, `for_each`, `reports` naming a field
+   that isn't there, a sensitive or list field reported.
+3. **(negative)** The inputs refused at validation: unknown, set by the child's form or rule, of
+   another type, sensitive into a plain field; the child with a case step of its own.
+4. The guide's example, run as written: the child opens with its sources, plays its script, closes,
+   and `pay_garage` reads `repair.cost` from `person:lee, case:repair`.
+5. The child unfinished: the step runs, `waiting_for` has one line, the parent stays open.
+6. The report: `repair.outcome` as a close reason; a reported field never set is absent, and a
+   reader fails; the `MAY_BE_UNSET` warning; the outcome type-checked.
+7. Who approves in the child: the parent's opener and the step's proposer refused there; the child
+   opened by the parent, never a person.
+8. **(negative)** The child's opening refused: the parent's step fails, a retry opens it once the
+   cause is gone, and never a second child.
+9. The routes: the parent's close and a rule's stop close the child, saying why; an edit leaves the
+   child's values; a migration keeping `repair@3` (renamed) and one changing it (waits); a skip of
+   a failed opening; a required case step; a repeatable one opening `repair#2`.
+10. The package: `cases/` read, refused shapes, the digest covering the child, plans that disagree.
+11. The diff, the case map, the builder, the schema, the digest pin.
+
 ### What changes in the guide, if answered as recommended
 
 - "Required steps": the "a rule can stop confirm" check becomes a warning (choice 9).

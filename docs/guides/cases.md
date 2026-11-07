@@ -3015,7 +3015,7 @@ assert run.reached("repair")
 
 ```
 started repair#1: case repair@3 (vehicle from system:opener; budget from person:ana), run memory/repair#1
-repair#1 done: repair closed, nothing left to do, reaching fixed
+repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost
 scheduled pay_garage#1: payments.refund@2 (order_id from system:opener; amount from person:lee, case:repair), key memory/pay_garage#1
 ```
 
@@ -3041,5 +3041,5 @@ may find it unset.
 
 **One level only.** A child case's definition has no case step of its own (a deliberate limit,
 brief, D48): one close then reaches everything it must, and no case starts itself. `ventoux check`
-refuses it (`steps.repair: repair@3 has a case step, fix_parts: a child case starts no case of its
-own`), and refuses an input the child doesn't take at its opening, or of another type.
+refuses it (`steps.repair: repair@3 has a case step, order_parts: a child case opens no case of
+its own`), and refuses an input the child doesn't take at its opening, or of another type.
