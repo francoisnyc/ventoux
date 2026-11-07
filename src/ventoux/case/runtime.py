@@ -2204,7 +2204,9 @@ def open_child(state: CaseState, name: str, step: CaseStep, commands: list[Comma
     excluded = may_not_approve(state, name, run)
     run.excluded = excluded
     proposal_spent(state, name)  # the proposed run has started
-    child_run = f"{state.case}/{run.entry}"
+    # The child's own workflow ID, under its parent's: the first part of this case's name is its
+    # workflow ID (`claim-7`), so the codec seals the child under the parent's key (brief, D75).
+    child_run = f"{state.case.split('/')[0]}/{run.entry}"
     state.history.append(
         f"started {run.entry}: case {step.case} ({origins(step.inputs, state)}), run {child_run}"
     )
@@ -2226,7 +2228,7 @@ def child_rang(
     if not open_child:
         state.history.append(f"child_ended for {event.entry}, which is no open child: nothing read")
         return
-    commands.append(ReadChild(event.entry, f"{state.case}/{event.entry}"))
+    commands.append(ReadChild(event.entry, f"{state.case.split('/')[0]}/{event.entry}"))
 
 
 def child_not_ended(case: CaseDefinition, state: CaseState, event: ChildNotEnded) -> None:

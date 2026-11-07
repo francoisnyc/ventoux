@@ -9,6 +9,7 @@ from temporalio.worker import Worker
 from ventoux.case.memory import Activity
 from ventoux.temporal.activities import plan_activities
 from ventoux.temporal.cases import CaseWorkflow
+from ventoux.temporal.children import ChildActivities
 from ventoux.temporal.converter import require_ventoux_converter
 from ventoux.temporal.forget import ForgetActivities, ForgetWorkflow
 from ventoux.temporal.logs import keep_only_exception_types
@@ -63,12 +64,18 @@ def case_worker(
     keep_only_exception_types()  # a failure's text never reaches the log (brief, D31)
     forgetting = [] if forget is None else ForgetActivities(client).all()
     registry = [] if cases.environment is None else RegistryActivities(client).for_cases()
+    children = ChildActivities(client).all()  # how a child case ended, read (brief, D75)
     return Worker(
         client,
         task_queue=task_queue,
         identity=identity,
         workflows=[cases, plans] if forget is None else [cases, plans, forget],
-        activities=[*plan_activities(cases.catalog, implementations), *forgetting, *registry],
+        activities=[
+            *plan_activities(cases.catalog, implementations),
+            *forgetting,
+            *registry,
+            *children,
+        ],
         # Temporal: plain-function activities run here; the caller shuts it down, as above.
         activity_executor=activity_executor,
         workflow_runner=SANDBOX,
