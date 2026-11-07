@@ -644,6 +644,7 @@ def ended(entry: str, child: CaseDefinition, state: CaseState, at: int) -> CaseE
     return CaseEnded(
         entry,
         state.closed_as or "done",
+        state.closed_by if state.closed_as is not None else None,
         closed.removeprefix("closed: "),
         tuple(state.milestones),
         {

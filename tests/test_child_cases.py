@@ -447,7 +447,8 @@ def test_a_child_closed_by_a_person_reports_its_reason_as_the_outcome() -> None:
     )
     assert "repair#1 done: repair closed, written_off, by lee; reporting nothing" in run.history
     assert run.state.values["repair.outcome"] == "written_off"
-    assert run.state.sources["repair.outcome"] == {"case:repair"}
+    # Which reason was chosen is a person's act, as a task's outcome is (brief, D11).
+    assert run.state.sources["repair.outcome"] == {"case:repair", "person:lee"}
     assert "repair.cost" not in run.state.values  # never set in the child, so absent
     assert run.closed
 
@@ -1152,3 +1153,86 @@ def test_on_temporal_a_case_step_fails_closed_until_child_cases_run_there() -> N
         claim(), file={"order_id": "ord-1", "vehicle": "veh-9"}, answers=[ASSESSED], people=PEOPLE
     )
     assert run.needs_attention == [refused]
+
+
+# --- From the tutor's review of #88 ---
+
+
+def test_who_closed_the_child_decided_its_outcome_so_approves_nothing_it_feeds() -> None:
+    # lee closes the repair as written off, and pay_garage runs only then: lee's choice decided
+    # that it runs, so lee approves nothing of it (brief, D11) (brief, D74).
+    definition = claim()
+    definition["steps"]["pay_garage"]["when"] = {"==": [{"var": "repair.outcome"}, "written_off"]}
+    definition["steps"]["pay_garage"]["inputs"]["amount"] = {"var": "payout"}
+    opened: dict[str, Any] = {
+        "file": {"order_id": "ord-1", "vehicle": "veh-9"},
+        "cases": {"repair@3": written_off_repair()},
+        "case_answers": {"repair": [close("written_off", "lee")]},
+        "people": PEOPLE,
+    }
+    # Said as for any condition a person's answer feeds: it decides whether the step runs.
+    refused = "lee set repair.outcome, which decides whether pay_garage runs, so cannot approve it"
+    with pytest.raises(AnswerRefused, match=refused):
+        run_case(definition, answers=[ASSESSED, ("pay_garage", "approve", "lee")], **opened)
+    run = run_case(definition, answers=[ASSESSED, ("pay_garage", "approve", "sam")], **opened)
+    assert any(line.startswith("scheduled pay_garage#1") for line in run.history)
+    # A child that closed by itself is done, decided by nobody: its outcome is the child's alone.
+    done = run_case(
+        claim(),
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[ASSESSED],
+        cases={"repair@3": repair()},
+        case_answers={"repair": [("fix", "fixed", "lee", {"cost": 640})]},
+        people=PEOPLE,
+    )
+    assert done.state.sources["repair.outcome"] == {"case:repair"}
+
+
+def telling_repair() -> dict[str, Any]:
+    """The guide's repair, which also drafts a letter to the vehicle's contact."""
+    child = repair()
+    child["steps"]["tell"] = {
+        "kind": "activity",
+        "display": {"title": "Tell the owner"},
+        "activity": "letters.draft@2",
+        "inputs": {"to_customer": {"var": "vehicle"}, "template": "repair-started"},
+    }
+    return child
+
+
+def customer_vehicle() -> dict[str, Any]:
+    """The claim, its vehicle typed by the customer."""
+    definition = claim()
+    definition["fields"]["vehicle"]["source"] = "untrusted:customer"
+    return definition
+
+
+def test_a_childs_opening_keeps_the_sources_its_parent_gave_it() -> None:
+    # The child's own checks judge where a value really came from: the customer, not the parent
+    # that opened it (brief, D12) (brief, D74).
+    run = run_case(
+        customer_vehicle(),
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[ASSESSED],
+        cases={"repair@3": telling_repair()},
+        people=PEOPLE,
+    )
+    [failed] = [
+        line for line in run.children["repair#1"].history if line.startswith("tell#1 failed")
+    ]
+    assert failed.endswith("this value comes from vehicle (system:opener, untrusted:customer)")
+
+
+def test_the_check_reads_a_childs_opening_with_the_sources_its_parent_gives() -> None:
+    # As the check follows a report out of a child, it follows an opening in: refused at the
+    # parent's input before any case opens, as a plan's fields are (brief, D36) (brief, D74).
+    issues = validate_case(
+        parse_case(customer_vehicle()), CATALOG, cases={"repair@3": telling_repair()}
+    )
+    refused = [(i.path, i.message) for i in issues if i.code == "INPUT_POLICY"]
+    assert [path for path, _ in refused] == ["steps.repair.inputs.vehicle"]
+    assert refused[0][1].startswith("repair@3, in its step tell: letters.draft@2 takes to_customer")
+    assert "untrusted:customer" in refused[0][1]
+    # The same child, given a trusted vehicle, is refused nowhere.
+    issues = validate_case(parse_case(claim()), CATALOG, cases={"repair@3": telling_repair()})
+    assert [i for i in issues if i.code == "INPUT_POLICY"] == []

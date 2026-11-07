@@ -253,6 +253,7 @@ def decide(
         state.history.append(f"{event.by} closed the case as {event.reason}, as {role}")
         why = f"closed as {event.reason} by {event.by}"
         state.closed_as = event.reason  # a child reports it as its outcome (brief, D74)
+        state.closed_by = event.by
         begin_closing(state, why, f"{event.reason}, by {event.by}")
     else:
         complete(case, catalog, state, event)
@@ -2217,7 +2218,10 @@ def child_ended(state: CaseState, run: StepRun, step: CaseStep, event: CaseEnded
     run.status = "done"
     state.values[f"{run.step}.outcome"] = event.outcome
     # Trusted: the child's reviewed release declares its close reasons, as a plan its outcomes.
-    state.sources[f"{run.step}.outcome"] = frozenset({route})
+    # But which reason was chosen is a person's act, as a task's outcome is: who closed it decided
+    # it, and approves nothing it feeds (brief, D11).
+    chose = frozenset() if event.closed_by is None else frozenset({f"person:{event.closed_by}"})
+    state.sources[f"{run.step}.outcome"] = frozenset({route}) | chose
     state.obtained[f"{run.step}.outcome"] = Obtained(event.at, run.entry)
     for field, given in event.report.items():
         state.values[f"{run.step}.{field}"] = given.value

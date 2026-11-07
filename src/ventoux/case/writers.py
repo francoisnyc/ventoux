@@ -113,13 +113,15 @@ def always(
     opener: str,
     refused: Callable[[frozenset[str]], bool],
     reports: Reports | None = None,
+    opening: Mapping[str, frozenset[str]] | None = None,
 ) -> frozenset[str]:
     """Each value of `case`, opened by `opener`, that `refused` refuses whichever writer wrote
     it: what a check may claim of every case (brief, D34). A refusal looks for one source it
     refuses, and a value a rule sets comes from the union of what it read, so a rule's write is
     refused when its field's mark is, or a value it reads always is. Grown from nothing, so two
     fields set from each other vouch for nothing (brief, D42)."""
-    found = {name for name, sources in stamped(case, contracts, opener).items() if refused(sources)}
+    stamps = stamped(case, contracts, opener, opening)
+    found = {name for name, sources in stamps.items() if refused(sources)}
     computed = computed_writes(case, contracts, reports)
     while True:
         more = {
@@ -335,8 +337,10 @@ def report_writes(
         opening = {field: frozenset({f"{GIVEN}{field}"}) for field in child.fields}
         inside = case_sources(child, contract_steps(child, catalog), OPENER, opening=opening)
         # The outcome is declared by the child's reviewed release; what steered the start passes
-        # on, as for a plan's outcome (brief, D43).
-        found[f"{name}.outcome"] = [(frozenset({start_of(name)}), frozenset({route}))]
+        # on, as for a plan's outcome (brief, D43). A close reason is a person's choice, as a
+        # task's answer is: whoever closes the child, said as a stand-in (brief, D11).
+        closer = {f"person:closing {child.case}"} if child.close_reasons else set()
+        found[f"{name}.outcome"] = [(frozenset({start_of(name)}), frozenset({route, *closer}))]
         for field in child.reports:
             sources = inside.get(field, frozenset())
             given = [s.removeprefix(GIVEN) for s in sources if s.startswith(GIVEN)]

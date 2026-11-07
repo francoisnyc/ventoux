@@ -734,6 +734,17 @@ The tests use only what a caller uses today, plus three additions (`cases`, `cas
   parent closes it. A child that finishes later, after its parent moved on, is 18d's: its end comes
   by a signal.
 
+- **From the tutor's review of #88:** who closed a child decided its outcome, so a child closed
+  by a person gives `person:<closer>, case:repair` (its ending event carries who closed it, as
+  data; `done` stays `case:repair`), and the closer approves nothing that outcome decides, as a
+  task's answerer. At the check, a child with close reasons gives its outcome a person stand-in.
+  And the check reads a child's input policies with the sources the parent gives its opening
+  (`child_policy_issues`), refusing at the parent's input before any case opens; what the child
+  refuses on its own stays its own release check's. Not followed yet, carried: the child's
+  conditions and rules, read with those sources (`UNTRUSTED_TRIGGER`, a steered start), and, from
+  the review, whether a person answering a wait inside a plan should be excluded from what the
+  plan's outcome decides.
+
 ## Promises (18c)
 
 Each claim the note, D74 and the guide's "Child cases" make, and the test that would fail if it
@@ -751,6 +762,8 @@ first or, for a pin of behaviour already built, catching a mutation.
 | A child supplied under another name, or unreadable, is refused | `test_a_child_supplied_under_another_name_or_unreadable_is_refused` |
 | The child opens with its sources, plays, closes, and reports as the step's outputs, each with `case:<child>` | `test_the_guides_child_case_runs_as_written`, and in `test_case.py` |
 | An untrusted value given to a child comes back untrusted, at the check | `test_a_value_a_child_was_given_comes_back_with_where_it_came_from` |
+| A child's opening keeps its parent's sources at runtime, and the check reads its input policies with them, refusing at the parent's input | `test_a_childs_opening_keeps_the_sources_its_parent_gave_it`, `test_the_check_reads_a_childs_opening_with_the_sources_its_parent_gives` |
+| Who closed a child with a reason decided its outcome, and approves nothing it decides; `done` is the child's alone | `test_who_closed_the_child_decided_its_outcome_so_approves_nothing_it_feeds` |
 | `case:` is trusted, and never read as a system | `test_a_reported_value_passes_trusted_only_and_never_reads_as_from_a_system` |
 | An open child keeps its step running, in one line of `waiting_for`, after the parent's own entries | `test_an_open_child_keeps_its_step_running_and_its_parent_waiting`, `test_an_open_childs_line_comes_after_the_parents_own_open_entries` |
 | The outcome is `done` or a close reason, type-checked; a report carries nothing else, and the parent never reads the child's milestones | `test_a_child_closed_by_a_person_reports_its_reason_as_the_outcome`, `test_a_childs_outcome_is_done_or_one_of_its_close_reasons`, `test_a_report_carries_nothing_its_child_doesnt_report` |

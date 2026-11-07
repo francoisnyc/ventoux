@@ -270,6 +270,9 @@ class CaseState:
     # The close reason a person closed it with, or None: it closed by itself. A child's report
     # gives it to its parent as the step's outcome (brief, D74).
     closed_as: str | None = None
+    # Who closed it with that reason: their choice decided the outcome a parent reads (brief, D11)
+    # (brief, D74).
+    closed_by: str | None = None
     # The child cases its release pins, as stored data, by reference (`repair@3`): given when it
     # opens, as a case's start holds its plans, so the engine reads what each reports (brief, D74).
     cases: dict[str, object] = field(default_factory=dict[str, object])
@@ -436,6 +439,7 @@ class CaseEnded:
 
     entry: str  # the step run, such as `repair#1`
     outcome: str  # `done`, or the close reason a person closed it with
+    closed_by: str | None  # the person who chose that reason; None: it closed by itself
     closed: str  # how its closed line says it: `nothing left to do`, `duplicate, by lee`
     reached: tuple[str, ...]  # its milestones, in the order reached
     report: Mapping[str, Sourced]  # each field its `reports` lists that is set at its close

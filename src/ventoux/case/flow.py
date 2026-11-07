@@ -29,6 +29,7 @@ from ventoux.case.writers import (
     Reports,
     always,
     case_sources,
+    contract_steps,
     how_started,
     rule_reads,
     start_of,
@@ -336,9 +337,12 @@ class Refusals:
         contracts: Mapping[str, Contract],
         opener: str,
         reports: Reports | None = None,
+        opening: Mapping[str, frozenset[str]] | None = None,
     ):
         self.case, self.contracts, self.opener, self.reports = case, contracts, opener, reports
-        self.sources = case_sources(case, contracts, opener, reports=reports)
+        # A child's opening fields, with the sources its parent gives them (brief, D74).
+        self.opening = opening
+        self.sources = case_sources(case, contracts, opener, reports=reports, opening=opening)
         self.found: dict[int, frozenset[str]] = {}
 
     def refused(self, policy: Policy) -> Callable[[frozenset[str]], bool]:
@@ -354,7 +358,12 @@ class Refusals:
             return policy.refuses(frozenset()) is not None
         if id(policy) not in self.found:
             self.found[id(policy)] = always(
-                self.case, self.contracts, self.opener, self.refused(policy), self.reports
+                self.case,
+                self.contracts,
+                self.opener,
+                self.refused(policy),
+                self.reports,
+                self.opening,
             )
         return any(field in self.found[id(policy)] for field in read)
 
@@ -386,12 +395,13 @@ def policy_issues(
     contracts: Mapping[str, Contract],
     said: Collection[str],
     reports: Reports | None = None,
+    opening: Mapping[str, frozenset[str]] | None = None,
 ) -> list[Issue]:
     """Each activity and workflow step's input against its contract's input policies, which say
     where it may come from (brief, D21). An input at a path in `said` already has its issue (one
     cause, one issue)."""
-    by_a_system = Refusals(case, contracts, BY_A_SYSTEM, reports)
-    by_a_person = Refusals(case, contracts, BY_A_PERSON, reports)
+    by_a_system = Refusals(case, contracts, BY_A_SYSTEM, reports, opening)
+    by_a_person = Refusals(case, contracts, BY_A_PERSON, reports, opening)
     issues: list[Issue] = []
     for name, contract in contracts.items():
         step = case.steps[name]
@@ -569,6 +579,53 @@ def steered(
 def steered_to_do(step: str) -> str:
     """What an author can do about a start untrusted data steers (brief, D43)."""
     return f"start {step} only on trusted data, or let a person decide in a task"
+
+
+def child_policy_issues(
+    case: CaseDefinition,
+    catalog: Catalog,
+    contracts: Mapping[str, Contract],
+    children: Mapping[str, CaseDefinition],
+    said: Collection[str],
+    reports: Reports | None = None,
+) -> list[Issue]:
+    """Each case step's inputs carried into its child: the child's own input policies checked
+    with the sources the parent gives its opening, said at the parent's input that feeds a refused
+    value, before any case opens, as a plan's fields are (brief, D36) (brief, D74). What the child
+    refuses on its own is its own release check's to say (one cause, one issue); a step with an
+    input issue already is left out."""
+    parent = Refusals(case, contracts, BY_A_SYSTEM, reports)
+    issues: list[Issue] = []
+    for name, child in children.items():
+        step = case.steps[name]
+        assert isinstance(step, CaseStep)  # only a case step opens a child
+        if any(path.startswith(f"steps.{name}.inputs") for path in said):
+            continue
+        opening = {
+            field: provenance(expression, parent.sources)
+            for field, expression in step.inputs.items()
+        }
+        inside = contract_steps(child, catalog)
+        alone = {(i.path, i.code) for i in policy_issues(child, inside, ())}
+        given: set[str] = set()
+        for issue in policy_issues(child, inside, (), opening=opening):
+            if (issue.path, issue.code) in alone:
+                continue
+            _, child_step, _, child_input = issue.path.split(".", 3)
+            read = child.steps[child_step]
+            assert isinstance(read, CallStep)  # only a call step's input has a policy
+            for field in fields_read(read.inputs[child_input]):
+                if field in step.inputs and field not in given:
+                    given.add(field)
+                    issues.append(
+                        Issue(
+                            f"steps.{name}.inputs.{field}",
+                            issue.code,
+                            f"{step.case}, in its step {child_step}: {issue.message}",
+                            issue.severity,
+                        )
+                    )
+    return issues
 
 
 def plan_fields_sources(

@@ -3093,7 +3093,9 @@ child asking as it opens. Until then a case step on Temporal fails, needing atte
   sources (D28). It is opened by the parent case, never a person, and the parent's exclusions
   cross: the parent's opener and the step's proposer approve nothing in the child (D25). Each input
   is checked at validation as any opening is: a field of the child, not set by its forms or rules,
-  of its type.
+  of its type. And the check reads the child's input policies with the sources the parent gives
+  its opening, saying a refusal at the parent's input before any case opens, as for a plan's
+  fields (D36). *Changed in the tutor's review of #88, before D74 was merged.*
 - **A sensitive value enters a child only into a sensitive field, and a report carries no
   sensitive field, for now** (deliberate limits, D48): a view hides more than its source, never
   less.
@@ -3124,9 +3126,13 @@ child asking as it opens. Until then a case step on Temporal fails, needing atte
 - **`case:<child>` is a trusted origin** (adds to D12; decided 2026-11-07, while building 18c):
   it records the route a value took, and the value's own sources decide its trust, so
   `person:lee, case:repair` is trusted and `untrusted:customer, case:repair` is not. `only_from`
-  still refuses it: a value from a child comes from no system it names. The child's outcome
-  carries `case:repair` alone, as a plan's carries `system:refund-order@1`: the child's reviewed
-  release declares its close reasons.
+  still refuses it: a value from a child comes from no system it names. The child's reviewed
+  release declares its close reasons, so a child that closed by itself gives `done` with
+  `case:repair` alone, as a plan's outcome carries `system:refund-order@1`. But which reason was
+  chosen is a person's act, as a task's outcome is: a child closed by a person gives its outcome
+  `person:<closer>, case:repair`, its ending carrying who closed it, and the closer approves
+  nothing that outcome decides (D11). *Changed in the tutor's review of #88, before D74 was
+  merged.*
 - **The parent holds its pinned children as stored data, by reference,** given when it opens, as a
   case's start holds its plans: the engine reads each child's outcomes and reported fields from
   them, so `repair.cost` is type-checked at runtime as at validation.

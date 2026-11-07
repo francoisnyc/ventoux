@@ -2994,9 +2994,10 @@ forgets it too`.
 When the child closes, the step is done, and the parent reads the report as the step's outputs:
 `repair.outcome` (`done`, or the reason a person closed the repair with) and `repair.cost`; the
 milestones the repair reached are in the step's history line. Each value keeps the sources it had
-in the child and gains `case:repair`, saying where it came from. Nothing else crosses back, and a child never
-writes into its parent's case file: the parent decides what a report changes, with its own steps
-and rules.
+in the child and gains `case:repair`, saying where it came from. A close reason is the person's
+who chose it, as a task's answer is: `person:lee, case:repair`, so lee approves nothing that
+outcome decides. Nothing else crosses back, and a child never writes into its parent's case file:
+the parent decides what a report changes, with its own steps and rules.
 
 In a test, `cases` gives the child definitions by name and release, as `plans` gives plans, and
 `case_answers` gives each case step's child its own script, as `answers` does:
@@ -3043,3 +3044,7 @@ may find it unset.
 brief, D48): one close then reaches everything it must, and no case starts itself. `ventoux check`
 refuses it (`steps.repair.case: repair@3 has a case step, order_parts: a child case opens no
 case of its own`), and refuses an input the child doesn't take at its opening, or of another type.
+It reads the child's input policies with the sources the claim gives its opening: a vehicle the
+customer typed, given to a repair that drafts a letter to it, is refused at the claim's input
+(`steps.repair.inputs.vehicle: repair@3, in its step tell: letters.draft@2 takes to_customer only
+from a system or a person, …`), before any case opens.
