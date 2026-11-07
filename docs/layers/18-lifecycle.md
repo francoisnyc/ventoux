@@ -769,6 +769,23 @@ server, with bounded waits and the thread guard on. No test reads the parent's w
    history.
 9. Replay: every recorded history replays; a new one with a child recorded and replayed.
 
+### Found while building 18d
+
+- **The test server never tells a parent its child was terminated,** under any close policy;
+  the development server does at once (`TerminatedError`). So the test that a run notices at
+  once runs on the development server (`tests/dev_server.py`); the questions asked after a
+  switch and daily are tested on the test server, where only they can notice.
+- **A doorbell's read waits for the child that rang to end, 5 s at most.** The child rings as its
+  last act and ends in its next workflow task: a parent quick to read found it running, recorded
+  it open, and waited for the daily check. Sending the doorbell in the task that completes the
+  child was tried: the development server never delivers it.
+- **Carried: a parent terminated with a child running, then forgotten.** The key goes once the
+  parent has ended; a child still running under it fails its workflow tasks, unable to read its
+  own values, until an operator terminates it. Nothing permissive happens, and the data was to
+  become unreadable; but the child isn't closed. Destroying the key only once no workflow of the
+  family runs needs every child found from the parent's history, across its runs: left for a
+  later layer, as decided at slice 6.
+
 ### Seams and tests for 18c (curriculum step 4, proposed)
 
 The tests use only what a caller uses today, plus three additions (`cases`, `case_answers`,
