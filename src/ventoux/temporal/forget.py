@@ -24,7 +24,12 @@ from temporalio.service import RPCError, RPCStatusCode
 # deterministic and passed through, imported once and shared (as in `cases.py`).
 with workflow.unsafe.imports_passed_through():
     from ventoux.case.definition import parse_case
-    from ventoux.case.forgetting import approval_refusal, forgetting_role, role_refusal
+    from ventoux.case.forgetting import (
+        approval_refusal,
+        family_forgetting,
+        forgetting_role,
+        role_refusal,
+    )
     from ventoux.core.catalog import Catalog
     from ventoux.core.person import identifier_problem
     from ventoux.temporal.cases import CaseForget, CaseReport, CaseStart
@@ -71,6 +76,16 @@ class CaseLookup:
     # What its definition says (brief, D32): allowed, while_open or never; empty if its
     # definition can't be read any more.
     forgetting: str
+
+
+def child_refusal(case: str) -> str | None:
+    """Why `case` can't be forgotten alone: its ID names a case before its `/`, whose key it is
+    under. Forgetting it would destroy that case's key, so only that case is forgotten, with
+    its children (brief, D75). None if `case` is a case of its own."""
+    if "/" not in case:
+        return None
+    parent, child = case.split("/", 1)
+    return f"{child} is a child of {parent}: forget {parent}, which forgets it too"
 
 
 def lookup_refusal(case: str, found: CaseLookup) -> str | None:
@@ -168,8 +183,10 @@ class ForgetWorkflow:
     async def drive(self, start: ForgetStart) -> ForgetReport:
         """Check the proposal, wait for an answer someone may give, and carry it out."""
         proposer = frozenset(start.roles)
-        refused = identifier_problem(start.by) or role_refusal(
-            self.catalog, start.case, "proposed", start.by, proposer
+        refused = (
+            identifier_problem(start.by)
+            or role_refusal(self.catalog, start.case, "proposed", start.by, proposer)
+            or child_refusal(start.case)
         )
         if refused is not None:
             # Nothing to wait for: the request ends, saying why.
@@ -278,10 +295,16 @@ class ForgetActivities:
         return CaseLookup(key, await self.still_running(case), await self.forgetting(case))
 
     async def forgetting(self, case: str) -> str:
-        """What the case's definition says about forgetting, read from the start of its latest
-        run (each run carries the definition); empty if Temporal holds no history of it."""
+        """What the case's family says about forgetting, read from the start of its latest run
+        (each run carries the definition, and its release the children it pins): the strictest
+        of the case's and its children's (brief, D75); empty if Temporal holds no history of
+        it."""
         opening = await self.start_of(case)
-        return "" if opening is None else parse_case(opening.definition).forgetting
+        if opening is None:
+            return ""
+        pinned = {} if opening.release is None else opening.release.cases
+        children = [parse_case(definition) for definition in pinned.values()]
+        return family_forgetting(parse_case(opening.definition), children)
 
     @activity.defn(name="ventoux.forget.opener")
     async def opener(self, case: str) -> CaseOpener:

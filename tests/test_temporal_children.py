@@ -13,6 +13,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from dev_server import cli_binary, cli_folder, dev_server
 from temporalio.client import Client
 from temporalio.service import RPCError, RPCStatusCode
@@ -20,11 +21,14 @@ from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.workflow import ParentClosePolicy
 from test_child_cases import CLOSABLE, claim, repair
 from test_temporal_case import QUEUE, Case, SwitchingCases, on_temporal, reported, runs_of, skipping
+from test_temporal_forget import on_temporal as forgetting_on_temporal
+from test_temporal_forget import reported as forget_reported
 from worker_threads import worker_threads
 
 from ventoux.case.definition import parse_case
+from ventoux.case.forgetting import ForgetRefused
 from ventoux.case.runtime import decide
-from ventoux.case.state import Answered, CaseEnded, CaseState, Opened
+from ventoux.case.state import Answered, CaseEnded, CaseState, ForgetApproved, Opened
 from ventoux.core.provenance import Sourced
 from ventoux.temporal.cases import (
     CaseReport,
@@ -36,12 +40,15 @@ from ventoux.temporal.cases import (
     start_case,
 )
 from ventoux.temporal.children import SETTLE, ChildActivities, ChildAsked, ChildRead
+from ventoux.temporal.converter import keys_of
+from ventoux.temporal.forget import ForgetReport, answer_forget, propose_forget
 from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     CATALOG,
     FAKES,
     START,
     DevelopmentCases,
+    DevelopmentForget,
     DevelopmentPlans,
     development_converter,
     release_of,
@@ -435,3 +442,123 @@ def test_a_doorbell_read_waits_for_the_child_ringing_it_to_end() -> None:
     assert read.how == ""
     assert read.ending is not None
     assert read.ending.closed == "nothing left to do"
+
+
+# --- Slice 6: forgetting (brief, D75) ---
+
+
+def test_a_child_is_never_forgotten_alone() -> None:
+    # A child is under its parent's key: forgetting it alone would destroy its parent's key. So
+    # the request is refused before anyone answers, naming the case to forget instead.
+    async def scenario(client: Client) -> tuple[ForgetReport, str, CaseReport]:
+        parent = await start_case(client, DevelopmentCases, RELEASE, FILE, "claim-21", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, DevelopmentCases, "claim-21/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-21/repair#1", "pia", ["privacy"], QUEUE
+        )
+        ended = await request.result()
+        return ended, keys_of(client).state("claim-21"), await reported(child, lambda now: True)
+
+    ended, key, child = forgetting_on_temporal(scenario)
+    assert ended.status == "refused"
+    assert ended.history == [
+        (
+            "refused pia's proposal: repair#1 is a child of claim-21: forget claim-21, which "
+            "forgets it too"
+        )
+    ]
+    assert key == "kept"
+    assert child.status == "open"
+
+
+def test_forgetting_the_parent_forgets_its_children() -> None:
+    # One key for the family: the parent, asked to close as forgotten, closes its child, ends
+    # once the child has ended, and only then is the key destroyed, with no workflow of the
+    # family still running (brief, D32) (brief, D75).
+    async def scenario(client: Client) -> tuple[ForgetReport, CaseReport, list[str]]:
+        parent = await start_case(client, DevelopmentCases, RELEASE, FILE, "claim-22", QUEUE)
+        await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+        child = await started(client, DevelopmentCases, "claim-22/repair#1")
+        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        request = await propose_forget(
+            client, DevelopmentForget, "claim-22", "pia", ["privacy"], QUEUE
+        )
+        await answer_forget(request, "approve", "olu", ["privacy"])
+        ended = await request.result()
+        statuses = [
+            getattr((await client.get_workflow_handle(id).describe()).status, "name", "")
+            for id in ("claim-22", "claim-22/repair#1")
+        ]
+        return ended, await child.result(), statuses
+
+    ended, child, statuses = forgetting_on_temporal(scenario)
+    assert ended.status == "forgotten"
+    assert ended.history[-3:] == [
+        "claim-22 asked to close as forgotten",
+        "claim-22 ended: closed: forgotten",
+        "the key of claim-22 was destroyed",
+    ]
+    assert child.history[-2:] == [
+        "cancelled fix#1: closed by its parent: forgotten",
+        "closed: by its parent: forgotten",
+    ]
+    assert statuses == ["COMPLETED", "COMPLETED"]
+
+
+def test_the_familys_forgetting_is_the_strictest_of_its_cases() -> None:
+    # Forgetting the parent forgets its children: so a child that keeps its records keeps the
+    # family's, worked out from the cases the parent's release pins, said as the parent's own
+    # refusal is (brief, D32) (brief, D75).
+    never = release_of(claim(), 1, cases={"repair@3": repair() | {"forgetting": "never"}})
+    closable = claim() | {"close_reasons": CLOSABLE}
+    while_open = release_of(
+        closable, 1, cases={"repair@3": repair() | {"forgetting": "while_open"}}
+    )
+
+    async def scenario(client: Client) -> list[ForgetReport]:
+        await start_case(client, DevelopmentCases, never, FILE, "claim-23", QUEUE)
+        closed = await start_case(client, DevelopmentCases, while_open, FILE, "claim-24", QUEUE)
+        await close(closed, "duplicate", "ana", ["support"])
+        await closed.result()
+        ended = []
+        for case in ("claim-23", "claim-24"):
+            request = await propose_forget(
+                client, DevelopmentForget, case, "pia", ["privacy"], QUEUE
+            )
+            # Polled, never awaited: a request that wasn't refused waits for an answer, and the
+            # test server would skip time to its end.
+            decided = lambda now: now.status == "refused" or len(now.history) > 0
+            ended.append(await forget_reported(request, decided))
+        return ended
+
+    ended = forgetting_on_temporal(scenario)
+    assert [each.history[-1] for each in ended] == [
+        (
+            "refused pia's proposal: claim-23 keeps its records (forgetting: never): it can't be "
+            "forgotten"
+        ),
+        (
+            "refused pia's proposal: claim-24 is closed, and its definition keeps closed cases "
+            "(forgetting: while_open)"
+        ),
+    ]
+
+
+def test_the_case_itself_refuses_forgetting_a_family_that_keeps_its_records() -> None:
+    # The case checks a request again, depending on nothing the request did: a child pinned to
+    # keep its records keeps the family's (brief, D32) (brief, D75).
+    case = parse_case(claim())
+    kept = {"repair@3": repair() | {"forgetting": "never"}}
+    state, _ = decide(
+        case, CATALOG, CaseState("claim-25/run"), Opened(FILE, None, at=START, cases=kept)
+    )
+    approved = ForgetApproved(
+        "pia", frozenset({"privacy"}), "olu", frozenset({"privacy"}), at=START
+    )
+    with pytest.raises(ForgetRefused) as refused:
+        decide(case, CATALOG, state, approved)
+    assert str(refused.value) == (
+        "claim-25 keeps its records (forgetting: never): it can't be forgotten"
+    )
