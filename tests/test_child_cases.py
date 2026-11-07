@@ -1347,3 +1347,63 @@ def test_a_childs_state_crosses_continue_as_new() -> None:
         assert (again.closed_as, again.closed_by) == (state.closed_as, state.closed_by)
         assert (again.cases, again.excluded) == (state.cases, state.excluded)
     assert list(state_from_data(state_as_data(run.state), {}).cases) == ["repair@3"]
+
+
+@pytest.mark.parametrize(
+    ("given", "said"),
+    [
+        # Another system's reference: the system is checked (brief, D30).
+        ({"var": "branch"}, "a reference to branches"),
+        # A computed one, though of the system: only one read as it is (brief, D36).
+        (
+            {
+                "if": [
+                    {"==": [{"var": "vehicle"}, "veh-9"]},
+                    {"var": "order_id"},
+                    {"var": "order_id"},
+                ]
+            },
+            "a reference to orders",
+        ),
+    ],
+)
+def test_a_childs_reference_refuses_another_system_and_a_computed_reference(
+    given: dict[str, Any], said: str
+) -> None:
+    # From the tutor's third review of #88: each half of the rule, pinned.
+    definition = claim()
+    definition["fields"]["branch"] = {
+        "type": "reference",
+        "system": "branches",
+        "display": {"title": "Branch"},
+    }
+    definition["steps"]["repair"]["inputs"]["order_id"] = given
+    issues = validate_case(parse_case(definition), CATALOG, cases={"repair@3": paying_repair()})
+    assert [(i.path, i.message) for i in issues if i.code == "INPUT_TYPE"] == [
+        (
+            "steps.repair.inputs.order_id",
+            (
+                "repair@3 takes order_id as a reference to orders, read as it is, and is given "
+                f"{said}: give it a reference field of orders"
+            ),
+        )
+    ]
+
+
+def test_a_childs_refusal_through_a_rules_condition_is_said_at_the_parents_input() -> None:
+    # A rule sets contact to a written value, but only when the customer's vehicle says so: its
+    # condition decides, so contact carries what it read, and the check follows it to vehicle
+    # (brief, D42).
+    child = telling_repair()
+    child["fields"]["contact"] = {"type": "string", "display": {"title": "Contact"}}
+    child["rules"] = {
+        "pick": {
+            "display": {"title": "Write to the fleet desk for this vehicle"},
+            "on": "opened",
+            "when": {"==": [{"var": "vehicle"}, "veh-9"]},
+            "then": {"set": {"contact": "fleet@example.com"}},
+        }
+    }
+    child["steps"]["tell"]["inputs"]["to_customer"] = {"var": "contact"}
+    issues = validate_case(parse_case(customer_vehicle()), CATALOG, cases={"repair@3": child})
+    assert [i.path for i in issues if i.code == "INPUT_POLICY"] == ["steps.repair.inputs.vehicle"]
