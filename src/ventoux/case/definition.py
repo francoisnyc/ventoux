@@ -68,6 +68,10 @@ Roles = Annotated[tuple[RoleName, ...], AfterValidator(some_roles)]
 PlanReference = Annotated[
     str, matching(r"[a-z][a-z0-9-]*@[1-9][0-9]*", 'a plan reference looks like "refund-order@1"')
 ]
+# A child case, by its name and the release its parent pins: `repair@3` (brief, D74).
+CaseReference = Annotated[
+    str, matching(r"[a-z][a-z0-9-]*@[1-9][0-9]*", 'a case reference looks like "repair@3"')
+]
 
 
 class Shape(BaseModel):
@@ -349,6 +353,16 @@ class PlanStep(Step):
         return data
 
 
+class CaseStep(Step):
+    """A whole case opened from this step, a child of this case: its opening given from the case
+    file, and its end report read back as the step's outputs (brief, D74)."""
+
+    kind: Literal["case"]
+    case: CaseReference  # the child, with the release this case pins
+    inputs: dict[Name, PlanExpression] = {}  # each of the child's opening fields, from the file
+    max_age: MaxAge = {}  # how old each fact it reads may be when it runs (brief, D18)
+
+
 class Then(Shape):
     """What a rule does when it fires: stop steps (brief, D40), set fields (brief, D42), reach
     milestones (brief, D38), start steps (brief, D39). Done in that order."""
@@ -592,6 +606,7 @@ type AnyStep = Annotated[
     Annotated[TaskStep, Tag("task step")]
     | Annotated[ActivityStep, Tag("activity step")]
     | Annotated[PlanStep, Tag("plan step")]
+    | Annotated[CaseStep, Tag("case step")]
     | Annotated[WorkflowStep, Tag("workflow step")]
     | Annotated[WaitStep, Tag("wait step")],
     Discriminator(kind_of),
@@ -931,7 +946,7 @@ def expressions_in(case: CaseDefinition) -> list[tuple[str, str | None, PlanExpr
 
 def step_problems(
     path: str,
-    step: TaskStep | CallStep | PlanStep | WaitStep,
+    step: TaskStep | CallStep | PlanStep | CaseStep | WaitStep,
     case: CaseDefinition,
     rule_starts: bool,
 ) -> list[str]:
@@ -1145,7 +1160,7 @@ def parse_case(data: object) -> CaseDefinition:
         raise CaseInvalid("\n".join(problem(e) for e in error.errors())) from None
 
 
-STEP_KINDS = "a task, an activity, a plan, a workflow or a wait"
+STEP_KINDS = "a task, an activity, a plan, a case, a workflow or a wait"
 
 
 def problem(error: Any) -> str:

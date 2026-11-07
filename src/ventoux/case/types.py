@@ -15,6 +15,7 @@ from ventoux.case.definition import (
     ActivityStep,
     CallStep,
     CaseDefinition,
+    CaseStep,
     PlanStep,
     TaskStep,
     WaitStep,
@@ -57,6 +58,8 @@ def case_types(case: CaseDefinition, catalog: Catalog) -> dict[str, FieldType]:
     for name, step in case.steps.items():
         if isinstance(step, WaitStep):
             continue  # a wait gives no value: its event's payload is the event's
+        if isinstance(step, CaseStep):
+            continue  # its values are its child's report; with no child read, none (fail closed)
         if isinstance(step, TaskStep):
             types[f"{name}.outcome"] = OutcomeType(outcomes=tuple(step.outcomes))
         elif isinstance(step, PlanStep):
@@ -125,7 +128,7 @@ def fits_type(given: FieldType, wanted: FieldType) -> bool | None:
 
 
 def expressions_of(
-    step: TaskStep | CallStep | PlanStep | WaitStep,
+    step: TaskStep | CallStep | PlanStep | CaseStep | WaitStep,
 ) -> list[tuple[str, Expression, bool]]:
     """Each expression the step reads, where it is in the step, and whether it is a condition:
     its `when`, its approval's `when`, its inputs."""

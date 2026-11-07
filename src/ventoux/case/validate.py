@@ -13,6 +13,7 @@ from ventoux.case.calls import (
     expression_issues,
     plan_input_issues,
     supplied_plans,
+    unknown_cases,
 )
 from ventoux.case.definition import (
     After,
@@ -73,11 +74,15 @@ from ventoux.core.validate import Issue
 
 
 def validate_case(
-    case: CaseDefinition, catalog: Catalog, plans: Mapping[str, Any] | None = None
+    case: CaseDefinition,
+    catalog: Catalog,
+    plans: Mapping[str, Any] | None = None,
+    cases: Mapping[str, Any] | None = None,
 ) -> list[Issue]:
-    """Every problem in `case`, a parsed case definition, read against `catalog` and the `plans`
-    the deployment supplies, stored data by reference (`refund-order@1`), as the runtime is given
-    them. No plans means none: a plan step's plan is then missing (fail closed)."""
+    """Every problem in `case`, a parsed case definition, read against `catalog`, the `plans`
+    the deployment supplies and the child `cases` its package holds, each stored data by reference
+    (`refund-order@1`, `repair@3`), as the runtime is given them. No plans or cases means none: a
+    plan step's plan, or a case step's child, is then missing (fail closed)."""
     # Fail closed: anything but a parsed definition is refused, never read as one with no problems.
     if not isinstance(case, CaseDefinition):
         raise TypeError(
@@ -95,6 +100,7 @@ def validate_case(
     contracts, unknown_contracts = called_contracts(case, catalog)
     supplied, unknown_plans = supplied_plans(case, plans or {})
     found += unknown_contracts + unknown_plans
+    found += unknown_cases(case, cases or {})
     found += contract_input_issues(case, contracts) + plan_input_issues(case, supplied)
     calling = {name for name, step in case.steps.items() if isinstance(step, CallStep | PlanStep)}
     missing = calling - set(contracts) - set(supplied)

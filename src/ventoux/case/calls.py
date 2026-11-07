@@ -8,7 +8,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from ventoux.case.called import called
-from ventoux.case.definition import ActivityStep, CallStep, CaseDefinition, PlanStep, WorkflowStep
+from ventoux.case.definition import (
+    ActivityStep,
+    CallStep,
+    CaseDefinition,
+    CaseStep,
+    PlanStep,
+    WorkflowStep,
+)
 from ventoux.case.plan_step import PlanNotSupplied, supplied
 from ventoux.case.types import expressions_of, set_problem, step_types, type_problem
 from ventoux.core.approval import risk_refusal
@@ -67,6 +74,20 @@ def supplied_plans(
             fix = "" if step.plan in plans else ": supply it with the deployment's plans"
             issues.append(Issue(f"steps.{name}.plan", "UNKNOWN_PLAN", f"{missing}{fix}"))
     return found, issues
+
+
+def unknown_cases(case: CaseDefinition, cases: Mapping[str, Any]) -> list[Issue]:
+    """An issue for each case step whose child isn't supplied, by its reference (brief, D74). A
+    case references its child, never defines it: the parent's package holds it, under `cases/`."""
+    return [
+        Issue(
+            f"steps.{name}.case",
+            "UNKNOWN_CASE",
+            f"{step.case} isn't supplied: add it to the package's cases/",
+        )
+        for name, step in case.steps.items()
+        if isinstance(step, CaseStep) and step.case not in cases
+    ]
 
 
 def contract_input_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> list[Issue]:

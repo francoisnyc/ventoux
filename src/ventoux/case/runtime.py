@@ -64,6 +64,7 @@ from ventoux.case.definition import (
     ActivityStep,
     CallStep,
     CaseDefinition,
+    CaseStep,
     DeclaredEvent,
     PlanStep,
     Step,
@@ -1412,7 +1413,7 @@ def retry(
 
 
 def reads_a_stale_fact(
-    step: TaskStep | CallStep | PlanStep | WaitStep, state: CaseState, at: int
+    step: TaskStep | CallStep | PlanStep | CaseStep | WaitStep, state: CaseState, at: int
 ) -> bool:
     """Whether the step's condition reads a fact the step needs fresh that is too old at `at`."""
     if not isinstance(step, CallStep | PlanStep) or step.when is None:
@@ -1644,7 +1645,7 @@ def is_from_a_person(state: CaseState, field: str) -> bool:
 
 
 def free_to_start(
-    state: CaseState, name: str, step: TaskStep | CallStep | PlanStep | WaitStep
+    state: CaseState, name: str, step: TaskStep | CallStep | PlanStep | CaseStep | WaitStep
 ) -> bool:
     """Whether the step may start by itself: it isn't waiting for its approval, and it starts by
     itself and hasn't started before; or its approval was just given; or a person proposed it,
@@ -1770,7 +1771,7 @@ def start(
     catalog: Catalog,
     state: CaseState,
     name: str,
-    step: TaskStep | CallStep | PlanStep | WaitStep,
+    step: TaskStep | CallStep | PlanStep | CaseStep | WaitStep,
     commands: list[Command],
 ) -> None:
     """Open a task's run, or a wait's; start a plan; ask for an activity's or a workflow's
@@ -1778,6 +1779,9 @@ def start(
     if isinstance(step, PlanStep):
         start_plan(case, catalog, state, name, step, commands)
         return
+    if isinstance(step, CaseStep):
+        # Replaced in this layer's slice that opens a child: until then, never a silent start.
+        raise NotImplementedError(f"{name}: a case step can't open its child yet")
     if isinstance(step, WaitStep):
         # Open until the event's next arrival: pending work, listed with what it waits for
         # (brief, D10) (brief, D24) (brief, D41).

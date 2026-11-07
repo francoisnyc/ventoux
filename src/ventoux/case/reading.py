@@ -16,6 +16,7 @@ from ventoux.case.definition import (
     AnsweredTask,
     CallStep,
     CaseDefinition,
+    CaseStep,
     EventArrived,
     PlanStep,
     Reached,
@@ -563,7 +564,7 @@ def read_step(name: str, case: CaseDefinition, catalog: Catalog) -> EntryReading
     """A step: what it is, when it may start, who approves it, what it reaches and how old its
     facts may be (brief, D56)."""
     step = case.steps[name]
-    if not isinstance(step, TaskStep | CallStep | PlanStep | WaitStep):
+    if not isinstance(step, TaskStep | CallStep | PlanStep | CaseStep | WaitStep):
         # Fail closed: a kind of step the reader doesn't know is refused, never guessed.
         raise ReadingRefused(f"can't read {name}: {step!r} is no kind of step")
     sentences = [what_it_is(name, step, catalog), when_it_starts(name, step, case)]
@@ -630,7 +631,7 @@ def giving(name: str, inputs: Mapping[str, Expression]) -> str:
 
 
 def when_it_starts(
-    name: str, step: TaskStep | CallStep | PlanStep | WaitStep, case: CaseDefinition
+    name: str, step: TaskStep | CallStep | PlanStep | CaseStep | WaitStep, case: CaseDefinition
 ) -> str:
     """`It starts by itself once review is done, if review.outcome = "approve".`"""
     required = [
