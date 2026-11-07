@@ -14,7 +14,7 @@ import pytest
 
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG
+from ventoux.testing import CATALOG, run_case
 
 ROOT = Path(__file__).parent.parent
 GUIDE = ROOT / "docs" / "guides" / "cases.md"
@@ -45,7 +45,7 @@ def claim() -> dict[str, Any]:
             "assess": {
                 "kind": "task",
                 "display": {"title": "Assess the claim"},
-                "roles": ["adjuster"],
+                "roles": ["support"],
                 "outcomes": {
                     "accept": {
                         "display": {"title": "Accept the claim"},
@@ -111,7 +111,7 @@ def repair() -> dict[str, Any]:
             "fix": {
                 "kind": "task",
                 "display": {"title": "Fix the vehicle"},
-                "roles": ["garage"],
+                "roles": ["support-lead"],
                 "outcomes": {
                     "fixed": {
                         "display": {"title": "Fixed"},
@@ -135,7 +135,7 @@ def repair() -> dict[str, Any]:
         ),
         (
             "owner",
-            {"type": "string", "sensitive": True, "visible_to": ["garage"]},
+            {"type": "string", "sensitive": True, "visible_to": ["support-lead"]},
             "reports.owner: owner is sensitive, and a report carries no sensitive field yet",
         ),
         (
@@ -233,7 +233,7 @@ def test_a_sensitive_value_enters_a_child_only_into_a_sensitive_field() -> None:
         "type": "string",
         "display": {"title": "Owner"},
         "sensitive": True,
-        "visible_to": ["adjuster"],
+        "visible_to": ["support"],
     }
     definition["steps"]["repair"]["inputs"]["owner"] = {"var": "owner"}
     child = repair()
@@ -248,7 +248,7 @@ def test_a_sensitive_value_enters_a_child_only_into_a_sensitive_field() -> None:
         )
     ]
     assert issues_of(definition, child, "SENSITIVE_TO_CHILD") == expected
-    child["fields"]["owner"] |= {"sensitive": True, "visible_to": ["garage"]}
+    child["fields"]["owner"] |= {"sensitive": True, "visible_to": ["support-lead"]}
     assert issues_of(definition, child, "SENSITIVE_TO_CHILD") == []
 
 
@@ -280,3 +280,33 @@ def test_a_child_supplied_under_another_name_or_unreadable_is_refused() -> None:
     assert issues_of(claim(), child, "UNKNOWN_CASE") == [
         ("steps.repair.case", "repair@3 can't be read: display: required")
     ]
+
+
+# --- Slice 4: the guide's example, run as written (brief, D74) ---
+
+PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"], "lee": ["support-lead"]}
+
+
+def guide_python() -> str:
+    """The section's example, as the guide writes it."""
+    section = GUIDE.read_text().split(SECTION)[1]
+    return section.split("```python\n")[1].split("```")[0]
+
+
+def guide_history() -> list[str]:
+    """The history lines the section shows."""
+    section = GUIDE.read_text().split(SECTION)[1]
+    return section.split("```\n")[2].split("```")[0].splitlines()
+
+
+def test_the_guides_child_case_runs_as_written() -> None:
+    # Our own documentation, run so it can't drift from the code; never a definition (data).
+    namespace = {"run_case": run_case, "claim_with_repair": claim(), "repair": repair()}
+    namespace["PEOPLE"] = PEOPLE
+    exec(guide_python(), namespace)  # noqa: S102 -- our guide, as in layer 7
+    run = namespace["run"]
+    shown = guide_history()
+    assert [line for line in run.history if line in shown] == shown
+    child = run.children["repair#1"]
+    assert child.closed
+    assert child.history[0] == "opened by memory, from repair#1, with budget, vehicle"

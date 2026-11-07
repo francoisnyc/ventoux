@@ -3118,6 +3118,15 @@ kept. Temporal's part (choices 24, 28 and continue-as-new) is 18d's, decided as 
 - **One level only** (a deliberate limit, D48): a child's definition has no case step of its own,
   refused when the parent is validated. That bounds what one close must reach, and no case opens
   itself.
+- **`case:<child>` is a trusted origin** (adds to D12; decided 2026-11-07, while building 18c):
+  it records the route a value took, and the value's own sources decide its trust, so
+  `person:lee, case:repair` is trusted and `untrusted:customer, case:repair` is not. `only_from`
+  still refuses it: a value from a child comes from no system it names. The child's outcome
+  carries `case:repair` alone, as a plan's carries `system:refund-order@1`: the child's reviewed
+  release declares its close reasons.
+- **The parent holds its pinned children as stored data, by reference,** given when it opens, as a
+  case's start holds its plans: the engine reads each child's outcomes and reported fields from
+  them, so `repair.cost` is type-checked at runtime as at validation.
 - **No new engine version (D51):** no definition readable before has a case step.
 
 ## Concepts

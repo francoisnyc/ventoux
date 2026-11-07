@@ -3016,7 +3016,7 @@ assert run.reached("repair")
 ```
 started repair#1: case repair@3 (vehicle from system:opener; budget from person:ana), run memory/repair#1
 repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost
-scheduled pay_garage#1: payments.refund@2 (order_id from system:opener; amount from person:lee, case:repair), key memory/pay_garage#1
+asked pay_garage.approval#1: approval of pay_garage by support-lead
 ```
 
 A child whose script isn't finished keeps the step running, and the parent open: its

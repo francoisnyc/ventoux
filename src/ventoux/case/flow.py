@@ -155,8 +155,8 @@ def type_issues(
     children: Mapping[str, CaseDefinition] | None = None,
 ) -> list[Issue]:
     """Each input given a value of another type than it takes: a contract's (strict validation,
-    G6), a plan's field (the plan's start, G7) or a child case's field (its opening, brief, D74).
-    Never converted (brief, D36). A plan's reference is `REFERENCE`'s, an input already refused
+    G6), a plan's field (the plan's start, G7) or a child case's field (its opening)
+    (brief, D74). Never converted (brief, D36). A plan's reference is `REFERENCE`'s, an input already refused
     isn't asked again (one cause, one issue)."""
     types = case_types(case, catalog)
     wanted: list[tuple[str, str, str, FieldType | None, str]] = []

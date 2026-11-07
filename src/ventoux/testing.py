@@ -17,13 +17,14 @@ from ventoux.case.admission import ProposalRefused, RetryRefused, StepStopped
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.claims import ClaimRefused
 from ventoux.case.closing import CloseRefused
-from ventoux.case.definition import parse_case
+from ventoux.case.definition import CaseDefinition, parse_case
 from ventoux.case.engine import ENGINE
 from ventoux.case.freshness import seconds_in
 from ventoux.case.memory import (
     Activity,
     Advance,
     CaseRun,
+    ChildRunner,
     Finish,
     PlanRunner,
     as_json,
@@ -38,6 +39,8 @@ from ventoux.case.runtime import CaseRefused, EventRefused
 from ventoux.case.state import (
     Answered,
     Assigned,
+    CaseEnded,
+    CaseState,
     ChangeProposed,
     Claimed,
     CloseAsked,
@@ -46,6 +49,7 @@ from ventoux.case.state import (
     Failed,
     ForgetApproved,
     GivenBack,
+    OpenCase,
     Opened,
     Proposed,
     Retried,
@@ -504,6 +508,8 @@ def run_case(
     at: int = START,
     release: Record | None = None,
     engine: int = ENGINE,
+    cases: Mapping[str, Any] | None = None,
+    case_answers: Mapping[str, Sequence[Any]] | None = None,
 ) -> CaseRun:
     """Open a case with `file`, play the scripted `answers` in order, and report where it ended.
     Each answer is `(step or entry, outcome, who)` or `(step or entry, outcome, who, form)`.
@@ -518,7 +524,10 @@ def run_case(
     fake workflows; a workflow contract with none is not bound, and its step fails. The case opens
     at `at`, seconds since the epoch; `later("3d")` in the script moves time on, every timer due
     by then fires, and every event after it happens then. `definition` may be the builder's
-    `Case`: its JSON is written and read back, and that runs, as the engine would get it."""
+    `Case`: its JSON is written and read back, and that runs, as the engine would get it.
+    `cases` gives the child cases its case steps open, as stored data, by reference (`repair@3`);
+    `case_answers` gives each child its own script, by step or by entry (`repair#2`), in the
+    form `answers` takes. A child plays it as it opens; its `CaseRun` is in `children`."""
     if isinstance(definition, Case):
         # The JSON runs, never the builder's objects (brief, D58).
         definition = json.loads(written(definition), parse_float=Decimal)
@@ -536,8 +545,90 @@ def run_case(
             release=named,
             # The test plays the API: it states the opener's roles too (brief, D71).
             roles=frozenset(people.get(opened_by, ())) if opened_by is not None else frozenset(),
+            cases=dict(cases or {}),
         )
     ]
+    events += script_events(answers, people, now)
+    implementations = {**FAKES, **activities}
+    runner = plan_runner(plans or {}, plan_answers or {}, implementations, people, catalog)
+    bound = {**WORKFLOW_FAKES, **workflows}
+    ran: dict[str, CaseRun] = {}
+    children = child_runner(case_answers or {}, people, catalog, implementations, bound, ran)
+    run = run_case_in_memory(
+        case,
+        catalog,
+        implementations,
+        events,
+        held=held,
+        plans=runner,
+        workflows=bound,
+        children=children,
+    )
+    run.children.update(ran)
+    return run
+
+
+def child_runner(
+    case_answers: Mapping[str, Sequence[Any]],
+    people: Mapping[str, Iterable[str]],
+    catalog: Catalog,
+    activities: Mapping[str, Activity],
+    workflows: Mapping[str, Activity],
+    ran: dict[str, CaseRun],
+) -> ChildRunner:
+    """Opens a case step's child in memory, plays its script, and says how it ended as an event;
+    or None while it is open (brief, D74). Each child's run is kept in `ran`, by entry. The child
+    reads `catalog`, and calls `activities` and `workflows`, as its parent does."""
+
+    def run(command: OpenCase, at: int) -> CaseEnded | Failed | None:
+        child = parse_case(command.definition)  # validated with its parent, in its package
+        step = command.entry.split("#")[0]
+        script = case_answers.get(command.entry, case_answers.get(step, ()))
+        parent = command.run.rpartition("/")[0]
+        opened = Opened(
+            {name: given.value for name, given in command.fields.items()},
+            None,  # opened by its parent case, never by a person (brief, D74)
+            at=at,
+            parent=(parent, command.entry),
+            sources={name: given.sources for name, given in command.fields.items()},
+        )
+        events = [opened, *script_events(script, people, at)]
+        child_run = run_case_in_memory(
+            child, catalog, activities, events, name=command.run, workflows=workflows
+        )
+        ran[command.entry] = child_run
+        if not child_run.closed:
+            return None  # open: the step runs on
+        return ended(command.entry, child, child_run.state, at)
+
+    return run
+
+
+def ended(entry: str, child: CaseDefinition, state: CaseState, at: int) -> CaseEnded:
+    """How a closed child reports to its parent: its outcome, its closed line, the milestones it
+    reached, and each field it reports that is set, with its sources (brief, D74)."""
+    closed = next(line for line in reversed(state.history) if line.startswith("closed: "))
+    return CaseEnded(
+        entry,
+        state.closed_as or "done",
+        closed.removeprefix("closed: "),
+        tuple(state.milestones),
+        {
+            name: Sourced(state.values[name], state.sources[name])
+            for name in child.reports
+            if name in state.values
+        },
+        at=at,
+    )
+
+
+def script_events(
+    answers: Sequence[Any], people: Mapping[str, Iterable[str]], at: int
+) -> list[Event | Finish | Advance]:
+    """The events a script plays after the opening at `at`, as the Ventoux API would send them:
+    each answer, proposal, request and `later`, with who sent it and their roles."""
+    now = at
+    events: list[Event | Finish | Advance] = []
     for item in answers:
         if isinstance(item, Later):
             now += item.seconds
@@ -614,12 +705,7 @@ def run_case(
             {name: Sensitive(value) for name, value in as_json(form[0]).items()} if form else None
         )
         events.append(Answered(entry, outcome, who, roles, given, at=now))
-    implementations = {**FAKES, **activities}
-    runner = plan_runner(plans or {}, plan_answers or {}, implementations, people, catalog)
-    bound = {**WORKFLOW_FAKES, **workflows}
-    return run_case_in_memory(
-        case, catalog, implementations, events, held=held, plans=runner, workflows=bound
-    )
+    return events
 
 
 def plan_runner(

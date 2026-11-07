@@ -4,6 +4,7 @@ own: the runtime depends on nothing validation did (brief, D34). See
 docs/layers/10-case-validation.md (10b).
 """
 
+from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
 
@@ -15,10 +16,12 @@ from ventoux.case.definition import (
     ActivityStep,
     CallStep,
     CaseDefinition,
+    CaseInvalid,
     CaseStep,
     PlanStep,
     TaskStep,
     WaitStep,
+    parse_case,
 )
 from ventoux.core.catalog import Catalog, NotInCatalog
 from ventoux.core.contract import ActivityContract
@@ -44,12 +47,15 @@ DONE = "done"  # how every run that succeeds ends
 FAILED = "failed"  # how a plan ending in a failed final state ends (brief, D28)
 
 
-def case_types(case: CaseDefinition, catalog: Catalog) -> dict[str, FieldType]:
+def case_types(
+    case: CaseDefinition, catalog: Catalog, cases: Mapping[str, object] | None = None
+) -> dict[str, FieldType]:
     """Every value `case` holds, by the name an expression reads it with, and its type: each field;
     each step's outcome, a closed list (brief, D9); each output its contract declares (brief, D29);
-    each value an event carries (brief, D41).
-    A step whose contract the catalog can't give has no values here, so reading one is an error
-    (fail closed)."""
+    each value an event carries (brief, D41); each child case's outcome and the fields it reports,
+    read from the pinned `cases` (brief, D74).
+    A step whose contract the catalog can't give, or whose child isn't in `cases`, has no values
+    here, so reading one is an error (fail closed)."""
     types: dict[str, FieldType] = {name: field.declared for name, field in case.fields.items()}
     # Each value an event from outside carries, as its payload declares it (brief, D41).
     for name, event in case.events.items():
@@ -59,7 +65,14 @@ def case_types(case: CaseDefinition, catalog: Catalog) -> dict[str, FieldType]:
         if isinstance(step, WaitStep):
             continue  # a wait gives no value: its event's payload is the event's
         if isinstance(step, CaseStep):
-            continue  # its values are its child's report; with no child read, none (fail closed)
+            child = readable_child(cases or {}, step.case)
+            if child is None:
+                continue  # no child read, so no values: reading one is an error (fail closed)
+            # `done`, or a close reason a person closed it with (brief, D74).
+            types[f"{name}.outcome"] = OutcomeType(outcomes=(DONE, *child.close_reasons))
+            for field in child.reports:
+                types[f"{name}.{field}"] = child.fields[field].declared
+            continue
         if isinstance(step, TaskStep):
             types[f"{name}.outcome"] = OutcomeType(outcomes=tuple(step.outcomes))
         elif isinstance(step, PlanStep):
@@ -79,6 +92,18 @@ def case_types(case: CaseDefinition, catalog: Catalog) -> dict[str, FieldType]:
                 if found is not None:
                     types[f"{name}.{field}"] = found
     return types
+
+
+def readable_child(cases: Mapping[str, object], reference: str) -> CaseDefinition | None:
+    """The child case `reference` names, read from `cases`, or None if it isn't there, can't be
+    read, or is another case: validation says which (brief, D74)."""
+    if reference not in cases:
+        return None
+    try:
+        child = parse_case(cases[reference])
+    except CaseInvalid:
+        return None
+    return child if child.case == reference.split("@")[0] else None
 
 
 def output_type(info: FieldInfo, system: str | None) -> FieldType | None:
@@ -173,11 +198,13 @@ def step_types(
     return types | {f"{EACH}.{field}": kind for field, kind in listed.fields.items()}
 
 
-def expression_problem(case: CaseDefinition, catalog: Catalog, name: str) -> str | None:
+def expression_problem(
+    case: CaseDefinition, catalog: Catalog, name: str, cases: Mapping[str, object] | None = None
+) -> str | None:
     """Why the step `name` can't read its expressions, or None: the first that doesn't check,
     said as `pay.when can't be read: …`. The runtime asks before reading them, so a misspelt
     outcome fails the step instead of reading as false (brief, D35)."""
-    types = step_types(case, case_types(case, catalog), name)
+    types = step_types(case, case_types(case, catalog, cases), name)
     for where, expression, condition in expressions_of(case.steps[name]):
         problem = type_problem(expression, types, condition)
         if problem is not None:
@@ -185,11 +212,13 @@ def expression_problem(case: CaseDefinition, catalog: Catalog, name: str) -> str
     return None
 
 
-def rule_problem(case: CaseDefinition, catalog: Catalog, name: str) -> str | None:
+def rule_problem(
+    case: CaseDefinition, catalog: Catalog, name: str, cases: Mapping[str, object] | None = None
+) -> str | None:
     """Why the rule `name` can't read its condition, or None, said as `flag_large.when can't be
     read: …`: asked before it is read, as for a step (brief, D35) (brief, D38)."""
     rule = case.rules[name]
-    types = case_types(case, catalog)
+    types = case_types(case, catalog, cases)
     problem = None if rule.when is None else type_problem(rule.when, types, True)
     if problem is not None:
         return f"{name}.when can't be read: {problem}"

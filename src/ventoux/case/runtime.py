@@ -88,6 +88,7 @@ from ventoux.case.state import (
     CLOSING,
     Answered,
     Assigned,
+    CaseEnded,
     CaseState,
     ChangeProposed,
     Claimed,
@@ -105,6 +106,7 @@ from ventoux.case.state import (
     Moment,
     Obtained,
     OpenApproval,
+    OpenCase,
     Opened,
     PlanCancelled,
     Proposed,
@@ -244,6 +246,7 @@ def decide(
         role = refuse_to_close(case, catalog, state, event)
         state.history.append(f"{event.by} closed the case as {event.reason}, as {role}")
         why = f"closed as {event.reason} by {event.by}"
+        state.closed_as = event.reason  # a child reports it as its outcome (brief, D74)
         begin_closing(state, why, f"{event.reason}, by {event.by}")
     else:
         complete(case, catalog, state, event)
@@ -474,14 +477,21 @@ def open_case(case: CaseDefinition, catalog: Catalog, state: CaseState, event: O
         state.opener = Holder(event.by, event.roles, at=event.at)
     state.engine = known(event.engine)  # set once, here, never by itself after (brief, D51)
     state.release = event.release
+    state.cases = dict(event.cases)  # the children its release pins (brief, D74)
     if event.release is not None:  # a draft's history is as it was before releases
         state.history.append(f"opened on {event.release}, engine {state.engine}")
     origin = OPENER if event.by is None else f"person:{event.by}"
     for name, value in event.file.items():
         state.values[name] = kept(case, name, value)
-        state.sources[name] = marked(case, name, origin)
+        # A child's value keeps the sources it had in its parent: a budget a person set is still
+        # that person's (brief, D74).
+        given = None if event.sources is None else event.sources.get(name)
+        state.sources[name] = marked(case, name, origin) if given is None else given
         state.obtained[name] = Obtained(event.at, None)  # from the opening, by no step run
-    state.history.append(f"opened by {event.by or OPENER}, with {listed(sorted(event.file))}")
+    opener = event.by or OPENER
+    if event.parent is not None:  # opened by its parent case, never by a person (brief, D74)
+        opener = f"{event.parent[0]}, from {event.parent[1]}"
+    state.history.append(f"opened by {opener}, with {listed(sorted(event.file))}")
     state.moments.append(Moment("opened"))
 
 
@@ -711,7 +721,7 @@ def propose(
     if refusal is not None:
         raise ProposalRefused(refusal)
     # Its expressions checked over the case's types before any is read (brief, D35).
-    if (problem := expression_problem(case, catalog, event.step)) is not None:
+    if (problem := expression_problem(case, catalog, event.step, state.cases)) is not None:
         raise ProposalRefused(problem)
     suggested = ", suggested by the step advisor" if event.suggested_by is not None else ""
     state.history.append(f"{event.by} proposed {event.step} as {role}{suggested}")
@@ -975,11 +985,20 @@ def answer_approval(
     state.history.append(f"{entry} won't run: {rejected}")
 
 
-def complete(case: CaseDefinition, catalog: Catalog, state: CaseState, event: Completed) -> None:
+def complete(
+    case: CaseDefinition, catalog: Catalog, state: CaseState, event: Completed | CaseEnded
+) -> None:
     """A scheduled activity, a workflow or a plan finished: its outcome lands in the case file,
     tagged with the contract (or plan) that declares it, and so does an activity's or a workflow's
     output, each field tagged with its contract's source (brief, D29). A run untrusted data
     steered adds what steered it to each, and reaches nothing (brief, D43)."""
+    run = next((run for run in state.runs if run.entry == event.entry), None)
+    if isinstance(event, CaseEnded):
+        assert run is not None  # only a running child ends, by its parent's driver
+        step = case.steps[run.step]
+        assert isinstance(step, CaseStep)  # only a case step opens a child
+        child_ended(state, run, step, event)
+        return
     if (checking := checked_answer(state, event.entry)) is not None:
         check_answered(case, catalog, state, checking, event)
         return
@@ -1375,7 +1394,7 @@ def retry(
                 f"{event.entry} can't be retried: {run.step} requires {requirement}, which "
                 "hasn't completed"
             )
-    if (problem := expression_problem(case, catalog, run.step)) is not None:
+    if (problem := expression_problem(case, catalog, run.step, state.cases)) is not None:
         raise RetryRefused(f"{event.entry} can't be retried: {problem}")
     values = state.values
     if run.item is not None:  # a repeated run reads its item (brief, D73)
@@ -1461,7 +1480,7 @@ def admit(
             try:
                 # Every expression it reads is checked over the case's types first, so a misspelt
                 # outcome fails the step instead of reading as false (brief, D35).
-                if (problem := expression_problem(case, catalog, name)) is not None:
+                if (problem := expression_problem(case, catalog, name, state.cases)) is not None:
                     raise StepStopped(problem)
                 # Freshness first, before the condition, the approval and the start, so each
                 # reads fresh facts (brief, D18) (brief, D33).
@@ -1693,7 +1712,7 @@ def start_from_rules(
             refusal = proposal_refusal(case, name, required[name], state)
         if refusal is None:
             try:
-                if (problem := expression_problem(case, catalog, name)) is not None:
+                if (problem := expression_problem(case, catalog, name, state.cases)) is not None:
                     raise StepStopped(problem)
                 if isinstance(step, CallStep | PlanStep):
                     never_waits(case, catalog, state, name, step, at)
@@ -1780,8 +1799,8 @@ def start(
         start_plan(case, catalog, state, name, step, commands)
         return
     if isinstance(step, CaseStep):
-        # Replaced in this layer's slice that opens a child: until then, never a silent start.
-        raise NotImplementedError(f"{name}: a case step can't open its child yet")
+        open_child(state, name, step, commands)
+        return
     if isinstance(step, WaitStep):
         # Open until the event's next arrival: pending work, listed with what it waits for
         # (brief, D10) (brief, D24) (brief, D41).
@@ -1858,7 +1877,7 @@ def start_items(
         return True
     # Every expression it reads is checked over the case's types and its item's first, so a
     # misspelt outcome fails it instead of reading as false (brief, D35).
-    if (problem := expression_problem(case, catalog, name)) is not None:
+    if (problem := expression_problem(case, catalog, name, state.cases)) is not None:
         fail(state, name, problem)
         return True
     started = False
@@ -2141,6 +2160,59 @@ def start_plan(
     commands.append(
         StartPlan(run.entry, step.plan, fields, plan_run, excluded, references, steered)
     )
+
+
+def open_child(state: CaseState, name: str, step: CaseStep, commands: list[Command]) -> None:
+    """Open the step's child case with its opening, each value with where it came from, so the
+    child's own checks see the real sources (brief, D74). The child checks its opening when it
+    opens, as any case does."""
+    fields: dict[str, Sourced] = {}
+    for field, expression in step.inputs.items():
+        try:
+            value = evaluate(expression, state.values)
+            fields[field] = Sourced(
+                kept_sensitive(expression, state.values, value),  # wrapped into the child too
+                provenance(expression, state.sources),
+            )
+        except (ExpressionError, NoSources) as error:
+            # Fail closed: a field that can't be read gets no default; the step fails.
+            raise InputRefused(f"{field} can't be evaluated: {error}") from None
+    run = coming_run(state, name, "running")
+    # Who may approve nothing in the child crosses into it, as into a plan (brief, D25).
+    excluded = may_not_approve(state, name, run)
+    run.excluded = excluded
+    proposal_spent(state, name)  # the proposed run has started
+    child_run = f"{state.case}/{run.entry}"
+    state.history.append(
+        f"started {run.entry}: case {step.case} ({origins(step.inputs, state)}), run {child_run}"
+    )
+    definition = state.cases[step.case]  # validated: the package holds every child it pins
+    commands.append(OpenCase(run.entry, step.case, definition, fields, child_run, excluded))
+
+
+def child_ended(state: CaseState, run: StepRun, step: CaseStep, event: CaseEnded) -> None:
+    """A case step's child closed: its outcome, and each field it reports, land as the step's
+    outputs, each with its sources in the child and `case:<child>`, the route it came by. A child
+    never writes into its parent's case file (brief, D74)."""
+    route = f"case:{step.case.split('@')[0]}"
+    run.status = "done"
+    state.values[f"{run.step}.outcome"] = event.outcome
+    # Trusted: the child's reviewed release declares its close reasons, as a plan its outcomes.
+    state.sources[f"{run.step}.outcome"] = frozenset({route})
+    state.obtained[f"{run.step}.outcome"] = Obtained(event.at, run.entry)
+    for field, given in event.report.items():
+        state.values[f"{run.step}.{field}"] = given.value
+        state.sources[f"{run.step}.{field}"] = given.sources | {route}
+        state.obtained[f"{run.step}.{field}"] = Obtained(event.at, run.entry)
+    child = step.case.split("@")[0]
+    reaching = f", reaching {listed(list(event.reached))}" if event.reached else ""
+    reported = listed(sorted(event.report)) or "nothing"
+    state.history.append(
+        f"{run.entry} done: {child} closed, {event.closed}{reaching}; reporting {reported}"
+    )
+    if event.outcome == DONE:
+        reach_unless_steered(state, run, step.reaches)
+    flag_if_stopping(state, run)
 
 
 def may_not_approve(state: CaseState, name: str, run: StepRun) -> dict[str, str]:

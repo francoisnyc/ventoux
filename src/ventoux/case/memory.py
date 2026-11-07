@@ -17,10 +17,12 @@ from ventoux.case.owing import attention, waiting_for
 from ventoux.case.runtime import decide
 from ventoux.case.state import (
     CancelWorkflow,
+    CaseEnded,
     CaseState,
     Completed,
     Event,
     Failed,
+    OpenCase,
     PlanCancelled,
     Schedule,
     StartPlan,
@@ -41,6 +43,17 @@ Activity = Callable[[dict[str, Any]], dict[str, Any]]
 # it waits for an answer nobody has given, and the step keeps running. Given by the caller: running
 # a plan is `async` (layer 5), and `case` doesn't import `asyncio` (layer 6's boundary test).
 PlanRunner = Callable[[StartPlan, int], Completed | Failed | None]
+
+
+# Opens a case step's child and runs it as far as it goes: how it ended, as an event at the time
+# given; or None while it is open, and the step keeps running. Given by the caller, which knows
+# the child's script, as a plan's runner knows the plan's (brief, D74).
+ChildRunner = Callable[[OpenCase, int], CaseEnded | Failed | None]
+
+
+def no_children(command: OpenCase, at: int) -> Failed:
+    """A driver that runs no child cases: a case step fails, and a person looks at it."""
+    return Failed(command.entry, f"{command.case} can't open here: no child cases run", at=at)
 
 
 def no_plans(command: StartPlan, at: int) -> Failed:
@@ -66,6 +79,9 @@ class CaseRun:
     # Each timer still set, soonest first, with its due time: pending work that waits on nobody,
     # so never in `waiting_for` (brief, D24) (brief, D44).
     timers: list[str]
+    # Each child case its case steps opened, as it ended, by the entry that opened it
+    # (brief, D74).
+    children: dict[str, "CaseRun"] = field(default_factory=dict[str, "CaseRun"])
 
     def view(self, roles: Iterable[str]) -> CaseView:
         """The case file as a person holding `roles` sees it (brief, D30)."""
@@ -116,6 +132,7 @@ def run_case_in_memory(
     held: Iterable[str] = (),
     plans: PlanRunner = no_plans,
     workflows: Mapping[str, Activity] | None = None,
+    children: ChildRunner = no_children,
 ) -> CaseRun:
     """Play `events` in order, the first opening the case; `name` names the case in its keys.
     The runs of the steps in `held` keep running until a `Finish` names them, so a test can
@@ -123,7 +140,9 @@ def run_case_in_memory(
     to the code that runs it, by reference; one it doesn't bind fails its step. Before each
     event, and at each `Advance`, every timer due by its time fires first (brief, D44)."""
     state = CaseState(name)
-    driver = Driver(case, catalog, implementations, frozenset(held), plans, workflows or {})
+    driver = Driver(
+        case, catalog, implementations, frozenset(held), plans, workflows or {}, children
+    )
     for event in events:
         state = driver.until(state, event.at)
         if isinstance(event, Advance):
@@ -162,6 +181,7 @@ class Driver:
     holding: frozenset[str]  # steps whose runs wait for a `Finish`
     plans: PlanRunner  # runs a plan step's plan
     workflows: Mapping[str, Activity]  # the workflows bound here, by contract
+    children: ChildRunner = no_children  # opens and runs a case step's child
     held: dict[str, Schedule | StartWorkflow] = field(
         default_factory=dict[str, Schedule | StartWorkflow]
     )  # by entry
@@ -204,6 +224,9 @@ class Driver:
                 elif isinstance(command, StartPlan):
                     if (ended := self.plans(command, at)) is not None:
                         queue.append(ended)  # else it waits for an answer: the step runs on
+                elif isinstance(command, OpenCase):
+                    if (closed := self.children(command, at)) is not None:
+                        queue.append(closed)  # else the child is open: the step runs on
                 elif isinstance(command, StartWorkflow) and command.workflow not in self.workflows:
                     # Fail closed: nothing guesses where to run an unbound workflow (brief, D29).
                     queue.append(Failed(command.entry, unbound(command.workflow), at=at))

@@ -75,6 +75,7 @@ with workflow.unsafe.imports_passed_through():
         ForgetApproved,
         GivenBack,
         Migration,
+        OpenCase,
         Opened,
         PlanCancelled,
         Proposed,
@@ -828,6 +829,12 @@ class CaseWorkflow:
             return
         if isinstance(command, CancelWorkflow):
             self.cancel_workflow(command)
+            return
+        if isinstance(command, OpenCase):
+            # A child case runs on Temporal from layer 18d: until then the step fails, needing
+            # attention, never a silent start (fail closed) (brief, D74).
+            said = f"{command.case} can't open here: a child case doesn't run on Temporal yet"
+            self.inbox.append(Failed(command.entry, said, at=now()))
             return
         self.running += 1
         # A start is a new attempt, an operator's retry under the same entry included: a stop

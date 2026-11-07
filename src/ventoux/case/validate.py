@@ -108,7 +108,7 @@ def validate_case(
     found += contract_input_issues(case, contracts) + plan_input_issues(case, supplied)
     calling = {name for name, step in case.steps.items() if isinstance(step, CallStep | PlanStep)}
     missing = calling - set(contracts) - set(supplied)
-    found += expression_issues(case, case_types(case, catalog), missing)
+    found += expression_issues(case, case_types(case, catalog, cases), missing)
     found += approval_issues(case, catalog, contracts)
     # Where each value comes from (10c), in the order the runtime meets it: an input already
     # refused isn't asked again (one cause, one issue).
