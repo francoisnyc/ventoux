@@ -8,7 +8,7 @@ ends it. Nothing starts that nobody asked for.
 
 from ventoux.case.admission import latest_counted, latest_of_item, requirements_met
 from ventoux.case.closing import close_held, needs_attention, pending
-from ventoux.case.definition import CaseDefinition
+from ventoux.case.definition import CaseDefinition, CaseStep
 from ventoux.case.owed import owed
 from ventoux.case.reach import reached_by
 from ventoux.case.sequence import requirements
@@ -23,6 +23,13 @@ def waiting_for(case: CaseDefinition, state: CaseState) -> list[str]:
     opened, then each owed step that can still start, with who may start it (brief, D72). A case
     closing or closed waits for nothing it owes: nothing starts any more."""
     lines = list(state.waiting.values())
+    # Each child case still open, in one line: its own entries are the child's, since those who
+    # see this case may not see the child (brief, D74).
+    lines += [
+        f"{run.entry}: case {step.case.split('@')[0]}, open"
+        for run in state.runs
+        if run.status == "running" and isinstance(step := case.steps.get(run.step), CaseStep)
+    ]
     if state.phase != "open":
         return lines
     for name in owed(case, state):

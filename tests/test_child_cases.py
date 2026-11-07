@@ -375,3 +375,22 @@ def test_a_reported_value_passes_trusted_only_and_never_reads_as_from_a_system()
     refused = [(i.path, i.message) for i in issues if i.code == "INPUT_POLICY"]
     assert [path for path, _ in refused] == ["steps.record.inputs.amount"]
     assert "case:repair" in refused[0][1]
+
+
+# --- Slice 5: a child that is still open (brief, D74) ---
+
+
+def test_an_open_child_keeps_its_step_running_and_its_parent_waiting() -> None:
+    # The child is pending work, said in one line: its own entries are the child's, since those
+    # who see the claim may not see the repair (brief, D24) (brief, D74).
+    run = run_case(
+        claim(),
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[("assess", "accept", "ana", {"payout": 900})],
+        cases={"repair@3": repair()},
+        people=PEOPLE,
+    )
+    assert run.status == "open"
+    assert run.waiting_for == ["repair#1: case repair, open"]
+    assert not run.reached("repair")
+    assert run.children["repair#1"].waiting_for == ["fix by support-lead"]

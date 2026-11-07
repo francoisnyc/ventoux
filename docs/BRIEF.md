@@ -3104,8 +3104,8 @@ kept. Temporal's part (choices 24, 28 and continue-as-new) is 18d's, decided as 
   milestones the child reached are said in the history, never read by the parent (a deliberate
   limit, D48).
 - **While it runs, the child is pending work** (adds to D24): the parent's `waiting_for` has one
-  line for it (`repair#1: case repair, open`); the child's own entries are the child's, since those
-  who see the parent may not see the child (D22, D30).
+  line for it (`repair#1: case repair, open`), after the parent's own open entries; the child's
+  own entries are the child's, since those who see the parent may not see the child (D22, D30).
 - **A child needing attention is the child's,** retried by its operators; the parent waits. A
   failure to open it (a release not active, an opening refused) is the parent's step failing,
   retried there under the same entry; a retry never opens a second child once one has opened.
