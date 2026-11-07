@@ -30,9 +30,11 @@ from ventoux.core.expressions import (
 )
 from ventoux.core.expressions.model import Comparison
 
-# The origins a value can come from: a system, or a person's answer, both trusted; or something a
-# developer declared untrusted, such as `untrusted:llm` (brief, D12).
-TRUSTED_ORIGINS = ("system:", "person:")
+# The origins a value can come from: a system, or a person's answer, both trusted; the route it
+# came back by from a child case, `case:repair`, trusted too, since the value's other sources
+# decide its trust (brief, D74); or something a developer declared untrusted, such as
+# `untrusted:llm` (brief, D12).
+TRUSTED_ORIGINS = ("system:", "person:", "case:")
 UNTRUSTED_ORIGIN = "untrusted:"
 # A plan field with no declared source: the case gives it, and the plan can't see its origin. Only
 # the static check uses it; the runtime check sees the real sources (docs/layers/04-provenance.md).
@@ -56,7 +58,8 @@ def is_label(text: str) -> bool:
 
 
 def is_trusted(source: str) -> bool:
-    """Whether `source` is one the engine trusts: from a system, a person, or the case."""
+    """Whether `source` is one the engine trusts: from a system, a person, or the case, or the
+    route a child case's report came by."""
     return source == CASE or source.startswith(TRUSTED_ORIGINS)
 
 

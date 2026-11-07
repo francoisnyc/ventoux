@@ -12,6 +12,7 @@ from ventoux.case.definition import (
     ActivityStep,
     CallStep,
     CaseDefinition,
+    CaseStep,
     PlanStep,
     Rule,
     Started,
@@ -25,8 +26,10 @@ from ventoux.case.rules import said as said_moment
 from ventoux.case.types import case_types, fits_type, step_types
 from ventoux.case.visibility import may_see, seen_by
 from ventoux.case.writers import (
+    Reports,
     always,
     case_sources,
+    contract_steps,
     how_started,
     rule_reads,
     start_of,
@@ -43,6 +46,7 @@ from ventoux.core.expressions import (
     ListType,
     OutcomeType,
     ReferenceType,
+    Var,
     check,
 )
 from ventoux.core.expressions.check import a_type
@@ -151,11 +155,14 @@ def type_issues(
     contracts: Mapping[str, Contract],
     plans: Mapping[str, Plan],
     said: Collection[str],
+    children: Mapping[str, CaseDefinition] | None = None,
+    cases: Mapping[str, object] | None = None,
 ) -> list[Issue]:
     """Each input given a value of another type than it takes: a contract's (strict validation,
-    G6) or a plan's field (the plan's start, G7). Never converted (brief, D36). A reference is
-    `REFERENCE`'s, an input already refused isn't asked again (one cause, one issue)."""
-    types = case_types(case, catalog)
+    G6), a plan's field (the plan's start, G7) or a child case's field (its opening)
+    (brief, D74). Never converted (brief, D36). A plan's reference is `REFERENCE`'s, an input already refused
+    isn't asked again (one cause, one issue)."""
+    types = case_types(case, catalog, cases)  # a child's report too (brief, D74)
     wanted: list[tuple[str, str, str, FieldType | None, str]] = []
     for name, contract in contracts.items():
         refs = references(contract.input)
@@ -168,9 +175,38 @@ def type_issues(
             if not isinstance(declared, ReferenceType):
                 wanted.append((name, f"{plan.plan}@{plan.version}", field, declared, ""))
     issues: list[Issue] = []
+    for name, child in (children or {}).items():
+        step = case.steps[name]
+        assert isinstance(step, CaseStep)  # only a case step opens a child
+        for field, opening in child.fields.items():
+            if not isinstance(opening.declared, ReferenceType):
+                wanted.append((name, step.case, field, opening.declared, ""))
+                continue
+            # A reference takes a reference to its system, read as it is, as a plan's field does
+            # (brief, D30) (brief, D36).
+            path = f"steps.{name}.inputs.{field}"
+            if field not in step.inputs or path in said:
+                continue
+            reading = step.inputs[field]
+            read_as = check(reading, step_types(case, types, name))
+            system = opening.declared.system
+            if not (
+                isinstance(reading, Var)
+                and isinstance(read_as, ReferenceType)
+                and read_as.system == system
+            ):
+                issues.append(
+                    Issue(
+                        path,
+                        "INPUT_TYPE",
+                        f"{step.case} takes {field} as a reference to {system}, read as it is, "
+                        f"and is given {a_type(read_as)}: give it a reference field of {system}",
+                    )
+                )
     for name, reference, field, wanted_type, kind in wanted:
         step = case.steps[name]
-        assert isinstance(step, CallStep | PlanStep)  # only these call a contract or a plan
+        # Only these call a contract, run a plan or open a child.
+        assert isinstance(step, CallStep | PlanStep | CaseStep)
         path = f"steps.{name}.inputs.{field}"
         if field not in step.inputs or path in said:
             continue
@@ -319,9 +355,18 @@ class Refusals:
     """Whether a policy refuses what an expression reads, for a case `opener` opens: whichever
     rule wrote each value it reads (`always`), or only when some did (`sometimes`) (brief, D42)."""
 
-    def __init__(self, case: CaseDefinition, contracts: Mapping[str, Contract], opener: str):
-        self.case, self.contracts, self.opener = case, contracts, opener
-        self.sources = case_sources(case, contracts, opener)
+    def __init__(
+        self,
+        case: CaseDefinition,
+        contracts: Mapping[str, Contract],
+        opener: str,
+        reports: Reports | None = None,
+        opening: Mapping[str, frozenset[str]] | None = None,
+    ):
+        self.case, self.contracts, self.opener, self.reports = case, contracts, opener, reports
+        # A child's opening fields, with the sources its parent gives them (brief, D74).
+        self.opening = opening
+        self.sources = case_sources(case, contracts, opener, reports=reports, opening=opening)
         self.found: dict[int, frozenset[str]] = {}
 
     def refused(self, policy: Policy) -> Callable[[frozenset[str]], bool]:
@@ -337,7 +382,12 @@ class Refusals:
             return policy.refuses(frozenset()) is not None
         if id(policy) not in self.found:
             self.found[id(policy)] = always(
-                self.case, self.contracts, self.opener, self.refused(policy)
+                self.case,
+                self.contracts,
+                self.opener,
+                self.refused(policy),
+                self.reports,
+                self.opening,
             )
         return any(field in self.found[id(policy)] for field in read)
 
@@ -353,7 +403,9 @@ class Refusals:
             if policy.refuses(own) is not None:
                 refused = self.refused(policy)
                 labels = ", ".join(sorted(s for s in own if refused(frozenset({s}))))
-                when = writer_decides(self.case, self.contracts, self.opener, field, refused)
+                when = writer_decides(
+                    self.case, self.contracts, self.opener, field, refused, self.reports
+                )
                 return (
                     f"{field} comes from {labels} {when}: whether {{step}} is refused "
                     f"depends on which rule set {field} last: set {field} only from values the "
@@ -363,13 +415,17 @@ class Refusals:
 
 
 def policy_issues(
-    case: CaseDefinition, contracts: Mapping[str, Contract], said: Collection[str]
+    case: CaseDefinition,
+    contracts: Mapping[str, Contract],
+    said: Collection[str],
+    reports: Reports | None = None,
+    opening: Mapping[str, frozenset[str]] | None = None,
 ) -> list[Issue]:
     """Each activity and workflow step's input against its contract's input policies, which say
     where it may come from (brief, D21). An input at a path in `said` already has its issue (one
     cause, one issue)."""
-    by_a_system = Refusals(case, contracts, BY_A_SYSTEM)
-    by_a_person = Refusals(case, contracts, BY_A_PERSON)
+    by_a_system = Refusals(case, contracts, BY_A_SYSTEM, reports, opening)
+    by_a_person = Refusals(case, contracts, BY_A_PERSON, reports, opening)
     issues: list[Issue] = []
     for name, contract in contracts.items():
         step = case.steps[name]
@@ -403,7 +459,10 @@ def writer_issue(path: str, message: str, which: str) -> Issue:
 
 
 def condition_issues(
-    case: CaseDefinition, contracts: Mapping[str, Contract], said: Collection[str]
+    case: CaseDefinition,
+    contracts: Mapping[str, Contract],
+    said: Collection[str],
+    reports: Reports | None = None,
 ) -> list[Issue]:
     """Each call step's input whose policy refuses the untrusted data a condition that lets the
     step start reads: untrusted data can't choose what is sent (brief, D39). Its own `when` is said
@@ -411,7 +470,7 @@ def condition_issues(
     its issue, which is the cause: one cause, one issue. The opener is trusted whoever it is, so
     who opens the case changes nothing; which rule wrote what the condition reads may, and then
     it is a warning, `WRITER_DECIDES` (brief, D42)."""
-    steering = Steering(case, contracts)
+    steering = Steering(case, contracts, reports)
     issues: list[Issue] = []
     for name, contract in contracts.items():
         step = case.steps[name]
@@ -447,9 +506,14 @@ class Steering:
     """Whether the untrusted data a condition reads is refused by an input's policy: whichever
     rule wrote it (an error), or only when some did (a warning) (brief, D39) (brief, D42)."""
 
-    def __init__(self, case: CaseDefinition, contracts: Mapping[str, Contract]):
-        self.case, self.contracts = case, contracts
-        self.sources = case_sources(case, contracts, BY_A_SYSTEM)
+    def __init__(
+        self,
+        case: CaseDefinition,
+        contracts: Mapping[str, Contract],
+        reports: Reports | None = None,
+    ):
+        self.case, self.contracts, self.reports = case, contracts, reports
+        self.sources = case_sources(case, contracts, BY_A_SYSTEM, reports=reports)
 
     def issue(
         self,
@@ -473,7 +537,7 @@ class Steering:
             untrusted = frozenset(source for source in sources if not is_trusted(source))
             return bool(untrusted) and policy.refuses(untrusted) is not None
 
-        if value in always(self.case, self.contracts, BY_A_SYSTEM, refused):
+        if value in always(self.case, self.contracts, BY_A_SYSTEM, refused, self.reports):
             if started is None:
                 return Issue(path, "INPUT_POLICY", why)
             return Issue(
@@ -481,7 +545,7 @@ class Steering:
                 "INPUT_POLICY",
                 f"{started} fails on its inputs every time {who} starts it: {why}",
             )
-        when = writer_decides(self.case, self.contracts, BY_A_SYSTEM, value, refused)
+        when = writer_decides(self.case, self.contracts, BY_A_SYSTEM, value, refused, self.reports)
         step = started if started is not None else who
         if value.startswith("started "):
             steered_step = value.removeprefix("started ")
@@ -541,6 +605,69 @@ def steered_to_do(step: str) -> str:
     return f"start {step} only on trusted data, or let a person decide in a task"
 
 
+def child_policy_issues(
+    case: CaseDefinition,
+    catalog: Catalog,
+    contracts: Mapping[str, Contract],
+    children: Mapping[str, CaseDefinition],
+    said: Collection[str],
+    reports: Reports | None = None,
+) -> list[Issue]:
+    """Each case step's inputs carried into its child: the child's own input policies checked
+    with the sources the parent gives its opening, said at the parent's input that feeds a refused
+    value, before any case opens, as a plan's fields are (brief, D36) (brief, D74). What the child
+    refuses on its own is its own release check's to say (one cause, one issue); a step with an
+    input issue already is left out."""
+    parent = Refusals(case, contracts, BY_A_SYSTEM, reports)
+    issues: list[Issue] = []
+    for name, child in children.items():
+        step = case.steps[name]
+        assert isinstance(step, CaseStep)  # only a case step opens a child
+        if any(path.startswith(f"steps.{name}.inputs") for path in said):
+            continue
+        opening = {
+            field: provenance(expression, parent.sources)
+            for field, expression in step.inputs.items()
+        }
+        inside = contract_steps(child, catalog)
+        alone = {(i.path, i.code) for i in policy_issues(child, inside, ())}
+        given: set[str] = set()
+        for issue in policy_issues(child, inside, (), opening=opening):
+            if (issue.path, issue.code) in alone:
+                continue
+            _, child_step, _, child_input = issue.path.split(".", 3)
+            read = child.steps[child_step]
+            assert isinstance(read, CallStep)  # only a call step's input has a policy
+            said_here = f"{step.case}, in its step {child_step}: {issue.message}"
+            # Each parent input that feeds it, through the child's rules if need be; never
+            # dropped: one that traces to no input is said at the case step itself.
+            fed = opening_fields(child, read.inputs[child_input]) & set(step.inputs)
+            paths = [f"steps.{name}.inputs.{field}" for field in sorted(fed - given)]
+            if not fed:
+                paths = [f"steps.{name}"]
+            given |= fed
+            issues += [Issue(path, issue.code, said_here, issue.severity) for path in paths]
+    return issues
+
+
+def opening_fields(child: CaseDefinition, expression: Expression) -> set[str]:
+    """The fields `expression` reads, and, for each a rule of `child` sets, what those rules read,
+    until nothing new: where in the child's opening a value it reads may have come from
+    (brief, D42)."""
+    found: set[str] = set()
+    waiting = list(fields_read(expression))
+    while waiting:
+        field = waiting.pop()
+        if field in found:
+            continue
+        found.add(field)
+        for rule in child.rules.values():
+            if field in rule.then.set:
+                waiting += fields_read(rule.then.set[field])
+                waiting += [] if rule.when is None else fields_read(rule.when)
+    return found
+
+
 def plan_fields_sources(
     step: PlanStep, plan: Plan, sources: Mapping[str, frozenset[str]]
 ) -> dict[str, frozenset[str]]:
@@ -562,12 +689,13 @@ def plan_policy_issues(
     contracts: Mapping[str, Contract],
     plans: Mapping[str, Plan],
     said: Collection[str],
+    reports: Reports | None = None,
 ) -> list[Issue]:
     """Each plan step's inputs carried into its plan: each activity in the plan checked with the
     sources the case gives its fields, at the case's input, before the plan runs (brief, D36). A
     step with an input issue already is left out (one cause, one issue)."""
-    by_a_system = Refusals(case, contracts, BY_A_SYSTEM)
-    by_a_person = Refusals(case, contracts, BY_A_PERSON)
+    by_a_system = Refusals(case, contracts, BY_A_SYSTEM, reports)
+    by_a_person = Refusals(case, contracts, BY_A_PERSON, reports)
     issues: list[Issue] = []
     for name, plan in plans.items():
         step = case.steps[name]
@@ -607,15 +735,20 @@ def plan_policy_issues(
 
 
 def plan_transition_issues(
-    case: CaseDefinition, contracts: Mapping[str, Contract], plans: Mapping[str, Plan]
+    case: CaseDefinition,
+    contracts: Mapping[str, Contract],
+    plans: Mapping[str, Plan],
+    reports: Reports | None = None,
 ) -> list[Issue]:
     """A plan step's input carrying untrusted data into a field one of its plan's transitions
     reads: the plan stops whenever it tries that transition, since untrusted data never chooses a
     plan's path (brief, D49). An error (`UNTRUSTED_TRIGGER`) only for a value untrusted whichever
     writer wrote it; a warning (`WRITER_DECIDES`) for one only some rules make untrusted
     (brief, D42). A field the plan itself declares untrusted is the plan's check to say."""
-    sources = case_sources(case, contracts, BY_A_SYSTEM)  # who opens it changes no trust
-    untrusted = always(case, contracts, BY_A_SYSTEM, is_untrusted)
+    sources = case_sources(
+        case, contracts, BY_A_SYSTEM, reports=reports
+    )  # who opens it changes no trust
+    untrusted = always(case, contracts, BY_A_SYSTEM, is_untrusted, reports)
     found: list[Issue] = []
     for name, plan in plans.items():
         step = case.steps[name]
@@ -643,7 +776,9 @@ def plan_transition_issues(
                         )
                     )
                 else:
-                    when = writer_decides(case, contracts, BY_A_SYSTEM, field, is_untrusted)
+                    when = writer_decides(
+                        case, contracts, BY_A_SYSTEM, field, is_untrusted, reports
+                    )
                     found.append(
                         Issue(
                             path,
@@ -686,15 +821,19 @@ def never_does(then: Then) -> str:
     return " or ".join(f"{verb} {' and '.join(names)}" for verb, names in acts if names)
 
 
-def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> list[Issue]:
+def trigger_issues(
+    case: CaseDefinition, contracts: Mapping[str, Contract], reports: Reports | None = None
+) -> list[Issue]:
     """A rule that reaches a milestone or stops a step, whose condition reads a value from an
     untrusted source: the runtime refuses to let it act whenever it does. Untrusted data informs;
     it never decides (brief, D38) (brief, D40). An error (`UNTRUSTED_TRIGGER`) only for a value
     untrusted whichever writer wrote it, since it then never acts; a warning (`WRITER_DECIDES`)
     for a value only some rules make untrusted, since whether it acts depends on which rule wrote
     last (brief, D42)."""
-    sources = case_sources(case, contracts, BY_A_SYSTEM)  # who opens it changes no trust
-    untrusted = always(case, contracts, BY_A_SYSTEM, is_untrusted)
+    sources = case_sources(
+        case, contracts, BY_A_SYSTEM, reports=reports
+    )  # who opens it changes no trust
+    untrusted = always(case, contracts, BY_A_SYSTEM, is_untrusted, reports)
     found: list[Issue] = []
     for name, rule in case.rules.items():
         if not rule.then.reach and not rule.then.stop:
@@ -717,7 +856,7 @@ def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> l
                     )
                 )
             else:
-                when = writer_decides(case, contracts, BY_A_SYSTEM, field, is_untrusted)
+                when = writer_decides(case, contracts, BY_A_SYSTEM, field, is_untrusted, reports)
                 found.append(
                     Issue(
                         path,
@@ -731,23 +870,28 @@ def trigger_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> l
                 )
             break  # one cause, one issue
         if len(found) == said and isinstance(on := anchor(rule.on), Started):
-            found += moment_issues(case, contracts, name, rule, on.started)
-    return found + reach_issues(case, contracts)
+            found += moment_issues(case, contracts, name, rule, on.started, reports)
+    return found + reach_issues(case, contracts, reports)
 
 
 def moment_issues(
-    case: CaseDefinition, contracts: Mapping[str, Contract], name: str, rule: Rule, step: str
+    case: CaseDefinition,
+    contracts: Mapping[str, Contract],
+    name: str,
+    rule: Rule,
+    step: str,
+    reports: Reports | None = None,
 ) -> list[Issue]:
     """A rule that reaches or stops, on the start of a step untrusted data steers: what steered
     the start counts as read by its condition, so it never acts on it (brief, D43). An error
     where every way the step starts is steered, whoever writes what it reads; a warning where
     only some are."""
-    sources = case_sources(case, contracts, BY_A_SYSTEM)
+    sources = case_sources(case, contracts, BY_A_SYSTEM, reports=reports)
     labels = ", ".join(sorted(sources.get(start_of(step), ())))
     if not labels:
         return []
     to_do = steered_to_do(step)
-    if start_of(step) in always(case, contracts, BY_A_SYSTEM, is_untrusted):
+    if start_of(step) in always(case, contracts, BY_A_SYSTEM, is_untrusted, reports):
         return [
             Issue(
                 f"rules.{name}.on",
@@ -757,7 +901,7 @@ def moment_issues(
                 f"{never_does(rule.then)}: {to_do}",
             )
         ]
-    how = how_started(case, contracts, BY_A_SYSTEM, step, is_untrusted)
+    how = how_started(case, contracts, BY_A_SYSTEM, step, is_untrusted, reports)
     return [
         Issue(
             f"rules.{name}.on",
@@ -770,12 +914,14 @@ def moment_issues(
     ]
 
 
-def reach_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> list[Issue]:
+def reach_issues(
+    case: CaseDefinition, contracts: Mapping[str, Contract], reports: Reports | None = None
+) -> list[Issue]:
     """A call, plan or wait step that reaches milestones, whose start untrusted data steers: its
     run reaches nothing (brief, D43). An error where every way it starts is steered, a warning
     where only some are. A task's answer is a person's, so its `reaches` stand."""
-    sources = case_sources(case, contracts, BY_A_SYSTEM)
-    untrusted = always(case, contracts, BY_A_SYSTEM, is_untrusted)
+    sources = case_sources(case, contracts, BY_A_SYSTEM, reports=reports)
+    untrusted = always(case, contracts, BY_A_SYSTEM, is_untrusted, reports)
     found: list[Issue] = []
     for name, step in case.steps.items():
         if not step.reaches or not isinstance(step, CallStep | PlanStep | WaitStep):
@@ -796,7 +942,7 @@ def reach_issues(case: CaseDefinition, contracts: Mapping[str, Contract]) -> lis
                 )
             )
             continue
-        how = how_started(case, contracts, BY_A_SYSTEM, name, is_untrusted)
+        how = how_started(case, contracts, BY_A_SYSTEM, name, is_untrusted, reports)
         found.append(
             Issue(
                 f"steps.{name}.reaches",

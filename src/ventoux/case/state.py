@@ -174,6 +174,9 @@ class Migration:
     # a name it doesn't say keeps its name (brief, D53).
     mapping: Mapping[str, Mapping[str, str]]
     engine: int  # the engine version it moves the case to, never back (brief, D51)
+    # The child cases it pins, as stored data, by reference; `plans` holds their plans too, since
+    # one reference is one plan (brief, D74).
+    cases: Mapping[str, object] = field(default_factory=dict[str, object])
 
     @property
     def label(self) -> str:
@@ -264,6 +267,18 @@ class CaseState:
     # open; closing: nothing new starts, running activities finish; closed (brief, D10).
     phase: Literal["open", "closing", "closed"] = "open"
     closed_because: str = ""  # why it is closing, as the closed line will say
+    # The close reason a person closed it with, or None: it closed by itself. A child's report
+    # gives it to its parent as the step's outcome (brief, D74).
+    closed_as: str | None = None
+    # Who closed it with that reason: their choice decided the outcome a parent reads (brief, D11)
+    # (brief, D74).
+    closed_by: str | None = None
+    # The child cases its release pins, as stored data, by reference (`repair@3`): given when it
+    # opens, as a case's start holds its plans, so the engine reads what each reports (brief, D74).
+    cases: dict[str, object] = field(default_factory=dict[str, object])
+    # Who approves nothing in this case, and why, as a child's parent gave it: its opener and the
+    # case step's proposer (brief, D25) (brief, D74). Empty for a case no parent opened.
+    excluded: dict[str, str] = field(default_factory=dict[str, str])
     flags: list[str] = field(default_factory=list[str])  # what a person should look at
     history: list[str] = field(default_factory=list[str])  # what happened, one line each
     firings: list[RuleFiring] = field(default_factory=list[RuleFiring])  # every rule's, in order
@@ -313,6 +328,16 @@ class Opened:
     # The opener's roles, as the trusted caller states them; none for a system, or for a case
     # opened before layer 17c (brief, D22) (brief, D71).
     roles: frozenset[str] = field(kw_only=True, default=frozenset())
+    # A child case's parent and the step run that opened it (`memory`, `repair#1`), or None: a
+    # person or a system opened it (brief, D74).
+    parent: tuple[str, str] | None = field(kw_only=True, default=None)
+    # Each value's sources, as its parent gives them, or None: each comes from its opener
+    # (brief, D12) (brief, D74).
+    sources: Mapping[str, frozenset[str]] | None = field(kw_only=True, default=None)
+    # The child cases its release pins, as stored data, by reference (brief, D74).
+    cases: Mapping[str, object] = field(kw_only=True, default_factory=dict[str, object])
+    # Who approves nothing in a child, and why, as its parent says (brief, D25) (brief, D74).
+    excluded: Mapping[str, str] = field(kw_only=True, default_factory=dict[str, str])
 
 
 @dataclass
@@ -404,6 +429,29 @@ class PlanCancelled:
     # Each activity in it that finished or failed after the close was requested, which the case
     # flags: `payments.refund@2 completed after the close was requested` (brief, D10).
     after_stop: tuple[str, ...] = ()
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class CaseEnded:
+    """A case step's child closed: how, what it reached, and what it reports, each value with its
+    sources in the child (brief, D74)."""
+
+    entry: str  # the step run, such as `repair#1`
+    outcome: str  # `done`, or the close reason a person closed it with
+    closed_by: str | None  # the person who chose that reason; None: it closed by itself
+    closed: str  # how its closed line says it: `nothing left to do`, `duplicate, by lee`
+    reached: tuple[str, ...]  # its milestones, in the order reached
+    report: Mapping[str, Sourced]  # each field its `reports` lists that is set at its close
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class ClosedByParent:
+    """A child case's parent closes it: it is closing, or a rule stopped the step that opened it.
+    The child begins closing as a person's close does (brief, D40) (brief, D74)."""
+
+    reason: str  # why, as its parent says: `duplicate, by ana`, `stopped by withdraw#1`
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
@@ -532,6 +580,8 @@ type Event = (
     | Retried
     | CloseAsked
     | PlanCancelled
+    | CaseEnded
+    | ClosedByParent
     | WorkflowCancelled
     | Shown
     | ForgetApproved
@@ -585,6 +635,30 @@ class StartPlan:
     steered: tuple[Steering, ...] = ()
 
 
+@dataclass(frozen=True)
+class OpenCase:
+    """Open a case step's child (brief, D74): its definition, its opening with where each value
+    came from, the run's name in its keys, and who may approve nothing in it."""
+
+    entry: str  # the step run, such as `repair#1`
+    case: str  # its reference, such as `repair@3`
+    definition: object  # the child's definition, as stored data
+    fields: dict[str, Sourced]  # its opening, read from the parent's case file
+    run: str  # names the child, and its keys: `memory/repair#1`
+    # Each person who approves nothing in the child, and why: the parent's opener and the step's
+    # proposer cross into it (brief, D25).
+    excluded: dict[str, str]
+
+
+@dataclass(frozen=True)
+class CloseCase:
+    """Close a case step's child, because its parent is closing or a rule stops the step; the
+    parent waits for it to end (brief, D40) (brief, D74)."""
+
+    entry: str  # the step run, such as `repair#1`
+    reason: str  # why, naming only who asked: `duplicate, by ana`, `stopped by withdraw#1`
+
+
 # Why a child is stopped when its case closes: the reason a plan's stop signal gives by default,
 # so a history recorded before 11c, whose signal gave none, replays the same (brief, D40).
 CLOSING = "the case is closing"
@@ -618,4 +692,13 @@ class UseRelease:
     migration: Migration
 
 
-type Command = Schedule | StartWorkflow | StartPlan | StopPlan | CancelWorkflow | UseRelease
+type Command = (
+    Schedule
+    | StartWorkflow
+    | StartPlan
+    | OpenCase
+    | StopPlan
+    | CloseCase
+    | CancelWorkflow
+    | UseRelease
+)

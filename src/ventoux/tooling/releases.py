@@ -38,16 +38,28 @@ RECORD = TypeAdapter(Record)
 
 
 def read_package(folder: Path) -> Package:
-    """The package in `folder`: `case.json`, and each plan in `plans/` as a `.json` file. Any
-    other file is refused, never ignored (brief, D50)."""
+    """The package in `folder`: `case.json`, each plan in `plans/` as a `.json` file, and each
+    child case it pins in `cases/`, a package of its own named by its reference (`repair@3`). Any
+    other file is refused, never ignored (brief, D50) (brief, D74)."""
     if not (folder / "case.json").is_file():
         raise PackageUnreadable(f"{folder} has no case.json: a package is a folder holding one")
     problems: list[str] = []
     for entry in sorted(folder.iterdir()):
-        if entry.name not in ("case.json", "plans"):
+        if entry.name not in ("case.json", "plans", "cases"):
             problems.append(
-                f"{entry.name} isn't part of a package: a package holds case.json and plans/"
+                f"{entry.name} isn't part of a package: a package holds case.json, plans/ and "
+                "cases/"
             )
+    children: dict[str, Package] = {}
+    if (folder / "cases").is_dir():
+        for entry in sorted((folder / "cases").iterdir()):
+            if not (entry / "case.json").is_file():
+                problems.append(
+                    f"cases/{entry.name} isn't a package: a child case is a folder holding "
+                    "case.json"
+                )
+            else:
+                children[entry.name] = read_package(entry)
     plans = folder / "plans"
     texts: list[str] = []
     if plans.is_dir():
@@ -60,7 +72,7 @@ def read_package(folder: Path) -> Package:
                 texts.append(entry.read_text())
     if problems:
         raise PackageRefused("\n".join(problems))
-    return package((folder / "case.json").read_text(), texts)
+    return package((folder / "case.json").read_text(), texts, children)
 
 
 @dataclass(frozen=True)

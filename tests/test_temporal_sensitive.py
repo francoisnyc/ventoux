@@ -387,8 +387,16 @@ def test_no_sensitive_value_in_plain_text_in_history(caplog: pytest.LogCaptureFi
         assert any(line.startswith("refused ana's answer accept") for line in ended.history)
         # The activity's code got the plain value, in the case and in its plan.
         assert LOOKED_UP == [NATIONAL_ID, NATIONAL_ID]
+        # It continued as new, carrying both IDs. The report can come from the run that has just
+        # asked to switch, before the next one exists (seen in CI, when the switch's task was
+        # retried): wait, a bounded number of times, for the next run, then hold it to it.
         runs = await every_run(client, "claim-7")
-        assert len(runs) > 1  # it continued as new, carrying both IDs
+        for _ in range(100):
+            if len(runs) > 1:
+                break
+            await asyncio.sleep(0.05)  # real time, for the server to start the next run
+            runs = await every_run(client, "claim-7")
+        assert len(runs) > 1
         return runs + await every_run(client, "claim-7/check_id#1")
 
     for history in on_temporal(scenario):

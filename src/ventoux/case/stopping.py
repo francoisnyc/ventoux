@@ -8,10 +8,18 @@ run is never stopped (brief, D17) (brief, D26). See docs/layers/11-rules.md (11c
 from ventoux.case.admission import latest_of_item, latest_run, requirements_met
 from ventoux.case.approvals import with_given
 from ventoux.case.closing import close_held
-from ventoux.case.definition import CallStep, CaseDefinition, PlanStep, WorkflowStep
+from ventoux.case.definition import CallStep, CaseDefinition, CaseStep, PlanStep, WorkflowStep
 from ventoux.case.freshness import stale_facts
 from ventoux.case.sequence import requirements
-from ventoux.case.state import CLOSING, CancelWorkflow, CaseState, Command, StepRun, StopPlan
+from ventoux.case.state import (
+    CLOSING,
+    CancelWorkflow,
+    CaseState,
+    CloseCase,
+    Command,
+    StepRun,
+    StopPlan,
+)
 from ventoux.core.catalog import Catalog
 
 
@@ -140,7 +148,9 @@ def stop_children(
     asked already (brief, D10) (brief, D28) (brief, D40)."""
     for run in state.runs:
         if run.status == "running" and not run.stop_requested:
-            ask_to_stop(case, catalog, run, CLOSING, commands)
+            # A child case is told why its parent closes, as a person's close says it.
+            closing = isinstance(case.steps[run.step], CaseStep)
+            ask_to_stop(case, catalog, run, state.closed_because if closing else CLOSING, commands)
 
 
 def ask_to_stop(
@@ -157,6 +167,10 @@ def ask_to_stop(
         commands.append(StopPlan(run.entry, reason))
     elif isinstance(step, WorkflowStep) and catalog.workflow(step.workflow).cancellable:
         commands.append(CancelWorkflow(run.entry, reason))
+    elif isinstance(step, CaseStep):
+        # A child case closes, saying why: its tasks are cancelled, its activities finish, and
+        # its parent waits for it to end, never for a person (brief, D48) (brief, D74).
+        commands.append(CloseCase(run.entry, reason))
 
 
 def waits_for_its_fact(case: CaseDefinition, state: CaseState, name: str, at: int) -> bool:

@@ -9,9 +9,12 @@ from ventoux.case.assignment_checks import assignment_issues
 from ventoux.case.calls import (
     approval_issues,
     called_contracts,
+    case_input_issues,
     contract_input_issues,
     expression_issues,
     plan_input_issues,
+    sensitive_to_child_issues,
+    supplied_cases,
     supplied_plans,
 )
 from ventoux.case.definition import (
@@ -19,6 +22,7 @@ from ventoux.case.definition import (
     AnsweredTask,
     CallStep,
     CaseDefinition,
+    CaseStep,
     PlanStep,
     Reached,
     ReminderRule,
@@ -28,6 +32,7 @@ from ventoux.case.definition import (
 )
 from ventoux.case.flow import (
     approver_issues,
+    child_policy_issues,
     condition_issues,
     no_sources_issues,
     plan_policy_issues,
@@ -68,16 +73,34 @@ from ventoux.case.warnings import (
     kept_from_starting_issues,
     warning_issues,
 )
+from ventoux.case.writers import report_writes
 from ventoux.core.catalog import Catalog
+from ventoux.core.provenance import fields_read
 from ventoux.core.validate import Issue
 
 
+def blind_inputs(case: CaseDefinition, missing: set[str]) -> set[str]:
+    """The path of each input that reads a value a step in `missing` would give: one whose
+    contract, plan or child can't be found."""
+    return {
+        f"steps.{name}.inputs.{field}"
+        for name, step in case.steps.items()
+        if isinstance(step, CallStep | PlanStep | CaseStep)
+        for field, expression in step.inputs.items()
+        if any("." in read and read.split(".")[0] in missing for read in fields_read(expression))
+    }
+
+
 def validate_case(
-    case: CaseDefinition, catalog: Catalog, plans: Mapping[str, Any] | None = None
+    case: CaseDefinition,
+    catalog: Catalog,
+    plans: Mapping[str, Any] | None = None,
+    cases: Mapping[str, Any] | None = None,
 ) -> list[Issue]:
-    """Every problem in `case`, a parsed case definition, read against `catalog` and the `plans`
-    the deployment supplies, stored data by reference (`refund-order@1`), as the runtime is given
-    them. No plans means none: a plan step's plan is then missing (fail closed)."""
+    """Every problem in `case`, a parsed case definition, read against `catalog`, the `plans`
+    the deployment supplies and the child `cases` its package holds, each stored data by reference
+    (`refund-order@1`, `repair@3`), as the runtime is given them. No plans or cases means none: a
+    plan step's plan, or a case step's child, is then missing (fail closed)."""
     # Fail closed: anything but a parsed definition is refused, never read as one with no problems.
     if not isinstance(case, CaseDefinition):
         raise TypeError(
@@ -95,26 +118,46 @@ def validate_case(
     contracts, unknown_contracts = called_contracts(case, catalog)
     supplied, unknown_plans = supplied_plans(case, plans or {})
     found += unknown_contracts + unknown_plans
+    children, unknown_cases = supplied_cases(case, cases or {})
+    found += unknown_cases + case_input_issues(case, children)
+    found += sensitive_to_child_issues(case, children)
+    reports = report_writes(case, children, catalog)  # where each reported value comes from
     found += contract_input_issues(case, contracts) + plan_input_issues(case, supplied)
-    calling = {name for name, step in case.steps.items() if isinstance(step, CallStep | PlanStep)}
-    missing = calling - set(contracts) - set(supplied)
-    found += expression_issues(case, case_types(case, catalog), missing)
+    calling = {
+        name
+        for name, step in case.steps.items()
+        if isinstance(step, CallStep | PlanStep | CaseStep)
+    }
+    missing = calling - set(contracts) - set(supplied) - set(children)
+    found += expression_issues(case, case_types(case, catalog, cases), missing)
     found += approval_issues(case, catalog, contracts)
     # Where each value comes from (10c), in the order the runtime meets it: an input already
     # refused isn't asked again (one cause, one issue).
     found += reference_issues(case, contracts, supplied, {issue.path for issue in found})
-    said = {issue.path for issue in found}
-    found += policy_issues(case, contracts, said) + no_sources_issues(case, supplied, said)
+    # An input reading what a missing step would give has no known sources: its step's issue is
+    # the cause, said once (one cause, one issue).
+    blind = blind_inputs(case, missing)
+    said = {issue.path for issue in found} | blind
+    found += policy_issues(case, contracts, said, reports)
+    found += no_sources_issues(case, supplied, said)
     # Only an error on the input is the cause: a warning (OPENER_DECIDES) never hides the
     # condition's refusal, which holds whoever opens the case.
-    found += condition_issues(case, contracts, {i.path for i in found if i.severity == "error"})
-    found += type_issues(case, catalog, contracts, supplied, {issue.path for issue in found})
-    found += plan_policy_issues(case, catalog, contracts, supplied, {i.path for i in found})
-    found += plan_transition_issues(case, contracts, supplied)
+    errors = {i.path for i in found if i.severity == "error"}
+    found += condition_issues(case, contracts, errors, reports)
+    found += type_issues(
+        case, catalog, contracts, supplied, {i.path for i in found} | blind, children, cases
+    )
+    found += plan_policy_issues(
+        case, catalog, contracts, supplied, {i.path for i in found}, reports
+    )
+    found += child_policy_issues(
+        case, catalog, contracts, children, {i.path for i in found}, reports
+    )
+    found += plan_transition_issues(case, contracts, supplied, reports)
     found += sensitive_issues(case, contracts, {issue.path for issue in found})
     found += approver_issues(case, catalog, contracts)
     found += assignment_issues(case, catalog)  # who a rule asks, when each entry opens (brief, D71)
-    found += trigger_issues(case, contracts)
+    found += trigger_issues(case, contracts, reports)
     found += role_issues_of(case, catalog, can, closing=not nobody_closes)
     found += source_issues_of(case, catalog) + system_issues_of(case, catalog)
     found += close_unreachable(case, can) + unreachable_milestones(case)
@@ -124,7 +167,7 @@ def validate_case(
     refused = {i.path.split(".")[1] for i in found if i.severity == "error" and "." in i.path}
     refused |= {name for name in case.steps if name not in can}
     said = {issue.path for issue in found}
-    found += warning_issues(case, contracts, supplied, said, missing | refused)
+    found += warning_issues(case, contracts, supplied, said, missing | refused, children)
     found += first_start_issues(case, {issue.path for issue in found})
     # A required step that may be left owed with nothing able to start it (brief, D72).
     found += may_strand_issues(case, refused)

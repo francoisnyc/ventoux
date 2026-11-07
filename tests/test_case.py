@@ -12,6 +12,8 @@ from typing import Annotated, Any
 
 import pytest
 from pydantic import BaseModel
+from test_child_cases import claim as repair_claim
+from test_child_cases import repair
 from test_repeated import order_return  # the guide's returned order, its lines repeated
 from test_required import refund_confirmed  # the guide's refund with a required step
 
@@ -123,7 +125,7 @@ def changed(change: str) -> dict[str, Any]:
     [
         (
             "kind",
-            "steps.pay.kind: a step is a task, an activity, a plan, a workflow or a wait, and this one is 'script'",
+            "steps.pay.kind: a step is a task, an activity, a plan, a case, a workflow or a wait, and this one is 'script'",
         ),
         ("sequence", "sequence: pya is not a step"),
         ("requires", "steps.pay.requires: reviwe is neither a milestone nor a step"),
@@ -707,6 +709,8 @@ def test_the_guides_examples_run_as_written() -> None:
         "parse_case": parse_case,
         "refund_confirmed": refund_confirmed(),  # "Required steps", checked in test_required.py
         "order_return": order_return(),  # "Repeated steps", checked in test_repeated.py
+        "claim_with_repair": repair_claim(),  # "Child cases", checked in test_child_cases.py
+        "repair": repair(),
     }
     for code in blocks("python"):
         exec(code, namespace)  # noqa: S102 -- our guide, as in layer 7

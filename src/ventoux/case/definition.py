@@ -68,6 +68,10 @@ Roles = Annotated[tuple[RoleName, ...], AfterValidator(some_roles)]
 PlanReference = Annotated[
     str, matching(r"[a-z][a-z0-9-]*@[1-9][0-9]*", 'a plan reference looks like "refund-order@1"')
 ]
+# A child case, by its name and the release its parent pins: `repair@3` (brief, D74).
+CaseReference = Annotated[
+    str, matching(r"[a-z][a-z0-9-]*@[1-9][0-9]*", 'a case reference looks like "repair@3"')
+]
 
 
 class Shape(BaseModel):
@@ -349,6 +353,24 @@ class PlanStep(Step):
         return data
 
 
+class CaseStep(Step):
+    """A whole case opened from this step, a child of this case: its opening given from the case
+    file, and its end report read back as the step's outputs (brief, D74)."""
+
+    kind: Literal["case"]
+    case: CaseReference  # the child, with the release this case pins
+    inputs: dict[Name, PlanExpression] = {}  # each of the child's opening fields, from the file
+    max_age: MaxAge = {}  # how old each fact it reads may be when it runs (brief, D18)
+
+    @model_validator(mode="before")
+    @classmethod
+    def no_approval(cls, data: Any) -> Any:
+        """A case step has no approval: the child's own steps ask for theirs (brief, D74)."""
+        if isinstance(data, dict) and "approval" in data:
+            raise ValueError("a case step has no approval: its child's steps ask for their own")
+        return data
+
+
 class Then(Shape):
     """What a rule does when it fires: stop steps (brief, D40), set fields (brief, D42), reach
     milestones (brief, D38), start steps (brief, D39). Done in that order."""
@@ -592,6 +614,7 @@ type AnyStep = Annotated[
     Annotated[TaskStep, Tag("task step")]
     | Annotated[ActivityStep, Tag("activity step")]
     | Annotated[PlanStep, Tag("plan step")]
+    | Annotated[CaseStep, Tag("case step")]
     | Annotated[WorkflowStep, Tag("workflow step")]
     | Annotated[WaitStep, Tag("wait step")],
     Discriminator(kind_of),
@@ -619,6 +642,9 @@ class CaseDefinition(Shape):
     # Whether a request may forget it (brief, D32): `allowed` open or closed; `while_open`, refused
     # once it is closed (books and records); `never`, always refused.
     forgetting: Literal["allowed", "while_open", "never"] = "allowed"
+    # What its end report carries when it closes as a child: its own fields, read by its parent
+    # as the case step's outputs (brief, D74).
+    reports: tuple[Name, ...] = ()
 
     @property
     def rules(self) -> dict[str, Rule]:
@@ -678,6 +704,7 @@ class CaseDefinition(Shape):
             if field.sensitive and field.visible_to is None
         ]
         problems += list_problems(self)
+        problems += report_problems(self)
         started_by_rules = {step for rule in self.rules.values() for step in rule.then.start}
         for name, step in self.steps.items():
             problems += step_problems(f"steps.{name}", step, self, name in started_by_rules)
@@ -929,9 +956,29 @@ def expressions_in(case: CaseDefinition) -> list[tuple[str, str | None, PlanExpr
     return found
 
 
+def report_problems(case: CaseDefinition) -> list[str]:
+    """What a report can't carry: a field the case doesn't have; a sensitive one, for now; a list,
+    since an output is an exact value (brief, D29) (brief, D74)."""
+    problems: list[str] = []
+    for name in case.reports:
+        path = f"reports.{name}"
+        field = case.fields.get(name)
+        if field is None:
+            problems.append(
+                f"{path}: {case.case} has no field {name}: a report lists the case's own fields"
+            )
+        elif field.sensitive:
+            problems.append(
+                f"{path}: {name} is sensitive, and a report carries no sensitive field yet"
+            )
+        elif isinstance(field.declared, ListType):
+            problems.append(f"{path}: {name} is a list, and a report carries no list")
+    return problems
+
+
 def step_problems(
     path: str,
-    step: TaskStep | CallStep | PlanStep | WaitStep,
+    step: TaskStep | CallStep | PlanStep | CaseStep | WaitStep,
     case: CaseDefinition,
     rule_starts: bool,
 ) -> list[str]:
@@ -1145,7 +1192,7 @@ def parse_case(data: object) -> CaseDefinition:
         raise CaseInvalid("\n".join(problem(e) for e in error.errors())) from None
 
 
-STEP_KINDS = "a task, an activity, a plan, a workflow or a wait"
+STEP_KINDS = "a task, an activity, a plan, a case, a workflow or a wait"
 
 
 def problem(error: Any) -> str:

@@ -219,6 +219,9 @@
           "$ref": "#/$defs/PlanStep"
         },
         {
+          "$ref": "#/$defs/CaseStep"
+        },
+        {
           "$ref": "#/$defs/WorkflowStep"
         },
         {
@@ -887,6 +890,104 @@
           "type": "object"
         }
       ]
+    },
+    "CaseStep": {
+      "additionalProperties": false,
+      "description": "A whole case opened from this step, a child of this case: its opening given from the case\nfile, and its end report read back as the step's outputs (brief, D74).",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/Display"
+        },
+        "requires": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Expression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "automatic": {
+          "default": true,
+          "title": "Automatic",
+          "type": "boolean"
+        },
+        "proposed_by": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Proposed By",
+          "type": "array"
+        },
+        "repeatable": {
+          "default": false,
+          "title": "Repeatable",
+          "type": "boolean"
+        },
+        "reaches": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "title": "Reaches",
+          "type": "array"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "case",
+          "title": "Kind",
+          "type": "string"
+        },
+        "case": {
+          "pattern": "^[a-z][a-z0-9-]*@[1-9][0-9]*$",
+          "title": "Case",
+          "type": "string"
+        },
+        "inputs": {
+          "additionalProperties": false,
+          "default": {},
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "$ref": "#/$defs/Expression"
+            }
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "max_age": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Max Age",
+          "type": "object"
+        }
+      },
+      "required": [
+        "display",
+        "kind",
+        "case"
+      ],
+      "title": "CaseStep",
+      "type": "object"
     },
     "Cat": {
       "additionalProperties": false,
@@ -2968,6 +3069,15 @@
       ],
       "title": "Forgetting",
       "type": "string"
+    },
+    "reports": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "type": "string"
+      },
+      "title": "Reports",
+      "type": "array"
     }
   },
   "required": [

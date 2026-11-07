@@ -8,6 +8,7 @@ from one. Pure: no clock, no I/O, the same list in the same order every time.
 See docs/layers/13-diff.md (13a) and docs/guides/releases.md, "What changed: the diff".
 """
 
+import dataclasses
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
@@ -118,9 +119,29 @@ def diff(before: Package, after: Package, catalog: Catalog) -> Diff:
         )
         if reference in before.plans and reference in after.plans:
             changes += plan_approvals(reference, versions)
+    changes += child_changes(before, after, catalog)
     found = [change for change in changes if isinstance(change, Change)]
     rewritten = tuple(line for line in changes if isinstance(line, Rewritten))
     return Diff(after.name, tuple(found), reworded(before, after, found), rewritten)
+
+
+def child_changes(before: Package, after: Package, catalog: Catalog) -> list[Change | Rewritten]:
+    """What changes in each child the two versions pin: read by the child's own diff, each change
+    named under its reference, with its verdict, since what a child does is what its parent's
+    cases do. A child only one version pins is said whole, never judged (brief, D55) (brief, D74).
+    """
+    found: list[Change | Rewritten] = []
+    for reference in merged(list(before.cases), list(after.cases)):
+        path = f"cases.{reference}"
+        if reference not in after.cases:
+            found.append(Change(path, "not proven", "removed", entry="removed"))
+        elif reference not in before.cases:
+            found.append(Change(path, "not proven", "added", entry="added"))
+        else:
+            inside = diff(before.cases[reference], after.cases[reference], catalog)
+            found += [dataclasses.replace(c, path=f"{path}.{c.path}") for c in inside.changes]
+            found += [dataclasses.replace(r, path=f"{path}.{r.path}") for r in inside.rewritten]
+    return found
 
 
 # --- Walking the two versions --------------------------------------------------------------------

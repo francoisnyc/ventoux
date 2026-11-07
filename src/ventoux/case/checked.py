@@ -28,7 +28,20 @@ def issues_of(released: Package, catalog: Catalog) -> list[Issue]:
         for reference, plan in released.plans.items()
         for issue in validate(plan, catalog)
     ]
-    issues += validate_case(released.case, catalog, stored)
+    # The parent reads its children as its cases do; one reference is one plan, so a child's
+    # plan steps find theirs beside the parent's (brief, D74).
+    for child in released.cases.values():
+        stored |= {
+            reference: json.loads(text, parse_float=Decimal)
+            for reference, text in child.written.plans.items()
+        }
+    issues += validate_case(released.case, catalog, stored, released.pinned)
+    # Each child is a package of its own, checked as one, its issues named under its reference.
+    for reference, child in released.cases.items():
+        issues += [
+            Issue(f"cases.{reference}.{issue.path}", issue.code, issue.message, issue.severity)
+            for issue in issues_of(child, catalog)
+        ]
     return issues
 
 

@@ -2936,3 +2936,115 @@ untrusted:customer, and is false`.
 `ventoux check` refuses `for_each` over a field that isn't a list (`steps.draft_line.for_each:
 order_id is a reference, not a list: a step repeats over a list field`), a key that isn't a text
 field of the list's items, and a repeated step that is a plan, a workflow or a wait.
+
+## Child cases
+
+A **child case** is a whole case started from a step of another: its own case file, people and
+closing, and when it closes, a report to its parent. Use one where work has a life of its own:
+a claim sends the vehicle to a garage, whose repair is assigned, chased and closed by other
+people, over weeks. Here the claim's `repair` step opens a `repair` case once the claim is
+assessed, and `pay_garage` pays what the repair cost:
+
+```json
+"repair": {
+  "kind": "case",
+  "display": {"title": "Repair the vehicle"},
+  "case": "repair@3",
+  "requires": ["assessed"],
+  "inputs": {"vehicle": {"var": "vehicle"}, "budget": {"var": "payout"}}
+},
+"pay_garage": {
+  "kind": "activity",
+  "display": {"title": "Pay the garage"},
+  "activity": "payments.refund@2",
+  "requires": ["repair"],
+  "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "repair.cost"}},
+  "approval": {"roles": ["support-lead"], "display": {"reason": "Every payout needs a team lead"}}
+}
+```
+
+**A child case is named with its release,** `repair@3`, as a plan is. The release is the
+claim's: `repair 3` is in the claim's package, so in its digest, and the claim's diff shows a
+change to it. Activating the claim checks that `repair 3` is active in the environment (see the
+releases guide, "A case in an environment"); the registry is asked again as the child opens, and a
+release retired since refuses it before anything starts: the step fails and needs attention,
+`repair#1 failed: repair 3 is not active in production: activate it, then retry repair#1`. A new
+garage process reaches claims by releasing the claim too, never on its own.
+
+**What the child is given.** Its `inputs` are the child's opening fields, read from the parent's
+case file, each with its sources, as a plan step's are (brief, D28): a budget an adjuster set is
+still that adjuster's in the child, so the child's own checks judge where it really came from.
+The child is opened by its parent case, recorded as such, never by a person. Who may not approve
+crosses too: the person who opened the claim, and the person who proposed the step, approve
+nothing in the repair (brief, D25). A child case has no `approval` of its own; its steps carry
+theirs. A sensitive value is given only to a field the child keeps sensitive too, and
+the check refuses anything else: a view can hide more than its source, never less.
+
+**One subject, one key.** The child is sealed under its parent's key (brief, D31): a sensitive
+input crosses sealed, never opened. Forgetting the claim forgets its repair with the same request,
+and a repair is never forgotten alone: `repair is a child of claim-7: forget claim-7, which
+forgets it too`.
+
+**What comes back.** The child's definition says what its report carries, in `reports`:
+
+```json
+"reports": ["cost"]
+```
+
+When the child closes, the step is done, and the parent reads the report as the step's outputs:
+`repair.outcome` (`done`, or the reason a person closed the repair with) and `repair.cost`; the
+milestones the repair reached are in the step's history line. Each value keeps the sources it had
+in the child and gains `case:repair`, saying where it came from. A close reason is the person's
+who chose it, as a task's answer is: `person:lee, case:repair`, so lee approves nothing that
+outcome decides. Nothing else crosses back, and a child never writes into its parent's case file:
+the parent decides what a report changes, with its own steps and rules.
+
+In a test, `cases` gives the child definitions by name and release, as `plans` gives plans, and
+`case_answers` gives each case step's child its own script, as `answers` does:
+
+```python
+run = run_case(
+    claim_with_repair,
+    file={"order_id": "ord-1", "vehicle": "veh-9"},
+    answers=[("assess", "accept", "ana", {"payout": 900})],
+    cases={"repair@3": repair},
+    case_answers={"repair": [("fix", "fixed", "lee", {"cost": 640})]},
+    people=PEOPLE,
+)
+assert run.reached("repair")
+```
+
+```
+started repair#1: case repair@3 (vehicle from system:opener; budget from person:ana), run memory/repair#1
+repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost
+asked pay_garage.approval#1: approval of pay_garage by support-lead
+```
+
+A child whose script isn't finished keeps the step running, and the parent open: its
+`waiting_for` has one line for it, `repair#1: case repair, open`. The child's own tasks are the
+child's, listed in its own report, since those who see the claim may not see the repair. A
+reported field the child never set (a repair closed as a duplicate has no cost) is absent, and
+whatever reads it fails, so branch on `repair.outcome` first; `ventoux check` warns where a reader
+may find it unset.
+
+**While the child runs,** it is the child's:
+
+- **A child that needs attention** is retried by its own operators, there; the parent waits. Only
+  a failure to *start* the child (a release not active, inputs refused) is the parent's step
+  failing, retried in the parent. A retry never starts a second child once one has run.
+- **When the parent closes, or a rule stops the step,** the child is closed too, saying why
+  (`closed by its parent: duplicate, by ana`): its tasks are cancelled, its running activities
+  finish, and the parent closes once the child has ended. A close never waits for a person.
+- **A parent that migrates** leaves its child on its own release: the target must start the same
+  `repair@3` from that step, or the migration waits for the child to end.
+- **A parent that continues as new** doesn't wait for its child: the report reaches the parent's
+  latest run.
+
+**One level only.** A child case's definition has no case step of its own (a deliberate limit,
+brief, D48): one close then reaches everything it must, and no case starts itself. `ventoux check`
+refuses it (`steps.repair.case: repair@3 has a case step, order_parts: a child case opens no
+case of its own`), and refuses an input the child doesn't take at its opening, or of another type.
+It reads the child's input policies with the sources the claim gives its opening: a vehicle the
+customer typed, given to a repair that drafts a letter to it, is refused at the claim's input
+(`steps.repair.inputs.vehicle: repair@3, in its step tell: letters.draft@2 takes to_customer only
+from a system or a person, …`), before any case opens.

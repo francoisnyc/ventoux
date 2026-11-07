@@ -136,7 +136,7 @@ def read(
     before anything acts, so a rule acts whole or not at all (brief, D42)."""
     # Checked over the case's types first, so a misspelt outcome fails it instead of reading as
     # false (brief, D35).
-    if (problem := rule_problem(case, catalog, name)) is not None:
+    if (problem := rule_problem(case, catalog, name, state.cases)) is not None:
         raise StepStopped(problem)
     rule = case.rules[name]
     if rule.when is not None and not holds(rule.when, state.values, f"{name}'s condition"):

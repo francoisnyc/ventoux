@@ -905,7 +905,7 @@ def test_the_command_says_the_diff(tmp_path: Path, capsys: Any) -> None:
     (new / "notes.txt").write_text("to do")
     assert main(["diff", str(old), str(new)]) == 1
     assert capsys.readouterr().err == (
-        f"{new}: notes.txt isn't part of a package: a package holds case.json and plans/\n"
+        f"{new}: notes.txt isn't part of a package: a package holds case.json, plans/ and cases/\n"
     )
     # Unreadable: exit 2.
     (new / "notes.txt").unlink()

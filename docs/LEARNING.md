@@ -53,6 +53,7 @@ and record the key points. A question is closed once you can explain the answer 
 | 46 | Layer 16c: why the case keeps the ID, never the file, and what checking it guards | closed |
 | 47 | Layer 17a: is an assignment a permission? | open |
 | 48 | Layer 18a: an owed step that can never start | open |
+| 49 | Layer 18b: how a repeated run is named, retried and migrated | open |
 
 ---
 
@@ -814,6 +815,15 @@ and record the key points. A question is closed once you can explain the answer 
     `"plan": "settle-claim@1"`. The builder writes the reference only; what it promises is the
     catalog's, checked by `ventoux check` (14c); where it runs is the binding's, never in a
     definition.
+- Retrieval (layer 18c warm-up, 2026-11-06): asked to be told. Given the card again: the catalog
+  answers what a definition may call (contracts, roles, labels; changes when a contract is added
+  or retired); a contract, what one entry promises (schemas, risk, effect, retries, timeouts,
+  idempotency, outcomes, output sources; never changes, a change is a new `@N`); a binding, where
+  it runs here (workflow type and queue; operations move it, no version, no release, activation
+  checks the pollers, D54). The test: could a case notice it or tighten it? Tied to 18c: a
+  child's release is pinned by its parent's (brief, D74), so a garage contract moved to another
+  queue needs no release; one with a new timeout is `@2`, a new `repair` release, and a new claim
+  release that pins it.
 - Status: open (a card: kept in the warm-up rotation until all three come without the table).
 
 ## 29. Layer 1: why `@1` and not `@1.0`
@@ -2014,4 +2024,31 @@ and record the key points. A question is closed once you can explain the answer 
     says `confirm, required, after pay`), or by `confirm` no longer requiring `pay`.
   - In one line: an owed step that can never start isn't something the case waits for; it needs
     a person, and the check tells the author before any case opens.
+- Status: open, until the three parts come back from memory.
+
+## 49. Layer 18b: how a repeated run is named, retried and migrated
+
+> A returned order's `lines` are `A12` (40) and `B7` (25), and `draft_line` drafts a letter per
+> line. a) What are the two runs called, what are their idempotency keys, and why aren't they
+> `draft_line#1` and `#2`, nor `draft_line[A12]#1`? b) A12's draft fails and B7's goes through:
+> what does an operator do, and why isn't the retry refused though B7's run came later? c) Why is
+> a migration changing `draft_line`'s key from `sku` to `label` refused once the letters are
+> drafted?
+
+- Asked at the end of layer 18b's walk-through (2026-11-06), in place of the layer's own question,
+  which waits for 18c.
+- Your answer: asked to be told. Given:
+  - **a) Named by a number the engine gives each key:** `draft_line.1#1` and `draft_line.2#1`, keyed
+    `memory/draft_line.1#1` and `memory/draft_line.2#1`. Matched by the key, named by the number.
+    Not by position: a list that changed would give position 1 to another line, and a retry would
+    send one line's key with another's values (D17). Not by value: no history line or workflow ID
+    quotes a value of the case file (D30), and a key may be untrusted or personal.
+  - **b) A retry by its entry:** `retry("draft_line.1#1", "omar")`, the same run with the same key
+    (D26). "Only the latest run" is asked per item, so B7's run, another item's, doesn't count; a
+    required `draft_line` isn't stranded meanwhile, since the retry can still do it.
+  - **c) Numbers are tied to the key:** told apart by `label`, the items would be numbered 3 and 4
+    and drafted again under new keys, which the letter system can't recognise (D17). Refused once
+    the step has numbers: keep the key, or migrate before it runs (D53, D73).
+  - In one line: a repeated run is named by a number tied to its item's key, never by position or
+    value, so its key never moves to another item, and nothing renumbers it under a new key.
 - Status: open, until the three parts come back from memory.
