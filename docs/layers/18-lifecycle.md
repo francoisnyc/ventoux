@@ -710,6 +710,65 @@ never show it: a test on it can't catch a child started without `ABANDON`.
     same; only a case whose start carries children opens one, and no such start existed, as no
     release held an attachment before D68. *Recommended.*
 
+### Seams and tests for 18d (curriculum step 4, proposed)
+
+The tests use only what a caller and an operator use today, on Temporal's time-skipping test
+server, with bounded waits and the thread guard on. No test reads the parent's workflow object.
+
+1. **Opening:** `start_case(client, cases, record, file, id, queue)` with a release record whose
+   package pins children (`release_of(claim, 1, cases={"repair@3": repair})`): its children
+   travel in the start, beside its plans (`ReleaseStart`). A draft, started from a definition,
+   pins none, so its case step fails closed as in 18c.
+2. **The child is a case:** `case_handle(client, "claim-7/repair#1")` and the existing calls
+   (`answer`, `close`, `report`) act on it as on any case; its `CaseReport` is its own.
+3. **What the parent says:** its `CaseReport` (`history`, `waiting_for`, `needs_attention`,
+   `closed`), and `repair.*` in its view.
+4. **From outside, as anyone could:** a doorbell sent with the client's own `signal`
+   (`child_ended`, an entry), and a child ended with the client's `terminate`: what an operator,
+   or anyone with access to the namespace, can do.
+5. **The close policy:** read from the parent's history, the event that starts the child.
+6. **Continue-as-new:** the existing `SwitchingCases` (two events a run), for parent and child.
+7. **Forgetting:** `propose_forget(client, "claim-7/repair#1", ...)` refused; the parent's
+   forgetting, as today's forget tests run it.
+8. **The registry:** `in_production`, `activated(client, record)` and `retire`, as the registry
+   tests use them.
+9. **Replay:** the histories recorded before 18d replay unchanged (`tests/histories`).
+
+**The refusals and lines, word for word (proposed):**
+
+| Situation | What is said |
+|---|---|
+| the child opens | in the parent, as in memory: `started repair#1: case repair@3 (…), run claim-7/repair#1`; in the child, `opened by claim-7, from repair#1, with budget and vehicle` |
+| the doorbell, read | `repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost`, as in memory |
+| a doorbell for an entry that isn't an open child, or rung twice | `child_ended for repair#2, which is no open child: nothing read` |
+| a doorbell from a child still running | `child_ended for repair#1, whose case is still open: nothing read` |
+| a child ended without reporting | `repair#1: repair@3 ended without reporting: it was terminated: look at the child, then retry or close` (`it failed`, `it timed out`) |
+| a child alone, forgotten | `repair#1 is a child of claim-7: forget claim-7, which forgets it too` |
+| the family's forgetting | the stricter of the parent's and its children's, said as today's refusal names it |
+| activating a parent whose child isn't usable | `claim 1 pins repair 3, which isn't activated in production` (`which is retired in production`; `…, whose digest here is another`), each said at once |
+| retiring a pinned release | `repair 3 not retired: claim 1, active in production, pins it` |
+| a child refused as it opens | `repair#1: repair@3 can't open in production: repair 3 is retired` |
+
+**The tests, in the order I'd write them,** each failing first (the negative first):
+
+1. **(negative)** A doorbell from anyone, for a child still running or no child, changes nothing.
+2. The guide's claim on Temporal: the child opens as its own workflow under the parent's ID,
+   rings, and the parent reads its report with `case:repair`; its sources and who closed it as in
+   memory.
+3. The close policy is `ABANDON`, read from the history; the child outlives the parent's switch,
+   and the parent's switch doesn't wait for it.
+4. **(negative)** A child terminated from outside fails the parent's step: at once in the run that
+   started it; after a switch, when the new run starts, and on the daily timer.
+5. The parent's close and a rule's stop close the child, saying why, also across a switch.
+6. **(negative)** A child forgotten alone is refused; forgetting the parent forgets the family;
+   the stricter forgetting applies.
+7. **(negative)** The registry: activation refuses a parent whose child isn't activated, is
+   retired, or has another digest; retiring a pinned release is refused; a child refused as it
+   opens fails the step.
+8. Sensitive inputs and reports cross sealed, under the one key: no plain value in either
+   history.
+9. Replay: every recorded history replays; a new one with a child recorded and replayed.
+
 ### Seams and tests for 18c (curriculum step 4, proposed)
 
 The tests use only what a caller uses today, plus three additions (`cases`, `case_answers`,
