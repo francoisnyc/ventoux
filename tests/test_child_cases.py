@@ -12,11 +12,12 @@ from typing import Any
 
 import pytest
 
+from ventoux.case.admission import RetryRefused
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import CaseRun
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, close, propose, run_case
+from ventoux.testing import CATALOG, close, propose, retry, run_case
 
 ROOT = Path(__file__).parent.parent
 GUIDE = ROOT / "docs" / "guides" / "cases.md"
@@ -535,3 +536,46 @@ def test_who_proposed_the_case_step_approves_nothing_in_the_child() -> None:
     assert any("key memory/repair#1/pay_parts#1" in line for line in child.history)
     # Opened by its parent, never by a person: nobody is the child's own opener.
     assert child.state.opened_by is None
+
+
+# --- Slice 8: a child that refuses its opening (brief, D74) ---
+
+
+def test_a_refused_opening_fails_the_step_and_a_retry_opens_no_second_child() -> None:
+    # The parent's step fails, needing attention: the operator fixes the cause, then retries it,
+    # under the same entry. Nothing is skipped automatically, and nothing guesses (brief, D26).
+    child = repair()
+    child["fields"]["budget"]["source"] = "untrusted:robots"  # a label nobody registered
+    said = (
+        "repair#1: repair@3 refused its opening: budget is declared untrusted:robots, a label "
+        "nobody registered"
+    )
+    script: list[Any] = [("assess", "accept", "ana", {"payout": 900})]
+    opened: dict[str, Any] = {
+        "file": {"order_id": "ord-1", "vehicle": "veh-9"},
+        "cases": {"repair@3": child},
+        "people": PEOPLE | {"omar": ["operations"]},
+    }
+    run = run_case(claim(), answers=script, **opened)
+    assert run.needs_attention == [said]
+    assert run.children == {}  # it never opened
+    run = run_case(claim(), answers=[*script, retry("repair#1", "omar")], **opened)
+    assert run.needs_attention == [said]  # the same run, refused again
+    started = (
+        "started repair#1: case repair@3 (vehicle from system:opener; budget from person:ana), "
+        "run memory/repair#1"
+    )
+    assert [line for line in run.history if line.startswith("started repair")] == [started] * 2
+
+
+def test_a_child_that_opened_is_never_opened_again_by_a_retry() -> None:
+    # A child needing attention is the child's, retried there: its parent's step runs on, and
+    # only a failed run is retried (brief, D26) (brief, D74).
+    with pytest.raises(RetryRefused, match="repair#1"):
+        run_case(
+            claim(),
+            file={"order_id": "ord-1", "vehicle": "veh-9"},
+            answers=[("assess", "accept", "ana", {"payout": 900}), retry("repair#1", "omar")],
+            cases={"repair@3": repair()},
+            people=PEOPLE | {"omar": ["operations"]},
+        )

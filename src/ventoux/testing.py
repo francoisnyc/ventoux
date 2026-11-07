@@ -35,7 +35,7 @@ from ventoux.case.migrations import migration_of
 from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
 from ventoux.case.releases import Record, digest, package
 from ventoux.case.requests import ChangeRefused
-from ventoux.case.runtime import CaseRefused, EventRefused
+from ventoux.case.runtime import CaseRefused, EventRefused, decide
 from ventoux.case.state import (
     Answered,
     Assigned,
@@ -593,6 +593,12 @@ def child_runner(
             sources={name: given.sources for name, given in command.fields.items()},
             excluded=command.excluded,
         )
+        try:
+            # The opening alone first: a child that refuses it never opened, and the parent's
+            # step fails, for its operator to retry once the cause is fixed (brief, D74).
+            decide(child, catalog, CaseState(command.run), opened)
+        except CaseRefused as refused:
+            return Failed(command.entry, f"{command.case} refused its opening: {refused}", at=at)
         events = [opened, *script_events(script, people, at)]
         child_run = run_case_in_memory(
             child, catalog, activities, events, name=command.run, workflows=workflows

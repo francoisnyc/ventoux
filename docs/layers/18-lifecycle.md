@@ -667,7 +667,7 @@ The tests use only what a caller uses today, plus three additions (`cases`, `cas
 | `repair.outcome` compared with what it can't be | `steps.pay_garage.when: repair.outcome is done or one of repair's close reasons (duplicate, written_off), never fixed` |
 | the child opened | `started repair#1: case repair@3 (vehicle from system:opener; budget from person:ana), run memory/repair#1`; the child's first line, `opened by claim-7, from repair#1, with budget and vehicle` |
 | the child closed | `repair#1 done: repair closed, nothing left to do, reaching fixed; reporting cost` (or `repair closed: duplicate, by lee; reporting nothing`) |
-| the child's opening refused (the step fails) | `repair#1 failed: repair refused its opening: budget is set by a person in approve, never given at the opening: correct repair's release, then retry repair#1` |
+| the child's opening refused (the step fails) | in `needs_attention`: `repair#1: repair@3 refused its opening: budget is declared untrusted:robots, a label nobody registered`; the operator fixes the cause and retries the same entry |
 | the parent closes, or a rule stops the step | in the child: `closed by its parent: duplicate, by ana` (`closed by its parent: stopped by withdraw#1`); in the parent: `repair#1 cancelled: the case is closing` |
 | a migration whose target opens another child | the migration waits: `repair#1 runs repair@3, and the target opens repair@4 from repair: it waits for repair#1 to end` |
 | the package | `cases/repair@3 isn't a package: a child case is a folder holding case.json`; `cases/repair@4 is named by no step` |
