@@ -675,7 +675,7 @@ class CaseWorkflow:
             self.definition = start.definition  # as stored data, for the next run's start
             named = None if start.release is None else self.released_on(case, start.release)
             if start.carried is None:
-                await self.ask_to_open()
+                await self.ask_to_open(pinned=start.parent is not None)
                 parent = start.parent
                 opened = Opened(
                     start.file,
@@ -762,10 +762,11 @@ class CaseWorkflow:
             await ring(start.parent)
         return report
 
-    async def ask_to_open(self) -> None:
+    async def ask_to_open(self, pinned: bool) -> None:
         """In an environment, ask its registry whether the case may open: on its package's
         active release, with that digest, on the queue it was activated on; a draft only where
-        drafts run. Refused, `CaseRefused`, and nothing is decided (brief, D54). The answer comes
+        drafts run; a child, `pinned`, on the release its parent pins, whichever is active
+        (brief, D75). Refused, `CaseRefused`, and nothing is decided (brief, D54). The answer comes
         from an activity, recorded in this history: a replay reads it there, and never asks
         again. Behind a patch, so a case opened before 12e replays as it was recorded."""
         if self.environment is None or not workflow.patched(REGISTRY_PATCH):
@@ -776,7 +777,10 @@ class CaseWorkflow:
         if self.release is not None:
             released = Released(self.release.name, self.release.release, self.release.digest)
         answer = await self.ask_registry(
-            Asked(self.environment, opening=Opening(info.workflow_id, info.task_queue, released))
+            Asked(
+                self.environment,
+                opening=Opening(info.workflow_id, info.task_queue, released, pinned=pinned),
+            )
         )
         if not answer.done:
             raise CaseRefused(answer.said[0])

@@ -19,14 +19,31 @@ from temporalio.client import Client
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.workflow import ParentClosePolicy
+from test_activation import NEEDS, SERVED, SERVES, production, worker
 from test_child_cases import CLOSABLE, claim, repair
 from test_temporal_case import QUEUE, Case, SwitchingCases, on_temporal, reported, runs_of, skipping
 from test_temporal_forget import on_temporal as forgetting_on_temporal
 from test_temporal_forget import reported as forget_reported
+from test_temporal_registry import QUEUE as REFUNDS
+from test_temporal_registry import ProductionCases, in_production, production_worker
 from worker_threads import worker_threads
 
 from ventoux.case.definition import parse_case
 from ventoux.case.forgetting import ForgetRefused
+from ventoux.case.registry import (
+    Activating,
+    Answer,
+    Opening,
+    Registry,
+    Released,
+    Retiring,
+    activate,
+    closed,
+    open_on,
+    opened,
+    retire,
+)
+from ventoux.case.releases import Hash, Record
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered, CaseEnded, CaseState, ForgetApproved, Opened
 from ventoux.core.provenance import Sourced
@@ -42,6 +59,7 @@ from ventoux.temporal.cases import (
 from ventoux.temporal.children import SETTLE, ChildActivities, ChildAsked, ChildRead
 from ventoux.temporal.converter import keys_of
 from ventoux.temporal.forget import ForgetReport, answer_forget, propose_forget
+from ventoux.temporal.registry import Retire, activation_of, ask, released
 from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     CATALOG,
@@ -562,3 +580,163 @@ def test_the_case_itself_refuses_forgetting_a_family_that_keeps_its_records() ->
     assert str(refused.value) == (
         "claim-25 keeps its records (forgetting: never): it can't be forgotten"
     )
+
+
+# --- Slice 7: the registry (brief, D75) ---
+
+REPAIR_3 = Released("repair", 3, Hash(1, "33" * 32))
+CLAIM_1 = Released("claim", 1, Hash(1, "c1" * 32))
+REPAIRING = worker("repairs-a", SERVES, queue="repairs")  # a case worker on another queue
+
+
+def pinning(released: Released, pins: tuple[Released, ...], queue: str = "refunds") -> Activating:
+    """Pia's activation of `released`, which pins the child releases `pins`, on `queue`."""
+    seen = {queue: [f"{queue}-a"]}
+    return Activating(released, dict(NEEDS), queue, seen, "pia", pins=pins)
+
+
+def with_repair(queue: str = "refunds") -> Registry:
+    """Production with repair 3 activated on `queue`."""
+    registry, answer = activate(production(SERVED, REPAIRING), pinning(REPAIR_3, (), queue))
+    assert answer.done, answer.said
+    return registry
+
+
+def test_activating_a_parent_checks_each_child_it_pins() -> None:
+    # A parent's case opens the child on its pinned release, on the parent's queue: activating
+    # the parent checks that release here first, activated, not retired, with the digest the
+    # parent's package gives it, on that queue; refused, saying so (brief, D54) (brief, D75).
+    retired, _ = activate(with_repair(), pinning(Released("repair", 4, Hash(1, "44" * 32)), ()))
+    retired, answer = retire(retired, Retiring(REPAIR_3, "pia"), {})
+    assert answer.done, answer.said
+    other = Released("repair", 3, Hash(1, "99" * 32))
+    refused = [
+        (production(SERVED, REPAIRING), REPAIR_3),
+        (retired, REPAIR_3),
+        (with_repair(), other),
+        (with_repair("repairs"), REPAIR_3),
+    ]
+    said = [activate(registry, pinning(CLAIM_1, (child,)))[1].said for registry, child in refused]
+    assert said == [
+        [
+            "claim 1 not activated in production:",
+            "claim 1 pins repair 3, which production never activated",
+        ],
+        [
+            "claim 1 not activated in production:",
+            "claim 1 pins repair 3, which is retired in production",
+        ],
+        [
+            "claim 1 not activated in production:",
+            "claim 1 pins repair 3, whose digest in production is another",
+        ],
+        [
+            "claim 1 not activated in production:",
+            "claim 1 pins repair 3, which production activated on repairs, not refunds",
+        ],
+    ]
+    after, done = activate(with_repair(), pinning(CLAIM_1, (REPAIR_3,)))
+    assert done.said == ["pia activated claim 1 in production"]
+    assert after.active["claim"] == 1
+
+
+def test_a_release_a_release_in_use_pins_is_not_retired() -> None:
+    # Fail closed early: a parent active here, or with a case open on it, still opens children on
+    # the release it pins; retiring it would fail their steps (brief, D54) (brief, D75).
+    registry, _ = activate(with_repair(), pinning(CLAIM_1, (REPAIR_3,)))
+    registry, _ = activate(registry, pinning(Released("repair", 4, Hash(1, "44" * 32)), ()))
+    _, active = retire(registry, Retiring(REPAIR_3, "pia"), {})
+    registry, _ = opened(registry, Opening("claim-7", "refunds", CLAIM_1))
+    registry, _ = activate(registry, pinning(Released("claim", 2, Hash(1, "c2" * 32)), ()))
+    _, open_case = retire(registry, Retiring(REPAIR_3, "pia"), {})
+    registry, _ = closed(registry, "claim-7")
+    _, done = retire(registry, Retiring(REPAIR_3, "pia"), {})
+    assert [active.said, open_case.said, done.said] == [
+        ["repair 3 not retired: claim 1, active in production, pins it"],
+        ["repair 3 not retired: claim 1, with 1 open case in production, pins it"],
+        ["pia retired repair 3 in production"],
+    ]
+
+
+def test_a_child_opens_on_its_pinned_release_never_the_active_one() -> None:
+    # Activating repair 4 breaks no claim pinning repair 3: a child asks for its pinned release,
+    # as a migration's target is asked, activated here, not retired, with its digest, on its
+    # queue (brief, D54) (brief, D75). A case of its own still opens only on the active one.
+    registry, _ = activate(with_repair(), pinning(CLAIM_1, (REPAIR_3,)))
+    registry, _ = activate(registry, pinning(Released("repair", 4, Hash(1, "44" * 32)), ()))
+    child = Opening("claim-7/repair#1", "refunds", REPAIR_3, pinned=True)
+    after, allowed = opened(registry, child)
+    _, alone = opened(registry, Opening("repair-9", "refunds", REPAIR_3))
+    other = Released("repair", 3, Hash(1, "99" * 32))
+    _, digest = opened(registry, replace(child, released=other))
+    _, queue = opened(registry, replace(child, task_queue="repairs"))
+    assert [allowed.said, alone.said, digest.said, queue.said] == [
+        ["claim-7/repair#1 is open on repair 3 in production"],
+        ["repair-9 can't open on repair 3: repair 4 is active in production"],
+        ["claim-7/repair#1 can't open on repair 3: production's repair 3 has another digest"],
+        ["claim-7/repair#1 can't open on repair 3 on repairs: production activated it on refunds"],
+    ]
+    assert open_on(after, REPAIR_3) == ["claim-7/repair#1"]
+
+
+async def activated_here(client: Client, record: Record) -> None:
+    """Pia activates `record` in production on the parent's queue, pins included, the registry
+    given the pollers a command would see (the test server can't list them)."""
+    asked = activation_of(record, REFUNDS, {REFUNDS: ["refunds-a"]}, "pia")
+    answer = await ask(client, "production", "activate", asked)
+    assert answer.done, answer.said
+
+
+def test_on_temporal_a_child_opens_on_its_pinned_release() -> None:
+    # Production activates repair 3, claim 1 pinning it, then repair 4: claim-30's child opens
+    # on repair 3 all the same, asking for it, never the active one (brief, D75).
+    async def scenario(client: Client) -> CaseReport:
+        async with production_worker(client):
+            for record in (release_of(repair(), 3), RELEASE, release_of(repair(), 4)):
+                await activated_here(client, record)
+            case = await start_case(client, ProductionCases, RELEASE, FILE, "claim-30", REFUNDS)
+            await answer(case, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+            child = await started(client, ProductionCases, "claim-30/repair#1")
+            return await reported(child, lambda now: now.waiting_at == ["fix#1"])
+
+    child = in_production(scenario)
+    assert child.release == "repair 3"
+
+
+def test_on_temporal_activating_a_parent_before_its_child_is_refused() -> None:
+    # The request a command builds from the record carries the children it pins (brief, D75).
+    async def scenario(client: Client) -> Answer:
+        async with production_worker(client):
+            asked = activation_of(RELEASE, REFUNDS, {REFUNDS: ["refunds-a"]}, "pia")
+            return await ask(client, "production", "activate", asked)
+
+    refused = in_production(scenario)
+    assert refused.said == [
+        "claim 1 not activated in production:",
+        "claim 1 pins repair 3, which production never activated",
+    ]
+
+
+def test_on_temporal_a_child_refused_as_it_opens_fails_its_step() -> None:
+    # Should a pinned release go anyway (here, retired before a parent was activated by a
+    # request that didn't say its pins), the child's own ask refuses it: the parent's step
+    # fails, needing attention, never waited for in silence (brief, D17) (brief, D75).
+    async def scenario(client: Client) -> CaseReport:
+        async with production_worker(client):
+            for record in (release_of(repair(), 3), release_of(repair(), 4)):
+                await activated_here(client, record)
+            gone = Retiring(Released("repair", 3, release_of(repair(), 3).digest), "pia")
+            assert (await ask(client, "production", "retire", Retire(gone))).done
+            unpinned = Activating(released(RELEASE), {}, REFUNDS, {REFUNDS: ["refunds-a"]}, "pia")
+            assert (await ask(client, "production", "activate", unpinned)).done
+            case = await start_case(client, ProductionCases, RELEASE, FILE, "claim-31", REFUNDS)
+            await answer(case, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
+            return await reported(case, lambda now: bool(now.needs_attention))
+
+    report = in_production(scenario)
+    assert report.needs_attention == [
+        (
+            "repair#1: repair@3 refused its opening: claim-31/repair#1 can't open on repair 3: "
+            "repair 3 is retired in production"
+        )
+    ]
