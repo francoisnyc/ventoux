@@ -605,7 +605,7 @@ child stands in for all of that the way `plan_runner` stands in for a plan's chi
 
 41. **No new engine version** (D51): no definition readable before has a case step. *Recommended.*
 
-#### 18d: on Temporal (proposed 2026-11-07)
+#### 18d: on Temporal (answered 2026-11-07: as recommended; D75)
 
 Checked against the code and the prototype before asking, as 18b's and 18c's were:
 
