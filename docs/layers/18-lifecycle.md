@@ -1219,11 +1219,13 @@ async def main() -> None:
                         break
                     await asyncio.sleep(0.05)
                 status = (await child.describe()).status
-                print(f"{server} {policy}: after the parent continued as new, the child is {status.name}")
+                after = f"{server} {policy}: after the parent continued as new, the child is"
+                print(f"{after} {status.name}")
                 if status == WorkflowExecutionStatus.RUNNING:
                     await child.signal("finish")
                     await asyncio.wait_for(parent.result(), timeout=10)
-                    print(f"{server} {policy}: the child's signal to {pid} reached its latest run, which ended")
+                    reached = f"the child's signal to {pid} reached its latest run, which ended"
+                    print(f"{server} {policy}: {reached}")
 
 
 asyncio.run(main())
