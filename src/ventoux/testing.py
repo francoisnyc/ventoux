@@ -555,7 +555,9 @@ def run_case(
     runner = plan_runner(plans or {}, plan_answers or {}, implementations, people, catalog)
     bound = {**WORKFLOW_FAKES, **workflows}
     ran: dict[str, CaseRun] = {}
-    children = child_runner(case_answers or {}, people, catalog, implementations, bound, ran)
+    children = child_runner(
+        case_answers or {}, people, catalog, implementations, bound, ran, runner
+    )
     run = run_case_in_memory(
         case,
         catalog,
@@ -577,10 +579,12 @@ def child_runner(
     activities: Mapping[str, Activity],
     workflows: Mapping[str, Activity],
     ran: dict[str, CaseRun],
+    plans: PlanRunner,
 ) -> ChildRunner:
     """Opens a case step's child in memory, plays its script, and says how it ended as an event;
     or None while it is open (brief, D74). Each child's run is kept in `ran`, by entry. The child
-    reads `catalog`, and calls `activities` and `workflows`, as its parent does."""
+    reads `catalog`, and calls `activities`, `workflows` and `plans`, as its parent does: one
+    reference is one plan."""
 
     def run(command: OpenCase | CloseCase, at: int) -> CaseEnded | Failed | None:
         if isinstance(command, CloseCase):
@@ -605,7 +609,7 @@ def child_runner(
             return Failed(command.entry, f"{command.case} refused its opening: {refused}", at=at)
         events = [opened, *script_events(script, people, at)]
         child_run = run_case_in_memory(
-            child, catalog, activities, events, name=command.run, workflows=workflows
+            child, catalog, activities, events, name=command.run, plans=plans, workflows=workflows
         )
         ran[command.entry] = child_run
         if not child_run.closed:
@@ -621,6 +625,7 @@ def child_runner(
             activities,
             [ClosedByParent(command.reason, at=at)],
             name=was.state.case,
+            plans=plans,
             workflows=workflows,
             state=was.state,
         )
@@ -956,10 +961,17 @@ def migrate(
     )
 
 
-def release_of(definition: dict[str, Any], number: int, plans: Sequence[Any] = ()) -> Record:
-    """`definition` and its `plans` released in memory as release `number`, as CI would record
-    it: what a migration's target is in a test. Numbers are written as JSON writes them."""
-    released = package(as_text(definition), [as_text(plan) for plan in plans])
+def release_of(
+    definition: dict[str, Any],
+    number: int,
+    plans: Sequence[Any] = (),
+    cases: Mapping[str, Any] | None = None,
+) -> Record:
+    """`definition`, its `plans` and the child `cases` it pins (each a definition, by reference)
+    released in memory as release `number`, as CI would record it: what a migration's target is
+    in a test. Numbers are written as JSON writes them."""
+    children = {ref: package(as_text(child), []) for ref, child in (cases or {}).items()}
+    released = package(as_text(definition), [as_text(plan) for plan in plans], children)
     return Record(released.name, number, 1, digest(released), "memory", {}, released.written)
 
 

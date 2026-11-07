@@ -23,6 +23,7 @@ from ventoux.case.definition import (
     CallStep,
     CaseDefinition,
     CaseInvalid,
+    CaseStep,
     EventArrived,
     PlanStep,
     Reached,
@@ -34,7 +35,7 @@ from ventoux.case.definition import (
 )
 from ventoux.case.engine import KNOWN
 from ventoux.case.freshness import seconds_in
-from ventoux.case.releases import Hash, Record, canonical, is_release
+from ventoux.case.releases import Hash, Record, Written, canonical, is_release
 from ventoux.case.sequence import requirements
 from ventoux.case.state import CaseState, Migration, StepRun, Timer
 from ventoux.case.timers import named, utc
@@ -66,10 +67,23 @@ def migration_of(record: Record, mapping: dict[str, dict[str, str]], engine: int
         record.digest.method,
         record.digest.sha256,
         json.loads(record.written.case, parse_float=Decimal),
-        {ref: json.loads(text, parse_float=Decimal) for ref, text in record.written.plans.items()},
+        {ref: json.loads(text, parse_float=Decimal) for ref, text in all_plans(record.written)},
         mapping,
         engine,
+        {
+            ref: json.loads(child.case, parse_float=Decimal)
+            for ref, child in record.written.cases.items()
+        },
     )
+
+
+def all_plans(written: Written) -> list[tuple[str, str]]:
+    """Every plan's text in the package, its children's included, by reference: one reference is
+    one plan, so each is said once (brief, D74)."""
+    found = dict(written.plans)
+    for child in written.cases.values():
+        found |= dict(child.plans)
+    return sorted(found.items())
 
 
 def released(case: CaseDefinition, state: CaseState) -> str:
@@ -90,7 +104,9 @@ def target_of(case: CaseDefinition, migration: Migration) -> CaseDefinition | st
         target = parse_case(dict(migration.case))
     except CaseInvalid:
         return f"what was given as {label} doesn't give its digest"
-    if target.case != migration.name or not is_release(target, migration.plans, given):
+    if target.case != migration.name or not is_release(
+        target, migration.plans, given, migration.cases
+    ):
         return f"what was given as {label} doesn't give its digest"
     return target
 
@@ -343,6 +359,15 @@ def unfinished(
                 f"{after.called}: {when}"
             )
         ]
+    if isinstance(before, CaseStep) and isinstance(after, CaseStep) and before.case != after.case:
+        # Its child keeps its own release: the target opens the same one, or the run ends first
+        # (brief, D74).
+        return [
+            (
+                f"{run.entry} {state_of(run)} on {before.case}, and {label}'s {new} opens "
+                f"{after.case}: {when}"
+            )
+        ]
     if isinstance(before, PlanStep) and isinstance(after, PlanStep) and before.plan != after.plan:
         return [
             (
@@ -510,6 +535,7 @@ def apply(
     follow_timers(case, target, state, migration, at)
     state.release = label
     state.engine = migration.engine
+    state.cases = dict(migration.cases)  # the children the target pins (brief, D74)
     return target
 
 

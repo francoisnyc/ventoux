@@ -25,6 +25,7 @@ from ventoux.case.definition import (
     CallStep,
     CaseDefinition,
     CaseInvalid,
+    CaseStep,
     PlanStep,
     parse_case,
 )
@@ -68,6 +69,8 @@ class Written:
 
     case: str  # case.json's text
     plans: Mapping[str, str]  # each plan's text, by its reference (`refund-order@1`)
+    # Each child case it pins, as its folder says it, by reference (`repair@3`) (brief, D74).
+    cases: Mapping[str, "Written"] = field(default_factory=dict[str, "Written"])
 
 
 @dataclass(frozen=True)
@@ -78,6 +81,16 @@ class Package:
     case: CaseDefinition
     plans: Mapping[str, Plan]  # by reference, in the order of their references
     written: Written
+    # Each child case its case steps open, a package of its own, by reference (brief, D74).
+    cases: Mapping[str, "Package"] = field(default_factory=dict[str, "Package"])
+
+    @property
+    def pinned(self) -> dict[str, object]:
+        """Each child's definition as stored data, by reference: what a case of this package
+        holds, and what validation reads (brief, D74)."""
+        return {
+            ref: read_json(child.written.case, "case.json") for ref, child in self.cases.items()
+        }
 
 
 @dataclass(frozen=True)
@@ -139,9 +152,11 @@ class Record:
     notes: Notes | None = None
 
 
-def package(case: str, plans: Sequence[str]) -> Package:
-    """The package of `case`, case.json's text, and `plans`, each plan file's text. Refused unless
-    the plans are exactly those its plan steps name, each once (brief, D50)."""
+def package(case: str, plans: Sequence[str], cases: Mapping[str, Package] | None = None) -> Package:
+    """The package of `case`, case.json's text, `plans`, each plan file's text, and `cases`, each
+    child package by its reference. Refused unless the plans are exactly those its plan steps
+    name, each once (brief, D50), and the children exactly those its case steps open, one level
+    deep, sharing no reference to a plan they disagree on (brief, D74)."""
     try:
         definition = parse_case(read_json(case, "case.json"))
     except CaseInvalid as invalid:
@@ -164,15 +179,57 @@ def package(case: str, plans: Sequence[str]) -> Package:
         problems.append(f"{reference} is run by a plan step and isn't in plans/: add it")
     for reference in sorted(set(found) - named):
         problems.append(f"{reference} is run by no plan step: remove it, or name it in a step")
+    children = dict(cases or {})
+    problems += child_problems(definition, children, found)
     if problems:
         raise PackageRefused("\n".join(problems))
     order = sorted(found)  # a folder's plans have no order: their references give one
+    pinned = sorted(children)
     return Package(
         definition.case,
         definition,
         {reference: found[reference] for reference in order},
-        Written(case, {reference: texts[reference] for reference in order}),
+        Written(
+            case,
+            {reference: texts[reference] for reference in order},
+            {reference: children[reference].written for reference in pinned},
+        ),
+        {reference: children[reference] for reference in pinned},
     )
+
+
+def child_problems(
+    definition: CaseDefinition, children: Mapping[str, Package], plans: Mapping[str, Plan]
+) -> list[str]:
+    """What keeps `children` from being the child cases `definition` pins: each case step's child
+    present, under its own name, opening no case of its own, and no plan reference meaning two
+    plans (brief, D74)."""
+    named = {step.case for step in definition.steps.values() if isinstance(step, CaseStep)}
+    problems = [
+        f"{reference} is opened by a case step and isn't in cases/: add it"
+        for reference in sorted(named - set(children))
+    ]
+    problems += [
+        f"cases/{reference} is opened by no case step: remove it, or name it in a step"
+        for reference in sorted(set(children) - named)
+    ]
+    for reference in sorted(set(children) & named):
+        child = children[reference]
+        if child.name != reference.split("@")[0]:
+            problems.append(
+                f"cases/{reference} holds the case {child.name}: a child's folder is named by "
+                "its case and release"
+            )
+        if child.cases:
+            # One level only: a deliberate limit, so one close reaches all it must (brief, D74).
+            problems.append(f"cases/{reference} has cases/ of its own: a child opens no case")
+        for plan in sorted(set(child.plans) & set(plans)):
+            if canonical(child.plans[plan]) != canonical(plans[plan]):
+                problems.append(
+                    f"plans/{plan} differs between {definition.case} and cases/{reference}: one "
+                    "reference is one plan"
+                )
+    return problems
 
 
 def read_json(text: str, what: str) -> Any:
@@ -250,39 +307,63 @@ def key_of(model: BaseModel, name: str) -> str:
     return alias if alias is not None else name
 
 
-def behaviour(case: CaseDefinition, plans: Mapping[str, Plan]) -> object:
-    """A package's behaviour, as plain data: its case, then its plans in their references' order."""
-    return {
+def behaviour(
+    case: CaseDefinition, plans: Mapping[str, Plan], cases: Mapping[str, Package] | None = None
+) -> object:
+    """A package's behaviour, as plain data: its case, then its plans in their references' order,
+    then the behaviour of each child it pins (brief, D74). A package with no child writes none,
+    so every digest made before child cases is unchanged, as a default is left out (brief, D50)."""
+    found: dict[str, object] = {
         "case": canonical(case),
         "plans": {"#map": [[ref, canonical(plans[ref])] for ref in sorted(plans)]},
     }
+    if cases:
+        found["cases"] = {
+            "#map": [[ref, behaviour(cases[ref].case, cases[ref].plans)] for ref in sorted(cases)]
+        }
+    return found
 
 
 def digest(released: Package) -> Hash:
     """The behaviour digest: SHA-256 of the behaviour written canonically (brief, D50)."""
-    return behaviour_digest(released.case, released.plans)
+    return behaviour_digest(released.case, released.plans, released.cases)
 
 
-def behaviour_digest(case: CaseDefinition, plans: Mapping[str, Plan]) -> Hash:
-    """The digest of a case and its plans, however they were read."""
-    text = json.dumps(behaviour(case, plans), sort_keys=True, separators=(",", ":"))
+def behaviour_digest(
+    case: CaseDefinition, plans: Mapping[str, Plan], cases: Mapping[str, Package] | None = None
+) -> Hash:
+    """The digest of a case, its plans and its children, however they were read."""
+    text = json.dumps(behaviour(case, plans, cases), sort_keys=True, separators=(",", ":"))
     return Hash(METHOD, hashlib.sha256(text.encode()).hexdigest())
 
 
-def is_release(case: CaseDefinition, plans: Mapping[str, object], given: Hash) -> bool:
-    """Whether `case` and `plans`, stored data by reference as a case's start holds them, are the
-    package whose digest is `given`: a method this code knows, each plan under its own reference,
-    and the same digest. A case checks it when it opens, depending on nothing the client did
-    (brief, D51)."""
+def is_release(
+    case: CaseDefinition,
+    plans: Mapping[str, object],
+    given: Hash,
+    cases: Mapping[str, object] | None = None,
+) -> bool:
+    """Whether `case`, `plans` and the children `cases` pins, stored data by reference as a case's
+    start holds them, are the package whose digest is `given`: a method this code knows, each plan
+    under its own reference, and the same digest. One reference is one plan, so `plans` holds the
+    children's plans too, each read where its plan steps name it (brief, D74). A case checks it
+    when it opens, depending on nothing the client did (brief, D51)."""
     if given.method != METHOD:
         return False
     try:
         parsed = {reference: parse_plan(data) for reference, data in plans.items()}
-    except PlanInvalid:
+        children = {ref: parse_case(data) for ref, data in (cases or {}).items()}
+    except (PlanInvalid, CaseInvalid):
         return False
+    pinned = {
+        ref: Package(child.case, child, own_plans(child, parsed), Written("", {}))
+        for ref, child in children.items()
+    }
+    if cases:
+        parsed = own_plans(case, parsed)
     if any(f"{plan.plan}@{plan.version}" != reference for reference, plan in parsed.items()):
         return False
-    return behaviour_digest(case, parsed) == given
+    return behaviour_digest(case, parsed, pinned) == given
 
 
 # --- What changed --------------------------------------------------------------------------------
@@ -431,7 +512,7 @@ def stored(record: Record, name: str) -> Package:
             f"know (it computes method {METHOD}): run a tool that knows it"
         )
     try:
-        kept = package(record.written.case, list(record.written.plans.values()))
+        kept = unwritten(record.written)
     except (PackageRefused, PackageUnreadable) as refused:
         raise RecordRefused(f"{where}'s package can't be read again: {refused}") from None
     if digest(kept) != record.digest:
@@ -440,6 +521,18 @@ def stored(record: Record, name: str) -> Package:
             f"record was changed, or the method was; it can't be compared"
         )
     return kept
+
+
+def own_plans(case: CaseDefinition, plans: Mapping[str, Plan]) -> dict[str, Plan]:
+    """The plans `case`'s plan steps name, of `plans`, by reference."""
+    named = {step.plan for step in case.steps.values() if isinstance(step, PlanStep)}
+    return {reference: plan for reference, plan in plans.items() if reference in named}
+
+
+def unwritten(written: Written) -> Package:
+    """The package `written` says, its children included, read again as a folder is read."""
+    children = {reference: unwritten(child) for reference, child in written.cases.items()}
+    return package(written.case, list(written.plans.values()), children)
 
 
 def record(

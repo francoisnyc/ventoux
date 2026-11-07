@@ -12,12 +12,28 @@ from typing import Any
 
 import pytest
 
+from ventoux.case import checked
 from ventoux.case.admission import RetryRefused
 from ventoux.case.answers import AnswerRefused
 from ventoux.case.definition import CaseInvalid, parse_case
 from ventoux.case.memory import CaseRun
+from ventoux.case.releases import PackageRefused, digest, package, stored
 from ventoux.case.validate import validate_case
-from ventoux.testing import CATALOG, close, edit, propose, retry, run_case, send, skip
+from ventoux.testing import (
+    CATALOG,
+    ChangeRefused,
+    as_text,
+    close,
+    edit,
+    migrate,
+    propose,
+    release_of,
+    retry,
+    run_case,
+    send,
+    skip,
+)
+from ventoux.tooling.releases import read_package
 
 ROOT = Path(__file__).parent.parent
 GUIDE = ROOT / "docs" / "guides" / "cases.md"
@@ -744,3 +760,212 @@ def test_a_repeatable_case_step_proposed_again_opens_another_child() -> None:
     assert sorted(run.children) == ["repair#1", "repair#2"]
     assert run.children["repair#2"].state.case == "memory/repair#2"
     assert run.state.values["repair.cost"] == 120  # the latest run's, as for any step
+
+
+# --- Slice 10: the package holds its children (brief, D50) (brief, D74) ---
+
+
+def folder_of(tmp_path: Path, parent: dict[str, Any], children: dict[str, Any]) -> Path:
+    """A package folder: `parent` as case.json, and each child as `cases/<reference>/case.json`."""
+    folder = tmp_path / "claim"
+    (folder / "cases").mkdir(parents=True)
+    (folder / "case.json").write_text(as_text(parent))
+    for reference, child in children.items():
+        (folder / "cases" / reference).mkdir()
+        (folder / "cases" / reference / "case.json").write_text(as_text(child))
+    return folder
+
+
+def test_a_package_holds_each_child_it_pins_as_a_package_of_its_own(tmp_path: Path) -> None:
+    read = read_package(folder_of(tmp_path, claim(), {"repair@3": repair()}))
+    assert list(read.cases) == ["repair@3"]
+    assert read.cases["repair@3"].case.case == "repair"
+    assert validate_case(read.case, CATALOG, cases=read.pinned) == validate_case(
+        read.case, CATALOG, cases={"repair@3": repair()}
+    )
+
+
+def test_a_package_whose_children_dont_fit_its_case_steps_is_refused(tmp_path: Path) -> None:
+    # Refused, never ignored: nothing is released (brief, D50) (brief, D74).
+    def refused(children: dict[str, Any], extra: str | None = None) -> str:
+        folder = folder_of(tmp_path / str(len(list(tmp_path.iterdir()))), claim(), children)
+        if extra is not None:
+            (folder / "cases" / extra).mkdir()
+        with pytest.raises(PackageRefused) as refusal:
+            read_package(folder)
+        return str(refusal.value)
+
+    assert refused({}) == "repair@3 is opened by a case step and isn't in cases/: add it"
+    assert refused({"repair@3": repair(), "repair@4": repair()}) == (
+        "cases/repair@4 is opened by no case step: remove it, or name it in a step"
+    )
+    assert refused({"repair@3": repair() | {"case": "garage"}}) == (
+        "cases/repair@3 holds the case garage: a child's folder is named by its case and release"
+    )
+    assert refused({"repair@3": repair()}, extra="notes") == (
+        "cases/notes isn't a package: a child case is a folder holding case.json"
+    )
+
+
+def test_a_child_that_pins_children_of_its_own_is_refused(tmp_path: Path) -> None:
+    # One level only, in the package as at validation (brief, D74).
+    child = repair()
+    child["steps"]["order_parts"] = {
+        "kind": "case",
+        "display": {"title": "Order the parts"},
+        "case": "parts@1",
+    }
+    folder = folder_of(tmp_path, claim(), {"repair@3": child})
+    inner = folder / "cases" / "repair@3" / "cases" / "parts@1"
+    inner.mkdir(parents=True)
+    (inner / "case.json").write_text(as_text(repair() | {"case": "parts"}))
+    with pytest.raises(PackageRefused) as refusal:
+        read_package(folder)
+    assert str(refusal.value) == "cases/repair@3 has cases/ of its own: a child opens no case"
+
+
+def test_a_plan_reference_meaning_two_plans_in_one_package_is_refused() -> None:
+    # One reference is one plan, so the digest and a reader never tell two apart (brief, D50).
+    from test_releases import written  # here: that module reads the example package
+
+    case, plans = written()
+    case["steps"]["repair"] = {"kind": "case", "display": {"title": "Repair"}, "case": "repair@3"}
+    child = repair()
+    child["steps"]["settle"] = {
+        "kind": "plan",
+        "display": {"title": "Settle"},
+        "plan": "refund-order@1",
+    }
+    changed = copy.deepcopy(plans[0])
+    changed["states"]["approve_refund"]["approval"]["timeout"] = "72h"
+    for given, problems in ((plans[0], ""), (changed, "differs")):
+        inner = package(as_text(child), [as_text(given)])
+        if not problems:
+            assert list(package(as_text(case), [as_text(plans[0])], {"repair@3": inner}).cases)
+            continue
+        with pytest.raises(PackageRefused) as refusal:
+            package(as_text(case), [as_text(plans[0])], {"repair@3": inner})
+        assert str(refusal.value) == (
+            "plans/refund-order@1 differs between refund and cases/repair@3: one reference is "
+            "one plan"
+        )
+
+
+def test_the_parents_digest_covers_what_its_children_do() -> None:
+    # A new garage process reaches claims only by a release of the claim (brief, D50) (brief, D74).
+    def digest_with(child: dict[str, Any]) -> str:
+        pinned = package(as_text(child), [])
+        return digest(package(as_text(claim()), [], {"repair@3": pinned})).sha256
+
+    slower = repair()
+    slower["steps"]["fix"]["roles"] = ["support"]
+    assert digest_with(slower) != digest_with(repair())
+    # Wording only changes no digest, in a child as in its parent.
+    reworded = repair()
+    reworded["steps"]["fix"]["display"]["title"] = "Repair the vehicle"
+    assert digest_with(reworded) == digest_with(repair())
+
+
+def test_a_release_record_keeps_its_children_and_reads_back_as_the_same_package() -> None:
+    record = release_of(claim(), 1, cases={"repair@3": repair()})
+    kept = stored(record, "claim")
+    assert list(kept.cases) == ["repair@3"]
+    assert digest(kept) == record.digest
+
+
+PLATFORM = PEOPLE | {"pia": ["platform"], "lee": ["support-lead", "platform"]}
+ASSESSED = ("assess", "accept", "ana", {"payout": 900})
+
+
+def test_a_migration_renaming_the_case_step_keeps_its_open_child() -> None:
+    # Running work finishes under what it started with: the child keeps its release, and the
+    # record of which child the run opened follows the rename (brief, D53) (brief, D74).
+    after = claim() | {"close_reasons": CLOSABLE}
+    after["steps"]["fix_vehicle"] = after["steps"].pop("repair")
+    after["steps"]["pay_garage"]["requires"] = ["fix_vehicle"]
+    after["steps"]["pay_garage"]["inputs"]["amount"] = {"var": "fix_vehicle.cost"}
+    run = run_case(
+        claim() | {"close_reasons": CLOSABLE},
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[
+            ASSESSED,
+            migrate(
+                release_of(after, 2, cases={"repair@3": repair()}),
+                {"steps": {"repair": "fix_vehicle"}},
+                "pia",
+            ),
+            ("case.change#1", "approve", "lee"),
+            close("duplicate", "ana"),
+        ],
+        cases={"repair@3": repair()},
+        people=PLATFORM,
+        release=release_of(claim() | {"close_reasons": CLOSABLE}, 1, cases={"repair@3": repair()}),
+    )
+    assert any(line.startswith("applied case.change#1: migrated") for line in run.history)
+    # The close still reaches the child, by the entry it opened under.
+    assert run.children["repair#1"].history[-1] == "closed: by its parent: duplicate, by ana"
+    assert run.closed
+
+
+def test_a_migration_opening_another_release_from_the_step_is_refused_until_it_ends() -> None:
+    after = claim()
+    after["steps"]["repair"]["case"] = "repair@4"
+    with pytest.raises(ChangeRefused) as refused:
+        run_case(
+            claim(),
+            file={"order_id": "ord-1", "vehicle": "veh-9"},
+            answers=[
+                ASSESSED,
+                migrate(release_of(after, 2, cases={"repair@4": repair()}), {}, "pia"),
+            ],
+            cases={"repair@3": repair()},
+            people=PLATFORM,
+            release=release_of(claim(), 1, cases={"repair@3": repair()}),
+        )
+    assert (
+        "repair#1 is running on repair@3, and claim 2's repair opens repair@4: migrate after it finishes"
+        in str(refused.value)
+    )
+
+
+def test_the_release_check_checks_each_child_and_gives_the_parent_its_children() -> None:
+    # One check before release, for the parent and every child it pins (brief, D50) (brief, D74).
+    pinned = package(as_text(repair()), [])
+    released = package(as_text(claim()), [], {"repair@3": pinned})
+    assert [i.code for i in checked.issues_of(released, CATALOG) if i.severity == "error"] == []
+    broken = repair()
+    broken["steps"]["fix"]["roles"] = ["mechanic"]  # a role nobody registered
+    released = package(as_text(claim()), [], {"repair@3": package(as_text(broken), [])})
+    paths = [i.path for i in checked.issues_of(released, CATALOG) if i.severity == "error"]
+    assert paths and all(path.startswith("cases.repair@3.") for path in paths)
+
+
+def test_a_childs_plan_step_finds_its_plan_beside_its_parents() -> None:
+    # One reference is one plan, so `plans` serves the parent and its children (brief, D74).
+    from test_case import refund_order  # here: that module imports this one's guide
+
+    child = repair()
+    child["fields"]["order_id"] = {
+        "type": "reference",
+        "system": "orders",
+        "display": {"title": "Order"},
+    }
+    child["steps"]["settle"] = {
+        "kind": "plan",
+        "display": {"title": "Settle the parts"},
+        "plan": "refund-order@1",
+        "inputs": {"order_id": {"var": "order_id"}, "amount": {"var": "budget"}},
+    }
+    definition = claim()
+    definition["steps"]["repair"]["inputs"]["order_id"] = {"var": "order_id"}
+    run = run_case(
+        definition,
+        file={"order_id": "ord-1", "vehicle": "veh-9"},
+        answers=[ASSESSED],
+        cases={"repair@3": child},
+        case_answers={"repair": [("fix", "fixed", "lee", {"cost": 640})]},
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+        people=PEOPLE,
+    )
+    assert "settle#1 done" in run.children["repair#1"].history

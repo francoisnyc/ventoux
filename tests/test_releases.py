@@ -229,7 +229,7 @@ def test_a_stray_file_is_refused(tmp_path: Path) -> None:
     with pytest.raises(PackageRefused) as refusal:
         read_package(folder)
     assert str(refusal.value) == (
-        "notes.txt isn't part of a package: a package holds case.json and plans/\n"
+        "notes.txt isn't part of a package: a package holds case.json, plans/ and cases/\n"
         "plans/draft.yaml isn't a plan's file: each plan is a .json file"
     )
 
@@ -471,7 +471,10 @@ def test_the_command_says_what_it_did(tmp_path: Path, capsys: Any) -> None:
     assert command(folder, releases, "a3", capsys) == (
         1,
         "",
-        f"{folder}: notes.txt isn't part of a package: a package holds case.json and plans/\n",
+        (
+            f"{folder}: notes.txt isn't part of a package: a package holds case.json, plans/ "
+            "and cases/\n"
+        ),
     )
     (folder / "notes.txt").unlink()
     (folder / "case.json").write_text("{")

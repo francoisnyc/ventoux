@@ -174,6 +174,9 @@ class Migration:
     # a name it doesn't say keeps its name (brief, D53).
     mapping: Mapping[str, Mapping[str, str]]
     engine: int  # the engine version it moves the case to, never back (brief, D51)
+    # The child cases it pins, as stored data, by reference; `plans` holds their plans too, since
+    # one reference is one plan (brief, D74).
+    cases: Mapping[str, object] = field(default_factory=dict[str, object])
 
     @property
     def label(self) -> str:
