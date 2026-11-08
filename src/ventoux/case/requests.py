@@ -9,6 +9,7 @@ See docs/layers/12-releases.md (12c).
 
 from ventoux.case.admission import latest_run
 from ventoux.case.answers import AnswerRefused, offers
+from ventoux.case.audit import Decision, Fact
 from ventoux.case.definition import (
     ActivityStep,
     CallStep,
@@ -18,6 +19,7 @@ from ventoux.case.definition import (
     rule_fields,
 )
 from ventoux.case.migrations import Moved, apply, problems_of, released
+from ventoux.case.recording import RECORDS_FROM
 from ventoux.case.state import (
     Answered,
     CaseState,
@@ -236,6 +238,8 @@ def answer_change(
     state.history.append(f"{event.by} answered {request.entry} {event.outcome} as {role}{worded}")
     if event.outcome == REJECT:
         state.history.append(f"{request.entry} not applied: {event.by} rejected it")
+        refused = f"{event.by} rejected it"
+        state.deciding.append(Decision("rejected", entry=request.entry, reason=refused))
         return None
     if request.kind == EDIT:
         apply_edit(case, state, request, event.by, event.at)
@@ -305,7 +309,7 @@ def apply_edit(
     if problem is None and inputs_digest({name: Var(var=name)}, state.values) != request.against:
         problem = f"{name} changed since it was proposed: propose it again"
     if problem is not None:
-        state.history.append(f"{request.entry} not applied: {problem}")
+        not_applied(state, request, problem)
         return
     state.values[name] = request.value
     # Both people decided it, so neither approves a step that reads it (brief, D11); a mark the
@@ -317,6 +321,8 @@ def apply_edit(
     state.history.append(
         f"applied {request.entry}: {name} edited by {request.by}, approved by {approved_by}"
     )
+    wrote = Fact(name, tuple(sorted(state.sources[name])), request.value)
+    state.deciding.append(Decision("edited", entry=request.entry, wrote=wrote))
     lapse_spent(case, state, name)
 
 
@@ -326,7 +332,7 @@ def apply_skip(
     """The failed run ends skipped: neither done nor failed, so nothing requiring it starts, it
     reaches nothing, and a close it held completes; unless it no longer can be (brief, D52)."""
     if (problem := skip_problem(case, state, request.target)) is not None:
-        state.history.append(f"{request.entry} not applied: {problem}")
+        not_applied(state, request, problem)
         return
     run = next(run for run in state.runs if run.entry == request.target)
     run.status, run.reason = "skipped", ""
@@ -336,6 +342,8 @@ def apply_skip(
     state.history.append(
         f"applied {request.entry}: {run.entry} skipped by {request.by}, approved by {approved_by}"
     )
+    skipped = Decision("skipped", step=run.step, entry=request.entry, target=run.entry)
+    state.deciding.append(skipped)
 
 
 def apply_migration(
@@ -353,16 +361,28 @@ def apply_migration(
     assert isinstance(migration, Migration)  # a migration's request carries its migration
     if released(case, state) != request.against:
         moved = f"the case moved to {released(case, state)} since it was proposed"
-        state.history.append(f"{request.entry} not applied: {moved}: propose it again")
+        not_applied(state, request, f"{moved}: propose it again")
         return None
     if problems := problems_of(case, catalog, state, migration):
-        state.history.append(f"{request.entry} not applied: {'; '.join(problems)}")
+        not_applied(state, request, "; ".join(problems))
         return None
     state.history.append(
         f"applied {request.entry}: migrated from {request.against} to {migration.label}, engine "
         f"{migration.engine}, proposed by {request.by}, approved by {approved_by}"
     )
+    # A case moved to the first engine that records says so: its trail starts here, and is
+    # never passed off as whole (brief, D76).
+    starts = state.engine < RECORDS_FROM <= migration.engine
+    began = f"what came before engine {RECORDS_FROM} was not recorded" if starts else None
+    migrated = Decision("migrated", entry=request.entry, target=migration.label, reason=began)
+    state.deciding.append(migrated)
     return Moved(apply(case, catalog, state, migration, at), migration)
+
+
+def not_applied(state: CaseState, request: ChangeRequest, problem: str) -> None:
+    """The approved request can't be applied any more: it says why, and changes nothing."""
+    state.history.append(f"{request.entry} not applied: {problem}")
+    state.deciding.append(Decision("refused", entry=request.entry, reason=problem))
 
 
 def lapse_spent(case: CaseDefinition, state: CaseState, name: str) -> None:

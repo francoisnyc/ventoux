@@ -9,6 +9,12 @@ from typing import Any
 
 import pytest
 from cases.refund import refund
+from test_case import REFUND
+from test_change_requests import LARGE as LARGE_ORD_1
+from test_change_requests import OPERATING, TYPED_WRONG, account_closed
+from test_change_requests import PEOPLE as CHANGERS
+from test_migrations import REFUND_1, on_refund_1
+from test_migrations import REVIEWED as REVIEWED_250
 from test_rules import DUPLICATE, WITHDRAWS, withdrawable
 from test_sensitive import FILE, NATIONAL_ID, OPENING, claim, lookup
 from test_set import APPROVED, with_owed
@@ -22,7 +28,7 @@ from ventoux.case.state import Answered
 from ventoux.core.sensitive import Sensitive
 from ventoux.temporal.carried import state_as_data, state_from_data
 from ventoux.temporal.converter import ExactPayloadConverter
-from ventoux.testing import CATALOG, AnswerRefused, close, retry, run_case
+from ventoux.testing import CATALOG, AnswerRefused, close, edit, migrate, retry, run_case, skip
 
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
 LARGE = {"order_id": "ord-2", "amount": 250}
@@ -270,6 +276,80 @@ def test_a_rules_stop_and_a_persons_close_say_what_they_stopped() -> None:
         ("stopped", "review", "review#1", "close_reasons.duplicate"),
         ("closed", None, None, None),
     ]
+
+
+def test_a_change_request_says_what_it_changed_or_why_not() -> None:
+    # An edit: proposed by Ana, approved by Lee; what it wrote is both of theirs (brief, D52).
+    proposed = [TYPED_WRONG, edit("approved_amount", 250, "ana")]
+    edited = [*proposed, ("case.change#1", "approve", "lee")]
+    run = run_case(REFUND, LARGE_ORD_1, edited, CHANGERS, engine=3)
+    proposal, approval = run.audit[-2:]
+    assert proposal.act == Act(
+        "change proposed",
+        by="ana",
+        roles=("support",),
+        entry="approved_amount",
+        outcome="edit",
+        values={"approved_amount": Decimal(250)},
+    )
+    assert approval.decisions[0] == Decision(
+        "edited",
+        entry="case.change#1",
+        wrote=Fact("approved_amount", ("person:ana", "person:lee"), Decimal(250)),
+    )
+    # Rejected: nothing changed, and the record says who rejected it.
+    rejected = [*proposed, ("case.change#1", "reject", "lee")]
+    run = run_case(REFUND, LARGE_ORD_1, rejected, CHANGERS, engine=3)
+    assert run.audit[-1].decisions == [
+        Decision("rejected", entry="case.change#1", reason="lee rejected it")
+    ]
+    # A skip of a failed run, approved by another operator.
+    skipped = [
+        ("review", "approve", "ana", {"approved_amount": 40}),
+        skip("pay#1", "omar"),
+        ("case.change#1", "approve", "olga"),
+    ]
+    run = run_case(
+        REFUND,
+        {"order_id": "ord-1", "amount": 40},
+        skipped,
+        OPERATING,
+        activities={"payments.refund@2": account_closed},
+        engine=3,
+    )
+    [skipping] = [
+        each for each in run.audit if each.act.entry == "case.change#1" and each.act.by == "olga"
+    ]
+    assert skipping.decisions[0] == Decision(
+        "skipped", step="pay", entry="case.change#1", target="pay#1"
+    )
+
+
+def test_a_case_before_engine_3_records_nothing_until_it_migrates_to_it() -> None:
+    # Opened at engine 2, it decides and replays as it always did, and makes no record.
+    run = on_refund_1([REVIEWED_250], engine=2)
+    assert run.audit == [] and run.state.engine == 2
+    # Moved to engine 3 by a migration: its records start with the act that moved it, saying what
+    # came before wasn't recorded; never a partial trail passed off as whole (brief, D76).
+    moved = on_refund_1(
+        [REVIEWED_250, migrate(REFUND_1, {}, "pia", 3), ("case.change#1", "approve", "lee")],
+        engine=2,
+    )
+    [first] = moved.audit
+    assert (first.number, first.engine, first.release) == (1, 3, "refund 1")
+    assert first.act == Act(
+        "answered",
+        by="lee",
+        roles=("platform", "support-lead"),
+        entry="case.change#1",
+        outcome="approve",
+    )
+    assert first.decisions[0] == Decision(
+        "migrated",
+        entry="case.change#1",
+        target="refund 1",
+        reason="what came before engine 3 was not recorded",
+    )
 
 
 def known(inputs: dict[str, Any]) -> dict[str, Any]:
