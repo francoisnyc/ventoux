@@ -1572,7 +1572,7 @@ async def start_case(
     # The codec finds a key from the part of a workflow ID before its first `/` (brief, D31).
     if "/" in id:
         raise ValueError(f'{id} can\'t name a case: a case ID has no "/"')
-    keys.create(id)
+    await asyncio.to_thread(keys.create, id)  # off the event loop (brief, D78)
     await client.start_workflow(
         workflow.run,
         opening(opening_on, file, opened_by, opener_roles),

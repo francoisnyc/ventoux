@@ -8,6 +8,7 @@ again. The rest of the payload stays readable in the Temporal UI (brief, D15) (b
 See docs/layers/09-case-data.md (9b).
 """
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
@@ -55,11 +56,20 @@ class SensitiveCodec(PayloadCodec, WithSerializationContext):
             workflow_id = context.workflow_id
         return SensitiveCodec(self.keys, None if workflow_id is None else case_of(workflow_id))
 
+    # Python: `asyncio.to_thread` runs a plain function on another thread, and waits for it. A
+    # key service's call waits a round trip, and its whole timeout while the service is down:
+    # made on the event loop, it would stall every workflow and activity on the worker. So the
+    # payloads are sealed and opened on a thread, all at once (brief, D78).
     async def encode(self, payloads: Sequence[Payload]) -> list[Payload]:
-        return [self.sealed(payload, SENSITIVE, ENCRYPTED, self.keys.seal) for payload in payloads]
+        return await asyncio.to_thread(self.each, payloads, SENSITIVE, ENCRYPTED, self.keys.seal)
 
     async def decode(self, payloads: Sequence[Payload]) -> list[Payload]:
-        return [self.sealed(payload, ENCRYPTED, SENSITIVE, self.keys.open) for payload in payloads]
+        return await asyncio.to_thread(self.each, payloads, ENCRYPTED, SENSITIVE, self.keys.open)
+
+    def each(
+        self, payloads: Sequence[Payload], before: str, after: str, change: Any
+    ) -> list[Payload]:
+        return [self.sealed(payload, before, after, change) for payload in payloads]
 
     def sealed(self, payload: Payload, before: str, after: str, change: Any) -> Payload:
         """`payload` with each part named `before<n>` changed by `change` (seal or open) and
