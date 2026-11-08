@@ -536,6 +536,124 @@ attribute a test's workflow lowers, as `events_per_run` is for continue-as-new.
     documented answers, and checked once against a development Vault (`vault server -dev`) when one
     is available, with a test marked to run only then. *Recommended.*
 
+### 19c, at its start (2026-11-08): what 19b settled, and what is still to answer
+
+Choices 14 to 20 stand as answered on 2026-11-07: Vault's transit engine; destroyed at once; the
+mark in Vault's key-value engine; the standard library, no new dependency; `VAULT_TOKEN` alone;
+`KeyRefused` and `KeyUnavailable`; tests from recordings. D78 is written once the questions below
+are answered, before any code.
+
+**Checked in the code before asking:**
+
+- **The codec calls the provider synchronously from async code.** `SensitiveCodec.encode` and
+  `decode` are `async`, and call `keys.seal` and `keys.open` directly. So do the forget request's
+  async activities (`look_up` reads `keys.state`, `destroy_key` calls `keys.destroy`) and the
+  client's `start_case` and `start_run` (`keys.create`). With `FileKeys` that is a file read; with
+  Vault it is a round trip, on the event loop of the worker or the client.
+- **The export's sealing already runs off the loop:** `ExportActivities.append` is a plain
+  function, run on the worker's `activity_executor` threads.
+- **A failed export is said as the store's** (`export_failure`): anything but Ventoux's own two
+  refusals reads `the store failed with <type>`, and the attention line ends `look at the store,
+  then retry the export`.
+- **Two places read a key's state:** `read_audit` (`‹forgotten›` when `destroyed`) and the forget
+  request's `look_up` (`there is no case …` when `never made`).
+- **A case ID is refused only for a `/`** (`start_case`, `start_run`); the codec takes the part
+  before the first `/`. Every ID in the tests and guides is letters, digits and `-`, with capitals
+  (`refund-A-1001`).
+- **No Vault here:** none is installed. HashiCorp's release site answers, so a development server
+  (`vault server -dev`) can be fetched into a scratch folder for the one check against a real
+  Vault: a tool for a check, not a dependency of the project.
+
+**The questions, each with a recommendation:**
+
+31. **The codec's calls, off the event loop.** A Vault call made on the loop blocks every workflow
+    and activity on that worker for its round trip, and for its whole timeout while Vault is down.
+    - (a) **Every provider call from async code goes through `asyncio.to_thread`:** the codec's
+      `encode` and `decode` (one thread hop for the whole list of payloads, not one per part), the
+      forget activities' `state` and `destroy`, and the client's `create`. `FileKeys` goes the same
+      way: one path, whichever provider. The export activity is already on a thread.
+    - **Every Vault call has a timeout:** 10 seconds, connect and answer, a constructor argument; a
+      call that runs past it is `KeyUnavailable`, so the worker's thread is never held longer.
+    - **The export's sealing:** one call per sensitive value, each with its timeout; the activity's
+      own limit (`EXPORT_CALL`, a minute) bounds the whole, and a timeout there is retried as any
+      failure of the store is. Batching seals (Vault's `batch_input`) is left for later: said, not
+      built.
+    - (b) A thread pool of the provider's own. More to own, for nothing `to_thread` doesn't give.
+
+    *Recommended: (a).*
+
+32. **The export's failure names the service that failed,** and a final refusal is never retried.
+    - **Which service:** the activity's failure types are sorted three ways. `KeyUnavailable` and
+      `KeyRefused` are the key service's, and their message is Ventoux's own (it names the case and
+      the service's address, never a value), so it is said whole; `ExportRefused` and
+      `AuditRefused` stay Ventoux's refusals, said whole; anything else is the store's, by its type
+      alone. `ExportFailed` gains what to look at, `the store` or `the key service`, and the
+      attention line ends `look at the key service, then retry the export` when it was Vault.
+      Default `the store`, so a state carried from 19b reads as it did.
+    - **A final `KeyRefused`** (an exportable key, a mark, the wrong type) is non-retryable: it
+      fails the export at once, never 10 times. `KeyUnavailable` is retried, as a store that is down
+      is. `EXPORT_RETRIES` gains `KeyRefused`, and its test says so.
+
+    *Recommended.*
+
+33. **Forgotten or unreachable, never confused.** `VaultKeys.state` says `destroyed` only when
+    Vault answered with the mark, and `never made` only when Vault answered that neither the key
+    nor the mark exists. Anything else (unreachable, a timeout, the token refused, an answer it
+    can't read) raises `KeyUnavailable`.
+    - **`read_audit`** lets it through: an error, never `‹forgotten›`. A test.
+    - **The forget request, before anyone answers** (`look_up`): refused, saying so (choice 19):
+      `refused pia's proposal: the key service at https://vault.internal:8200 can't be reached:
+      propose again once it answers`. Nothing was decided, so nothing waits. A test that it is
+      never `there is no case claim-7`.
+    - **After the approval** (`destroy_key`): retried until Vault answers, as today: the approval
+      was given, so the request waits, `closing the case`. Said, with a test.
+
+    *Recommended.*
+
+34. **A case ID as a Vault name.** Vault puts a key's name in a URL path, and its key-value engine
+    puts the mark's there too: `.`, `..`, `%`, `?`, `#` and spaces would be read as path, query or
+    fragment, and two IDs could meet on one name.
+    - (a) **One spelling, escaped:** lowercase letters, digits and `-` stay as they are; every
+      other byte of the ID's UTF-8, capitals and `_` included, is written `_` and two hex digits.
+      `refund-A-1001` is `ventoux-refund-_41-1001`, `claim 7` is `ventoux-claim_207`. Two IDs never
+      share a name (`_` only starts an escape, so the mapping reads back), the name holds no path
+      character, and it is the same whether Vault folds capitals or not. The mark is
+      `ventoux/forgotten/<the same name>`. Refused, with `KeyRefused` at `create`: an empty ID, and
+      one whose name would pass 128 characters, saying the limit.
+    - (b) Refuse every ID outside lowercase letters, digits and `-`: simplest, but it refuses the
+      guide's `refund-A-1001`, and only where Vault is the provider, so development and production
+      would accept different IDs.
+
+    *Recommended: (a).* Tests: each awkward character, `..`, a capital against its lowercase twin,
+    and the refusals.
+
+35. **The part's binding is Vault's, and the key is checked as it is used.**
+    - **The part** is sent as `associated_data`, base64, on every encrypt and decrypt, `<case>/
+      <part>` as `FileKeys` binds it. A recording shows it is sent; only a real Vault shows a value
+      moved to another place fails to open: a test marked to run only where `vault` is installed,
+      run once here against a development server, and the PR says whether it ran, and where.
+    - **The key, read on every use:** before each seal or open, its configuration is read, and
+      refused unless its type is `aes256-gcm96`, it isn't exportable, and it allows no plaintext
+      backup. One more round trip per use; a check made once and remembered would miss a key made
+      exportable later (Vault lets that be turned on, never off). Created with all three set
+      explicitly.
+
+    *Recommended.*
+
+36. **The mark and the delete.** `destroy` writes the mark, then allows the key's deletion, then
+    deletes it. From the mark on, `state` says `destroyed`, and `create`, `seal` and `open` refuse:
+    the case is forgotten even if a later step fails. `destroy` again finishes: the mark is written
+    again (the same content), and a key already gone counts as deleted. A test for each step
+    failing (the mark, the configuration, the deletion), each then finished by a second `destroy`.
+    *Recommended.*
+
+**Settings, as choice 18 said, made exact:** `VaultKeys(address, transit_mount, marks_mount)`,
+each required, no default (the marks need a key-value engine of version 2, named apart from
+transit's); an `http://` address refused unless its host is `localhost` or `127.0.0.1`; the
+token read from `VAULT_TOKEN` when each call is made, never kept on the object, so it is in no
+`repr`; missing, the constructor refuses, saying to set `VAULT_TOKEN`. The default transport adds
+the token; a recording never sees it.
+
 ### Carried from 18d
 
 21. **A parent terminated with a child still running, then forgotten,** loses the key under that
