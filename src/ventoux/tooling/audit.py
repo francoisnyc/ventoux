@@ -152,7 +152,8 @@ def readable(record: Written, held: frozenset[str], keys: KeyProvider) -> Writte
     and wrote. Each is opened for the place it is found at, as the export sealed it, never the
     place written beside it: a sealed value moved elsewhere doesn't open (brief, D31)."""
     record = copy.deepcopy(record)  # the store's own rows are never changed
-    owner = case_of(record["stream"])  # a child's values are sealed under its case's key (D75)
+    # A child's values are sealed under its case's key (brief, D75).
+    owner = case_of(record["stream"])
     place = f"audit/{record['stream']}/{record['number']}"
 
     def read(value: object, at: str) -> object:

@@ -3266,20 +3266,28 @@ Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.
   survives the records leaving the state once written and crosses continue-as-new, so no two
   records share an ID. A plan run's events ride in the record of its step's end, from its report.
 - **Sealed, or not written** (D31). The activity seals each sensitive value with the provider,
-  under the case's key (a child's and a plan run's: its case's, D75), with a part naming its place:
-  `audit/<stream>/<number>/<field>`. It is given the definition's sensitive fields with the
-  records, and a value of one in clear fails the whole call, naming the record and the field,
-  never the value: read from the definition, never from the wrapper. Nothing is written then.
+  under the case's key (a child's and a plan run's: its case's, D75), with a part naming its place
+  in the record: `audit/<stream>/<number>/act/values/<field>`, `…/decisions/<n>/read/<field>`. It
+  is given the definition's sensitive fields with the records, and a value of one in clear fails
+  the whole call, naming the record and the field, never the value: read from the definition,
+  never from the wrapper. Nothing is written then. A field that narrows who sees it without being
+  sensitive is written in clear, saying who may see it.
 - **When the store can't be written** (D17): the case goes on and its records wait in the state;
   the activity's retries are bounded (10 attempts, the longest wait 5 minutes), then the case needs
-  attention, and an operator retries the export with `retry_export` (D26). The case never closes
+  attention, and an operator retries the export with `retry_export` (D26). The failure and the
+  retry are acts the case decides and records; the failure says the store's error by its type,
+  never what it said. The case never closes
   with records unwritten. Past 256 KB of unwritten records, measured as the export would write
   them, the case holds: it decides nothing new, each act waiting in its inbox, and says so.
 - **Reading it,** `read_audit(store, case, roles, keys)`, filters each value as the case view does
-  (D30); a sealed value is opened only for a role in its `visible_to`, while the key exists, and
-  said `‹forgotten›` after. The store's rows are admin access (D19).
+  (D30): a value whose field narrows who sees it is said hidden unless the reader holds one of
+  those roles; a sealed one is opened for them at the place it is found, while the key exists, and
+  said `‹forgotten›` after. With no definition at hand, it shows any reader what every role the
+  case names may see. The store's rows are admin access (D19).
 - **Forgetting:** close, export, then destroy (D32, as amended). The forget request's own stream,
-  holding no sensitive value, is written behind the patch marker `ventoux-forget-export`.
+  holding no sensitive value, is written behind the patch marker `ventoux-forget-export`, beside
+  the request, never in its way: one record per act (the proposal, each answer, the key
+  destroyed), the last written once the key is gone.
 - **Engine version 3 opens** (D51): `ENGINE` is 3, so new cases open there and a migration may move
   a case there. Only a case at 3 or above with records unwritten schedules the export, so a case
   at 2 replays as it was recorded.

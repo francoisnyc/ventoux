@@ -426,6 +426,57 @@ attribute a test's workflow lowers, as `events_per_run` is for continue-as-new.
 13. Replay: every history before 19b replays, a forget request's included; the engine 3 history
     replays.
 
+### Decided while building 19b
+
+- **The export's failure and its retry are acts the case decides** (`ExportFailed`,
+  `ExportRetried`), each recorded as any act is: the failure's reason is the store's error by its
+  type, `the store failed with ConnectionError: ‹sensitive›`, or Ventoux's own refusal whole (a
+  value in clear, a gap, a changed record), which never quotes a value. So the attention reads
+  `audit export failed: the store failed with ConnectionError: ‹sensitive›: look at the store,
+  then retry the export`, and the retry's refusal `the audit export hasn't failed: nothing to
+  retry` when there is nothing to retry. The hold is said in `needs_attention` too.
+- **Written records leave the state** once the store has them; the counter (`recorded`) gives the
+  next number, and crosses continue-as-new. The report says how many wait: `unwritten`.
+- **A record sent again is the same when each sealed value has the same place and the same
+  `visible_to`:** sealing again uses a fresh nonce, so its bytes differ. Found when a retried write
+  was refused as "other content".
+- **The export holds the switch, but none starts when a switch is due** (unless the case is closed
+  or holding). Letting the switch happen beside a running export stalled the test server's time;
+  holding it while an export retries for minutes would grow the run's history. A closed case wakes
+  only for its inbox: woken by a switch it can't take, it spun.
+- **The forget request writes its stream beside it,** never in its way: a store that is down never
+  keeps an answer waiting, nor the key. Its writes retry for as long as the store is down (never
+  given up: nothing in them is sensitive, so nothing waits on them), and a store that refuses them
+  fails the request. One record per act: the proposal (`admitted`, or `refused` with why), each
+  answer (`refused` with why, `rejected`, or `approved` with what the approval did to the case: a
+  refusal if it had closed first and keeps closed cases), and `key destroyed` (`forgotten`), whose
+  lines are the case's end and the key's. That last record is written after the key is gone, not
+  before as D77 first said: it holds no sensitive value, and only the case's records need the key.
+  Two act kinds are added for it, `forget proposed` and `key destroyed`; its records name no
+  release and the code's engine version.
+- **The forget request waiting says `closing the case`,** as before; why is the case's: its report
+  needs attention, saying the export failed. The line proposed, `closing the case: its audit export
+  is behind`, would need the request to ask the case, which it doesn't; the guide says what is.
+- **A sealed value's place is its path in the record:** `audit/<stream>/<number>/act/values/<field>`,
+  `…/decisions/<n>/read/<field>`, `…/decisions/<n>/wrote`, not `audit/<stream>/<number>/<field>`:
+  a record can hold the same field in several places.
+- **A field that narrows who sees it, without being sensitive, is written saying so:**
+  `{"value": …, "visible_to": […]}`, so `read_audit` can filter it with no definition at hand.
+  `exported` and the activity's input gain `restricted`, beside `sensitive`.
+- **`read_audit` opens a sealed value for the place it is found at,** never the `part` written
+  beside it: a value moved within the store would otherwise open where it was moved to. It filters
+  only what narrows: a value seen by every role the case names is shown to any reader, since
+  `read_audit` has no definition to say who those are. The store's readers are admin access (D19).
+- **A plan's events become decisions in the plan workflow,** from its history, and its report
+  carries them as `decisions` (not `events`); the case names their step and run. A decision gains
+  `by` (a person answering a plan's wait) and `outcome` (what an activity gave, the answer given),
+  both carried. An activity's output values are not in them: choice 28 promised its inputs.
+- **Test 12 needed no new test:** the tutor's test from #90 already moved a case to engine 3 once
+  the code opened cases there, and its export starts with the migration's record.
+- **Two histories recorded at 19b** (`at_19b_refund_export_retried`, `at_19b_forget_request`),
+  replayed from now on. Every history before 19b replays, the forget request recorded before 12c
+  included.
+
 ### For 19c: the production key provider
 
 14. **Vault's transit engine, or a cloud KMS.**
@@ -679,6 +730,65 @@ every line in exactly one record; the migration's "not recorded"; a request not 
 refused proposal's step; no record renamed; `OPENING` (four release tests); on Temporal, a
 migration to a version known but not opened, and its branch for a version not known at all.
 
+## Promises (19b)
+
+Each claim the note, D77 and the guide make about the export, and the test that would fail if it
+weren't true. Tests are in `tests/test_audit_export.py` unless named otherwise. Each was watched
+failing first or, for a guard, failing when switched off (said in each slice's commit).
+
+| Promise | Test |
+|---|---|
+| A sensitive field's value in clear fails the export, read from the definition, never the wrapper; nothing is written; the refusal names the record and the field, never the value | `test_a_sensitive_value_in_clear_fails_the_export` |
+| A sealed value opens only at its own place, under its case's key | `test_a_sensitive_value_in_clear_fails_the_export`, `test_read_audit_opens_a_value_only_for_a_role_that_may_see_it` (a value moved in the store) |
+| The store keeps each record once: the same again accepted; a gap or other content refused, saying which; nothing of the call kept; a case's streams read in order | `test_the_store_keeps_each_record_once_in_order` |
+| A case worker without a store is refused, saying what to give | `test_a_case_worker_without_a_store_is_refused` |
+| A case at engine 3 writes every record, in order, in its stream, before it ends: the history line for line | `test_the_quickstarts_refund_is_exported_on_temporal` |
+| A case at engine 2 makes no record, schedules no export, writes nothing | `test_a_case_at_engine_2_schedules_no_export` |
+| No two records share a number: across continue-as-new, and after written records leave the state | `test_record_numbers_never_repeat_across_switches` |
+| The store down: the case goes on, then needs attention, saying the store's error by its type, never what it said; only an operating role retries the export; once written, the case ends; it never ends with records unwritten | `test_with_the_store_down_the_case_closes_only_once_its_export_is_retried` |
+| A retry of an export that hasn't failed is refused, saying so | `test_an_export_that_hasnt_failed_is_never_retried` |
+| The export is retried 10 times, at most 5 minutes apart; refusals are never retried; the case holds past 256 KB | `test_a_deployment_retries_the_export_ten_times_and_holds_past_256_kb` |
+| Past its bound the case decides nothing new, says so, and decides what waited, in order, once the export catches up | `test_past_its_bound_the_case_holds_until_its_export_catches_up` |
+| Forgetting: close, export, then destroy; every record written, sealed, before the key goes, and unreadable after | `test_forgetting_closes_exports_then_destroys` |
+| The store down as forgetting is approved: the case closes but doesn't end, needing attention; the key stays until the export is written | `test_with_the_store_down_forgetting_keeps_the_key_until_the_export_is_written` |
+| The forget request writes its own stream: one record per act, each line in exactly one record; a refused answer and a rejection each say so | `test_forgetting_closes_exports_then_destroys`, `test_a_refused_answer_and_a_rejection_are_each_recorded_in_the_request_s_stream` |
+| A child writes its own stream, under its parent's key; a sensitive value is in clear nowhere in the store | `test_a_childs_records_are_its_own_stream_sealed_under_its_parents_key` |
+| A parent closing its child with the store down: each needs attention, nothing deadlocks; once both exports are retried, the child ends, then the parent | `test_with_the_store_down_a_parent_closing_its_child_ends_once_both_exports_are_retried` |
+| `read_audit`: a value whose field narrows who sees it is said hidden, with the roles that would, sealed or not; a sealed one opens only for a role in its `visible_to`, says `‹forgotten›` once the key is gone, and is an error if it doesn't open | `test_read_audit_opens_a_value_only_for_a_role_that_may_see_it` |
+| A plan step's events are in the record of its end: an activity started on its inputs with their sources, an answer refused or taken by whom, what an activity gave | `test_a_plan_steps_events_are_in_the_record_of_its_end` |
+| A migration to engine 3 on Temporal is accepted once the code opens cases there, and the export starts with its record | `test_temporal_migrations.py::test_a_case_moves_on_temporal_only_to_an_engine_it_opens_cases_at` |
+| Every history recorded before 19b replays, a forget request's included; those recorded at 19b replay | the replay tests over `tests/histories`, `test_histories_recorded_at_19b_replay` |
+
+**Not tested, said so:** that the case never continues as new while it holds is the switch's own
+rule (nothing runs, and a switch due starts no export); no test drives a switch at the bound. A
+case terminated by an admin ends with what it hadn't written (D77's known limit).
+
+## Routes checked before the pull request (19b)
+
+| Route | How it reaches the export | Test |
+|---|---|---|
+| an answer, an edit, a migration, an event, a rule, the opening | each makes its record in the engine (19a); the next workflow task writes it | the quickstart's refund, the switches', the migration's |
+| a migration to engine 3 | accepted once the code opens cases there; its record starts the stream | the migration's |
+| a plan step | its plan's events, as decisions, in the record of its end | the plan step's |
+| a child case | its own stream, under its parent's key; its close waits for its export | the child's, the parent's close |
+| a close or a stop | a closed case ends only once every record is written | the store-down tests |
+| a retry | `retry_export`, by an operating role, refused otherwise or when nothing failed | the store-down test, the retry's |
+| forgetting | close, export, destroy; the request's own stream | the three forgetting tests |
+| continue-as-new | the counter crosses; written records leave the state; no export starts when a switch is due | the switches' |
+| the export itself | sealed by place, refused in clear, kept once, read by role | the first four tests, `read_audit`'s |
+| replay | a case at 2 schedules nothing; the forget stream behind its patch | the engine 2 test, the replay tests |
+
+**Sealing across every boundary:** into a child (its start, 18d's test), out of it (its records,
+under its parent's key), into the export (sealed by place, in clear nowhere: the child's test and
+the forgetting test search the whole store for the value).
+
+**Guards, each watched failing when switched off:** the in-clear check reading the definition;
+the store's gap and changed-record refusals; a worker without a store; the counter; only an
+operating role retrying; a close waiting for its export; the hold; the forget stream's lines, one
+record each, and its last record; sealing under the parent's key; `read_audit`'s hidden, forgotten
+and narrowed branches, and the place it opens at; the plan's decisions, given and recorded; records
+only from engine 3; the forget patch, on replay.
+
 ## What changed in the guide with the answers
 
 Done, on this branch:
@@ -692,3 +802,15 @@ Done, on this branch:
 - A section on the forget request's own stream (choice 12), and the "never made again" mark
   (choice 16).
 - The key table gains the "not now" kind's wording (choice 19).
+
+With what building 19b changed:
+
+- A sealed value's part names where in the record it is (`audit/claim-7/41/decisions/0/read/
+  national_id`), and its `visible_to` is inside the sealed value; a key with nothing to say is
+  written as `null`.
+- The export's failure says the store's error by its type.
+- `read_audit` gives records, each value as the reader may read it: hidden, opened, or
+  `‹forgotten›`; a value moved in the store doesn't open; a value every role sees is shown to any
+  reader.
+- The forget request waiting says `closing the case`, and the case says why; its stream holds each
+  answer, refused ones too.

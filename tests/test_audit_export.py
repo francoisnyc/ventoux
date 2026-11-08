@@ -41,6 +41,7 @@ from test_temporal_children import FILE as REPAIR_FILE
 from test_temporal_forget import on_temporal as forgetting_on_temporal
 from worker_threads import worker_threads
 
+from ventoux.case import engine as engine_module
 from ventoux.case.admission import RetryRefused
 from ventoux.case.audit import AuditRecord
 from ventoux.case.definition import parse_case
@@ -254,6 +255,34 @@ def test_the_quickstarts_refund_is_exported_on_temporal(tmp_path: Path) -> None:
     ]
     assert [line for each in written for line in each["lines"]] == ended.history
     assert "ventoux.audit.append" in scheduled(history)
+
+
+def test_a_case_at_engine_2_schedules_no_export(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Opened by code that opens cases at 2 at most: it makes no records, so it schedules no
+    # export and writes nothing, and replays as it was recorded (brief, D51) (brief, D77).
+    store = FileAudit(tmp_path / "audit")
+
+    async def scenario(client: Client) -> tuple[CaseReport, WorkflowHistory]:
+        # Python's `monkeypatch`: the sandbox reads `OPENING` from `ventoux.case.engine`.
+        monkeypatch.setattr(engine_module, "OPENING", (2, 1))
+        case = await start_case(client, DevelopmentCases, REFUND, SMALL, "refund-2", QUEUE)
+        await answer(case, "review#1", "approve", "ana", ["support"], {"approved_amount": FORTY})
+        return await case.result(), await case.fetch_history()
+
+    ended, history = on_temporal(scenario, audit=store)
+    assert (ended.status, ended.engine) == ("closed", 2)
+    assert "ventoux.audit.append" not in scheduled(history)
+    assert store.read("refund-2") == []
+
+
+def test_a_deployment_retries_the_export_ten_times_and_holds_past_256_kb() -> None:
+    # What a deployment gets unless it lowers them, as the guide says (brief, D77).
+    retries = CaseWorkflow.export_retries
+    assert (retries.maximum_attempts, retries.maximum_interval) == (10, timedelta(minutes=5))
+    assert set(retries.non_retryable_error_types or ()) == {"ExportRefused", "AuditRefused"}
+    assert CaseWorkflow.audit_bound == 256 * 1024
 
 
 def test_record_numbers_never_repeat_across_switches(tmp_path: Path) -> None:

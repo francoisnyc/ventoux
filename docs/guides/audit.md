@@ -50,8 +50,9 @@ and the export receives one record:
      "rule": "steps.pay.approval",
      "read": [
        {"field": "approved_amount", "sources": ["person:ana"], "value": "1250.00"},
-       {"field": "national_id", "sources": ["system:intake"], "visible_to": ["claims-officer"],
-        "value": {"sealed": "q8Zx…", "part": "audit/claim-7/41/national_id"}}
+       {"field": "national_id", "sources": ["system:intake"],
+        "value": {"sealed": "q8Zx…", "part": "audit/claim-7/41/decisions/0/read/national_id",
+                  "visible_to": ["claims-officer"]}}
      ]},
     {"kind": "started", "step": "pay", "entry": "pay#1", "rule": "steps.pay.when",
      "read": [{"field": "approved_amount", "sources": ["person:ana"], "value": "1250.00"}]}
@@ -59,6 +60,9 @@ and the export receives one record:
   "lines": ["pay.approval#1 approved by sam (team-lead)", "started pay#1: payments.refund@2"]
 }
 ```
+
+(A key with nothing to say, such as a decision's `target`, `reason`, `wrote`, `by` or `outcome`,
+is written as `null`; left out here.)
 
 - **`stream` and `number`** identify it: the workflow that made it (`claim-7`; a child case
   `claim-7/repair#1`; a request to forget `claim-7/forget`) and a number from 1, in order. Never
@@ -118,9 +122,10 @@ keeps, which never goes back, even once written records have left its state. So:
   holds `claim-7/40` and is given `claim-7/42` refuses it.
 - **A store that is down doesn't stop the case.** The case goes on deciding; its records wait in
   its state, in order, and Temporal retries the write, 10 times, waiting at most 5 minutes
-  between tries. Then the case **needs attention** (`audit export failed: look at the store, then
-  retry the export`), as any failed step does (D17). Once the store is back, an operator retries
-  it:
+  between tries. Then the case **needs attention** (`audit export failed: the store failed with
+  ConnectionError: ‹sensitive›: look at the store, then retry the export`: the store's error by
+  its type, never what it said), as any failed step does (D17). Once the store is back, an
+  operator retries it:
 
   ```python
   from ventoux.temporal.cases import retry_export
@@ -144,7 +149,8 @@ keeps, which never goes back, even once written records have left its state. So:
 ## Sensitive values: sealed, or not written
 
 A sensitive field's value is sealed by the key service under the case's key, with a part naming
-its place in the export (`audit/claim-7/41/national_id`). Sealed for that place, it opens only there: moved
+its place in the export (`audit/claim-7/41/decisions/0/read/national_id`: the record, then where in
+it). Sealed for that place, it opens only there: moved
 into another record, another case or Temporal's history, it doesn't open.
 
 A value a person typed into a form is in the export as the case file holds it: sealed if its
@@ -168,13 +174,16 @@ record and the field, never the value.
 ```python
 from ventoux.tooling.audit import read_audit
 
-for line in read_audit(store, "claim-7", roles=["claims-officer"], keys=keys):
-    print(line)
+for record in read_audit(store, "claim-7", roles=["claims-officer"], keys=keys):
+    print(record["number"], record["act"]["kind"], record["lines"])
 ```
 
-- **Filtered by role, as the case file is** (D30): a field whose `visible_to` excludes every role
-  given is said hidden, with the roles that would see it. A sensitive value is opened through the
-  key service, only for a role in its `visible_to`, while the key exists.
+- **Filtered by role, as the case file is** (D30): a value whose field's `visible_to` excludes
+  every role given reads `hidden (needs claims-officer)`, sealed or not. A sensitive value is
+  opened through the key service, only for a role in its `visible_to`, while the key exists, at
+  the place it is found: copied anywhere else in the store, it doesn't open, and reading it is an
+  error. A value every role of the case sees is shown to any reader: `read_audit` has no
+  definition to say who those roles are, so who may call it is yours to keep small.
 - **The store itself is admin access.** Whoever reads its rows directly sees every value in clear
   and every sealed one as ciphertext. Keep that access small and audited (D19), as you do
   Temporal's.
@@ -186,10 +195,12 @@ Ventoux never deletes from the store. How long you keep it is yours, as Temporal
 When a case is forgotten (D32), the order is **close, export, then destroy:** the case closes as
 forgotten and writes every record, sealed, before it ends; only then is its key destroyed, so
 nothing is left that could no longer be sealed. With the store down at that moment, the case stays
-closing and needs attention, and the request waits, saying `closing the case: its audit export is
-behind`; the key stays until the export is written. The request writes its own stream to the
-export (`claim-7/forget`: who proposed it, who approved it, the case closed, the key destroyed),
-so the act of forgetting is in the trail too. After that, the case's export still says:
+closed and needs attention (`audit export failed: …`), and the request waits, saying `closing the
+case`; the key stays until the export is written. The request writes its own stream to the
+export (`claim-7/forget`: who proposed it, each answer and who gave it, refused ones too, the case
+asked to close, the key destroyed), so the act of forgetting is in the trail too. Its records hold
+no sensitive value; its last is written once the key is gone. After that, the case's export
+still says:
 
 - every decision, who made it, in which role, under which rule and release, and when;
 - every fact each decision rested on, **by name and source**;
