@@ -49,12 +49,17 @@ def recorded(case: CaseDefinition, state: CaseState, act: Event, since: int) -> 
     state.deciding = []  # a collector for one decision: always empty between events
 
 
-def decided_start(state: CaseState, name: str, step: Step, entry: str) -> None:
-    """Say that `name`'s run `entry` started, under which rule, on which facts."""
-    rule = f"steps.{name}.when" if step.when is not None else f"steps.{name}"
+def starting_rule(state: CaseState, name: str, step: Step) -> str:
+    """Where the definition let `name` start: the rule that started it, or its own condition.
+    Read before the run starts: who proposed it is forgotten once it has."""
     if (asked := state.proposed_by_rules.get(name)) is not None:
         [firing] = [each for each in state.firings if each.entry == asked.entry]
-        rule = f"rules.{firing.rule}"
+        return f"rules.{firing.rule}"
+    return f"steps.{name}.when" if step.when is not None else f"steps.{name}"
+
+
+def decided_start(state: CaseState, name: str, step: Step, entry: str, rule: str) -> None:
+    """Say that `name`'s run `entry` started, under `rule`, on which facts."""
     # What let it start: its condition, and, for a call, its approval's, which decided whether a
     # person had to approve; then what it was given.
     approval = step.approval.when if isinstance(step, CallStep) and step.approval else None

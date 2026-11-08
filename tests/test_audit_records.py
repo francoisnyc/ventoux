@@ -4,12 +4,14 @@ Read field by field, never through their lines. See docs/layers/19-audit-keys.md
 """
 
 import dataclasses
+from collections.abc import Callable
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
 from cases.refund import refund
-from test_case import REFUND
+from test_case import REFUND, with_check_order
 from test_change_requests import FORGETTERS, OPERATING, TYPED_WRONG, account_closed
 from test_change_requests import LARGE as LARGE_ORD_1
 from test_change_requests import PEOPLE as CHANGERS
@@ -19,6 +21,7 @@ from test_child_cases import repair
 from test_events import RECEIPT, waiting_for_a_receipt
 from test_migrations import REFUND_1, on_refund_1
 from test_migrations import REVIEWED as REVIEWED_250
+from test_plan_step import refund_order, refund_with_plan
 from test_rules import DUPLICATE, WITHDRAWS, withdrawable
 from test_sensitive import FILE, NATIONAL_ID, OPENING, claim, lookup
 from test_set import APPROVED, with_owed
@@ -26,6 +29,7 @@ from test_set import FILE as WITH_FEE
 from test_set import PEOPLE as SET_PEOPLE
 
 from ventoux.case.audit import Act, Decision, Fact
+from ventoux.case.memory import CaseRun
 from ventoux.case.recording import record_refused
 from ventoux.case.runtime import decide
 from ventoux.case.state import Answered
@@ -38,15 +42,20 @@ from ventoux.testing import (
     close,
     edit,
     forget,
+    later,
+    load_definition,
     migrate,
+    propose,
     retry,
     run_case,
+    shown,
     skip,
 )
 from ventoux.testing import (
     claim as claim_entry,
 )
 
+ROOT = Path(__file__).parent.parent
 PEOPLE = {"ana": ["support"], "sam": ["support", "support-lead"]}
 LARGE = {"order_id": "ord-2", "amount": 250}
 REVIEWED = [("review", "approve", "ana", {"approved_amount": 250})]
@@ -426,6 +435,46 @@ def test_an_event_and_a_claim_are_acts_with_what_they_caused() -> None:
     ]
 
 
+def test_a_timer_a_plan_a_proposal_and_a_record_shown_are_each_recorded() -> None:
+    # A timer: two days after the review started, its rule starts the chase (brief, D44).
+    chased = load_definition(ROOT / "examples" / "refund" / "refund-chased.json")
+    run = run_case(chased, {"order_id": "ord-1", "amount": 40}, [later("3d")], PEOPLE, engine=3)
+    timer = next(each for each in run.audit if each.act.kind == "timer")
+    assert timer.act == Act("timer", entry="chase_review")
+    assert [(each.kind, each.entry, each.rule) for each in timer.decisions] == [
+        ("started", "chase#1", "rules.chase_review")
+    ]
+    # A plan step: started on its inputs, completed when its plan ends (brief, D28).
+    run = run_case(
+        refund_with_plan(),
+        {"order_id": "ord-1", "amount": 250},
+        [("review", "approve", "ana", {"approved_amount": 250})],
+        PEOPLE,
+        plans={"refund-order@1": refund_order()},
+        plan_answers={"settle": [("approve_refund", "approve", "sam")]},
+        engine=3,
+    )
+    decided = [(d.kind, d.entry) for each in run.audit for d in each.decisions]
+    assert ("started", "settle#1") in decided and ("completed", "settle#1") in decided
+    # A person's proposal, which admission starts at once, while the payment waits for a team
+    # lead (brief, D61).
+    run = run_case(
+        with_check_order(),
+        LARGE,
+        [*REVIEWED, propose("check_order", "ana")],
+        PEOPLE,
+        engine=3,
+    )
+    proposal = next(each for each in run.audit if each.act.kind == "proposed")
+    assert proposal.act == Act("proposed", by="ana", roles=("support",), entry="check_order")
+    assert (proposal.decisions[0].kind, proposal.decisions[0].entry) == ("started", "check_order#1")
+    # A record shown decides nothing: the act and its line (brief, D16).
+    run = run_case(claim(), FILE, [shown("customer_id", "ana")], {"ana": ["adjuster"]}, engine=3)
+    showing = run.audit[-1]
+    assert showing.act == Act("shown", by="ana", roles=("adjuster",), entry="customer_id")
+    assert showing.decisions == []
+
+
 def known(inputs: dict[str, Any]) -> dict[str, Any]:
     """The orders system, which knows every order: a stand-in for any activity."""
     return {"status": "known"}
@@ -493,3 +542,46 @@ def test_records_cross_continue_as_new_as_they_were() -> None:
     assert back.audit == run.state.audit
     assert any(each.wrote and each.target is None for r in back.audit for each in r.decisions)
     assert any(each.target == "owed_known" for r in back.audit for each in r.decisions)
+
+
+REVIEWED_40 = [("review", "approve", "ana", {"approved_amount": 40})]
+
+# Each route's scenario, at engine 3: what the other tests here run.
+SCENARIOS: dict[str, Callable[[], CaseRun]] = {
+    "the small refund": lambda: run_case(
+        refund, {"order_id": "ord-1", "amount": 40}, REVIEWED_40, PEOPLE, engine=3
+    ),
+    "an approval": lambda: run_case(
+        refund, LARGE, [*REVIEWED, ("pay.approval#1", "approve", "sam")], PEOPLE, engine=3
+    ),
+    "a rule's set and reach": lambda: run_case(
+        owed_and_known(), WITH_FEE, [APPROVED], SET_PEOPLE, engine=3
+    ),
+    "a stop": lambda: run_case(
+        withdrawable(), {"order_id": "ord-1", "amount": 40}, WITHDRAWS, PEOPLE, engine=3
+    ),
+    "an edit": lambda: run_case(
+        REFUND,
+        LARGE_ORD_1,
+        [TYPED_WRONG, edit("approved_amount", 250, "ana"), ("case.change#1", "approve", "lee")],
+        CHANGERS,
+        engine=3,
+    ),
+    "forgetting": lambda: run_case(claim(), FILE, [forget("pia", "olu")], FORGETTERS, engine=3),
+    "an event": lambda: run_case(
+        waiting_for_a_receipt(),
+        {"order_id": "ord-1", "amount": 40},
+        [*REVIEWED_40, RECEIPT],
+        PEOPLE,
+        engine=3,
+    ),
+}
+
+
+@pytest.mark.parametrize("scenario", list(SCENARIOS))
+def test_each_record_keeps_exactly_the_lines_its_act_added(scenario: str) -> None:
+    # Numbered from 1 with no gap, and the history, line for line: no act left out, and no
+    # line in two records (brief, D76).
+    run = SCENARIOS[scenario]()
+    assert [each.number for each in run.audit] == list(range(1, len(run.audit) + 1))
+    assert [line for each in run.audit for line in each.lines] == run.history
