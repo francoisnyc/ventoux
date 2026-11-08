@@ -7,6 +7,7 @@ docs/layers/19-audit-keys.md (19b), docs/guides/audit.md and brief, D77.
 import asyncio
 import base64
 import dataclasses
+from collections.abc import Callable
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -42,6 +43,7 @@ from ventoux.temporal.cases import (
     CaseWorkflow,
     answer,
     retry_export,
+    shown,
     start_case,
 )
 from ventoux.temporal.worker import case_worker
@@ -287,3 +289,59 @@ def test_an_export_that_hasnt_failed_is_never_retried() -> None:
             ExportRetried("omar", frozenset({"operations"}), at=1_800_000_000),
         )
     assert str(refused.value) == "the audit export hasn't failed: nothing to retry"
+
+
+# Temporal: the export failing quickly, and a case holding past 4 KB of records unwritten.
+@workflow.defn(name="ventoux.case")
+class SmallBound(CaseWorkflow):
+    catalog = DevelopmentCases.catalog
+    export_retries = QuicklyFailingExports.export_retries
+    audit_bound = 4 * 1024
+
+    @workflow.run
+    async def run(self, start: CaseStart) -> CaseReport:
+        return await self.drive(start)
+
+
+def longer_than(seen: int) -> Callable[[CaseReport], bool]:
+    """Whether a report's history has grown past `seen` lines."""
+    return lambda now: len(now.history) > seen
+
+
+HELD = "the audit export is 4 KB behind: the case decides nothing until it is written"
+
+
+def test_past_its_bound_the_case_holds_until_its_export_catches_up(tmp_path: Path) -> None:
+    # The store down, records pile up; past the bound the case decides nothing new, says so, and
+    # each event sent waits, in order; once the export is written, it decides them (brief, D77).
+    store = DownAudit(tmp_path / "audit")
+    store.down = True
+
+    async def scenario(client: Client) -> tuple[CaseReport, CaseReport, CaseReport]:
+        case = await start_case(client, SmallBound, REFUND, LARGE, "refund-1", QUEUE)
+        await reported(case, lambda now: FAILED in now.needs_attention)
+        for _ in range(30):  # bounded: records of a record shown, until the case holds
+            now = await reported(case, lambda now: True)
+            if HELD in now.needs_attention:
+                break
+            seen = len(now.history)
+            await shown(case, "order_id", "ana", ["support"])
+            await reported(case, longer_than(seen))
+        held = await reported(case, lambda now: HELD in now.needs_attention)
+        await answer(case, "review#1", "approve", "ana", ["support"], REVIEW_FORM)
+        await asyncio.sleep(0.3)  # time enough to decide it, were it allowed
+        waiting = await reported(case, lambda now: True)
+        store.down = False
+        await retry_export(case, "omar", ["operations"])
+        decided = await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        return held, waiting, decided
+
+    held, waiting, decided = on_temporal(scenario, cases=SmallBound, audit=store)
+    assert waiting.history == held.history  # the answer waits, undecided
+    assert not any(line.startswith("ana answered") for line in waiting.history)
+    assert HELD not in decided.needs_attention
+    retried = decided.history.index("omar retried the audit export as operations")
+    answered = decided.history.index(
+        "ana answered review#1 approve as support, setting approved_amount"
+    )
+    assert retried < answered  # decided once the export caught up, in the order it came
