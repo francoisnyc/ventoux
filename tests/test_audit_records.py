@@ -103,6 +103,51 @@ def test_the_quickstarts_small_refund_records_each_act_and_what_it_decided() -> 
     assert [line for each in run.audit for line in each.lines] == run.history
 
 
+def test_an_approval_that_starts_its_step_is_one_record() -> None:
+    # The guide's example: Sam's approval is one act, and pay starting is what it caused.
+    run = run_case(
+        refund, LARGE, [*REVIEWED, ("pay.approval#1", "approve", "sam")], PEOPLE, engine=3
+    )
+    _, review, approval, _ = run.audit
+    amount = Fact("approved_amount", ("person:ana",), Decimal(250))
+    # The review's answer let pay run once a team lead approves: asked, on the amount.
+    assert review.decisions[-1] == Decision(
+        "admitted",
+        step="pay",
+        entry="pay.approval#1",
+        rule="steps.pay.approval.when",
+        read=(amount,),
+    )
+    assert approval.act == Act(
+        "answered",
+        by="sam",
+        roles=("support", "support-lead"),
+        entry="pay.approval#1",
+        outcome="approve",
+    )
+    # What the approver saw: the approval's condition and the inputs (brief, D11).
+    assert approval.decisions == [
+        Decision(
+            "approved",
+            step="pay",
+            entry="pay.approval#1",
+            rule="steps.pay.approval",
+            read=(amount, Fact("order_id", ("system:opener",), "ord-2")),
+        ),
+        Decision(
+            "started",
+            step="pay",
+            entry="pay#1",
+            rule="steps.pay.when",
+            read=(
+                Fact("review.outcome", ("person:ana",), "approve"),
+                amount,
+                Fact("order_id", ("system:opener",), "ord-2"),
+            ),
+        ),
+    ]
+
+
 def known(inputs: dict[str, Any]) -> dict[str, Any]:
     """The orders system, which knows every order: a stand-in for any activity."""
     return {"status": "known"}

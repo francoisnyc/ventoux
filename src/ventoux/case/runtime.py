@@ -83,7 +83,7 @@ from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, sta
 from ventoux.case.keeping import kept
 from ventoux.case.migrations import Moved, apply, problems_of, released
 from ventoux.case.owed import owed
-from ventoux.case.recording import decided_start, recorded
+from ventoux.case.recording import decided_start, facts, recorded
 from ventoux.case.requests import answer_change, propose_change
 from ventoux.case.rules import fire_rules, nothing_decided, reach, retry_rule, said_steered
 from ventoux.case.sequence import requirements
@@ -943,6 +943,13 @@ def answer_approval(
     assert step.approval is not None  # only a step with an approval is asked for one
     role = judge_approval(case, catalog, state, approval.entry, approval.step, step, event)
     worded = as_worded(state, event)
+    # What the approver saw: the approval's condition, then the inputs (brief, D11).
+    kind = "approved" if event.outcome == APPROVE else "rejected"
+    read = facts(state, [step.approval.when, *step.inputs.values()])
+    rule = f"steps.{approval.step}.approval"
+    state.deciding.append(
+        Decision(kind, step=approval.step, entry=approval.entry, rule=rule, read=read)
+    )
     if event.outcome == APPROVE:
         # One entry collects the answers: it stays open until `count` different people have
         # approved it (brief, D47).

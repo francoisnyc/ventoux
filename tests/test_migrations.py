@@ -154,8 +154,8 @@ def test_a_target_is_checked() -> None:
     assert refused_migration(REFUND_1) == (
         "the case is already on refund 1, engine 2: nothing to move"
     )
-    assert refused_migration(REFUND_2, engine=3) == (
-        "engine 3 is one this code doesn't know (it knows 2, 1)"
+    assert refused_migration(REFUND_2, engine=4) == (
+        "engine 4 is one this code doesn't know (it knows 3, 2, 1)"
     )
     assert refused_migration(REFUND_2, engine=1) == (
         "engine 1 is older than the case's engine 2: the engine never goes back"
