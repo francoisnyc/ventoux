@@ -459,3 +459,41 @@ a small definition written by hand), the committed examples, and the schema corp
 - **My explanation's example was wrong** (step 1): a misspelt field in a case's condition gives
   `EXPRESSION_INVALID`; `UNKNOWN_FIELD` is a plan's code. The guide's example now says what the
   engine gives, and a test runs it from the guide.
+
+## Promises (20a)
+
+Each claim the note, D80 and the guide make about 20a's behaviour, and the test that would fail if
+it weren't true (all in `tests/test_conformance.py` unless named). Each was watched failing:
+before its code was written, or with its branch switched off when the code came first.
+
+| Promise | Test |
+|---|---|
+| An expected issue not given is a mismatch, naming the entry and both sides | `test_an_entry_expecting_an_issue_a_valid_definition_doesnt_give_is_a_mismatch` |
+| An issue given and not expected is a mismatch (an entry expected valid that isn't) | `test_an_entry_expected_valid_whose_definition_gives_an_issue_is_a_mismatch` |
+| Issues are compared as a multiset: in any order, none missing, none extra | `test_issues_are_compared_in_any_order_as_a_multiset_never_by_message` |
+| The severity is compared: another severity is one missing and one extra | `test_an_issue_of_another_severity_is_both_missing_and_extra` |
+| A message is never compared: an expected issue carrying one is refused, as any key the format doesn't have | `test_an_expected_issue_carrying_a_message_is_refused_since_wording_is_never_compared` |
+| A definition refused when read is compared by the paths it is refused at, both ways | `test_a_definition_refused_when_read_matches_the_paths_it_is_refused_at`, `…_but_expected_to_read_is_a_mismatch`, `test_a_definition_that_reads_but_expected_refused_is_a_mismatch`, `test_a_definition_refused_at_another_path_is_a_mismatch` |
+| A package is read with its plans by the one check (`issues_of`) | `test_a_package_is_read_with_its_plans_as_the_one_check_reads_it` |
+| A plan alone is read and checked against its catalog, compared as a package is | `test_a_plan_alone_is_read_and_checked_against_its_catalog`, `test_a_plan_entry_is_compared_as_a_package_is` |
+| A package that can't be put together is a broken entry, said, never a result | `test_a_package_that_cant_be_put_together_is_a_broken_entry_said_never_a_result` |
+| A file an entry names that isn't there, and a catalog the runner doesn't know, are broken entries, said | `test_a_plan_file_an_entry_names_that_isnt_there_is_a_broken_entry`, `test_an_entry_naming_a_catalog_the_runner_doesnt_know_is_a_broken_entry` |
+| Every entry is run: a broken entry never hides the next | `test_a_broken_entry_never_hides_the_next` |
+| An issue with a code `ISSUE_CODES` doesn't list is refused when it is made | `test_an_issue_with_a_code_not_listed_is_refused_when_made` |
+| A listed code no entry expects is said uncovered; every listed code has a committed entry | `test_a_listed_code_no_entry_expects_is_said_uncovered`, `test_every_listed_code_has_a_committed_entry_expecting_it` |
+| A code said refused first is skipped by `uncovered`, and its package is checked to be refused (files missing said) | `test_a_code_the_package_refuses_first_is_not_uncovered`, `test_a_code_said_refused_first_whose_package_is_put_together_is_said`, `test_a_code_said_refused_first_whose_files_arent_there_is_said` |
+| This engine gives what every committed entry expects, both ways (valid ones validate; refused ones are refused, with the issues expected) | `test_this_engine_gives_what_each_committed_entry_expects` (one per entry) |
+| The committed suite names the engine version it describes | `test_the_committed_suite_names_the_engine_it_describes` |
+| Every committed definition is an entry, its file equal | `test_every_committed_definition_is_an_entry_its_file_equal` |
+| The catalog as data holds everything validation reads from it | `test_the_catalog_as_data_holds_everything_validation_reads_from_it` |
+| The committed catalog file is what the development catalog gives, byte for byte | `test_the_committed_catalog_file_is_what_the_development_catalog_gives` |
+| `--write` writes the catalog files and never an expected result | `test_write_writes_the_catalog_files_and_never_an_expected_result` |
+| **Curriculum:** a change to validation that alters a result fails `--unchanged`, naming the entry | `test_unchanged_fails_on_a_result_changed_naming_the_entry` |
+| `--unchanged` passes on the committed suite; fails on a catalog file not as generated, naming the line, writing nothing; exits 2 on a suite it can't read | `test_unchanged_passes_on_the_committed_suite`, `test_unchanged_fails_on_a_catalog_file_not_as_generated_naming_the_line`, `test_unchanged_says_a_suite_that_cant_be_read_and_exits_2` |
+| A result changed or removed with no line of `changes` saying so exactly is unrecorded; a new entry needs none; order changes nothing | `test_a_result_changed_with_no_line_naming_it_is_unrecorded`, `test_a_result_changed_with_its_line_is_recorded`, `test_a_line_that_says_another_change_records_nothing`, `test_a_new_entry_needs_no_line_and_a_removed_one_does`, `test_issues_in_another_order_are_no_change` |
+| `--since` fails on an unrecorded change; a base with no suite has nothing to compare; a base it can't read exits 2 | `test_since_fails_on_a_result_changed_with_no_line_against_the_base`, `test_since_a_base_with_no_suite_has_nothing_to_compare`, `test_since_says_a_base_suite_that_cant_be_read_and_exits_2` |
+| CI runs `--unchanged` in `check` and `--since` against the base in `changes` | `test_ci_checks_the_suite_and_every_change_to_it_against_the_base` |
+| The guide's example entry is in the suite as written, and this engine gives it | `test_the_guides_example_entry_is_in_the_suite_as_written_and_this_engine_gives_it` |
+| `--export` writes every file byte for byte and nothing else; refuses a folder holding files, writing nothing | `test_export_writes_every_file_of_the_suite_byte_for_byte_and_nothing_else`, `test_export_refuses_a_folder_holding_files_and_writes_nothing` |
+| A definition's problems are said as before, now with their paths kept | the parsing tests (`test_simulate.py`, `test_schema.py`, `test_draft_sheet.py` and others), unchanged and passing |
+| `ledger.post@1` is recorded in the lock | `test_catalog.py::test_every_development_contract_matches_its_recorded_hash` |

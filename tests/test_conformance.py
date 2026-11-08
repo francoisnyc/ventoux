@@ -533,3 +533,58 @@ def test_a_code_said_refused_first_whose_package_is_put_together_is_said(tmp_pat
             "give an entry expecting it instead"
         )
     ]
+
+
+def test_a_broken_entry_never_hides_the_next(tmp_path: Path) -> None:
+    broken = {**unreadable_entry({"issues": []}), "name": "missing", "case": "cases/missing.json"}
+    suite = a_suite(tmp_path, broken, refund_entry(FIRES_NEVER))
+    assert mismatches(suite) == [
+        "missing: a broken entry: cases/missing.json isn't in the suite",
+        "the refund case: expected rules.say_goodbye.on NEVER_FIRES (error), not given",
+    ]
+
+
+def test_a_plan_file_an_entry_names_that_isnt_there_is_a_broken_entry(tmp_path: Path) -> None:
+    suite = with_package(a_suite(tmp_path, package_entry(["plans/gone.json"])))
+    assert mismatches(suite) == [
+        "the refund package: a broken entry: plans/gone.json isn't in the suite"
+    ]
+
+
+def test_an_entry_naming_a_catalog_the_runner_doesnt_know_is_a_broken_entry(
+    tmp_path: Path,
+) -> None:
+    suite = a_suite(tmp_path, {**refund_entry({"issues": []}), "catalog": "production"})
+    assert mismatches(suite) == [
+        (
+            "the refund case: a broken entry: it names the catalog production, and this runner "
+            "knows development"
+        )
+    ]
+
+
+def test_unchanged_says_a_suite_that_cant_be_read_and_exits_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    suite = a_copy_of_the_suite(tmp_path)
+    (suite / "suite.json").write_text(json.dumps({"engine": 3, "entries": [], "extra": 1}))
+    assert main(["conformance", "--unchanged", "--suite", str(suite)]) == 2
+    assert "extra: Extra inputs are not permitted" in capsys.readouterr().out
+
+
+def test_a_code_said_refused_first_whose_files_arent_there_is_said(tmp_path: Path) -> None:
+    suite = with_refused_first(a_suite(tmp_path, refund_entry({"issues": []})), "cases/gone.json")
+    assert refused_first_problems(suite) == [
+        (
+            "UNKNOWN_PLAN: said refused before validation: a broken entry: cases/gone.json isn't "
+            "in the suite"
+        )
+    ]
+
+
+def test_since_says_a_base_suite_that_cant_be_read_and_exits_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "suite.json").write_text(json.dumps({"engine": 3}))
+    assert main(["conformance", "--since", str(tmp_path)]) == 2
+    assert "entries: Field required" in capsys.readouterr().out

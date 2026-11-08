@@ -122,6 +122,11 @@ def read_suite(folder: Path) -> Suite:
 def given(entry: Entry, folder: Path) -> list[Found] | RefusedAt:
     """What this engine gives for `entry`, a suite's entry whose files are in `folder`: the issues
     of the check `ventoux check` makes, or where its definition is refused when read."""
+    if entry.catalog not in CATALOGS:
+        raise BrokenEntry(
+            f"a broken entry: it names the catalog {entry.catalog}, and this runner knows "
+            f"{', '.join(sorted(CATALOGS))}"
+        )
     catalog = catalog_named(CATALOGS[entry.catalog], None)
     if isinstance(entry, PlanEntry):
         return plan_given(entry, folder, catalog)
@@ -131,7 +136,7 @@ def given(entry: Entry, folder: Path) -> list[Found] | RefusedAt:
 def plan_given(entry: PlanEntry, folder: Path, catalog: Catalog) -> list[Found] | RefusedAt:
     """A plan alone: read, then checked as a package's plans are (layer 3)."""
     try:
-        plan = parse_plan(read_json((folder / entry.plan).read_text(), entry.plan))
+        plan = parse_plan(read_json(text_of(folder, entry.plan), entry.plan))
     except PlanInvalid as invalid:
         return RefusedAt(invalid.paths)
     return [(issue.path, issue.code, issue.severity) for issue in validate(plan, catalog)]
@@ -140,7 +145,7 @@ def plan_given(entry: PlanEntry, folder: Path, catalog: Catalog) -> list[Found] 
 def package_given(entry: PackageEntry, folder: Path, catalog: Catalog) -> list[Found] | RefusedAt:
     """A package: its case read, then put together with its plans and checked by `issues_of`, the
     one check `ventoux check` and `ventoux release` refuse on (brief, D50)."""
-    text = (folder / entry.case).read_text()
+    text = text_of(folder, entry.case)
     try:
         parse_case(read_json(text, entry.case))
     except CaseInvalid as invalid:
@@ -157,11 +162,20 @@ def put_together(folder: Path, case: str, plans: list[str], cases: dict[str, Chi
     release` puts one together; `PackageRefused` when it can't be."""
     children = {
         reference: package(
-            (folder / child.case).read_text(), [(folder / plan).read_text() for plan in child.plans]
+            text_of(folder, child.case), [text_of(folder, plan) for plan in child.plans]
         )
         for reference, child in cases.items()
     }
-    return package((folder / case).read_text(), [(folder / p).read_text() for p in plans], children)
+    return package(text_of(folder, case), [text_of(folder, p) for p in plans], children)
+
+
+def text_of(folder: Path, name: str) -> str:
+    """The file `name` of the suite in `folder`; a file an entry names that isn't there is a broken
+    entry, said, never an error that stops the run."""
+    path = folder / name
+    if not path.is_file():
+        raise BrokenEntry(f"a broken entry: {name} isn't in the suite")
+    return path.read_text()
 
 
 def mismatches(folder: Path) -> list[str]:
@@ -227,6 +241,9 @@ def refused_first_problems(folder: Path) -> list[str]:
         try:
             put_together(folder, refused.case, refused.plans, refused.cases)
         except PackageRefused:
+            continue
+        except BrokenEntry as broken:
+            found.append(f"{refused.code}: said refused before validation: {broken}")
             continue
         found.append(
             f"{refused.code}: said refused before validation, and its package is put together: "
