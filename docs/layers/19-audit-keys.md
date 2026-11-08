@@ -467,6 +467,9 @@ attribute a test's workflow lowers, as `events_per_run` is for continue-as-new.
   beside it: a value moved within the store would otherwise open where it was moved to. It filters
   only what narrows: a value seen by every role the case names is shown to any reader, since
   `read_audit` has no definition to say who those are. The store's readers are admin access (D19).
+  Kept as built, on the tutor's answer to this reading of choice 11 (review of #91): giving
+  `read_audit` the definition, to refuse a reader holding no role the case names, was the
+  alternative.
 - **A plan's events become decisions in the plan workflow,** from its history, and its report
   carries them as `decisions` (not `events`); the case names their step and run. A decision gains
   `by` (a person answering a plan's wait) and `outcome` (what an activity gave, the answer given),
