@@ -22,6 +22,7 @@ from ventoux.temporal.forget import ForgetWorkflow
 from ventoux.temporal.registry import publish_manifest
 from ventoux.temporal.worker import case_worker
 from ventoux.temporal.workflow import PlanWorkflow
+from ventoux.tooling.audit import AuditStore
 
 
 def workflow_type(registered: type) -> str:
@@ -80,6 +81,7 @@ async def environment_worker(
     forget: type[ForgetWorkflow] | None = None,
     *,
     activity_executor: Executor,
+    audit: AuditStore | None,
 ) -> Worker:
     """A case worker for `cases`'s environment, as `case_worker` builds one, once its manifest is
     published: refused (`ManifestRefused`, `RegistryMissing`), it never polls (brief, D54).
@@ -98,4 +100,5 @@ async def environment_worker(
         forget,
         identity,
         activity_executor=activity_executor,
+        audit=audit,
     )

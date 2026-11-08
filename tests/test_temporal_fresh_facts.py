@@ -38,6 +38,7 @@ from ventoux.testing import (
     FAKES,
     DevelopmentCases,
     DevelopmentPlans,
+    development_audit,
     development_converter,
     load_definition,
 )
@@ -100,6 +101,7 @@ def skipping[T](
                 DevelopmentPlans,
                 served,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             return await asyncio.wait_for(scenario(environment), timeout=30)

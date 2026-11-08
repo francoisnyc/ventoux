@@ -58,6 +58,7 @@ from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.temporal.worker import case_worker
 from ventoux.temporal.workflow import PlanWorkflow, RunReport
 from ventoux.testing import CATALOG, DAY, START
+from ventoux.tooling.audit import AuditStore
 from ventoux.tooling.keys import KeyRefused
 
 # Temporal: this module defines a workflow (`CasesWithPlans`, below), so the workflow sandbox
@@ -71,6 +72,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentCases,
         DevelopmentPlans,
         Outcome,
+        development_audit,
         development_converter,
         fake_refund,
         fixture_converter,
@@ -90,10 +92,12 @@ def on_temporal[T](
     cases: type[CaseWorkflow] = DevelopmentCases,
     queue: str = QUEUE,
     converter: DataConverter | None = None,
+    audit: AuditStore | None = None,
 ) -> T:
     """Run `scenario` against Temporal's time-skipping test server, with a worker serving the
     development cases, their plans and `activities`: nothing outside is reached. `converter`
-    holds the keys, for a test that replays what it recorded; else fresh ones."""
+    holds the keys, for a test that replays what it recorded; else fresh ones. `audit` is the
+    store the cases' records are written to, for a test that reads it; else a fresh one."""
 
     async def go() -> T:
         async with (
@@ -106,6 +110,7 @@ def on_temporal[T](
                 DevelopmentPlans,
                 activities,
                 activity_executor=threads,
+                audit=audit or development_audit(),
             ),
         ):
             # Bounded: a case that hangs (a workflow task retried forever) fails the test.
@@ -167,6 +172,7 @@ def skipping[T](
                 DevelopmentPlans,
                 activities,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             return await asyncio.wait_for(scenario(environment), timeout=20)
@@ -772,6 +778,18 @@ REWORKABLE = copy.deepcopy(REFUND)
 REWORKABLE["steps"]["review"] |= {"repeatable": True, "proposed_by": ["support"]}
 
 
+async def continued_as_new(client: Client, id: str) -> None:
+    """Once the case has continued as new: a switch waits for nothing to run, its export
+    included (brief, D27) (brief, D77). Asked a bounded number of times, for about 15 seconds:
+    an export under way can take more than 5 on a loaded machine (tutor review of #91)."""
+    for _ in range(300):
+        first, last = await runs_of(client, id)
+        if last != first:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"{id} never continued as new")
+
+
 async def runs_of(client: Client, id: str) -> tuple[str, str]:
     """The case's first run ID, and its current one."""
     described = await client.get_workflow_handle(id).describe()
@@ -885,9 +903,15 @@ def test_a_switch_waits_while_an_activity_runs() -> None:
             case,
             lambda now: "pay#1 done, giving refund_id from untrusted:undeclared" in now.history,
         )
+        # Then it switches, once nothing runs: the payment, and the export of its records
+        # (brief, D77). Asked a bounded number of times.
+        for _ in range(100):
+            if (switched := await runs_of(client, "refund-1"))[1] != while_running[1]:
+                break
+            await asyncio.sleep(0.05)
         await close(case, "duplicate", "ana", PEOPLE["ana"])
         await case.result()
-        return while_running, paid, await runs_of(client, "refund-1")
+        return while_running, paid, switched
 
     (first, during), paid, (_, last) = on_temporal(
         scenario, {**FAKES, "payments.refund@2": held}, cases=SwitchingCases
@@ -957,6 +981,9 @@ def test_a_case_history_replays() -> None:
         case = await start_case(client, SwitchingCases, REFUND, LARGE, "refund-1", QUEUE)
         await answer(case, "review#1", "approve", "ana", PEOPLE["ana"], REVIEW_FORM)
         await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await continued_as_new(
+            client, "refund-1"
+        )  # once its export has written the review's records
         await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
         await case.result()
         first, last = await runs_of(client, "refund-1")
@@ -1225,6 +1252,9 @@ def test_a_waiting_start_crosses_continue_as_new() -> None:
         case = await start_case(client, SwitchingCases, PAID_BY_A_RULE, LARGE, "refund-1", QUEUE)
         await answer(case, "review#1", "approve", "sam", PEOPLE["sam"], REVIEW_FORM)
         await reported(case, lambda now: now.waiting_at == ["pay.approval#1"])
+        await continued_as_new(
+            client, "refund-1"
+        )  # once its export has written the review's records
         await answer(case, "pay.approval#1", "approve", "sam", PEOPLE["sam"])
         await answer(case, "pay.approval#1", "approve", "lee", PEOPLE["lee"])
         ended = await case.result()

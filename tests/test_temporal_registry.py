@@ -75,6 +75,7 @@ from ventoux.testing import (
     FAKES,
     DevelopmentCases,
     DevelopmentPlans,
+    development_audit,
     development_converter,
     fixture_converter,
 )
@@ -162,6 +163,7 @@ async def production_worker(
             build,
             identity,
             activity_executor=threads,
+            audit=development_audit(),
         )
         async with worker:
             yield worker

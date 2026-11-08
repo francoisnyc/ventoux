@@ -486,6 +486,9 @@ be erased on request), has size limits, and a second copy of business records go
   same case key (or omits them), so destroying the key makes the warehouse copy unreadable too.
   Reports that need such a value decrypt it through the key provider while the key exists.
 - The audit trail keeps every decision, who made it, the rule and the release; only the values go.
+- **Amended 2026-11-08, by D77** (the text above stands; this chooses): the export carries each
+  sensitive value as ciphertext under the case's key, never omits it; a failure's message is left
+  out, its type kept (D76).
 
 ### D16. References are typed; resolvers show what they point to
 
@@ -536,6 +539,10 @@ be erased on request), has size limits, and a second copy of business records go
 - **Amended 2026-10-23, by D52** (the text above stands; this adds to it): the skip is built as a
   change request an operator proposes and another operator approves; the run ends `skipped`,
   neither done nor failed.
+- **Amended 2026-11-08, by D77** (the text above stands; this adds to it): an audit export that
+  can't be written is retried a bounded number of times, then the case needs attention, and an
+  operator retries the export; a case whose unwritten records reach their bound holds, deciding
+  nothing new until they are written. Nothing is dropped, nothing decided unrecorded.
 
 ### D18. Facts know when they were obtained; steps can require fresh ones
 
@@ -1020,6 +1027,10 @@ be erased on request), has size limits, and a second copy of business records go
   case opened before keeps this decision's rule; the request refuses the opener's approval
   whatever the case's version, asking the case's start who opened it when someone approves, and
   refuses anyone if that can't be told.
+- **Amended 2026-11-08, by D77** (the text above stands; this adds to it): close, export, then
+  destroy. The case writes every record, sealed, before it ends, so all are sealed before the key
+  goes; with the store down the case stays closing and the request waits, saying why. The request
+  writes its own stream to the export, before the key is destroyed.
 
 ### D33. Fresh facts: time on events, refreshing a read, and a given approval's lapse
 
@@ -3237,6 +3248,53 @@ D15, D27, D30, D31 and D51, whose text is kept.*
   record is never renamed by a later migration. *From the tutor's review of 19a:* until then no
   case moves to version 3 on Temporal either: a migration there is refused when proposed, saying
   that this code knows the version but doesn't run cases at it yet.
+
+### D77. The audit export: written by the case, sealed, in order, and never ahead of what it wrote
+
+*Decided 2026-11-08, in layer 19b (`docs/layers/19-audit-keys.md`, choices 8 to 13 and 22 to 30).
+Adds to D15, D17, D19, D27, D30, D31, D32, D51, D75 and D76, whose text is kept.*
+
+- **A store is two methods,** `append(records)` and `read(prefix)`, the platform team's in
+  production; `FileAudit`, one JSON Lines file per stream, append-only, in development and tests.
+  It keeps each record once by its stream and number: the same content again is accepted, other
+  content or a number whose previous one it doesn't hold is refused. Ventoux never deletes from it.
+  A case worker without a store is refused.
+- **The case writes its own records,** through an activity the worker registers, never a contract
+  a definition could call: after each workflow task that made records, one call with all not yet
+  written, oldest first. A stream is the workflow's ID (`claim-7`, `claim-7/repair#1`,
+  `claim-7/forget`); a record's number comes from a counter in the state, never lowered, which
+  survives the records leaving the state once written and crosses continue-as-new, so no two
+  records share an ID. A plan run's events ride in the record of its step's end, from its report.
+- **Sealed, or not written** (D31). The activity seals each sensitive value with the provider,
+  under the case's key (a child's and a plan run's: its case's, D75), with a part naming its place
+  in the record: `audit/<stream>/<number>/act/values/<field>`, `…/decisions/<n>/read/<field>`. It
+  is given the definition's sensitive fields with the records, and a value of one in clear fails
+  the whole call, naming the record and the field, never the value: read from the definition,
+  never from the wrapper. Nothing is written then. A field that narrows who sees it without being
+  sensitive is written in clear, saying who may see it.
+- **When the store can't be written** (D17): the case goes on and its records wait in the state;
+  the activity's retries are bounded (10 attempts, the longest wait 5 minutes), then the case needs
+  attention, and an operator retries the export with `retry_export` (D26). The failure and the
+  retry are acts the case decides and records; the failure says the store's error by its type,
+  never what it said. The case never closes
+  with records unwritten. Past 256 KB of unwritten records, measured as the export would write
+  them, the case holds: it decides nothing new, each act waiting in its inbox, and says so.
+- **Reading it,** `read_audit(store, case, roles, keys)`, filters each value as the case view does
+  (D30): a value whose field narrows who sees it is said hidden unless the reader holds one of
+  those roles; a sealed one is opened for them at the place it is found, while the key exists, and
+  said `‹forgotten›` after. With no definition at hand, it shows any reader what every role the
+  case names may see. The store's rows are admin access (D19).
+- **Forgetting:** close, export, then destroy (D32, as amended). The forget request's own stream,
+  holding no sensitive value, is written behind the patch marker `ventoux-forget-export`, beside
+  the request, never in its way: one record per act (the proposal, each answer, the key
+  destroyed), the last written once the key is gone.
+- **Engine version 3 opens** (D51): `ENGINE` is 3, so new cases open there and a migration may move
+  a case there. Only a case at 3 or above with records unwritten schedules the export, so a case
+  at 2 replays as it was recorded.
+- **Known limits, said:** a case terminated by an admin (D19) ends with whatever it had not
+  written, and forgetting it then destroys the key; while a case holds, each act sent to it waits
+  as a signal in its run's history; a plan whose workflow itself fails returns no report, so its
+  events stay in its own history.
 
 ## Concepts
 

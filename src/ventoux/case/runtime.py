@@ -78,6 +78,7 @@ from ventoux.case.definition import (
     sent_by,
 )
 from ventoux.case.engine import known
+from ventoux.case.exporting import export_failed, export_retried
 from ventoux.case.forgetting import forget
 from ventoux.case.freshness import Stale, ago, as_said, refuse_unless_whole, stale_facts
 from ventoux.case.keeping import kept
@@ -102,6 +103,8 @@ from ventoux.case.state import (
     Command,
     Completed,
     Event,
+    ExportFailed,
+    ExportRetried,
     Failed,
     ForgetApproved,
     GivenApproval,
@@ -262,6 +265,10 @@ def decide(
         propose_change(case, catalog, state, event)
     elif isinstance(event, TimerDue):
         fire_timer(state, event)
+    elif isinstance(event, ExportFailed):
+        export_failed(state, event)
+    elif isinstance(event, ExportRetried):
+        export_retried(catalog, state, event)
     elif isinstance(event, CloseAsked):
         role = refuse_to_close(case, catalog, state, event)
         state.history.append(f"{event.by} closed the case as {event.reason}, as {role}")

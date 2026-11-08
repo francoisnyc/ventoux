@@ -35,6 +35,12 @@ type ActKind = Literal[
     "given back",
     "assigned",
     "unassigned",
+    "export failed",
+    "export retried",
+    # A request to forget a case writes its own stream (brief, D77): proposed, answered, and once
+    # the case has ended, its key destroyed.
+    "forget proposed",
+    "key destroyed",
 ]
 
 # What the engine decided, as an auditor asks about it (brief, D76).
@@ -86,6 +92,12 @@ class Decision:
     target: str | None = None  # what it reached or stopped, if anything: `owed_known`, `pay#1`
     # Why, for a refusal or a failure: its own words, which never quote a value (brief, D30).
     reason: str | None = None
+    # Who decided it, when not the act's own: a person answering a wait inside a plan step's plan,
+    # whose answer reaches the case with the step's end (brief, D77).
+    by: str | None = None
+    # What it gave, when the decision carries one: a plan's activity's outcome (`done`,
+    # `declined`), the answer given to a plan's wait (`approve`).
+    outcome: str | None = None
 
 
 @dataclass(frozen=True)

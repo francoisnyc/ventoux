@@ -23,6 +23,7 @@ from ventoux.testing import (
     FAKES,
     DevelopmentCases,
     DevelopmentPlans,
+    development_audit,
     development_converter,
     load_definition,
     run_case,
@@ -73,6 +74,7 @@ def on_temporal[T](
                 DevelopmentPlans,
                 FAKES,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=20)

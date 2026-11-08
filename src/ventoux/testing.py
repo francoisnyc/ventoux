@@ -1,6 +1,7 @@
 """Run cases in memory, in tests: no Temporal server, scripted answers, fake activities."""
 
 import asyncio
+import dataclasses
 import json
 import shutil
 import tempfile
@@ -34,6 +35,7 @@ from ventoux.case.memory import (
 )
 from ventoux.case.migrations import migration_of
 from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
+from ventoux.case.recording import plan_decisions
 from ventoux.case.releases import Record, digest, package
 from ventoux.case.requests import ChangeRefused
 from ventoux.case.runtime import CaseRefused, EventRefused, decide
@@ -78,6 +80,7 @@ from ventoux.temporal.cases import CaseReport, CaseStart, CaseWorkflow
 from ventoux.temporal.contract_check import check_workflow_contract
 from ventoux.temporal.forget import ForgetReport, ForgetStart, ForgetWorkflow
 from ventoux.temporal.workflow import PlanStart, PlanWorkflow, RunReport
+from ventoux.tooling.audit import FileAudit
 from ventoux.tooling.builder.case import Case
 from ventoux.tooling.builder.written import written
 
@@ -469,6 +472,11 @@ class DevelopmentForget(ForgetWorkflow):
         return await self.drive(start)
 
 
+def development_audit() -> FileAudit:
+    """An audit store in a fresh temporary folder, for a test's case worker (brief, D77)."""
+    return FileAudit(tempfile.mkdtemp(prefix="ventoux-audit-"))
+
+
 def development_converter() -> DataConverter:
     """Ventoux's data converter with a fresh development key file, for one test server: tests
     reuse workflow IDs, and a case's key is never made twice (brief, D31)."""
@@ -774,12 +782,20 @@ def plan_runner(
             )
         except RunRefused as refused:
             return Failed(command.entry, f"{command.plan} can't start: {refused}", at=at)
+        # What the plan decided, for the record of the step's end, as on Temporal (brief, D77).
+        step = command.entry.split("#")[0]
+        decided = tuple(
+            dataclasses.replace(each, step=step, entry=command.entry)
+            for each in plan_decisions(ran.history)
+        )
         if ran.status == "succeeded":
-            return Completed(command.entry, {}, at=at)
+            return Completed(command.entry, {}, at=at, ran=decided)
         if ran.status == "failed":
-            return Completed(command.entry, {}, "failed", at=at)  # a failed final state: an outcome
+            # A failed final state: an outcome.
+            return Completed(command.entry, {}, "failed", at=at, ran=decided)
         if ran.status == "stopped":
-            return Failed(command.entry, f"{command.plan} stopped: {ran.reason}", at=at)
+            reason = f"{command.plan} stopped: {ran.reason}"
+            return Failed(command.entry, reason, at=at, ran=decided)
         return None  # waiting for an answer the script doesn't give: the step runs on
 
     return run

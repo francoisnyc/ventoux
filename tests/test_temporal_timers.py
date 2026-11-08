@@ -47,6 +47,7 @@ from ventoux.testing import (
     START,
     DevelopmentCases,
     DevelopmentPlans,
+    development_audit,
     development_converter,
     fixture_converter,
     later,
@@ -235,6 +236,7 @@ def test_a_timer_already_due_and_an_answer_in_one_workflow_task_fire_timer_first
                     DevelopmentPlans,
                     FAKES,
                     activity_executor=threads,
+                    audit=development_audit(),
                 ),
             ):
                 answered = "ana answered review#1 approve as support, setting approved_amount"

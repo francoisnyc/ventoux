@@ -56,6 +56,7 @@ with workflow.unsafe.imports_passed_through():
         DevelopmentCases,
         DevelopmentForget,
         DevelopmentPlans,
+        development_audit,
         development_converter,
         fixture_converter,
         kyc_check,
@@ -231,6 +232,7 @@ def on_temporal[T](
                 FAKES,
                 forget=DevelopmentForget,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
             Worker(
                 environment.client,

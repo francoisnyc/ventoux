@@ -27,6 +27,7 @@ from ventoux.testing import (
     FAKES,
     DevelopmentCases,
     DevelopmentPlans,
+    development_audit,
     development_converter,
     fixture_converter,
 )
@@ -150,6 +151,7 @@ def before_the_worker(id: str, signals: Callable[[Case], Awaitable[None]]) -> Ca
                     DevelopmentPlans,
                     FAKES,
                     activity_executor=threads,
+                    audit=development_audit(),
                 ),
             ):
                 return await asyncio.wait_for(case.result(), timeout=20)

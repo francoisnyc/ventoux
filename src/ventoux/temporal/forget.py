@@ -15,7 +15,7 @@ from typing import Any, ClassVar
 
 from temporalio import activity, workflow
 from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
-from temporalio.common import WorkflowIDReusePolicy
+from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.converter import WorkflowSerializationContext
 from temporalio.exceptions import ApplicationError
 from temporalio.service import RPCError, RPCStatusCode
@@ -23,7 +23,9 @@ from temporalio.service import RPCError, RPCStatusCode
 # Temporal: the workflow sandbox imports a workflow's modules afresh; `case` and `core` are
 # deterministic and passed through, imported once and shared (as in `cases.py`).
 with workflow.unsafe.imports_passed_through():
+    from ventoux.case.audit import Act, ActKind, AuditRecord, Decision
     from ventoux.case.definition import parse_case
+    from ventoux.case.engine import ENGINE
     from ventoux.case.forgetting import (
         approval_refusal,
         family_forgetting,
@@ -32,7 +34,15 @@ with workflow.unsafe.imports_passed_through():
     )
     from ventoux.core.catalog import Catalog
     from ventoux.core.person import identifier_problem
-    from ventoux.temporal.cases import CaseForget, CaseReport, CaseStart
+    from ventoux.temporal.audit import ExportSent
+    from ventoux.temporal.carried import record_as_data
+    from ventoux.temporal.cases import (
+        EXPORT_CALL,
+        EXPORT_REFUSALS,
+        CaseForget,
+        CaseReport,
+        CaseStart,
+    )
     from ventoux.temporal.converter import keys_of
 
 # How long one call to the key provider may take; Temporal retries it until it answers, as a
@@ -44,6 +54,15 @@ CASE_WAIT = timedelta(days=30)
 ALIVE = timedelta(seconds=30)
 FIRST_PAUSE = timedelta(milliseconds=100)  # between two questions to Temporal, at first
 LONGEST_PAUSE = timedelta(seconds=10)  # and at most, well within ALIVE
+# A request writes its own audit stream behind this patch: one recorded before 19b replays as it
+# was, writing nothing (brief, D51) (brief, D77).
+EXPORT_PATCH = "ventoux-forget-export"
+# A store that is down is retried for as long as it takes, never given up on: the request's
+# records hold nothing sensitive, so its key never waits for them, but none is dropped. A store
+# that refuses them (a gap, other content) fails the request (brief, D77).
+FORGET_EXPORTS = RetryPolicy(
+    maximum_interval=timedelta(minutes=5), non_retryable_error_types=list(EXPORT_REFUSALS)
+)
 
 
 @dataclass
@@ -166,6 +185,11 @@ class ForgetWorkflow:
         self.report = ForgetReport("waiting")
         self.found = CaseLookup("never made", False, "")  # the case, once looked up
         self.inbox: list[ForgetAnswer] = []  # answers not yet judged, in the order they came
+        self.exports = False  # whether it writes its own audit stream (from 19b)
+        self.recorded = 0  # how many records it made: the next is numbered after them
+        self.unwritten: list[AuditRecord] = []  # made, not yet written, oldest first
+        self.since = 0  # the first history line no record holds yet
+        self.ended = False  # it decides nothing more: the writer stops once all is written
 
     # Temporal: a signal is a message into a running workflow, recorded in its history.
     @workflow.signal(name="answer")
@@ -181,6 +205,51 @@ class ForgetWorkflow:
         return await self.drive(start)
 
     async def drive(self, start: ForgetStart) -> ForgetReport:
+        """Carry the request through, writing its own audit stream beside it (from 19b)."""
+        self.exports = workflow.patched(EXPORT_PATCH)
+        if not self.exports:
+            return await self.decide(start)
+        # Temporal: a task inside a workflow runs in step with it, and replays the same way. The
+        # writer runs beside the request: a store that is down never keeps an answer waiting.
+        writer = asyncio.create_task(self.write())
+        report = await self.decide(start)
+        self.ended = True
+        await writer  # it ends once each record is written, and fails if one is refused
+        return report
+
+    def record(self, kind: ActKind, by: str | None, roles: list[str], *decided: Decision) -> None:
+        """Record an act of the request: who, the `decided` it caused, and the history lines added
+        since its last record, so each line is in exactly one record (brief, D77)."""
+        if not self.exports:
+            return
+        self.recorded += 1
+        lines = self.report.history[self.since :]
+        self.since = len(self.report.history)
+        act = Act(kind, by=by, roles=tuple(sorted(roles)))
+        at = int(workflow.now().timestamp())  # workflow time, recorded in history (brief, D33)
+        made = AuditRecord(self.recorded, at, None, ENGINE, act, list(decided), lines)
+        self.unwritten.append(made)
+
+    async def write(self) -> None:
+        """Write the request's records to the store as they are made, until it has ended and
+        each is written."""
+        while True:
+            await workflow.wait_condition(lambda: bool(self.unwritten) or self.ended)
+            if not self.unwritten:
+                return
+            sending = list(self.unwritten)
+            sent = ExportSent(
+                workflow.info().workflow_id, [record_as_data(each) for each in sending], {}, {}
+            )
+            await workflow.execute_activity(
+                "ventoux.audit.append",
+                sent,
+                start_to_close_timeout=EXPORT_CALL,
+                retry_policy=FORGET_EXPORTS,
+            )
+            self.unwritten = self.unwritten[len(sending) :]
+
+    async def decide(self, start: ForgetStart) -> ForgetReport:
         """Check the proposal, wait for an answer someone may give, and carry it out."""
         proposer = frozenset(start.roles)
         refused = (
@@ -192,6 +261,7 @@ class ForgetWorkflow:
             # Nothing to wait for: the request ends, saying why.
             self.report.status = "refused"
             self.report.history.append(f"refused {start.by}'s proposal: {refused}")
+            self.record("forget proposed", start.by, start.roles, self.refused(start, refused))
             return self.report
         # Before anyone answers: Temporal says the same of a case that ended and one that never
         # was, so the key provider tells which it is; the case's definition says whether it
@@ -202,9 +272,13 @@ class ForgetWorkflow:
         if (refused := lookup_refusal(start.case, self.found)) is not None:
             self.report.status = "refused"
             self.report.history.append(f"refused {start.by}'s proposal: {refused}")
+            self.record("forget proposed", start.by, start.roles, self.refused(start, refused))
             return self.report
         role = forgetting_role(self.catalog, proposer)
         self.report.history.append(f"{start.by} proposed forgetting {start.case}, as {role}")
+        self.record(
+            "forget proposed", start.by, start.roles, Decision("admitted", target=start.case)
+        )
         while True:
             await workflow.wait_condition(lambda: bool(self.inbox))
             sent = self.inbox.pop(0)
@@ -212,6 +286,7 @@ class ForgetWorkflow:
             if refused is not None:
                 # Recorded, and the request waits on, as every refusal on Temporal (layer 8c).
                 self.report.history.append(f"refused {sent.by}'s answer {sent.outcome}: {refused}")
+                self.record("answered", sent.by, sent.roles, self.refused(start, refused))
                 continue
             # Its opener approves no change to the case. Asked of the case's start, behind a patch:
             # a request recorded before 12c replays as it was (brief, D51) (brief, D52).
@@ -221,19 +296,37 @@ class ForgetWorkflow:
                 )
                 if (refused := opener_refusal(start.case, sent.by, found)) is not None:
                     self.report.history.append(f"refused {sent.by}'s answer approve: {refused}")
+                    self.record("answered", sent.by, sent.roles, self.refused(start, refused))
                     continue
             if sent.outcome == "reject":
                 self.report.status = "rejected"
                 self.report.history.append(f"rejected by {sent.by}")
+                self.record(
+                    "answered", sent.by, sent.roles, Decision("rejected", target=start.case)
+                )
                 return self.report
             role = forgetting_role(self.catalog, frozenset(sent.roles))
             self.report.history.append(f"approved by {sent.by}, as {role}")
-            await self.carry_out(start, sent)
+            approved = Decision("approved", target=start.case)
+            # The approval's record holds what it did to the case: asked it to close, or found it
+            # closed; or, refused, why.
+            if (refused := await self.ask_to_close(start, sent)) is not None:
+                self.record("answered", sent.by, sent.roles, approved, self.refused(start, refused))
+                return self.report
+            self.record("answered", sent.by, sent.roles, approved)
+            await self.destroy_once_ended(start.case)
+            # Its last record, written after the key is gone: it holds no sensitive value.
+            self.record("key destroyed", None, [], Decision("forgotten", target=start.case))
             return self.report
 
-    async def carry_out(self, start: ForgetStart, approved: ForgetAnswer) -> None:
-        """Close the case as `forgotten`, wait until its workflow has ended, then destroy its
-        key: work still running needs the key to read its own values (brief, D32)."""
+    @staticmethod
+    def refused(start: ForgetStart, reason: str) -> Decision:
+        """The decision of a refusal: what was refused, and why, in the line's own words."""
+        return Decision("refused", target=start.case, reason=reason)
+
+    async def ask_to_close(self, start: ForgetStart, approved: ForgetAnswer) -> str | None:
+        """Ask the case to close as `forgotten`. Why it can't be forgotten if it closed first and
+        keeps closed cases; None if it may go on (brief, D32)."""
         case = start.case
         sent = CaseForget(start.by, start.roles, approved.by, approved.roles)
         try:
@@ -245,12 +338,17 @@ class ForgetWorkflow:
                 # It closed before the approval reached it, and keeps closed cases (brief, D32).
                 self.report.status = "refused"
                 self.report.history.append(f"refused: {closed_first(case)}")
-                return
+                return closed_first(case)
             self.report.history.append(f"{case} was already closed")
         # The status changes with its line, after the signal: a query between workflow tasks
         # reads the report as it is, so set before the signal it said `closing the case` with
         # no line saying the case was asked (fix-flaky-temporal).
         self.report.status = "closing the case"
+        return None
+
+    async def destroy_once_ended(self, case: str) -> None:
+        """Wait until the case's workflow has ended, then destroy its key: work still running
+        needs the key to read its own values (brief, D32)."""
         ended = await workflow.execute_activity_method(
             ForgetActivities.case_ended,
             case,

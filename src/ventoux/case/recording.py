@@ -4,6 +4,7 @@ See `ventoux.case.audit` for what a record holds, and docs/layers/19-audit-keys.
 """
 
 import copy
+from typing import assert_never
 
 from ventoux.case.audit import Act, AuditRecord, Decision, Fact
 from ventoux.case.definition import CallStep, CaseDefinition, CaseStep, PlanStep, Step
@@ -21,6 +22,8 @@ from ventoux.case.state import (
     ClosedByParent,
     Completed,
     Event,
+    ExportFailed,
+    ExportRetried,
     Failed,
     ForgetApproved,
     GivenBack,
@@ -34,6 +37,7 @@ from ventoux.case.state import (
     Unassigned,
     WorkflowCancelled,
 )
+from ventoux.core import history as plan_history
 from ventoux.core.expressions import Expression
 from ventoux.core.provenance import fields_read
 
@@ -45,7 +49,11 @@ def recorded(case: CaseDefinition, state: CaseState, act: Event, since: int) -> 
     """Record `act`, once `decide` has decided it: the decisions it caused, and the lines it
     added to the history from line `since` on. From engine version 3 only (brief, D76)."""
     if state.engine >= RECORDS_FROM:
-        state.audit.append(record(case, state, act, state.deciding, state.history[since:]))
+        # A plan step's end brings what its plan decided first: it decided it before it ended.
+        ran = list(act.ran) if isinstance(act, Completed | Failed | PlanCancelled) else []
+        decided = [*ran, *state.deciding]
+        state.audit.append(record(case, state, act, decided, state.history[since:]))
+        state.recorded += 1
     state.deciding = []  # a collector for one decision: always empty between events
 
 
@@ -122,6 +130,7 @@ def record_refused(
         entry = getattr(act, "entry", None)
         refused = Decision("refused", step=step, entry=entry, reason=str(refusal))
         state.audit.append(record(case, state, act, [refused], [line]))
+        state.recorded += 1
     return state
 
 
@@ -133,9 +142,10 @@ def record(
     lines: list[str],
 ) -> AuditRecord:
     """The next record of `state`, for `act`, the `decisions` it caused and the `lines` it
-    wrote: numbered after the last, from 1 (brief, D76)."""
+    wrote: numbered after the last the case made, from 1, written or not: so no two records share
+    a number (brief, D76) (brief, D77)."""
     return AuditRecord(
-        number=len(state.audit) + 1,
+        number=state.recorded + 1,
         at=act.at,
         release=state.release,
         engine=state.engine,
@@ -228,6 +238,10 @@ def act_of(case: CaseDefinition, event: Event) -> Act:
             )
         case Unassigned():
             return Act("unassigned", by=event.by, roles=roles, entry=event.entry)
+        case ExportFailed():
+            return Act("export failed")  # its reason is the failed decision's
+        case ExportRetried():
+            return Act("export retried", by=event.by, roles=roles)
 
 
 def roles_of(event: ForgetApproved) -> tuple[str, ...]:
@@ -261,4 +275,52 @@ def asked(event: Event) -> str:
         return f"{event.by}'s proposal to {event.kind} {event.target}"  # never the value
     if isinstance(event, Sent):
         return f"{event.event} from {event.by}"  # who sent it, never what it carries
+    if isinstance(event, ExportRetried):
+        return f"{event.by}'s retry of the audit export"
     return type(event).__name__  # only people's requests are refused; anything else is a bug
+
+
+def plan_decisions(history: list[plan_history.Event]) -> list[Decision]:
+    """What a plan step's plan decided, from its run's history, as decisions of the record of the
+    step's end; its step and entry are the case's to fill (brief, D77). An activity started on its
+    inputs, each with its sources; what it gave; each answer to a wait, refused or taken, by whom;
+    a stop. Moving between states decides nothing a line doesn't say."""
+    decided: list[Decision] = []
+    waiting: str | None = None  # the wait open, which an answer is to
+    for event in history:
+        match event:
+            case plan_history.Scheduled():
+                # Only the inputs written in the plan: the engine's own key is no fact.
+                read = tuple(
+                    Fact(name, tuple(sorted(found)), event.inputs[name])
+                    for name, found in event.sources.items()
+                )
+                decided.append(Decision("started", target=event.activity, read=read))
+            case plan_history.Gave():
+                decided.append(Decision("completed", target=event.activity, outcome=event.event))
+            case plan_history.Waiting():
+                waiting = event.entry
+            case plan_history.Answered():
+                answered = Decision("answered", target=waiting, by=event.by, outcome=event.outcome)
+                decided.append(answered)
+            case plan_history.Refused():
+                refused = Decision(
+                    "refused",
+                    target=waiting,
+                    by=event.by,
+                    outcome=event.outcome,
+                    reason=event.reason,
+                )
+                decided.append(refused)
+            case plan_history.Stopped():
+                decided.append(Decision("failed", target=event.state, reason=event.reason))
+            case (
+                plan_history.Started()
+                | plan_history.Entered()
+                | plan_history.Moved()
+                | plan_history.Ended()
+            ):
+                pass  # lines only
+            case _:
+                assert_never(event)  # a new kind of event is recorded, or mypy says so
+    return decided

@@ -2129,3 +2129,42 @@ and record the key points. A question is closed once you can explain the answer 
     rested on; a value is kept exactly as the case file keeps it, wrapped if and only if its field
     is sensitive.
 - Status: open, until the three parts come back from memory.
+
+## 52. Layer 19: what the audit export says after forgetting, and what no one can read
+
+> `claim-7` is forgotten after Sam approved `pay.approval#1`; its opening held the national ID,
+> and Ana's answer set `approved_amount`. a) In the store, what can an auditor still read about
+> Sam's approval, and what does `read_audit` show where the national ID was, with and without
+> `claims-sensitive`? b) The case's last record is written before its key is destroyed, the forget
+> request's last record after: why is each order safe, and why couldn't the case's be reversed?
+> c) The store goes down just as Olu approves: what stops the key going while a record of
+> `claim-7` is unwritten?
+
+- Asked at the end of layer 19b's walk-through (2026-11-08): the layer's own question, asked as
+  the warm-up (entry 37) before the export existed, and kept for 19b by entry 51.
+- Your answer: asked to be told. Given:
+  - **a) Everything about what happened, nothing of what was sensitive.** Sam's record keeps its
+    act (who, as what, on which entry, which outcome, when, on which release and engine), its
+    decisions (`approved` under `steps.pay.approval`, `started` under `steps.pay.when`), each fact
+    by name and source, every value that wasn't sensitive (`approved_amount`, `1250.00`, from
+    `person:ana`), and its lines (D32). Where the national ID was, the store holds ciphertext
+    under a key that no longer exists and is never made again. `read_audit` says `hidden (needs
+    claims-sensitive)` to a role outside its `visible_to` (the role check comes first), and
+    `‹forgotten›` to `claims-sensitive`: the role allows it, the key doesn't exist. A failure's
+    message was never exported, only its type.
+  - **b) The case's records need the key; the request's don't.** `Sealer.written` seals each
+    sensitive value with the case's key, and `refuse_in_clear` refuses one in clear: with the key
+    gone first, the case's last records could never be written, so close, export, then destroy.
+    The request's records hold no sensitive value (sent with no sensitive fields), so writing
+    after needs no key; and `key destroyed` is then a fact that happened, never a claim made
+    before `destroy_key`, which can still be refused and retried.
+  - **c) Three waits, each on the one before.** The closed case keeps running while records are
+    unwritten (`until_closed_and_written`), needing attention once the export gives up; the
+    request's `case_ended` waits while the case's workflow runs, heartbeating; `destroy_key`
+    refuses while it still runs. Only an operator's `retry_export` lets the case end, and then the
+    key goes. Known limit (D77): a case an admin terminates ends with what it hadn't written.
+  - In one line: after forgetting the export still says who decided what, under which rule and
+    release, when, on which facts by name and source, with every non-sensitive value; every
+    sensitive value is ciphertext no one can open. Close, export, then destroy, because the case's
+    records need the key to be sealed and the request's last record needs none.
+- Status: open, until the three parts come back from memory.

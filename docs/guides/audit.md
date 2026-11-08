@@ -50,8 +50,9 @@ and the export receives one record:
      "rule": "steps.pay.approval",
      "read": [
        {"field": "approved_amount", "sources": ["person:ana"], "value": "1250.00"},
-       {"field": "national_id", "sources": ["system:intake"], "visible_to": ["claims-officer"],
-        "value": {"sealed": "q8Zx…", "part": "audit/claim-7/41/national_id"}}
+       {"field": "national_id", "sources": ["system:intake"],
+        "value": {"sealed": "q8Zx…", "part": "audit/claim-7/41/decisions/0/read/national_id",
+                  "visible_to": ["claims-officer"]}}
      ]},
     {"kind": "started", "step": "pay", "entry": "pay#1", "rule": "steps.pay.when",
      "read": [{"field": "approved_amount", "sources": ["person:ana"], "value": "1250.00"}]}
@@ -59,6 +60,9 @@ and the export receives one record:
   "lines": ["pay.approval#1 approved by sam (team-lead)", "started pay#1: payments.refund@2"]
 }
 ```
+
+(A key with nothing to say, such as a decision's `target`, `reason`, `wrote`, `by` or `outcome`,
+is written as `null`; left out here.)
 
 - **`stream` and `number`** identify it: the workflow that made it (`claim-7`; a child case
   `claim-7/repair#1`; a request to forget `claim-7/forget`) and a number from 1, in order. Never
@@ -99,36 +103,60 @@ worker = case_worker(
 A store is anything with two methods: `append(records)`, which keeps each record once by its
 stream and number (a record already kept with the same content is accepted; with other content,
 refused), and `read(case)`, which gives a case's records, its children's and its requests', each
-stream in order. `FileAudit` is the development store; in
-production it is yours (a database table, a bucket), written to that shape. A case worker without
-a store is refused: a case would run with no trail.
+stream in order. `FileAudit` is the development store; in production it is yours (a database
+table, a bucket), written to that shape. A case worker without a store is refused: a case would
+run with no trail.
 
-**Cases export from engine version 3.** A case opened by an earlier version of Ventoux decides and
-replays as it always did, and exports nothing: its report says `no audit export: opened at engine
-2`, and `ventoux environment check` lists such cases while they are open. Migrating one to engine 3
-starts its export there; its first record says that what came before was not recorded.
+**"The same content" means equal with each sealed value taken by its place,** never its bytes.
+A write that landed but whose answer was lost is sent again, sealed afresh with a new nonce: other
+ciphertext, the same value at the same place. A store comparing bytes refuses it as other content,
+the operator's retry too, and the case never closes. Compare with `ventoux.tooling.audit.same`,
+which `FileAudit` uses.
+
+**Cases export from engine version 3,** the version new cases open at. A case opened by an earlier
+version of Ventoux decides and replays as it always did, and exports nothing. Migrating one to
+engine 3 starts its export there; its first record says that what came before was not recorded.
 
 ## Written once, never lost
 
 The case writes its records through an activity the worker registers (never a contract a definition
-could call), after each decision, oldest first. So:
+could call), after each decision, oldest first. Each record's number comes from a counter the case
+keeps, which never goes back, even once written records have left its state. So:
 
 - **A retried write duplicates nothing:** the same records carry the same IDs.
 - **Nothing is skipped:** a record is written only after every record before it. A store that
   holds `claim-7/40` and is given `claim-7/42` refuses it.
 - **A store that is down doesn't stop the case.** The case goes on deciding; its records wait in
-  its state, in order, and Temporal retries the write. The case view says so:
-  `audit export waiting: attempt 4`. After the write's retries the case **needs attention**
-  (`audit export failed: look at the store, then retry`), as any failed step does (D17).
+  its state, in order, and Temporal retries the write, 10 times, waiting at most 5 minutes
+  between tries. Then the case **needs attention** (`audit export failed: the store failed with
+  ConnectionError: ‹sensitive›: look at the store, then retry the export`: the store's error by
+  its type, never what it said), as any failed step does (D17). Once the store is back, an
+  operator retries it:
+
+  ```python
+  from ventoux.temporal.cases import retry_export
+
+  await retry_export(case, by="omar", roles=["operations"])
+  ```
+
+  Only an operating role may (D26), as for a step's retry.
+- **Never more waiting than a switch can carry.** Records waiting are measured as the export would
+  write them. Past 256 KB the case **holds**: it decides nothing new until the export catches up,
+  each answer or event sent to it waiting its turn, and says so (`the audit export is 256 KB
+  behind: the case decides nothing until it is written`). Nothing is dropped, and nothing is
+  decided without its record.
 - **A case doesn't close with records unwritten.** Its last records are written before it ends,
-  so the export is complete before Temporal's retention starts counting.
+  so the export is complete before Temporal's retention starts counting. A close never waits on
+  anything but the store: a person's close, a forgetting, or a parent closing its child each
+  finish once the export is written.
 - **Known limit: a terminated case.** An admin who terminates a case's workflow (D19) ends it with
   whatever it hadn't written yet. Keep that access small and audited.
 
 ## Sensitive values: sealed, or not written
 
 A sensitive field's value is sealed by the key service under the case's key, with a part naming
-its place in the export (`audit/claim-7/41/national_id`). Sealed for that place, it opens only there: moved
+its place in the export (`audit/claim-7/41/decisions/0/read/national_id`: the record, then where in
+it). Sealed for that place, it opens only there: moved
 into another record, another case or Temporal's history, it doesn't open.
 
 A value a person typed into a form is in the export as the case file holds it: sealed if its
@@ -152,13 +180,16 @@ record and the field, never the value.
 ```python
 from ventoux.tooling.audit import read_audit
 
-for line in read_audit(store, "claim-7", roles=["claims-officer"], keys=keys):
-    print(line)
+for record in read_audit(store, "claim-7", roles=["claims-officer"], keys=keys):
+    print(record["number"], record["act"]["kind"], record["lines"])
 ```
 
-- **Filtered by role, as the case file is** (D30): a field whose `visible_to` excludes every role
-  given is said hidden, with the roles that would see it. A sensitive value is opened through the
-  key service, only for a role in its `visible_to`, while the key exists.
+- **Filtered by role, as the case file is** (D30): a value whose field's `visible_to` excludes
+  every role given reads `hidden (needs claims-officer)`, sealed or not. A sensitive value is
+  opened through the key service, only for a role in its `visible_to`, while the key exists, at
+  the place it is found: copied anywhere else in the store, it doesn't open, and reading it is an
+  error. A value every role of the case sees is shown to any reader: `read_audit` has no
+  definition to say who those roles are, so who may call it is yours to keep small.
 - **The store itself is admin access.** Whoever reads its rows directly sees every value in clear
   and every sealed one as ciphertext. Keep that access small and audited (D19), as you do
   Temporal's.
@@ -167,9 +198,15 @@ for line in read_audit(store, "claim-7", roles=["claims-officer"], keys=keys):
 
 Ventoux never deletes from the store. How long you keep it is yours, as Temporal's retention is.
 
-When a case is forgotten (D32), the request writes its own stream to the export
-(`claim-7/forget`: who proposed it, who approved it, the case closed, the key destroyed), so the
-act of forgetting is in the trail too. After that, the case's export still says:
+When a case is forgotten (D32), the order is **close, export, then destroy:** the case closes as
+forgotten and writes every record, sealed, before it ends; only then is its key destroyed, so
+nothing is left that could no longer be sealed. With the store down at that moment, the case stays
+closed and needs attention (`audit export failed: …`), and the request waits, saying `closing the
+case`; the key stays until the export is written. The request writes its own stream to the
+export (`claim-7/forget`: who proposed it, each answer and who gave it, refused ones too, the case
+asked to close, the key destroyed), so the act of forgetting is in the trail too. Its records hold
+no sensitive value; its last is written once the key is gone. After that, the case's export
+still says:
 
 - every decision, who made it, in which role, under which rule and release, and when;
 - every fact each decision rested on, **by name and source**;
@@ -233,6 +270,7 @@ tests replay a model's (D62): a request the recording doesn't hold is refused, s
 | Refused when | Example |
 |---|---|
 | a case worker has no audit store | `a case worker needs an audit store: give case_worker audit=…` |
+| the export is retried by someone without an operating role | `the audit export is retried by an operating role (operations), and ana has support` |
 | a record holds a sensitive value in clear | `audit record claim-7/41 holds national_id, a sensitive field, in clear: nothing was written` |
 | a record skips one | `audit record claim-7/42 can't be kept: claim-7/41 is missing` |
 | a record's ID is kept with other content | `audit record claim-7/41 is already kept, with other content` |
@@ -243,16 +281,18 @@ tests replay a model's (D62): a request the recording doesn't hold is refused, s
 
 ## Design notes: what writing this revealed
 
-Decided in layer 19's design note (`docs/layers/19-audit-keys.md`), answered 2026-11-07 as
-recommended; this guide was changed to match.
+Decided in layer 19's design note (`docs/layers/19-audit-keys.md`), answered 2026-11-07 (19a) and
+2026-11-08 (19b) as recommended; this guide was changed to match.
 
 1. **The engine had no structured decisions:** `CaseState.history` is lines of text. Records are
    made in `case`, one per act, beside the lines (brief, D76).
 2. **The export carries values,** in clear where not sensitive, sealed where sensitive, and is
-   filtered where read (D76).
-3. **A store that is down** lets the case go on but never close with records unwritten (D77).
-4. **"Never made again" on Vault** is a mark in Vault's key-value engine, written before the key
-   is deleted (D78).
-5. **No client library:** Vault over HTTPS with the standard library (D78).
-6. **A parent terminated with a child still running, then forgotten** (carried from layer 18d)
-   stays a known limit, for layer 20's deployment guide.
+   filtered where read (D76, D77).
+3. **A store that is down** lets the case go on but never close with records unwritten; past a
+   bound it holds (D77).
+4. **Forgetting:** close, export, then destroy (D77).
+5. **"Never made again" on Vault** is a mark in Vault's key-value engine, written before the key
+   is deleted (19c).
+6. **No client library:** Vault over HTTPS with the standard library (19c).
+7. **A parent terminated with a child still running, then forgotten** (carried from layer 18d)
+   stays a known limit.

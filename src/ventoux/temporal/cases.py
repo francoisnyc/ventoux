@@ -21,7 +21,7 @@ from temporalio.client import (
     WorkflowHandle,
     WorkflowQueryFailedError,
 )
-from temporalio.common import WorkflowIDReusePolicy
+from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import (
     ActivityError,
     ApplicationError,
@@ -40,6 +40,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.admission import ProposalRefused, RetryRefused
     from ventoux.case.advising import AdvisorView, advisor_view
     from ventoux.case.answers import AnswerRefused
+    from ventoux.case.audit import AuditRecord, Decision
     from ventoux.case.called import unbound
     from ventoux.case.claims import ClaimRefused, assignees
     from ventoux.case.closing import CloseRefused, needs_attention
@@ -51,7 +52,7 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.case.migrations import all_plans, migration_of
     from ventoux.case.owing import attention, waiting_for
     from ventoux.case.plan_step import PlanNotSupplied, supplied, wrong_references
-    from ventoux.case.recording import asked
+    from ventoux.case.recording import RECORDS_FROM, record_refused
     from ventoux.case.registry import Answer, Moving, Opening, Released
     from ventoux.case.releases import Hash, Record, behaviour_digest, is_release
     from ventoux.case.requests import ChangeRefused
@@ -78,6 +79,8 @@ with workflow.unsafe.imports_passed_through():
         Command,
         Completed,
         Event,
+        ExportFailed,
+        ExportRetried,
         Failed,
         ForgetApproved,
         GivenBack,
@@ -106,8 +109,14 @@ with workflow.unsafe.imports_passed_through():
     from ventoux.core.sensitive import Sensitive
     from ventoux.core.workflow_contract import WorkflowContract
     from ventoux.temporal.activities import OUTCOME
+    from ventoux.temporal.audit import ExportSent, restricted_fields, sensitive_fields
     from ventoux.temporal.bindings import Binding
-    from ventoux.temporal.carried import state_as_data, state_from_data
+    from ventoux.temporal.carried import (
+        decision_from_data,
+        record_as_data,
+        state_as_data,
+        state_from_data,
+    )
     from ventoux.temporal.children import (
         SETTLE,
         ChildAsked,
@@ -216,6 +225,8 @@ class CaseReport:
     assignees: dict[str, str] = field(default_factory=dict[str, str])
     # A closed child case's report, which its parent reads; None for any other (brief, D75).
     ending: ChildEnding | None = None
+    # How many of its audit records are not yet written to its store (brief, D77).
+    unwritten: int = 0
 
 
 @dataclass
@@ -425,6 +436,16 @@ class SheetAnswer:
     wording_refused: str = ""
 
 
+# The export's own call, and how often it is tried before the case is told it failed: a store
+# down for a while is waited for, a refusal (a value in clear, a gap) never retried (brief, D77).
+EXPORT_CALL = timedelta(minutes=1)
+EXPORT_RETRIES = RetryPolicy(
+    maximum_attempts=10,
+    maximum_interval=timedelta(minutes=5),
+    non_retryable_error_types=["ExportRefused", "AuditRefused"],
+)
+
+
 class CaseWorkflow:
     """The code of a case workflow. A deployment subclasses it to name its catalog and plans, and
     registers the subclass (Temporal's SDK wants `@workflow.run` on the class it registers), as
@@ -444,6 +465,13 @@ class CaseWorkflow:
     # so replay switches at the same place (brief, D27). Temporal warns at about 10,000 history
     # events; a case's event makes a few.
     events_per_run: ClassVar[int] = 1000
+    # How much of the case's records may wait unwritten, measured as data, before the case holds:
+    # well under Temporal's 512 KB warning for one payload, which the switch's state is
+    # (brief, D77). A test's workflow lowers it, as `events_per_run`.
+    audit_bound: ClassVar[int] = 256 * 1024
+    # How often the export is tried before the case is told it failed: 10 times, at most 5 minutes
+    # apart (brief, D77). A test's workflow lowers it, as `audit_bound`.
+    export_retries: ClassVar[RetryPolicy] = EXPORT_RETRIES
 
     def __init__(self) -> None:
         self.state = CaseState("")  # named when the case opens
@@ -470,6 +498,8 @@ class CaseWorkflow:
         self.checking = False
         # An engine bug raised in a task beside the loop, which the loop raises in its turn.
         self.broken: Exception | None = None
+        self.exporting = False  # whether this run's export of the case's records is under way
+        self.woken = False  # whether an export just ended: the loop looks again (brief, D77)
 
     # Temporal: a signal is a message into a running workflow, recorded in its history, so replay
     # delivers it again at the same point.
@@ -489,6 +519,11 @@ class CaseWorkflow:
     @workflow.signal(name="retry")
     def retry(self, sent: CaseRequest) -> None:
         self.inbox.append(Retried(sent.what, sent.by, frozenset(sent.roles), at=now()))
+
+    # An operator retries the case's failed audit export (brief, D26) (brief, D77).
+    @workflow.signal(name="retry_export")
+    def retry_export(self, sent: CaseRequest) -> None:
+        self.inbox.append(ExportRetried(sent.by, frozenset(sent.roles), at=now()))
 
     @workflow.signal(name="claim")
     def claim(self, sent: CaseRequest) -> None:
@@ -569,6 +604,11 @@ class CaseWorkflow:
         # What waits for an operator, and what is owed and can't start, as in memory
         # (brief, D72).
         attention_now = needs_attention(state) if self.case is None else attention(self.case, state)
+        if self.holding():
+            attention_now.append(
+                f"the audit export is {self.audit_bound // 1024} KB behind: the case decides "
+                "nothing until it is written"
+            )
         return CaseReport(
             state.phase,
             # What it waits for, and what it owes, as in memory (brief, D72); none before the
@@ -582,6 +622,7 @@ class CaseWorkflow:
             state.release or "draft",
             state.engine,
             assignees(state),
+            unwritten=len(state.audit) if state.engine >= RECORDS_FROM else 0,
         )
 
     @workflow.query(name="view")
@@ -722,12 +763,46 @@ class CaseWorkflow:
         if start.carried is not None:
             self.ask_open_children()  # this run holds no handle on them (brief, D75)
             self.check_daily()
-        while self.state.phase != "closed":
+        told_registry = False
+        while True:
+            await self.until_closed_and_written(start)
+            if self.registered is not None and not told_registry:
+                # Its registry lists it open until it says it closed: retried until the registry
+                # answers, so the workflow can't end while its registry is unreachable
+                # (brief, D5).
+                await self.ask_registry(Asked(self.registered, closing=workflow.info().workflow_id))
+                told_registry = True
+            # What came with the close, or while the registry was asked, is refused and
+            # recorded, never dropped while its sender's send succeeded (brief, D41, as added in
+            # 11d's tutor review), and its record written too before the case ends (brief, D77).
+            # Temporal fails a completion that a newer signal overtakes, so this run records that
+            # signal too.
+            if not self.inbox:
+                break
+        report = self.report()
+        if start.parent is not None:
+            # A child's last act: ring its parent, by its workflow ID, never a run ID, with the
+            # entry only; the parent reads this report itself (brief, D75).
+            ended = ending_of(start.parent.entry, self.case, self.state, now())
+            report.ending = ending_data(ended)
+            await ring(start.parent)
+        return report
+
+    async def until_closed_and_written(self, start: CaseStart) -> None:
+        """Decide each event as it comes, until the case is closed, every record of it written, and
+        nothing waits in its inbox. Once closed, an event is refused, its refusal recorded; while
+        the export is behind, only the export's own events are decided (brief, D77)."""
+        while self.state.phase != "closed" or self.unwritten() or self.inbox:
+            self.export_due()
             await self.until_something_comes()
+            self.woken = False
             if self.broken is not None:
                 # An engine bug is never lost: it fails the workflow task, which Temporal retries
                 # until fixed code is deployed (brief, D17); the log keeps its type (brief, D31).
                 raise self.broken
+            if self.state.phase == "closed" or self.holding():
+                self.take_while_closed_or_held()
+                continue
             # Before an event stamped `t`, every timer due by `t` fires, each stamped with its own
             # due time; with nothing in the inbox, every timer due by now (brief, D44).
             # The case's definition now: a migration may have moved it (brief, D53).
@@ -737,36 +812,87 @@ class CaseWorkflow:
                 if self.time_to_switch():
                     self.switch(start)
                 continue
-            event = self.inbox.pop(0)
-            try:
-                names_its_entry(event, self.state)
-                refuse_an_engine_not_opened(event)
-                await self.ask_to_move(event)
-                self.decide(self.case, event)
-            except REFUSALS as refused:
-                # In memory a refusal raises to the test; here nobody is there to catch it. It is
-                # recorded, and the case waits on as if it hadn't come: `decide` changed nothing
-                # (8b, slice 0). Never queued for later (layer 6).
-                self.state.history.append(f"refused {asked(event)}: {refused}")
-        if self.registered is not None:
-            # Its registry lists it open until it says it closed: retried until the registry
-            # answers, so the workflow can't end while its registry is unreachable (brief, D5).
-            await self.ask_registry(Asked(self.registered, closing=workflow.info().workflow_id))
-        # What came with the close, still in the inbox, is refused and recorded, never dropped
-        # while its sender's send succeeded (brief, D41, as added in 11d's tutor review). Only a
-        # line of history, no command, so replay decides the same; and Temporal fails a
-        # completion that a newer signal overtakes, so this run records that signal too.
+            await self.take(self.inbox.pop(0))
+
+    async def take(self, event: Event) -> None:
+        """Decide `event`; a refusal is recorded, and the case waits on as if it hadn't come."""
+        try:
+            names_its_entry(event, self.state)
+            refuse_an_engine_not_opened(event)
+            await self.ask_to_move(event)
+            self.decide(self.case, event)
+        except REFUSALS as refused:
+            # In memory a refusal raises to the test; here nobody is there to catch it. It is
+            # recorded, line and record, and the case waits on as if it hadn't come: `decide`
+            # changed nothing (8b, slice 0) (brief, D76). Never queued for later (layer 6).
+            self.state = record_refused(self.case, self.state, event, refused)
+
+    def take_while_closed_or_held(self) -> None:
+        """Once closed, refuse each event but the export's own; while the case holds, leave them
+        waiting in the inbox, in order. The export's own events are decided either way."""
+        waiting: list[Event] = []
         for event in self.inbox:
-            self.state.history.append(f"refused {asked(event)}: the case is closed")
-        self.inbox.clear()
-        report = self.report()
-        if start.parent is not None:
-            # A child's last act: ring its parent, by its workflow ID, never a run ID, with the
-            # entry only; the parent reads this report itself (brief, D75).
-            ended = ending_of(start.parent.entry, self.case, self.state, now())
-            report.ending = ending_data(ended)
-            await ring(start.parent)
-        return report
+            if isinstance(event, ExportFailed | ExportRetried):
+                try:
+                    self.decide(self.case, event)
+                except REFUSALS as refused:
+                    self.state = record_refused(self.case, self.state, event, refused)
+            elif self.state.phase == "closed":
+                self.state = record_refused(self.case, self.state, event, CaseIsClosed())
+            else:
+                waiting.append(event)  # the case holds: decided once the export catches up
+        self.inbox = waiting
+
+    def unwritten(self) -> bool:
+        """Whether the case has records not yet written to its store (brief, D77)."""
+        return self.state.engine >= RECORDS_FROM and bool(self.state.audit)
+
+    def holding(self) -> bool:
+        """Whether so much waits unwritten that the case decides nothing new: a switch never
+        carries more than the bound, and nothing is decided without its record (brief, D77)."""
+        if self.state.phase == "closed" or not self.unwritten():
+            return False
+        return waiting_size(self.state.audit) >= self.audit_bound
+
+    def export_due(self) -> None:
+        """Write the records not yet written, one export at a time, unless it has failed and
+        waits for an operator."""
+        if self.exporting or not self.unwritten() or self.state.export_failed:
+            return
+        if self.state.phase != "closed" and not self.holding() and self.switch_due():
+            # The records cross the switch in the state, and the next run writes them: an export
+            # started now would hold the switch back for as long as it runs (brief, D27).
+            return
+        self.exporting = True
+        self.running += 1  # the case never switches while its export is under way (brief, D27)
+        self.beside(self.export())
+
+    async def export(self) -> None:
+        """Send the records not yet written to the case worker's store; once written, they leave
+        the state, and their numbers are never given again. After its retries, the case is told it
+        failed (brief, D17) (brief, D77)."""
+        sending = list(self.state.audit)
+        sent = ExportSent(
+            workflow.info().workflow_id,
+            [record_as_data(each) for each in sending],
+            {name: list(roles) for name, roles in sensitive_fields(self.case).items()},
+            {name: list(roles) for name, roles in restricted_fields(self.case).items()},
+        )
+        try:
+            await workflow.execute_activity(
+                "ventoux.audit.append",
+                sent,
+                start_to_close_timeout=EXPORT_CALL,
+                retry_policy=self.export_retries,
+            )
+            last = sending[-1].number
+            self.state.audit = [each for each in self.state.audit if each.number > last]
+        except ActivityError as error:
+            self.inbox.append(ExportFailed(export_failure(error), at=now()))
+        finally:
+            self.exporting = False
+            self.running -= 1
+            self.woken = True
 
     async def ask_to_open(self, pinned: bool) -> None:
         """In an environment, ask its registry whether the case may open: on its package's
@@ -840,19 +966,29 @@ class CaseWorkflow:
         due time, whichever comes first. A case with no timer waits as it did before 11f, so its
         history replays the same; one with a timer waits on one workflow timer, for the soonest
         (brief, D44)."""
-        due = soonest(self.state)
+        # Closed, or holding, the case fires no timer: it decides nothing new (brief, D77).
+        due = None if self.state.phase == "closed" or self.holding() else soonest(self.state)
         if due is not None and due <= workflow.now().timestamp():
             return  # one has fallen due already, as across a switch: it fires at once
         # Temporal: with a timeout, `wait_condition` starts a workflow timer, which history
         # records, and raises `TimeoutError` when it fires first; it is cancelled otherwise.
         timeout = None if due is None else due - workflow.now().timestamp()
         try:
-            await workflow.wait_condition(
-                lambda: bool(self.inbox) or self.time_to_switch() or self.broken is not None,
-                timeout=timeout,
-            )
+            await workflow.wait_condition(self.something_came, timeout=timeout)
         except TimeoutError:
             pass  # the timer's time has come
+
+    def something_came(self) -> bool:
+        """Whether the loop has something to do: an engine bug, an export ended, an event it may
+        decide, or the time to continue as new."""
+        if self.broken is not None or self.woken:
+            return True
+        if self.state.phase == "closed":
+            return bool(self.inbox)  # a closed case never switches: it waits for its export
+        if self.holding():
+            # Only the export's own events are taken while the case holds.
+            return any(isinstance(each, ExportFailed | ExportRetried) for each in self.inbox)
+        return bool(self.inbox) or self.time_to_switch()
 
     def fire_due(self, case: Any, at: int) -> bool:
         """Decide every timer due by `at`, one at a time and in order, each stamped with its own
@@ -868,8 +1004,12 @@ class CaseWorkflow:
         """Whether the case should continue as new now: enough events in this run, or Temporal
         suggests it (its history is getting large); and nothing is running, whose result would
         come back to a run that has ended (brief, D27)."""
+        return self.running == 0 and self.switch_due()
+
+    def switch_due(self) -> bool:
+        """Enough events in this run, or Temporal suggests continuing as new."""
         enough = self.decided >= self.events_per_run
-        return self.running == 0 and (enough or workflow.info().is_continue_as_new_suggested())
+        return enough or workflow.info().is_continue_as_new_suggested()
 
     def switch(self, start: CaseStart) -> None:
         """Continue as new, carrying the whole state. Only at a quiet point: no event waiting to
@@ -1013,19 +1153,34 @@ class CaseWorkflow:
             return
         finally:
             self.children.pop(command.entry, None)
+        # What the plan decided, for the record of the step's end (brief, D77).
+        decided = tuple(self.plan_ran(command.entry, ran))
         if ran.status == "cancelled":
             # Ended by the close, with what finished or failed in it after the close (brief, D28).
-            self.inbox.append(PlanCancelled(command.entry, tuple(ran.after_stop), at=now()))
+            self.inbox.append(
+                PlanCancelled(command.entry, tuple(ran.after_stop), at=now(), ran=decided)
+            )
         elif ran.status == "succeeded":
-            self.inbox.append(Completed(command.entry, {}, at=now()))
+            self.inbox.append(Completed(command.entry, {}, at=now(), ran=decided))
         elif ran.status == "failed":
             self.inbox.append(
-                Completed(command.entry, {}, "failed", at=now())
+                Completed(command.entry, {}, "failed", at=now(), ran=decided)
             )  # a failed final state
         else:
             self.inbox.append(
-                Failed(command.entry, f"{command.plan} stopped: {ran.reason}", at=now())
+                Failed(
+                    command.entry, f"{command.plan} stopped: {ran.reason}", at=now(), ran=decided
+                )
             )
+
+    def plan_ran(self, entry: str, ran: RunReport) -> list[Decision]:
+        """What the plan run `entry` decided, as its report gives it, each naming its step and
+        run."""
+        step = entry.split("#")[0]
+        # A plan's inputs aren't the case's fields: each comes back as it crossed.
+        return [
+            replace(decision_from_data(each, {}), step=step, entry=entry) for each in ran.decisions
+        ]
 
     async def run_workflow(self, command: StartWorkflow) -> None:
         """Run the workflow step as a child workflow, `<case ID>/<entry>`, of the type and on the
@@ -1319,6 +1474,42 @@ def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWor
     return f"{reference} failed with {raised(error)}: {Sensitive(said)}"
 
 
+# Ventoux's own refusals of an export, whose words never quote a value: said whole.
+EXPORT_REFUSALS = ("ExportRefused", "AuditRefused")
+
+
+class CaseIsClosed(Exception):
+    """An event that came once the case had closed: refused, its refusal recorded."""
+
+    def __str__(self) -> str:
+        return "the case is closed"
+
+
+def export_failure(error: ActivityError) -> str:
+    """Why the export failed, as the case says it: Ventoux's own refusal whole, anything else by
+    its type alone, since a store's error may quote anything (brief, D31)."""
+    cause = error.cause
+    if isinstance(cause, ApplicationError) and cause.type in EXPORT_REFUSALS:
+        return cause.message
+    kind = cause.type if isinstance(cause, ApplicationError) and cause.type else "an error"
+    return f"the store failed with {kind}: {Sensitive('')}"
+
+
+def waiting_size(records: list[AuditRecord]) -> int:
+    """How much the records waiting take, measured as data, each sealed value at what sealing
+    adds to it: what the switch would carry, and close to what the export writes."""
+
+    def measured(value: object) -> str:
+        return "x" * SEALED_SIZE if isinstance(value, Sensitive) else str(value)
+
+    return sum(len(json.dumps(record_as_data(each), default=measured)) for each in records)
+
+
+# What sealing a value adds, at most, as the export writes it: its ciphertext in base64, its part
+# and who may see it.
+SEALED_SIZE = 512
+
+
 def engine() -> int:
     """The engine version a case opens at: asked of Temporal's patch markers, newest first, so a
     replay reads the version its history recorded (brief, D51). Temporal: `patched` says whether
@@ -1538,6 +1729,14 @@ async def retry(
     """Retry the failed run `entry` (`pay#1`), as an operator: the same run, the same key
     (brief, D26)."""
     await case.signal(CaseWorkflow.retry, CaseRequest(entry, by, sorted(roles)))
+
+
+async def retry_export(
+    case: WorkflowHandle[CaseWorkflow, CaseReport], by: str, roles: list[str]
+) -> None:
+    """Retry the case's failed audit export, as an operator, once its store is back
+    (brief, D26) (brief, D77)."""
+    await case.signal(CaseWorkflow.retry_export, CaseRequest("audit export", by, sorted(roles)))
 
 
 async def close(

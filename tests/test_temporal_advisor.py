@@ -41,6 +41,7 @@ from ventoux.testing import (
     START,
     DevelopmentCases,
     DevelopmentPlans,
+    development_audit,
     development_converter,
 )
 from ventoux.tooling.cli import main
@@ -135,6 +136,7 @@ def run_the_claim() -> Ran:
                 DevelopmentPlans,
                 FAKES,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             return await asyncio.wait_for(scenario(environment.client), timeout=30)

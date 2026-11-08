@@ -24,7 +24,15 @@ from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.workflow import ParentClosePolicy
 from test_activation import NEEDS, SERVED, SERVES, production, worker
 from test_child_cases import CLOSABLE, claim, repair, written_off_repair
-from test_temporal_case import QUEUE, Case, SwitchingCases, on_temporal, reported, runs_of, skipping
+from test_temporal_case import (
+    QUEUE,
+    Case,
+    SwitchingCases,
+    on_temporal,
+    reported,
+    runs_of,
+    skipping,
+)
 from test_temporal_forget import on_temporal as forgetting_on_temporal
 from test_temporal_forget import reported as forget_reported
 from test_temporal_registry import QUEUE as REFUNDS
@@ -93,6 +101,7 @@ from ventoux.testing import (
     DevelopmentForget,
     DevelopmentPlans,
     as_text,
+    development_audit,
     development_converter,
     fixture_converter,
     release_of,
@@ -149,7 +158,7 @@ def test_the_guides_child_case_runs_on_temporal() -> None:
     ) in "\n".join(parent.history)
     # A released case says its release first; then who opened it: its parent, never a person.
     assert child.history[:2] == [
-        "opened on repair 3, engine 2",
+        "opened on repair 3, engine 3",
         "opened by claim-7, from repair#1, with budget and vehicle",
     ]
 
@@ -208,8 +217,10 @@ def test_the_child_outlives_its_parents_switch() -> None:
 
 async def until_switched(client: Client, id: str, first: str) -> list[str]:
     """The case's first run and its current one, once it has continued as new; asked a bounded
-    number of times."""
-    for _ in range(100):
+    number of times, for about 15 seconds: a switch waits for an export under way (brief, D77),
+    which on a loaded machine can take more than the 5 seconds this once allowed (tutor review of
+    #91), and the scenario's own bound, 20 seconds, still holds."""
+    for _ in range(300):
         _, current = await runs_of(client, id)
         if current != first:
             return [first, current]
@@ -240,6 +251,7 @@ def on_dev_server[T](scenario: Callable[[Client], Awaitable[T]]) -> T:
                 DevelopmentPlans,
                 FAKES,
                 activity_executor=threads,
+                audit=development_audit(),
             ),
         ):
             # Bounded: a case that hangs fails the test.
@@ -257,7 +269,9 @@ def test_a_child_terminated_in_the_run_that_started_it_fails_the_step_at_once() 
         await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
         child = await started(client, DevelopmentCases, "claim-10/repair#1")
-        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        # Its records written: the time-skipping server skips no time past an activity whose
+        # workflow was terminated while it ran (brief, D77).
+        await reported(child, lambda now: now.waiting_at == ["fix#1"] and now.unwritten == 0)
         await child.terminate("from outside")
         return await reported(parent, lambda now: bool(now.needs_attention))
 
@@ -278,7 +292,9 @@ def test_a_child_terminated_after_a_switch_is_noticed_when_the_next_run_starts()
         first, _ = await runs_of(client, "claim-11")
         _, second = await until_switched(client, "claim-11", first)
         child = await started(client, SwitchingCases, "claim-11/repair#1")
-        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        # Its records written: the time-skipping server skips no time past an activity whose
+        # workflow was terminated while it ran (brief, D77).
+        await reported(child, lambda now: now.waiting_at == ["fix#1"] and now.unwritten == 0)
         await child.terminate("from outside")
         for entry in ("repair#8", "repair#9"):  # two events: the case switches again
             await case_handle(client, SwitchingCases, "claim-11").signal("child_ended", entry)
@@ -346,7 +362,9 @@ def test_a_child_terminated_unheard_is_noticed_within_a_day() -> None:
         await answer(parent, "assess#1", "accept", "ana", ["support"], {"payout": Decimal(900)})
         await reported(parent, lambda now: "repair#1: case repair, open" in now.waiting_for)
         child = await started(client, DevelopmentCases, "claim-13/repair#1")
-        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        # Its records written: the time-skipping server skips no time past an activity whose
+        # workflow was terminated while it ran (brief, D77).
+        await reported(child, lambda now: now.waiting_at == ["fix#1"] and now.unwritten == 0)
         await child.terminate("from outside")
         await environment.sleep(timedelta(hours=23))
         unheard = await reported(parent, lambda now: True)
@@ -370,7 +388,12 @@ def test_after_a_switch_a_child_terminated_unheard_is_noticed_within_a_day() -> 
         first, _ = await runs_of(client, "claim-14")
         await until_switched(client, "claim-14", first)
         child = await started(client, SwitchingCases, "claim-14/repair#1")
-        await reported(child, lambda now: now.waiting_at == ["fix#1"])
+        # Its records written: the time-skipping server skips no time past an activity whose
+        # workflow was terminated while it ran (brief, D77).
+        await reported(child, lambda now: now.waiting_at == ["fix#1"] and now.unwritten == 0)
+        # The parent's too: its new run writes what it carried. Running as the time is skipped,
+        # the server waits for it, but the skip then starts quiet, as the child's.
+        await reported(parent, lambda now: now.unwritten == 0)
         await child.terminate("from outside")
         await environment.sleep(timedelta(hours=25))
         return await reported(parent, lambda now: bool(now.needs_attention))
