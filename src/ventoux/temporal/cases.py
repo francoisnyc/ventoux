@@ -442,7 +442,9 @@ EXPORT_CALL = timedelta(minutes=1)
 EXPORT_RETRIES = RetryPolicy(
     maximum_attempts=10,
     maximum_interval=timedelta(minutes=5),
-    non_retryable_error_types=["ExportRefused", "AuditRefused"],
+    # Refusals are final: retried, they would be refused again. A key the key service refuses for
+    # good (one that can leave it) is one too; one it can't give now is retried (brief, D78).
+    non_retryable_error_types=["ExportRefused", "AuditRefused", "KeyRefused"],
 )
 
 
@@ -888,7 +890,8 @@ class CaseWorkflow:
             last = sending[-1].number
             self.state.audit = [each for each in self.state.audit if each.number > last]
         except ActivityError as error:
-            self.inbox.append(ExportFailed(export_failure(error), at=now()))
+            reason, service = export_failure(error)
+            self.inbox.append(ExportFailed(reason, service, at=now()))
         finally:
             self.exporting = False
             self.running -= 1
@@ -1476,6 +1479,8 @@ def workflow_failure(reference: str, contract: WorkflowContract, error: ChildWor
 
 # Ventoux's own refusals of an export, whose words never quote a value: said whole.
 EXPORT_REFUSALS = ("ExportRefused", "AuditRefused")
+# The key service's errors, met sealing for the export (brief, D78).
+KEY_SERVICE = ("KeyUnavailable", "KeyRefused")
 
 
 class CaseIsClosed(Exception):
@@ -1485,14 +1490,20 @@ class CaseIsClosed(Exception):
         return "the case is closed"
 
 
-def export_failure(error: ActivityError) -> str:
-    """Why the export failed, as the case says it: Ventoux's own refusal whole, anything else by
-    its type alone, since a store's error may quote anything (brief, D31)."""
+def export_failure(error: ActivityError) -> tuple[str, str]:
+    """Why the export failed, as the case says it, and which service failed. Ventoux's own
+    refusals, and the key service's errors (Ventoux's own words, naming the case and the service,
+    never a value), are said whole; anything else is the store's, by its type alone, since a
+    store's error may quote anything (brief, D31) (brief, D78)."""
     cause = error.cause
-    if isinstance(cause, ApplicationError) and cause.type in EXPORT_REFUSALS:
-        return cause.message
-    kind = cause.type if isinstance(cause, ApplicationError) and cause.type else "an error"
-    return f"the store failed with {kind}: {Sensitive('')}"
+    kind = cause.type if isinstance(cause, ApplicationError) and cause.type else None
+    if kind in EXPORT_REFUSALS:
+        assert isinstance(cause, ApplicationError)  # its kind says so
+        return cause.message, "the store"
+    if kind in KEY_SERVICE:
+        assert isinstance(cause, ApplicationError)
+        return cause.message, "the key service"
+    return f"the store failed with {kind or 'an error'}: {Sensitive('')}", "the store"
 
 
 def waiting_size(records: list[AuditRecord]) -> int:

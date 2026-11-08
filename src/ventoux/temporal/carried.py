@@ -162,6 +162,7 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         # How many records it has made, and why its export failed, if it has (brief, D77).
         "recorded": state.recorded,
         "export_failed": state.export_failed,
+        "export_service": state.export_service,
     }
 
 
@@ -388,6 +389,7 @@ def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Cas
         # written, so their count is how many it made.
         recorded=whole(data.get("recorded", len(data.get("audit", [])))),
         export_failed=data.get("export_failed", ""),
+        export_service=data.get("export_service", "the store"),  # carried from 19c
     )
 
 
