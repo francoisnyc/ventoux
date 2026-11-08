@@ -246,7 +246,12 @@ def pending(state: CaseState) -> bool:
 
 def needs_attention(state: CaseState) -> list[str]:
     """What waits for an operator, each with why: every failed step run, then every failed rule
-    (brief, D17) (brief, D38)."""
+    (brief, D17) (brief, D38), then a failed audit export (brief, D77)."""
     runs = [f"{run.entry}: {run.reason}" for run in state.runs if run.status == "failed"]
     rules = [f"{f.entry}: {f.reason}" for f in state.firings if f.status == "failed"]
-    return runs + rules
+    export = (
+        [f"audit export failed: {state.export_failed}: look at the store, then retry the export"]
+        if state.export_failed
+        else []
+    )
+    return runs + rules + export

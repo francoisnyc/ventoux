@@ -1992,13 +1992,13 @@ case = await start_case(
     id="refund-A-1002", task_queue="refunds",
 )
 now = await report(case)
-assert (now.release, now.engine) == ("refund 1", 2)
+assert (now.release, now.engine) == ("refund 1", 3)
 ```
 
 Its history begins with the release and the engine version that decide it:
 
 ```
-opened on refund 1, engine 2
+opened on refund 1, engine 3
 opened by system:opener, with amount and order_id
 ```
 

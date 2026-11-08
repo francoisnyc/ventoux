@@ -213,7 +213,7 @@ assert moved.waiting_for == ["fraud_check by fraud"]
 ```
 pia proposed case.change#1: migrate to refund 3, to be approved by platform
 lee answered case.change#1 approve as platform
-applied case.change#1: migrated from refund 1, engine 2 to refund 3, engine 2, proposed by pia, approved by lee
+applied case.change#1: migrated from refund 1, engine 3 to refund 3, engine 3, proposed by pia, approved by lee
 withdrew pay.approval#1: refund 3 changed pay
 renamed step pay to payment
 renamed field approved_amount to amount_approved

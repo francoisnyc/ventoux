@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 # layer 12c: the case refuses its opener's approval of forgetting it (brief, D52). Version 3, from
 # layer 19a: the case makes audit records (brief, D76); new cases open at it once the export that
 # writes them is built (layer 19b).
-ENGINE = 2
+ENGINE = 3
 
 # Every version this code can still decide as, newest first. A version leaves this list only once
 # no open case decides as it, as Temporal's patches are deprecated, then removed.

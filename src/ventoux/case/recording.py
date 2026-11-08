@@ -21,6 +21,8 @@ from ventoux.case.state import (
     ClosedByParent,
     Completed,
     Event,
+    ExportFailed,
+    ExportRetried,
     Failed,
     ForgetApproved,
     GivenBack,
@@ -46,6 +48,7 @@ def recorded(case: CaseDefinition, state: CaseState, act: Event, since: int) -> 
     added to the history from line `since` on. From engine version 3 only (brief, D76)."""
     if state.engine >= RECORDS_FROM:
         state.audit.append(record(case, state, act, state.deciding, state.history[since:]))
+        state.recorded += 1
     state.deciding = []  # a collector for one decision: always empty between events
 
 
@@ -122,6 +125,7 @@ def record_refused(
         entry = getattr(act, "entry", None)
         refused = Decision("refused", step=step, entry=entry, reason=str(refusal))
         state.audit.append(record(case, state, act, [refused], [line]))
+        state.recorded += 1
     return state
 
 
@@ -133,9 +137,10 @@ def record(
     lines: list[str],
 ) -> AuditRecord:
     """The next record of `state`, for `act`, the `decisions` it caused and the `lines` it
-    wrote: numbered after the last, from 1 (brief, D76)."""
+    wrote: numbered after the last the case made, from 1, written or not: so no two records share
+    a number (brief, D76) (brief, D77)."""
     return AuditRecord(
-        number=len(state.audit) + 1,
+        number=state.recorded + 1,
         at=act.at,
         release=state.release,
         engine=state.engine,
@@ -228,6 +233,10 @@ def act_of(case: CaseDefinition, event: Event) -> Act:
             )
         case Unassigned():
             return Act("unassigned", by=event.by, roles=roles, entry=event.entry)
+        case ExportFailed():
+            return Act("export failed")  # its reason is the failed decision's
+        case ExportRetried():
+            return Act("export retried", by=event.by, roles=roles)
 
 
 def roles_of(event: ForgetApproved) -> tuple[str, ...]:
@@ -261,4 +270,6 @@ def asked(event: Event) -> str:
         return f"{event.by}'s proposal to {event.kind} {event.target}"  # never the value
     if isinstance(event, Sent):
         return f"{event.event} from {event.by}"  # who sent it, never what it carries
+    if isinstance(event, ExportRetried):
+        return f"{event.by}'s retry of the audit export"
     return type(event).__name__  # only people's requests are refused; anything else is a bug

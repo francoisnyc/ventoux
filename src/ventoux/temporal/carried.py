@@ -159,6 +159,9 @@ def state_as_data(state: CaseState) -> dict[str, Any]:
         "audit": [record_as_data(each) for each in state.audit],
         # Always empty between events, like `moments` (brief, D76).
         "deciding": [decision_as_data(each) for each in state.deciding],
+        # How many records it has made, and why its export failed, if it has (brief, D77).
+        "recorded": state.recorded,
+        "export_failed": state.export_failed,
     }
 
 
@@ -379,6 +382,10 @@ def state_from_data(data: dict[str, Any], types: Mapping[str, FieldType]) -> Cas
         # None in a state from before 19a: no case made records.
         audit=[record_from_data(each, types) for each in data.get("audit", [])],
         deciding=[decision_from_data(each, types) for each in data.get("deciding", [])],
+        # None in a state from before 19b: 19a numbered every record it holds from 1, none yet
+        # written, so their count is how many it made.
+        recorded=whole(data.get("recorded", len(data.get("audit", [])))),
+        export_failed=data.get("export_failed", ""),
     )
 
 

@@ -8,6 +8,7 @@ from temporalio.worker import Worker
 
 from ventoux.case.memory import Activity
 from ventoux.temporal.activities import plan_activities
+from ventoux.temporal.audit import ExportActivities
 from ventoux.temporal.cases import CaseWorkflow
 from ventoux.temporal.children import ChildActivities
 from ventoux.temporal.converter import require_ventoux_converter
@@ -71,6 +72,7 @@ def case_worker(
     forgetting = [] if forget is None else ForgetActivities(client).all()
     registry = [] if cases.environment is None else RegistryActivities(client).for_cases()
     children = ChildActivities(client).all()  # how a child case ended, read (brief, D75)
+    exports = ExportActivities(client, audit).all()  # its records, written (brief, D77)
     return Worker(
         client,
         task_queue=task_queue,
@@ -81,6 +83,7 @@ def case_worker(
             *forgetting,
             *registry,
             *children,
+            *exports,
         ],
         # Temporal: plain-function activities run here; the caller shuts it down, as above.
         activity_executor=activity_executor,

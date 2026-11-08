@@ -14,9 +14,9 @@ from ventoux.temporal.carried import state_as_data, state_from_data
 
 def test_a_state_from_before_12b_is_engine_1() -> None:
     # A state carried before 12b says no version: it was decided by version 1 (brief, D51). A new
-    # one is this code's version, 2 since 12c (brief, D52).
+    # one is this code's version, 3 since 19b (brief, D77).
     carried = state_as_data(CaseState("refund-1/run-1"))
-    assert carried["engine"] == ENGINE == 2
+    assert carried["engine"] == ENGINE == 3
     del carried["engine"]
     assert state_from_data(carried, {}).engine == 1
 

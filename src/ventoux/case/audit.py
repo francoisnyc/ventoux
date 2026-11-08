@@ -35,6 +35,8 @@ type ActKind = Literal[
     "given back",
     "assigned",
     "unassigned",
+    "export failed",
+    "export retried",
 ]
 
 # What the engine decided, as an auditor asks about it (brief, D76).

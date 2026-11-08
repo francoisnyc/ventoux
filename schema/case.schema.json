@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ventoux.dev/schema/engine-2/case.schema.json",
+  "$id": "https://ventoux.dev/schema/engine-3/case.schema.json",
   "title": "Ventoux case definition",
   "description": "A case's `case.json`. A case: its case file's fields, milestones, steps, and a `sequence` shorthand (brief, D2). Shape only: keys, types, name patterns and the expression operators. Whether a field read is declared, a role registered, a plan reference known or a step reachable is checked by `ventoux check`, never by this schema. A model's output may be constrained by it (layer 15) and is still a draft: read by the parser, checked by `ventoux check`, reviewed in a pull request; the builder never runs on model output (brief, D58).",
   "$defs": {

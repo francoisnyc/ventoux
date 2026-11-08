@@ -11,14 +11,21 @@ See docs/layers/19-audit-keys.md (19b) and docs/guides/audit.md.
 import base64
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
+from temporalio import activity
+from temporalio.client import Client
+
 from ventoux.case.audit import Act, AuditRecord, Decision, Fact
 from ventoux.case.definition import CaseDefinition
 from ventoux.core.sensitive import Sensitive
+from ventoux.temporal.carried import record_from_data
 from ventoux.temporal.codec import case_of
+from ventoux.temporal.converter import keys_of
+from ventoux.tooling.audit import AuditStore
 from ventoux.tooling.keys import KeyProvider
 
 # Who may see each sensitive field, by field: what the export checks, and writes beside each
@@ -165,3 +172,35 @@ def plain_json(value: object) -> object:
     if isinstance(value, Mapping):
         return {str(name): plain_json(each) for name, each in value.items()}
     return value
+
+
+@dataclass
+class ExportSent:
+    """What a case sends its export: its stream, the records not yet written, oldest first, as the
+    state holds them, and its definition's sensitive fields. Sensitive values cross sealed by the
+    codec, under the case's key, as any activity's input (brief, D31)."""
+
+    stream: str  # the case's workflow ID: `claim-7`, a child's `claim-7/repair#1`
+    records: list[dict[str, Any]]  # each record as `carried.record_as_data` writes it
+    sensitive: dict[str, list[str]]  # each sensitive field, with who may see it
+
+
+class ExportActivities:
+    """What a case worker runs to write a case's records to its store, with its client's keys."""
+
+    def __init__(self, client: Client, store: AuditStore) -> None:
+        self.keys = keys_of(client)  # the key provider the client's codec seals with
+        self.store = store
+
+    # Temporal: an activity runs outside the workflow, where a key may be used and a file
+    # written; the case only hears whether it was written.
+    @activity.defn(name="ventoux.audit.append")
+    def append(self, sent: ExportSent) -> None:
+        """Seal and write the records; refused (`ExportRefused`, `AuditRefused`) or failing, the
+        whole call writes nothing new, and the case retries it (brief, D77)."""
+        records = [record_from_data(each, {}) for each in sent.records]
+        sensitive = {name: tuple(roles) for name, roles in sent.sensitive.items()}
+        self.store.append(exported(sent.stream, records, sensitive, self.keys))
+
+    def all(self) -> list[Any]:
+        return [self.append]

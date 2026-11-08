@@ -87,9 +87,11 @@ def test_a_refused_act_is_one_record_saying_why_and_nothing_else_changes() -> No
     assert record.lines == [line]
     # Nothing else changed: the refused act is recorded, and the case waits on (brief, D76).
     assert after.history == [*run.state.history, line]
-    assert dataclasses.replace(after, audit=run.state.audit, history=run.state.history) == (
-        run.state
+    assert after.recorded == run.state.recorded + 1  # the counter, with the record (brief, D77)
+    unchanged = dataclasses.replace(
+        after, audit=run.state.audit, history=run.state.history, recorded=run.state.recorded
     )
+    assert unchanged == run.state
     # A refused proposal names its step: the act gives it (brief, D76).
     proposal = Proposed("pay", "sam", frozenset({"support"}), at=LATER)
     with pytest.raises(ProposalRefused) as refusal:
@@ -438,7 +440,9 @@ def test_an_event_and_a_claim_are_acts_with_what_they_caused() -> None:
         ("review", "approve", "ana", {"approved_amount": 40}),
         RECEIPT,
     ]
-    run = run_case(waiting_for_a_receipt(), {"order_id": "ord-1", "amount": 40}, script, PEOPLE)
+    run = run_case(
+        waiting_for_a_receipt(), {"order_id": "ord-1", "amount": 40}, script, PEOPLE, engine=2
+    )
     assert run.audit == []  # engine 2: nothing recorded
     run = run_case(
         waiting_for_a_receipt(), {"order_id": "ord-1", "amount": 40}, script, PEOPLE, engine=3

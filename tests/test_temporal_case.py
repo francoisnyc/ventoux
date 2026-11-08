@@ -58,6 +58,7 @@ from ventoux.temporal.converter import ExactPayloadConverter
 from ventoux.temporal.worker import case_worker
 from ventoux.temporal.workflow import PlanWorkflow, RunReport
 from ventoux.testing import CATALOG, DAY, START
+from ventoux.tooling.audit import AuditStore
 from ventoux.tooling.keys import KeyRefused
 
 # Temporal: this module defines a workflow (`CasesWithPlans`, below), so the workflow sandbox
@@ -91,10 +92,12 @@ def on_temporal[T](
     cases: type[CaseWorkflow] = DevelopmentCases,
     queue: str = QUEUE,
     converter: DataConverter | None = None,
+    audit: AuditStore | None = None,
 ) -> T:
     """Run `scenario` against Temporal's time-skipping test server, with a worker serving the
     development cases, their plans and `activities`: nothing outside is reached. `converter`
-    holds the keys, for a test that replays what it recorded; else fresh ones."""
+    holds the keys, for a test that replays what it recorded; else fresh ones. `audit` is the
+    store the cases' records are written to, for a test that reads it; else a fresh one."""
 
     async def go() -> T:
         async with (
@@ -107,7 +110,7 @@ def on_temporal[T](
                 DevelopmentPlans,
                 activities,
                 activity_executor=threads,
-                audit=development_audit(),
+                audit=audit or development_audit(),
             ),
         ):
             # Bounded: a case that hangs (a workflow task retried forever) fails the test.

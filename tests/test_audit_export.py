@@ -7,18 +7,23 @@ docs/layers/19-audit-keys.md (19b), docs/guides/audit.md and brief, D77.
 import asyncio
 import base64
 import dataclasses
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 from skipping_server import time_skipping
+from temporalio.client import Client, WorkflowHistory
 from test_audit_records import checked_claim, known
+from test_case import REFUND
 from test_sensitive import FILE, NATIONAL_ID
+from test_temporal_case import QUEUE, on_temporal
 from worker_threads import worker_threads
 
 from ventoux.case.audit import AuditRecord
 from ventoux.case.definition import parse_case
 from ventoux.temporal.audit import ExportRefused, exported, sensitive_fields
+from ventoux.temporal.cases import CaseReport, answer, start_case
 from ventoux.temporal.worker import case_worker
 from ventoux.testing import (
     FAKES,
@@ -130,3 +135,37 @@ def test_a_case_worker_without_a_store_is_refused() -> None:
             )
 
     asyncio.run(build())
+
+
+# The small refund, as the API sends it: exact numbers (brief, D20).
+FORTY = Decimal(40)
+SMALL = {"order_id": "ord-1", "amount": FORTY}
+
+
+def scheduled(history: WorkflowHistory) -> list[str]:
+    """The activities a case's run scheduled, by type, in order, as its history recorded them."""
+    return [
+        event.activity_task_scheduled_event_attributes.activity_type.name
+        for event in history.events
+        if event.HasField("activity_task_scheduled_event_attributes")
+    ]
+
+
+def test_the_quickstarts_refund_is_exported_on_temporal(tmp_path: Path) -> None:
+    # Opened at engine 3, the case writes every record to the store, in order, in its own stream,
+    # before it ends: the history line for line (brief, D77).
+    store = FileAudit(tmp_path / "audit")
+
+    async def scenario(client: Client) -> tuple[CaseReport, WorkflowHistory]:
+        case = await start_case(client, DevelopmentCases, REFUND, SMALL, "refund-1", QUEUE)
+        await answer(case, "review#1", "approve", "ana", ["support"], {"approved_amount": FORTY})
+        return await case.result(), await case.fetch_history()
+
+    ended, history = on_temporal(scenario, audit=store)
+    assert (ended.status, ended.engine) == ("closed", 3)
+    written = store.read("refund-1")
+    assert [(each["stream"], each["number"]) for each in written] == [
+        ("refund-1", number) for number in range(1, len(written) + 1)
+    ]
+    assert [line for each in written for line in each["lines"]] == ended.history
+    assert "ventoux.audit.append" in scheduled(history)

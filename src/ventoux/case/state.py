@@ -314,6 +314,12 @@ class CaseState:
     # What the engine decided in the decision being made, waiting to be recorded: always empty
     # between events, like `moments` (brief, D76).
     deciding: list[Decision] = field(default_factory=list[Decision])
+    # How many records the case has made, never lowered: the next is numbered after it, though
+    # written records have left `audit` (brief, D77).
+    recorded: int = 0
+    # Why the audit export failed, until an operator retries it; empty while it hasn't
+    # (brief, D77).
+    export_failed: str = ""
 
 
 @dataclass(frozen=True)
@@ -597,6 +603,24 @@ class Unassigned:
     at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
 
 
+@dataclass(frozen=True)
+class ExportFailed:
+    """The case's audit export failed after its retries: its records wait, and an operator looks
+    at the store (brief, D17) (brief, D77)."""
+
+    reason: str  # why, in words that never quote a value (brief, D30)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
+@dataclass(frozen=True)
+class ExportRetried:
+    """An operator retries the case's failed audit export (brief, D26) (brief, D77)."""
+
+    by: str  # who retried it, as the trusted caller states (brief, D19)
+    roles: frozenset[str]  # their roles, stated with the retry (brief, D22)
+    at: int = field(kw_only=True)  # when it reached the case, in seconds since the epoch
+
+
 type Event = (
     Opened
     | Answered
@@ -620,6 +644,8 @@ type Event = (
     | GivenBack
     | Assigned
     | Unassigned
+    | ExportFailed
+    | ExportRetried
 )
 
 
