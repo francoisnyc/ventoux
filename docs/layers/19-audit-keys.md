@@ -1,6 +1,6 @@
 # Layer 19: Audit export and a production key provider
 
-Status: 2026-11-08, answered; 19a built, its promises and routes checked. This note starts
+Status: 2026-11-08, 19a merged (#90, D76); 19b's questions asked. This note starts
 from `main` at `ff37fb9`, with layers 0 to 18 merged. The warm-up was asked and recorded (learning question 37). The guide
 was written first (curriculum step 2): `docs/guides/audit.md` describes the layer as if it worked;
 it was changed with the answers (listed at the end).
@@ -227,6 +227,131 @@ C. **No new dependency:** Vault through the standard library's HTTP (choice 17).
     `FileAudit`, one JSON Lines file per stream, append-only, for development and tests. A
     production store is the platform team's, written to the protocol. A case worker without a
     store is refused. *Recommended.*
+
+### 19b, at its start (2026-11-08): what 19a settled, and what is still to answer
+
+19a is merged (#90, D76). Choices 8 to 13 above stand as answered (D77 writes them down): the
+case writes its records through a worker-registered activity, after each workflow task that made
+some, oldest first, kept once by ID (8); with the store down it goes on but never closes with
+records unwritten, and needs attention after the write's retries (9a); each sensitive value is
+sealed with a part naming its place, and a value in clear is refused, read from the definition (10);
+`read_audit` filters by role as the view does (11); Ventoux never deletes, and the forget request
+writes its own stream (12); a store is two methods, with `FileAudit` for development (13).
+
+**Checked in the code before asking:**
+
+- **A case continues as new only when nothing runs** (`time_to_switch`: `self.running == 0`). An
+  export activity retrying for hours would hold the switch, and the run's history would grow; so
+  its retries must be bounded, then the case needs attention with nothing running.
+- **Forgetting waits for the case's workflow to end, however it ended** (`ForgetActivities.
+  case_ended`): a terminated case counts as ended, and its key goes.
+- **A closing parent waits for its child's report** (the case step's run is running until the
+  child ends, D75); each case writes its own export, so neither waits on the other's.
+- **A plan run's events are structured** (`core/history.py`), and two of them carry values: an
+  activity's inputs (`Scheduled`) and its output (`Gave`), sensitive ones wrapped. The plan's
+  report (`RunReport`) carries only their lines today.
+- **The forget request is a workflow of its own** (`ForgetWorkflow`): an activity it starts calling
+  would break the replay of every request recorded before.
+
+**The split stays one pull request (19b),** in slices: the engine version and the counter; the
+store and `FileAudit`; the export activity, sealing and the negative test; the store down, the
+bound and attention; the close and forgetting; `read_audit`; the plan's events; the forget
+request's stream; replay.
+
+22. **Opening engine 3** (your question). `ENGINE` becomes 3, so `OPENING` is (3, 2, 1): new
+    cases open at 3, writing the marker `ventoux-engine-3`, and a migration to 3 is accepted, the
+    guard from #90 then reaching no version (kept: it says what to do the next time a version is
+    known before it is run). `run_case`'s default becomes 3.
+    - **What changes for a case at 2:** nothing. The export activity is scheduled only when the
+      case's state is at engine 3 or above and holds records not yet written: a case at 2 has
+      none, so no command it never issued appears in its replay. Tested: every history in
+      `tests/histories` replays unchanged, and a case opened at 2 on Temporal schedules no export
+      (read from its history: no `ventoux.audit.append` activity).
+    - **Pinned:** a history recorded at engine 3 (an opening, an answer, an approval, the payment,
+      the close, so several exports), replayed in CI as the others are.
+    - **What changes for a case moved to 3:** its export starts with the migration's record (19a's
+      "what came before engine 3 was not recorded").
+
+    *Recommended.*
+
+23. **The record number** (your question). A counter in the state, `recorded`: the number of
+    records ever made, never lowered; a record is numbered `recorded + 1`. Exported records leave
+    `state.audit`; the counter stays, and crosses continue-as-new. A state carried before 19b has
+    none: read as the number of records it holds, which 19a numbered from 1 with no gap. A
+    record's ID is its stream and its number, so no two ever share one. *Recommended.*
+
+24. **Records waiting while the store is down** (your question). Temporal warns at a payload of
+    512 KB and refuses one over 2 MB, and the whole state crosses continue-as-new as one payload.
+    - (a) **A bound on what waits, measured, then the case holds.** The size of the records not
+      yet written, as the export would write them (JSON, sealed parts counted at their size), is
+      worked out in the workflow, deterministically, after each decision. Past 256 KB the case
+      **holds**: it decides nothing new, each event waiting in its inbox, still signalled and still
+      in Temporal's history, until the export catches up; it says so, `the audit export is 256
+      KB behind: the case decides nothing until it is written`, and needs attention (D17). Never
+      a dropped record, never an act decided unrecorded, and never a failed switch: the switch
+      carries at most the bound. Below it, the case goes on as 9a says.
+    - (b) Refuse new acts past the bound. A refused act is a record too (D76), so refusing would
+      grow what it bounds.
+    - (c) No bound: a long outage ends in a payload Temporal refuses, and a run that can't
+      continue as new.
+
+    *Recommended: (a).* Known limit, said in D77: while a case holds, each act sent to it waits as
+    a signal in its run's history, which can't switch until the export is back; Temporal's
+    history limit bounds that, and the case has needed attention since the hold began.
+
+25. **Forgetting and the export** (your question). **Close, export, then destroy:** the request
+    asks the case to close as forgotten; the case writes every record, the forgetting's own
+    included, sealed under its key, and only then ends (choice 9a: a case never closes with
+    records unwritten); the request destroys the key once the workflow has ended, as today.
+    - **The store down at that moment:** the case stays closing, its export retried, needing
+      attention; the request waits for the case to end, its report saying `closing the case:
+      its audit export is behind`; the key is not destroyed. Never a record left that can't be
+      sealed, never a key kept in silence.
+    - **A child** is under its parent's key (D75): its records are sealed with the parent's key and
+      written by the child's own workflow before it ends; the key goes once both have ended, as
+      18d built.
+    - **Known limit, said in D77:** a case terminated by an admin (D19) ends with whatever it had
+      not written, and forgetting it then destroys the key: those records were never exported.
+
+    *Recommended.*
+
+26. **The close waiting for the export** (your question, choice 9a). It can't deadlock: the export
+    depends on nothing but the store, and nothing the store does waits on the case.
+    - **A person's close, store down:** the case is closing, the export retried, then attention;
+      an operator retries the export once the store is back, and the case ends.
+    - **A close by forgetting:** the same, and the request waits for the end (25).
+    - **A parent closing a child:** the child closes, writes its own export, then reports; the
+      parent waits for that report as for any running step. Neither's export waits on the other.
+    - Each is a test, the store down, then back, the case ending.
+
+    *Recommended.*
+
+27. **How an operator retries the export** (mine). Not `retry("audit", ...)`: a step may be called
+    `audit`. A signal of its own, `retry_export`, from a person holding an operating role (D26),
+    refused otherwise, as a retry is; the case's line says who retried it. The export's own
+    retries are bounded (10 attempts, the longest wait 5 minutes), then it has failed: `audit
+    export failed: look at the store, then retry the export`. *Recommended.*
+
+28. **A plan run's events** (choice 6, as 19a found it). They ride in the record of the plan
+    step's end: `RunReport` gains `events`, the plan's history as data, and each becomes a decision
+    in that record (`Scheduled` as `started`, its inputs as facts with their sources; `Gave` as
+    `completed`; a wait's answer as `answered`; a refusal as `refused`; `Stopped` as `failed`). A
+    result's shape changing replays: Temporal compares commands, never a result's content. A plan
+    whose workflow itself fails returns no report, so its events stay in its own history, said
+    in D77. *Recommended.*
+
+29. **The forget request's own stream** (choice 12). Its records (proposed, approved or rejected,
+    the case closed, the key destroyed) hold no sensitive value, so they are written plain. Behind
+    a patch marker, `ventoux-forget-export`, so a request recorded before 19b replays as it was.
+    Written before the key is destroyed, since the case's stream must be complete first.
+    *Recommended.*
+
+30. **The definition's sensitive fields, for the check** (choice 10). The export activity is given,
+    with the records, the case's sensitive fields (names and `visible_to`), read from the
+    definition in the workflow; a record holding a value of one in clear fails the whole call,
+    and nothing is written. A child's from its own definition. *Recommended.*
+
+**Carried, unchanged:** 18d's terminated parent whose child loses its key; 18c's three items.
 
 ### For 19c: the production key provider
 
