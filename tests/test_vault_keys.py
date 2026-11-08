@@ -47,14 +47,22 @@ MARKS = "/v1/secret/data/ventoux/forgotten"
 NOT_FOUND: tuple[int, dict[str, Any]] = (404, {"errors": []})
 
 
+# Where a mark's metadata is read: it outlives any version of the mark deleted.
+MARK_METADATA = "/v1/secret/metadata/ventoux/forgotten"
+# A mark's metadata as Vault 1.21 gives it, trimmed: one version, written, never deleted.
+VERSION = {"created_time": "2026-11-08T19:17:35Z", "deletion_time": "", "destroyed": False}
+
+
 def no_mark(name: str = NAME) -> Exchange:
-    """Vault's key-value engine, asked for a case's mark, holding none."""
-    return Exchange("GET", f"{MARKS}/{name}", None, NOT_FOUND)
+    """Vault's key-value engine, asked for a case's mark, holding none: no metadata."""
+    return Exchange("GET", f"{MARK_METADATA}/{name}", None, NOT_FOUND)
 
 
-def marked(name: str = NAME) -> Exchange:
-    """Vault's key-value engine, asked for a case's mark, holding it: the case was forgotten."""
-    return Exchange("GET", f"{MARKS}/{name}", None, (200, {"data": {"data": {"forgotten": True}}}))
+def marked(name: str = NAME, **version: Any) -> Exchange:
+    """Vault's key-value engine, asked for a case's mark, holding it: the case was forgotten.
+    `version` changes its one version, as deleting it would."""
+    metadata = {"current_version": 1, "versions": {"1": VERSION | version}}
+    return Exchange("GET", f"{MARK_METADATA}/{name}", None, (200, {"data": metadata}))
 
 
 def no_key(name: str = NAME) -> Exchange:
@@ -130,7 +138,7 @@ def test_a_recording_refuses_a_request_it_doesnt_hold() -> None:
         f"the recording holds no GET {KEYS}/{NAME} (request 1): record it, or fix what asked"
     )
     recording = Recording([no_mark()])
-    recording("GET", f"{MARKS}/{NAME}", None)
+    recording("GET", f"{MARK_METADATA}/{NAME}", None)
     with pytest.raises(RecordingRefused) as refused:
         recording("POST", "/v1/transit/encrypt/ventoux-claim-7", {"plaintext": "MSA4NSAwNQ=="})
     assert str(refused.value) == (
@@ -402,7 +410,7 @@ def test_the_https_transport_sends_the_token_only_to_vault_and_never_says_it(
         keys = VaultKeys(address, "transit", "secret")
         assert keys.state("claim-7") == "never made"
         assert Vault.seen == [
-            ("GET", f"{MARKS}/{NAME}", TOKEN),
+            ("GET", f"{MARK_METADATA}/{NAME}", TOKEN),
             ("GET", f"{KEYS}/{NAME}", TOKEN),
         ]
         moved = VaultKeys(address, "transit", "secret/moved")
@@ -659,6 +667,9 @@ path "transit/decrypt/ventoux-*" {
 path "secret/data/ventoux/forgotten/ventoux-*" {
   capabilities = ["create", "read", "update"]
 }
+path "secret/metadata/ventoux/forgotten/ventoux-*" {
+  capabilities = ["read"]
+}
 """
 
 
@@ -690,7 +701,7 @@ def test_the_guides_policy_is_all_ventoux_needs(
         ventoux = Https(address, 2)
         assert ventoux("GET", "/v1/transit/keys/payroll", None)[0] == 403
         # Deleting a mark, its latest version or all of them: refused.
-        for path in (f"{MARKS}/{NAME}", f"/v1/secret/metadata/ventoux/forgotten/{NAME}"):
+        for path in (f"{MARKS}/{NAME}", f"{MARK_METADATA}/{NAME}"):
             assert ventoux("DELETE", path, None)[0] == 403, path
 
 
@@ -747,4 +758,64 @@ def test_a_value_sealed_by_another_provider_doesnt_open(tmp_path: Path) -> None:
         vault(no_mark(), key()).open("claim-7", sealed, "sensitive/0")
     assert str(refused.value) == (
         "a sealed part of claim-7 doesn't open: it was damaged, or sealed for another case or place"
+    )
+
+
+@pytest.mark.skipif(
+    VAULT is None, reason="runs only where vault is installed (a development Vault)"
+)
+def test_a_mark_whose_version_was_deleted_still_says_forgotten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A mark's version deleted, by someone (`vault kv delete`) or by nobody (the mount's
+    # `delete_version_after`), leaves its metadata: the case is still forgotten, and its ID never
+    # makes a key again. Read as "no mark", it would be "never made" and made again (brief, D31)
+    # (brief, D78) (tutor review of #92).
+    monkeypatch.setenv("VAULT_TOKEN", DEVELOPMENT_TOKEN)
+    with development_vault(tmp_path) as address:
+        root = Https(address, 2)
+        keys = VaultKeys(address, "transit", "secret")
+        keys.create("claim-7")
+        keys.destroy("claim-7")
+        data = f"/v1/secret/data/ventoux/forgotten/{vault_name('claim-7')}"
+        assert root("DELETE", data, None)[0] == 204  # its latest version deleted, as root
+        assert root("GET", data, None)[0] == 404  # the version reads as gone
+        assert keys.state("claim-7") == "destroyed"
+        with pytest.raises(KeyRefused, match="a key was already made for claim-7"):
+            keys.create("claim-7")
+        # The recordings' metadata is Vault's: each field they give, there.
+        status, body = root("GET", data.replace("/data/", "/metadata/"), None)
+        assert status == 200
+        [version] = body["data"]["versions"].values()
+        assert set(VERSION) <= set(version) and version["deletion_time"] != ""
+        # The mount deleting every version a second after it is written: nobody acting.
+        assert root("POST", "/v1/secret/config", {"delete_version_after": "1s"})[0] in (200, 204)
+        keys.create("claim-8")
+        keys.destroy("claim-8")
+        data = f"/v1/secret/data/ventoux/forgotten/{vault_name('claim-8')}"
+        for _ in range(50):  # bounded: until the version has been deleted
+            if root("GET", data, None)[0] == 404:
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("the mark's version was never deleted")
+        assert keys.state("claim-8") == "destroyed"
+        with pytest.raises(KeyRefused, match="a key was already made for claim-8"):
+            keys.create("claim-8")
+
+
+def test_a_mark_is_read_from_its_metadata() -> None:
+    # Any version ever written means forgotten, deleted or destroyed since; metadata holding no
+    # version was never written by Ventoux, and is neither answer (brief, D78) (tutor review of
+    # #92).
+    deleted = marked(deletion_time="2026-11-08T19:17:36Z")
+    assert vault(deleted).state("claim-7") == "destroyed"
+    assert vault(marked(destroyed=True)).state("claim-7") == "destroyed"
+    with pytest.raises(KeyRefused, match="a key was already made for claim-7"):
+        vault(deleted).create("claim-7")
+    empty = replace(marked(), answer=(200, {"data": {"current_version": 0, "versions": {}}}))
+    with pytest.raises(KeyUnavailable) as failed:
+        vault(empty).state("claim-7")
+    assert str(failed.value) == (
+        f"the key service at {ADDRESS} gave an answer Ventoux can't read for claim-7"
     )

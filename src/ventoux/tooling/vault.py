@@ -206,12 +206,18 @@ class VaultKeys:
         return name
 
     def marked(self, case: str, name: str) -> bool:
-        """Whether Vault holds `case`'s mark: it was forgotten."""
-        status, body = self.ask(case, "GET", self.mark_path(name), None, {200, 404})
+        """Whether Vault holds `case`'s mark: it was forgotten. Read from the mark's metadata,
+        never its latest version: a version deleted (`vault kv delete`, or the mount's
+        `delete_version_after`, nobody acting) reads as gone, but its metadata outlives it. Any
+        version ever written means forgotten; no metadata means never marked, since Ventoux's
+        policy can't delete it (brief, D78) (tutor review of #92)."""
+        path = f"/v1/{self.marks_mount}/metadata/ventoux/forgotten/{name}"
+        status, body = self.ask(case, "GET", path, None, {200, 404})
         if status == 404:
             return False
-        # Only a mark as Ventoux writes it says the case was forgotten: never just any answer.
-        if not isinstance(self.read(case, body, "data", "data"), dict):
+        versions = self.read(case, body, "data", "versions")
+        if not isinstance(versions, dict) or not versions:
+            # Metadata with no version was never written by Ventoux: neither answer is safe.
             raise self.unreadable(case)
         return True
 

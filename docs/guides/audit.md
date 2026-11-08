@@ -275,6 +275,9 @@ path "transit/decrypt/ventoux-*" {
 path "secret/data/ventoux/forgotten/ventoux-*" {
   capabilities = ["create", "read", "update"]
 }
+path "secret/metadata/ventoux/forgotten/ventoux-*" {
+  capabilities = ["read"]
+}
 ```
 
 A token holding only this does everything Ventoux asks of Vault, and nothing more: it reads no
