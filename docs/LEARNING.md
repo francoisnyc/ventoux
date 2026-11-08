@@ -2168,3 +2168,42 @@ and record the key points. A question is closed once you can explain the answer 
     sensitive value is ciphertext no one can open. Close, export, then destroy, because the case's
     records need the key to be sealed and the request's last record needs none.
 - Status: open, until the three parts come back from memory.
+
+## 53. Layer 19c: a mark that outlives the key, waiting or refusing, and the event loop
+
+> a) `VaultKeys.state` asks for the mark before the key, and reads the mark from its metadata,
+> not its latest version. For each, what would go wrong the other way, and for which case: one
+> being forgotten when Vault failed between the mark and the deletion, or one forgotten long ago?
+> b) Vault is down. Olu approves forgetting `claim-7`, and Pia proposes forgetting `claim-9`. Why
+> does one request wait for Vault while the other is refused at once, and why would the opposite
+> be wrong in each case? c) Why does the codec move its calls to a thread even with `FileKeys`,
+> and why does the audit export, which seals as much, not need to?
+
+- Asked at the end of layer 19c's walk-through (2026-11-08): the layer's own question was asked at
+  19b (entry 52).
+- Your answer: asked to be told. Given:
+  - **a) Mark first covers the case being forgotten; metadata covers the case forgotten long
+    ago.** `destroy` writes the mark, allows the deletion, then deletes: cut short after the mark,
+    the key is still there. Read key first, that case reads `kept`, and `seal` and `open` go on
+    using the key of a case whose forgetting was approved (as would a key of the name made again
+    later); mark first, "destroyed" wins over anything Vault holds under the name, and the next
+    `destroy` finishes. A mark's version can be deleted (`vault kv delete`, or the mount's
+    `delete_version_after`, nobody acting), leaving its metadata; read from the data, the case
+    reads `never made`, the forget request says "there is no case", and `start_case` makes a key
+    again: a forgotten ID reopened (D31). The metadata outlives deleted versions, and Ventoux's
+    policy can't delete it (tutor review of #92).
+  - **b) Before the decision, refuse and ask again; after it, finish what was decided.** Pia's
+    proposal: nothing is decided yet, and `look_up`'s checks (does the case exist, was it
+    forgotten) can't be answered; waiting would hold a request whose checks never ran, guessing
+    would refuse for a false reason, and refusing costs a proposal made again. Olu's approval:
+    two people decided and the case was asked to close as forgotten (D32); refusing would lose the
+    approval and leave a "forgotten" case's key alive, so `destroy_key` is retried until Vault
+    answers, the request `closing the case`.
+  - **c) Async code never waits on the key service on the loop, and only async code runs there.**
+    The codec holds a `KeyProvider`, whichever: one path for all, tested with `FileKeys` (whose
+    call is blocking I/O too) and run with Vault. It runs on the worker's event loop, which drives
+    every workflow task and async activity and the client's calls; a round trip there stalls them
+    all, for the whole timeout while Vault is down. The export activity is a plain function,
+    which Temporal already runs on the activity executor's threads: off the loop, bounded by each
+    call's timeout and its own minute.
+- Status: open, until the three parts come back from memory.
