@@ -473,7 +473,7 @@ before its code was written, or with its branch switched off when the code came 
 | Issues are compared as a multiset: in any order, none missing, none extra | `test_issues_are_compared_in_any_order_as_a_multiset_never_by_message` |
 | The severity is compared: another severity is one missing and one extra | `test_an_issue_of_another_severity_is_both_missing_and_extra` |
 | A message is never compared: an expected issue carrying one is refused, as any key the format doesn't have | `test_an_expected_issue_carrying_a_message_is_refused_since_wording_is_never_compared` |
-| A definition refused when read is compared by the paths it is refused at, both ways | `test_a_definition_refused_when_read_matches_the_paths_it_is_refused_at`, `…_but_expected_to_read_is_a_mismatch`, `test_a_definition_that_reads_but_expected_refused_is_a_mismatch`, `test_a_definition_refused_at_another_path_is_a_mismatch` |
+| A definition refused when read is compared by the paths it is refused at, both ways | `test_a_definition_refused_when_read_matches_the_paths_it_is_refused_at`, `test_a_definition_refused_when_read_but_expected_to_read_is_a_mismatch`, `test_a_definition_that_reads_but_expected_refused_is_a_mismatch`, `test_a_definition_refused_at_another_path_is_a_mismatch` |
 | A package is read with its plans by the one check (`issues_of`) | `test_a_package_is_read_with_its_plans_as_the_one_check_reads_it` |
 | A plan alone is read and checked against its catalog, compared as a package is | `test_a_plan_alone_is_read_and_checked_against_its_catalog`, `test_a_plan_entry_is_compared_as_a_package_is` |
 | A package that can't be put together is a broken entry, said, never a result | `test_a_package_that_cant_be_put_together_is_a_broken_entry_said_never_a_result` |
