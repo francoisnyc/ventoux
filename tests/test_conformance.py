@@ -21,8 +21,9 @@ from ventoux.tooling.conformance import (
     mismatches,
     read_suite,
     uncovered,
+    unrecorded,
 )
-from ventoux.tooling.suite import Entry
+from ventoux.tooling.suite import Entry, Suite
 
 ROOT = Path(__file__).parent.parent
 REFUND = ROOT / "examples" / "refund" / "refund.json"  # a valid case with no plan step
@@ -362,3 +363,87 @@ def test_write_writes_the_catalog_files_and_never_an_expected_result(tmp_path: P
         SUITE / "catalogs" / "development.json"
     ).read_text()
     assert (suite / "suite.json").read_text() == entries
+
+
+def suite_of(entries: list[dict[str, Any]], changes: list[dict[str, Any]] = []) -> Suite:  # noqa: B006
+    return Suite.model_validate({"engine": 3, "entries": entries, "changes": changes})
+
+
+VALID: dict[str, Any] = {"issues": []}
+NO_LINE = (
+    "and no line of changes names it: add one saying what it was, what it is now, why and when"
+)
+FIRES_NEVER = {"issues": [NEVER_FIRES]}
+
+
+def change(was: dict[str, Any] | None, now: dict[str, Any] | None) -> dict[str, Any]:
+    return {"entry": "closed before it acts", "was": was, "now": now, "why": "D80", "date": "x"}
+
+
+def test_a_result_changed_with_no_line_naming_it_is_unrecorded() -> None:
+    base = suite_of([closed_early_entry(VALID)])
+    head = suite_of([closed_early_entry(FIRES_NEVER)])
+    assert unrecorded(base, head) == [
+        f"closed before it acts: its expected result changed, {NO_LINE}"
+    ]
+
+
+def test_a_result_changed_with_its_line_is_recorded() -> None:
+    base = suite_of([closed_early_entry(VALID)])
+    head = suite_of([closed_early_entry(FIRES_NEVER)], [change(VALID, FIRES_NEVER)])
+    assert unrecorded(base, head) == []
+
+
+def test_a_line_that_says_another_change_records_nothing() -> None:
+    base = suite_of([closed_early_entry(VALID)])
+    head = suite_of([closed_early_entry(FIRES_NEVER)], [change(FIRES_NEVER, VALID)])
+    assert unrecorded(base, head) == [
+        f"closed before it acts: its expected result changed, {NO_LINE}"
+    ]
+
+
+def test_a_new_entry_needs_no_line_and_a_removed_one_does() -> None:
+    assert unrecorded(suite_of([]), suite_of([closed_early_entry(VALID)])) == []
+    assert unrecorded(suite_of([closed_early_entry(VALID)]), suite_of([])) == [
+        f"closed before it acts: removed, {NO_LINE}"
+    ]
+    head = suite_of([], [change(VALID, None)])
+    assert unrecorded(suite_of([closed_early_entry(VALID)]), head) == []
+
+
+def test_issues_in_another_order_are_no_change() -> None:
+    two = {"issues": [NEVER_FIRES, {**NEVER_FIRES, "path": "rules.x.on"}]}
+    turned = {"issues": [{**NEVER_FIRES, "path": "rules.x.on"}, NEVER_FIRES]}
+    assert (
+        unrecorded(suite_of([closed_early_entry(two)]), suite_of([closed_early_entry(turned)]))
+        == []
+    )
+
+
+def test_since_fails_on_a_result_changed_with_no_line_against_the_base(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = a_copy_of_the_suite(tmp_path)
+    data = json.loads((base / "suite.json").read_text())
+    entry = next(e for e in data["entries"] if e["name"].startswith("WRONG_KIND"))
+    entry["expected"] = {"issues": []}
+    (base / "suite.json").write_text(json.dumps(data))
+    assert main(["conformance", "--since", str(base)]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("WRONG_KIND: a step and its contract are the same kind")
+    assert "its expected result changed, and no line of changes names it" in out
+
+
+def test_since_a_base_with_no_suite_has_nothing_to_compare(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["conformance", "--since", str(tmp_path)]) == 0
+    assert "has no suite.json: no result to compare" in capsys.readouterr().out
+
+
+def test_ci_checks_the_suite_and_every_change_to_it_against_the_base() -> None:
+    from test_unchanged import WORKFLOW, ci_runs
+
+    assert ci_runs("- run: uv run ventoux conformance --unchanged")
+    changes = WORKFLOW.read_text().split("\n  changes:")[1]
+    assert "- run: uv run ventoux conformance --since base/src/ventoux/conformance" in changes

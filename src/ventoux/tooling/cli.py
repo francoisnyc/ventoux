@@ -51,7 +51,7 @@ from ventoux.tooling.check import (
     shown,
     write,
 )
-from ventoux.tooling.conformance import SUITE, conformance_command
+from ventoux.tooling.conformance import SUITE, conformance_command, since_command
 from ventoux.tooling.deployment import (
     Configuration,
     Unconfigured,
@@ -119,6 +119,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     conforming.add_argument(
         "--unchanged", action="store_true", help="check, writing nothing (the default; for CI)"
+    )
+    conforming.add_argument(
+        "--since",
+        type=Path,
+        help="a base's suite folder: fail on a result changed with no line of changes saying so",
     )
     simulating = commands.add_parser(
         "simulate", help="play a story on the in-memory engine, and check what it expects"
@@ -238,6 +243,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return advise_command(arguments, found)  # needs no catalog: the case's worker has it
     if arguments.command == "conformance":
         # The suite names its own catalogs, never the deployment's (brief, D80).
+        if arguments.since is not None:
+            return since_command(arguments.since, arguments.suite)
         return conformance_command(arguments.suite, arguments.write)
     if arguments.command == "schema":
         return write_schemas(arguments.out, arguments.unchanged)  # needs no catalog: shape only

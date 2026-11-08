@@ -27,7 +27,15 @@ from ventoux.core.promise import promise_of
 from ventoux.core.validate import ISSUE_CODES, validate
 from ventoux.tooling.check import differs, shown
 from ventoux.tooling.deployment import DEVELOPMENT, catalog_named
-from ventoux.tooling.suite import Entry, Issues, PackageEntry, PlanEntry, Suite, path_of
+from ventoux.tooling.suite import (
+    Entry,
+    Expected,
+    Issues,
+    PackageEntry,
+    PlanEntry,
+    Suite,
+    path_of,
+)
 
 # The catalogs a suite names, each by the Python catalog its file is generated from. The suite's
 # data names a catalog file, never a Python module: this map is the runner's.
@@ -202,6 +210,43 @@ def uncovered(folder: Path) -> list[str]:
     return [f"{code}: listed, and no entry expects it" for code in sorted(ISSUE_CODES - expected)]
 
 
+def unrecorded(base: Suite, head: Suite) -> list[str]:
+    """Each entry whose expected result `head` changes or removes from `base` with no line of
+    `head`'s changes saying so, exactly: what it was and what it is now. A new entry needs none
+    (brief, D80)."""
+    found: list[str] = []
+    now = {entry.name: entry.expected for entry in head.entries}
+    for entry in base.entries:
+        after = now.get(entry.name)
+        if after is not None and same(entry.expected, after):
+            continue
+        said = any(
+            line.entry == entry.name and same(line.was, entry.expected) and same(line.now, after)
+            for line in head.changes
+        )
+        if not said:
+            how = "removed" if after is None else "its expected result changed"
+            found.append(
+                f"{entry.name}: {how}, and no line of changes names it: add one saying what it "
+                "was, what it is now, why and when"
+            )
+    return found
+
+
+def same(one: Expected | None, other: Expected | None) -> bool:
+    """Whether two expected results say the same: issues in any order, paths in any order."""
+    return as_compared(one) == as_compared(other)
+
+
+def as_compared(expected: Expected | None) -> object:
+    """An expected result as it is compared: a sorted list of issues, or the sorted paths."""
+    if expected is None:
+        return None
+    if isinstance(expected, Issues):
+        return sorted((issue.path, issue.code, issue.severity) for issue in expected.issues)
+    return ("refused when read", sorted(expected.at))
+
+
 DONE = 0  # the suite conforms, or the catalog files were written
 FAILED = 1  # a mismatch, a code uncovered, or a catalog file not as generated: each said
 CANT_READ = 2  # the suite can't be read
@@ -236,4 +281,24 @@ def conformance_command(folder: Path, write: bool) -> int:
     if problems:
         return FAILED
     print(f"✓ this engine conforms to {shown(folder)}")
+    return DONE
+
+
+def since_command(base: Path, head: Path) -> int:
+    """`ventoux conformance --since BASE`: each result the suite in `head` changes or removes from
+    the one in `base` with no line of changes saying so. A base with no suite (before the suite
+    existed) has no result to compare."""
+    if not (base / "suite.json").is_file():
+        print(f"{shown(base)} has no suite.json: no result to compare")
+        return DONE
+    try:
+        problems = unrecorded(read_suite(base), read_suite(head))
+    except SuiteUnreadable as unreadable:
+        print(unreadable)
+        return CANT_READ
+    for problem in problems:
+        print(problem)
+    if problems:
+        return FAILED
+    print(f"✓ every result {shown(head)} changes is said in its changes")
     return DONE

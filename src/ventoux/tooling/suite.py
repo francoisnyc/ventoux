@@ -85,11 +85,22 @@ class PlanEntry(Closed):
 Entry = Annotated[PackageEntry | PlanEntry, Field(discriminator="kind")]
 
 
+class Change(Closed):
+    """A result changed on purpose, said where an implementer reading the suite later finds it."""
+
+    entry: str  # the entry's name
+    was: Expected | None  # what it expected before; None for an entry that is new
+    now: Expected | None  # what it expects now; None for an entry removed
+    why: str  # the reason, naming the decision or the fix: "brief, D81"
+    date: str  # when: `2026-11-08`
+
+
 class Suite(Closed):
-    """The whole suite: the engine version it describes, and its entries."""
+    """The whole suite: the engine version it describes, its entries, and each result changed."""
 
     engine: int  # the engine version whose validation it states (brief, D51)
     entries: list[Entry]
+    changes: list[Change] = []  # oldest first; never rewritten, as the brief's decisions aren't
 
 
 def path_of(loc: tuple[int | str, ...]) -> str:
